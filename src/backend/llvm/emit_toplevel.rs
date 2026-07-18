@@ -1247,9 +1247,10 @@ impl LlvmBackend {
         self.ctx.field_to_meta_idx.clear();
         for (f, &(lo, hi)) in &self.ctx.range_bounds {
             if hi < i64::MAX {
-                let mi = range_meta.len();
-                let dlo = if lo > i64::MIN { lo } else { i64::MIN };
-                range_meta.push(format!("!{} = !{{ i64 {}, i64 {} }}", mi, dlo, hi));
+                // 2026-07-18: Offset by 50 to avoid collision with TBAA metadata nodes
+                // (!0 through ~!20). LLVM metadata IDs must be unique across the module.
+                let mi = range_meta.len() + 50;
+                range_meta.push(format!("!{} = !{{ i64 {}, i64 {} }}", mi, lo, hi));
                 self.ctx.field_to_meta_idx.insert(f.clone(), mi);
             }
         }
@@ -1267,7 +1268,8 @@ impl LlvmBackend {
                 // Only add if no contract-driven range already exists
                 // (contract ranges are tighter and take priority).
                 if !self.ctx.field_to_meta_idx.contains_key(field_name) {
-                    let mi = range_meta.len();
+                    // 2026-07-18: Offset by 50 to avoid TBAA node collision.
+                    let mi = range_meta.len() + 50;
                     range_meta.push(format!("!{} = !{{ i64 {}, i64 {} }}", mi, range_bounds.0, range_bounds.1));
                     self.ctx.field_to_meta_idx.insert(field_name.clone(), mi);
                 }
@@ -1673,7 +1675,7 @@ impl LlvmBackend {
                         let gep = self.emit_state_gep(out, indent, "prg", "%state", idx_val);
                         let rl = format!("%prl{}", self.fun.txn_counter); self.fun.txn_counter += 1;
                         let tn = crate::backend::llvm::tbaa_node(&ty, self.ctx.type_universe.as_ref());
-                        writeln!(out, "{}{} = load {}, ptr {}, align {}, !tbaa !{}, !range !{{{}, {}}}",
+                        writeln!(out, "{}{} = load {}, ptr {}, align {}, !tbaa !{}, !range !{{i64 {}, i64 {}}}",
                             indent, rl, ty, gep, self.align_of(&ty), tn, 0i64, bound).ok();
                     } else {
                         writeln!(out, "{}call void @llvm.assume(i1 {})", indent, i1).ok();

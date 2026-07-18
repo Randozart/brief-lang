@@ -246,9 +246,15 @@ pub(crate) fn emit_main(&mut self, out: &mut String, has_wake_triggers: bool) {
     } else {
         writeln!(out, "  call void @reactor_tick(ptr noalias nocapture %state)").ok();
     }
+    // 2026-07-18: When exit_condition is set (by natural death logic), the
+    // loop entry checks it via emit_exit_check — no need for wake triggers or
+    // __wait_for_trigger__. Just loop back to the entry check.
     if has_wake_triggers {
         writeln!(out, "  %any_active = call i1 @llvm.wake.any()").ok();
         writeln!(out, "  br i1 %any_active, label %.loop, label %.end").ok();
+    } else if self.ctx.exit_condition.is_some() {
+        // Natural death: exit condition checked at loop entry. Loop back.
+        writeln!(out, "  br label %.loop").ok();
     } else {
         writeln!(out, "  call void @__wait_for_trigger__()").ok();
         writeln!(out, "  br label %.loop").ok();

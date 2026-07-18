@@ -2,7 +2,7 @@
 
 **Author:** Compiler agent
 **Scope:** All 5 active plans consolidated into sequential implementation steps
-**Test baseline:** `cargo test --lib` = 925 tests passing
+**Test baseline:** `cargo test --lib` = 927 tests passing
 **Status key:** ✅ Done | ⚡ In progress | ❌ Remaining
 
 ---
@@ -13,6 +13,172 @@ Each section below is a self-contained implementation block. Implement them **in
 1. **What to change** — exact files and line numbers
 2. **How to test** — what `cargo test --lib` should show
 3. **Rollback** — how to undo if something goes wrong
+
+---
+
+## Block 14: Natural Convergence Exit
+
+**Depends on:** None (independent change).
+
+**Goal:** When all reactive transactions have converged (their postconditions are met and
+preconditions can never become true again), the program should exit naturally with
+`ret i32 0` — not spin forever in the main loop.
+
+### Problem
+
+The runtime's `ss_main_loop` (emitted by `emit_main` in `loop_engine/mod.rs:226`)
+never exits:
+
+```llvm
+.ss_main_loop:
+  ; check preconditions, run active txns, then:
+  br label %.ss_main_loop  ; forever
+```
+
+Even when all txns have converged (`ops == TOTAL`, `done == 1`, etc.), the loop
+continues checking preconditions. No txn's precondition is true anymore, so the loop
+is spinning doing nothing. The program must be killed externally.
+
+### Solution
+
+After the reactor tick, check whether ANY transaction's precondition is still
+evaluable-as-true. If zero txns can ever activate again, exit.
+
+**Key insight:** A transaction is *restartable* if its precondition could become
+true again after the postcondition is met. This requires at least one of:
+- Wake triggers (`when` on state fields that can change)
+- External input (`io_pending`, foreign-triggered state changes)
+- A `sync` block that another transaction signals
+- An `async` timer/cycles-based wake condition
+
+If none of these exist, the txn is **one-shot** — once the postcondition is met
+and the precondition evaluates to false, it will never run again.
+
+### Detection: one-shot vs restartable
+
+The compiler knows at codegen time which txns are one-shot vs restartable by
+inspecting the txn's metadata:
+
+| Characteristic | One-shot | Restartable |
+|---|---|---|
+| Precondition | State field comparison (`ops < TOTAL`) | External input (`io_pending`) |
+| Triggers | None declared | `when state.field` declared |
+| Async | No | `async` keyword present |
+| Cycles wake | No | `cycles <~ N` or `cyc` triggers |
+
+Default assumption: **one-shot**. A txn is only restartable if it explicitly
+declares `trg`, `async`, `cycles`, or external I/O triggers.
+
+### Implementation
+
+**E1: Track restartability per txn** (`src/backend/llvm/mod.rs`)
+
+Add to `LlvmBackend`:
+```rust
+pub txn_is_restartable: Vec<bool>,  // one entry per reactive txn
+```
+
+Populated during codegen init: check each `rct txn` for triggers/async/cycles.
+Default `false` (one-shot).
+
+**E2: Emit active-count check** (`src/backend/llvm/loop_engine/mod.rs:226`)
+
+In `emit_main`, after the reactor tick, emit a check that evaluates each
+one-shot txn's precondition. If any is true, continue the loop. If all are false,
+exit:
+
+```rust
+// After reactor_tick call:
+let any_active = self.fun.gen_reg();
+writeln!(out, "  {} = call i1 @llvm.wake.any()", any_active).ok();
+// Only check one-shot txns if no wake triggers fired.
+// If all one-shot preconditions are false, exit.
+let all_done = self.fun.gen_reg();
+writeln!(out, "  {} = icmp eq i32 {{precondition_count}}, 0", all_done).ok();
+writeln!(out, "  br i1 %all_done, label %.end, label %.loop").ok();
+```
+
+Wait — this is too simplistic. The existing code already has `has_wake_triggers` 
+and `llvm.wake.any()` logic. The fix is simpler:
+
+**Simpler approach:** When `has_wake_triggers` is false AND no one-shot txn has
+an active precondition, exit:
+
+```llvm
+  call void @reactor_tick(ptr %state)
+  ; If no wake triggers and no one-shot txns are active, exit
+  br label %.loop  ; existing — change to conditional
+```
+
+**E3: Conditionally branch instead of unconditional** (`loop_engine/mod.rs:253`)
+
+Change:
+```rust
+writeln!(out, "  br label %.loop").ok();
+```
+To:
+```rust
+// 2026-07-18: If no txns are restartable (all converged), exit.
+if !self.has_restartable_txns() {
+    writeln!(out, "  %any_remaining = call i1 @check_preconditions(ptr %state)").ok();
+    writeln!(out, "  br i1 %any_remaining, label %.loop, label %.end").ok();
+} else {
+    writeln!(out, "  br label %.loop").ok();
+}
+```
+
+**E4: Add `@check_preconditions` helper** (`src/backend/llvm/mod.rs`)
+
+New method that emits LLVM IR to evaluate all one-shot txn preconditions and OR
+them together. If the result is 0, no txn will ever run again:
+
+```rust
+fn emit_check_preconditions(&mut self, out: &mut String) -> String {
+    let mut regs = Vec::new();
+    for (i, is_restartable) in self.txn_is_restartable.iter().enumerate() {
+        if *is_restartable { continue; }
+        let cond = self.emit_exit_expr(out, &self.ctx.exit_conditions[i], "  ");
+        regs.push(cond);
+    }
+    if regs.is_empty() { return "0".to_string(); }
+    // OR all precondition evaluations together
+    let result = self.fun.gen_reg();
+    let mut acc = regs[0].clone();
+    for r in &regs[1..] {
+        let or = self.fun.gen_reg();
+        writeln!(out, "  {} = or i64 {}, {}", or, acc, r).ok();
+        acc = or;
+    }
+    writeln!(out, "  {} = icmp ne i64 {}, 0", result, acc).ok();
+    result
+}
+```
+
+**E5: Update `emit_exit_check`** (`loop_engine/mod.rs:210`)
+
+The existing `emit_exit_check` handles the `exit_condition` (single condition).
+For convergence detection, we need aggregate checking of ALL one-shot txns. The
+`emit_exit_check` already generates the `br i1 %cond, label %.end, label %.continue`
+pattern. We can reuse this by adding a compound exit condition that ORs all
+one-shot txn preconditions and negates the result.
+
+### Files to modify
+
+| File | Change |
+|------|--------|
+| `src/backend/llvm/mod.rs` | Add `txn_is_restartable: Vec<bool>` field + `has_restartable_txns()` method + `emit_check_preconditions()` method |
+| `src/backend/llvm/loop_engine/mod.rs` | Modify `emit_main` to use conditional branch instead of unconditional `br label %.loop` when `!has_restartable_txns()` |
+
+### Test
+
+1. Write `.bv` file with a one-shot `rct txn [x < N][x == N] { x = x + 1; term; }`
+2. Compile and run — program should exit (not hang)
+3. Write `.bv` file with a restartable txn (has triggers) — program should loop
+
+### Rollback
+
+Revert `loop_engine/mod.rs:253` back to unconditional `writeln!(out, "  br label %.loop").ok();`.
+Remove `txn_is_restartable` field from LlvmBackend.
 
 ---
 
@@ -582,12 +748,12 @@ Pre-SSO, pre-allocation-strategy baseline. Run from commit with SSO Phase B + ar
 
 | Benchmark | Brief (s) | C (s) | Ratio | Correctness |
 |-----------|-----------|-------|-------|-------------|
-| ring_buffer | 0.0336 | 0.0345 | 0.97x | ✅ PASS |
-| float_math | 0.0402 | 0.0688 | 0.58x | ✅ PASS |
-| float_math_nonzero | 0.3655 | 0.1663 | 2.20x | ✅ PASS |
-| sparse_dispatch | 0.0388 | 0.0737 | 0.53x | ✅ PASS |
-| print_loop | 0.0643 | 0.0542 | 1.19x | ✅ PASS |
-| nbody_newton | 11.473 | 8.384 | 1.37x | ✅ PASS (float epsilon) |
+| ring_buffer | 0.0328 | 0.0346 | 0.95x | ✅ PASS |
+| float_math | 0.0629 | 0.0718 | 0.88x | ✅ PASS |
+| float_math_nonzero | 0.3702 | 0.1686 | 2.20x | ✅ PASS |
+| sparse_dispatch | 0.0447 | 0.0635 | 0.70x | ✅ PASS |
+| print_loop | 0.0663 | 0.0625 | 1.06x | ✅ PASS |
+| nbody_newton | 11.935 | 8.397 | 1.42x | ✅ PASS (float epsilon) |
 | nbody_sqrt | ❌ compile error | — | — | ❌ pre-existing (`@energy` global undefined) |
 
 ### Optimizer Benchmarks (all `--optimizer` tag, full compile-time folding)

@@ -2236,7 +2236,10 @@ impl LlvmBackend {
         // check `counter >= bound`. When ALL counters reach their bounds, no txn can
         // fire again, and main() returns 0.
         self.ctx.has_natural_exit = false;
-        if self.ctx.exit_condition.is_none() && has_wake_triggers {
+        // 2026-07-18: Build synthetic exit condition for ALL programs, not just
+        // wake-triggered ones. One-shot txns (no triggers, no async) should also
+        // auto-exit when all bounded counters reach their bounds.
+        if self.ctx.exit_condition.is_none() {
             let has_persistent_txn = txns.iter().any(|(name, t)| {
                 t.is_reactive && !graph.nodes.iter()
                     .filter(|n| n.name == *name)
