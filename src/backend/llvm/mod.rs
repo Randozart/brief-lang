@@ -237,7 +237,7 @@ fn remap_expr_into(e: &mut Expr, map: &HashMap<String, String>) {
                 *name = field.clone();
             }
         }
-        Expr::Call(_, args) => {
+        Expr::Call(_, args, _) => {
             for arg in args.iter_mut() {
                 remap_expr_into(arg, map);
             }
@@ -409,7 +409,7 @@ fn collect_strings_expr(expr: &Expr, seen: &mut std::collections::HashSet<String
         Expr::Field(o, _) | Expr::Index(o, _) => {
             collect_strings_expr(o, seen, out);
         }
-        Expr::Call(_, args) => {
+        Expr::Call(_, args, _) => {
             for a in args { collect_strings_expr(a, seen, out); }
         }
         Expr::Match(value, arms) => {
@@ -709,6 +709,11 @@ pub struct LlvmBackend {
     // ── Dynamic Trigger Safety ─────────────────────────────
     // 2026-07-15: Phase 7i — Controls null-check emission for @ *ptr.
     pub(crate) trg_unresolved_action: TrgUnresolvedAction,
+
+    // ── Allocation Strategy Analysis ─────────────────────────
+    // 2026-07-18: Pre-computed strategies from analysis pass.
+    // Keyed by analysis_id on Expr::Call("Alloc#", ..., Some(id)).
+    pub analysis_alloc_strategies: Option<std::collections::HashMap<usize, AllocStrategy>>,
 }
 
 #[derive(Debug, Clone)]
@@ -796,7 +801,13 @@ impl LlvmBackend {
             spirv_kernels: Vec::new(),
             spirv_blobs: Vec::new(),
             trg_unresolved_action: TrgUnresolvedAction::Warn,
+            analysis_alloc_strategies: None,
         }
+    }
+
+    pub fn with_alloc_strategies(mut self, strategies: std::collections::HashMap<usize, AllocStrategy>) -> Self {
+        self.analysis_alloc_strategies = Some(strategies);
+        self
     }
 
     pub fn with_spec(mut self, spec: crate::target_spec::TargetSpec) -> Self {
@@ -1385,7 +1396,7 @@ impl LlvmBackend {
 
     fn check_expr_embedded(&mut self, expr: &Expr, ctx_name: &str, threading_intrinsics: &[&str]) {
         match expr {
-            Expr::Call(name, args) => {
+            Expr::Call(name, args, _) => {
                 if threading_intrinsics.contains(&name.as_str()) {
                     self.warnings.push(format!(
                         "TargetError: threading intrinsic not supported on target 'Embedded' — '{}' in '{}'",
@@ -3537,7 +3548,7 @@ impl LlvmBackend {
 
     fn scan_trg_stmt(&mut self, stmt: &Statement) {
         if let Statement::TrgBinding { instance, .. } = stmt {
-            if let Expr::Call(callee, args) = instance {
+            if let Expr::Call(callee, args, _) = instance {
                 if !self.ctx.cell_defs.contains_key(callee) { return; }
                 let cell = &self.ctx.cell_defs[callee];
                 for (i, arg) in args.iter().enumerate() {

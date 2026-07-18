@@ -135,12 +135,17 @@ pub fn compile_source(file_path: &str, source: &str, opts: &BuildOptions) -> Res
     // BVIR snapshot at Post stage (after normalizer, before codegen)
     emit_bvir_snapshot(file_path, BvirStage::Post, &items, &universe, opts)?;
 
+    // 2026-07-18: Run allocation strategy analysis before codegen.
+    // Assigns strategies to Alloc# call sites — the codegen reads the
+    // analysis output to select Arena/Alloca/Malloc instead of guessing.
+    let alloc_strategies = brief_compiler::analysis::allocation::analyze_alloc_strategies(&mut items);
+
     // 2026-07-16: P4 — Collect extra objects from ForeignBinding FromSpec paths
     // for linking into the final binary.
     let extra_objects = collect_extra_objects(&items, &resolver)?;
 
     // ── Code generation ───────────────────────────────────────────────
-    let (codegen_output, ext) = codegen(&items, &mut universe, &pm, opts)?;
+    let (codegen_output, ext) = codegen(&items, &mut universe, &pm, opts, alloc_strategies)?;
 
     // ── Write output ──────────────────────────────────────────────────
     let out_path = determine_out_path(file_path, opts.out_dir.as_deref())?;
@@ -227,11 +232,13 @@ fn codegen(
     universe: &mut TypeUniverse,
     pm: &PluginManager,
     opts: &BuildOptions,
+    alloc_strategies: std::collections::HashMap<usize, brief_compiler::backend::llvm::AllocStrategy>,
 ) -> Result<(String, &'static str), String> {
     let mut output;
     let ext: &str = match opts.backend {
         BackendKind::Llvm => {
             let mut b = LlvmBackend::new()
+                .with_alloc_strategies(alloc_strategies)
                 .with_optimize_budget(opts.optimize_budget)
                 .with_type_universe(universe.clone())
                 .with_trg_unresolved_action(opts.trg_unresolved_action);
@@ -265,6 +272,7 @@ fn codegen(
         }
         BackendKind::Gpu => {
             let mut b = LlvmBackend::new()
+                .with_alloc_strategies(alloc_strategies)
                 .with_optimize_budget(opts.optimize_budget)
                 .with_type_universe(universe.clone())
                 .with_gpu_offload(true);

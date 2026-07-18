@@ -54,7 +54,7 @@ pub fn infer_expression(expr: &Expr, ctx: &mut TypecheckContext) -> Result<Type,
         }
 
         // ── Calls ───────────────────────────────────────────────
-        Expr::Call(name, args) => infer_call(name, args, ctx),
+        Expr::Call(name, args, _) => infer_call(name, args, ctx),
 
         // ── Binary operators ─────────────────────────────────────
         Expr::BinaryOp(kind, lhs, rhs) => infer_binary_op(kind, lhs, rhs, ctx),

@@ -31,7 +31,7 @@ pub fn eval_expr(
             .ok_or_else(|| RuntimeError::UndefinedVariable { name: name.clone() }),
 
         // ── Calls ───────────────────────────────────────────────
-        Expr::Call(name, args) => eval_call(name, args, heap, bindings),
+        Expr::Call(name, args, _) => eval_call(name, args, heap, bindings),
 
         // ── Binary operators ─────────────────────────────────────
         Expr::BinaryOp(kind, lhs, rhs) => eval_binary_op(kind, lhs, rhs, heap, bindings),

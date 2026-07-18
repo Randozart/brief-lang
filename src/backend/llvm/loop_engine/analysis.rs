@@ -49,7 +49,7 @@ pub fn exempt_side_effect_args(
     field_index_map: &HashMap<String, usize>,
 ) {
     match expr {
-        Expr::Call(_name, args) => {
+        Expr::Call(_name, args, _) => {
             for arg in args {
                 collect_field_ids_from_expr(arg, fields, field_index_map);
             }
@@ -77,7 +77,7 @@ pub fn collect_field_ids_from_expr(
         Expr::UnaryOp(_, inner) => {
             collect_field_ids_from_expr(inner, fields, field_index_map);
         }
-        Expr::Call(_, args) => {
+        Expr::Call(_, args, _) => {
             for arg in args {
                 collect_field_ids_from_expr(arg, fields, field_index_map);
             }
@@ -127,7 +127,7 @@ pub fn collect_expr_field_refs_for_set(e: &Expr, refs: &mut HashSet<String>) {
         Expr::UnaryOp(_, inner) => {
             collect_expr_field_refs_for_set(inner, refs);
         }
-        Expr::Call(_, args) => {
+        Expr::Call(_, args, _) => {
             for arg in args {
                 collect_expr_field_refs_for_set(arg, refs);
             }
@@ -201,7 +201,7 @@ pub fn collect_expr_field_refs(
         Expr::UnaryOp(_, inner) => {
             collect_expr_field_refs(inner, fields, field_index_map);
         }
-        Expr::Call(_, args) => {
+        Expr::Call(_, args, _) => {
             for arg in args {
                 collect_expr_field_refs(arg, fields, field_index_map);
             }
@@ -233,7 +233,7 @@ pub fn collect_all_idents(e: &Expr, idents: &mut HashSet<String>) {
         Expr::UnaryOp(_, inner) => {
             collect_all_idents(inner, idents);
         }
-        Expr::Call(_, args) => {
+        Expr::Call(_, args, _) => {
             for arg in args {
                 collect_all_idents(arg, idents);
             }
@@ -271,7 +271,7 @@ pub fn build_let_field_refs(
 /// Check if an expression is an output-related FFI call.
 pub fn is_output_call(expr: &Expr) -> bool {
     match expr {
-        Expr::Call(name, _) if name == "PrintInt#" || name == "PrintFloat#"
+        Expr::Call(name, _, _) if name == "PrintInt#" || name == "PrintFloat#"
             || name == "PutChar#" || name == "Print#" || name == "Println#" => true,
         _ => false,
     }
@@ -337,7 +337,7 @@ fn seed_from_expr(
         Expr::UnaryOp(_, inner) => {
             seed_from_expr(inner, let_fields, live);
         }
-        Expr::Call(_, args) => {
+        Expr::Call(_, args, _) => {
             for arg in args {
                 seed_from_expr(arg, let_fields, live);
             }

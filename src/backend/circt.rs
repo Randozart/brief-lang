@@ -340,7 +340,7 @@ impl CirctBackend {
                     Some(w)
                 }
             }
-            Expr::Call(name, args) => {
+            Expr::Call(name, args, _) => {
                 // 2026-07-14: Intrinsic calls and function calls both use Expr::Call.
                 // Match intrinsic names first, then fall back to submodule instantiation.
                 match name.as_str() {
@@ -900,7 +900,7 @@ mod tests {
             make_txn("compute", vec![
                 Statement::Assign(
                     Expr::Identifier("x".to_string()),
-                    Expr::Call("add".to_string(), vec![Expr::Decimal(1), Expr::Decimal(2)]),
+                    Expr::Call("add".to_string(), vec![Expr::Decimal(1), Expr::Decimal(2)], None),
                 ),
             ], Expr::Bool(true), Expr::Bool(true)),
         ]);
@@ -915,7 +915,7 @@ mod tests {
             make_txn("test", vec![
                 Statement::Assign(
                     Expr::Identifier("x".to_string()),
-                    Expr::Call("Abs#".to_string(), vec![Expr::Decimal(-5)]),
+                    Expr::Call("Abs#".to_string(), vec![Expr::Decimal(-5)], None),
                 ),
             ], Expr::Bool(true), Expr::Bool(true)),
         ]);
@@ -931,7 +931,7 @@ mod tests {
             make_txn("test", vec![
                 Statement::Assign(
                     Expr::Identifier("x".to_string()),
-                    Expr::Call("Ctpop#".to_string(), vec![Expr::Decimal(255)]),
+                    Expr::Call("Ctpop#".to_string(), vec![Expr::Decimal(255)], None),
                 ),
             ], Expr::Bool(true), Expr::Bool(true)),
         ]);
@@ -946,7 +946,7 @@ mod tests {
             make_txn("test", vec![
                 Statement::Assign(
                     Expr::Identifier("x".to_string()),
-                    Expr::Call("Bitreverse#".to_string(), vec![Expr::Decimal(1)]),
+                    Expr::Call("Bitreverse#".to_string(), vec![Expr::Decimal(1)], None),
                 ),
             ], Expr::Bool(true), Expr::Bool(true)),
         ]);

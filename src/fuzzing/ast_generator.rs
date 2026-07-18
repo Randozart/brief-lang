@@ -362,7 +362,7 @@ fn arb_call_expr(max_depth: usize) -> impl Strategy<Value = Expr> {
         arb_identifier(),
         proptest::collection::vec(arb_expr(sub_depth), 0usize..=3usize),
     ).prop_map(|(name, args)| {
-        Expr::Call(name, args)
+        Expr::Call(name, args, None)
     })
 }
 
@@ -475,7 +475,7 @@ mod tests {
                 1 + measure_expr_depth(l).max(measure_expr_depth(r))
             }
             Expr::UnaryOp(_, e) => 1 + measure_expr_depth(e),
-            Expr::Call(_, args) => {
+            Expr::Call(_, args, _) => {
                 1 + args.iter().map(measure_expr_depth).max().unwrap_or(0)
             }
             _ => 0,

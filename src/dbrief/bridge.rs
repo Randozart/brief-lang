@@ -303,7 +303,7 @@ fn data_entry_to_expr(entry: &DataEntry, group_schema_name: Option<&str>, schema
             resolved
         };
         let named_fields_expr = ast::Expr::Tuple(named_fields.into_iter().map(|(n, v)| ast::Expr::Tuple(vec![ast::Expr::Quoted(n.into()), v])).collect());
-        return ast::Expr::Call("StructInstance".to_string(), vec![ast::Expr::Identifier(schema_name.to_string()), named_fields_expr]);
+        return ast::Expr::Call("StructInstance".to_string(), vec![ast::Expr::Identifier(schema_name.to_string()), named_fields_expr], None);
     }
 
     // No schema — use ObjectLiteral
@@ -399,7 +399,7 @@ mod tests {
                                     _ => panic!("Expected string entry key"),
                                 }
                                 match ev {
-                                    ast::Expr::Call(name_str, args) if name_str == "StructInstance" && args.len() == 2 => {
+                                    ast::Expr::Call(name_str, args, _) if name_str == "StructInstance" && args.len() == 2 => {
                                         let name = &args[0];
                                         assert!(matches!(name, ast::Expr::Identifier(n) if n == "Item"));
                                     }

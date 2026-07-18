@@ -145,9 +145,9 @@ impl LlvmBackend {
 
             // ── Call ─────────────────────────────────────────────────
             // 2026-07-12: Intrinsic call if name ends with '#', else user call.
-            Expr::Call(name, args) => {
+            Expr::Call(name, args, analysis_id) => {
                 if name.ends_with('#') {
-                    self.emit_intrinsic_call_dispatch(out, v, name, args, indent)
+                    self.emit_intrinsic_call_dispatch(out, v, name, args, *analysis_id, indent)
                 } else {
                     self.emit_user_call(out, v, name, args, indent)
                 }
@@ -726,9 +726,10 @@ impl LlvmBackend {
         v: &str,
         name: &str,
         args: &[Expr],
+        analysis_id: Option<usize>,
         indent: &str,
     ) -> TypedRegister {
-        emit_intrinsic_call(self, out, v, name, args, indent)
+        emit_intrinsic_call(self, out, v, name, args, analysis_id, indent)
     }
 
     /// 2026-07-14: Emit bit-shift/mask for layout field access (value.#fieldname).

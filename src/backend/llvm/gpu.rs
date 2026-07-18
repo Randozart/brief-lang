@@ -139,7 +139,7 @@ fn collect_touched_fields(expr: &Expr, fields: &mut Vec<String>) {
         Expr::UnaryOp(_, e) | Expr::Cast(e, _) => {
             collect_touched_fields(e, fields);
         }
-        Expr::Call(_, args) => {
+        Expr::Call(_, args, _) => {
             for arg in args {
                 collect_touched_fields(arg, fields);
             }
@@ -168,7 +168,7 @@ fn collect_touched_fields(expr: &Expr, fields: &mut Vec<String>) {
 /// is always allowed (it is GPU-native).
 fn collect_unsafe_ffi(expr: &Expr, reasons: &mut Vec<String>) {
     match expr {
-        Expr::Call(name, args) => {
+        Expr::Call(name, args, _) => {
             if name.ends_with('#') {
                 if !is_gpu_safe_intrinsic(name) {
                     reasons.push(format!("GPU kernel contains unsafe intrinsic '{}'", name));
@@ -510,7 +510,7 @@ fn is_float_context(expr: &Expr, field_types: &HashMap<String, String>) -> bool 
             is_float_context(l, field_types) || is_float_context(r, field_types)
         }
         Expr::UnaryOp(UnaryOpKind::Neg, e) => is_float_context(e, field_types),
-        Expr::Call(name, _) if name.ends_with('#') => matches!(name.as_str(),
+        Expr::Call(name, _, _) if name.ends_with('#') => matches!(name.as_str(),
             "Sin#" | "Cos#" | "Pow#" | "Sqrt#" | "Fabs#"
             | "Ceil#" | "Floor#" | "PrintFloat#"
         ),
@@ -552,7 +552,7 @@ fn has_print_intrinsics(body: &[Statement]) -> bool {
 
 fn has_print_intrinsics_expr(expr: &Expr) -> bool {
     match expr {
-        Expr::Call(name, _) => matches!(name.as_str(),
+        Expr::Call(name, _, _) => matches!(name.as_str(),
             "PrintInt#" | "PrintFloat#" | "PutChar#"
         ),
         Expr::BinaryOp(_, l, r) => {
@@ -868,7 +868,7 @@ fn emit_spirv_expr(
             reg
         }
         // GPU intrinsics
-        Expr::Call(name, args) => {
+        Expr::Call(name, args, _) => {
             emit_spirv_intrinsic(name, args, ir, indent, field_offsets, loaded_regs, field_types, write_fields)
         }
         _ => {
@@ -1113,7 +1113,7 @@ mod tests {
     #[test]
     fn test_check_eligibility_ffi_is_ineligible() {
         let body = vec![
-            Statement::Expression(Expr::Call("print_int".to_string(), vec![])),
+            Statement::Expression(Expr::Call("print_int".to_string(), vec![], None)),
         ];
         let result = check_eligibility(&body);
         assert!(!result.eligible, "FFI call should be ineligible");
@@ -1234,7 +1234,7 @@ mod tests {
         let body = vec![
             Statement::Assign(
                 Expr::Identifier("r".to_string()),
-                Expr::Call("Sin#".to_string(), vec![Expr::Identifier("x".to_string())]),
+                Expr::Call("Sin#".to_string(), vec![Expr::Identifier("x".to_string())], None),
             ),
         ];
         let result = check_eligibility(&body);
@@ -1246,7 +1246,7 @@ mod tests {
     fn test_check_eligibility_unsafe_intrinsic_blocked() {
         // ReadFile# has side effects and no SPIR-V mapping — should be blocked
         let body = vec![
-            Statement::Expression(Expr::Call("read_file".to_string(), vec![Expr::Quoted("test".into())])),
+            Statement::Expression(Expr::Call("read_file".to_string(), vec![Expr::Quoted("test".into())], None)),
         ];
         let result = check_eligibility(&body);
         assert!(!result.eligible, "unsafe intrinsic should be ineligible");
@@ -1259,7 +1259,7 @@ mod tests {
     fn test_check_eligibility_ffi_in_assignment_blocked() {
         // FFI call inside assignment RHS should be caught
         let body = vec![
-            Statement::Assign(Expr::Identifier("x".to_string()), Expr::Call("read_file".to_string(), vec![Expr::Quoted("foo.txt".into())])),
+            Statement::Assign(Expr::Identifier("x".to_string()), Expr::Call("read_file".to_string(), vec![Expr::Quoted("foo.txt".into())], None)),
         ];
         let result = check_eligibility(&body);
         assert!(!result.eligible, "FFI in assignment RHS should be ineligible");
@@ -1274,7 +1274,7 @@ mod tests {
             Statement::Guarded(
                 Expr::Bool(true),
                 vec![
-                    Statement::Expression(Expr::Call("read_file".to_string(), vec![Expr::Quoted("test".into())])),
+                    Statement::Expression(Expr::Call("read_file".to_string(), vec![Expr::Quoted("test".into())], None)),
                 ],
             ),
         ];
@@ -1287,7 +1287,7 @@ mod tests {
     #[test]
     fn test_emit_spirv_get_global_id() {
         let body = vec![
-            Statement::Assign(Expr::Identifier("r".to_string()), Expr::Call("GetGlobalId#".to_string(), vec![Expr::Decimal(0)])),
+            Statement::Assign(Expr::Identifier("r".to_string()), Expr::Call("GetGlobalId#".to_string(), vec![Expr::Decimal(0)], None)),
         ];
         let kernel = extract_kernel("gtid_test", &body, Expr::Decimal(100), &[], HashMap::new());
         let ir = emit_spirv_module(&kernel);
@@ -1298,7 +1298,7 @@ mod tests {
     #[test]
     fn test_emit_spirv_get_local_id() {
         let body = vec![
-            Statement::Assign(Expr::Identifier("r".to_string()), Expr::Call("GetLocalId#".to_string(), vec![Expr::Decimal(1)])),
+            Statement::Assign(Expr::Identifier("r".to_string()), Expr::Call("GetLocalId#".to_string(), vec![Expr::Decimal(1)], None)),
         ];
         let kernel = extract_kernel("ltid_test", &body, Expr::Decimal(100), &[], HashMap::new());
         let ir = emit_spirv_module(&kernel);
@@ -1309,7 +1309,7 @@ mod tests {
     #[test]
     fn test_emit_spirv_get_group_id() {
         let body = vec![
-            Statement::Assign(Expr::Identifier("r".to_string()), Expr::Call("GetGroupId#".to_string(), vec![Expr::Decimal(0)])),
+            Statement::Assign(Expr::Identifier("r".to_string()), Expr::Call("GetGroupId#".to_string(), vec![Expr::Decimal(0)], None)),
         ];
         let kernel = extract_kernel("grid_test", &body, Expr::Decimal(100), &[], HashMap::new());
         let ir = emit_spirv_module(&kernel);
@@ -1320,7 +1320,7 @@ mod tests {
     #[test]
     fn test_emit_spirv_barrier() {
         let body = vec![
-            Statement::Expression(Expr::Call("SubGroupBarrier#".to_string(), vec![])),
+            Statement::Expression(Expr::Call("SubGroupBarrier#".to_string(), vec![], None)),
         ];
         let kernel = extract_kernel("bar_test", &body, Expr::Decimal(100), &[], HashMap::new());
         let ir = emit_spirv_module(&kernel);
@@ -1348,7 +1348,7 @@ mod tests {
     #[test]
     fn test_check_eligibility_gpu_intrinsic_allowed() {
         let body = vec![
-            Statement::Expression(Expr::Call("GetGlobalId#".to_string(), vec![Expr::Decimal(0)])),
+            Statement::Expression(Expr::Call("GetGlobalId#".to_string(), vec![Expr::Decimal(0)], None)),
         ];
         let result = check_eligibility(&body);
         assert!(result.eligible, "get_global_id should be GPU-eligible");
@@ -1357,7 +1357,7 @@ mod tests {
     #[test]
     fn test_check_eligibility_barrier_allowed() {
         let body = vec![
-            Statement::Expression(Expr::Call("SubGroupBarrier#".to_string(), vec![])),
+            Statement::Expression(Expr::Call("SubGroupBarrier#".to_string(), vec![], None)),
         ];
         let result = check_eligibility(&body);
         assert!(result.eligible, "barrier should be GPU-eligible");
@@ -1458,7 +1458,7 @@ mod tests {
         ft.insert("x".to_string(), "float".to_string());
         ft.insert("r".to_string(), "float".to_string());
         let body = vec![
-            Statement::Assign(Expr::Identifier("r".to_string()), Expr::Call("Sin#".to_string(), vec![Expr::Identifier("x".to_string())])),
+            Statement::Assign(Expr::Identifier("r".to_string()), Expr::Call("Sin#".to_string(), vec![Expr::Identifier("x".to_string())], None)),
         ];
         let kernel = extract_kernel("sin_test", &body, Expr::Decimal(10), &[], ft);
         let ir = emit_spirv_module(&kernel);
@@ -1606,8 +1606,8 @@ mod tests {
         ft.insert("y".to_string(), "i64".to_string());
         // Kernel using both get_global_id(0) and get_global_id(1)
         let body = vec![
-            Statement::Assign(Expr::Identifier("x".to_string()), Expr::Call("GetGlobalId#".to_string(), vec![Expr::Decimal(0)])),
-            Statement::Assign(Expr::Identifier("y".to_string()), Expr::Call("GetGlobalId#".to_string(), vec![Expr::Decimal(1)])),
+            Statement::Assign(Expr::Identifier("x".to_string()), Expr::Call("GetGlobalId#".to_string(), vec![Expr::Decimal(0)], None)),
+            Statement::Assign(Expr::Identifier("y".to_string()), Expr::Call("GetGlobalId#".to_string(), vec![Expr::Decimal(1)], None)),
         ];
         let kernel = extract_kernel("grid2d", &body, Expr::Decimal(100), &[], ft);
         let ir = emit_spirv_module(&kernel);
@@ -1623,7 +1623,7 @@ mod tests {
         ft.insert("x".to_string(), "i64".to_string());
         // Kernel using only get_global_id(0)
         let body = vec![
-            Statement::Assign(Expr::Identifier("x".to_string()), Expr::Call("GetGlobalId#".to_string(), vec![Expr::Decimal(0)])),
+            Statement::Assign(Expr::Identifier("x".to_string()), Expr::Call("GetGlobalId#".to_string(), vec![Expr::Decimal(0)], None)),
         ];
         let kernel = extract_kernel("grid1d", &body, Expr::Decimal(100), &[], ft);
         let ir = emit_spirv_module(&kernel);

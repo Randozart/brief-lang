@@ -1530,7 +1530,7 @@ fn test_list_len_loads_length() {
             output_type: None, outputs: vec![],
             contract: default_contract(),
             body: vec![
-                Statement::Assign(Expr::Identifier("len".to_string()), Expr::Call("Len#".to_string(), vec![Expr::List(vec![Expr::Decimal(1), Expr::Decimal(2)])])),
+                Statement::Assign(Expr::Identifier("len".to_string()), Expr::Call("Len#".to_string(), vec![Expr::List(vec![Expr::Decimal(1), Expr::Decimal(2)])], None)),
             ],
             metadata: HashMap::new(), derivation: None, modifiers: vec![], span: None,
         }),
@@ -2084,7 +2084,7 @@ fn test_emit_address_of() {
             body: vec![
                 Statement::Assign(
                     Expr::Identifier("ptr".to_string()),
-                    Expr::Call("AddressOf#".to_string(), vec![Expr::Quoted(b"uart".to_vec())]),
+                    Expr::Call("AddressOf#".to_string(), vec![Expr::Quoted(b"uart".to_vec())], None),
                 ),
                 Statement::Term(None),
             ],

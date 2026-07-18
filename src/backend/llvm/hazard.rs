@@ -12,7 +12,7 @@ fn expr_refs_name(expr: &Expr, name: &str) -> bool {
         Expr::Identifier(n) => n == name,
         Expr::BinaryOp(_, l, r) => expr_refs_name(l, name) || expr_refs_name(r, name),
         Expr::UnaryOp(_, e) | Expr::Cast(e, _) | Expr::IsType(e, _) => expr_refs_name(e, name),
-        Expr::Call(_, args) => args.iter().any(|a| expr_refs_name(a, name)),
+        Expr::Call(_, args, _) => args.iter().any(|a| expr_refs_name(a, name)),
         Expr::Field(obj, _) => expr_refs_name(obj, name),
         Expr::Index(obj, idx) => expr_refs_name(obj, name) || expr_refs_name(idx, name),
         Expr::Block(stmts) => stmts.iter().any(|s| stmt_refs_name(s, name)),

@@ -779,7 +779,7 @@ fn references_triggers_or_ffi(expr: &Expr) -> bool {
 
 fn references_triggers_or_ffi_with_decls(expr: &Expr, inop_decls: &HashMap<String, bool>) -> bool {
     match expr {
-        Expr::Call(_, _) => true,
+        Expr::Call(_, _, _) => true,
         Expr::Identifier(_) | Expr::Decimal(_) | Expr::Float(_) | Expr::Bool(_) | Expr::Quoted(_) => false,
         Expr::BinaryOp(_, a, b) => {
             references_triggers_or_ffi_with_decls(a, inop_decls) || references_triggers_or_ffi_with_decls(b, inop_decls)
@@ -926,7 +926,7 @@ fn collect_projection_identifiers(expr: &Expr, state_fields: &HashSet<String>, u
             collect_projection_identifiers(l, state_fields, usage);
             collect_projection_identifiers(r, state_fields, usage);
         }
-        Expr::Call(_, args) => {
+        Expr::Call(_, args, _) => {
             for arg in args {
                 collect_projection_identifiers(arg, state_fields, usage);
             }
@@ -1046,7 +1046,7 @@ fn collect_state_identifiers(expr: &Expr, state_fields: &HashSet<String>, out: &
         Expr::Cast(inner, _) => {
             collect_state_identifiers(inner, state_fields, out);
         }
-        Expr::Call(_, args) => {
+        Expr::Call(_, args, _) => {
             for arg in args {
                 collect_state_identifiers(arg, state_fields, out);
             }
@@ -1134,7 +1134,7 @@ fn scan_for_ffi_args(stmt: &Statement, out: &mut HashSet<String>) {
 
 fn collect_ffi_identifiers(expr: &Expr, out: &mut HashSet<String>) {
     match expr {
-        Expr::Call(_, args) => {
+        Expr::Call(_, args, _) => {
             for arg in args {
                 collect_identifiers(arg, out);
             }
@@ -1214,7 +1214,7 @@ fn collect_identifiers(expr: &Expr, out: &mut HashSet<String>) {
             collect_identifiers(a, out);
         }
         Expr::Cast(a, _) => collect_identifiers(a, out),
-        Expr::Call(_, args) => {
+        Expr::Call(_, args, _) => {
             for arg in args {
                 collect_identifiers(arg, out);
             }

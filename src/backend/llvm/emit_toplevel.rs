@@ -2095,7 +2095,7 @@ impl LlvmBackend {
                 if let Some(trg_idx) = trg_idx_opt {
                     let trg_ll_ty = self.ctx.field_types[trg_idx].clone();
                     // 2026-07-14: Trigger LinkRef removed; use TtyReadKey# for all trigger reads
-                    let read_expr = crate::ast::Expr::Call("TtyReadKey#".to_string(), vec![]);
+                    let read_expr = crate::ast::Expr::Call("TtyReadKey#".to_string(), vec![], None);
                     let result = self.emit_expr(out, &read_expr, "  ");
                     let conv = format!("%cit_{}_{}", self.fun.txn_counter, trg.name);
                     self.fun.txn_counter += 1;

@@ -57,7 +57,7 @@ pub fn expr_cost(expr: &Expr) -> u64 {
     match expr {
         Expr::Decimal(_) | Expr::Float(_) | Expr::Bool(_) | Expr::Quoted(_) => 1,
         Expr::Identifier(_) => 1,
-        Expr::Call(name, args) => {
+        Expr::Call(name, args, _) => {
             let base = if name.ends_with('#') { 5 } else { 10 };
             base + args.iter().map(expr_cost).sum::<u64>()
         }
@@ -94,7 +94,7 @@ pub fn stmt_cost(stmt: &Statement) -> u64 {
 /// Count the number of function/intrinsic calls in an expression.
 pub fn count_calls(expr: &Expr, intrinsics: &mut u64, includes_io: &mut bool) {
     match expr {
-        Expr::Call(name, args) => {
+        Expr::Call(name, args, _) => {
             if name.ends_with('#') {
                 *intrinsics += 1;
                 if name == "PrintInt#" || name == "PrintFloat#" || name == "PrintString#" {
@@ -125,7 +125,7 @@ pub fn count_calls(expr: &Expr, intrinsics: &mut u64, includes_io: &mut bool) {
 pub fn is_proven_terminable(expr: &Expr) -> bool {
     // An expression is terminable if it has no recursive calls.
     match expr {
-        Expr::Call(name, _) => !name.ends_with('#'),
+        Expr::Call(name, _, _) => !name.ends_with('#'),
         _ => true,
     }
 }
@@ -202,7 +202,7 @@ mod tests {
 
     #[test]
     fn test_count_calls() {
-        let expr = Expr::Call("AddI64#".into(), vec![Expr::Decimal(1), Expr::Decimal(2)]);
+        let expr = Expr::Call("AddI64#".into(), vec![Expr::Decimal(1), Expr::Decimal(2)], None);
         let mut intrinsics = 0;
         let mut includes_io = false;
         count_calls(&expr, &mut intrinsics, &mut includes_io);

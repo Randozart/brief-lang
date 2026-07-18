@@ -186,7 +186,7 @@ impl<'a> Parser<'a> {
                 // Extract function name if primary is an identifier
                 match expr {
                     Expr::Identifier(name) => {
-                        expr = Expr::Call(name, args);
+                        expr = Expr::Call(name, args, None);
                     }
                     _ => {
                         return self.error_at_current("only named functions can be called");

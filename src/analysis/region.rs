@@ -248,7 +248,7 @@ impl RegionAnalyzer {
                     self.deps.entry(rf.clone()).or_default().insert(name.clone());
                     self.rev_deps.entry(name.clone()).or_default().insert(rf.clone());
                 }
-                Expr::Call(_, args) => {
+                Expr::Call(_, args, _) => {
                     for arg in args.iter().rev() {
                         work.push(arg);
                     }
@@ -1303,7 +1303,7 @@ fn collect_var_ids(expr: &Expr, vars: &mut HashSet<String>) {
             Expr::Identifier(n) => { vars.insert(n.clone()); }
             Expr::BinaryOp(_, l, r) => { work.push(r); work.push(l); }
             Expr::UnaryOp(_, e) => { work.push(e); }
-            Expr::Call(_, args) => { work.extend(args.iter().rev()); }
+            Expr::Call(_, args, _) => { work.extend(args.iter().rev()); }
             Expr::Tuple(elems) => { work.extend(elems.iter().rev()); }
             Expr::Index(l, i) => { work.push(i.as_ref()); work.push(l.as_ref()); }
             Expr::Field(o, _) => { work.push(o); }
@@ -1405,7 +1405,7 @@ fn expr_has_call(expr: &Expr) -> bool {
     let mut work: Vec<&Expr> = vec![expr];
     while let Some(e) = work.pop() {
         match e {
-            Expr::Call(_, _) => return true,
+            Expr::Call(_, _, _) => return true,
             Expr::Tuple(elems) => {
                 work.extend(elems.iter().rev());
             }
@@ -1628,10 +1628,10 @@ fn substitute_expr(expr: &Expr, old_var: &str, new_expr: &Expr) -> Expr {
                     work.push(W::Args(1, Box::new(move |v| Expr::Cast(Box::new(v[0].clone()), t2.clone()))));
                     work.push(W::Proc(*a));
                 }
-                Expr::Call(name, args) => {
+                Expr::Call(name, args, _) => {
                     let n = args.len();
                     let name2 = name;
-                    work.push(W::Args(n, Box::new(move |v| Expr::Call(name2, v))));
+                    work.push(W::Args(n, Box::new(move |v| Expr::Call(name2, v, None))));
                     for a in args.into_iter().rev() {
                         work.push(W::Proc(a));
                     }

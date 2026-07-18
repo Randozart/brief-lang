@@ -226,7 +226,7 @@ fn collect_expr_ids_inner(expr: &Expr, ids: &mut Vec<String>) {
         Expr::UnaryOp(_, a) | Expr::Cast(a, _) | Expr::IsType(a, _) => {
             collect_expr_ids_inner(a, ids);
         }
-        Expr::Call(_, args) => {
+        Expr::Call(_, args, _) => {
             for arg in args {
                 collect_expr_ids_inner(arg, ids);
             }

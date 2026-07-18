@@ -137,7 +137,7 @@ impl ExprCodegenLLVM for CallExpr {
             &str,
         ) -> crate::backend::llvm::TypedRegister,
     ) -> crate::backend::llvm::TypedRegister {
-        ctx.emit_expr(out, &Expr::Call(self.name.clone(), self.args.clone()), "")
+        ctx.emit_expr(out, &Expr::Call(self.name.clone(), self.args.clone(), None), "")
     }
 }
 

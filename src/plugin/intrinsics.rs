@@ -315,10 +315,10 @@ fn evaluate_expression_for_intrinsic(
     universe: &mut TypeUniverse,
 ) -> Result<(), String> {
     match expr {
-        Expr::Call(name, args) if name.ends_with('$') => {
+        Expr::Call(name, args, _) if name.ends_with('$') => {
             dispatch_intrinsic(name, args, program, universe)
         }
-        Expr::Call(_, args) => {
+        Expr::Call(_, args, _) => {
             // Non-$ calls: check arguments for nested $ intrinsics.
             for arg in args {
                 evaluate_expression_for_intrinsic(arg, program, universe)?;
@@ -379,7 +379,7 @@ mod tests {
     // ── Helper: create a $ call expression ────────────────────────────
 
     fn make_call(name: &str, args: Vec<Expr>) -> Expr {
-        Expr::Call(name.to_string(), args)
+        Expr::Call(name.to_string(), args, None)
     }
 
     fn make_string(s: &str) -> Expr {

@@ -87,9 +87,10 @@ impl LlvmBackend {
                 *k,
                 Box::new(Self::rewrite_cell_identifiers(e, cell_name)),
             ),
-            Expr::Call(name, args) => Expr::Call(
+            Expr::Call(name, args, _) => Expr::Call(
                 name.clone(),
                 args.iter().map(|a| Self::rewrite_cell_identifiers(a, cell_name)).collect(),
+                None,
             ),
             Expr::Field(obj, field) => Expr::Field(
                 Box::new(Self::rewrite_cell_identifiers(obj, cell_name)),
@@ -1578,7 +1579,7 @@ impl LlvmBackend {
                 self.emit_direct_projection(out, src_val, name, indent)
             }
             // Pattern 2: intrinsic call — strlen#(Ptr) etc.
-            Expr::Call(name, args) if name == "strlen#" && args.len() == 1 => {
+            Expr::Call(name, args, _) if name == "strlen#" && args.len() == 1 => {
                 self.emit_strlen_meld_route(out, indent, &args[0], src_val)
             }
             // Pattern 3: field access on the partner type — "CString.ptr"

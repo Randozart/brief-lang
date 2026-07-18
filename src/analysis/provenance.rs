@@ -126,7 +126,7 @@ fn collect_var_names(expr: &Expr) -> Vec<String> {
                 work.push(a);
             }
             Expr::Field(obj, _) | Expr::Index(obj, _) => { work.push(obj); }
-            Expr::Call(_, args) => { work.extend(args.iter().rev()); }
+            Expr::Call(_, args, _) => { work.extend(args.iter().rev()); }
             Expr::If(cond, then, else_) => {
                 work.push(then);
                 work.push(cond);

@@ -12,7 +12,7 @@ impl fmt::Display for Expr {
             Expr::Bool(b) => write!(f, "{}", if *b { "true" } else { "false" }),
             Expr::Float(n) => write!(f, "{}", n),
             Expr::Identifier(name) => write!(f, "{}", name),
-            Expr::Call(name, args) => {
+            Expr::Call(name, args, _) => {
                 write!(f, "{}(", name)?;
                 for (i, arg) in args.iter().enumerate() {
                     if i > 0 {

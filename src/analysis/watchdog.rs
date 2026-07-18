@@ -205,7 +205,7 @@ fn collect_vars(expr: &Expr, vars: &mut HashSet<String>) {
         Expr::UnaryOp(_, inner) | Expr::Cast(inner, _) | Expr::IsType(inner, _) => {
             collect_vars(inner, vars);
         }
-        Expr::Call(_, args) => {
+        Expr::Call(_, args, _) => {
             for arg in args {
                 collect_vars(arg, vars);
             }

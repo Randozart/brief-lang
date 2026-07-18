@@ -137,7 +137,7 @@ fn collect_reads_from_expr(expr: &Expr, reads: &mut HashSet<String>) {
             collect_reads_from_expr(r, reads);
         }
         Expr::UnaryOp(_, e) => collect_reads_from_expr(e, reads),
-        Expr::Call(_, args) => {
+        Expr::Call(_, args, _) => {
             for a in args {
                 collect_reads_from_expr(a, reads);
             }

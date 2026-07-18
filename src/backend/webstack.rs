@@ -437,7 +437,7 @@ impl WebstackGenerator {
                 self.extract_identifiers(e, deps);
             }
             Expr::Field(e, _) => self.extract_identifiers(e, deps),
-            Expr::Call(_, args) => {
+            Expr::Call(_, args, _) => {
                 for arg in args {
                     self.extract_identifiers(arg, deps);
                 }
@@ -697,7 +697,7 @@ impl WebstackGenerator {
                     UnaryOpKind::BitNot => format!("(~{})", op),
                 }
             }
-            Expr::Call(name, args) => {
+            Expr::Call(name, args, _) => {
                 let ts_args: Vec<String> = args.iter().map(|a| self.expr_to_ts(a)).collect();
                 let ts_name = self.ts_ident(name);
                 if self.ffi_ts_impl.contains_key(name) {
@@ -1002,7 +1002,7 @@ impl WebstackGenerator {
                     UnaryOpKind::BitNot => format!("(!{})", op),
                 }
             }
-            Expr::Call(name, args) => {
+            Expr::Call(name, args, _) => {
                 let rust_args: Vec<String> = args.iter().map(|a| self.expr_to_rust(a)).collect();
                 let joined = rust_args.join(", ");
                 match name.as_str() {
@@ -1207,7 +1207,7 @@ mod tests {
             item: "x".into(),
             list: Box::new(Expr::Identifier("items".into())),
             body: vec![
-                Statement::Expression(Expr::Call("print".into(), vec![Expr::Identifier("x".into())])),
+                Statement::Expression(Expr::Call("print".into(), vec![Expr::Identifier("x".into())], None)),
             ],
         };
         backend.statement_to_ts(&mut out, &stmt);
@@ -1229,20 +1229,20 @@ mod tests {
     #[test]
     fn test_intrinsic_to_ts_math() {
         let mut backend = WebstackGenerator::new();
-        let r = backend.expr_to_ts(&Expr::Call("Abs#".to_string(), vec![Expr::Decimal(-5)]));
+        let r = backend.expr_to_ts(&Expr::Call("Abs#".to_string(), vec![Expr::Decimal(-5)], None));
         assert!(r.contains("Math.abs"));
 
-        let r2 = backend.expr_to_ts(&Expr::Call("Sqrt#".to_string(), vec![Expr::Decimal(9)]));
+        let r2 = backend.expr_to_ts(&Expr::Call("Sqrt#".to_string(), vec![Expr::Decimal(9)], None));
         assert!(r2.contains("Math.sqrt"));
 
-        let r3 = backend.expr_to_ts(&Expr::Call("IntToStr#".to_string(), vec![Expr::Decimal(42)]));
+        let r3 = backend.expr_to_ts(&Expr::Call("IntToStr#".to_string(), vec![Expr::Decimal(42)], None));
         assert!(r3.contains("String"));
     }
 
     #[test]
     fn test_intrinsic_to_str_ts() {
         let mut backend = WebstackGenerator::new();
-        let r = backend.expr_to_ts(&Expr::Call("ToStr#".to_string(), vec![Expr::Decimal(100)]));
+        let r = backend.expr_to_ts(&Expr::Call("ToStr#".to_string(), vec![Expr::Decimal(100)], None));
         assert!(r.contains("String(100)"), "ToStr should map to String() in TS: {}", r);
     }
 

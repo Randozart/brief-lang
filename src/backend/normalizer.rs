@@ -16,7 +16,7 @@ pub fn collect_intrinsic_calls(items: &[TopLevel]) -> Vec<IntrinsicCall> {
     let mut calls = Vec::new();
     for item in items {
         walk_toplevel(item, &mut |e| {
-            if let Expr::Call(name, _) = e {
+            if let Expr::Call(name, _, _) = e {
                 if name.ends_with('#') {
                     calls.push(IntrinsicCall { name: name.clone() });
                 }

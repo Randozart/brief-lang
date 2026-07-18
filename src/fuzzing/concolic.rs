@@ -80,7 +80,7 @@ fn expr_involves_trigger(expr: &Expr) -> bool {
             expr_involves_trigger(l) || expr_involves_trigger(r)
         }
         Expr::UnaryOp(_, e) => expr_involves_trigger(e),
-        Expr::Call(_, args) => args.iter().any(expr_involves_trigger),
+        Expr::Call(_, args, _) => args.iter().any(expr_involves_trigger),
         Expr::Index(list, idx) => {
             expr_involves_trigger(list) || expr_involves_trigger(idx)
         }

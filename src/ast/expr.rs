@@ -18,7 +18,7 @@ pub enum Expr {
     Identifier(String), // foo, Sqrt#, AddI64#
 
     // ── Operations ──────────────────────────────────────────────
-    Call(String, Vec<Expr>), // f(x), Sqrt#(x)
+    Call(String, Vec<Expr>, Option<usize>), // f(x), Sqrt#(x) — analysis_id for Alloc# strategy
     BinaryOp(BinaryOpKind, Box<Expr>, Box<Expr>),
     UnaryOp(UnaryOpKind, Box<Expr>),
     Field(Box<Expr>, String),
@@ -144,7 +144,7 @@ impl Expr {
             Expr::UnaryOp(_, e) => e.collect_vars_into(acc),
             Expr::Field(e, _) => e.collect_vars_into(acc),
             Expr::Index(l, r) => { l.collect_vars_into(acc); r.collect_vars_into(acc); }
-            Expr::Call(_, args) => { for a in args { a.collect_vars_into(acc); } }
+            Expr::Call(_, args, _) => { for a in args { a.collect_vars_into(acc); } }
             Expr::Block(_stmts) => {}
             Expr::If(c, t, e) => {
                 c.collect_vars_into(acc);

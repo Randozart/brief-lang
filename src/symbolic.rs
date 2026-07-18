@@ -235,7 +235,7 @@ pub fn eval_symbolic(expr: &Expr, state: &SymbolicState) -> SymbolicValue {
         }
 
         // Function calls - can't track
-        Expr::Call(_, _) => SymbolicValue::Unknown,
+        Expr::Call(_, _, _) => SymbolicValue::Unknown,
 
         // Unary operations
         Expr::UnaryOp(UnaryOpKind::Neg, _)

@@ -100,7 +100,7 @@ impl<'a> DataflowAnalyzer<'a> {
             Expr::UnaryOp(_, inner) | Expr::Cast(inner, _) | Expr::IsType(inner, _) => {
                 self.extract_ids_recursive(inner, ids);
             }
-            Expr::Call(_, args) | Expr::Tuple(args) | Expr::List(args) => {
+            Expr::Call(_, args, _) | Expr::Tuple(args) | Expr::List(args) => {
                 for arg in args {
                     self.extract_ids_recursive(arg, ids);
                 }

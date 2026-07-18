@@ -382,7 +382,7 @@ pub(crate) fn parse_expr(expr: &SExpr) -> Result<Expr, String> {
                     let name = sexpr_str(&parts[1])?.to_string();
                     let mut args = Vec::new();
                     for i in 2..parts.len() { args.push(parse_expr(&parts[i])?); }
-                    Ok(Expr::Call(name, args))
+                    Ok(Expr::Call(name, args, None))
                 }
                 "binop" => {
                     let kind = parse_binop(sexpr_str(&parts[1])?)?;

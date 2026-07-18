@@ -108,7 +108,7 @@ impl Annotator {
 
     fn collect_calls_from_expr(&self, expr: &Expr, calls: &mut Vec<String>) {
         match expr {
-            Expr::Call(name, args) => {
+            Expr::Call(name, args, _) => {
                 calls.push(name.clone());
                 for arg in args {
                     self.collect_calls_from_expr(arg, calls);
@@ -462,7 +462,7 @@ impl Annotator {
             Expr::Bool(true) => "true".to_string(),
             Expr::Bool(false) => "false".to_string(),
             Expr::Identifier(n) => n.clone(),
-            Expr::Call(name, args) => {
+            Expr::Call(name, args, _) => {
                 let args_str = args
                     .iter()
                     .map(|a| self.format_expr(a))
@@ -579,7 +579,7 @@ mod tests {
     }
 
     fn make_call_expr(name: &str) -> Expr {
-        Expr::Call(name.to_string(), vec![])
+        Expr::Call(name.to_string(), vec![], None)
     }
 
     #[test]
@@ -613,7 +613,7 @@ mod tests {
     fn test_analyze_nested_call() {
         let mut ann = Annotator::new();
         let inner = make_call_expr("inner");
-        let outer = Expr::Call("outer".to_string(), vec![inner]);
+        let outer = Expr::Call("outer".to_string(), vec![inner], None);
         let stmts = vec![Statement::Expression(outer)];
         let items = vec![make_defn("foo", stmts)];
         ann.analyze(&items);

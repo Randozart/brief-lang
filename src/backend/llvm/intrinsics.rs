@@ -22,12 +22,13 @@ pub fn emit_intrinsic_call(
     v: &str,
     name: &str,
     args: &[Expr],
+    analysis_id: Option<usize>,
     indent: &str,
 ) -> BTypedRegister {
     // Special-case intrinsics that don't fit the template pattern
     match name {
         "Malloc#" => return emit_malloc(backend, out, v, args, indent),
-        "Alloc#" => return emit_alloc(backend, out, v, args, indent),
+        "Alloc#" => return emit_alloc(backend, out, v, args, indent, analysis_id),
         "Free#" => return emit_free(backend, out, v, args, indent),
         "Load#" => return emit_load(backend, out, v, args, indent),
         "Store#" => return emit_store(backend, out, v, args, indent),
@@ -228,10 +229,38 @@ fn emit_malloc(
 //   Alloc#(size, my_custom_alloc_fn)    — identifier: user Brief function
 fn emit_alloc(
     backend: &mut LlvmBackend, out: &mut String, v: &str,
-    args: &[Expr], indent: &str,
+    args: &[Expr], indent: &str, analysis_id: Option<usize>,
 ) -> BTypedRegister {
     let size = emit_arg(backend, out, &args[0], indent);
-    // Check for optional 2nd arg (strategy override).
+
+    // 2026-07-18: Phase 4 — Check pre-computed strategy from analysis pass.
+    // If the analysis determined Malloc (escape detected), use it directly.
+    if let Some(aid) = analysis_id {
+        if let Some(ref strategies) = backend.analysis_alloc_strategies {
+            if let Some(strategy) = strategies.get(&aid) {
+                return match strategy {
+                    AllocStrategy::Malloc => {
+                        // TEMP: 2026-07-18: Conservative — always Malloc for now.
+                        // Full escape analysis will assign Arena/Alloca when safe.
+                        emit_malloc_inline(backend, out, v, &size, indent)
+                    }
+                    AllocStrategy::Arena => {
+                        let _result = backend.emit_arena_alloc(out, indent, &size);
+                        backend.fun.alloc_strategies.insert(v.to_string(), AllocStrategy::Arena);
+                        BTypedRegister { name: v.to_string(), ty: Type::ptr(Type::int()) }
+                    }
+                    AllocStrategy::Alloca => {
+                        writeln!(out, "{}{} = alloca i8, i64 {}", indent, v, size).ok();
+                        backend.fun.alloc_strategies.insert(v.to_string(), AllocStrategy::Alloca);
+                        BTypedRegister { name: v.to_string(), ty: Type::ptr(Type::int()) }
+                    }
+                };
+            }
+        }
+    }
+
+    // Check for optional 2nd arg (strategy override) — explicit user override
+    // takes priority over analysis.
     if args.len() >= 2 {
         return emit_alloc_with_strategy(backend, out, v, args, indent, &size);
     }

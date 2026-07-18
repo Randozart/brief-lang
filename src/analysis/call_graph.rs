@@ -112,7 +112,7 @@ pub fn extract_called_transactions(body: &[Statement]) -> Vec<String> {
 /// Recursively collect function/transaction call names from expressions
 pub fn collect_call_names(expr: &Expr, called: &mut Vec<String>) {
     match expr {
-        Expr::Call(name, args) => {
+        Expr::Call(name, args, _) => {
             called.push(name.clone());
             for arg in args {
                 collect_call_names(arg, called);
@@ -225,7 +225,7 @@ mod tests {
     }
 
     fn make_call(name: &str) -> Expr {
-        Expr::Call(name.to_string(), vec![])
+        Expr::Call(name.to_string(), vec![], None)
     }
 
     fn make_guarded(stmts: Vec<Statement>) -> Statement {

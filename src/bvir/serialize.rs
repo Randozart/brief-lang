@@ -185,7 +185,7 @@ fn emit_expr(e: &Expr) -> SExpr {
             list(&[atom("string"), atom(&s)])
         }
         Expr::Identifier(name) => list(&[atom("ident"), atom(name)]),
-        Expr::Call(name, args) => {
+        Expr::Call(name, args, _) => {
             let mut children = vec![atom("call"), atom(name)];
             for a in args { children.push(emit_expr(a)); }
             SExpr::List(children)

@@ -146,7 +146,7 @@ fn count_expr_ops(expr: &Expr) -> u64 {
             1 + count_expr_ops(e)
         }
         // Calls — recurse into args
-        Expr::Call(_, args) => {
+        Expr::Call(_, args, _) => {
             args.iter().map(|a| count_expr_ops(a)).sum()
         }
         _ => 0,
