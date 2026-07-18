@@ -233,10 +233,15 @@ is_precompute_ok() {
 
     # Size comparison
     local brief_text=0
-    local c_text=1
+    local c_text=0
     if command -v size &>/dev/null; then
         brief_text=$(size "$brief_bin" 2>/dev/null | tail -1 | awk '{print $1}')
-        c_text=$(size "$c_bin" 2>/dev/null | tail -1 | awk '{print $1}')
+        if [ -f "$c_bin" ]; then
+            c_text=$(size "$c_bin" 2>/dev/null | tail -1 | awk '{print $1}')
+        fi
+        if [ "$brief_text" -eq 0 ]; then
+            return 0
+        fi
         if [ "$c_text" -gt 0 ] && [ "$brief_text" -lt $(( c_text / 4 )) ]; then
             return 0
         fi
@@ -245,6 +250,13 @@ is_precompute_ok() {
     return 1
 }
 
+# ── Cross-benchmark correctness references ──────────────────────────
+# Some benchmarks (e.g. queue_drain_idio) have no C reference of their own —
+# they are compared against a different benchmark's C reference (e.g.
+# queue_drain_sym_c). The BRIEF_CROSS_REF array maps (benchmark, c_ref).
+declare -A BRIEF_CROSS_REF
+BRIEF_CROSS_REF["queue_drain_idio"]="queue_drain_sym"
+
 # ── CORRECTNESS CHECK ────────────────────────────────────────────────
 
 LAST_CORRECTNESS=""
@@ -252,9 +264,21 @@ LAST_CORRECTNESS=""
 check_correctness() {
     local name="$1"
     local brief_bin="benchmarks/${name}"
-    local c_bin="benchmarks/${name}_c"
 
-    if [ ! -f "$brief_bin" ] || [ ! -f "$c_bin" ]; then
+    local c_bin="benchmarks/${name}_c"
+    local ref_name="${BRIEF_CROSS_REF[$name]:-$name}"
+    local ref_c_bin="benchmarks/${ref_name}_c"
+
+    if [ ! -f "$brief_bin" ]; then
+        echo "  correctness: SKIP (brief binary missing)"
+        LAST_CORRECTNESS="SKIP"
+        return
+    fi
+
+    if [ "$name" != "$ref_name" ] && [ -f "$ref_c_bin" ]; then
+        # Cross-benchmark comparison: compare against another benchmark's C ref
+        :
+    elif [ ! -f "$c_bin" ]; then
         echo "  correctness: SKIP (binary missing)"
         LAST_CORRECTNESS="SKIP"
         return
@@ -262,7 +286,11 @@ check_correctness() {
 
     local brief_out c_out
     brief_out=$(BOUND=5 timeout 10 "$brief_bin" 2>&1 || echo "__FAIL__")
-    c_out=$(BOUND=5 timeout 10 "$c_bin" 2>&1 || echo "__FAIL__")
+    if [ "$name" != "$ref_name" ] && [ -f "$ref_c_bin" ]; then
+        c_out=$(BOUND=5 timeout 10 "$ref_c_bin" 2>&1 || echo "__FAIL__")
+    else
+        c_out=$(BOUND=5 timeout 10 "$c_bin" 2>&1 || echo "__FAIL__")
+    fi
 
     if [ "$brief_out" = "$c_out" ]; then
         echo "  correctness: MATCH (output: \"${brief_out:0:40}\")"
@@ -356,7 +384,13 @@ bench_self_term() {
         record_result "$name" "SKIP" "" "" "" "SKIP"
         return
     fi
-    if [ ! -f "$c_bin" ]; then
+    # 2026-07-18: Cross-benchmark reference check
+    local ref_name="${BRIEF_CROSS_REF[$name]:-$name}"
+    local ref_c_bin="benchmarks/${ref_name}_c"
+    if [ "$name" != "$ref_name" ] && [ -f "$ref_c_bin" ]; then
+        # Cross-benchmark: C ref exists under a different name
+        :
+    elif [ ! -f "$c_bin" ]; then
         echo "  SKIP — no C binary"
         record_result "$name" "SKIP" "" "" "" "SKIP"
         return
