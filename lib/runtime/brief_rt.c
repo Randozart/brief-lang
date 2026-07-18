@@ -306,58 +306,7 @@ int64_t brief_ttyname(int64_t fd) {
     return (int64_t)(uintptr_t)ttyname((int)fd);
 }
 
-// 2026-07-18: Byte string comparison (mirrors memcmp).
-// Callers should use Copy#(dst, src, len) intrinsic for memcpy.
-int64_t __memcmp(const uint8_t *a, const uint8_t *b, int64_t len) {
-    if (len == 0) return 0;
-    for (int64_t i = 0; i < len; i++) {
-        if (a[i] != b[i]) return a[i] < b[i] ? -1 : 1;
-    }
-    return 0;
-}
-
-// 2026-07-18: Find byte substring in byte string. Returns offset or -1.
-int64_t __utf8_find(const uint8_t *haystack, int64_t hay_len,
-                    const uint8_t *needle, int64_t needle_len) {
-    if (!haystack || !needle || needle_len <= 0 || hay_len < needle_len) return -1;
-    for (int64_t i = 0; i <= hay_len - needle_len; i++) {
-        int64_t match = 1;
-        for (int64_t j = 0; j < needle_len; j++) {
-            if (haystack[i + j] != needle[j]) { match = 0; break; }
-        }
-        if (match) return i;
-    }
-    return -1;
-}
-
-// 2026-07-18: UTF-8 byte sequence validator. Returns 1 if valid, 0 if not.
-int64_t __utf8_validate(const uint8_t *data, int64_t len) {
-    if (!data || len < 0) return 0;
-    int64_t i = 0;
-    while (i < len) {
-        uint8_t c = data[i];
-        int64_t seq_len;
-        uint32_t min_cp;
-        if (c < 0x80) { seq_len = 1; min_cp = 0; }
-        else if (c < 0xC0) return 0; // continuation byte without start
-        else if (c < 0xE0) { seq_len = 2; min_cp = 0x80; }
-        else if (c < 0xF0) { seq_len = 3; min_cp = 0x800; }
-        else if (c < 0xF8) { seq_len = 4; min_cp = 0x10000; }
-        else return 0; // > 0xF7 is invalid
-
-        if (i + seq_len > len) return 0;
-
-        uint32_t cp = c & (0x7F >> seq_len);
-        for (int64_t j = 1; j < seq_len; j++) {
-            uint8_t b = data[i + j];
-            if ((b & 0xC0) != 0x80) return 0;
-            cp = (cp << 6) | (b & 0x3F);
-        }
-        if (cp < min_cp) return 0;                // overlong
-        if (cp >= 0xD800 && cp <= 0xDFFF) return 0; // surrogate
-        if (cp > 0x10FFFF) return 0;              // out of range
-
-        i += seq_len;
-    }
-    return 1;
-}
+// 2026-07-18: All __utf8_* functions now implemented as pure Brief in utf8view.bv
+// (uses Load# + convergent txn). Find byte substring in byte string.
+// Returns offset or -1.
+// (implemented in pure Brief in lib/std/types/utf8view.bv)

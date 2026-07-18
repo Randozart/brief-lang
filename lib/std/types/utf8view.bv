@@ -3,14 +3,120 @@
 // Struct literal creation (Utf8View { ... }) pending parser support.
 // Import via `import "std/types/utf8view.bv"`.
 
-// 2026-07-18: Foreign functions — no existing intrinsic covers these.
-// __memcmp: byte-range comparison (no Memcmp# intrinsic yet).
-// __utf8_find: substring search (no Find# intrinsic).
-// __utf8_validate: UTF-8 sequence validator (no Validate# intrinsic).
-// Memcpy: use Copy#(dst, src, len) intrinsic instead (emits @llvm.memcpy).
-frgn __utf8_validate(data: Int, len: Int) -> Int;
-frgn __utf8_find(hay: Int, hay_len: Int, needle: Int, needle_len: Int) -> Int;
-frgn __memcmp(a: Int, b: Int, len: Int) -> Int;
+// 2026-07-18: Native Brief functions for byte-string operations.
+// Uses Load#(addr, 1) for per-byte access, Copy#(dst, src, len) for bulk copy.
+
+// ── Byte comparison ───────────────────────────────────────────────
+// Convergent txn iterates i from 0 to len. Returns -1/0/1 (memcmp semantics).
+txn memcmp_loop(a: Int, b: Int, len: Int, i: Int)
+    [i < len][i == len] -> Int
+{
+    let av: Int = Load#(a + i, 1);
+    let bv: Int = Load#(b + i, 1);
+    when av < bv { term -1; };
+    when bv < av { term 1; };
+    i = i + 1;
+    term 0;
+};
+
+defn __memcmp(a: Int, b: Int, len: Int) -> Int {
+    when len == 0 { term 0; };
+    term memcmp_loop(a, b, len, 0);
+};
+
+// ── Substring search (like memmem) ────────────────────────────────
+// Inner: check if needle matches at position i.
+// Iterates j from 0..needle_len, early-exits on mismatch via mismatch flag.
+txn memcmp_at(hay: Int, needle: Int, len: Int, i: Int, j: Int, mismatch: Int)
+    [j < len && mismatch == 0][j == len || mismatch != 0] -> Bool
+{
+    let hv: Int = Load#(hay + i + j, 1);
+    let nv: Int = Load#(needle + j, 1);
+    when hv != nv {
+        mismatch = 1;
+    };
+    j = j + 1;
+    term mismatch == 0;
+};
+
+// Outer: iterate haystack positions, call memcmp_at for each.
+// Returns byte offset of match, or -1 if not found.
+txn find_loop(hay: Int, hay_len: Int, needle: Int, needle_len: Int, i: Int)
+    [i + needle_len <= hay_len][i + needle_len > hay_len] -> Int
+{
+    let found: Bool = memcmp_at(hay, needle, needle_len, i, 0, 0);
+    when found { term i; };
+    i = i + 1;
+    term -1;
+};
+
+defn __utf8_find(hay: Int, hay_len: Int, needle: Int, needle_len: Int) -> Int {
+    when needle_len == 0 { term 0; };
+    when hay_len < needle_len { term -1; };
+    term find_loop(hay, hay_len, needle, needle_len, 0);
+};
+
+// ── UTF-8 validation ─────────────────────────────────────────────
+
+defn decode_seq_len(lead: Int) -> Int {
+    when lead < 0x80 { term 1; };
+    when lead >= 0xC0 && lead < 0xE0 { term 2; };
+    when lead >= 0xE0 && lead < 0xF0 { term 3; };
+    when lead >= 0xF0 && lead < 0xF8 { term 4; };
+    term 0;  // continuation byte (0x80-0xBF) or invalid (> 0xF7)
+};
+
+defn decode_min_cp(lead: Int) -> Int {
+    when lead < 0x80 { term 0; };
+    when lead >= 0xE0 && lead < 0xF0 { term 0x800; };
+    when lead >= 0xF0 && lead < 0xF8 { term 0x10000; };
+    term 0;  // 2-byte sequences start at 0x80; invalid/cont return 0
+};
+
+// Outer: iterate over bytes, validate each UTF-8 sequence.
+// Decodes the code point through continuation bytes for constraint checks.
+txn utf8_validate_loop(data: Int, len: Int, i: Int, valid: Int)
+    [i < len && valid == 1][i >= len || valid == 0] -> Int
+{
+    let lead: Int = Load#(data + i, 1);
+    let seq_len: Int = decode_seq_len(lead);
+    when seq_len == 0 { valid = 0; term 0; };
+    when i + seq_len > len { valid = 0; term 0; };
+    
+    // Decode code point from lead byte then continuation bytes
+    let shift: Int = 1;
+    let mask: Int = if seq_len == 1 { 0x7F } elsif seq_len == 2 { 0x1F } elsif seq_len == 3 { 0x0F } else { 0x07 };
+    let cp: Int = lead & mask;
+    when seq_len > 1 {
+        let b1: Int = Load#(data + i + 1, 1);
+        when (b1 & 0xC0) != 0x80 { valid = 0; term 0; };
+        cp = (cp << 6) | (b1 & 0x3F);
+    };
+    when seq_len > 2 {
+        let b2: Int = Load#(data + i + 2, 1);
+        when (b2 & 0xC0) != 0x80 { valid = 0; term 0; };
+        cp = (cp << 6) | (b2 & 0x3F);
+    };
+    when seq_len > 3 {
+        let b3: Int = Load#(data + i + 3, 1);
+        when (b3 & 0xC0) != 0x80 { valid = 0; term 0; };
+        cp = (cp << 6) | (b3 & 0x3F);
+    };
+    
+    // Check code point constraints: no overlong, no surrogates, no overflow
+    let min_cp: Int = decode_min_cp(lead);
+    when cp < min_cp { valid = 0; term 0; };
+    when cp >= 0xD800 && cp <= 0xDFFF { valid = 0; term 0; };
+    when cp > 0x10FFFF { valid = 0; term 0; };
+    
+    i = i + seq_len;
+    term 1;
+};
+
+defn __utf8_validate(data: Int, len: Int) -> Int {
+    when len == 0 { term 1; };
+    term utf8_validate_loop(data, len, 0, 1);
+};
 
 // Byte length of the view (O(1)).
 defn utf8view_len(v: Utf8View) -> Int {
