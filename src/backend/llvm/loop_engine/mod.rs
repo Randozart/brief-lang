@@ -246,15 +246,26 @@ pub(crate) fn emit_main(&mut self, out: &mut String, has_wake_triggers: bool) {
     } else {
         writeln!(out, "  call void @reactor_tick(ptr noalias nocapture %state)").ok();
     }
-    // 2026-07-18: When exit_condition is set (by natural death logic), the
-    // loop entry checks it via emit_exit_check — no need for wake triggers or
-    // __wait_for_trigger__. Just loop back to the entry check.
+    // 2026-07-18: Convergence exit logic.
+    // - Wake triggers: check @llvm.wake.any(); exit if none pending.
+    // - Exit condition set (natural death): loop back to entry check.
+    // - No wake triggers & no restartable txns: one-shot program. Check
+    //   if any txn precondition is still true; exit if all converged.
+    // - Otherwise: call __wait_for_trigger__() and loop (reactive system).
+    let has_exit_cond = self.ctx.exit_condition.is_some();
+    let is_one_shot = !has_wake_triggers && !self.has_async_txns;
     if has_wake_triggers {
         writeln!(out, "  %any_active = call i1 @llvm.wake.any()").ok();
         writeln!(out, "  br i1 %any_active, label %.loop, label %.end").ok();
-    } else if self.ctx.exit_condition.is_some() {
-        // Natural death: exit condition checked at loop entry. Loop back.
+    } else if has_exit_cond {
         writeln!(out, "  br label %.loop").ok();
+    } else if is_one_shot {
+        // 2026-07-18: One-shot program — no exit condition analysis available,
+        // no wake triggers. After reactor_tick, any immediately-fireable txn
+        // has run. Since no restart is possible, exit unconditionally.
+        // Note: bounded-counter txns with exit_condition set are already
+        // handled by the previous branch and run a proper loop.
+        writeln!(out, "  br label %.end").ok();
     } else {
         writeln!(out, "  call void @__wait_for_trigger__()").ok();
         writeln!(out, "  br label %.loop").ok();
@@ -264,6 +275,25 @@ pub(crate) fn emit_main(&mut self, out: &mut String, has_wake_triggers: bool) {
     writeln!(out, "}}").ok();
     writeln!(out).ok();
 }
+
+    /// 2026-07-18: Emit IR to check if ANY reactive txn's precondition is
+    /// still true. Returns the register name holding i1 (1 = active, 0 = all idle).
+    /// Called when exit_condition is set (by natural death logic).
+    pub(crate) fn emit_any_txn_active(&mut self, out: &mut String) -> String {
+        // Precondition: exit_condition is set. Evaluate it, negate: if exit
+        // condition is NOT yet met (value = 0), some txn is still active.
+        let exit_cond = self.ctx.exit_condition.clone();
+        if let Some(cond) = exit_cond {
+            let val = self.emit_exit_expr(out, &cond, "  ");
+            let not_done = self.fun.gen_reg();
+            writeln!(out, "  {} = icmp eq i64 {}, 0", not_done, val).ok();
+            return not_done;
+        }
+        // No exit condition — conservative: assume active.
+        let one = self.fun.gen_reg();
+        writeln!(out, "  {} = add i64 0, 1", one).ok();
+        one
+    }
 
     /// Pre-extract float fields into SSA registers before loop body.
     /// Allows LLVM SROA to handle float fields as scalars.

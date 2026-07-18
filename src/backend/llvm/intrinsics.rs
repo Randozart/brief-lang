@@ -403,6 +403,14 @@ fn emit_free(
     writeln!(out, "{}{} = inttoptr i64 {} to ptr", indent, ptr, addr).ok();
     let bytes = args.get(1).and_then(|a| if let Expr::Decimal(n) = a { Some(*n as usize) } else { None }).unwrap_or(8);
     writeln!(out, "{}{} = load i{}, ptr {}", indent, v, bytes * 8, ptr).ok();
+    // 2026-07-18: Narrow loads (< 8 bytes) are zero-extended to i64 so the
+    // result matches the declared return type (Int = i64). Without this,
+    // comparisons of loaded bytes fail (icmp expects i64, got i8).
+    if bytes < 8 {
+        let zext = backend.fun.gen_reg();
+        writeln!(out, "{}{} = zext i{} {} to i64", indent, zext, bytes * 8, v).ok();
+        return BTypedRegister { name: zext, ty: Type::int() };
+    }
     BTypedRegister { name: v.to_string(), ty: Type::int() }
 }
 
