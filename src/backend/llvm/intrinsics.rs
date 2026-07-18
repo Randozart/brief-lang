@@ -6,7 +6,7 @@
 
 use std::sync::LazyLock;
 use crate::ast::{Expr, Type};
-use crate::backend::llvm::{LlvmBackend, TypedRegister as BTypedRegister};
+use crate::backend::llvm::{AllocStrategy, LlvmBackend, TypedRegister as BTypedRegister};
 use crate::config::{OpConfig, derive_llvm_type, TypeConfig};
 use std::fmt::Write;
 
@@ -27,6 +27,7 @@ pub fn emit_intrinsic_call(
     // Special-case intrinsics that don't fit the template pattern
     match name {
         "Malloc#" => return emit_malloc(backend, out, v, args, indent),
+        "Alloc#" => return emit_alloc(backend, out, v, args, indent),
         "Free#" => return emit_free(backend, out, v, args, indent),
         "Load#" => return emit_load(backend, out, v, args, indent),
         "Store#" => return emit_store(backend, out, v, args, indent),
@@ -207,15 +208,62 @@ fn emit_malloc(
     let name = v.trim_start_matches('%');
     writeln!(out, "{}%{}_p = call ptr @malloc(i64 {})", indent, name, size).ok();
     writeln!(out, "{}{} = ptrtoint ptr %{}_p to i64", indent, v, name).ok();
+    // 2026-07-18: Record Malloc strategy so Free# can dispatch correctly.
+    backend.fun.alloc_strategies.insert(v.to_string(), AllocStrategy::Malloc);
     BTypedRegister { name: v.to_string(), ty: Type::ptr(Type::int()) }
 }
 
+// 2026-07-18: Alloc# — compiler-delegated allocation with triple dispatch.
+// Strategy 1: Arena scope active → bump allocate.
+// Strategy 2: Bounded scope + no escape → alloca (stack).
+// Strategy 3: Default → @malloc (heap).
+fn emit_alloc(
+    backend: &mut LlvmBackend, out: &mut String, v: &str,
+    args: &[Expr], indent: &str,
+) -> BTypedRegister {
+    let size = emit_arg(backend, out, &args[0], indent);
+    // Strategy 1: Arena scope active → bump allocate from per-txn arena.
+    if backend.fun.arena_slots.is_some() {
+        let result = backend.emit_arena_alloc(out, indent, &size);
+        backend.fun.alloc_strategies.insert(v.to_string(), AllocStrategy::Arena);
+        return BTypedRegister { name: v.to_string(), ty: Type::ptr(Type::int()) };
+    }
+    // Strategy 2: Bounded scope + no escape detected → alloca.
+    // TEMP: 2026-07-18: will_escape_current_allocation always returns false.
+    // Phase 4 (Ptr Level 3 borrow checker) will add proper provenance tracking.
+    if backend.is_in_bounded_scope() && !backend.will_escape_current_allocation() {
+        writeln!(out, "{}{} = alloca i8, i64 {}", indent, v, size).ok();
+        backend.fun.alloc_strategies.insert(v.to_string(), AllocStrategy::Alloca);
+        return BTypedRegister { name: v.to_string(), ty: Type::ptr(Type::int()) };
+    }
+    // Strategy 3: Default → @malloc.
+    let name = v.trim_start_matches('%');
+    writeln!(out, "{}%{}_p = call ptr @malloc(i64 {})", indent, name, size).ok();
+    writeln!(out, "{}{} = ptrtoint ptr %{}_p to i64", indent, v, name).ok();
+    backend.fun.alloc_strategies.insert(v.to_string(), AllocStrategy::Malloc);
+    BTypedRegister { name: v.to_string(), ty: Type::ptr(Type::int()) }
+}
+
+// 2026-07-18: Free# — strategy-aware. Looks up the pointer's allocation
+// strategy from the alloc_strategies map. Arena/Alloca → no-op (memory
+// reclaimed by scope end / arena reset). Malloc/unknown → call @free.
 fn emit_free(
     backend: &mut LlvmBackend, out: &mut String, v: &str,
     args: &[Expr], indent: &str,
 ) -> BTypedRegister {
-    let ptr = emit_arg(backend, out, &args[0], indent);
-    writeln!(out, "{}call void @free(ptr {})", indent, ptr).ok();
+    let ptr_reg = emit_arg(backend, out, &args[0], indent);
+    // Look up the allocation strategy for the pointer register.
+    let strategy = backend.fun.alloc_strategies.get(&ptr_reg);
+    match strategy {
+        Some(AllocStrategy::Arena) | Some(AllocStrategy::Alloca) => {
+            // 2026-07-18: Arena/stack allocations don't need per-element free.
+            // Arena reset at scope end / stack pop reclaims all memory.
+        }
+        _ => {
+            // Heap-allocated (Malloc) or unknown → emit @free.
+            writeln!(out, "{}call void @free(ptr {})", indent, ptr_reg).ok();
+        }
+    }
     writeln!(out, "{}{} = add i64 0, 0", indent, v).ok();
     BTypedRegister { name: v.to_string(), ty: Type::void() }
 }

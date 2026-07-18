@@ -1243,6 +1243,20 @@ impl LlvmBackend {
         }
     }
 
+    // 2026-07-18: Check if we're in a scope with a known contract-proven bound.
+    // Used by Alloc# to decide between arena bump vs alloca vs @malloc.
+    pub(crate) fn is_in_bounded_scope(&self) -> bool {
+        self.fun.is_static_bound
+    }
+
+    // 2026-07-18: Check if the allocation result escapes the current scope.
+    // Simplified: checks if the result register is stored to %State or returned.
+    // TEMP: Always returns false (assume no escape) until Phase 4 (Ptr Level 3
+    // borrow checker) provides provenance-based escape analysis.
+    pub(crate) fn will_escape_current_allocation(&self) -> bool {
+        false
+    }
+
     pub(crate) fn emit_spirv_embeds(&self) -> String {
         let mut out = String::new();
         if self.spirv_blobs.is_empty() && self.spirv_kernels.is_empty() {

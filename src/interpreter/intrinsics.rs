@@ -116,6 +116,11 @@ pub fn execute_intrinsic(
             let addr = heap.allocate(size as usize);
             Ok(i64_to_bits(addr as i64))
         }
+        "Alloc#" => {
+            let size = arg_as_i64(args, 0)?;
+            let addr = heap.allocate(size as usize);
+            Ok(i64_to_bits(addr as i64))
+        }
         "Free#" => {
             let ptr = arg_as_i64(args, 0)?;
             heap.free(ptr as u64)
