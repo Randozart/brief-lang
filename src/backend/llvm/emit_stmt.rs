@@ -23,6 +23,10 @@ pub fn emit_statement(backend: &mut LlvmBackend, out: &mut String, stmt: &Statem
                     TypedRegister { name: v, ty: ty.clone().unwrap_or(Type::int()) }
                 }
             };
+            // 2026-07-18: Track alloca bindings so identifier codegen loads values.
+            if expr.is_none() {
+                backend.fun.let_binding_allocas.insert(val.name.clone());
+            }
             backend.fun.let_bindings.insert(name.clone(), val.name.clone());
             backend.fun.let_binding_types.insert(name.clone(), val.ty.clone());
             TypedRegister { name: val.name, ty: Type::void() }
@@ -63,10 +67,23 @@ pub fn emit_statement(backend: &mut LlvmBackend, out: &mut String, stmt: &Statem
                     let strat = backend.check_insert_strategy(lhs);
                     if let Some(pv) = &strat {
                         emit_strategy_fn_call(backend, out, indent, lhs, pv, Some(&val.name));
-                    } else if let Some(reg) = backend.fun.let_bindings.get(name) {
-                        // 2026-07-14: store type must match val.ty — hardcoded i64 breaks bool/float assigns
+                    } else if let Some(reg) = backend.fun.let_bindings.get(name).cloned() {
+                        // 2026-07-18: If the binding is a value register (not an alloca),
+                        // the variable is being mutated — create an alloca and redirect.
+                        let is_alloca = backend.fun.let_binding_allocas.contains(&reg)
+                            || backend.fun.param_slots.values().any(|s| s == &reg);
+                        let slot = if is_alloca {
+                            reg
+                        } else {
+                            let slot = backend.fun.gen_reg();
+                            writeln!(out, "{}{} = alloca i64, align 8", indent, slot).ok();
+                            writeln!(out, "{}store i64 {}, ptr {}", indent, reg, slot).ok();
+                            backend.fun.let_bindings.insert(name.clone(), slot.clone());
+                            backend.fun.let_binding_allocas.insert(slot.clone());
+                            slot
+                        };
                         let store_ty = backend.llvm_type(&val.ty);
-                        writeln!(out, "{}store {} {}, ptr {}", indent, store_ty, val.name, reg).ok();
+                        writeln!(out, "{}store {} {}, ptr {}", indent, store_ty, val.name, slot).ok();
                     // 2026-07-14: Handle MMIO and regular state field assignments
                     } else if let Some(&addr) = backend.ctx.mmio_fields.get(name) {
                         let ptr = backend.fun.gen_reg();
@@ -134,12 +151,25 @@ pub fn emit_statement(backend: &mut LlvmBackend, out: &mut String, stmt: &Statem
         Statement::Term(val) | Statement::TermBang(val) => {
             if let Some(val) = val {
                 let reg = backend.emit_expr(out, val, indent);
-                if backend.fun.fn_ret_ty != "void" {
+                if backend.fun.callable_txn_result.is_some() {
+                    // 2026-07-18: In a callable txn, term stores to %result and
+                    // branches to post (convergence loop). The 'ret' is at done:.
+                    let ret_ty = backend.llvm_type(&reg.ty);
+                    if let Some(ref result_slot) = backend.fun.callable_txn_result {
+                        writeln!(out, "{}store {} {}, ptr {}", indent, ret_ty, reg.name, result_slot).ok();
+                    }
+                    if let Some(ref post_label) = backend.fun.callable_txn_post_label {
+                        writeln!(out, "{}br label %{}", indent, post_label).ok();
+                    }
+                    backend.fun.terminated = true;
+                } else if backend.fun.fn_ret_ty != "void" {
                     let ret_ty = backend.llvm_type(&reg.ty);
                     writeln!(out, "{}ret {} {}", indent, ret_ty, reg.name).ok();
                     backend.fun.terminated = true;
+                } else {
+                    backend.fun.terminated = true;
                 }
-                // 2026-07-15: Void functions: just set terminated — caller emits ret at done:
+            } else {
                 backend.fun.terminated = true;
             }
             TypedRegister { name: backend.fun.gen_reg(), ty: Type::void() }
@@ -180,6 +210,7 @@ pub fn emit_statement(backend: &mut LlvmBackend, out: &mut String, stmt: &Statem
                 writeln!(out, "{}br label %{}", indent, end_lbl).ok();
             }
             writeln!(out, "{}{}:", indent, end_lbl).ok();
+            backend.fun.terminated = false;
             backend.fun.terminated = false;
             TypedRegister { name: backend.fun.gen_reg(), ty: Type::void() }
         }

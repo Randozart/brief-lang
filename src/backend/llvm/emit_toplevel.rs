@@ -1069,10 +1069,17 @@ impl LlvmBackend {
         // i64 at the call site. Using llvm_type() gave "i8*" for String/Bool returns,
         // creating a type mismatch (ret i64 in a define i8* function) that broke opt/llc.
         let has_ret = d.output_type.is_some() || !d.outputs.is_empty();
+        // 2026-07-18: Use the correct LLVM type for the return type instead of
+        // always using "i64". Bool returns need "i8" to match term's ret i8.
         let ll_ret_ty = if !has_ret {
             "float".to_string()
         } else {
-            "i64".to_string()
+            d.output_type.as_ref()
+                .and_then(|ot| match ot {
+                    crate::ast::OutputType::Single(ty) => Some(self.llvm_type(ty)),
+                    _ => None,
+                })
+                .unwrap_or_else(|| "i64".to_string())
         };
         let is_float_fn = ll_ret_ty == "float" || ll_ret_ty == "double";
         self.fun.fn_ret_ty = ll_ret_ty.clone();
@@ -1464,7 +1471,17 @@ impl LlvmBackend {
         } else {
             !txn.outputs.is_empty() && !matches!(txn.outputs.first(), Some(Type::Void))
         };
-        let ret_llvm = if has_return { "i64" } else { "void" };
+        // 2026-07-18: Use correct LLVM type for return instead of always "i64".
+        let ret_llvm = if has_return {
+            txn.output_type.as_ref()
+                .and_then(|ot| match ot {
+                    crate::ast::OutputType::Single(ty) => Some(self.llvm_type(ty)),
+                    _ => None,
+                })
+                .unwrap_or_else(|| "i64".to_string())
+        } else {
+            "void".to_string()
+        };
 
         // Resolve #inline / #?inline directives for callable txns.
         let inline_attr = {
@@ -1498,8 +1515,10 @@ impl LlvmBackend {
         writeln!(out, ") local_unnamed_addr #8{} {{", inline_str).ok();
         writeln!(out, "  entry:").ok();
 
-        writeln!(out, "  %result = alloca i64, align 8").ok();
-        writeln!(out, "  store i64 0, ptr %result, align 8").ok();
+        // 2026-07-18: Use the function's return type for %result, not always i64.
+        // Bool-returning functions need i8 result type to match the define i8 signature.
+        writeln!(out, "  %result = alloca {}, align 8", ret_llvm).ok();
+        writeln!(out, "  store {} 0, ptr %result, align 8", ret_llvm).ok();
 
         for (i, (n, t)) in txn.parameters.iter().enumerate() {
             let raw = format!("%arg{}", i);
@@ -1548,7 +1567,11 @@ impl LlvmBackend {
             let loaded = format!("%p{}_l{}", i, self.fun.txn_counter);
             self.fun.txn_counter += 1;
             writeln!(out, "  {} = load i64, ptr {}, align 8", loaded, slot).ok();
-            self.fun.let_bindings.insert(n.clone(), loaded);
+            // 2026-07-18: Store the SLOT (alloca) in let_bindings, not the loaded
+            // register. This makes assigns to the parameter (`i = i + 1`) store
+            // through the alloca correctly. Reads still load from the slot, but
+            // LLVM's optimizer merges redundant loads via SROA.
+            self.fun.let_bindings.insert(n.clone(), slot.clone());
             // loaded is i64 (boxed value from param slot). Store Type::int()
             // for boxed types so downstream doesn't treat them as native.
             if matches!(t, Type::Custom(__t) if __t == "Bool" || __t == "Char" || __t == "String" || __t == "Data" || __t == "Float") {
@@ -1558,6 +1581,7 @@ impl LlvmBackend {
             }
         }
 
+        // 2026-07-18: Set fn_ret_ty so term codegen extends narrow types to match.
         self.fun.callable_txn_result = Some("%result".to_string());
         self.fun.callable_txn_post_label = Some("post".to_string());
         self.fun.in_callable_txn = true;
@@ -1597,8 +1621,8 @@ impl LlvmBackend {
         writeln!(out, "done:").ok();
         if has_return {
             let ret = format!("%ret{}", self.fun.txn_counter); self.fun.txn_counter += 1;
-            writeln!(out, "  {} = load i64, ptr %result, align 8", ret).ok();
-            writeln!(out, "  ret i64 {}", ret).ok();
+            writeln!(out, "  {} = load {}, ptr %result, align 8", ret, ret_llvm).ok();
+            writeln!(out, "  ret {} {}", ret_llvm, ret).ok();
         } else {
             writeln!(out, "  ret void").ok();
         }

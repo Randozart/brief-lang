@@ -331,7 +331,7 @@ impl LlvmBackend {
         &mut self,
         out: &mut String,
         txns: &[(String, &crate::ast::Transaction)],
-        _has_wake_triggers: bool,
+        has_wake_triggers: bool,
     ) {
         // 2026-07-17: Early-return for modulo-gated dispatch (sparse_dispatch).
         // Checks if all reactive txns have counter % K == N preconditions and
@@ -348,8 +348,31 @@ impl LlvmBackend {
         writeln!(out, "  %state = alloca %State, align 8").ok();
         self.emit_inline_init_stores(out, "%state");
         self.emit_ssa_mt_prealloc(out, txns);
+        // 2026-07-18: Convergence check — if no wake triggers and no async,
+        // the program is one-shot. Exit when all txns have converged
+        // (precondition false for all).
+        let is_one_shot = !has_wake_triggers && !self.has_async_txns;
+        let has_exit_cond = self.ctx.exit_condition.is_some();
+        let is_terminating = has_exit_cond || is_one_shot;
+
+        let active_slot = if is_terminating {
+            let slot = format!("%any_active_{}", self.fun.txn_counter);
+            self.fun.txn_counter += 1;
+            Some(slot)
+        } else {
+            None
+        };
+
+        // 2026-07-18: Allocate convergence tracking slot in entry (not in loop)
+        if let Some(ref slot) = active_slot {
+            writeln!(out, "  {} = alloca i64, align 8", slot).ok();
+        }
         writeln!(out, "  br label %.ss_main_loop").ok();
         writeln!(out, ".ss_main_loop:").ok();
+        // Reset active flag each iteration
+        if let Some(ref slot) = active_slot {
+            writeln!(out, "  store i64 0, ptr {}", slot).ok();
+        }
         // Check each txn's precondition, execute body if true
         for (name, txn) in txns {
             if txn.is_reactive {
@@ -361,6 +384,9 @@ impl LlvmBackend {
                 self.fun.txn_counter += 1;
                 writeln!(out, "  br i1 {}, label %{}, label %{}", bool_reg, body_label, next_label).ok();
                 writeln!(out, "{}:", body_label).ok();
+                if let Some(ref slot) = active_slot {
+                    writeln!(out, "  store i64 1, ptr {}", slot).ok();
+                }
                 for stmt in &txn.body {
                     self.emit_statement(out, stmt, "  ");
                 }
@@ -368,7 +394,18 @@ impl LlvmBackend {
                 writeln!(out, "{}:", next_label).ok();
             }
         }
-        writeln!(out, "  br label %.ss_main_loop").ok();
+        if let Some(ref slot) = active_slot {
+            // Check if any txn ran this iteration
+            let check_reg = self.fun.gen_reg();
+            writeln!(out, "  {} = load i64, ptr {}", check_reg, slot).ok();
+            let done_reg = self.fun.gen_reg();
+            writeln!(out, "  {} = icmp eq i64 {}, 0", done_reg, check_reg).ok();
+            writeln!(out, "  br i1 {}, label %.end, label %.ss_main_loop", done_reg).ok();
+        } else {
+            writeln!(out, "  br label %.ss_main_loop").ok();
+        }
+        writeln!(out, ".end:").ok();
+        writeln!(out, "  ret i32 0").ok();
         writeln!(out, "}}").ok();
         writeln!(out).ok();
     }

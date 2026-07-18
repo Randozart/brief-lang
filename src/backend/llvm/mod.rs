@@ -1590,7 +1590,15 @@ impl LlvmBackend {
                     if !t.is_reactive && (!t.parameters.is_empty() || has_output) {
                         let tys: Vec<Type> = t.parameters.iter().map(|(_, ty)| ty.clone()).collect();
                         self.ctx.defn_params.insert(t.name.clone(), tys);
-                        self.ctx.defn_return_types.insert(t.name.clone(), t.outputs.clone());
+                        // 2026-07-18: Populate from output_type as well.
+                        let ret_tys = if !t.outputs.is_empty() {
+                            t.outputs.clone()
+                        } else if let Some(ref ot) = t.output_type {
+                            ot.all_types()
+                        } else {
+                            vec![]
+                        };
+                        self.ctx.defn_return_types.insert(t.name.clone(), ret_tys);
                     }
                 }
                 TopLevel::Trigger(trg) => {
@@ -1624,7 +1632,16 @@ impl LlvmBackend {
                 TopLevel::Definition(d) => {
                     let tys: Vec<Type> = d.parameters.iter().map(|(_, t)| t.clone()).collect();
                     self.ctx.defn_params.insert(d.name.clone(), tys);
-                    self.ctx.defn_return_types.insert(d.name.clone(), d.outputs.clone());
+                    // 2026-07-18: Populate return types from output_type (-> Type) as
+                    // well as legacy outputs. output_type is the primary metadata source.
+                    let ret_tys = if !d.outputs.is_empty() {
+                        d.outputs.clone()
+                    } else if let Some(ref ot) = d.output_type {
+                        ot.all_types()
+                    } else {
+                        vec![]
+                    };
+                    self.ctx.defn_return_types.insert(d.name.clone(), ret_tys);
                 }
                 TopLevel::ForeignBinding(fb) => {
                     let sig = crate::ast::ForeignSignature {

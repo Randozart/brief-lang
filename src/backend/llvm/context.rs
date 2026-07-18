@@ -253,6 +253,8 @@ pub struct FunctionContext {
     pub let_bindings: HashMap<String, String>,
     pub let_binding_types: HashMap<String, Type>,
     pub let_original_types: HashMap<String, Type>,
+    /// 2026-07-18: Tracks which let-bindings point to allocas (vs SSA registers).
+    pub let_binding_allocas: HashSet<String>,
 
     // Register type caches
     pub reg_float_cache: HashMap<String, String>,
@@ -477,6 +479,7 @@ impl FunctionContext {
             let_bindings: HashMap::new(),
             let_binding_types: HashMap::new(),
             let_original_types: HashMap::new(),
+            let_binding_allocas: HashSet::new(),
             reg_float_cache: HashMap::new(),
             reg_type_cache: HashMap::new(),
             ssa_old_int_regs: HashMap::new(),
@@ -550,6 +553,7 @@ impl FunctionContext {
         self.let_bindings.clear();
         self.let_binding_types.clear();
         self.let_original_types.clear();
+        self.let_binding_allocas.clear();
         self.reg_float_cache.clear();
         self.reg_type_cache.clear();
     }

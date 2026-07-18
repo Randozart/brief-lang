@@ -79,7 +79,15 @@ impl LlvmBackend {
                         .unwrap_or(Type::int());
                     TypedRegister { name: reg.clone(), ty: brief_ty }
                 } else if let Some(reg) = self.get_local(name) {
-                    TypedRegister { name: reg.clone(), ty: self.get_local_type(name) }
+                    // 2026-07-18: If the binding is an alloca (param slot,
+                    // uninitialized let, or txn param slot), emit a load.
+                    if self.fun.param_slots.values().any(|s| s == &reg) || self.fun.let_binding_allocas.contains(&reg) {
+                        let loaded = self.fun.gen_reg();
+                        writeln!(out, "{}{} = load i64, ptr {}, align 8", indent, loaded, reg).ok();
+                        TypedRegister { name: loaded, ty: self.get_local_type(name) }
+                    } else {
+                        TypedRegister { name: reg.clone(), ty: self.get_local_type(name) }
+                    }
                 } else if let Some(phi_reg_str) = self.fun.phi_field_regs.get(name).cloned() {
                     let brief_ty = self.ctx.field_index_map.get(name)
                         .and_then(|idx| self.ctx.field_brief_types.get(*idx).cloned())
@@ -315,6 +323,15 @@ impl LlvmBackend {
                     writeln!(out, "{}{} = sitofp i64 {} to double", indent, v, src.name).ok();
                 } else if target_ll == "i64" && src_ll == "double" {
                     writeln!(out, "{}{} = fptosi double {} to i64", indent, v, src.name).ok();
+                } else if target_ll == "i64" && src_ll == "ptr" {
+                    // 2026-07-18: Custom types (String, etc.) are stored as i64 in
+                    // state fields — the value is already ptrtoint. Skip conversion.
+                    if matches!(src.ty, Type::Custom(_)) {
+                        return TypedRegister { name: src.name.clone(), ty: target.clone() };
+                    }
+                    writeln!(out, "{}{} = ptrtoint ptr {} to i64", indent, v, src.name).ok();
+                } else if target_ll == "ptr" && src_ll == "i64" {
+                    writeln!(out, "{}{} = inttoptr i64 {} to ptr", indent, v, src.name).ok();
                 } else {
                     writeln!(out, "{}{} = bitcast {} {} to {}", indent, v, src_ll, src.name, target_ll).ok();
                 }
@@ -727,7 +744,8 @@ impl LlvmBackend {
                 if is_float {
                     writeln!(out, "{}{} = fcmp oeq {} {}, {}", indent, icmp, ty_str, l.name, r.name).ok();
                 } else {
-                    writeln!(out, "{}{} = icmp eq i64 {}, {}", indent, icmp, l.name, r.name).ok();
+                    let cmp_ty = self.llvm_type(&l.ty);
+                    writeln!(out, "{}{} = icmp eq {} {}, {}", indent, icmp, cmp_ty, l.name, r.name).ok();
                 }
                 writeln!(out, "{}{} = zext i1 {} to i8", indent, v, icmp).ok();
                 TypedRegister { name: v.to_string(), ty: Type::bool_() }
@@ -737,7 +755,8 @@ impl LlvmBackend {
                 if is_float {
                     writeln!(out, "{}{} = fcmp one {} {}, {}", indent, icmp, ty_str, l.name, r.name).ok();
                 } else {
-                    writeln!(out, "{}{} = icmp ne i64 {}, {}", indent, icmp, l.name, r.name).ok();
+                    let cmp_ty = self.llvm_type(&l.ty);
+                    writeln!(out, "{}{} = icmp ne {} {}, {}", indent, icmp, cmp_ty, l.name, r.name).ok();
                 }
                 writeln!(out, "{}{} = zext i1 {} to i8", indent, v, icmp).ok();
                 TypedRegister { name: v.to_string(), ty: Type::bool_() }
@@ -747,7 +766,8 @@ impl LlvmBackend {
                 if is_float {
                     writeln!(out, "{}{} = fcmp olt {} {}, {}", indent, icmp, ty_str, l.name, r.name).ok();
                 } else {
-                    writeln!(out, "{}{} = icmp slt i64 {}, {}", indent, icmp, l.name, r.name).ok();
+                    let cmp_ty = self.llvm_type(&l.ty);
+                    writeln!(out, "{}{} = icmp slt {} {}, {}", indent, icmp, cmp_ty, l.name, r.name).ok();
                 }
                 writeln!(out, "{}{} = zext i1 {} to i8", indent, v, icmp).ok();
                 TypedRegister { name: v.to_string(), ty: Type::bool_() }
@@ -757,7 +777,8 @@ impl LlvmBackend {
                 if is_float {
                     writeln!(out, "{}{} = fcmp ole {} {}, {}", indent, icmp, ty_str, l.name, r.name).ok();
                 } else {
-                    writeln!(out, "{}{} = icmp sle i64 {}, {}", indent, icmp, l.name, r.name).ok();
+                    let cmp_ty = self.llvm_type(&l.ty);
+                    writeln!(out, "{}{} = icmp sle {} {}, {}", indent, icmp, cmp_ty, l.name, r.name).ok();
                 }
                 writeln!(out, "{}{} = zext i1 {} to i8", indent, v, icmp).ok();
                 TypedRegister { name: v.to_string(), ty: Type::bool_() }
@@ -767,7 +788,8 @@ impl LlvmBackend {
                 if is_float {
                     writeln!(out, "{}{} = fcmp ogt {} {}, {}", indent, icmp, ty_str, l.name, r.name).ok();
                 } else {
-                    writeln!(out, "{}{} = icmp sgt i64 {}, {}", indent, icmp, l.name, r.name).ok();
+                    let cmp_ty = self.llvm_type(&l.ty);
+                    writeln!(out, "{}{} = icmp sgt {} {}, {}", indent, icmp, cmp_ty, l.name, r.name).ok();
                 }
                 writeln!(out, "{}{} = zext i1 {} to i8", indent, v, icmp).ok();
                 TypedRegister { name: v.to_string(), ty: Type::bool_() }
@@ -777,17 +799,20 @@ impl LlvmBackend {
                 if is_float {
                     writeln!(out, "{}{} = fcmp oge {} {}, {}", indent, icmp, ty_str, l.name, r.name).ok();
                 } else {
-                    writeln!(out, "{}{} = icmp sge i64 {}, {}", indent, icmp, l.name, r.name).ok();
+                    let cmp_ty = self.llvm_type(&l.ty);
+                    writeln!(out, "{}{} = icmp sge {} {}, {}", indent, icmp, cmp_ty, l.name, r.name).ok();
                 }
                 writeln!(out, "{}{} = zext i1 {} to i8", indent, v, icmp).ok();
                 TypedRegister { name: v.to_string(), ty: Type::bool_() }
             }
             crate::ast::BinaryOpKind::And => {
-                writeln!(out, "{}{} = and i8 {}, {}", indent, v, l.name, r.name).ok();
+                let cmp_ty = self.llvm_type(&l.ty);
+                writeln!(out, "{}{} = and {} {}, {}", indent, v, cmp_ty, l.name, r.name).ok();
                 TypedRegister { name: v.to_string(), ty: Type::bool_() }
             }
             crate::ast::BinaryOpKind::Or => {
-                writeln!(out, "{}{} = or i8 {}, {}", indent, v, l.name, r.name).ok();
+                let cmp_ty = self.llvm_type(&l.ty);
+                writeln!(out, "{}{} = or {} {}, {}", indent, v, cmp_ty, l.name, r.name).ok();
                 TypedRegister { name: v.to_string(), ty: Type::bool_() }
             }
             _ => {
