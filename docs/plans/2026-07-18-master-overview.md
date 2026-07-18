@@ -558,11 +558,21 @@ Record full output. Compare against pre-implementation baseline. Any regression 
 | `src/backend/llvm/emit_toplevel.rs` | ✅ Done | llvm_type SSO override, param boxing SSO gate |
 | `src/backend/llvm/helpers.rs` | ✅ Done | SSO concat, adapt_to_i64 SSO, mask_tag/free temp tag scheme |
 | `src/backend/llvm/intrinsics.rs` | ✅ Done | lower_type→llvm_type (SSO-aware type resolution) |
-| `src/backend/llvm/emit_stmt.rs` | ✅ Done | lower_type→llvm_type (SSO-aware type resolution) |
-| `src/analysis/provenance.rs` | ✅ Done | Fix is_local_provenance stub + collect_local_names + wired in compile.rs |
-| `src/typechecker/mod.rs` | ❌ Block 5-6 | Provenance threading, PtrConst |
-| `lib/std/memory/arena.bv` | ❌ Block 2 | Pure-Brief arena type |
-| `lib/std/memory/crossword.bv` | ❌ Block 2 | Pure-Brief crossword arena |
+| `src/backend/llvm/emit_stmt.rs` | ✅ Done | lower_type→llvm_type, dead-br-after-term fix |
+| `src/backed/llvm/emit_stmt.rs` | ✅ Done | Guard/If codegen — conditional br after term/ret |
+| `src/parser/definitions.rs` | ✅ Done | txn return type (-> Type) parsing |
+| `src/parser/expressions.rs` | ✅ Done | Binary bitwise ops (& \| ^ << >>) |
+| `src/type_universe/operators.rs` | ✅ Done | builtin_operator_binding entries for Int bitwise/shift |
+| `src/analysis/provenance.rs` | ✅ Done | Fix is_local_provenance stub + collect_local_names |
+| `src/analysis/transition_graph.rs` | ✅ Done | Provenance-aware write set extraction |
+| `src/typechecker/mod.rs` | ✅ Done | Provenance threading, PtrConst, write-through guard |
+| `lib/std/memory/arena.bv` | ✅ Done | Pure-Brief arena type |
+| `lib/std/memory/crossword.bv` | ✅ Done | Pure-Brief crossword arena |
+| `lib/std/types/bootstrap.bv` | ✅ Done | Utf8View, StaticString, SmallString64 type decls |
+| `lib/std/types/utf8view.bv` | ✅ Done | Pure-Brief memcmp, utf8_find, utf8_validate |
+| `lib/std/types/small_string.bv` | ✅ Done | SmallString64 inline buffer operations |
+| `lib/runtime/brief_rt.c` | ✅ Done | __utf8_validate, __utf8_find (kept for ref, pure-Brief supersedes) |
+| `BUGS.md` | ✅ Done | All findings documented |
 
 ## Benchmark Baseline (July 18, 2026)
 
