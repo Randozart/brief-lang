@@ -811,16 +811,27 @@ impl<'a> Parser<'a> {
                 if slot_name == "op" {
                     let op_name = self.expect_identifier()?;
                     self.expect(Token::TildeArrow)?;
-                    let fn_name = self.expect_identifier()?;
-                    self.expect(Token::LParen)?;
-                    let mut params = Vec::new();
-                    while !self.check(&Token::RParen) {
-                        params.push(self.expect_identifier()?);
-                        if !self.check(&Token::RParen) { self.expect(Token::Comma)?; }
+                    // 2026-07-18: Accept string ("int.add") or identifier (int_add)
+                    // for the generic op identifier. Parenthesized param list is
+                    // optional syntactic sugar (currently discarded — the generic
+                    // ID uniquely identifies the operation).
+                    let impl_val = if self.check(&Token::String(String::new())) {
+                        self.expect_string()?
+                    } else {
+                        self.expect_identifier()?
+                    };
+                    if self.eat(&Token::LParen) {
+                        // Skip parameter types (documentation only)
+                        while !self.check(&Token::RParen) {
+                            if self.check(&Token::Identifier(String::new())) || self.check(&Token::String(String::new())) {
+                                self.advance();
+                            } else { break; }
+                            if !self.check(&Token::RParen) { self.eat(&Token::Comma); }
+                        }
+                        self.expect(Token::RParen)?;
                     }
-                    self.advance();
                     self.eat(&Token::Semicolon);
-                    metadata.insert(format!("op.{}", op_name), PropertyValue::Identifier(fn_name));
+                    metadata.insert(format!("op.{}", op_name), PropertyValue::String(impl_val));
                     continue;
                 }
                 let slot_ty = if self.eat(&Token::TildeArrow) {
@@ -934,16 +945,27 @@ impl<'a> Parser<'a> {
                 if slot_name == "op" {
                     let op_name = self.expect_identifier()?;
                     self.expect(Token::TildeArrow)?;
-                    let fn_name = self.expect_identifier()?;
-                    self.expect(Token::LParen)?;
-                    let mut params = Vec::new();
-                    while !self.check(&Token::RParen) {
-                        params.push(self.expect_identifier()?);
-                        if !self.check(&Token::RParen) { self.expect(Token::Comma)?; }
+                    // 2026-07-18: Accept string ("int.add") or identifier (int_add)
+                    // for the generic op identifier. Parenthesized param list is
+                    // optional syntactic sugar (currently discarded — the generic
+                    // ID uniquely identifies the operation).
+                    let impl_val = if self.check(&Token::String(String::new())) {
+                        self.expect_string()?
+                    } else {
+                        self.expect_identifier()?
+                    };
+                    if self.eat(&Token::LParen) {
+                        // Skip parameter types (documentation only)
+                        while !self.check(&Token::RParen) {
+                            if self.check(&Token::Identifier(String::new())) || self.check(&Token::String(String::new())) {
+                                self.advance();
+                            } else { break; }
+                            if !self.check(&Token::RParen) { self.eat(&Token::Comma); }
+                        }
+                        self.expect(Token::RParen)?;
                     }
-                    self.advance();
                     self.eat(&Token::Semicolon);
-                    metadata.insert(format!("op.{}", op_name), PropertyValue::Identifier(fn_name));
+                    metadata.insert(format!("op.{}", op_name), PropertyValue::String(impl_val));
                     continue;
                 }
                 // 2026-07-18: op binding via <~: InsertAt <~ ring_push.
