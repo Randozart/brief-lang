@@ -11,7 +11,7 @@
 
 use crate::ast::{Expr, Statement, Type};
 use crate::backend::llvm::{LlvmBackend, TypedRegister};
-use crate::backend::llvm::intrinsics::emit_intrinsic_call;
+use crate::backend::llvm::intrinsics::{emit_intrinsic_call, OP_CONFIG};
 use crate::ast::*;
 use crate::backend::llvm::emit_stmt;
 use crate::backend::llvm::types::lower_type;
@@ -538,6 +538,45 @@ impl LlvmBackend {
         TypedRegister { name: v.to_string(), ty: ret_type }
     }
 
+    /// 2026-07-18: Try to emit a binary operation from config/llvm-ops.toml.
+    /// Returns Some(reg) if the config had a matching template, None to fall
+    /// through to the hardcoded match arms in emit_binary_op.
+    fn emit_binop_from_config(&mut self, out: &mut String, v: &str,
+        kind: &BinaryOpKind, l: &TypedRegister, r: &TypedRegister,
+        indent: &str, ret_ty: &Type) -> Option<TypedRegister>
+    {
+        let op_name = match kind {
+            BinaryOpKind::Add => "Add", BinaryOpKind::Sub => "Sub",
+            BinaryOpKind::Mul => "Mul", BinaryOpKind::Div => "Div",
+            BinaryOpKind::Mod => "Rem", BinaryOpKind::Eq => "Eq",
+            BinaryOpKind::Neq => "Neq", BinaryOpKind::Lt => "Lt",
+            BinaryOpKind::Le => "Le", BinaryOpKind::Gt => "Gt",
+            BinaryOpKind::Ge => "Ge", BinaryOpKind::And => "And",
+            BinaryOpKind::Or => "Or",
+            BinaryOpKind::Shl => "Shl", BinaryOpKind::Shr => "Shr",
+            BinaryOpKind::BitAnd => "BitAnd", BinaryOpKind::BitOr => "BitOr",
+            BinaryOpKind::BitXor => "BitXor",
+            BinaryOpKind::Concat => "Concat",
+            _ => return None, // Not in config
+        };
+        // Get type name from operand (e.g. "Int", "Float", "Bool")
+        let type_name = match &l.ty {
+            Type::Custom(n) => n.as_str(),
+            Type::Applied(n, _) => n.as_str(),
+            _ => return None,
+        };
+        // Get byte width from the universe if available
+        let bytes = self.ctx.type_universe.as_ref()
+            .and_then(|u| l.ty.universe_key().and_then(|k| u.get(k)))
+            .map(|rt| rt.bytes)
+            .unwrap_or(8u64);
+        let tmpl = OP_CONFIG.lookup(op_name, type_name, bytes)?;
+        // Fill template: %a and %b are the operand placeholders
+        let line = tmpl.replace("%a", &l.name).replace("%b", &r.name);
+        writeln!(out, "{}{} = {}", indent, v, line).ok();
+        Some(TypedRegister { name: v.to_string(), ty: ret_ty.clone() })
+    }
+
     /// Emit a binary operation.
     fn emit_binary_op(&mut self, out: &mut String, v: &str,
         kind: &crate::ast::BinaryOpKind, l: &TypedRegister, r: &TypedRegister, indent: &str) -> TypedRegister {
@@ -551,6 +590,12 @@ impl LlvmBackend {
         let ty_str = if is_double { "double" } else if is_float { "float" } else { "i64" };
         let fast = if is_float { " fast" } else { "" };
         let mut ret_ty = if is_double { Type::float64() } else if is_float { Type::float() } else { Type::int() };
+        // 2026-07-18: Phase 0 — try config-driven dispatch first.
+        // The OP_CONFIG maps (op_name, type_name, bytes) → LLVM IR template.
+        // If the config has an entry, fill the template and skip hardcoded matches.
+        if let Some(reg) = self.emit_binop_from_config(out, v, kind, l, r, indent, &ret_ty) {
+            return reg;
+        }
         match kind {
             crate::ast::BinaryOpKind::Add => {
                 // 2026-07-17: Pointer-offset arithmetic: `buf + N` emits GEP.

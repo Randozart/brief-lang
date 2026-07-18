@@ -10,7 +10,7 @@ use crate::backend::llvm::{AllocStrategy, LlvmBackend, TypedRegister as BTypedRe
 use crate::config::{OpConfig, derive_llvm_type, TypeConfig};
 use std::fmt::Write;
 
-static OP_CONFIG: LazyLock<OpConfig> = LazyLock::new(|| OpConfig::load());
+pub(crate) static OP_CONFIG: LazyLock<OpConfig> = LazyLock::new(|| OpConfig::load());
 static TYPE_CONFIG: LazyLock<TypeConfig> = LazyLock::new(|| TypeConfig::load());
 
 /// Emit an intrinsic call by name. For generic operations (Add#, Eq#, etc.)
