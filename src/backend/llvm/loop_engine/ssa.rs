@@ -418,6 +418,22 @@ impl LlvmBackend {
         } else {
             writeln!(out, "  {} = add i64 0, 1", bound_reg).ok();
         }
+        // 2026-07-18: Preallocate push targets for all txn bodies in the
+        // multi-txn main loop. Each body's push targets are collected via
+        // over-approximation and deduplicated, then preallocated once with
+        // capacity = bound + 2 per target. Since all txns share the same
+        // arena and bound, one preallocation block covers all bodies.
+        {
+            let mut push_targets: Vec<String> = Vec::new();
+            for (_name, txn) in txns {
+                crate::backend::llvm::collect_push_targets(&txn.body, &mut push_targets);
+            }
+            push_targets.sort();
+            push_targets.dedup();
+            if !push_targets.is_empty() {
+                self.emit_prealloc_for_targets(out, "  ", &push_targets, &bound_reg);
+            }
+        }
         writeln!(out, "  br label %.fm_loop").ok();
         writeln!(out, ".fm_loop:").ok();
         let c_gep = self.fun.next_reg_with_prefix("fmg");

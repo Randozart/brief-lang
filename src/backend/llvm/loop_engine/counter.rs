@@ -70,6 +70,20 @@ impl LlvmBackend {
             gep, counter_idx).ok();
         let init_name = self.fun.next_reg_with_prefix("fli");
         writeln!(out, "  {} = load i64, ptr {}, align 8", init_name, gep).ok();
+        // 2026-07-18: Preallocate push targets before the loop body.
+        // Collects all Assign(Ident, _) targets from the body and allocates
+        // (bound + 2) * 8 bytes per target from the arena (or @malloc if
+        // no arena active). This converts per-iteration push overhead from
+        // O(N) malloc+memcpy to O(1) direct store.
+        if let Some(stmts) = body {
+            let mut push_targets: Vec<String> = Vec::new();
+            crate::backend::llvm::collect_push_targets(stmts, &mut push_targets);
+            push_targets.sort();
+            push_targets.dedup();
+            if !push_targets.is_empty() {
+                self.emit_prealloc_for_targets(out, "  ", &push_targets, &bound_reg);
+            }
+        }
         // 2026-07-17: Pre-generate backedge register name (forward reference
         // from phi header to latch definition — valid in LLVM IR).
         let next = self.fun.next_reg_with_prefix("fln");
@@ -163,6 +177,19 @@ impl LlvmBackend {
         let c0 = self.fun.txn_counter;
         let bound_reg = self.fun.next_reg_with_prefix("fmb");
         self.emit_countable_load_bound(out, &bound_reg, total_idx, total_const_name, c0);
+        // 2026-07-18: Preallocate push targets before memory-counter loop.
+        // Same pattern as emit_folded_loop — collects push targets using
+        // over-approximation (all Assign(Ident, _) in body) and allocates
+        // slot count = bound + 2 per target.
+        {
+            let mut push_targets: Vec<String> = Vec::new();
+            crate::backend::llvm::collect_push_targets(body, &mut push_targets);
+            push_targets.sort();
+            push_targets.dedup();
+            if !push_targets.is_empty() {
+                self.emit_prealloc_for_targets(out, "  ", &push_targets, &bound_reg);
+            }
+        }
         writeln!(out, "  br label %.fm_loop").ok();
         writeln!(out, ".fm_loop:").ok();
         let counter_gep = self.fun.next_reg_with_prefix("fmg");
