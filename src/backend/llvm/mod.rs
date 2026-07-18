@@ -833,6 +833,12 @@ impl LlvmBackend {
         self
     }
 
+    // 2026-07-18: Set the stack allocation threshold for runtime fallback.
+    pub fn with_stack_threshold(mut self, threshold: u64) -> Self {
+        self.ctx.stack_threshold = threshold;
+        self
+    }
+
     pub fn with_spec(mut self, spec: crate::target_spec::TargetSpec) -> Self {
         self.ctx.spec = Some(spec);
         self

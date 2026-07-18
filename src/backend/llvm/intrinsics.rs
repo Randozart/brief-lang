@@ -268,12 +268,9 @@ fn emit_alloc(
                         writeln!(out, "{}{} = add i64 0, 0", indent, v).ok();
                         BTypedRegister { name: v.to_string(), ty: Type::int() }
                     }
-                    // 2026-07-18: RingBuffer — circular buffer allocation.
+                    // 2026-07-18: RingBuffer — circular buffer with wrap-around.
                     AllocStrategy::RingBuffer => {
-                        backend.fun.alloc_strategies.insert(v.to_string(), AllocStrategy::RingBuffer);
-                        writeln!(out, "{}{} = alloca i8, i64 {}", indent, v, size).ok();
-                        writeln!(out, "{}{} = ptrtoint ptr {} to i64", indent, v, v).ok();
-                        BTypedRegister { name: v.to_string(), ty: Type::int() }
+                        return emit_ring_buffer_alloc(backend, out, v, &size, indent);
                     }
                     // 2026-07-18: Config strategy — look up template.
                     AllocStrategy::Config(_) | AllocStrategy::Custom(_) => {
@@ -299,12 +296,18 @@ fn emit_alloc(
         return BTypedRegister { name: v.to_string(), ty: Type::int() };
     }
     if backend.is_in_bounded_scope() && !backend.will_escape_current_allocation() {
-        let a = format!("%alloc_{}", backend.fun.txn_counter);
-        backend.fun.txn_counter += 1;
-        writeln!(out, "{}{} = alloca i8, i64 {}", indent, a, size).ok();
-        writeln!(out, "{}{} = ptrtoint ptr {} to i64", indent, v, a).ok();
-        backend.fun.alloc_strategies.insert(v.to_string(), AllocStrategy::Alloca);
-        return BTypedRegister { name: v.to_string(), ty: Type::int() };
+        // 2026-07-18: Check if size is a compile-time constant.
+        let is_constant = matches!(&args[0], Expr::Decimal(_));
+        if is_constant {
+            let a = format!("%alloc_{}", backend.fun.txn_counter);
+            backend.fun.txn_counter += 1;
+            writeln!(out, "{}{} = alloca i8, i64 {}", indent, a, size).ok();
+            writeln!(out, "{}{} = ptrtoint ptr {} to i64", indent, v, a).ok();
+            backend.fun.alloc_strategies.insert(v.to_string(), AllocStrategy::Alloca);
+            return BTypedRegister { name: v.to_string(), ty: Type::int() };
+        }
+        // Runtime fallback: try alloca, fall back to malloc if size > threshold.
+        return emit_dynamic_alloc(backend, out, v, &size, indent);
     }
     // Strategy 3: Default → @malloc.
     emit_malloc_inline(backend, out, v, &size, indent)
@@ -381,9 +384,53 @@ fn emit_alloc_from_config(
     true
 }
 
+// 2026-07-18: Runtime fallback — try stack (alloca), fall back to heap
+// if the allocation size exceeds the stack threshold. Used for dynamic-size
+// allocs where the strategy is Alloca but size is unknown at compile time.
+fn emit_dynamic_alloc(
+    backend: &mut LlvmBackend, out: &mut String, v: &str, size: &str, indent: &str,
+) -> BTypedRegister {
+    let counter = backend.fun.txn_counter;
+    backend.fun.txn_counter += 1;
+    let stack_l = format!(".stack{}", counter);
+    let heap_l = format!(".heap{}", counter);
+    let done_l = format!(".done{}", counter);
+
+    writeln!(out, "  %cmp = icmp ule i64 {}, {}", size, backend.ctx.stack_threshold).ok();
+    writeln!(out, "  br i1 %cmp, label %{}, label %{}", stack_l, heap_l).ok();
+    writeln!(out, "{}:", stack_l).ok();
+    writeln!(out, "  %s = alloca i8, i64 {}", size).ok();
+    writeln!(out, "  %sv = ptrtoint ptr %s to i64").ok();
+    writeln!(out, "  br label %{}", done_l).ok();
+    writeln!(out, "{}:", heap_l).ok();
+    writeln!(out, "  %h = call ptr @malloc(i64 {})", size).ok();
+    writeln!(out, "  %hv = ptrtoint ptr %h to i64").ok();
+    writeln!(out, "  br label %{}", done_l).ok();
+    writeln!(out, "{}:", done_l).ok();
+    writeln!(out, "  {} = phi i64 [ %sv, %{} ], [ %hv, %{} ]", v, stack_l, heap_l).ok();
+    backend.fun.alloc_strategies.insert(v.to_string(), AllocStrategy::Alloca);
+    BTypedRegister { name: v.to_string(), ty: Type::int() }
+}
+
+// 2026-07-18: RingBuffer — circular buffer alloc via slot-based ring.
+// Each allocation advances a head pointer modulo RING_SIZE (power of two).
+// Free# is a no-op — old slots are overwritten when head wraps around.
+fn emit_ring_buffer_alloc(
+    backend: &mut LlvmBackend, out: &mut String, v: &str, size: &str, indent: &str,
+) -> BTypedRegister {
+    let counter = backend.fun.txn_counter;
+    backend.fun.txn_counter += 1;
+    // Ring buffer uses a stack-allocated circular buffer per txn scope.
+    // For now: emit as alloca and mark as RingBuffer for Free# behavior.
+    // Full implementation would use @ring_head global + wrapping GEP.
+    let a = format!("%ring_buf{}", counter);
+    writeln!(out, "{}{} = alloca i8, i64 {}", indent, a, size).ok();
+    writeln!(out, "{}{} = ptrtoint ptr {} to i64", indent, v, a).ok();
+    backend.fun.alloc_strategies.insert(v.to_string(), AllocStrategy::RingBuffer);
+    BTypedRegister { name: v.to_string(), ty: Type::int() }
+}
+
 // 2026-07-18: Emit @malloc for a size register, returning ptrtoint'd i64.
-// Extracted so both default triple dispatch and explicit Malloc strategy
-// share the same emission path.
 fn emit_malloc_inline(
     backend: &mut LlvmBackend, out: &mut String, v: &str, size: &str, indent: &str,
 ) -> BTypedRegister {

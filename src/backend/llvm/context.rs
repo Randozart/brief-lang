@@ -108,6 +108,8 @@ pub struct CompilerContext {
 
     // Optimization
     pub optimize_budget: u64,
+    /// 2026-07-18: Max stack allocation size. Allocs above this → heap.
+    pub stack_threshold: u64,
     pub optimize_report: bool,
     pub optimize_size: Option<u64>,
     pub pgo_profile: Option<PgoProfile>,
@@ -203,6 +205,7 @@ impl CompilerContext {
             cell_trigger_bindings: Vec::new(),
             variant_disc: HashMap::new(),
             optimize_budget: 256,
+            stack_threshold: 4096,
             optimize_report: false,
             optimize_size: None,
             pgo_profile: None,

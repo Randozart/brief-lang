@@ -320,3 +320,70 @@ pub fn analyze_alloc_strategies(items: &mut [TopLevel]) -> HashMap<usize, AllocS
     }
     result
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::ast::*;
+
+    /// Helper: create a minimal defn with one Alloc# call and optional Term.
+    fn make_defn(alloc_size: i64, term_var: Option<&str>) -> TopLevel {
+        let alloc_expr = Expr::Call("Alloc#".into(), vec![Expr::Decimal(alloc_size)], None);
+        let body = if let Some(var) = term_var {
+            vec![
+                Statement::Let { name: "buf".into(), ty: None, expr: Some(alloc_expr), modifiers: vec![] },
+                Statement::Term(Some(Expr::Identifier(var.into()))),
+            ]
+        } else {
+            vec![
+                Statement::Let { name: "buf".into(), ty: None, expr: Some(alloc_expr), modifiers: vec![] },
+                Statement::Term(None),
+            ]
+        };
+        TopLevel::Definition(Definition {
+            name: "f".into(), parameters: vec![], output_type: None, outputs: vec![],
+            type_params: vec![], contract: Contract::new(Expr::Bool(true), Expr::Bool(true)),
+            body, derivation: None, metadata: Default::default(),
+            modifiers: vec![], annotations: vec![], span: None,
+        })
+    }
+
+    #[test]
+    fn test_empty_items_no_strategies() {
+        assert!(analyze_alloc_strategies(&mut []).is_empty());
+    }
+
+    #[test]
+    fn test_alloc_id_assigned_in_defn() {
+        let mut defn = make_defn(8, None);
+        if let TopLevel::Definition(d) = &mut defn {
+            if let Statement::Let { expr: Some(Expr::Call(_, _, id)), .. } = &mut d.body[0] {
+                assert!(id.is_none(), "ID should be None before analysis");
+            }
+        }
+        let result = analyze_alloc_strategies(&mut [defn]);
+        assert_eq!(result.len(), 1, "should have one strategy");
+    }
+
+    #[test]
+    fn test_alloc_escaped_via_term() {
+        let defn = make_defn(16, Some("buf"));
+        let result = analyze_alloc_strategies(&mut [defn]);
+        assert_eq!(result.len(), 1);
+        for (_, s) in &result {
+            assert_eq!(*s, AllocStrategy::Malloc, "returned via Term → Malloc");
+        }
+    }
+
+    #[test]
+    fn test_alloc_not_escaped_in_defn_is_malloc() {
+        // In a defn (no arena, no bounded scope), default is Malloc
+        // even without explicit escape. This is the conservative default.
+        let defn = make_defn(16, None);
+        let result = analyze_alloc_strategies(&mut [defn]);
+        assert_eq!(result.len(), 1);
+        for (_, s) in &result {
+            assert_eq!(*s, AllocStrategy::Malloc, "defn default → Malloc");
+        }
+    }
+}

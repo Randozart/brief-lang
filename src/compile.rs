@@ -73,6 +73,11 @@ pub struct BuildOptions {
     /// When ON, String is a 2-field \`{ i64, i64 }\` struct with inline storage for ≤6
     /// bytes, heap for longer. When OFF (default), String is passed as \`i8*\` (legacy).
     pub feature_sso_strings: bool,
+    /// 2026-07-18: Maximum size in bytes for stack allocation (alloca).
+    /// Allocations exceeding this threshold fall back to heap (malloc).
+    /// Used by the runtime fallback check in emit_dynamic_alloc.
+    /// Default 4096 (4KB) — safe for most stack frames.
+    pub stack_threshold: u64,
 }
 
 /// Compile a Brief source file: produce an executable binary (or `.ll` with `--llvm`).
@@ -206,6 +211,7 @@ pub fn check_source(file_path: &str, source: &str) -> Result<(), String> {
         trg_unresolved_action: TrgUnresolvedAction::Warn,
         extra_objects: vec![],
         feature_sso_strings: false,
+        stack_threshold: 4096,
     };
     let (_items, _universe) = parse_and_check(file_path, source, &default_opts)?;
     println!("OK");
@@ -258,6 +264,7 @@ fn codegen(
             let mut b = LlvmBackend::new()
                 .with_alloc_strategies(alloc_strategies)
                 .with_sso_strings(opts.feature_sso_strings)
+                .with_stack_threshold(opts.stack_threshold)
                 .with_optimize_budget(opts.optimize_budget)
                 .with_type_universe(universe.clone())
                 .with_trg_unresolved_action(opts.trg_unresolved_action);
@@ -293,6 +300,7 @@ fn codegen(
             let mut b = LlvmBackend::new()
                 .with_alloc_strategies(alloc_strategies)
                 .with_sso_strings(opts.feature_sso_strings)
+                .with_stack_threshold(opts.stack_threshold)
                 .with_optimize_budget(opts.optimize_budget)
                 .with_type_universe(universe.clone())
                 .with_gpu_offload(true);
