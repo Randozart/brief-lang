@@ -946,13 +946,18 @@ impl<'a> Parser<'a> {
                     metadata.insert(format!("op.{}", op_name), PropertyValue::Identifier(fn_name));
                     continue;
                 }
-                let slot_ty = if self.eat(&Token::TildeArrow) {
-                    self.parse_expression()?;
-                    Type::int()
-                } else {
-                    self.expect(Token::Colon)?;
-                    self.parse_type()?
-                };
+                // 2026-07-18: property binding: InsertAt <~ ring_push.
+                // Parse as metadata value (identifier, #L/#R/#T, etc.) and store
+                // in metadata instead of creating a type slot. The type universe
+                // picks up metadata properties via register_typedefs (normalizer.rs:254).
+                if self.eat(&Token::TildeArrow) {
+                    let pv = self.parse_metadata_value_standalone()?;
+                    self.eat(&Token::Semicolon);
+                    metadata.insert(slot_name, pv);
+                    continue;
+                }
+                self.expect(Token::Colon)?;
+                let slot_ty = self.parse_type()?;
                 self.eat(&Token::Semicolon);
                 slots.push(TypeDefSlot { name: slot_name, ty: slot_ty, bit_range: None });
             }

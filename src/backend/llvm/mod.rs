@@ -3209,8 +3209,13 @@ impl LlvmBackend {
                             crate::ast::Type::Applied(n, _) => n.as_str(),
                             _ => "",
                         };
+                        // 2026-07-18: The parser now stores property values as
+                        // PropertyValue::Identifier (not String). Check both variants.
                         if tu.get(type_name).and_then(|rt| rt.properties.get("insert_at"))
-                            .map_or(false, |strat| *strat == crate::ast::PropertyValue::String("ring_push".to_string()))
+                            .map_or(false, |strat| {
+                                *strat == crate::ast::PropertyValue::Identifier("ring_push".to_string())
+                                || *strat == crate::ast::PropertyValue::String("ring_push".to_string())
+                            })
                         {
                             let data_idx = self.ctx.field_types.len();
                             self.ctx.field_index_map.insert(format!("{}_data", s.name), data_idx);
