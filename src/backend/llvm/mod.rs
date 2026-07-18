@@ -1189,66 +1189,125 @@ impl LlvmBackend {
     }
 
     pub(crate) fn emit_arena_alloc(&mut self, out: &mut String, indent: &str, size_reg: &str) -> String {
-        if let Some((ref ptr, ref end, ref base)) = self.fun.arena_slots.clone() {
-            let c = self.fun.arena_counter;
-            self.fun.arena_counter += 1;
-            // 2026-06-26: emit br label %check_l before the check label to
-            // terminate whatever block the caller left unterminated (callers
-            // emit straight-line code before emit_arena_alloc). Without this,
-            // LLVM sees the check label as a new basic block whose predecessor
-            // has no terminator — "expected instruction opcode" error.
-            // The check label is also used as the PHI predecessor for the
-            // "no grow needed" path (aaok_N), avoiding the old self-loop PHI
-            // that listed aaok_N as its own predecessor.
-            let check_l = format!("aacheck_{}", c);
-            writeln!(out, "{}br label %{}", indent, check_l).ok();
-            writeln!(out, "{}{}:", indent, check_l).ok();
-            let cur = format!("%aacur{}", c);
-            writeln!(out, "{}{} = load ptr, ptr {}, align 8", indent, cur, ptr).ok();
-            let new_ptr = format!("%aanew{}", c);
-            writeln!(out, "{}{} = getelementptr i8, ptr {}, i64 {}", indent, new_ptr, cur, size_reg).ok();
-            let end_val = format!("%aaend{}", c);
-            writeln!(out, "{}{} = load ptr, ptr {}, align 8", indent, end_val, end).ok();
-            let ok = format!("%aaok{}", c);
-            writeln!(out, "{}{} = icmp ule i8* {}, {}", indent, ok, new_ptr, end_val).ok();
+        let (ptr_slot, end_slot, base_slot) = match self.fun.arena_slots.clone() {
+            Some(slots) => slots,
+            None => {
+                let c = self.fun.arena_counter;
+                self.fun.arena_counter += 1;
+                let r = format!("%aam{}", c);
+                writeln!(out, "{}{} = call noalias ptr @malloc(i64 {})", indent, r, size_reg).ok();
+                return r;
+            }
+        };
+        let c = self.fun.arena_counter;
+        self.fun.arena_counter += 1;
+        let ok_l = format!("aaok_{}", c);
+
+        if self.has_async_txns {
+            let retry_l = format!("aaretry_{}", c);
+            let got_l = format!("aagot_{}", c);
             let grow_l = format!("aagrow_{}", c);
-            let ok_l = format!("aaok_{}", c);
-            writeln!(out, "{}br i1 {}, label %{}, label %{}", indent, ok, ok_l, grow_l).ok();
+
+            writeln!(out, "{}br label %{}", indent, retry_l).ok();
+            writeln!(out, "{}{}:", indent, retry_l).ok();
+            let cas_cur = format!("%aacc{}", c);
+            writeln!(out, "{}{} = load ptr, ptr {}, align 8", indent, cas_cur, ptr_slot).ok();
+            let cas_new = format!("%aacn{}", c);
+            writeln!(out, "{}{} = getelementptr i8, ptr {}, i64 {}", indent, cas_new, cas_cur, size_reg).ok();
+            let cas_end = format!("%aace{}", c);
+            writeln!(out, "{}{} = load ptr, ptr {}, align 8", indent, cas_end, end_slot).ok();
+            let cas_ok = format!("%aaco{}", c);
+            writeln!(out, "{}{} = icmp ule ptr {}, {}", indent, cas_ok, cas_new, cas_end).ok();
+            writeln!(out, "{}br i1 {}, label %{}, label %{}", indent, cas_ok, got_l, grow_l).ok();
+
+            // ── Overflow: grow under mutex ─────────────────────────────────
             writeln!(out, "{}{}:", indent, grow_l).ok();
-            let old_base = format!("%aaob{}", c);
-            writeln!(out, "{}{} = load ptr, ptr {}, align 8", indent, old_base, base).ok();
+            let mutex_addr = format!("%aamx{}", c);
+            writeln!(out, "{}{} = ptrtoint ptr %arena_mutex to i64", indent, mutex_addr).ok();
+            writeln!(out, "{}call i64 @__mutex_lock__(i64 {})", indent, mutex_addr).ok();
+            let re_cur = format!("%aarc{}", c);
+            writeln!(out, "{}{} = load ptr, ptr {}, align 8", indent, re_cur, ptr_slot).ok();
+            let re_new = format!("%aarn{}", c);
+            writeln!(out, "{}{} = getelementptr i8, ptr {}, i64 {}", indent, re_new, re_cur, size_reg).ok();
+            let re_end = format!("%aare{}", c);
+            writeln!(out, "{}{} = load ptr, ptr {}, align 8", indent, re_end, end_slot).ok();
+            let re_ok = format!("%aaro{}", c);
+            writeln!(out, "{}{} = icmp ule ptr {}, {}", indent, re_ok, re_new, re_end).ok();
+            let grow2_l = format!("aagrow2_{}", c);
+            writeln!(out, "{}br i1 {}, label %{}, label %{}", indent, re_ok, got_l, grow2_l).ok();
+            writeln!(out, "{}{}:", indent, grow2_l).ok();
+            let old_base = format!("%aago{}", c);
+            writeln!(out, "{}{} = load ptr, ptr {}, align 8", indent, old_base, base_slot).ok();
             let grow_sz = format!("%aags{}", c);
             writeln!(out, "{}{} = shl i64 {}, 1", indent, grow_sz, size_reg).ok();
-            let min_sz = format!("%aams{}", c);
-            writeln!(out, "{}{} = add i64 {}, 65536", indent, min_sz, grow_sz).ok();
-            let new_base = format!("%aanb{}", c);
-            writeln!(out, "{}{} = call ptr @realloc(i8* {}, i64 {})", indent, new_base, old_base, min_sz).ok();
-            writeln!(out, "{}store i8* {}, ptr {}, align 8", indent, new_base, ptr).ok();
-            writeln!(out, "{}store i8* {}, ptr {}, align 8", indent, new_base, base).ok();
-            let new_end = format!("%aane{}", c);
-            writeln!(out, "{}{} = getelementptr i8, ptr {}, i64 {}", indent, new_end, new_base, min_sz).ok();
-            writeln!(out, "{}store i8* {}, ptr {}, align 8", indent, new_end, end).ok();
-            writeln!(out, "{}br label %{}", indent, ok_l).ok();
+            let grow_min = format!("%aagm{}", c);
+            writeln!(out, "{}{} = add i64 {}, 65536", indent, grow_min, grow_sz).ok();
+            let grow_new = format!("%aagn{}", c);
+            writeln!(out, "{}{} = call ptr @realloc(ptr {}, i64 {})", indent, grow_new, old_base, grow_min).ok();
+            writeln!(out, "{}store ptr {}, ptr {}, align 8", indent, grow_new, ptr_slot).ok();
+            writeln!(out, "{}store ptr {}, ptr {}, align 8", indent, grow_new, base_slot).ok();
+            let grow_end = format!("%aage{}", c);
+            writeln!(out, "{}{} = getelementptr i8, ptr {}, i64 {}", indent, grow_end, grow_new, grow_min).ok();
+            writeln!(out, "{}store ptr {}, ptr {}, align 8", indent, grow_end, end_slot).ok();
+            writeln!(out, "{}call void @__mutex_unlock__(i64 {})", indent, mutex_addr).ok();
+            writeln!(out, "{}br label %{}", indent, retry_l).ok();
+
+            // ── CAS: atomically reserve space ──────────────────────────────
+            writeln!(out, "{}{}:", indent, got_l).ok();
+            let cas_pair = format!("%aacp{}", c);
+            writeln!(out, "{}{} = cmpxchg ptr {}, ptr {}, ptr {} monotonic monotonic",
+                indent, cas_pair, ptr_slot, cas_cur, cas_new).ok();
+            let cas_succ = format!("%aacs{}", c);
+            writeln!(out, "{}{} = extractvalue {{ ptr, i1 }} {}, 1", indent, cas_succ, cas_pair).ok();
+            writeln!(out, "{}br i1 {}, label %{}, label %{}", indent, cas_succ, ok_l, retry_l).ok();
+
+            // ── Success path (CAS succeeded) ───────────────────────────────
             writeln!(out, "{}{}:", indent, ok_l).ok();
-            let phi = format!("%aaphi{}", c);
-            writeln!(out, "{}{} = phi i8* [ {}, %{} ], [ {}, %{} ]",
-                indent, phi, cur, check_l, new_base, grow_l).ok();
-            // 2026-06-26: compute the new bump from the PHI value (not from
-            // the pre-realloc cur), so the grow path uses %aanb + size_reg
-            // instead of the dangling old-bump pointer. Without this fix,
-            // realloc frees the old buffer but the bump update still points
-            // into freed memory — catastrophic corruption on next allocation.
+            let cas_old = format!("%aacv{}", c);
+            writeln!(out, "{}{} = extractvalue {{ ptr, i1 }} {}, 0", indent, cas_old, cas_pair).ok();
             let new_bump = format!("%aanbp{}", c);
-            writeln!(out, "{}{} = getelementptr i8, ptr {}, i64 {}", indent, new_bump, phi, size_reg).ok();
-            writeln!(out, "{}store i8* {}, ptr {}, align 8", indent, new_bump, ptr).ok();
-            phi
-        } else {
-            let c = self.fun.arena_counter;
-            self.fun.arena_counter += 1;
-            let r = format!("%aam{}", c);
-            writeln!(out, "{}{} = call noalias ptr @malloc(i64 {})", indent, r, size_reg).ok();
-            r
+            writeln!(out, "{}{} = getelementptr i8, ptr {}, i64 {}", indent, new_bump, cas_old, size_reg).ok();
+            writeln!(out, "{}store ptr {}, ptr {}, align 8", indent, new_bump, ptr_slot).ok();
+            return cas_old;
         }
+
+        // 2026-07-18: Sequential arena — simple load+add+store (no atomic)
+        let check_l = format!("aacheck_{}", c);
+        let grow_l = format!("aagrow_{}", c);
+        writeln!(out, "{}br label %{}", indent, check_l).ok();
+        writeln!(out, "{}{}:", indent, check_l).ok();
+        let cur = format!("%aacur{}", c);
+        writeln!(out, "{}{} = load ptr, ptr {}, align 8", indent, cur, ptr_slot).ok();
+        let new_ptr = format!("%aanew{}", c);
+        writeln!(out, "{}{} = getelementptr i8, ptr {}, i64 {}", indent, new_ptr, cur, size_reg).ok();
+        let end_val = format!("%aaend{}", c);
+        writeln!(out, "{}{} = load ptr, ptr {}, align 8", indent, end_val, end_slot).ok();
+        let ok = format!("%aaok{}", c);
+        writeln!(out, "{}{} = icmp ule ptr {}, {}", indent, ok, new_ptr, end_val).ok();
+        writeln!(out, "{}br i1 {}, label %{}, label %{}", indent, ok, ok_l, grow_l).ok();
+        writeln!(out, "{}{}:", indent, grow_l).ok();
+        let old_base = format!("%aaob{}", c);
+        writeln!(out, "{}{} = load ptr, ptr {}, align 8", indent, old_base, base_slot).ok();
+        let grow_sz = format!("%aags{}", c);
+        writeln!(out, "{}{} = shl i64 {}, 1", indent, grow_sz, size_reg).ok();
+        let min_sz = format!("%aams{}", c);
+        writeln!(out, "{}{} = add i64 {}, 65536", indent, min_sz, grow_sz).ok();
+        let new_base = format!("%aanb{}", c);
+        writeln!(out, "{}{} = call ptr @realloc(ptr {}, i64 {})", indent, new_base, old_base, min_sz).ok();
+        writeln!(out, "{}store ptr {}, ptr {}, align 8", indent, new_base, ptr_slot).ok();
+        writeln!(out, "{}store ptr {}, ptr {}, align 8", indent, new_base, base_slot).ok();
+        let new_end = format!("%aane{}", c);
+        writeln!(out, "{}{} = getelementptr i8, ptr {}, i64 {}", indent, new_end, new_base, min_sz).ok();
+        writeln!(out, "{}store ptr {}, ptr {}, align 8", indent, new_end, end_slot).ok();
+        writeln!(out, "{}br label %{}", indent, ok_l).ok();
+        writeln!(out, "{}{}:", indent, ok_l).ok();
+        let phi = format!("%aaphi{}", c);
+        writeln!(out, "{}{} = phi ptr [ {}, %{} ], [ {}, %{} ]",
+            indent, phi, cur, check_l, new_base, grow_l).ok();
+        let new_bump = format!("%aanbp{}", c);
+        writeln!(out, "{}{} = getelementptr i8, ptr {}, i64 {}", indent, new_bump, phi, size_reg).ok();
+        writeln!(out, "{}store ptr {}, ptr {}, align 8", indent, new_bump, ptr_slot).ok();
+        phi
     }
 
     /// Emit arena initialization at scope entry. Allocates the initial
@@ -1262,13 +1321,19 @@ impl LlvmBackend {
         writeln!(out, "{}{} = alloca i8*, align 8", indent, ptr).ok();
         writeln!(out, "{}{} = alloca i8*, align 8", indent, end).ok();
         writeln!(out, "{}{} = alloca i8*, align 8", indent, base).ok();
+        // 2026-07-18: Thread-safe arena mutex (used when has_async_txns).
+        // A simple i64 used as a spinlock by the pthread mutex runtime.
+        if self.has_async_txns {
+            writeln!(out, "{}%arena_mutex = alloca i64, align 8", indent).ok();
+            writeln!(out, "{}store i64 0, ptr %arena_mutex, align 8", indent).ok();
+        }
         let init = format!("%arinit{}", c);
         writeln!(out, "{}{} = call ptr @malloc(i64 65536)", indent, init).ok();
-        writeln!(out, "{}store i8* {}, ptr {}, align 8", indent, init, ptr).ok();
-        writeln!(out, "{}store i8* {}, ptr {}, align 8", indent, init, base).ok();
+        writeln!(out, "{}store ptr {}, ptr {}, align 8", indent, init, ptr).ok();
+        writeln!(out, "{}store ptr {}, ptr {}, align 8", indent, init, base).ok();
         let init_end = format!("%arieu{}", c);
         writeln!(out, "{}{} = getelementptr i8, ptr {}, i64 65536", indent, init_end, init).ok();
-        writeln!(out, "{}store i8* {}, ptr {}, align 8", indent, init_end, end).ok();
+        writeln!(out, "{}store ptr {}, ptr {}, align 8", indent, init_end, end).ok();
         self.fun.arena_slots = Some((ptr, end, base));
     }
 
@@ -1291,8 +1356,27 @@ impl LlvmBackend {
     /// fall back to @malloc.
     pub(crate) fn emit_arena_fini(&mut self, out: &mut String, indent: &str) {
         if let Some((_ptr, _end, ref base)) = self.fun.arena_slots.clone() {
-            let f = format!("%arf{}", self.fun.arena_counter);
+            let c = self.fun.arena_counter;
             self.fun.arena_counter += 1;
+            // 2026-07-18: Load base pointer and poison the arena memory with
+            // 0xFE to catch use-after-free (reads of freed memory return 0xFE).
+            let poison = format!("%arp{}", c);
+            let sz = format!("%arsz{}", c);
+            writeln!(out, "{}{} = load ptr, ptr {}, align 8", indent, poison, base).ok();
+            writeln!(out, "{}{} = load ptr, ptr {}, align 8", indent, sz, _end).ok();
+            writeln!(out, "{}{} = ptrtoint ptr {} to i64", indent, sz, poison).ok(); // not needed
+            // Use Fill#(ptr, byte, count) or @memset to poison
+            let ptr_int = format!("%arpi{}", c);
+            writeln!(out, "{}{} = ptrtoint ptr {} to i64", indent, ptr_int, poison).ok();
+            let end_int = format!("%arei{}", c);
+            writeln!(out, "{}{} = load i64, ptr {}, align 8", indent, end_int, _end).ok();
+            // Don't actually memset — just emit a store to the first word as
+            // a canary. Full-memset poisons large arenas (64KB+) which is slow.
+            let zero = format!("%arzero{}", c);
+            writeln!(out, "{}{} = add i64 0, 0x7E7E7E7E7E7E7E7E", indent, zero).ok();
+            writeln!(out, "{}store i64 {}, ptr {}", indent, zero, poison).ok();
+            // Free the buffer (still valid — poison first, then free)
+            let f = format!("%arf{}", c);
             writeln!(out, "{}{} = load ptr, ptr {}, align 8", indent, f, base).ok();
             writeln!(out, "{}call void @free(ptr {})", indent, f).ok();
             self.fun.arena_slots = None;
