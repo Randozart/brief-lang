@@ -281,10 +281,14 @@ impl LlvmBackend {
                     let ptr = self.fun.gen_reg();
                     writeln!(out, "{}{} = inttoptr i64 {} to ptr", indent, ptr, obj_reg.name).ok();
                     let offset = self.fun.gen_reg();
-                    // 2026-07-17: List/tuple literals have a length header at
+                    // 2026-07-17: List/tuple types have a length header at
                     // slot 0 — elements start at index 1. Raw Ptr buffers
                     // (from Malloc#) have no header.
-                    if matches!(obj.as_ref(), Expr::List(_) | Expr::Tuple(_)) {
+                    // 2026-07-18: Check by TYPE, not expression form — non-literal
+                    // list identifiers also need the +1 offset.
+                    let is_list_type = matches!(&obj_reg.ty, Type::Ptr(_))
+                        || matches!(&obj_reg.ty, Type::Applied(n, _) if n == "List");
+                    if is_list_type {
                         writeln!(out, "{}{} = add i64 {}, 1", indent, offset, idx_reg.name).ok();
                     } else {
                         writeln!(out, "{}{} = add i64 {}, 0", indent, offset, idx_reg.name).ok();
@@ -482,53 +486,64 @@ impl LlvmBackend {
     }
 
     // 2026-07-18: SVO List indexing — extract element from inline storage
-    // or fall through to heap access based on tag bit.
+    // or heap. Uses stack-allocated array + GEP for dynamic inline indexing
+    // (extractvalue requires constant indices, but the index is runtime).
     fn emit_svo_index(&mut self, out: &mut String, v: &str, obj: &TypedRegister,
         idx: &TypedRegister, indent: &str) -> TypedRegister {
         let cap = self.ctx.type_universe.as_ref()
             .map(|u| u.svo_capacity(&obj.ty)).unwrap_or(0);
-        let struct_ty = format!("{{ {} }}", std::iter::repeat("i64").take(cap + 1)
-            .collect::<Vec<_>>().join(", "));
-        // Extract the tag+len slot (last slot) to check tag bit
-        let tag_slot = self.fun.gen_reg();
-        writeln!(out, "{}{} = extractvalue {} {}, {}", indent, tag_slot, struct_ty, obj.name, cap).ok();
-        let is_inline = self.fun.gen_reg();
-        writeln!(out, "{}{} = and i64 {}, 1", indent, is_inline, tag_slot).ok();
-        let inline_l = format!(".svo_idx_inl_{}", self.fun.txn_counter);
-        let heap_l = format!(".svo_idx_heap_{}", self.fun.txn_counter);
-        let done_l = format!(".svo_idx_done_{}", self.fun.txn_counter);
+        let n_slots = cap + 1;
+        let struct_ty = format!("{{ {} }}",
+            std::iter::repeat("i64").take(n_slots).collect::<Vec<_>>().join(", "));
+        let counter = self.fun.txn_counter;
         self.fun.txn_counter += 1;
-        writeln!(out, "{}{} = icmp ne i64 {}, 0", indent, is_inline, is_inline).ok();  // ahem
-        // Actually just use the tag bit directly
-        let inl_cond = self.fun.gen_reg();
-        writeln!(out, "{}{} = icmp ne i64 {}, 0", indent, inl_cond, tag_slot).ok();
-        // Wait, the tag bit is bit 0 of tag_slot. We already AND-ed with 1 above.
-        // Let me redo: just check if the last slot has bit 0 set.
-        let tag_bit = self.fun.gen_reg();
-        writeln!(out, "{}{} = and i64 {}, 1", indent, tag_bit, tag_slot).ok();
-        // Actually this duplicates is_inline above. Let me just use is_inline:
+        let arr = format!("%svo_arr_{}", counter);
+        writeln!(out, "{}{} = alloca [{} x i64], align 8", indent, arr, cap).ok();
+        // Store each data slot into the stack array
+        for i in 0..cap {
+            let slot = format!("%svo_sl_{}_{}", counter, i);
+            let gep = format!("%svo_gep_{}_{}", counter, i);
+            writeln!(out, "{}{} = extractvalue {} {}, {}", indent, slot, struct_ty, obj.name, i).ok();
+            writeln!(out, "{}{} = getelementptr [{} x i64], ptr {}, i64 0, i64 {}",
+                indent, gep, cap, arr, i).ok();
+            writeln!(out, "{}store i64 {}, ptr {}", indent, slot, gep).ok();
+        }
+        // Extract tag+len from last slot
+        let tag_slot = format!("%svo_tag_{}", counter);
+        writeln!(out, "{}{} = extractvalue {} {}, {}", indent, tag_slot, struct_ty, obj.name, cap).ok();
+        let is_inline = format!("%svo_inl_{}", counter);
+        writeln!(out, "{}{} = and i64 {}, 1", indent, is_inline, tag_slot).ok();
+        let inline_l = format!(".svo_idx_inl_{}", counter);
+        let heap_l = format!(".svo_idx_heap_{}", counter);
+        let done_l = format!(".svo_idx_done_{}", counter);
         writeln!(out, "{}br i1 %{}, label %{}, label %{}", indent, is_inline, inline_l, heap_l).ok();
-        // Inline path: extract element from data slot[idx]
+        // Inline path: GEP + load from stack array
         writeln!(out, "{}{}:", indent, inline_l).ok();
-        let inline_val = self.fun.gen_reg();
-        writeln!(out, "{}{} = extractvalue {} {}, {}", indent, inline_val, struct_ty, obj.name, idx.name).ok();
+        let inl_gep = format!("%svo_ig_{}", counter);
+        writeln!(out, "{}{} = getelementptr [{} x i64], ptr {}, i64 0, i64 {}",
+            indent, inl_gep, cap, arr, idx.name).ok();
+        let inl_val = format!("%svo_iv_{}", counter);
+        writeln!(out, "{}{} = load i64, ptr {}", indent, inl_val, inl_gep).ok();
         writeln!(out, "{}br label %{}", indent, done_l).ok();
-        // Heap path: inttoptr + GEP + load (existing behavior)
+        // Heap path: extract ptr from slot 0 (first data slot holds ptrtoint
+        // when tag bit 0 is clear), then inttoptr + GEP + load.
         writeln!(out, "{}{}:", indent, heap_l).ok();
-        let heap_ptr = self.fun.gen_reg();
-        writeln!(out, "{}{} = inttoptr i64 {} to ptr", indent, heap_ptr, obj.name).ok();
-        let heap_offset = self.fun.gen_reg();
-        writeln!(out, "{}{} = add i64 {}, 1", indent, heap_offset, idx.name).ok();
-        let heap_gep = self.fun.gen_reg();
-        writeln!(out, "{}{} = getelementptr i64, ptr {}, i64 {}", indent, heap_gep, heap_ptr, heap_offset).ok();
-        let heap_val = self.fun.gen_reg();
+        let heap_slot0 = format!("%svo_hs{}", counter);
+        writeln!(out, "{}{} = extractvalue {} {}, 0", indent, heap_slot0, struct_ty, obj.name).ok();
+        let heap_ptr = format!("%svo_hp_{}", counter);
+        writeln!(out, "{}{} = inttoptr i64 {} to ptr", indent, heap_ptr, heap_slot0).ok();
+        let heap_off = format!("%svo_ho_{}", counter);
+        writeln!(out, "{}{} = add i64 {}, 1", indent, heap_off, idx.name).ok();
+        let heap_gep = format!("%svo_hg_{}", counter);
+        writeln!(out, "{}{} = getelementptr i64, ptr {}, i64 {}", indent, heap_gep, heap_ptr, heap_off).ok();
+        let heap_val = format!("%svo_hv_{}", counter);
         writeln!(out, "{}{} = load i64, ptr {}", indent, heap_val, heap_gep).ok();
         writeln!(out, "{}br label %{}", indent, done_l).ok();
         // Merge
         writeln!(out, "{}{}:", indent, done_l).ok();
-        let phi = self.fun.gen_reg();
+        let phi = format!("%svo_ph_{}", counter);
         writeln!(out, "{}{} = phi i64 [ %{}, %{} ], [ %{}, %{} ]", indent, phi,
-            inline_val, inline_l, heap_val, heap_l).ok();
+            inl_val, inline_l, heap_val, heap_l).ok();
         TypedRegister { name: phi, ty: Type::int() }
     }
 
