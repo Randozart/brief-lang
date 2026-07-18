@@ -252,23 +252,25 @@ fn register_typedefs(items: &[TopLevel], universe: &mut TypeUniverse, prim_confi
                 if let PropertyValue::Int(n) = pv { Some(*n as u64) } else { None }
             })
             .unwrap_or_else(|| bytes.min(8));
-        // Collect properties from metadata and slots
+        // Collect properties from metadata only — slots are stored as typed
+        // `fields` on ResolvedType (2026-07-18), replacing old slot.* properties.
         let mut properties: std::collections::HashMap<String, PropertyValue> = td.body.metadata.clone();
-        for slot in &td.body.slots {
-            properties.insert(format!("slot.{}", slot.name), PropertyValue::Identifier(slot.ty.to_string()));
-        }
         // Build ResolvedType. The base type is the Expr name (e.g. "Bits"),
         // or "Bits" if the base expr is not an identifier.
         let base = match td.base.as_ref() {
             Expr::Identifier(name) => name.clone(),
             _ => "Bits".to_string(),
         };
+        let fields: Vec<(String, Type)> = td.body.slots.iter()
+            .map(|s| (s.name.clone(), s.ty.clone()))
+            .collect();
         let mut rt = crate::type_universe::ResolvedType {
             name: td.name.clone(),
             base,
             bytes,
             alignment,
             properties,
+            fields,
         };
         // Attach field-level layout annotations if layout property is set
         // 2026-07-16: Strip leading '<' that read_layout_body includes
@@ -316,8 +318,23 @@ fn register_typedefs(items: &[TopLevel], universe: &mut TypeUniverse, prim_confi
                 attach_layout_fields(&mut rt, &crate::ast::layout::LayoutPattern::Slice(layout_fields));
             }
         }
+        // 2026-07-18: Preserve primordial properties that the TypeDef may not set
+        // (ctd, alu, encoding). This ensures bootstrap.bv types inherit their
+        // semantic identity from the primordial without requiring explicit
+        // declarations in every .bv file.
+        for key in &["ctd", "alu", "encoding"] {
+            if !rt.properties.contains_key(*key) {
+                if let Some(existing) = universe.get(&rt.name) {
+                    if let Some(val) = existing.properties.get(*key) {
+                        rt.properties.insert(key.to_string(), val.clone());
+                    }
+                }
+            }
+        }
         // Attach llvm_type (same as the main loop does for existing types)
-        // 2026-07-17: Use ctd_to_llvm with derive_llvm_type fallback
+        // 2026-07-17: Use ctd_to_llvm with derive_llvm_type fallback.
+        // If ctd was inherited from the primordial above, this correctly maps
+        // String→"ptr", Data→"ptr", etc.
         let ctd = rt.properties.get("ctd").and_then(|pv| match pv {
             PropertyValue::Identifier(s) => Some(s.as_str()),
             _ => None,

@@ -102,6 +102,7 @@ fn parse_universe(parts: &[SExpr]) -> Result<ResolvedType, String> {
         bytes: 8,
         alignment: 8,
         properties: HashMap::new(),
+        fields: vec![],
     };
     let mut i = 2;
     while i < parts.len() {

@@ -17,7 +17,16 @@ use std::collections::HashMap;
 
 /// Resolved metadata for a single type in the universe.
 /// CTD and ALU are set by the primordial, llvm_type by the normalizer.
-/// All three are read via properties — no hardcoded getter methods.
+/// Properties, fields, and ops are all stored here — the flat property bag
+/// holds ops (keyed as "op.Add" etc.) and general annotations, while the
+/// `fields` vec stores ordered struct-like field declarations.
+///
+/// 2026-07-18: Added `fields` — struct field declarations populated from
+/// TypeDef.body.slots by the normalizer (register_typedefs). For primitive
+/// types seeded via seed_primordial_types(), fields is empty unless the type
+/// has a struct-like shape (e.g. String has [("data", Int), ("len", Int)]).
+/// Codegen uses this to drive LLVM struct lowering and state slot width,
+/// replacing hardcoded "String" → "ptr" matches with shape+encoding checks.
 #[derive(Debug, Clone)]
 pub struct ResolvedType {
     pub name: String,
@@ -25,6 +34,10 @@ pub struct ResolvedType {
     pub bytes: u64,
     pub alignment: u64,
     pub properties: HashMap<String, crate::ast::PropertyValue>,
+    /// 2026-07-18: Struct field declarations — (name, type) pairs from
+    /// TypeDef.body.slots or primordial seed table. Empty for scalars.
+    /// Drives LLVM struct type lowering and is_string_like() checks.
+    pub fields: Vec<(String, crate::ast::Type)>,
 }
 
 /// Central type definition registry.
@@ -104,27 +117,29 @@ impl TypeUniverse {
                 bytes,
                 alignment,
                 properties,
+                fields: vec![],
             });
         }
-        // String — special case: heap-allocated struct with ptr+len+codec fields
-        // CTD = String tells the normalizer to map to "ptr" at ABI boundaries.
+        // 2026-07-18: String primordial — 2-field struct (data: Int, len: Int)
+        // with encoding property. Codegen currently maps via CTD="String" to "ptr";
+        // Phase B will switch to shape+encoding (is_string_like) for SSO handle.
+        // The `encoding` property is set here for --no-stdlib support.
         {
             let mut p = std::collections::HashMap::new();
             p.insert("ctd".into(), crate::ast::PropertyValue::Identifier("String".to_string()));
             p.insert("alu".into(), crate::ast::PropertyValue::Identifier("Int".to_string()));
             p.insert("alignment".into(), crate::ast::PropertyValue::Int(8));
-            p.insert("field.ptr.offset".into(), crate::ast::PropertyValue::Int(0));
-            p.insert("field.ptr.width".into(), crate::ast::PropertyValue::Int(64));
-            p.insert("field.len.offset".into(), crate::ast::PropertyValue::Int(64));
-            p.insert("field.len.width".into(), crate::ast::PropertyValue::Int(64));
-            p.insert("field.codec.offset".into(), crate::ast::PropertyValue::Int(128));
-            p.insert("field.codec.width".into(), crate::ast::PropertyValue::Int(8));
+            p.insert("encoding".into(), crate::ast::PropertyValue::String("UTF-8".to_string()));
             self.types.insert("String".to_string(), ResolvedType {
                 name: "String".to_string(),
                 base: "Bits".to_string(),
-                bytes: 24,
+                bytes: 16,
                 alignment: 8,
                 properties: p,
+                fields: vec![
+                    ("data".into(), crate::ast::Type::int()),
+                    ("len".into(), crate::ast::Type::int()),
+                ],
             });
         }
     }
@@ -206,6 +221,32 @@ impl TypeUniverse {
             })
             .unwrap_or(crate::ast::Formatting::None)
     }
+
+    /// 2026-07-18: Check if a type is string-like by shape + properties.
+    /// Phase A: matches via CTD="String" for backward compat.
+    /// Phase B: switches to 2-Int-fields + encoding check, removing CTD fallback.
+    /// User-defined `type MyStr { data: Int; len: Int; encoding <~ "UTF-8" }`
+    /// will be detected without any compiler changes.
+    pub fn is_string_like(&self, ty: &Type) -> bool {
+        let name = match ty {
+            Type::Custom(n) | Type::Applied(n, _) => n,
+            _ => return false,
+        };
+        let Some(rt) = self.types.get(name) else { return false; };
+        // Phase A: CTD="String" is the primary identifier (matches current String primordial).
+        // Phase B: this fallback is removed — pure shape+encoding drives detection.
+        if rt.properties.get("ctd").map_or(false, |v| {
+            matches!(v, crate::ast::PropertyValue::Identifier(s) if s == "String")
+        }) {
+            return true;
+        }
+        // Shape + encoding check: 2 Int fields + encoding property.
+        // Works for future SSO String and user-defined string-like types.
+        rt.fields.len() == 2
+            && rt.fields[0].1 == Type::int()
+            && rt.fields[1].1 == Type::int()
+            && rt.properties.contains_key("encoding")
+    }
 }
 
 #[cfg(test)]
@@ -219,7 +260,7 @@ mod tests {
         let mut u = TypeUniverse::new();
         u.types.insert("String.c".into(), ResolvedType {
             name: "String.c".into(), base: "String".into(), bytes: 8, alignment: 8,
-            properties: HashMap::new(),
+            properties: HashMap::new(), fields: vec![],
         });
         assert!(u.get_extension("String", "c").is_some());
     }
@@ -280,7 +321,7 @@ mod tests {
         let mut u = TypeUniverse::new();
         u.types.insert("String.c".into(), ResolvedType {
             name: "String.c".into(), base: "String".into(), bytes: 8, alignment: 8,
-            properties: HashMap::new(),
+            properties: HashMap::new(), fields: vec![],
         });
         let result = u.find_meld_to_extension("String", "c");
         assert!(result.is_some());

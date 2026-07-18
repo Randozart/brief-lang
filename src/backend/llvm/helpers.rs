@@ -664,11 +664,14 @@ impl LlvmBackend {
         }
     }
 
-    /// Check if an expression is a reference to a linked String trigger.
+    /// Check if an expression is a reference to a linked String-like trigger.
     fn is_linked_string_trigger(&self, expr: &Expr) -> bool {
         let Expr::Identifier(name) = expr else { return false; };
         let Some(trg) = self.ctx.triggers.get(name) else { return false; };
-        type_is(&self.ctx.type_universe, &trg.ty, "String")
+        // 2026-07-18: Replaced `type_is(..., "String")` with `is_string_like`.
+        // `is_string_like` matches via CTD="String" (Phase A) or shape+encoding (Phase B).
+        // Data is still checked by name since it has no encoding property.
+        self.ctx.type_universe.as_ref().map_or(false, |u| u.is_string_like(&trg.ty))
             || type_is(&self.ctx.type_universe, &trg.ty, "Data")
     }
 
@@ -964,6 +967,7 @@ impl LlvmBackend {
     /// Recursively detect if an expression chain produces a String/Data value.
     /// Used by `emit_inline_concat` to decide between inline concat vs
     /// generic `add i64` for `a + b` on String operands.
+    /// 2026-07-18: Replaced `type_is(..., "String")` with `is_string_like`.
     pub(crate) fn is_string_chain(&self, e: &Expr) -> bool {
         match e {
             Expr::Quoted(_) => true,
@@ -972,7 +976,9 @@ impl LlvmBackend {
                 self.is_string_chain(l) || self.is_string_chain(r)
             }
             Expr::Cast(inner, target_ty) => {
-                type_is(&self.ctx.type_universe, target_ty, "String")
+                // Phase A: is_string_like (CTD="String") + Data name check.
+                // Phase B: pure is_string_like (shape+encoding) replaces both.
+                self.ctx.type_universe.as_ref().map_or(false, |u| u.is_string_like(target_ty))
                     || type_is(&self.ctx.type_universe, target_ty, "Data")
                     || self.is_string_chain(inner)
             }
@@ -982,15 +988,16 @@ impl LlvmBackend {
 
     /// Check if an identifier resolves to String/Data type via let bindings
     /// or struct field type hints.
+    /// 2026-07-18: Replaced `type_is(..., "String")` with `is_string_like`.
     fn is_string_identifier(&self, name: &str) -> bool {
-        let type_matches = |t: &Type| -> bool {
-            type_is(&self.ctx.type_universe, t, "String")
+        let is_like = |t: &Type| -> bool {
+            self.ctx.type_universe.as_ref().map_or(false, |u| u.is_string_like(t))
                 || type_is(&self.ctx.type_universe, t, "Data")
         };
-        if self.fun.let_binding_types.get(name).map_or(false, |t| type_matches(t)) {
+        if self.fun.let_binding_types.get(name).map_or(false, |t| is_like(t)) {
             return true;
         }
-        if self.fun.let_original_types.get(name).map_or(false, |t| type_matches(t)) {
+        if self.fun.let_original_types.get(name).map_or(false, |t| is_like(t)) {
             return true;
         }
         self.ctx.field_index_map.get(name)

@@ -1335,7 +1335,11 @@ impl LlvmBackend {
     }
 
     fn type_is_heap_allocated(&self, ty: &Type) -> bool {
-        matches!(ty, Type::Custom(__t) if __t == "String" || __t == "Data") || matches!(ty, Type::Custom(name) if name == "List" || name == "HashMap" || name == "HashSet" || name == "Stack" || name == "Queue" || name == "StringBuilder")
+        // 2026-07-18: Phase A — String check replaced with is_string_like.
+        // Phase B (SSO) may make short strings non-heap; is_string_like stays.
+        (self.ctx.type_universe.as_ref().map_or(false, |u| u.is_string_like(ty))
+            || matches!(ty, Type::Custom(__t) if __t == "Data"))
+            || matches!(ty, Type::Custom(name) if name == "List" || name == "HashMap" || name == "HashSet" || name == "Stack" || name == "Queue" || name == "StringBuilder")
     }
 
     fn check_stmt_embedded(&mut self, stmt: &Statement, ctx_name: &str, threading_intrinsics: &[&str]) {
@@ -1624,6 +1628,7 @@ impl LlvmBackend {
                                 bytes,
                                 alignment: 8,
                                 properties: std::collections::HashMap::new(),
+                                fields: vec![],
                             };
                             universe.types.insert(s.name.clone(), rt);
                         }

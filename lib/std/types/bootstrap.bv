@@ -235,13 +235,12 @@ type Char <: Bits {
     default_width <~ 32;
 };
 
-type String <: Bits {
-    ptr: Ptr<UInt8>;
+type String {
+    data: Int;
     len: Int;
-    codec: UInt8;
-    bytes <~ 24;
+    bytes <~ 16;
     alignment <~ 8;
-    llvm <~ "%String";
+    encoding <~ "UTF-8";
     tbaa <~ "String";
 };
 

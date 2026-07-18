@@ -313,6 +313,7 @@ mod tests {
             bytes,
             alignment: 8,
             properties: HashMap::new(),
+            fields: vec![],
         }
     }
 

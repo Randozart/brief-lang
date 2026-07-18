@@ -709,6 +709,7 @@ mod tests {
             bytes,
             alignment: 8,
             properties: props,
+            fields: vec![],
         }
     }
 
