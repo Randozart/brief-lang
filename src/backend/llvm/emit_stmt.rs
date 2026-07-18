@@ -36,10 +36,10 @@ pub fn emit_statement(backend: &mut LlvmBackend, out: &mut String, stmt: &Statem
                 let strat = backend.check_extract_strategy(source)
                     .or_else(|| backend.check_extract_strategy(rhs));
                 // Extract fn_name from property value — no hardcoded strings.
-                let Some(crate::ast::PropertyValue::Identifier(fn_name)) = &strat else {
+                let Some(pv) = &strat else {
                     return TypedRegister { name: backend.fun.gen_reg(), ty: Type::void() };
                 };
-                let Some(result) = emit_strategy_fn_call(backend, out, indent, source, fn_name, None) else {
+                let Some(result) = emit_strategy_fn_call(backend, out, indent, source, pv, None) else {
                     return TypedRegister { name: backend.fun.gen_reg(), ty: Type::void() };
                 };
                 // Store popped result to the LHS variable.
@@ -61,8 +61,8 @@ pub fn emit_statement(backend: &mut LlvmBackend, out: &mut String, stmt: &Statem
                 Expr::Identifier(name) => {
                     // 2026-07-18: Push — emit call @fn_name(handle, val).
                     let strat = backend.check_insert_strategy(lhs);
-                    if let Some(crate::ast::PropertyValue::Identifier(fn_name)) = &strat {
-                        emit_strategy_fn_call(backend, out, indent, lhs, fn_name, Some(&val.name));
+                    if let Some(pv) = &strat {
+                        emit_strategy_fn_call(backend, out, indent, lhs, pv, Some(&val.name));
                     } else if let Some(reg) = backend.fun.let_bindings.get(name) {
                         // 2026-07-14: store type must match val.ty — hardcoded i64 breaks bool/float assigns
                         let store_ty = crate::backend::llvm::types::lower_type(&val.ty);
@@ -123,8 +123,8 @@ pub fn emit_statement(backend: &mut LlvmBackend, out: &mut String, stmt: &Statem
             if let Expr::AddrOf(source) = expr {
                 let strat = backend.check_extract_strategy(source)
                     .or_else(|| backend.check_extract_strategy(expr));
-                if let Some(crate::ast::PropertyValue::Identifier(fn_name)) = &strat {
-                    emit_strategy_fn_call(backend, out, indent, source, fn_name, None);
+                if let Some(pv) = &strat {
+                    emit_strategy_fn_call(backend, out, indent, source, pv, None);
                 }
                 TypedRegister { name: backend.fun.gen_reg(), ty: Type::void() }
             } else {
@@ -226,29 +226,58 @@ pub fn emit_statement(backend: &mut LlvmBackend, out: &mut String, stmt: &Statem
     }
 }
 
-/// Compute the handle (ptrtoint of first RingBuf inline field) and emit a generic
-/// call @fn_name(handle[, value]) for strategy-based collection operations.
-/// 2026-07-18: Generic dispatch — no hardcoded function names. The fn_name comes
-/// from the type property (e.g. "ring_push" from InsertAt <~ ring_push).
+/// Resolve a strategy property value to a function name and argument markers,
+/// compute the handle (ptrtoint of first RingBuf inline field), and emit a
+/// generic call @fn_name(arg1, arg2, ...) where args are resolved from markers.
+/// 2026-07-18: Generic dispatch — no hardcoded function names.
+/// Supports: PropertyValue::Identifier("ring_push") for convention-based dispatch,
+///   and PropertyValue::List([Identifier("ring_push"), HashL, HashR]) for
+///   explicit marker-based dispatch like InsertAt <~ ring_push(#L, #R).
 fn emit_strategy_fn_call(backend: &mut LlvmBackend, out: &mut String, indent: &str,
-    target: &Expr, fn_name: &str, value: Option<&str>) -> Option<String> {
-    let name = target.as_var_name()?;
-    let rbi = backend.ctx.ringbuf_inline.get(name)?;
+    target: &Expr, pv: &crate::ast::PropertyValue, value: Option<&str>) -> Option<String> {
+    let (fn_name, markers): (&str, &[crate::ast::PropertyValue]) = match pv {
+        crate::ast::PropertyValue::Identifier(s) => {
+            const EMPTY: &[crate::ast::PropertyValue] = &[];
+            (s.as_str(), EMPTY)
+        }
+        crate::ast::PropertyValue::List(items) => {
+            let fn_ident = match items.first()? {
+                crate::ast::PropertyValue::Identifier(f) => f.as_str(),
+                _ => return None,
+            };
+            (fn_ident, &items[1..])
+        }
+        _ => return None,
+    };
+    let var_name = target.as_var_name()?;
+    let rbi = backend.ctx.ringbuf_inline.get(var_name)?;
     let gep = backend.fun.gen_reg();
     writeln!(out, "{}{} = getelementptr inbounds %State, ptr %state, i32 0, i32 {}",
         indent, gep, rbi.data_idx).ok();
     let handle = backend.fun.gen_reg();
     writeln!(out, "{}{} = ptrtoint ptr {} to i64", indent, handle, gep).ok();
-    match value {
-        Some(val) => {
-            let result = backend.fun.gen_reg();
-            writeln!(out, "{}{} = call i64 @{}(i64 {}, i64 {})", indent, result, fn_name, handle, val).ok();
-            Some(result)
+
+    // Resolve markers to argument registers. Convention-based dispatch (no markers)
+    // passes (handle, value) for push and (handle) for pop. Marker-based dispatch
+    // resolves each marker to the corresponding register.
+    let args: Vec<String> = if markers.is_empty() {
+        // Convention-based: push = (handle, value), pop = (handle)
+        match value {
+            Some(val) => vec![handle.clone(), val.to_string()],
+            None => vec![handle.clone()],
         }
-        None => {
-            let result = backend.fun.gen_reg();
-            writeln!(out, "{}{} = call i64 @{}(i64 {})", indent, result, fn_name, handle).ok();
-            Some(result)
-        }
-    }
+    } else {
+        // Marker-based: resolve #L, #R, #T to actual registers
+        markers.iter().map(|m| match m {
+            crate::ast::PropertyValue::HashL => handle.clone(),
+            crate::ast::PropertyValue::HashR => value.map(|v| v.to_string()).unwrap_or(handle.clone()),
+            crate::ast::PropertyValue::HashT => "1".to_string(), // placeholder — element type
+            _ => handle.clone(),
+        }).collect()
+    };
+
+    let args_str = args.join(", ");
+    let result = backend.fun.gen_reg();
+    writeln!(out, "{}{} = call i64 @{}({})", indent, result, fn_name, args_str).ok();
+    Some(result)
 }

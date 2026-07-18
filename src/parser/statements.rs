@@ -231,6 +231,19 @@ impl<'a> Parser<'a> {
             Some(Token::Identifier(s)) => {
                 let s = s.clone();
                 self.pos += 1;
+                // 2026-07-18: Property function call: ring_push(#L, #R).
+                // Parse as List([Identifier("ring_push"), HashL, HashR]).
+                if self.eat(&Token::LParen) {
+                    let mut items = vec![PropertyValue::Identifier(s)];
+                    if !self.check(&Token::RParen) {
+                        loop {
+                            items.push(self.parse_metadata_value_standalone()?);
+                            if !self.eat(&Token::Comma) { break; }
+                        }
+                    }
+                    self.expect(Token::RParen)?;
+                    return Ok(PropertyValue::List(items));
+                }
                 Ok(PropertyValue::Identifier(s))
             }
             Some(Token::Integer(n)) => {
