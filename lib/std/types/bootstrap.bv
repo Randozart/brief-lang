@@ -243,6 +243,46 @@ type String {
     tbaa <~ "String";
 };
 
+// 2026-07-18: Utf8View — borrowed, trusted-UTF-8 view of byte data.
+// Zero-allocation fat pointer. Does NOT own the underlying buffer.
+// encoding <~ "UTF-8" is guaranteed by construction (validated at boundary).
+// Not stored in state (borrow — can't outlive referenced data).
+type Utf8View {
+    data: Int;
+    len: Int;
+    alignment <~ 8;
+    encoding <~ "UTF-8";
+    tbaa <~ "Utf8View";
+};
+
+// 2026-07-18: StaticString — compile-time-known string data in ROM (.rodata).
+// Zero-cost view of static string literals. No allocation, no free.
+// Created automatically by the compiler for all string literals before
+// conversion to String or Utf8View.
+type StaticString {
+    data: Int;
+    len: Int;
+    tbaa <~ "StaticString";
+};
+
+// 2026-07-18: SmallString64 — inline buffer string for embedded systems.
+// 64 bytes of inline storage packed into 8 × Int fields, no heap allocation.
+// Ideal for targets with no heap (microcontroller, bare-metal).
+// Operations in std/types/small_string.bv.
+type SmallString64 {
+    slot0: Int;
+    slot1: Int;
+    slot2: Int;
+    slot3: Int;
+    slot4: Int;
+    slot5: Int;
+    slot6: Int;
+    slot7: Int;
+    len: Int;
+    alignment <~ 8;
+    encoding <~ "UTF-8";
+};
+
 type Data <: Bits {
     bytes <~ 8;
     alignment <~ 8;

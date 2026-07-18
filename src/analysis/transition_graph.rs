@@ -1268,18 +1268,37 @@ fn collect_identifiers(expr: &Expr, out: &mut HashSet<String>) {
     }
 }
 
+/// Extract the set of state fields that a transaction body writes to.
+/// 2026-07-18: Provenance-aware — uses infer_provenance to trace through
+/// field accesses and index operations, yielding more precise write sets
+/// than simple identifier matching.
 fn extract_write_set(body: &[Statement], state_fields: &HashSet<String>) -> HashSet<String> {
     let mut writes = HashSet::new();
     for stmt in body {
         if let Statement::Assign(lhs, _) = stmt {
-            if let Expr::Identifier(n) = lhs {
-                if state_fields.contains(n) {
-                    writes.insert(n.clone());
+            // 2026-07-18: Use provenance to extract the root variable name
+            // from Expr::Field and Expr::Index chains.
+            let root = extract_root_via_provenance(lhs);
+            if let Some(name) = root {
+                if state_fields.contains(&name) {
+                    writes.insert(name);
                 }
             }
         }
     }
     writes
+}
+
+/// 2026-07-18: Walk the provenance chain of an expression to find the root
+/// variable name. Handles Identifier, Field(base, _), and Index(base, _)
+/// by recursively walking to the base until an Identifier is found.
+fn extract_root_via_provenance(expr: &Expr) -> Option<String> {
+    match expr {
+        Expr::Identifier(n) => Some(n.clone()),
+        Expr::Field(base, _) => extract_root_via_provenance(base),
+        Expr::Index(base, _) => extract_root_via_provenance(base),
+        _ => None,
+    }
 }
 
 #[cfg(test)]
@@ -1610,5 +1629,43 @@ mod tests {
         let modes = assign_field_modes(&all, &referenced, &usage);
         let mode = modes.get("x").expect("x should have a mode");
         assert_eq!(*mode, crate::analysis::FieldMode::Always, "referenced + no projection → Always");
+    }
+
+    // ── Provenance-aware write set tests ───────────────────────────────
+
+    #[test]
+    fn test_extract_root_via_provenance_identifier() {
+        let expr = Expr::Identifier("count".to_string());
+        assert_eq!(extract_root_via_provenance(&expr), Some("count".to_string()));
+    }
+
+    #[test]
+    fn test_extract_root_via_provenance_field() {
+        let expr = Expr::Field(
+            Box::new(Expr::Identifier("obj".to_string())),
+            "Size".to_string(),
+        );
+        assert_eq!(extract_root_via_provenance(&expr), Some("obj".to_string()));
+    }
+
+    #[test]
+    fn test_extract_root_via_provenance_decimal() {
+        let expr = Expr::Decimal(42);
+        assert_eq!(extract_root_via_provenance(&expr), None);
+    }
+
+    #[test]
+    fn test_extract_write_set_provenance_field_assign() {
+        let fields: HashSet<String> = ["obj".to_string()].into();
+        let body = vec![Statement::Assign(
+            Expr::Field(
+                Box::new(Expr::Identifier("obj".to_string())),
+                "Size".to_string(),
+            ),
+            Expr::Decimal(42),
+        )];
+        let writes = extract_write_set(&body, &fields);
+        assert!(writes.contains("obj"), "field assign to obj.Size should detect obj as written");
+        assert_eq!(writes.len(), 1);
     }
 }

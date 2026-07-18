@@ -714,6 +714,13 @@ pub struct LlvmBackend {
     // 2026-07-18: Pre-computed strategies from analysis pass.
     // Keyed by analysis_id on Expr::Call("Alloc#", ..., Some(id)).
     pub analysis_alloc_strategies: Option<std::collections::HashMap<usize, AllocStrategy>>,
+
+    // ── SSO String Optimization ──────────────────────────────
+    // 2026-07-18: Phase B — When enabled, String is a {i64, i64} struct with
+    // inline storage for ≤6 bytes (SSO tag in lower 3 bits) and heap pointer
+    // for longer strings. When disabled (default), String is a single i64
+    // (ptrtoint of heap/stack pointer, legacy 16-byte header format).
+    pub feature_sso_strings: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -802,11 +809,19 @@ impl LlvmBackend {
             spirv_blobs: Vec::new(),
             trg_unresolved_action: TrgUnresolvedAction::Warn,
             analysis_alloc_strategies: None,
+            feature_sso_strings: false,
         }
     }
 
     pub fn with_alloc_strategies(mut self, strategies: std::collections::HashMap<usize, AllocStrategy>) -> Self {
         self.analysis_alloc_strategies = Some(strategies);
+        self
+    }
+
+    // 2026-07-18: Enable SSO (Short String Optimization) for String types.
+    // When ON, String is a {i64, i64} struct with inline storage for ≤6 bytes.
+    pub fn with_sso_strings(mut self, enabled: bool) -> Self {
+        self.feature_sso_strings = enabled;
         self
     }
 
@@ -838,6 +853,22 @@ impl LlvmBackend {
         // to always return "i64" for state fields — this keeps %State struct
         // layout uniform and avoids type mismatches in codegen paths that
         // assume i64 (load i64, store i64, add i64, icmp i64, etc.).
+        // 2026-07-18: SSO String / Utf8View fields occupy 2 consecutive i64 slots
+        // (data+tag in slot 0, length in slot 1). The field_index_map entry points
+        // to slot 0; slot 1 is implicitly at index+1. State load/store must emit
+        // extractvalue/insertvalue on the {i64,i64} struct.
+        // Utf8View always gets 2 slots (always {i64,i64}) regardless of SSO flag.
+        if matches!(ty, Type::Custom(name) if name == "Utf8View")
+            || (self.feature_sso_strings
+                && self.ctx.type_universe.as_ref().map_or(false, |u| u.is_string_like(ty)))
+        {
+            // 2026-07-18: Push 2 slots for SSO string handles ({data, len}).
+            self.ctx.field_types.push("i64".to_string());
+            self.ctx.field_brief_types.push(ty.clone());
+            self.ctx.field_types.push("i64".to_string());
+            self.ctx.field_brief_types.push(ty.clone());
+            return;
+        }
         self.ctx.field_types.push("i64".to_string());
         self.ctx.field_brief_types.push(ty.clone());
     }
@@ -1337,6 +1368,10 @@ impl LlvmBackend {
     fn type_is_heap_allocated(&self, ty: &Type) -> bool {
         // 2026-07-18: Phase A — String check replaced with is_string_like.
         // Phase B (SSO) may make short strings non-heap; is_string_like stays.
+        // 2026-07-18: Utf8View, StaticString, SmallString64 are never heap-allocated.
+        if matches!(ty, Type::Custom(name) if name == "Utf8View" || name == "StaticString" || name == "SmallString64") {
+            return false;
+        }
         (self.ctx.type_universe.as_ref().map_or(false, |u| u.is_string_like(ty))
             || matches!(ty, Type::Custom(__t) if __t == "Data"))
             || matches!(ty, Type::Custom(name) if name == "List" || name == "HashMap" || name == "HashSet" || name == "Stack" || name == "Queue" || name == "StringBuilder")

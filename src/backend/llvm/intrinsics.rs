@@ -117,9 +117,9 @@ pub fn emit_intrinsic_call(
     // 2026-07-18: Resolve %t (type placeholder) for type-dependent templates.
     let t_ty = if matches!(arg_regs[0].ty, Type::Ptr(_)) {
         let inner = match &arg_regs[0].ty { Type::Ptr(i) => *i.clone(), _ => Type::int() };
-        crate::backend::llvm::types::lower_type(&inner)
+        backend.llvm_type(&inner)
     } else {
-        crate::backend::llvm::types::lower_type(&arg_regs[0].ty)
+        backend.llvm_type(&arg_regs[0].ty)
     };
 
     if let Some(template) = OP_CONFIG.lookup(op_name, &prim, bytes) {
@@ -779,7 +779,7 @@ fn emit_intrinsic_deref(
 ) -> BTypedRegister {
     let ptr_reg = backend.emit_expr(out, &args[0], indent);
     let inner_ty = match &ptr_reg.ty { Type::Ptr(i) => *i.clone(), _ => Type::int() };
-    let llvm_ty = crate::backend::llvm::types::lower_type(&inner_ty);
+    let llvm_ty = backend.llvm_type(&inner_ty);
     writeln!(out, "{}{} = load {}, ptr {}, align {}", indent, v, llvm_ty, ptr_reg.name,
         backend.align_of(&llvm_ty)).ok();
     BTypedRegister { name: v.to_string(), ty: inner_ty }
@@ -793,7 +793,7 @@ fn emit_intrinsic_index(
     let obj_reg = backend.emit_expr(out, &args[0], indent);
     let idx_reg = backend.emit_expr(out, &args[1], indent);
     let inner_ty = match &obj_reg.ty { Type::Ptr(i) => *i.clone(), _ => Type::int() };
-    let llvm_ty = crate::backend::llvm::types::lower_type(&inner_ty);
+    let llvm_ty = backend.llvm_type(&inner_ty);
     let gep = backend.fun.gen_reg();
     writeln!(out, "{}{} = getelementptr {}, ptr {}, i64 {}", indent, gep, llvm_ty, obj_reg.name, idx_reg.name).ok();
     writeln!(out, "{}{} = load {}, ptr {}, align {}", indent, v, llvm_ty, gep,
@@ -811,8 +811,8 @@ fn emit_intrinsic_cast(
     // dispatch. The target type is passed as the second argument's type.
     let src = backend.emit_expr(out, &args[0], indent);
     // Default target type is the source type (identity cast).
-    let target_ll = crate::backend::llvm::types::lower_type(&src.ty);
-    let src_ll = crate::backend::llvm::types::lower_type(&src.ty);
+    let target_ll = backend.llvm_type(&src.ty);
+    let src_ll = backend.llvm_type(&src.ty);
     writeln!(out, "{}{} = bitcast {} {} to {}", indent, v, src_ll, src.name, target_ll).ok();
     BTypedRegister { name: v.to_string(), ty: src.ty.clone() }
 }
@@ -827,7 +827,7 @@ fn emit_external_call(
         .map(|a| backend.emit_expr(out, a, indent))
         .collect();
     let arg_strs: Vec<String> = typed_regs.iter()
-        .map(|reg| format!("{} {}", crate::backend::llvm::types::lower_type(&reg.ty), reg.name))
+        .map(|reg| format!("{} {}", backend.llvm_type(&reg.ty), reg.name))
         .collect();
     let clean_name = name.trim_end_matches('#');
     writeln!(out, "{}{} = call i64 @{}({})", indent, v, clean_name, arg_strs.join(", ")).ok();

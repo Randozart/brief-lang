@@ -258,6 +258,7 @@ impl Annotator {
             Type::Constrained(inner, _) => self.type_to_string(inner),
             Type::LayoutPtr(lc) => format!("Ptr<Bits @/0..{}>", lc.bytes * 8 - 1),
             Type::Ptr(inner) => format!("Ptr<{}>", self.type_to_string(inner)),
+            Type::PtrConst(inner) => format!("Ptr<const {}>", self.type_to_string(inner)),
             Type::Function(params, ret) => {
                 let params_str: Vec<String> = params.iter().map(|t| self.type_to_string(t)).collect();
                 format!("({}) -> {}", params_str.join(", "), self.type_to_string(ret))

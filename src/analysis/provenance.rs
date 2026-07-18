@@ -1,4 +1,5 @@
 use crate::ast::{BinaryOpKind, Expr, Statement};
+use std::collections::HashSet;
 
 /// Describes where a pointer value originates from — used to detect
 /// dangling borrows and to refine parallel-txn write sets.
@@ -52,17 +53,14 @@ pub fn deref_provenance(ptr: &Expr) -> Provenance {
 }
 
 /// Check if a provenance refers to a local (non-state) variable.
-/// Used to detect dangling pointers: storing the address of a local
-/// into a state field creates a dangling reference.
-pub fn is_local_provenance(prov: &Provenance) -> bool {
+/// 2026-07-18: Fixed stub — now checks `local_names` set instead of
+/// always returning false. Used to detect dangling pointers: storing
+/// the address of a local into a state field creates a dangling reference.
+pub fn is_local_provenance(prov: &Provenance, local_names: &HashSet<String>) -> bool {
     match prov {
-        Provenance::Known(_) => {
-            // All Known at this stage are considered state-addressable.
-            // A refined version would check a set of local variable names.
-            false
-        }
+        Provenance::Known(name) => local_names.contains(name),
         Provenance::FieldAccess { base, .. } | Provenance::Index { base, .. } => {
-            is_local_provenance(base)
+            is_local_provenance(base, local_names)
         }
         Provenance::Deref(_) => false,
         Provenance::Unknown => false,
@@ -97,14 +95,15 @@ pub fn build_dangling_warning(target: &Expr, source: &Expr) -> String {
 }
 
 /// Scan transaction body assignments for dangling pointer patterns.
-/// Emits warnings when a pointer to a local variable is stored in a
-/// state field via `&target = &source`.
-pub fn check_dangling_ptrs(body: &[Statement]) -> Vec<String> {
+/// 2026-07-18: Now takes `local_names` set to distinguish local vars
+/// from state fields. Emits warnings when a pointer to a local variable
+/// is stored in a state field via `&target = &source`.
+pub fn check_dangling_ptrs(body: &[Statement], local_names: &HashSet<String>) -> Vec<String> {
     let mut warnings = Vec::new();
     for stmt in body {
         let Some((target, source)) = extract_ptr_assign(stmt) else { continue; };
         let source_prov = infer_provenance(source);
-        if is_local_provenance(&source_prov) {
+        if is_local_provenance(&source_prov, local_names) {
             warnings.push(build_dangling_warning(target, source));
         }
     }
@@ -158,6 +157,22 @@ fn collect_var_names(expr: &Expr) -> Vec<String> {
         }
     }
     vars
+}
+
+/// Collect local variable names from a transaction's let-bindings and
+/// parameters. Used by check_dangling_ptrs to distinguish local variables
+/// from state fields.
+pub fn collect_local_names(body: &[Statement], params: &[(String, crate::ast::Type)]) -> HashSet<String> {
+    let mut locals: HashSet<String> = params.iter().map(|(n, _)| n.clone()).collect();
+    for stmt in body {
+        if let Statement::Let { name, .. } = stmt {
+            locals.insert(name.clone());
+        }
+        if let Statement::Block(inner) = stmt {
+            locals.extend(collect_local_names(inner, &[]));
+        }
+    }
+    locals
 }
 
 /// Collect variable names written to by assignment statements in a body.
@@ -310,7 +325,30 @@ mod tests {
         let body = vec![
             Statement::Assign(Expr::Identifier("x".to_string()), Expr::Decimal(42)),
         ];
-        let warnings = check_dangling_ptrs(&body);
+        let local_names = HashSet::from(["x".to_string()]);
+        let warnings = check_dangling_ptrs(&body, &local_names);
         assert!(warnings.is_empty());
+    }
+
+    #[test]
+    fn test_is_local_provenance_with_locals() {
+        let local_names = HashSet::from(["temp".to_string()]);
+        assert!(is_local_provenance(&Provenance::Known("temp".to_string()), &local_names));
+        assert!(!is_local_provenance(&Provenance::Known("state_field".to_string()), &local_names));
+    }
+
+    #[test]
+    fn test_dangling_warning_fires() {
+        let body = vec![
+            Statement::Assign(
+                Expr::Identifier("state_field".to_string()),
+                Expr::Identifier("local_var".to_string()),
+            ),
+        ];
+        let local_names = HashSet::from(["local_var".to_string()]);
+        let warnings = check_dangling_ptrs(&body, &local_names);
+        assert_eq!(warnings.len(), 1);
+        assert!(warnings[0].contains("local_var"));
+        assert!(warnings[0].contains("state_field"));
     }
 }

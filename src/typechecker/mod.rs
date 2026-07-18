@@ -12,6 +12,7 @@
 mod validate;
 pub use validate::*;
 
+use crate::analysis::provenance::Provenance;
 use crate::ast::*;
 use crate::errors::{SyntaxError, TypeError};
 use crate::intrinsic_signatures::{get_intrinsic_signature, ReturnKind, Signature};
@@ -21,6 +22,10 @@ use std::collections::HashMap;
 /// Type-check context: variable bindings and type universe.
 pub struct TypecheckContext<'a> {
     pub bindings: HashMap<String, Type>,
+    /// 2026-07-18: Names of state-level bindings (top-level let, state fields,
+    /// txn parameters). Used by is_mutable_location to distinguish mutable
+    /// state fields from immutable let-bindings for PtrConst inference.
+    pub state_keys: std::collections::HashSet<String>,
     pub universe: &'a TypeUniverse,
 }
 
@@ -28,104 +33,143 @@ impl<'a> TypecheckContext<'a> {
     pub fn new(universe: &'a TypeUniverse) -> Self {
         TypecheckContext {
             bindings: HashMap::new(),
+            state_keys: std::collections::HashSet::new(),
             universe,
         }
+    }
+
+    /// 2026-07-18: Check if a variable name refers to a mutable state location.
+    /// Used by AddrOf to decide Ptr<T> (mutable) vs Ptr<const T> (immutable).
+    pub fn is_mutable_location(&self, name: &str) -> bool {
+        self.state_keys.contains(name)
     }
 }
 
 /// Infer the type of an expression in the given context.
-pub fn infer_expression(expr: &Expr, ctx: &mut TypecheckContext) -> Result<Type, TypeError> {
+/// Infer the type of an expression. Returns both the type and provenance.
+/// 2026-07-18: Phase 2 — Thread Provenance through type inference for
+/// pointer tracking and dangling-borrow detection.
+pub fn infer_expression(expr: &Expr, ctx: &mut TypecheckContext) -> Result<(Type, Provenance), TypeError> {
     match expr {
         // ── Literals ────────────────────────────────────────────
-        Expr::Decimal(_) => Ok(Type::int()),
-        Expr::Float(_) => Ok(Type::float()),
-        Expr::Bool(_) => Ok(Type::bool_()),
-        Expr::Quoted(_) => Ok(Type::string()),
+        Expr::Decimal(_) => Ok((Type::int(), Provenance::Unknown)),
+        Expr::Float(_) => Ok((Type::float(), Provenance::Unknown)),
+        Expr::Bool(_) => Ok((Type::bool_(), Provenance::Unknown)),
+        Expr::Quoted(_) => Ok((Type::string(), Provenance::Unknown)),
 
         // ── References ──────────────────────────────────────────
         Expr::Identifier(name) => {
-            ctx.bindings
+            let ty = ctx.bindings
                 .get(name)
                 .cloned()
                 .ok_or_else(|| TypeError::UndefinedVariable {
                     name: name.clone(),
                     available: ctx.bindings.keys().cloned().collect(),
-                })
+                })?;
+            Ok((ty, Provenance::Known(name.clone())))
         }
 
         // ── Calls ───────────────────────────────────────────────
-        Expr::Call(name, args, _) => infer_call(name, args, ctx),
+        Expr::Call(name, args, _) => {
+            infer_call(name, args, ctx).map(|ty| (ty, Provenance::Unknown))
+        }
 
         // ── Binary operators ─────────────────────────────────────
-        Expr::BinaryOp(kind, lhs, rhs) => infer_binary_op(kind, lhs, rhs, ctx),
+        Expr::BinaryOp(kind, lhs, rhs) => {
+            infer_binary_op(kind, lhs, rhs, ctx).map(|ty| (ty, Provenance::Unknown))
+        }
 
         // ── Unary operators ──────────────────────────────────────
-        Expr::UnaryOp(kind, expr) => infer_unary_op(kind, expr, ctx),
+        Expr::UnaryOp(kind, expr) => {
+            infer_unary_op(kind, expr, ctx).map(|ty| (ty, Provenance::Unknown))
+        }
 
         // ── Other expressions ────────────────────────────────────
         Expr::Block(stmts) => {
             for stmt in stmts {
                 infer_statement(stmt, ctx)?;
             }
-            Ok(Type::void())
+            Ok((Type::void(), Provenance::Unknown))
         }
-        Expr::If(cond, then, else_) => infer_if(cond, then, else_, ctx),
+        Expr::If(cond, then, else_) => {
+            infer_if(cond, then, else_, ctx).map(|ty| (ty, Provenance::Unknown))
+        }
         Expr::Tuple(elems) => {
             let types: Result<Vec<Type>, _> =
-                elems.iter().map(|e| infer_expression(e, ctx)).collect();
-            Ok(Type::Tuple(types?))
+                elems.iter().map(|e| infer_expression(e, ctx).map(|(t, _)| t)).collect();
+            Ok((Type::Tuple(types?), Provenance::Unknown))
         }
         Expr::List(elems) => {
             if let Some(first) = elems.first() {
-                let elem_ty = infer_expression(first, ctx)?;
-                Ok(Type::Applied("List".into(), vec![elem_ty]))
+                let (elem_ty, _) = infer_expression(first, ctx)?;
+                Ok((Type::Applied("List".into(), vec![elem_ty]), Provenance::Unknown))
             } else {
-                Ok(Type::Applied("List".into(), vec![Type::int()]))
+                Ok((Type::Applied("List".into(), vec![Type::int()]), Provenance::Unknown))
             }
         }
         Expr::Lambda(params, body) => {
             for param in params {
                 ctx.bindings.insert(param.clone(), Type::int());
             }
-            let ret_ty = infer_expression(body, ctx)?;
-            Ok(Type::Function(
+            let (ret_ty, _) = infer_expression(body, ctx)?;
+            Ok((Type::Function(
                 params.iter().map(|_| Type::int()).collect(),
                 Box::new(ret_ty),
-            ))
+            ), Provenance::Unknown))
         }
-        Expr::Field(obj, _name) => {
-            // Simplified: just return the object's type
-            infer_expression(obj, ctx)
+        Expr::Field(obj, name) => {
+            let (obj_ty, obj_prov) = infer_expression(obj, ctx)?;
+            Ok((obj_ty, Provenance::FieldAccess {
+                base: Box::new(obj_prov),
+                field: name.clone(),
+            }))
         }
         Expr::Index(obj, index) => {
-            let _obj_ty = infer_expression(obj, ctx)?;
-            let _idx_ty = infer_expression(index, ctx)?;
-            // Simplified: assume index returns element type
-            Ok(Type::int())
+            let (_, obj_prov) = infer_expression(obj, ctx)?;
+            let (_, idx_prov) = infer_expression(index, ctx)?;
+            Ok((Type::int(), Provenance::Index {
+                base: Box::new(obj_prov),
+                index: Box::new(idx_prov),
+            }))
         }
         Expr::Cast(expr, target_ty) => {
-            infer_expression(expr, ctx)?;
-            Ok(target_ty.clone())
+            let (_, prov) = infer_expression(expr, ctx)?;
+            Ok((target_ty.clone(), prov))
         }
         Expr::IsType(expr, _ty) => {
-            infer_expression(expr, ctx)?;
-            Ok(Type::bool_())
+            let (_, prov) = infer_expression(expr, ctx)?;
+            Ok((Type::bool_(), prov))
         }
         Expr::Within(expr, scope) => {
-            infer_expression(scope, ctx)?;
+            let (_, _) = infer_expression(scope, ctx)?;
             infer_expression(expr, ctx)
         }
-        Expr::DerivationBlock(_) => Ok(Type::void()),
+        Expr::DerivationBlock(_) => Ok((Type::void(), Provenance::Unknown)),
         // 2026-07-17: Address-of: &expr returns a Ptr to the inner type.
+        // Provenance carries through so the backend can distinguish
+        // mutable state borrows from immutable local borrows.
+        // 2026-07-18: Const inference — &local_var returns Ptr<const T>
+        // (read-only), while &state_field returns Ptr<T> (mutable).
         Expr::AddrOf(inner) => {
-            let inner_ty = infer_expression(inner, ctx)?;
-            Ok(Type::Ptr(Box::new(inner_ty)))
+            let (inner_ty, inner_prov) = infer_expression(inner, ctx)?;
+            let ptr_ty = if let Expr::Identifier(name) = inner.as_ref() {
+                if ctx.is_mutable_location(name) {
+                    Type::ptr(inner_ty)
+                } else {
+                    Type::ptr_const(inner_ty)
+                }
+            } else {
+                // 2026-07-18: Compound expressions (Field, Index) on state
+                // are still mutable — fall back to Ptr<T>.
+                Type::ptr(inner_ty)
+            };
+            Ok((ptr_ty, inner_prov))
         }
         // 2026-07-15: Dereference: *ptr returns the pointee type (strip outer Ptr).
         Expr::Deref(inner) => {
-            let inner_ty = infer_expression(inner, ctx)?;
+            let (inner_ty, inner_prov) = infer_expression(inner, ctx)?;
             match inner_ty {
-                Type::Ptr(pointee) => Ok((*pointee).clone()),
+                Type::Ptr(pointee) => Ok(((*pointee).clone(), Provenance::Deref(Box::new(inner_prov)))),
                 _ => Err(TypeError::InvalidOperation {
                     operation: format!("cannot dereference non-pointer type '{}'", inner_ty),
                     type_name: inner_ty.to_string(),
@@ -136,9 +180,16 @@ pub fn infer_expression(expr: &Expr, ctx: &mut TypecheckContext) -> Result<Type,
             name: name.clone(),
             available: vec![],
         }),
-        Expr::FormattingAnnotation(_) => Ok(Type::void()),
-        Expr::Match(expr, arms) => infer_match(expr, arms, ctx),
+        Expr::FormattingAnnotation(_) => Ok((Type::void(), Provenance::Unknown)),
+        Expr::Match(expr, arms) => {
+            infer_match(expr, arms, ctx).map(|ty| (ty, Provenance::Unknown))
+        }
     }
+}
+
+/// 2026-07-18: Convenience wrapper — infer type without provenance.
+pub fn infer_type_only(expr: &Expr, ctx: &mut TypecheckContext) -> Result<Type, TypeError> {
+    infer_expression(expr, ctx).map(|(ty, _)| ty)
 }
 
 /// Infer the type of a function/intrinsic call.
@@ -148,7 +199,7 @@ fn infer_call(name: &str, args: &[Expr], ctx: &mut TypecheckContext) -> Result<T
         let sig = get_intrinsic_signature(name).ok_or_else(|| {
             let found: Vec<String> = args
                 .iter()
-                .filter_map(|a| infer_expression(a, ctx).ok())
+                .filter_map(|a| infer_type_only(a, ctx).ok())
                 .map(|t| format!("{}", t))
                 .collect();
             TypeError::InvalidOperation {
@@ -161,7 +212,7 @@ fn infer_call(name: &str, args: &[Expr], ctx: &mut TypecheckContext) -> Result<T
 
     // User function call
     for arg in args {
-        infer_expression(arg, ctx)?;
+        infer_type_only(arg, ctx)?;
     }
     Ok(Type::int())
 }
@@ -181,7 +232,7 @@ fn infer_intrinsic_call(
         });
     }
     for (i, (_, param_ty)) in sig.parameters.iter().enumerate() {
-        let arg_ty = infer_expression(&args[i], ctx)?;
+        let arg_ty = infer_type_only(&args[i], ctx)?;
         // Simplified type compatibility check
         if format!("{}", arg_ty) != format!("{}", param_ty) {
             return Err(TypeError::TypeMismatch {
@@ -198,7 +249,7 @@ fn infer_intrinsic_call(
         ReturnKind::Native("Bool") => Type::bool_(),
         ReturnKind::Inferred => {
             // Infer from first argument's type
-            args.first().map(|a| infer_expression(a, ctx)).unwrap_or(Ok(Type::int()))?
+            args.first().map(|a| infer_type_only(a, ctx)).unwrap_or(Ok(Type::int()))?
         }
         ReturnKind::Exact(t) => t.clone(),
         _ => Type::int(), // fallback for unknown Native kinds
@@ -212,8 +263,8 @@ fn infer_binary_op(
     rhs: &Expr,
     ctx: &mut TypecheckContext,
 ) -> Result<Type, TypeError> {
-    let lhs_ty = infer_expression(lhs, ctx)?;
-    let rhs_ty = infer_expression(rhs, ctx)?;
+    let lhs_ty = infer_type_only(lhs, ctx)?;
+    let rhs_ty = infer_type_only(rhs, ctx)?;
 
     // Check type compatibility
     let lhs_str = format!("{}", lhs_ty);
@@ -268,7 +319,7 @@ fn infer_unary_op(
     expr: &Expr,
     ctx: &mut TypecheckContext,
 ) -> Result<Type, TypeError> {
-    let ty = infer_expression(expr, ctx)?;
+    let ty = infer_type_only(expr, ctx)?;
     match kind {
         UnaryOpKind::Neg => {
             let type_str = format!("{}", ty);
@@ -294,7 +345,7 @@ fn infer_if(
     else_: &Option<Box<Expr>>,
     ctx: &mut TypecheckContext,
 ) -> Result<Type, TypeError> {
-    let cond_ty = infer_expression(cond, ctx)?;
+    let cond_ty = infer_type_only(cond, ctx)?;
     let cond_str = format!("{}", cond_ty);
     if cond_str != "Bool" {
         return Err(TypeError::TypeMismatch {
@@ -303,9 +354,9 @@ fn infer_if(
             context: "if condition".into(),
         });
     }
-    let then_ty = infer_expression(then, ctx)?;
+    let then_ty = infer_type_only(then, ctx)?;
     if let Some(else_) = else_ {
-        let else_ty = infer_expression(else_, ctx)?;
+        let else_ty = infer_type_only(else_, ctx)?;
         // Both branches should return the same type
         let then_str = format!("{}", then_ty);
         let else_str = format!("{}", else_ty);
@@ -328,9 +379,9 @@ fn infer_match(
     arms: &[MatchArm],
     ctx: &mut TypecheckContext,
 ) -> Result<Type, TypeError> {
-    let _matched_ty = infer_expression(expr, ctx)?;
+    let _matched_ty = infer_type_only(expr, ctx)?;
     if let Some(first) = arms.first() {
-        infer_expression(&first.body, ctx)
+        infer_type_only(&first.body, ctx)
     } else {
         Ok(Type::void())
     }
@@ -341,7 +392,7 @@ pub fn infer_statement(stmt: &Statement, ctx: &mut TypecheckContext) -> Result<(
     match stmt {
         Statement::Let { name, ty, expr, .. } => {
             let inferred = if let Some(expr) = expr {
-                infer_expression(expr, ctx)?
+                infer_type_only(expr, ctx)?
             } else {
                 Type::int()
             };
@@ -350,28 +401,39 @@ pub fn infer_statement(stmt: &Statement, ctx: &mut TypecheckContext) -> Result<(
             Ok(())
         }
         Statement::Assign(lhs, rhs) => {
-            infer_expression(lhs, ctx)?;
-            infer_expression(rhs, ctx)?;
+            // 2026-07-18: Write-through guard — reject *p = val when p is Ptr<const T>.
+            if let Expr::Deref(ptr) = lhs {
+                if let Ok((ptr_ty, _)) = infer_expression(ptr, ctx) {
+                    if matches!(ptr_ty, Type::PtrConst(_)) {
+                        return Err(TypeError::InvalidOperation {
+                            operation: "write through const pointer (*p = val)".into(),
+                            type_name: format!("{}", ptr_ty),
+                        });
+                    }
+                }
+            }
+            infer_type_only(lhs, ctx)?;
+            infer_type_only(rhs, ctx)?;
             Ok(())
         }
         Statement::Term(val) | Statement::TermBang(val) => {
             if let Some(val) = val {
-                infer_expression(val, ctx)?;
+                infer_type_only(val, ctx)?;
             }
             Ok(())
         }
         Statement::Return(val) => {
             if let Some(val) = val {
-                infer_expression(val, ctx)?;
+                infer_type_only(val, ctx)?;
             }
             Ok(())
         }
         Statement::Expression(expr) => {
-            infer_expression(expr, ctx)?;
+            infer_type_only(expr, ctx)?;
             Ok(())
         }
         Statement::If(cond, then, else_) => {
-            infer_expression(cond, ctx)?;
+            infer_type_only(cond, ctx)?;
             for stmt in then {
                 infer_statement(stmt, ctx)?;
             }
@@ -381,7 +443,7 @@ pub fn infer_statement(stmt: &Statement, ctx: &mut TypecheckContext) -> Result<(
             Ok(())
         }
         Statement::Guarded(cond, body) => {
-            infer_expression(cond, ctx)?;
+            infer_type_only(cond, ctx)?;
             for stmt in body {
                 infer_statement(stmt, ctx)?;
             }
@@ -395,7 +457,7 @@ pub fn infer_statement(stmt: &Statement, ctx: &mut TypecheckContext) -> Result<(
         }
         Statement::Escape(_) => Ok(()),
         Statement::Foreach { item, list, body } => {
-            let list_ty = infer_expression(list, ctx)?;
+            let list_ty = infer_type_only(list, ctx)?;
             // Element type: assume List<T> has element T
             ctx.bindings.insert(item.clone(), Type::int());
             for stmt in body {
@@ -404,7 +466,7 @@ pub fn infer_statement(stmt: &Statement, ctx: &mut TypecheckContext) -> Result<(
             Ok(())
         }
         Statement::TrgBinding { instance, .. } => {
-            infer_expression(instance, ctx)?;
+            infer_type_only(instance, ctx)?;
             Ok(())
         }
         Statement::InlineAsm { .. } => Ok(()),
@@ -457,6 +519,14 @@ fn check_top_level(item: &TopLevel, universe: &TypeUniverse, state_bindings: &Ha
     // 2026-07-14: Inject state variable bindings so transactions/defns can reference them.
     for (name, ty) in state_bindings {
         ctx.bindings.insert(name.clone(), ty.clone());
+        ctx.state_keys.insert(name.clone());
+    }
+    // 2026-07-18: Txn parameters are also mutable state locations (they hold
+    // state field values within the txn body).
+    if let TopLevel::Transaction(txn) = item {
+        for (name, _) in &txn.parameters {
+            ctx.state_keys.insert(name.clone());
+        }
     }
     match item {
         TopLevel::Definition(defn) => {

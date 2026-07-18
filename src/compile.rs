@@ -69,6 +69,10 @@ pub struct BuildOptions {
     pub trg_unresolved_action: TrgUnresolvedAction,
     /// 2026-07-16: P4 — Pre-compiled .o / .so / .a objects linked into the binary.
     pub extra_objects: Vec<PathBuf>,
+    /// 2026-07-18: Phase B — Enable SSO (Short String Optimization) for String types.
+    /// When ON, String is a 2-field \`{ i64, i64 }\` struct with inline storage for ≤6
+    /// bytes, heap for longer. When OFF (default), String is passed as \`i8*\` (legacy).
+    pub feature_sso_strings: bool,
 }
 
 /// Compile a Brief source file: produce an executable binary (or `.ll` with `--llvm`).
@@ -140,6 +144,19 @@ pub fn compile_source(file_path: &str, source: &str, opts: &BuildOptions) -> Res
     // analysis output to select Arena/Alloca/Malloc instead of guessing.
     let alloc_strategies = brief_compiler::analysis::allocation::analyze_alloc_strategies(&mut items);
 
+    // 2026-07-18: Dangling pointer detection — check each txn for local
+    // pointer stored in state field (e.g. `&state_ptr = &local_var`).
+    use brief_compiler::analysis::provenance::{check_dangling_ptrs, collect_local_names};
+    for item in &items {
+        if let brief_compiler::ast::TopLevel::Transaction(txn) = item {
+            let local_names = collect_local_names(&txn.body, &txn.parameters);
+            let warnings = check_dangling_ptrs(&txn.body, &local_names);
+            for w in &warnings {
+                eprintln!("{}", w);
+            }
+        }
+    }
+
     // 2026-07-16: P4 — Collect extra objects from ForeignBinding FromSpec paths
     // for linking into the final binary.
     let extra_objects = collect_extra_objects(&items, &resolver)?;
@@ -188,6 +205,7 @@ pub fn check_source(file_path: &str, source: &str) -> Result<(), String> {
         enable_plugins: vec![],
         trg_unresolved_action: TrgUnresolvedAction::Warn,
         extra_objects: vec![],
+        feature_sso_strings: false,
     };
     let (_items, _universe) = parse_and_check(file_path, source, &default_opts)?;
     println!("OK");
@@ -239,6 +257,7 @@ fn codegen(
         BackendKind::Llvm => {
             let mut b = LlvmBackend::new()
                 .with_alloc_strategies(alloc_strategies)
+                .with_sso_strings(opts.feature_sso_strings)
                 .with_optimize_budget(opts.optimize_budget)
                 .with_type_universe(universe.clone())
                 .with_trg_unresolved_action(opts.trg_unresolved_action);
@@ -273,6 +292,7 @@ fn codegen(
         BackendKind::Gpu => {
             let mut b = LlvmBackend::new()
                 .with_alloc_strategies(alloc_strategies)
+                .with_sso_strings(opts.feature_sso_strings)
                 .with_optimize_budget(opts.optimize_budget)
                 .with_type_universe(universe.clone())
                 .with_gpu_offload(true);

@@ -1,0 +1,47 @@
+// 2026-07-18: SmallString64 operations — inline buffer string for embedded.
+// 64 bytes inline packed into 8 × Int slots, zero heap allocation.
+// Import via `import "std/types/small_string.bv"`.
+
+// Current length of a SmallString64.
+defn smallstring_len(s: SmallString64) -> Int {
+    term s.len;
+};
+
+// Get byte at position i. Bounds: [i >= 0][i < s.len].
+// Uses when guards to select the correct Int slot.
+defn smallstring_get(s: SmallString64, i: Int) -> Int [i >= 0][i < s.len] {
+    let slot_idx: Int = i / 8;
+    let byte_idx: Int = i % 8;
+    when slot_idx == 0 { term (s.slot0 >> (byte_idx * 8)) & 0xFF; };
+    when slot_idx == 1 { term (s.slot1 >> (byte_idx * 8)) & 0xFF; };
+    when slot_idx == 2 { term (s.slot2 >> (byte_idx * 8)) & 0xFF; };
+    when slot_idx == 3 { term (s.slot3 >> (byte_idx * 8)) & 0xFF; };
+    when slot_idx == 4 { term (s.slot4 >> (byte_idx * 8)) & 0xFF; };
+    when slot_idx == 5 { term (s.slot5 >> (byte_idx * 8)) & 0xFF; };
+    when slot_idx == 6 { term (s.slot6 >> (byte_idx * 8)) & 0xFF; };
+    when slot_idx == 7 { term (s.slot7 >> (byte_idx * 8)) & 0xFF; };
+    term 0;
+};
+
+// Append a byte. Contract ensures capacity is not exceeded.
+defn smallstring_push_byte(s: SmallString64, byte: Int) [s.len < 64] {
+    let slot_idx: Int = s.len / 8;
+    let byte_idx: Int = s.len % 8;
+    let shifted: Int = (byte & 0xFF) << (byte_idx * 8);
+    when slot_idx == 0 { s.slot0 = s.slot0 | shifted; };
+    when slot_idx == 1 { s.slot1 = s.slot1 | shifted; };
+    when slot_idx == 2 { s.slot2 = s.slot2 | shifted; };
+    when slot_idx == 3 { s.slot3 = s.slot3 | shifted; };
+    when slot_idx == 4 { s.slot4 = s.slot4 | shifted; };
+    when slot_idx == 5 { s.slot5 = s.slot5 | shifted; };
+    when slot_idx == 6 { s.slot6 = s.slot6 | shifted; };
+    when slot_idx == 7 { s.slot7 = s.slot7 | shifted; };
+    s.len = s.len + 1;
+};
+
+// Clear all slots and reset length.
+defn smallstring_clear(s: SmallString64) {
+    s.slot0 = 0; s.slot1 = 0; s.slot2 = 0; s.slot3 = 0;
+    s.slot4 = 0; s.slot5 = 0; s.slot6 = 0; s.slot7 = 0;
+    s.len = 0;
+};

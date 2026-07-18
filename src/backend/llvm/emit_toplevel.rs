@@ -323,6 +323,25 @@ impl LlvmBackend {
                 return "ptr".to_string();
             }
         }
+        // 2026-07-18: SSO String override — return {i64, i64} struct instead of ptr.
+        // This must be checked after struct_types (which returns ptr for FFI) but
+        // before the universe query (which returns "ptr" for String via ctd_to_llvm).
+        // 2026-07-18: Utf8View always uses {i64, i64} (fat pointer), regardless of SSO.
+        if let Type::Custom(name) = ty {
+            if name == "Utf8View" {
+                return "{ i64, i64 }".to_string();
+            }
+        }
+        if self.feature_sso_strings {
+            if let Type::Custom(name) = ty {
+                if name == "String" {
+                    return "{ i64, i64 }".to_string();
+                }
+            }
+            if self.ctx.type_universe.as_ref().map_or(false, |u| u.is_string_like(ty)) {
+                return "{ i64, i64 }".to_string();
+            }
+        }
         // 2026-07-14: Universe query with derive_llvm_type replaces
         // the removed ResolvedType.llvm_type field.
         self.ctx.type_universe.as_ref()
@@ -1104,6 +1123,11 @@ impl LlvmBackend {
                 writeln!(out, "  {} = ptrtoint ptr {} to i64", conv, raw).ok();
                 reg = conv;
             } else if param_llvm_ty == "i64" {
+                reg = raw;
+            } else if self.feature_sso_strings
+                && self.ctx.type_universe.as_ref().map_or(false, |u| u.is_string_like(t))
+            {
+                // 2026-07-18: SSO String params are {i64, i64} — no boxing needed.
                 reg = raw;
             } else if matches!(t, Type::Custom(__t) if __t == "Bool" || __t == "Char" || __t == "String" || __t == "Data" || __t == "Float") {
                 // 2026-07-12: box_op removed from ResolvedType — use hardcoded fallback.

@@ -18,7 +18,7 @@ pub fn emit_statement(backend: &mut LlvmBackend, out: &mut String, stmt: &Statem
                 Some(e) => backend.emit_expr(out, e, indent),
                 None => {
                     let v = backend.fun.gen_reg();
-                    let llvm_ty = ty.as_ref().map(|t| crate::backend::llvm::types::lower_type(t)).unwrap_or("i64".into());
+                    let llvm_ty = ty.as_ref().map(|t| backend.llvm_type(t)).unwrap_or("i64".into());
                     writeln!(out, "{}{} = alloca {}", indent, v, llvm_ty).ok();
                     TypedRegister { name: v, ty: ty.clone().unwrap_or(Type::int()) }
                 }
@@ -65,14 +65,14 @@ pub fn emit_statement(backend: &mut LlvmBackend, out: &mut String, stmt: &Statem
                         emit_strategy_fn_call(backend, out, indent, lhs, pv, Some(&val.name));
                     } else if let Some(reg) = backend.fun.let_bindings.get(name) {
                         // 2026-07-14: store type must match val.ty — hardcoded i64 breaks bool/float assigns
-                        let store_ty = crate::backend::llvm::types::lower_type(&val.ty);
+                        let store_ty = backend.llvm_type(&val.ty);
                         writeln!(out, "{}store {} {}, ptr {}", indent, store_ty, val.name, reg).ok();
                     // 2026-07-14: Handle MMIO and regular state field assignments
                     } else if let Some(&addr) = backend.ctx.mmio_fields.get(name) {
                         let ptr = backend.fun.gen_reg();
                         writeln!(out, "{}{} = inttoptr i64 {} to ptr", indent, ptr, addr).ok();
                         // 2026-07-14: volatile store type must match val.ty — hardcoded i64 breaks MMIO bools
-                        let store_ty = crate::backend::llvm::types::lower_type(&val.ty);
+                        let store_ty = backend.llvm_type(&val.ty);
                         writeln!(out, "{}store volatile {} {}, ptr {}", indent, store_ty, val.name, ptr).ok();
                     } else if let Some(&idx) = backend.ctx.field_index_map.get(name) {
                         let ptr = backend.fun.gen_reg();
@@ -90,7 +90,7 @@ pub fn emit_statement(backend: &mut LlvmBackend, out: &mut String, stmt: &Statem
                 // pointer-offset arithmetic (buf + N) via GEP in emit_expr.
                 Expr::Deref(inner) => {
                     let ptr_reg = backend.emit_expr(out, inner, indent);
-                    let store_ty = crate::backend::llvm::types::lower_type(&val.ty);
+                    let store_ty = backend.llvm_type(&val.ty);
                     writeln!(out, "{}store {} {}, ptr {}", indent, store_ty, val.name, ptr_reg.name).ok();
                 }
                 // 2026-07-17: Pointer-indexed store — data[idx] = val.
@@ -135,7 +135,7 @@ pub fn emit_statement(backend: &mut LlvmBackend, out: &mut String, stmt: &Statem
             if let Some(val) = val {
                 let reg = backend.emit_expr(out, val, indent);
                 if backend.fun.fn_ret_ty != "void" {
-                    let ret_ty = crate::backend::llvm::types::lower_type(&reg.ty);
+                    let ret_ty = backend.llvm_type(&reg.ty);
                     writeln!(out, "{}ret {} {}", indent, ret_ty, reg.name).ok();
                     backend.fun.terminated = true;
                 }
@@ -147,7 +147,7 @@ pub fn emit_statement(backend: &mut LlvmBackend, out: &mut String, stmt: &Statem
         Statement::Return(val) => {
             if let Some(val) = val {
                 let reg = backend.emit_expr(out, val, indent);
-                let ret_ty = crate::backend::llvm::types::lower_type(&reg.ty);
+                let ret_ty = backend.llvm_type(&reg.ty);
                 writeln!(out, "{}ret {} {}", indent, ret_ty, reg.name).ok();
                 backend.fun.terminated = true;
             }

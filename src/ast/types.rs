@@ -24,6 +24,11 @@ pub enum Type {
     TypeVar(String),
     /// Pointer type: Ptr(T)
     Ptr(Box<Type>),
+    /// Read-only pointer type: Ptr<const T>. Same size as Ptr(T), but the
+    /// compiler rejects write-through (*p = val). Created by `&let_var`
+    /// where the variable is immutable (local let-binding, not state field).
+    /// 2026-07-18: Phase 3 — Const inference from context.
+    PtrConst(Box<Type>),
     /// Function type: Function([Int, Int], Box::new(Int))
     Function(Vec<Type>, Box<Type>),
     /// Type-level width: Width(8)
@@ -78,6 +83,9 @@ impl Type {
     }
     pub fn ptr(inner: Type) -> Type {
         Type::Ptr(Box::new(inner))
+    }
+    pub fn ptr_const(inner: Type) -> Type {
+        Type::PtrConst(Box::new(inner))
     }
 }
 

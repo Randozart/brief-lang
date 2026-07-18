@@ -1,0 +1,24 @@
+// 2026-07-18: Utf8View operations — borrowed, trusted-UTF-8 view.
+// Zero-allocation fat pointer. encoding <~ "UTF-8" guaranteed by construction.
+// Struct literal creation (Utf8View { ... }) pending parser support.
+// Import via `import "std/types/utf8view.bv"`.
+
+frgn __utf8_validate(data: Int, len: Int) -> Int;
+frgn __utf8_find(hay: Int, hay_len: Int, needle: Int, needle_len: Int) -> Int;
+frgn __memcmp(a: Int, b: Int, len: Int) -> Int;
+frgn __memcpy(dst: Int, src: Int, len: Int) -> Int;
+
+// Byte length of the view (O(1)).
+defn utf8view_len(v: Utf8View) -> Int {
+    term v.len;
+};
+
+// Find first byte offset of needle in haystack. Returns -1 if not found.
+defn utf8view_find(haystack: Utf8View, needle: Utf8View) -> Int {
+    term __utf8_find(haystack.data, haystack.len, needle.data, needle.len);
+};
+
+// Byte comparison — returns true if equal.
+defn utf8view_eq(a: Utf8View, b: Utf8View) -> Bool {
+    term a.len == b.len && __memcmp(a.data, b.data, a.len) == 0;
+};

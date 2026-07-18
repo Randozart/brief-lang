@@ -17,6 +17,10 @@
 // interface as List and RingBuffer, via InsertAt/ExtractFrom
 // property bindings.
 type CrosswordArena<T> <: List<T> {
+    base: Ptr<Byte>;
+    capacity: Int;
+    slot_offset: Int;
+    string_offset: Int;
     InsertAt <~ crossword_push;
     ExtractFrom <~ crossword_pop;
 };

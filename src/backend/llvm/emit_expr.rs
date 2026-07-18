@@ -14,7 +14,7 @@ use crate::backend::llvm::{LlvmBackend, TypedRegister};
 use crate::backend::llvm::intrinsics::{emit_intrinsic_call, OP_CONFIG};
 use crate::ast::*;
 use crate::backend::llvm::emit_stmt;
-use crate::backend::llvm::types::lower_type;
+
 use std::fmt::Write;
 
 impl LlvmBackend {
@@ -241,7 +241,7 @@ impl LlvmBackend {
                 }
                 // Struct field access via extractvalue or GEP
                 writeln!(out, "{}{} = extractvalue {} {}, {}", indent, v,
-                    lower_type(&obj_reg.ty), obj_reg.name, field).ok();
+                    self.llvm_type(&obj_reg.ty), obj_reg.name, field).ok();
                 TypedRegister { name: v.to_string(), ty: Type::int() }
             }
 
@@ -271,7 +271,7 @@ impl LlvmBackend {
                     writeln!(out, "{}{} = load i64, ptr {}", indent, v, gep).ok();
                 } else {
                     writeln!(out, "{}{} = extractelement {} {}, {}",
-                        indent, v, lower_type(&obj_reg.ty), obj_reg.name, idx_reg.name).ok();
+                        indent, v, self.llvm_type(&obj_reg.ty), obj_reg.name, idx_reg.name).ok();
                 }
                 TypedRegister { name: v.to_string(), ty: Type::int() }
             }
@@ -285,8 +285,8 @@ impl LlvmBackend {
             // alone would produce a no-op bitcast.
             Expr::Cast(expr, target) => {
                 let src = self.emit_expr(out, expr, indent);
-                let target_ll = lower_type(target);
-                let src_ll = lower_type(&src.ty);
+                let target_ll = self.llvm_type(target);
+                let src_ll = self.llvm_type(&src.ty);
                 // 2026-07-17: Priorities for cast dispatch:
                 // 1. Ptr<T> target → inttoptr (never String — String/Data have Custom type)
                 // 2. String/Data target → runtime helper
@@ -379,7 +379,7 @@ impl LlvmBackend {
                     Type::Ptr(inner_ty) => inner_ty.as_ref().clone(),
                     _ => Type::int(), // fallback
                 };
-                let llvm_ty = lower_type(&pointee_ty);
+                let llvm_ty = self.llvm_type(&pointee_ty);
                 writeln!(out, "{}{} = load {}, ptr {}, align 8", indent, v, llvm_ty, ptr_reg.name).ok();
                 TypedRegister { name: v.to_string(), ty: pointee_ty }
             }
@@ -424,6 +424,66 @@ impl LlvmBackend {
     /// 2026-07-14: Use alloca instead of global constant to avoid placement
     /// issues (globals must be at module level, not inside functions).
     fn emit_string_literal(&mut self, out: &mut String, v: &str, bytes: &[u8], indent: &str) -> TypedRegister {
+        // 2026-07-18: Phase B — SSO string path when feature is enabled.
+        if self.feature_sso_strings {
+            if bytes.len() <= 6 {
+                return self.emit_sso_literal(out, v, bytes, indent);
+            }
+            return self.emit_sso_heap_literal(out, v, bytes, indent);
+        }
+        self.emit_legacy_string_literal(out, v, bytes, indent)
+    }
+
+    // 2026-07-18: SSO string literal — pack ≤6 bytes inline into handle[0] with
+    // SSO tag (0b001), store length in handle[1]. Returns {i64, i64} struct.
+    // No heap allocation, no 16-byte header, no null terminator needed for SSO.
+    fn emit_sso_literal(&mut self, out: &mut String, v: &str, bytes: &[u8], indent: &str) -> TypedRegister {
+        let len = bytes.len() as u64;
+        // Pack bytes into u64 (little-endian), shift left 3 for tag bits, set bit 0 (SSO tag)
+        let packed = bytes.iter().enumerate().fold(0u64, |acc, (i, &b)| {
+            acc | ((b as u64) << (i * 8))
+        });
+        let shifted = packed << 3;
+        let t0 = self.fun.gen_reg();
+        writeln!(out, "{}{} = or i64 {}, 1", indent, t0, shifted).ok();
+        // Build {i64, i64} struct
+        let t1 = self.fun.gen_reg();
+        writeln!(out, "{}{} = insertvalue {{ i64, i64 }} undef, i64 {}, 0", indent, t1, t0).ok();
+        let t2 = self.fun.gen_reg();
+        writeln!(out, "{}{} = insertvalue {{ i64, i64 }} %{}, i64 {}, 1", indent, t2, t1, len).ok();
+        TypedRegister { name: t2, ty: Type::string() }
+    }
+
+    // 2026-07-18: SSO heap string literal — allocate raw bytes + null terminator
+    // on stack (no 16-byte header, no capacity slot). Handle[0] = ptrtoint with
+    // tag 0b000 (heap), handle[1] = length. Returns {i64, i64} struct.
+    fn emit_sso_heap_literal(&mut self, out: &mut String, v: &str, bytes: &[u8], indent: &str) -> TypedRegister {
+        let len = bytes.len() as u64;
+        let alloc_size = len + 1;
+        let alloca_reg = self.fun.gen_reg();
+        writeln!(out, "{}{} = alloca [{} x i8], align 1", indent, alloca_reg, alloc_size).ok();
+        for (i, &b) in bytes.iter().enumerate() {
+            let ptr = self.fun.gen_reg();
+            writeln!(out, "{}{} = getelementptr inbounds [{} x i8], ptr {}, i32 0, i32 {}",
+                indent, ptr, alloc_size, alloca_reg, i).ok();
+            writeln!(out, "{}store i8 {}, ptr {}", indent, b, ptr).ok();
+        }
+        let last = self.fun.gen_reg();
+        writeln!(out, "{}{} = getelementptr inbounds [{} x i8], ptr {}, i32 0, i32 {}",
+            indent, last, alloc_size, alloca_reg, bytes.len()).ok();
+        writeln!(out, "{}store i8 0, ptr {}", indent, last).ok();
+        let p2i = self.fun.gen_reg();
+        writeln!(out, "{}{} = ptrtoint ptr {} to i64", indent, p2i, alloca_reg).ok();
+        let t1 = self.fun.gen_reg();
+        writeln!(out, "{}{} = insertvalue {{ i64, i64 }} undef, i64 {}, 0", indent, t1, p2i).ok();
+        let t2 = self.fun.gen_reg();
+        writeln!(out, "{}{} = insertvalue {{ i64, i64 }} %{}, i64 {}, 1", indent, t2, t1, len).ok();
+        TypedRegister { name: t2, ty: Type::string() }
+    }
+
+    // 2026-07-18: Legacy string literal emission (SSO OFF).
+    // Stack-allocated [len+1 x i8] buffer, ptrtoint to i64, returned as Int type.
+    fn emit_legacy_string_literal(&mut self, out: &mut String, v: &str, bytes: &[u8], indent: &str) -> TypedRegister {
         let len = bytes.len() + 1;
         let alloca = self.fun.gen_reg();
         writeln!(out, "{}{} = alloca [{} x i8], align 1", indent, alloca, len).ok();
@@ -464,6 +524,19 @@ impl LlvmBackend {
                     crate::ast::Type::Custom(name) => name.as_str(),
                     _ => return arg.clone(),
                 };
+                // 2026-07-18: SSO String → C i8* shim. When SSO is ON, the String
+                // handle is {i64, i64} but C expects i8*. Extract handle[0] and
+                // inttoptr to i8*.
+                if self.feature_sso_strings
+                    && (ty_name == "String" || ty_name == "Data")
+                    && self.ctx.type_universe.as_ref().map_or(false, |u| u.is_string_like(&arg.ty))
+                {
+                    let extracted = self.fun.gen_reg();
+                    writeln!(out, "{}  {} = extractvalue {{ i64, i64 }} {}, 0", indent, extracted, arg.name).ok();
+                    let ptr_reg = self.fun.gen_reg();
+                    writeln!(out, "{}  {} = inttoptr i64 {} to ptr", indent, ptr_reg, extracted).ok();
+                    return TypedRegister { name: ptr_reg, ty: arg.ty.clone() };
+                }
                 if self.ctx.type_universe.as_ref().and_then(|u| u.find_meld_to_extension(ty_name, ext_str)).is_some() {
                     // meld exists — convention compatible, identity conversion
                     arg.clone()
@@ -473,11 +546,11 @@ impl LlvmBackend {
             }).collect()
         };
         let arg_strs: Vec<String> = meld_args.iter()
-            .map(|reg| format!("{} {}", crate::backend::llvm::types::lower_type(&reg.ty), reg.name))
+            .map(|reg| format!("{} {}", self.llvm_type(&reg.ty), reg.name))
             .collect();
         let ret_type = sig.result_type.return_type().unwrap_or(Type::int());
         // 2026-07-16: Meld inverse on return value (identity for now)
-        let ret_llvm = crate::backend::llvm::types::lower_type(&ret_type);
+        let ret_llvm = self.llvm_type(&ret_type);
         writeln!(out, "{}{} = call {} @{}({})", indent, v, ret_llvm, sig.name, arg_strs.join(", ")).ok();
         TypedRegister { name: v.to_string(), ty: ret_type }
     }
@@ -505,7 +578,7 @@ impl LlvmBackend {
             call_args.push("ptr %state".to_string());
             let param_tys = defn_param_tys.unwrap();
             for (i, reg) in arg_regs.iter().enumerate() {
-                let reg_llvm_ty = lower_type(&reg.ty);
+                let reg_llvm_ty = self.llvm_type(&reg.ty);
                 // 2026-07-17: Get the function's expected parameter type.
                 // If available, use llvm_type() to determine the expected
                 // LLVM type and insert conversions (i64 → ptr for String/Data).
@@ -526,14 +599,14 @@ impl LlvmBackend {
             }
         } else {
             for reg in &arg_regs {
-                call_args.push(format!("{} {}", lower_type(&reg.ty), reg.name));
+                call_args.push(format!("{} {}", self.llvm_type(&reg.ty), reg.name));
             }
         }
         // 2026-07-14: user call return type from defn_return_types — fall back to i64
         let ret_type = self.ctx.defn_return_types.get(name)
             .and_then(|types| types.first().cloned())
             .unwrap_or(Type::int());
-        let ret_llvm = lower_type(&ret_type);
+        let ret_llvm = self.llvm_type(&ret_type);
         writeln!(out, "{}{} = call {} @{}({})", indent, v, ret_llvm, name, call_args.join(", ")).ok();
         TypedRegister { name: v.to_string(), ty: ret_type }
     }
@@ -605,12 +678,12 @@ impl LlvmBackend {
                 if matches!(l.ty, Type::Ptr(_)) && !is_float {
                     let ptr_ty = match &l.ty { Type::Ptr(i) => *i.clone(), _ => Type::int() };
                     writeln!(out, "{}{} = getelementptr {}, ptr {}, i64 {}", indent, v,
-                        crate::backend::llvm::types::lower_type(&ptr_ty), l.name, r.name).ok();
+                        self.llvm_type(&ptr_ty), l.name, r.name).ok();
                     ret_ty = l.ty.clone();
                 } else if matches!(r.ty, Type::Ptr(_)) && !is_float {
                     let ptr_ty = match &r.ty { Type::Ptr(i) => *i.clone(), _ => Type::int() };
                     writeln!(out, "{}{} = getelementptr {}, ptr {}, i64 {}", indent, v,
-                        crate::backend::llvm::types::lower_type(&ptr_ty), r.name, l.name).ok();
+                        self.llvm_type(&ptr_ty), r.name, l.name).ok();
                     ret_ty = r.ty.clone();
                 } else if is_float {
                     writeln!(out, "{}{} = fadd{} {} {}, {}", indent, v, fast, ty_str, l.name, r.name).ok();
@@ -802,11 +875,11 @@ impl LlvmBackend {
         }
         let shifted = self.fun.gen_reg();
         writeln!(out, "{}{} = lshr {} {}, {}", indent, shifted,
-            lower_type(&obj_reg.ty), obj_reg.name, offset).ok();
+            self.llvm_type(&obj_reg.ty), obj_reg.name, offset).ok();
         if width < 64 {
             let mask = (1u128 << width).wrapping_sub(1);
             writeln!(out, "{}{} = and {} {}, {}", indent, v,
-                lower_type(&obj_reg.ty), shifted, mask).ok();
+                self.llvm_type(&obj_reg.ty), shifted, mask).ok();
             return TypedRegister { name: v.to_string(), ty: Type::int() };
         }
         TypedRegister { name: shifted, ty: Type::int() }

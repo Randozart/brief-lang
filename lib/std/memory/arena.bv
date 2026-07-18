@@ -9,9 +9,9 @@
 //   4. arena_free(a) — free backing buffer via Free#
 // The [pre][post] contract on arena_alloc prevents overflow.
 type Arena {
-    base: Ptr<Byte>,
-    offset: Int,
-    capacity: Int,
+    base: Ptr<Byte>;
+    offset: Int;
+    capacity: Int;
 };
 
 // Allocate backing buffer via Alloc#. If called inside a txn with

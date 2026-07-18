@@ -757,6 +757,10 @@ impl LlvmBackend {
         a: &TypedRegister,
         b: &TypedRegister,
     ) -> TypedRegister {
+        // 2026-07-18: Phase B — SSO concat path.
+        if self.feature_sso_strings {
+            return self.emit_sso_concat(out, indent, a, b);
+        }
         let a_boxed = self.adapt_to_i64(out, indent, a);
         let b_boxed = self.adapt_to_i64(out, indent, b);
         let a_clean = self.emit_mask_tag(out, indent, &a_boxed, "cam");
@@ -776,10 +780,117 @@ impl LlvmBackend {
         self.emit_box_concat_result(out, indent, &result, "t")
     }
 
+    // 2026-07-18: SSO-aware concat. When both operands are SSO inline and total
+    // bytes ≤ 6, packs into a new SSO handle. Otherwise allocates raw heap buffer
+    // (no 16-byte header) and returns heap handle with tag 0b000.
+    fn emit_sso_concat(
+        &mut self,
+        out: &mut String,
+        indent: &str,
+        a: &TypedRegister,
+        b: &TypedRegister,
+    ) -> TypedRegister {
+        let a_reg = &a.name;
+        let b_reg = &b.name;
+        // Extract handle[1] (length) from both
+        let a_len = self.fun.gen_reg();
+        writeln!(out, "{}{} = extractvalue {{ i64, i64 }} {}, 1", indent, a_len, a_reg).ok();
+        let b_len = self.fun.gen_reg();
+        writeln!(out, "{}{} = extractvalue {{ i64, i64 }} {}, 1", indent, b_len, b_reg).ok();
+        let total_len = self.fun.gen_reg();
+        writeln!(out, "{}{} = add i64 {}, {}", indent, total_len, a_len, b_len).ok();
+        // Extract handle[0] (data/tag) from both
+        let a_dtag = self.fun.gen_reg();
+        writeln!(out, "{}{} = extractvalue {{ i64, i64 }} {}, 0", indent, a_dtag, a_reg).ok();
+        let b_dtag = self.fun.gen_reg();
+        writeln!(out, "{}{} = extractvalue {{ i64, i64 }} {}, 0", indent, b_dtag, b_reg).ok();
+        // Check if total ≤ 6 (SSO threshold) — if so, use SSO inline path
+        let cmp = self.fun.gen_reg();
+        writeln!(out, "{}{} = icmp ule i64 {}, 6", indent, cmp, total_len).ok();
+        let sso_label = format!("sso_con_{}", self.fun.txn_counter);
+        let heap_label = format!("heap_con_{}", self.fun.txn_counter);
+        let done_label = format!("done_con_{}", self.fun.txn_counter);
+        self.fun.txn_counter += 1;
+        writeln!(out, "{}br i1 {}, label %{}, label %{}", indent, cmp, sso_label, heap_label).ok();
+        // ── SSO inline path ──────────────────────────────────────────
+        writeln!(out, "{}{}:", indent, sso_label).ok();
+        // Extract packed data: (handle[0] >> 3) & mask for SSO, or memcpy for heap
+        // For SSO inline, handle[0] = (data << 3) | 1. So data = handle[0] >> 3.
+        let a_data = self.fun.gen_reg();
+        writeln!(out, "{}{} = lshr i64 {}, 3", indent, a_data, a_dtag).ok();
+        let b_data = self.fun.gen_reg();
+        writeln!(out, "{}{} = lshr i64 {}, 3", indent, b_data, b_dtag).ok();
+        // Shift b_data left by a_len * 8 bits to position it after a's bytes
+        let b_shifted = self.fun.gen_reg();
+        let a_len_8 = self.fun.gen_reg();
+        writeln!(out, "{}{} = shl i64 {}, 3", indent, a_len_8, a_len).ok();
+        writeln!(out, "{}{} = shl i64 {}, {}", indent, b_shifted, b_data, a_len_8).ok();
+        // Combine: result_data = a_data | b_shifted
+        let combined = self.fun.gen_reg();
+        writeln!(out, "{}{} = or i64 {}, {}", indent, combined, a_data, b_shifted).ok();
+        // Shift left 3 for tag and set SSO tag (bit 0)
+        let sso_tag = self.fun.gen_reg();
+        writeln!(out, "{}{} = shl i64 {}, 3", indent, sso_tag, combined).ok();
+        let new_handle0 = self.fun.gen_reg();
+        writeln!(out, "{}{} = or i64 {}, 1", indent, new_handle0, sso_tag).ok();
+        // Build {i64, i64} result
+        let sso_iv = self.fun.gen_reg();
+        writeln!(out, "{}{} = insertvalue {{ i64, i64 }} undef, i64 {}, 0", indent, sso_iv, new_handle0).ok();
+        let sso_res = self.fun.gen_reg();
+        writeln!(out, "{}{} = insertvalue {{ i64, i64 }} %{}, i64 {}, 1", indent, sso_res, sso_iv, total_len).ok();
+        writeln!(out, "{}br label %{}", indent, done_label).ok();
+        // ── Heap path ────────────────────────────────────────────────
+        writeln!(out, "{}{}:", indent, heap_label).ok();
+        // Allocate raw bytes + null terminator (no 16-byte header)
+        let alloc_sz = self.fun.gen_reg();
+        writeln!(out, "{}{} = add i64 {}, 1", indent, alloc_sz, total_len).ok();
+        let heap_buf = self.emit_arena_alloc(out, indent, &alloc_sz);
+        // Mask tag bits for data pointer: handle[0] & -8
+        let a_ptr_raw = self.fun.gen_reg();
+        writeln!(out, "{}{} = and i64 {}, -8", indent, a_ptr_raw, a_dtag).ok();
+        let b_ptr_raw = self.fun.gen_reg();
+        writeln!(out, "{}{} = and i64 {}, -8", indent, b_ptr_raw, b_dtag).ok();
+        // Convert to pointers
+        let a_ptr = self.fun.gen_reg();
+        writeln!(out, "{}{} = inttoptr i64 {} to ptr", indent, a_ptr, a_ptr_raw).ok();
+        let b_ptr = self.fun.gen_reg();
+        writeln!(out, "{}{} = inttoptr i64 {} to ptr", indent, b_ptr, b_ptr_raw).ok();
+        let dest = self.fun.gen_reg();
+        writeln!(out, "{}{} = getelementptr i8, ptr {}, i64 0", indent, dest, heap_buf).ok();
+        // memcpy a's data into buffer
+        writeln!(out, "{}call void @llvm.memcpy.p0i8.p0i8.i64(i8* {}, ptr {}, i64 {}, i1 false)",
+            indent, dest, a_ptr, a_len).ok();
+        // memcpy b's data after a's data
+        let b_dest = self.fun.gen_reg();
+        writeln!(out, "{}{} = getelementptr i8, ptr {}, i64 {}", indent, b_dest, heap_buf, a_len).ok();
+        writeln!(out, "{}call void @llvm.memcpy.p0i8.p0i8.i64(i8* {}, ptr {}, i64 {}, i1 false)",
+            indent, b_dest, b_ptr, b_len).ok();
+        // null terminator
+        let nt = self.fun.gen_reg();
+        writeln!(out, "{}{} = getelementptr i8, ptr {}, i64 {}", indent, nt, heap_buf, total_len).ok();
+        writeln!(out, "{}store i8 0, ptr {}", indent, nt).ok();
+        // Build {i64, i64} with heap tag (0b000 — no bits set)
+        let heap_p2i = self.fun.gen_reg();
+        writeln!(out, "{}{} = ptrtoint ptr {} to i64", indent, heap_p2i, heap_buf).ok();
+        let heap_iv = self.fun.gen_reg();
+        writeln!(out, "{}{} = insertvalue {{ i64, i64 }} undef, i64 {}, 0", indent, heap_iv, heap_p2i).ok();
+        let heap_res = self.fun.gen_reg();
+        writeln!(out, "{}{} = insertvalue {{ i64, i64 }} %{}, i64 {}, 1", indent, heap_res, heap_iv, total_len).ok();
+        writeln!(out, "{}br label %{}", indent, done_label).ok();
+        // ── Done: phi the result ─────────────────────────────────────
+        writeln!(out, "{}{}:", indent, done_label).ok();
+        let phi_res = self.fun.gen_reg();
+        writeln!(out, "{}{} = phi {{ i64, i64 }} [ %{}, %{} ], [ %{}, %{} ]",
+            indent, phi_res, sso_res, sso_label, heap_res, heap_label).ok();
+        TypedRegister { name: phi_res, ty: Type::string() }
+    }
+
     /// Mask off tag bits (bit 0 = static, bit 1 = temp) from a boxed string.
     fn emit_mask_tag(&mut self, out: &mut String, indent: &str, val: &str, prefix: &str) -> String {
         let r = self.fun.next_reg_with_prefix(prefix);
-        writeln!(out, "{}{} = and i64 {}, -4", indent, r, val).ok();
+        // 2026-07-18: SSO uses 3 tag bits (AND -8); legacy uses 2 bits (AND -4).
+        let mask = if self.feature_sso_strings { -8i64 } else { -4i64 };
+        writeln!(out, "{}{} = and i64 {}, {}", indent, r, val, mask).ok();
         r
     }
 
@@ -920,7 +1031,8 @@ impl LlvmBackend {
         self.emit_free_one_temp(out, indent, b_boxed, tag_b_prefix, is_b_prefix, "free_b", "af_b");
     }
 
-    /// Check tag bit 1 and conditionally free a temporary string allocation.
+    /// Check tag bit 1 (legacy) or bit 2 (SSO) and conditionally free a
+    /// temporary string allocation.
     fn emit_free_one_temp(
         &mut self,
         out: &mut String,
@@ -932,7 +1044,9 @@ impl LlvmBackend {
         after_label: &str,
     ) {
         let tag = self.fun.next_reg_with_prefix(tag_prefix);
-        writeln!(out, "{}{} = and i64 {}, 2", indent, tag, boxed).ok();
+        // 2026-07-18: SSO uses bit 2 (value 4) for temporary; legacy uses bit 1 (value 2).
+        let temp_bit = if self.feature_sso_strings { 4i64 } else { 2i64 };
+        writeln!(out, "{}{} = and i64 {}, {}", indent, tag, boxed, temp_bit).ok();
         let is_temp = self.fun.next_reg_with_prefix(is_prefix);
         writeln!(out, "{}{} = icmp ne i64 {}, 0", indent, is_temp, tag).ok();
         let fl = format!("{}_{}", free_label, self.fun.txn_counter);
@@ -1884,6 +1998,15 @@ impl LlvmBackend {
             Type::Custom(t) if t == "Bool" => {
                 let tr = self.fun.gen_reg();
                 writeln!(out, "{}{} = zext i8 {} to i64", indent, tr, reg.name).ok();
+                tr
+            }
+            Type::Custom(t) if (t == "String" || t == "Data")
+                && self.feature_sso_strings
+                && self.ctx.type_universe.as_ref().map_or(false, |u| u.is_string_like(&reg.ty))
+            => {
+                // 2026-07-18: SSO String is {i64, i64} — extract handle[0] (data/tag).
+                let tr = self.fun.gen_reg();
+                writeln!(out, "{}{} = extractvalue {{ i64, i64 }} {}, 0", indent, tr, reg.name).ok();
                 tr
             }
             Type::Custom(t) if t == "String" || t == "Data" => {
