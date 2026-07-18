@@ -41,6 +41,9 @@
       "include": "#intrinsics"
     },
     {
+      "include": "#hash-words"
+    },
+    {
       "include": "#constants"
     },
     {
@@ -104,11 +107,11 @@
         },
         {
           "name": "keyword.control.flow.brief",
-          "match": "\\b(term|escape|TERM|ESCAPE)\\b"
+          "match": "\\b(term|term!|escape|TERM|ESCAPE)\\b"
         },
         {
           "name": "keyword.declaration.brief",
-          "match": "\\b(sig|defn|let|const|trg|SIG|DEFN|LET|CONST|TRG|struct|rstruct|enum|STRUCT|RSTRUCT|ENUM|inop|INOP|bild|BILD|type|TYPE|fallback|FALLBACK)\\b"
+          "match": "\\b(sig|defn|let|const|trg|txn|rct|SIG|DEFN|LET|CONST|TRG|TXN|RCT|struct|rstruct|enum|STRUCT|RSTRUCT|ENUM|inop|INOP|bild|BILD|type|TYPE|fallback|FALLBACK)\\b"
         },
         {
           "name": "keyword.declaration.ffi.brief",
@@ -239,6 +242,10 @@
           "match": "<-"
         },
         {
+          "name": "keyword.operator.property.brief",
+          "match": "<~"
+        },
+        {
           "name": "keyword.operator.assignment.brief",
           "match": "="
         }
@@ -275,7 +282,15 @@
         }
       ]
     },
-    "booleans": {
+        "hash-words": {
+          "patterns": [
+            {
+              "name": "keyword.hashword.brief",
+              "match": "#L|#R|#T"
+            }
+          ]
+        },
+        "booleans": {
       "patterns": [
         {
           "name": "constant.language.true.brief",
@@ -299,7 +314,7 @@
       "patterns": [
         {
           "name": "support.function.intrinsic.brief",
-          "match": "\\b[a-z_][a-zA-Z0-9_]*#"
+          "match": "\\b[a-zA-Z_][a-zA-Z0-9_]*#"
         }
       ]
     },
