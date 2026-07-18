@@ -170,12 +170,17 @@ pub fn emit_statement(backend: &mut LlvmBackend, out: &mut String, stmt: &Statem
             };
             writeln!(out, "{}br i1 {}, label %{}, label %{}", indent, cond_i1, then_lbl, end_lbl).ok();
             writeln!(out, "{}{}:", indent, then_lbl).ok();
+            backend.fun.terminated = false;
             for stmt in body {
                 emit_statement(backend, out, stmt, indent);
             }
-            // 2026-07-15: Always emit br to end (even if then body terminated)
-            writeln!(out, "{}br label %{}", indent, end_lbl).ok();
+            // 2026-07-18: Always emit end label (referenced by br i1 false branch).
+            // The next statement's code is emitted after this label.
+            if !backend.fun.terminated {
+                writeln!(out, "{}br label %{}", indent, end_lbl).ok();
+            }
             writeln!(out, "{}{}:", indent, end_lbl).ok();
+            backend.fun.terminated = false;
             TypedRegister { name: backend.fun.gen_reg(), ty: Type::void() }
         }
         Statement::If(cond, then, else_) => {
@@ -196,15 +201,23 @@ pub fn emit_statement(backend: &mut LlvmBackend, out: &mut String, stmt: &Statem
             };
             writeln!(out, "{}br i1 {}, label %{}, label %{}", indent, cond_i1, then_lbl, else_lbl).ok();
             writeln!(out, "{}{}:", indent, then_lbl).ok();
+            backend.fun.terminated = false;
             for stmt in then {
                 emit_statement(backend, out, stmt, indent);
             }
-            writeln!(out, "{}br label %{}", indent, end_lbl).ok();
+            if !backend.fun.terminated {
+                writeln!(out, "{}br label %{}", indent, end_lbl).ok();
+            }
             writeln!(out, "{}{}:", indent, else_lbl).ok();
+            backend.fun.terminated = false;
             for stmt in else_ {
                 emit_statement(backend, out, stmt, indent);
             }
-            writeln!(out, "{}br label %{}", indent, end_lbl).ok();
+            // 2026-07-18: Always emit end label (referenced by br i1 false branch
+            // and/or then->end and else->end branches).
+            if !backend.fun.terminated {
+                writeln!(out, "{}br label %{}", indent, end_lbl).ok();
+            }
             writeln!(out, "{}{}:", indent, end_lbl).ok();
             TypedRegister { name: backend.fun.gen_reg(), ty: Type::void() }
         }

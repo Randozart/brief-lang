@@ -2,7 +2,7 @@
 
 **Author:** Compiler agent
 **Scope:** All 5 active plans consolidated into sequential implementation steps
-**Test baseline:** `cargo test --lib` = 919 tests passing
+**Test baseline:** `cargo test --lib` = 925 tests passing
 **Status key:** ✅ Done | ⚡ In progress | ❌ Remaining
 
 ---
@@ -986,4 +986,72 @@ if self.feature_sso_strings
 5. **No heap fallback for SmallString** — unlike String (SSO → heap promotion), SmallString panics/contract-violates when `len > N`. This is intentional for embedded systems where allocation is not available.
 
 6. **Utf8View as function parameter convention** — Standard library functions should accept `Utf8View` for string parameters where ownership is not needed. This enables callers to pass either String (borrowed) or SmallString (borrowed) or StaticString (borrowed) without conversion.
+
+---
+
+## Fix Block: Pure-Brief Functions + txn Return Type + .#field Access
+
+**Motivation:** The pure-Brief `__memcmp`, `__utf8_find`, `__utf8_validate` functions in `utf8view.bv` compile but can't be tested because:
+1. The parser doesn't accept `-> RetType` on `txn` declarations
+2. Non-SSO String field access via `.data`/`.len` uses `extractvalue` on `ptr` type, which fails
+
+**Changes needed:**
+
+### F1: Parser — optional `-> Type` for `txn`
+
+**File:** `src/parser/definitions.rs` line 268
+
+Before `parse_block()`, parse an optional return type:
+```rust
+let output_type = if self.eat(&Token::Arrow) {
+    Some(self.parse_type()?)
+} else {
+    None
+};
+```
+Replace `output_type: None` with `output_type`.
+
+### F2: Non-SSO `.#field` access
+
+The `.#field` syntax (`s1.#data`, `s1.#len`) triggers `emit_layout_field_read` which reads by byte offset via `Load#(addr + offset, width)` — works for both SSO and non-SSO String because it doesn't rely on LLVM struct decomposition.
+
+Use in tests instead of `.data`/`.len`:
+```brief
+let data_ptr: Int = s1.#data;
+let byte_len: Int = s1.#len;
+```
+
+### F3: Correct Brief syntax in tests
+
+- `else if` chains → `when` guard chains
+- `txn -> RetType` → valid after F1
+- `if/else` expressions → `if cond { expr } else { expr }` (single-level only)
+
+### Test file: `test_utf8_pure.bv`
+
+Inline all 3 functions, exercise `memcmp`, `utf8_find`, `utf8_validate` with known test vectors, compile and run, verify exit code = 0.
+
+### F4: Parser — add binary bitwise ops `&` `|` `^` `<<` `>>`
+
+**File:** `src/parser/expressions.rs`
+
+The `BinaryOpKind` enum and LLVM config already have `BitAnd`, `BitOr`, `BitXor`, `Shl`, `Shr` — but the parser never wires the tokens to these variants. Add four new parse levels between `parse_compare` and `parse_term`:
+
+```
+parse_compare:  < > <= >=  → calls parse_bitor
+parse_bitor:    |           → calls parse_bitxor
+parse_bitxor:   ^           → calls parse_bitand
+parse_bitand:   &           → calls parse_shift
+parse_shift:    << >>       → calls parse_term
+parse_term:     + - ++      → calls parse_factor
+```
+
+Each token already exists in the lexer: `Pipe` (`|`), `BitXor` (`^`), `Ampersand` (`&`), `Shl` (`<<`), `Shr` (`>>`). No new tokens needed.
+
+### F5: Convention fixes
+
+- `__` prefix is frgn-only — `__memcmp` → `memcmp`, `__utf8_find` → `utf8_find`, `__utf8_validate` → `utf8_validate`
+- `defn` cannot mutate outside state — already correct (functions mutate their parameters, which is returned via `term`)
+- No `else` keyword exists — use `when` guards everywhere
+- Entry point uses `rct txn` or `[#]` marker, not `defn main()`
 

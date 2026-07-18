@@ -66,23 +66,71 @@ impl<'a> Parser<'a> {
 
     /// Comparison: a < b, a > b, a <= b, a >= b
     fn parse_comparison(&mut self) -> Result<Expr, SyntaxError> {
-        let mut expr = self.parse_term()?;
+        let mut expr = self.parse_bitor()?;
         loop {
             if self.eat(&Token::Lt) {
-                let rhs = self.parse_term()?;
+                let rhs = self.parse_bitor()?;
                 expr = Expr::BinaryOp(BinaryOpKind::Lt, Box::new(expr), Box::new(rhs));
             } else if self.eat(&Token::Gt) {
-                let rhs = self.parse_term()?;
+                let rhs = self.parse_bitor()?;
                 expr = Expr::BinaryOp(BinaryOpKind::Gt, Box::new(expr), Box::new(rhs));
             } else if self.eat(&Token::Le) {
-                let rhs = self.parse_term()?;
+                let rhs = self.parse_bitor()?;
                 expr = Expr::BinaryOp(BinaryOpKind::Le, Box::new(expr), Box::new(rhs));
             } else if self.eat(&Token::Ge) {
-                let rhs = self.parse_term()?;
+                let rhs = self.parse_bitor()?;
                 expr = Expr::BinaryOp(BinaryOpKind::Ge, Box::new(expr), Box::new(rhs));
             } else {
                 break;
             }
+        }
+        Ok(expr)
+    }
+
+    /// 2026-07-18: Bitwise OR: a | b
+    fn parse_bitor(&mut self) -> Result<Expr, SyntaxError> {
+        let mut expr = self.parse_bitxor()?;
+        while self.eat(&Token::Pipe) {
+            let rhs = self.parse_bitxor()?;
+            expr = Expr::BinaryOp(BinaryOpKind::BitOr, Box::new(expr), Box::new(rhs));
+        }
+        Ok(expr)
+    }
+
+    /// 2026-07-18: Bitwise XOR: a ^ b
+    fn parse_bitxor(&mut self) -> Result<Expr, SyntaxError> {
+        let mut expr = self.parse_bitand()?;
+        while self.eat(&Token::BitXor) {
+            let rhs = self.parse_bitand()?;
+            expr = Expr::BinaryOp(BinaryOpKind::BitXor, Box::new(expr), Box::new(rhs));
+        }
+        Ok(expr)
+    }
+
+    /// 2026-07-18: Bitwise AND: a & b
+    /// Note: `&` is also used as unary address-of in parse_unary.
+    /// In binary position (between expressions) it's bitwise AND,
+    /// in prefix position it's address-of. No ambiguity because
+    /// binary `&` only matches after a left-hand expression.
+    fn parse_bitand(&mut self) -> Result<Expr, SyntaxError> {
+        let mut expr = self.parse_shift()?;
+        while self.eat(&Token::Ampersand) {
+            let rhs = self.parse_shift()?;
+            expr = Expr::BinaryOp(BinaryOpKind::BitAnd, Box::new(expr), Box::new(rhs));
+        }
+        Ok(expr)
+    }
+
+    /// 2026-07-18: Shift: a << b, a >> b
+    fn parse_shift(&mut self) -> Result<Expr, SyntaxError> {
+        let mut expr = self.parse_term()?;
+        while self.eat(&Token::Shl) {
+            let rhs = self.parse_term()?;
+            expr = Expr::BinaryOp(BinaryOpKind::Shl, Box::new(expr), Box::new(rhs));
+        }
+        while self.eat(&Token::Shr) {
+            let rhs = self.parse_term()?;
+            expr = Expr::BinaryOp(BinaryOpKind::Shr, Box::new(expr), Box::new(rhs));
         }
         Ok(expr)
     }

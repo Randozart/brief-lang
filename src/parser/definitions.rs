@@ -257,6 +257,12 @@ impl<'a> Parser<'a> {
             Vec::new()
         };
         let contract = self.parse_contract()?;
+        // 2026-07-18: Optional return type for txn: txn name(params) [pre][post] -> Type { body }
+        let output_type: Option<crate::ast::OutputType> = if self.eat(&Token::Arrow) {
+            Some(crate::ast::OutputType::Single(self.parse_type()?))
+        } else {
+            None
+        };
         let body = self.parse_block()?;
         let derivation = self.parse_derivation_block()?;
         Ok(Transaction {
@@ -265,7 +271,7 @@ impl<'a> Parser<'a> {
             is_async,
             type_params: vec![],
             parameters,
-            output_type: None,
+            output_type,
             outputs: Vec::new(),
             contract,
             body,
