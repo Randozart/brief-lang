@@ -77,6 +77,11 @@ pub fn get_intrinsic_signature(name: &str) -> Option<Signature> {
         "Floor#" => Some(Signature { name: "Floor#", parameters: vec![], return_kind: ReturnKind::Native("Float"), observable: false }),
         "Pow#"   => Some(Signature { name: "Pow#",   parameters: vec![], return_kind: ReturnKind::Inferred, observable: false }),
 
+        // ── Runtime (observable) ────────────────────────────────────
+        "GetEnvInt#" => Some(Signature { name: "GetEnvInt#", parameters: vec![("name", Type::string())], return_kind: ReturnKind::Exact(Type::int()), observable: true }),
+        "PrintInt#" => Some(Signature { name: "PrintInt#", parameters: vec![("val", Type::int())], return_kind: ReturnKind::Exact(Type::void()), observable: true }),
+        "PrintStr#" => Some(Signature { name: "PrintStr#", parameters: vec![("val", Type::string())], return_kind: ReturnKind::Exact(Type::void()), observable: true }),
+
         // ── Memory (observable) ─────────────────────────────────────
         "Malloc#"  => Some(Signature { name: "Malloc#",  parameters: vec![("size", Type::int())], return_kind: ReturnKind::Exact(Type::ptr(Type::bits(1))), observable: true }),
         // 2026-07-18: Variadic — first arg is size (Int), optional second is

@@ -1,13 +1,10 @@
 // 2026-07-18: Utf8View operations — borrowed, trusted-UTF-8 view.
-// Zero-allocation fat pointer. encoding <~ "UTF-8" guaranteed by construction.
-// Struct literal creation (Utf8View { ... }) pending parser support.
 // Import via `import "std/types/utf8view.bv"`.
+// All byte-string operations implemented in pure Brief using Load# for
+// per-byte access and convergent txns for iteration.
 
-// 2026-07-18: Native Brief functions for byte-string operations.
-// Uses Load#(addr, 1) for per-byte access, Copy#(dst, src, len) for bulk copy.
-
-// ── Byte comparison ───────────────────────────────────────────────
-// Convergent txn iterates i from 0 to len. Returns -1/0/1 (memcmp semantics).
+// ── Byte comparison (memcmp) ──────────────────────────────────────
+// Convergent txn iterates i from 0 to len. Returns -1/0/1.
 txn memcmp_loop(a: Int, b: Int, len: Int, i: Int)
     [i < len][i == len] -> Int
 {
@@ -19,14 +16,13 @@ txn memcmp_loop(a: Int, b: Int, len: Int, i: Int)
     term 0;
 };
 
-defn __memcmp(a: Int, b: Int, len: Int) -> Int {
+defn memcmp(a: Int, b: Int, len: Int) -> Int {
     when len == 0 { term 0; };
     term memcmp_loop(a, b, len, 0);
 };
 
-// ── Substring search (like memmem) ────────────────────────────────
+// ── Substring search (memmem) ─────────────────────────────────────
 // Inner: check if needle matches at position i.
-// Iterates j from 0..needle_len, early-exits on mismatch via mismatch flag.
 txn memcmp_at(hay: Int, needle: Int, len: Int, i: Int, j: Int, mismatch: Int)
     [j < len && mismatch == 0][j == len || mismatch != 0] -> Bool
 {
@@ -39,18 +35,22 @@ txn memcmp_at(hay: Int, needle: Int, len: Int, i: Int, j: Int, mismatch: Int)
     term mismatch == 0;
 };
 
-// Outer: iterate haystack positions, call memcmp_at for each.
-// Returns byte offset of match, or -1 if not found.
+// Outer: iterate haystack positions. When found, advance i past end so
+// the convergence condition (i + needle_len > hay_len) is met immediately.
 txn find_loop(hay: Int, hay_len: Int, needle: Int, needle_len: Int, i: Int)
     [i + needle_len <= hay_len][i + needle_len > hay_len] -> Int
 {
     let found: Bool = memcmp_at(hay, needle, needle_len, i, 0, 0);
-    when found { term i; };
+    when found {
+        let pos: Int = i;
+        i = hay_len;
+        term pos;
+    };
     i = i + 1;
     term -1;
 };
 
-defn __utf8_find(hay: Int, hay_len: Int, needle: Int, needle_len: Int) -> Int {
+defn utf8_find(hay: Int, hay_len: Int, needle: Int, needle_len: Int) -> Int {
     when needle_len == 0 { term 0; };
     when hay_len < needle_len { term -1; };
     term find_loop(hay, hay_len, needle, needle_len, 0);
@@ -63,18 +63,16 @@ defn decode_seq_len(lead: Int) -> Int {
     when lead >= 0xC0 && lead < 0xE0 { term 2; };
     when lead >= 0xE0 && lead < 0xF0 { term 3; };
     when lead >= 0xF0 && lead < 0xF8 { term 4; };
-    term 0;  // continuation byte (0x80-0xBF) or invalid (> 0xF7)
+    term 0;
 };
 
 defn decode_min_cp(lead: Int) -> Int {
     when lead < 0x80 { term 0; };
     when lead >= 0xE0 && lead < 0xF0 { term 0x800; };
     when lead >= 0xF0 && lead < 0xF8 { term 0x10000; };
-    term 0;  // 2-byte sequences start at 0x80; invalid/cont return 0
+    term 0;
 };
 
-// Outer: iterate over bytes, validate each UTF-8 sequence.
-// Decodes the code point through continuation bytes for constraint checks.
 txn utf8_validate_loop(data: Int, len: Int, i: Int, valid: Int)
     [i < len && valid == 1][i >= len || valid == 0] -> Int
 {
@@ -82,53 +80,52 @@ txn utf8_validate_loop(data: Int, len: Int, i: Int, valid: Int)
     let seq_len: Int = decode_seq_len(lead);
     when seq_len == 0 { valid = 0; term 0; };
     when i + seq_len > len { valid = 0; term 0; };
-    
-    // Decode code point from lead byte then continuation bytes
-    let shift: Int = 1;
-    let mask: Int = if seq_len == 1 { 0x7F } elsif seq_len == 2 { 0x1F } elsif seq_len == 3 { 0x0F } else { 0x07 };
-    let cp: Int = lead & mask;
+
+    let cp: Int;
+    when seq_len == 1 { cp = lead & 0x7F; };
+    when seq_len == 2 { cp = lead & 0x1F; };
+    when seq_len == 3 { cp = lead & 0x0F; };
+    when seq_len == 4 { cp = lead & 0x07; };
     when seq_len > 1 {
         let b1: Int = Load#(data + i + 1, 1);
-        when (b1 & 0xC0) != 0x80 { valid = 0; term 0; };
+        when b1 < 0x80 || b1 >= 0xC0 { valid = 0; term 0; };
         cp = (cp << 6) | (b1 & 0x3F);
     };
     when seq_len > 2 {
         let b2: Int = Load#(data + i + 2, 1);
-        when (b2 & 0xC0) != 0x80 { valid = 0; term 0; };
+        when b2 < 0x80 || b2 >= 0xC0 { valid = 0; term 0; };
         cp = (cp << 6) | (b2 & 0x3F);
     };
     when seq_len > 3 {
         let b3: Int = Load#(data + i + 3, 1);
-        when (b3 & 0xC0) != 0x80 { valid = 0; term 0; };
+        when b3 < 0x80 || b3 >= 0xC0 { valid = 0; term 0; };
         cp = (cp << 6) | (b3 & 0x3F);
     };
-    
-    // Check code point constraints: no overlong, no surrogates, no overflow
+
     let min_cp: Int = decode_min_cp(lead);
     when cp < min_cp { valid = 0; term 0; };
     when cp >= 0xD800 && cp <= 0xDFFF { valid = 0; term 0; };
     when cp > 0x10FFFF { valid = 0; term 0; };
-    
+
     i = i + seq_len;
     term 1;
 };
 
-defn __utf8_validate(data: Int, len: Int) -> Int {
+defn utf8_validate(data: Int, len: Int) -> Int {
     when len == 0 { term 1; };
     term utf8_validate_loop(data, len, 0, 1);
 };
 
-// Byte length of the view (O(1)).
+// ── Type operations ───────────────────────────────────────────────
+
 defn utf8view_len(v: Utf8View) -> Int {
     term v.len;
 };
 
-// Find first byte offset of needle in haystack. Returns -1 if not found.
 defn utf8view_find(haystack: Utf8View, needle: Utf8View) -> Int {
-    term __utf8_find(haystack.data, haystack.len, needle.data, needle.len);
+    term utf8_find(haystack.data, haystack.len, needle.data, needle.len);
 };
 
-// Byte comparison — returns true if equal.
 defn utf8view_eq(a: Utf8View, b: Utf8View) -> Bool {
-    term a.len == b.len && __memcmp(a.data, b.data, a.len) == 0;
+    term a.len == b.len && memcmp(a.data, b.data, a.len) == 0;
 };

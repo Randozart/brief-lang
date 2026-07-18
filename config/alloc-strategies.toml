@@ -8,20 +8,29 @@
 # {v}   = result register name (without %)
 # {size} = size_i64 register name
 
+# 2026-07-18: free field controls Free# dispatch:
+#   none      → Free# is a no-op (arena, ring buffer, pool reuse)
+#   @free     → call @free (default)
+#   "fn_name" → call custom free function
+# If free is omitted, Free# calls @free (safe default).
+
 [alloc.pool_serial]
 template = """
 %{v}_p = call ptr @pool_alloc(i64 {size})
 %{v} = ptrtoint ptr %{v}_p to i64
 """
+free = "none"
 
 [alloc.mmap_shared]
 template = """
 %{v}_p = call ptr @mmap_shared(i64 {size})
 %{v} = ptrtoint ptr %{v}_p to i64
 """
+free = "munmap_shared"
 
 [alloc.pinned_dma]
 template = """
 %{v}_p = call ptr @alloc_dma_pinned(i64 {size})
 %{v} = ptrtoint ptr %{v}_p to i64
 """
+free = "free_dma_pinned"

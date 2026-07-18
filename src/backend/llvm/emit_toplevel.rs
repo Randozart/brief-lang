@@ -1457,7 +1457,13 @@ impl LlvmBackend {
         self.fun.let_original_types.clear(); self.fun.reg_float_cache.clear();
         self.fun.reg_type_cache.clear();
         self.fun.expr_dedup_cache.clear();
-        self.fun.is_static_bound = false;
+        // 2026-07-18: Detect bounded pre-condition (e.g. x < N) — enables
+        // Alloca strategy for stack-allocated temporaries within the loop.
+        self.fun.is_static_bound = matches!(&txn.contract.pre_condition,
+            Expr::BinaryOp(kind, left, _) if matches!(kind,
+                crate::ast::BinaryOpKind::Lt | crate::ast::BinaryOpKind::Le
+                    | crate::ast::BinaryOpKind::Lt | crate::ast::BinaryOpKind::Ge)
+                && matches!(left.as_ref(), Expr::Identifier(_)));
         self.fun.param_slots.clear();
         self.fun.ssa_old_int_regs.clear();
         self.fun.ssa_old_float_regs.clear();

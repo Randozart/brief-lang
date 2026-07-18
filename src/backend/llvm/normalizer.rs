@@ -443,7 +443,7 @@ fn build_supported_ops(config: &OpConfig) -> HashSet<String> {
         set.insert(format!("{}#", op_name));
     }
     // Also add some well-known intrinsics that don't appear as operations
-    for name in &["GetEnv#", "GetGlobalId#", "GetGlobalSize#", "GetLocalId#",
+    for name in &["GetEnv#", "GetEnvInt#", "GetGlobalId#", "GetGlobalSize#", "GetLocalId#",
                    "ToInt#", "ToFloat#", "ToString#", "Concat#", "Length#",
                    "AddressOf#", "SysCall#", "SysConf#",
                    "Load#", "Store#", "Copy#", "Fill#",

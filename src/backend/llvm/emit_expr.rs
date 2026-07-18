@@ -247,9 +247,10 @@ impl LlvmBackend {
                 if field.starts_with('#') {
                     return self.emit_layout_field_read(out, v, &obj_reg, field, indent);
                 }
-                // Struct field access via extractvalue or GEP
+                // Struct field access via extractvalue (numeric index required)
+                let field_idx = self.resolve_field_index(&obj_reg.ty, field);
                 writeln!(out, "{}{} = extractvalue {} {}, {}", indent, v,
-                    self.llvm_type(&obj_reg.ty), obj_reg.name, field).ok();
+                    self.llvm_type(&obj_reg.ty), obj_reg.name, field_idx).ok();
                 TypedRegister { name: v.to_string(), ty: Type::int() }
             }
 
@@ -854,6 +855,28 @@ impl LlvmBackend {
     }
 
     /// Get a local variable's register name from FunctionContext.
+    /// 2026-07-18: Resolve a struct field name to its numeric index (for extractvalue).
+    fn resolve_field_index(&self, ty: &Type, field: &str) -> usize {
+        let universe = match self.ctx.type_universe.as_ref() {
+            Some(u) => u,
+            None => return self.ctx.field_index_map.get(field).copied().unwrap_or(0),
+        };
+        let key = match ty.universe_key() {
+            Some(k) => k,
+            None => return self.ctx.field_index_map.get(field).copied().unwrap_or(0),
+        };
+        let rt = match universe.get(key) {
+            Some(r) => r,
+            None => return self.ctx.field_index_map.get(field).copied().unwrap_or(0),
+        };
+        for (i, (f, _)) in rt.fields.iter().enumerate() {
+            if f == field {
+                return i;
+            }
+        }
+        self.ctx.field_index_map.get(field).copied().unwrap_or(0)
+    }
+
     fn get_local(&self, name: &str) -> Option<String> {
         self.fun.let_bindings.get(name).cloned()
     }

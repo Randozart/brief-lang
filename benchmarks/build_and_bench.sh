@@ -86,6 +86,7 @@ TAG[queue_drain_idio]=runtime
 TAG[interval_step]=runtime
 TAG[gpu/saxpy]=runtime
 TAG[iir_filter_runtime]=runtime
+TAG[utf8_ops]=runtime
 TAG[ring_buffer_runtime]=runtime
 TAG[precompute_sum_runtime]=runtime
 TAG[binary_trees]=runtime
@@ -97,6 +98,7 @@ BENCHMARKS=(
     "precompute_sum"
     "const_heavy"
     "async_counters_idio"
+    "utf8_ops"
     "ring_buffer"
     # "async_counters_sym"   # excluded from timing (40 min at 50M)
     "float_math"

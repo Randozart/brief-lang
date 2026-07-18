@@ -7,11 +7,12 @@
 use std::sync::LazyLock;
 use crate::ast::{Expr, Type};
 use crate::backend::llvm::{AllocStrategy, LlvmBackend, TypedRegister as BTypedRegister};
-use crate::config::{OpConfig, derive_llvm_type, TypeConfig};
+use crate::config::{AllocConfig, OpConfig, derive_llvm_type, TypeConfig};
 use std::fmt::Write;
 
 pub(crate) static OP_CONFIG: LazyLock<OpConfig> = LazyLock::new(|| OpConfig::load());
 static TYPE_CONFIG: LazyLock<TypeConfig> = LazyLock::new(|| TypeConfig::load());
+pub(crate) static ALLOC_CONFIG: LazyLock<AllocConfig> = LazyLock::new(|| AllocConfig::load());
 
 /// Emit an intrinsic call by name. For generic operations (Add#, Eq#, etc.)
 /// looks up the IR template from config/llvm-ops.toml using (op, primitive, bytes)
@@ -36,6 +37,7 @@ pub fn emit_intrinsic_call(
         "Fill#" => return emit_fill(backend, out, v, args, indent),
         "Print#" => return emit_print(backend, out, v, args, indent),
         "GetEnv#" => return emit_get_env(backend, out, v, args, indent),
+        "GetEnvInt#" => return emit_get_env(backend, out, v, args, indent),
         "GetGlobalId#" => return emit_get_global_id(backend, out, v, args, indent),
         "GetGlobalSize#" => return emit_external_call(backend, out, v, name, args, indent),
         "GetLocalId#" => return emit_external_call(backend, out, v, name, args, indent),
@@ -245,14 +247,38 @@ fn emit_alloc(
                         emit_malloc_inline(backend, out, v, &size, indent)
                     }
                     AllocStrategy::Arena => {
-                        let _result = backend.emit_arena_alloc(out, indent, &size);
+                        let result = backend.emit_arena_alloc(out, indent, &size);
+                        writeln!(out, "{}{} = ptrtoint ptr {} to i64", indent, v, result).ok();
                         backend.fun.alloc_strategies.insert(v.to_string(), AllocStrategy::Arena);
-                        BTypedRegister { name: v.to_string(), ty: Type::ptr(Type::int()) }
+                        BTypedRegister { name: v.to_string(), ty: Type::int() }
                     }
                     AllocStrategy::Alloca => {
-                        writeln!(out, "{}{} = alloca i8, i64 {}", indent, v, size).ok();
+                        let a = format!("%alloc_{}", backend.fun.txn_counter);
+                        backend.fun.txn_counter += 1;
+                        writeln!(out, "{}{} = alloca i8, i64 {}", indent, a, size).ok();
+                        writeln!(out, "{}{} = ptrtoint ptr {} to i64", indent, v, a).ok();
                         backend.fun.alloc_strategies.insert(v.to_string(), AllocStrategy::Alloca);
-                        BTypedRegister { name: v.to_string(), ty: Type::ptr(Type::int()) }
+                        BTypedRegister { name: v.to_string(), ty: Type::int() }
+                    }
+                    // 2026-07-18: Inline — allocation fits in parent struct field.
+                    // The Alloc# is a no-op; the address is computed from the
+                    // containing struct's field offset at access time.
+                    AllocStrategy::Inline => {
+                        backend.fun.alloc_strategies.insert(v.to_string(), AllocStrategy::Inline);
+                        writeln!(out, "{}{} = add i64 0, 0", indent, v).ok();
+                        BTypedRegister { name: v.to_string(), ty: Type::int() }
+                    }
+                    // 2026-07-18: RingBuffer — circular buffer allocation.
+                    AllocStrategy::RingBuffer => {
+                        backend.fun.alloc_strategies.insert(v.to_string(), AllocStrategy::RingBuffer);
+                        writeln!(out, "{}{} = alloca i8, i64 {}", indent, v, size).ok();
+                        writeln!(out, "{}{} = ptrtoint ptr {} to i64", indent, v, v).ok();
+                        BTypedRegister { name: v.to_string(), ty: Type::int() }
+                    }
+                    // 2026-07-18: Config strategy — look up template.
+                    AllocStrategy::Config(_) | AllocStrategy::Custom(_) => {
+                        backend.fun.alloc_strategies.insert(v.to_string(), strategy.clone());
+                        emit_malloc_inline(backend, out, v, &size, indent)
                     }
                 };
             }
@@ -267,17 +293,18 @@ fn emit_alloc(
     // Default triple dispatch (no strategy arg).
     // Strategy 1: Arena scope active → bump allocate.
     if backend.fun.arena_slots.is_some() {
-        let _result = backend.emit_arena_alloc(out, indent, &size);
+        let result = backend.emit_arena_alloc(out, indent, &size);
+        writeln!(out, "{}{} = ptrtoint ptr {} to i64", indent, v, result).ok();
         backend.fun.alloc_strategies.insert(v.to_string(), AllocStrategy::Arena);
-        return BTypedRegister { name: v.to_string(), ty: Type::ptr(Type::int()) };
+        return BTypedRegister { name: v.to_string(), ty: Type::int() };
     }
-    // Strategy 2: Bounded scope + no escape → alloca.
-    // TEMP: 2026-07-18: will_escape_current_allocation always returns false.
-    // Phase 4 adds proper provenance tracking.
     if backend.is_in_bounded_scope() && !backend.will_escape_current_allocation() {
-        writeln!(out, "{}{} = alloca i8, i64 {}", indent, v, size).ok();
+        let a = format!("%alloc_{}", backend.fun.txn_counter);
+        backend.fun.txn_counter += 1;
+        writeln!(out, "{}{} = alloca i8, i64 {}", indent, a, size).ok();
+        writeln!(out, "{}{} = ptrtoint ptr {} to i64", indent, v, a).ok();
         backend.fun.alloc_strategies.insert(v.to_string(), AllocStrategy::Alloca);
-        return BTypedRegister { name: v.to_string(), ty: Type::ptr(Type::int()) };
+        return BTypedRegister { name: v.to_string(), ty: Type::int() };
     }
     // Strategy 3: Default → @malloc.
     emit_malloc_inline(backend, out, v, &size, indent)
@@ -367,7 +394,9 @@ fn emit_malloc_inline(
     let remaining_reg = backend.fun.gen_reg();
     writeln!(out, "{} {} = add i64 {}, 0", indent, remaining_reg, size).ok();
     backend.fun.fat_ptrs.insert(v.to_string(), (v.to_string(), "0".to_string(), remaining_reg));
-    BTypedRegister { name: v.to_string(), ty: Type::ptr(Type::int()) }
+    // 2026-07-18: Alloc# returns i64 (ptrtroint), not ptr.
+    // The register already holds ptrtoint ptr %malloc_p to i64.
+    BTypedRegister { name: v.to_string(), ty: Type::int() }
 }
 
 // 2026-07-18: Free# — strategy-aware. Looks up the pointer's allocation
@@ -381,11 +410,22 @@ fn emit_free(
     // Look up the allocation strategy for the pointer register.
     let strategy = backend.fun.alloc_strategies.get(&ptr_reg);
     match strategy {
-        Some(AllocStrategy::Arena) | Some(AllocStrategy::Alloca) => {
-            // 2026-07-18: Arena/stack allocations don't need per-element free.
-            // Arena reset at scope end / stack pop reclaims all memory.
+        // 2026-07-18: Inline, RingBuffer, Arena, Alloca — no Free# needed.
+        Some(AllocStrategy::Arena) | Some(AllocStrategy::Alloca)
+            | Some(AllocStrategy::Inline) | Some(AllocStrategy::RingBuffer) => {}
+        // 2026-07-18: Config strategy — check the free field from config.
+        Some(AllocStrategy::Config(name)) => {
+            match ALLOC_CONFIG.lookup_free(name) {
+                Some("none") => {}  // no-op
+                Some(fn_name) => {   // custom free function
+                    writeln!(out, "{}call void @{}(ptr {})", indent, fn_name, ptr_reg).ok();
+                }
+                None => {            // default → @free
+                    writeln!(out, "{}call void @free(ptr {})", indent, ptr_reg).ok();
+                }
+            }
         }
-        _ => {
+        Some(AllocStrategy::Malloc) | Some(AllocStrategy::Custom(_)) | _ => {
             // Heap-allocated (Malloc) or unknown → emit @free.
             writeln!(out, "{}call void @free(ptr {})", indent, ptr_reg).ok();
         }

@@ -1231,3 +1231,277 @@ Each token already exists in the lexer: `Pipe` (`|`), `BitXor` (`^`), `Ampersand
 - No `else` keyword exists — use `when` guards everywhere
 - Entry point uses `rct txn` or `[#]` marker, not `defn main()`
 
+---
+
+## Block 15: Unified Allocation Strategy System
+
+**Goal:** Replace the current stub escape analysis with a full DAG-based inference
+system that automatically selects the best allocation strategy per `Alloc#` call site.
+
+### Current Gaps Found
+
+| Gap | Impact | File |
+|-----|--------|------|
+| `will_escape_current_allocation()` always returns `false` | Arena/Alloca paths never selected | `mod.rs:1298` |
+| `is_static_bound` never set to `true` | Alloca path is dead code | `mod.rs:1290` |
+| No RingBuffer strategy | Streaming patterns default to Malloc | `mod.rs:278` |
+| No Inline/SOO strategy beyond SSO string | Small allocs always go to heap | `mod.rs:278` |
+| No runtime fallback (try stack → heap) | Stack overflow for dynamic sizes | `intrinsics.rs:280` |
+| No DAG dataflow analysis | Strategy defaults to Malloc for everything | `allocation.rs` |
+| No thread-local arena | Parallel dispatch can't use arenas | `mod.rs:1177` |
+| Config strategies always Free#→@free | Wrong for pool/no-free strategies | `intrinsics.rs:359` |
+
+### Phase A1 — Extend AllocStrategy
+
+**File:** `src/backend/llvm/mod.rs:278`
+
+Current:
+```rust
+pub enum AllocStrategy { Arena, Malloc, Alloca }
+```
+
+Add:
+```rust
+pub enum AllocStrategy {
+    Arena,                     // bump-allocated from per-txn arena
+    Malloc,                    // heap via @malloc
+    Alloca,                    // stack via alloca
+    Inline,                    // inline in parent struct (SSO/SVO)
+    RingBuffer,               // circular buffer, overwrite-oldest
+    Config(String),           // named template from alloc-strategies.toml
+    Custom(String),           // user-provided Brief function name
+}
+```
+
+Update all match sites (in `emit_alloc`, `emit_free`, `emit_alloc_with_strategy`).
+
+### Phase A2 — DAG-Based Strategy Inference
+
+**File:** `src/analysis/allocation.rs` (full rewrite)
+
+#### A2a: DAG Builder
+
+Walk each txn/defn body, build a dataflow graph:
+
+```rust
+pub enum DagNode {
+    Alloc { id: usize, size: Expr, result: Var },
+    Store { target: Var, source: Var },
+    Call { name: String, args: Vec<Var>, result: Var },
+    Return { value: Var },
+    StateWrite { field: String, value: Var },
+}
+
+pub struct DataflowEdge {
+    pub from: NodeId,
+    pub to: NodeId,
+    pub via: Var,
+}
+
+pub struct DataflowGraph {
+    pub nodes: Vec<DagNode>,
+    pub edges: Vec<DataflowEdge>,
+    pub root_allocations: Vec<NodeId>, // Alloc nodes at function root
+}
+```
+
+Builder walks the statement list recursively:
+- `Statement::Let { name, expr: Some(expr) }` → create edges from expr vars to name
+- `Statement::Assign(lhs, rhs)` → create edge from rhs vars to lhs vars
+- `Expr::Call("Alloc#", args, Some(id))` → create `DagNode::Alloc { id, size, result }`
+- `Statement::Term(Some(expr))` → create `DagNode::Return { value }`
+- `Expr::Field(_, _)` / `Expr::Identifier(_)` → resolve to Var
+- `when cond { body };` → recurse into body (same scope)
+
+#### A2b: Escape Detection
+
+For each `Alloc` node, trace forward through all reachable edges:
+
+```rust
+fn compute_escape(graph: &DataflowGraph, alloc: NodeId) -> EscapeResult {
+    let mut visited = HashSet::new();
+    let mut queue = VecDeque::new();
+    queue.push_back(alloc);
+
+    while let Some(node) = queue.pop_front() {
+        if !visited.insert(node) { continue; }
+        match &graph.nodes[node] {
+            DagNode::StateWrite { .. } => return Escaped,       // stored in state
+            DagNode::Return { .. } => return Escaped,           // returned
+            DagNode::Call { args, .. } => {
+                if args.contains(&result_var) { return Escaped; } // passed to fn
+            }
+            _ => {
+                // Follow outgoing edges
+                for edge in &graph.edges {
+                    if edge.from == node { queue.push_back(edge.to); }
+                }
+            }
+        }
+    }
+    NotEscaped  // no escape path found
+}
+```
+
+Use existing `provenance::infer_provenance` + `is_local_provenance` for assignments
+to distinguish state fields from local variables.
+
+#### A2c: Strategy Assignment
+
+```rust
+fn assign_strategy(alloc: &AllocNode, escape: EscapeResult, scope: &ScopeInfo) -> AllocStrategy {
+    match escape {
+        Escaped => AllocStrategy::Malloc,      // must use heap
+        NotEscaped => {
+            let size_const = alloc.size.as_const_u64();
+            match scope {
+                ScopeInfo::InArena => {
+                    if size_const.map_or(false, |s| s <= 8) {
+                        AllocStrategy::Inline     // tiny → struct field
+                    } else {
+                        AllocStrategy::Arena      // bump allocate
+                    }
+                }
+                ScopeInfo::Bounded => {
+                    if size_const.map_or(false, |s| s <= threshold) {
+                        AllocStrategy::Alloca     // stack
+                    } else {
+                        AllocStrategy::Inline     // inline or arena fallback
+                    }
+                }
+                ScopeInfo::Reactive => {
+                    // Check ring buffer pattern
+                    if is_ring_buffer_candidate(alloc, graph) {
+                        AllocStrategy::RingBuffer
+                    } else {
+                        AllocStrategy::Malloc     // reactive → conservative
+                    }
+                }
+                ScopeInfo::Default => AllocStrategy::Malloc,
+            }
+        }
+    }
+}
+```
+
+Ring buffer detection: allocation result written to state field, field consumed
+within same tick, field overwritten every tick (no cross-tick persistence).
+
+### Phase A3 — Runtime Fallback Checks
+
+**File:** `src/backend/llvm/intrinsics.rs:275`
+
+When analysis assigns `Alloca` but size is runtime-determined:
+
+```rust
+fn emit_dynamic_alloc(backend, out, v, size, threshold, indent) {
+    let stack_l = format!(".stack{}", backend.fun.txn_counter);
+    let heap_l = format!(".heap{}", backend.fun.txn_counter);
+    let done_l = format!(".done{}", backend.fun.txn_counter);
+    backend.fun.txn_counter += 1;
+
+    writeln!(out, "  %cmp = icmp ule i64 {}, {}", size, threshold).ok();
+    writeln!(out, "  br i1 %cmp, label %{}, label %{}", stack_l, heap_l).ok();
+    writeln!(out, "{}:", stack_l).ok();
+    writeln!(out, "  %s = alloca i8, i64 {}", size).ok();
+    writeln!(out, "  %sv = ptrtoint ptr %s to i64").ok();
+    writeln!(out, "  br label %{}", done_l).ok();
+    writeln!(out, "{}:", heap_l).ok();
+    writeln!(out, "  %h = call ptr @malloc(i64 {})", size).ok();
+    writeln!(out, "  %hv = ptrtoint ptr %h to i64").ok();
+    writeln!(out, "  br label %{}", done_l).ok();
+    writeln!(out, "{}:", done_l).ok();
+    writeln!(out, "  {} = phi i64 [ %sv, %{} ], [ %hv, %{} ]", v, stack_l, heap_l).ok();
+}
+```
+
+Add `stack_threshold: u64` to `BuildOptions` (default 4096).
+
+### Phase A4 — RingBuffer Strategy
+
+**File:** `src/backend/llvm/intrinsics.rs`
+
+New function:
+```rust
+fn emit_ring_buffer_alloc(backend, out, v, size, indent) -> BTypedRegister {
+    // Ring buffer state: @ring_head (global), @ring_buf (global array)
+    writeln!(out, "  %head = load i64, ptr @ring_head").ok();
+    writeln!(out, "  %wrapped = and i64 %head, {} - 1", RING_SIZE).ok();
+    writeln!(out, "  %slot = getelementptr i8, ptr @ring_buf, i64 %wrapped").ok();
+    writeln!(out, "{}{} = ptrtoint ptr %slot to i64", indent, v).ok();
+    writeln!(out, "  %next = add i64 %head, 1").ok();
+    writeln!(out, "  store i64 %next, ptr @ring_head").ok();
+    BTypedRegister { name: v.to_string(), ty: Type::int() }
+}
+```
+
+### Phase A5 — Inline/SOO Strategy
+
+**File:** `src/backend/llvm/intrinsics.rs`
+
+For allocations marked `Inline`, the `Alloc#` becomes a no-op — the storage
+is already in the parent struct. The returned "pointer" is actually a field
+offset into the containing struct. Operations on it use struct field access
+(extractvalue/insertvalue) rather than load/store through a pointer.
+
+For now, wire `Inline` to the existing SSO handle pattern (used by String with
+`feature_sso_strings = true`). Future: generalize to any fixed-size type.
+
+### Phase A6 — Wire is_static_bound
+
+**Files:** `src/backend/llvm/mod.rs:1290`, `src/backend/llvm/emit_toplevel.rs`
+
+Set `is_static_bound` during txn emission when the contract has a bounded
+pre-condition:
+
+```rust
+// In emit_toplevel.rs, where txns are emitted:
+let bounded = matches!(&txn.contract.pre_condition,
+    Expr::BinaryOp(BinaryOpKind::Lt | BinaryOpKind::Le | BinaryOpKind::Lt | BinaryOpKind::Ge,
+        left, right))
+    && matches!(left.as_ref(), Expr::Identifier(_));
+self.fun.is_static_bound = bounded;
+```
+
+This enables the `Alloca` path in `emit_alloc` for bounded-counter txns like
+`rct txn count [x < TOTAL][x == TOTAL] { ... }`.
+
+### Phase A7 — Thread-Local Arena
+
+**File:** `src/backend/llvm/mod.rs`
+
+Add `emit_tls_arena_init` for parallel dispatch. Uses `pthread_getspecific`/
+`pthread_setspecific` to give each thread its own arena. Falls back to
+per-txn arena for sequential dispatch.
+
+### Phase A8 — Config Free# Metadata
+
+**Files:** `src/config.rs`, `config/alloc-strategies.toml`
+
+Extend `AllocConfigEntry`:
+```rust
+pub struct AllocConfigEntry {
+    pub template: String,
+    pub free: Option<String>,   // None=@free, Some("none")=no-op, Some("fn")=custom
+}
+```
+
+In `emit_free`: check `alloc_strategies` for `Config(name)`, look up name
+in config, get the `free` field, dispatch accordingly.
+
+### Phase Order
+
+| Phase | Depends on | Effort |
+|-------|-----------|--------|
+| A8 | None | ~30 min |
+| A6 | None | ~30 min |
+| A1 | None | ~10 min |
+| A2a | None | ~4 hr |
+| A2b | A2a | ~3 hr |
+| A2c | A2b | ~2 hr |
+| A3 | A2c | ~2 hr |
+| A4 | A1 | ~2 hr |
+| A5 | A1 | ~1 hr |
+| A7 | A3 | ~2 hr |
+| AT | All | ~3 hr |
+
