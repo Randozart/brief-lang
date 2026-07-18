@@ -95,9 +95,20 @@ pub fn eval_expr(
         Expr::DerivationBlock(_) => Ok(Value::Void),
 
         // ── Dereference ──────────────────────────────────────────
-        Expr::Deref(inner) => eval_expr(inner, heap, bindings),
+        // 2026-07-18: Evaluate inner, expect Value::Ref(wrapped), return *wrapped.
+        Expr::Deref(inner) => {
+            let val = eval_expr(inner, heap, bindings)?;
+            match val {
+                Value::Ref(wrapped) => Ok((*wrapped).clone()),
+                other => Ok(other),
+            }
+        }
         // ── Address-of ───────────────────────────────────────────
-        Expr::AddrOf(inner) => eval_expr(inner, heap, bindings),
+        // 2026-07-18: Wrap the inner value in Value::Ref to represent a pointer.
+        Expr::AddrOf(inner) => {
+            let val = eval_expr(inner, heap, bindings)?;
+            Ok(Value::Ref(Box::new(val)))
+        }
 
         // ── Property get ─────────────────────────────────────────
         Expr::PropertyGet(_) => Ok(Value::Void),

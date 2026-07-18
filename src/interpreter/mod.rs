@@ -403,25 +403,51 @@ mod tests {
     }
 
     #[test]
-    fn test_deref_expression_evaluates_inner() {
-        // Deref in the interpreter just evaluates the inner expression.
+    fn test_deref_unwraps_ref() {
+        // Deref of a Ref returns the wrapped value.
         let mut heap = VirtualHeap::new();
         let mut bindings = std::collections::HashMap::new();
-        bindings.insert("x".to_string(), i64_to_bits(42));
+        let inner_val = Value::Int(42);
+        bindings.insert("x".to_string(), Value::Ref(Box::new(inner_val)));
         let expr = Expr::Deref(Box::new(Expr::Identifier("x".to_string())));
         let result = eval_expr(&expr, &mut heap, &mut bindings).unwrap();
         assert_eq!(result.as_i64(), Some(42));
     }
 
     #[test]
-    fn test_deref_nested() {
-        // Deref of deref: *(*y) — inner is evaluated, then outer.
+    fn test_deref_non_ref_passthrough() {
+        // Deref of a non-Ref value just returns the value as-is.
         let mut heap = VirtualHeap::new();
         let mut bindings = std::collections::HashMap::new();
-        bindings.insert("y".to_string(), i64_to_bits(99));
-        let inner = Expr::Deref(Box::new(Expr::Identifier("y".to_string())));
-        let outer = Expr::Deref(Box::new(inner));
-        let result = eval_expr(&outer, &mut heap, &mut bindings).unwrap();
+        bindings.insert("x".to_string(), Value::Int(42));
+        let expr = Expr::Deref(Box::new(Expr::Identifier("x".to_string())));
+        let result = eval_expr(&expr, &mut heap, &mut bindings).unwrap();
+        assert_eq!(result.as_i64(), Some(42));
+    }
+
+    #[test]
+    fn test_addrof_wraps_in_ref() {
+        // AddrOf wraps the value in a Ref.
+        let mut heap = VirtualHeap::new();
+        let mut bindings = std::collections::HashMap::new();
+        bindings.insert("x".to_string(), Value::Int(42));
+        let expr = Expr::AddrOf(Box::new(Expr::Identifier("x".to_string())));
+        let result = eval_expr(&expr, &mut heap, &mut bindings).unwrap();
+        match result {
+            Value::Ref(wrapped) => assert_eq!(wrapped.as_i64(), Some(42)),
+            _ => panic!("expected Ref, got {:?}", result),
+        }
+    }
+
+    #[test]
+    fn test_addrof_deref_roundtrip() {
+        // *(x) wraps then unwraps.
+        let mut heap = VirtualHeap::new();
+        let mut bindings = std::collections::HashMap::new();
+        bindings.insert("x".to_string(), Value::Int(99));
+        let addrof = Expr::AddrOf(Box::new(Expr::Identifier("x".to_string())));
+        let deref = Expr::Deref(Box::new(addrof));
+        let result = eval_expr(&deref, &mut heap, &mut bindings).unwrap();
         assert_eq!(result.as_i64(), Some(99));
     }
 }

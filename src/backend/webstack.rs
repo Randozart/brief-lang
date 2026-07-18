@@ -787,6 +787,9 @@ impl WebstackGenerator {
             Expr::Field(obj, field) => {
                 format!("{}[\"{}\"]", self.expr_to_ts(obj), field)
             }
+            // 2026-07-18: Pointer operations — simplified for WASM (no address space).
+            Expr::AddrOf(inner) => self.expr_to_ts(inner),
+            Expr::Deref(inner) => self.expr_to_ts(inner),
             _ => format!("/* expr: {:?} */ 0", expr),
         }
     }

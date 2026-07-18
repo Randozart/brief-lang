@@ -340,6 +340,9 @@ impl CirctBackend {
                     Some(w)
                 }
             }
+            // 2026-07-18: Pointer ops — emit inner expression (HW backend).
+            Expr::AddrOf(inner) => self.emit_expr(ng, out, inner, reg_names, result_ty),
+            Expr::Deref(inner) => self.emit_expr(ng, out, inner, reg_names, result_ty),
             Expr::Call(name, args, _) => {
                 // 2026-07-14: Intrinsic calls and function calls both use Expr::Call.
                 // Match intrinsic names first, then fall back to submodule instantiation.
