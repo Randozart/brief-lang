@@ -156,3 +156,40 @@ impl OpConfig {
         self.lookup(op, primitive, bytes).is_some()
     }
 }
+
+/// 2026-07-18: Maps named allocation strategies to LLVM IR templates.
+/// Loaded from config/alloc-strategies.toml at compile time.
+/// Structure: { strategy_name: template_string }
+#[derive(Debug, Clone)]
+pub struct AllocConfig {
+    strategies: HashMap<String, String>,
+}
+
+impl AllocConfig {
+    /// Load the built-in alloc strategies file.
+    pub fn load() -> Self {
+        let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("config/alloc-strategies.toml");
+        let content = match std::fs::read_to_string(&path) {
+            Ok(c) => c,
+            Err(_) => return AllocConfig { strategies: HashMap::new() },
+        };
+        let raw: HashMap<String, toml::Value> = toml::from_str(&content)
+            .unwrap_or_default();
+        let mut strategies = HashMap::new();
+        for (key, value) in raw {
+            if let Some(strat_key) = key.strip_prefix("alloc.") {
+                if let toml::Value::Table(table) = value {
+                    if let Some(toml::Value::String(tmpl)) = table.get("template") {
+                        strategies.insert(strat_key.to_string(), tmpl.clone());
+                    }
+                }
+            }
+        }
+        AllocConfig { strategies }
+    }
+
+    /// Look up the LLVM IR template for a strategy name.
+    pub fn lookup(&self, name: &str) -> Option<&str> {
+        self.strategies.get(name).map(|s| s.as_str())
+    }
+}

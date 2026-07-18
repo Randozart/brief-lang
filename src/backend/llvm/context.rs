@@ -451,6 +451,13 @@ pub struct FunctionContext {
     // Keyed by the underlying SSA register (%t{N}) or alloca name.
     // Propagated through let-bindings in emit_statement.
     pub alloc_strategies: HashMap<String, AllocStrategy>,
+
+    // 2026-07-18: Fat pointer provenance — base, offset, remaining registers.
+    // Keyed by the fat pointer register name. Populated by emit_expr when
+    // taking address-of (&s, &s[i], &buf[i]) and by Alloc#/Malloc#.
+    // Consulted by Length# (reads remaining), Index# (adjusts offset/remaining),
+    // and Deref# (bounds check against remaining).
+    pub fat_ptrs: HashMap<String, (String, String, String)>,
 }
 
 impl FunctionContext {
@@ -510,6 +517,7 @@ impl FunctionContext {
             chimera_map: HashMap::new(),
             expr_dedup_cache: HashMap::new(),
             alloc_strategies: HashMap::new(),
+            fat_ptrs: HashMap::new(),
         }
     }
 

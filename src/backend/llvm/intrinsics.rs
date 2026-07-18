@@ -210,37 +210,134 @@ fn emit_malloc(
     writeln!(out, "{}{} = ptrtoint ptr %{}_p to i64", indent, v, name).ok();
     // 2026-07-18: Record Malloc strategy so Free# can dispatch correctly.
     backend.fun.alloc_strategies.insert(v.to_string(), AllocStrategy::Malloc);
+    // 2026-07-18: Record fat pointer provenance — base points to alloc,
+    // offset 0, remaining = size. This enables O(1) Length#(ptr).
+    let remaining_reg = backend.fun.gen_reg();
+    writeln!(out, "{} {} = add i64 {}, 0", indent, remaining_reg, size).ok();
+    backend.fun.fat_ptrs.insert(v.to_string(), (v.to_string(), "0".to_string(), remaining_reg));
     BTypedRegister { name: v.to_string(), ty: Type::ptr(Type::int()) }
 }
 
 // 2026-07-18: Alloc# — compiler-delegated allocation with triple dispatch.
-// Strategy 1: Arena scope active → bump allocate.
-// Strategy 2: Bounded scope + no escape → alloca (stack).
-// Strategy 3: Default → @malloc (heap).
+// Args:
+//   Alloc#(size)                        — compiler picks (scope-based)
+//   Alloc#(size, Arena)                 — PascalCase: intrinsic dispatch
+//   Alloc#(size, Malloc)                — PascalCase: intrinsic dispatch
+//   Alloc#(size, Alloca)                — PascalCase: intrinsic dispatch
+//   Alloc#(size, "pool_serial")         — quoted: config/alloc-strategies.toml
+//   Alloc#(size, my_custom_alloc_fn)    — identifier: user Brief function
 fn emit_alloc(
     backend: &mut LlvmBackend, out: &mut String, v: &str,
     args: &[Expr], indent: &str,
 ) -> BTypedRegister {
     let size = emit_arg(backend, out, &args[0], indent);
-    // Strategy 1: Arena scope active → bump allocate from per-txn arena.
+    // Check for optional 2nd arg (strategy override).
+    if args.len() >= 2 {
+        return emit_alloc_with_strategy(backend, out, v, args, indent, &size);
+    }
+    // Default triple dispatch (no strategy arg).
+    // Strategy 1: Arena scope active → bump allocate.
     if backend.fun.arena_slots.is_some() {
-        let result = backend.emit_arena_alloc(out, indent, &size);
+        let _result = backend.emit_arena_alloc(out, indent, &size);
         backend.fun.alloc_strategies.insert(v.to_string(), AllocStrategy::Arena);
         return BTypedRegister { name: v.to_string(), ty: Type::ptr(Type::int()) };
     }
-    // Strategy 2: Bounded scope + no escape detected → alloca.
+    // Strategy 2: Bounded scope + no escape → alloca.
     // TEMP: 2026-07-18: will_escape_current_allocation always returns false.
-    // Phase 4 (Ptr Level 3 borrow checker) will add proper provenance tracking.
+    // Phase 4 adds proper provenance tracking.
     if backend.is_in_bounded_scope() && !backend.will_escape_current_allocation() {
         writeln!(out, "{}{} = alloca i8, i64 {}", indent, v, size).ok();
         backend.fun.alloc_strategies.insert(v.to_string(), AllocStrategy::Alloca);
         return BTypedRegister { name: v.to_string(), ty: Type::ptr(Type::int()) };
     }
     // Strategy 3: Default → @malloc.
+    emit_malloc_inline(backend, out, v, &size, indent)
+}
+
+// 2026-07-18: Handle explicit strategy override for Alloc#.
+// Strategy can be PascalCase (Arena/Malloc/Alloca), quoted string (config),
+// or an identifier (user function).
+fn emit_alloc_with_strategy(
+    backend: &mut LlvmBackend, out: &mut String, v: &str,
+    args: &[Expr], indent: &str, size: &str,
+) -> BTypedRegister {
+    let strategy_expr = &args[1];
+    match strategy_expr {
+        Expr::Identifier(name) => {
+            match name.as_str() {
+                "Arena" => {
+                    let _result = backend.emit_arena_alloc(out, indent, size);
+                    backend.fun.alloc_strategies.insert(v.to_string(), AllocStrategy::Arena);
+                }
+                "Malloc" => {
+                    emit_malloc_inline(backend, out, v, size, indent);
+                }
+                "Alloca" => {
+                    writeln!(out, "{}{} = alloca i8, i64 {}", indent, v, size).ok();
+                    backend.fun.alloc_strategies.insert(v.to_string(), AllocStrategy::Alloca);
+                }
+                // Unknown PascalCase — treat as user function name.
+                custom_fn => {
+                    let fn_reg = emit_arg(backend, out, strategy_expr, indent);
+                    writeln!(out, "{}{} = call i64 @{}(i64 {})", indent, v, custom_fn, size).ok();
+                    // Conservative: unknown strategy → Malloc for Free# dispatch.
+                    backend.fun.alloc_strategies.insert(v.to_string(), AllocStrategy::Malloc);
+                }
+            }
+        }
+        Expr::Quoted(bytes) => {
+            let strategy_name = String::from_utf8_lossy(bytes).to_string();
+            // Look up in config/alloc-strategies.toml.
+            let found = emit_alloc_from_config(backend, out, v, &strategy_name, size, indent);
+            if !found {
+                // Fallback to @malloc with warning.
+                let msg = format!("warning: unknown alloc strategy '{}', falling back to malloc", strategy_name);
+                backend.warnings.push(msg);
+                emit_malloc_inline(backend, out, v, size, indent);
+            }
+        }
+        _ => {
+            // Unknown expression type — emit as function call.
+            let fn_reg = emit_arg(backend, out, strategy_expr, indent);
+            writeln!(out, "{}{} = call i64 @custom_alloc(i64 {}, i64 {})", indent, v, size, fn_reg).ok();
+            backend.fun.alloc_strategies.insert(v.to_string(), AllocStrategy::Malloc);
+        }
+    }
+    BTypedRegister { name: v.to_string(), ty: Type::ptr(Type::int()) }
+}
+
+// 2026-07-18: Look up a quoted strategy name in config/alloc-strategies.toml
+// and emit the corresponding LLVM IR template. Returns true if found.
+fn emit_alloc_from_config(
+    backend: &mut LlvmBackend, out: &mut String, v: &str,
+    strategy_name: &str, size: &str, indent: &str,
+) -> bool {
+    let config = crate::config::AllocConfig::load();
+    let Some(template) = config.lookup(strategy_name) else {
+        return false;
+    };
+    let ir = template
+        .replace("{v}", v.trim_start_matches('%'))
+        .replace("{size}", size);
+    writeln!(out, "{}  {}", indent, ir).ok();
+    // AllocConfig entries default to Malloc strategy for Free# dispatch.
+    backend.fun.alloc_strategies.insert(v.to_string(), AllocStrategy::Malloc);
+    true
+}
+
+// 2026-07-18: Emit @malloc for a size register, returning ptrtoint'd i64.
+// Extracted so both default triple dispatch and explicit Malloc strategy
+// share the same emission path.
+fn emit_malloc_inline(
+    backend: &mut LlvmBackend, out: &mut String, v: &str, size: &str, indent: &str,
+) -> BTypedRegister {
     let name = v.trim_start_matches('%');
     writeln!(out, "{}%{}_p = call ptr @malloc(i64 {})", indent, name, size).ok();
     writeln!(out, "{}{} = ptrtoint ptr %{}_p to i64", indent, v, name).ok();
     backend.fun.alloc_strategies.insert(v.to_string(), AllocStrategy::Malloc);
+    let remaining_reg = backend.fun.gen_reg();
+    writeln!(out, "{} {} = add i64 {}, 0", indent, remaining_reg, size).ok();
+    backend.fun.fat_ptrs.insert(v.to_string(), (v.to_string(), "0".to_string(), remaining_reg));
     BTypedRegister { name: v.to_string(), ty: Type::ptr(Type::int()) }
 }
 
@@ -393,9 +490,16 @@ fn emit_len(
     backend: &mut LlvmBackend, out: &mut String, v: &str,
     args: &[Expr], indent: &str,
 ) -> BTypedRegister {
-    let list = emit_arg(backend, out, &args[0], indent);
+    let arg_reg = emit_arg(backend, out, &args[0], indent);
+    // Check if this argument has fat pointer provenance — if so, read
+    // the remaining length directly from the provenance metadata.
+    if let Some((_base, _offset, ref remaining)) = backend.fun.fat_ptrs.get(&arg_reg).cloned() {
+        writeln!(out, "{}{} = add i64 {}, 0", indent, v, remaining).ok();
+        return BTypedRegister { name: v.to_string(), ty: Type::int() };
+    }
+    // Fallback: load length from string/list header slot 0.
     let ptr = backend.fun.gen_reg();
-    writeln!(out, "{}{} = inttoptr i64 {} to ptr", indent, ptr, list).ok();
+    writeln!(out, "{}{} = inttoptr i64 {} to ptr", indent, ptr, arg_reg).ok();
     writeln!(out, "{}{} = load i64, ptr {}", indent, v, ptr).ok();
     BTypedRegister { name: v.to_string(), ty: Type::int() }
 }

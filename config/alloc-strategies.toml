@@ -1,0 +1,27 @@
+# ── Allocation Strategy Config ──────────────────────────────────────────
+# 2026-07-18: Custom allocation strategy LLVM IR templates.
+# PascalCase strategies (Arena, Malloc, Alloca) are intrinsic — do not
+# redefine them here.
+#
+# Quoted strategy names like "pool_serial" are resolved through this file.
+# Each entry provides an LLVM IR template with {v} and {size} placeholders.
+# {v}   = result register name (without %)
+# {size} = size_i64 register name
+
+[alloc.pool_serial]
+template = """
+%{v}_p = call ptr @pool_alloc(i64 {size})
+%{v} = ptrtoint ptr %{v}_p to i64
+"""
+
+[alloc.mmap_shared]
+template = """
+%{v}_p = call ptr @mmap_shared(i64 {size})
+%{v} = ptrtoint ptr %{v}_p to i64
+"""
+
+[alloc.pinned_dma]
+template = """
+%{v}_p = call ptr @alloc_dma_pinned(i64 {size})
+%{v} = ptrtoint ptr %{v}_p to i64
+"""

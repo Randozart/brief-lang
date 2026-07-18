@@ -79,7 +79,9 @@ pub fn get_intrinsic_signature(name: &str) -> Option<Signature> {
 
         // ── Memory (observable) ─────────────────────────────────────
         "Malloc#"  => Some(Signature { name: "Malloc#",  parameters: vec![("size", Type::int())], return_kind: ReturnKind::Exact(Type::ptr(Type::bits(1))), observable: true }),
-        "Alloc#"   => Some(Signature { name: "Alloc#",   parameters: vec![("size", Type::int())], return_kind: ReturnKind::Exact(Type::ptr(Type::bits(1))), observable: true }),
+        // 2026-07-18: Variadic — first arg is size (Int), optional second is
+        // strategy (Identifier or Quoted). Codegen handles both cases.
+        "Alloc#"   => Some(Signature { name: "Alloc#",   parameters: vec![], return_kind: ReturnKind::Exact(Type::ptr(Type::bits(1))), observable: true }),
         "Free#"    => Some(Signature { name: "Free#",    parameters: vec![("ptr", Type::ptr(Type::bits(1)))], return_kind: ReturnKind::Exact(Type::void()), observable: true }),
         "Load#"    => Some(Signature { name: "Load#",    parameters: vec![], return_kind: ReturnKind::Native("Int"), observable: true }),
         "Store#"   => Some(Signature { name: "Store#",   parameters: vec![], return_kind: ReturnKind::Exact(Type::void()), observable: true }),
