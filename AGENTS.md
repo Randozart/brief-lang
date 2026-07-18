@@ -1,7 +1,37 @@
 # Brief Compiler - Agent Guidelines
 
-This file is the condensed active guidelines (~330 lines). Historical context is in `AGENTS_HISTORY.md` and
+This file is the condensed active guidelines (~380 lines). Historical context is in `AGENTS_HISTORY.md` and
 the full snapshot backup at `AGENTS_HISTORY_2.md`.
+
+## Roleplay Instruction
+
+You are not writing code for one benchmark. You are building a compiler that
+must be correct for **all programs** written in Brief — every possible well-typed
+program, not just the test case you happen to be working on. Every decision must
+pass three questions:
+
+1. **Does this make the compiler more general, or does it special-case one pattern?**
+   A match arm for `"ring_push"` might solve today's benchmark but tomorrow's
+   `MyQueue<T>` with `InsertAt <~ my_push(#L, #R)` demands the same treatment.
+   The general solution costs slightly more up front and saves a refactor later.
+
+2. **Does this add knowledge the compiler must carry forever, or does it push
+   that knowledge into configuration where it can evolve?**
+   A hardcoded type name in Rust is forever. A property in `config/llvm-ops.toml`
+   or a binding in a `.bv` file can be updated without touching the compiler.
+   The dividing line is `--no-stdlib`: if it must work without stdlib, it's an
+   intrinsic. Everything else belongs in configuration or stdlib.
+
+3. **If this were the only rule left, would the architecture still hold?**
+   `ring_push` is a Brief function using Ptr arithmetic, not a compiler intrinsic.
+   `InsertAt <~ ring_push(#L, #R)` is a type property, not a Rust match arm.
+   The `<-` operator works for any type that declares `InsertAt`/`ExtractFrom`.
+   Each of these is true independently, and removing any one doesn't break the
+   others. That's the test of a clean architecture.
+
+Patches are UNACCEPTABLE. There is no "go fast and break things" — we are
+building for correctness across ALL programs. Every exception you make today
+becomes the rule tomorrow.
 
 ## IMPORTANT CONSIDERATION
 
@@ -14,6 +44,48 @@ information the compiler uses to optimize harder. Safety IS the
 optimization enabler. Full machine access is available through contracts
 proven at compile time, not `unsafe` blocks.
 
+### Intrinsics vs Stdlib — The Dividing Line
+
+**Everything that MUST hold with no stdlib loaded is an intrinsic.**
+**Everything else is stdlib.**
+
+If `rm -rf lib/std && briefc --no-stdlib` still type-checks and compiles
+`let x: Int = 5`, it's an intrinsic. If a user could write a `.bv` file
+that achieves the same thing, it belongs in stdlib.
+
+The `ring_push` case proves the pattern: a 15-line Brief function with Ptr
+arithmetic replaces a compiler intrinsic + Rust match arm. A user writing
+`MyQueue<T>` with `InsertAt <~ my_push(#L, #R)` gets the same `<-` syntax
+without touching the compiler.
+
+### Three-Layer Architecture
+
+| Layer | File | Role |
+|-------|------|------|
+| **Contract** | `src/intrinsic_signatures.rs` | Declares what `#` intrinsics exist |
+| **Implementation** | `config/llvm-ops.toml` | Maps (op, primitive, bytes) → LLVM IR template |
+| **Binding** | `lib/std/types/bootstrap.bv` | Maps operator symbols to per-type op bindings |
+
+The frontend validates calls against signatures. The backend finds templates
+in the config or falls through to `emit_external_call`. The type bindings in
+stdlib map `+` to the right op per type. A missing config template for a
+given type+width should be caught early — the frontend knows what the backend
+can compile.
+
+### Hash Words Convention
+
+`#L`, `#R`, `#T` are compiler-internal positional markers for op bindings.
+They are lexed as distinct tokens (not identifiers) and resolved at codegen
+time to concrete registers. See `docs/architecture/hash-words.md`.
+
+### Provenance Tracking
+
+Every code site with a rationale comment (`// YYYY-MM-DD: <why>`) carries
+full provenance: *when, why, what pattern it targets,* and *how to undo it*
+if it becomes obsolete. Temporary solutions are explicitly flagged with
+`// TEMP: YYYY-MM-DD: <reason>` and describe the path to permanence.
+This prevents "I'll fix it later" from fossilizing into architecture.
+
 ## Golden Rules
 
 1. **CONTRACT-FIRST**: Contracts are the source of truth. Never weaken
@@ -21,6 +93,11 @@ proven at compile time, not `unsafe` blocks.
 
 2. **NO MAGIC**: Never hardcode Rust string matches as built-in functions.
    `is_digit` → `import char from "std/char.bv"`. `None` → `import option from "std/option.bv"`.
+   The compiler must not know about specific types (`String`, `RingBuffer`),
+   specific function names (`"ring_push"`), or specific properties. Everything
+   type-specific belongs in config/llvm-ops.toml or stdlib .bv files.
+   Primitive types (Int, Float, Bool, Ptr, Void) are the sole exceptions —
+   the compiler needs these to bootstrap.
 
 3. **INTRINSICS BEFORE FRGN**: Before writing `frgn`, check if an intrinsic
    exists. Print? `PrintInt#`. Input? `GetEnvInt#`. GPU? `GetGlobalId#`.
@@ -82,6 +159,25 @@ proven at compile time, not `unsafe` blocks.
       rationale comments — rewrite them to explain the new structure instead)
     Rationale comments are institutional memory. A plan without a documentation
     strategy will produce unmaintainable code.
+
+13. **STDLIB IS THE EXTENSION MECHANISM**: New functionality goes in `.bv`
+    files, not new Rust match arms. The compiler teaches; stdlib learns.
+    A user writing `MyQueue<T>` with `InsertAt <~ my_push(#L, #R)` must get
+    the same `<-` behavior as `RingBuffer<T>` without touching the compiler.
+
+14. **NO KNOWLEDGE OF SPECIFIC TYPES**: The compiler must never check for
+    `Type::string()` or match on `"ring_push"` in Rust code. Type-specific
+    logic lives in config files (`config/llvm-ops.toml`) and stdlib `.bv`
+    files (property bindings). The sole exception: primitive types the
+    typechecker needs to bootstrap (`Int`, `Float`, `Bool`, `Void`, `Ptr<T>`).
+
+15. **FULL PROVENANCE TRACKING**: Every code site with a rationale comment
+    must carry *when, why, what pattern it targets,* and *how to undo it*
+    if it becomes obsolete. Temporary solutions are explicitly flagged with
+    `// TEMP: YYYY-MM-DD: <reason>` and describe the path to permanence.
+    This prevents "I'll fix it later" from fossilizing into architecture.
+    The absence of a provenance comment is itself a decision — it means
+    "this change needs no justification," which should be rare.
 
 ## Plan Directives
 
@@ -830,6 +926,8 @@ new intrinsic.
 | **Backend type dispatch** | `docs/architecture/backend-type-dispatch.md` — **READ THIS FIRST** before modifying any backend type code. No hardcoded `"Int" → i64` mappings. Types are driven by source metadata + config file. |
 | **Backend dispatch** | `docs/architecture/features/backend-dispatch.md` |
 | **Benchmark strategy** | `docs/architecture/benchmark-strategy.md` |
+| **Intrinsics vs stdlib** | `docs/architecture/intrinsics-vs-stdlib.md` |
+| **Hash words** | `docs/architecture/hash-words.md` |
 | **Kani harnesses** | `docs/architecture/kani-harnesses.md` |
 | **Plan documents** | `docs/plans/` |
 | **Ptr Level 3 plan** | `docs/plans/2026-07-09-ptr-level3-borrow-checking.md` |
