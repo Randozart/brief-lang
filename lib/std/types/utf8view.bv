@@ -3,10 +3,14 @@
 // Struct literal creation (Utf8View { ... }) pending parser support.
 // Import via `import "std/types/utf8view.bv"`.
 
+// 2026-07-18: Foreign functions — no existing intrinsic covers these.
+// __memcmp: byte-range comparison (no Memcmp# intrinsic yet).
+// __utf8_find: substring search (no Find# intrinsic).
+// __utf8_validate: UTF-8 sequence validator (no Validate# intrinsic).
+// Memcpy: use Copy#(dst, src, len) intrinsic instead (emits @llvm.memcpy).
 frgn __utf8_validate(data: Int, len: Int) -> Int;
 frgn __utf8_find(hay: Int, hay_len: Int, needle: Int, needle_len: Int) -> Int;
 frgn __memcmp(a: Int, b: Int, len: Int) -> Int;
-frgn __memcpy(dst: Int, src: Int, len: Int) -> Int;
 
 // Byte length of the view (O(1)).
 defn utf8view_len(v: Utf8View) -> Int {

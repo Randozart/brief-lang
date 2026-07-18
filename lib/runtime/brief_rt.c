@@ -306,12 +306,8 @@ int64_t brief_ttyname(int64_t fd) {
     return (int64_t)(uintptr_t)ttyname((int)fd);
 }
 
-// 2026-07-18: Memcpy wrapper (mirrors standard memcpy).
-void __memcpy(void *dst, const void *src, int64_t n) {
-    memcpy(dst, src, (size_t)n);
-}
-
 // 2026-07-18: Byte string comparison (mirrors memcmp).
+// Callers should use Copy#(dst, src, len) intrinsic for memcpy.
 int64_t __memcmp(const uint8_t *a, const uint8_t *b, int64_t len) {
     if (len == 0) return 0;
     for (int64_t i = 0; i < len; i++) {
