@@ -739,10 +739,12 @@ pub struct InterruptEntry {
     pub trg_name: Option<String>,
 }
 
-/// Recursively collect ArrowMut::Push targets from a statement body.
-/// Collect push targets from a statement body (arrow push operations).
-/// In the new AST, arrow operations are not represented as separate Expr variants;
-/// push targets are identified through Assign with specific patterns.
+/// Recursively collect push targets from a statement body.
+/// In the new AST, arrow push `queue <- val` parses as
+/// `Statement::Assign(Expr::Identifier("queue"), val)`.
+/// Over-approximation is safe: preallocating a buffer for a
+/// non-push field just allocates unused memory (freed at scope end).
+/// 2026-07-18: Fixed — was a stub that never extracted any names.
 pub(crate) fn collect_push_targets(body: &[Statement], out: &mut Vec<String>) {
     for stmt in body {
         match stmt {
@@ -751,6 +753,9 @@ pub(crate) fn collect_push_targets(body: &[Statement], out: &mut Vec<String>) {
             }
             Statement::Block(body) | Statement::SyncBlock(body) => {
                 collect_push_targets(body, out);
+            }
+            Statement::Assign(Expr::Identifier(name), _) => {
+                out.push(name.clone());
             }
             _ => {}
         }
@@ -3209,9 +3214,10 @@ impl LlvmBackend {
                             crate::ast::Type::Applied(n, _) => n.as_str(),
                             _ => "",
                         };
-                        // 2026-07-18: The parser now stores property values as
-                        // PropertyValue::Identifier (not String). Check both variants.
-                        if tu.get(type_name).and_then(|rt| rt.properties.get("insert_at"))
+                        // 2026-07-18: The parser stores InsertAt/ExtractFrom as
+                        // "op.InsertAt" / "op.ExtractFrom" with PropertyValue::Identifier.
+                        // Check both Identifier and String for backward compat.
+                        if tu.get(type_name).and_then(|rt| rt.properties.get("op.InsertAt"))
                             .map_or(false, |strat| {
                                 *strat == crate::ast::PropertyValue::Identifier("ring_push".to_string())
                                 || *strat == crate::ast::PropertyValue::String("ring_push".to_string())

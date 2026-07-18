@@ -946,14 +946,16 @@ impl<'a> Parser<'a> {
                     metadata.insert(format!("op.{}", op_name), PropertyValue::Identifier(fn_name));
                     continue;
                 }
-                // 2026-07-18: property binding: InsertAt <~ ring_push.
-                // Parse as metadata value (identifier, #L/#R/#T, etc.) and store
-                // in metadata instead of creating a type slot. The type universe
-                // picks up metadata properties via register_typedefs (normalizer.rs:254).
+                // 2026-07-18: op binding via <~: InsertAt <~ ring_push.
+                // Known ops (InsertAt, ExtractFrom) get the "op." prefix so they
+                // match the normalizer keep set and the LLVM dispatch lookup.
+                // Unknown slot names are stored as-is (general metadata).
                 if self.eat(&Token::TildeArrow) {
                     let pv = self.parse_metadata_value_standalone()?;
                     self.eat(&Token::Semicolon);
-                    metadata.insert(slot_name, pv);
+                    let is_op = slot_name == "InsertAt" || slot_name == "ExtractFrom";
+                    let key = if is_op { format!("op.{}", slot_name) } else { slot_name };
+                    metadata.insert(key, pv);
                     continue;
                 }
                 self.expect(Token::Colon)?;

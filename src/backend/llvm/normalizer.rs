@@ -98,7 +98,9 @@ pub fn normalize(items: &mut Vec<TopLevel>, universe: &mut TypeUniverse) -> Resu
 
     // Strip metadata LLVM doesn't use
     // 2026-07-17: Keep ctd and alu (replaces primitive), llvm_type, encoding, layout
-    let keep: HashSet<String> = ["ctd", "alu", "llvm_type", "encoding", "layout"]
+    // 2026-07-18: Keep op.InsertAt and op.ExtractFrom — used by arrow dispatch in emit_stmt
+    let keep: HashSet<String> = ["ctd", "alu", "llvm_type", "encoding", "layout",
+        "op.InsertAt", "op.ExtractFrom"]
         .iter().map(|s| s.to_string()).collect();
     for rt in universe.types.values_mut() {
         rt.properties.retain(|k, _| keep.contains(k));

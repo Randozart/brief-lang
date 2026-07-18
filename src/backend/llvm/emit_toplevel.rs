@@ -111,8 +111,10 @@ impl LlvmBackend {
             _ => target.as_var_name()?,
         };
         let type_name = self.lookup_strategy_type_name(var_name)?;
+        // 2026-07-18: Key is "op.InsertAt" — the parser stores InsertAt/ExtractFrom
+        // with the "op." prefix since they are operation bindings.
         tu.get(&type_name)
-            .and_then(|rt| rt.properties.get("insert_at"))
+            .and_then(|rt| rt.properties.get("op.InsertAt"))
             .cloned()
     }
 
@@ -126,8 +128,9 @@ impl LlvmBackend {
             _ => target.as_var_name()?,
         };
         let type_name = self.lookup_strategy_type_name(var_name)?;
+        // 2026-07-18: Key is "op.ExtractFrom" — follows op. prefix convention.
         tu.get(&type_name)
-            .and_then(|rt| rt.properties.get("extract_from"))
+            .and_then(|rt| rt.properties.get("op.ExtractFrom"))
             .cloned()
     }
 
