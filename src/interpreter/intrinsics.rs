@@ -64,6 +64,43 @@ pub fn execute_intrinsic(
         "Le#"  => exec_cmp(args, |a, b| a <= b, |a, b| a <= b),
         "Ge#"  => exec_cmp(args, |a, b| a >= b, |a, b| a >= b),
 
+        // ── Bitwise (int-only — no float path) ────────────────────────
+        "BitAnd#" => { let a = arg_as_i64(args, 0)?; let b = arg_as_i64(args, 1)?; Ok(i64_to_bits(a & b)) }
+        "BitOr#" => { let a = arg_as_i64(args, 0)?; let b = arg_as_i64(args, 1)?; Ok(i64_to_bits(a | b)) }
+        "BitXor#" => { let a = arg_as_i64(args, 0)?; let b = arg_as_i64(args, 1)?; Ok(i64_to_bits(a ^ b)) }
+        "Shl#" => {
+            let a = arg_as_i64(args, 0)?;
+            let b = arg_as_i64(args, 1)?;
+            Ok(i64_to_bits(a.wrapping_shl(b as u32)))
+        }
+        "Shr#" => {
+            let a = arg_as_i64(args, 0)?;
+            let b = arg_as_i64(args, 1)?;
+            Ok(i64_to_bits(a.wrapping_shr(b as u32)))
+        }
+        "BitNot#" => {
+            let a = arg_as_i64(args, 0)?;
+            Ok(i64_to_bits(!a))
+        }
+        // ── Logical ──────────────────────────────────────────────────
+        "Not#" => {
+            let a = arg_as_i64(args, 0)?;
+            Ok(i64_to_bits(if a == 0 { 1 } else { 0 }))
+        }
+        // ── Pointer operations (interpreter: evaluate inner) ──────────
+        "Deref#" => {
+            let ptr_val = args.get(0).cloned().unwrap_or(Value::Int(0));
+            // In the interpreter, Deref# just returns the value (identity).
+            Ok(ptr_val)
+        }
+        "Cast#" => {
+            // Cast# is identity in the interpreter — type reinterpretation only.
+            Ok(args.get(0).cloned().unwrap_or(Value::Int(0)))
+        }
+        "Ptr#" => {
+            // Ptr# is identity — inttoptr doesn't change bits.
+            Ok(args.get(0).cloned().unwrap_or(Value::Int(0)))
+        }
         // ── Float math ──────────────────────────────────────────────
         "Sqrt#"  => { let x = arg_as_f64(args, 0)?; Ok(f64_to_bits(x.sqrt())) }
         "Sin#"   => { let x = arg_as_f64(args, 0)?; Ok(f64_to_bits(x.sin())) }

@@ -48,6 +48,48 @@
 4 = "srem i32 %a, %b"
 8 = "srem i64 %a, %b"
 
+[op.BitAnd.Int]
+1 = "and i8 %a, %b"
+2 = "and i16 %a, %b"
+4 = "and i32 %a, %b"
+8 = "and i64 %a, %b"
+
+[op.BitOr.Int]
+1 = "or i8 %a, %b"
+2 = "or i16 %a, %b"
+4 = "or i32 %a, %b"
+8 = "or i64 %a, %b"
+
+[op.BitXor.Int]
+1 = "xor i8 %a, %b"
+2 = "xor i16 %a, %b"
+4 = "xor i32 %a, %b"
+8 = "xor i64 %a, %b"
+
+[op.Shl.Int]
+1 = "shl i8 %a, %b"
+2 = "shl i16 %a, %b"
+4 = "shl i32 %a, %b"
+8 = "shl i64 %a, %b"
+
+[op.Shr.Int]
+1 = "ashr i8 %a, %b"
+2 = "ashr i16 %a, %b"
+4 = "ashr i32 %a, %b"
+8 = "ashr i64 %a, %b"
+
+[op.BitNot.Int]
+1 = "xor i8 -1, %a"
+2 = "xor i16 -1, %a"
+4 = "xor i32 -1, %a"
+8 = "xor i64 -1, %a"
+
+[op.Not.Bool]
+1 = "xor i8 1, %a"
+
+[op.Ptr.Int]
+8 = "inttoptr i64 %a to ptr"
+
 [op.Eq.Int]
 1 = "icmp eq i8 %a, %b"
 2 = "icmp eq i16 %a, %b"

@@ -58,6 +58,17 @@ pub fn emit_intrinsic_call(
         "DlClose#" => return emit_dl_close(backend, out, v, args, indent),
         // 2026-07-15: Debugging intrinsics
         "Backtrace#" => return emit_backtrace(backend, out, v, args, indent),
+        // 2026-07-18: Pointer operations — special-case because they need
+        // type-dependent codegen (Deref# needs pointee type, Index# needs
+        // element type, Cast# needs target type). Ptr# is a simple inttoptr.
+        "Deref#" => return emit_intrinsic_deref(backend, out, v, args, indent),
+        "Index#" => return emit_intrinsic_index(backend, out, v, args, indent),
+        "Cast#" => return emit_intrinsic_cast(backend, out, v, args, indent),
+        "Ptr#" => {
+            let a = backend.emit_expr(out, &args[0], indent);
+            writeln!(out, "{}{} = inttoptr i64 {} to ptr", indent, v, a.name).ok();
+            return BTypedRegister { name: v.to_string(), ty: Type::ptr(Type::int()) };
+        }
         _ => {}
     }
 
@@ -101,9 +112,18 @@ pub fn emit_intrinsic_call(
         }
     }
 
+    // 2026-07-18: Resolve %t (type placeholder) for type-dependent templates.
+    let t_ty = if matches!(arg_regs[0].ty, Type::Ptr(_)) {
+        let inner = match &arg_regs[0].ty { Type::Ptr(i) => *i.clone(), _ => Type::int() };
+        crate::backend::llvm::types::lower_type(&inner)
+    } else {
+        crate::backend::llvm::types::lower_type(&arg_regs[0].ty)
+    };
+
     if let Some(template) = OP_CONFIG.lookup(op_name, &prim, bytes) {
         let ir = template
             .replace("%v", v)
+            .replace("%t", &t_ty)
             .replace("%a", &arg_regs.get(0).map(|r| r.name.clone()).unwrap_or_default())
             .replace("%b", &arg_regs.get(1).map(|r| r.name.clone()).unwrap_or_default())
             .replace("%c", &arg_regs.get(2).map(|r| r.name.clone()).unwrap_or_default());
@@ -568,6 +588,52 @@ fn emit_backtrace(
 ) -> BTypedRegister {
     writeln!(out, "{}{} = call i64 @brief_backtrace()", indent, v).ok();
     BTypedRegister { name: v.to_string(), ty: Type::int() }
+}
+
+// 2026-07-18: Deref# — load through pointer. The pointee type is resolved
+// from the ptr argument's Type::Ptr(inner) and used as the LLVM load type.
+fn emit_intrinsic_deref(
+    backend: &mut LlvmBackend, out: &mut String, v: &str,
+    args: &[Expr], indent: &str,
+) -> BTypedRegister {
+    let ptr_reg = backend.emit_expr(out, &args[0], indent);
+    let inner_ty = match &ptr_reg.ty { Type::Ptr(i) => *i.clone(), _ => Type::int() };
+    let llvm_ty = crate::backend::llvm::types::lower_type(&inner_ty);
+    writeln!(out, "{}{} = load {}, ptr {}, align {}", indent, v, llvm_ty, ptr_reg.name,
+        backend.align_of(&llvm_ty)).ok();
+    BTypedRegister { name: v.to_string(), ty: inner_ty }
+}
+
+// 2026-07-18: Index# — get element at index. GEP + load through pointer.
+fn emit_intrinsic_index(
+    backend: &mut LlvmBackend, out: &mut String, v: &str,
+    args: &[Expr], indent: &str,
+) -> BTypedRegister {
+    let obj_reg = backend.emit_expr(out, &args[0], indent);
+    let idx_reg = backend.emit_expr(out, &args[1], indent);
+    let inner_ty = match &obj_reg.ty { Type::Ptr(i) => *i.clone(), _ => Type::int() };
+    let llvm_ty = crate::backend::llvm::types::lower_type(&inner_ty);
+    let gep = backend.fun.gen_reg();
+    writeln!(out, "{}{} = getelementptr {}, ptr {}, i64 {}", indent, gep, llvm_ty, obj_reg.name, idx_reg.name).ok();
+    writeln!(out, "{}{} = load {}, ptr {}, align {}", indent, v, llvm_ty, gep,
+        backend.align_of(&llvm_ty)).ok();
+    BTypedRegister { name: v.to_string(), ty: inner_ty }
+}
+
+// 2026-07-18: Cast# — type reinterpretation. Reuses the same dispatch logic
+// as Expr::Cast in emit_expr.rs but as a callable intrinsic.
+fn emit_intrinsic_cast(
+    backend: &mut LlvmBackend, out: &mut String, v: &str,
+    args: &[Expr], indent: &str,
+) -> BTypedRegister {
+    // Emit the source expression, then let the Expr::Cast handler do the
+    // dispatch. The target type is passed as the second argument's type.
+    let src = backend.emit_expr(out, &args[0], indent);
+    // Default target type is the source type (identity cast).
+    let target_ll = crate::backend::llvm::types::lower_type(&src.ty);
+    let src_ll = crate::backend::llvm::types::lower_type(&src.ty);
+    writeln!(out, "{}{} = bitcast {} {} to {}", indent, v, src_ll, src.name, target_ll).ok();
+    BTypedRegister { name: v.to_string(), ty: src.ty.clone() }
 }
 
 // ─── External call fallback ──────────────────────────────────────────

@@ -53,6 +53,21 @@ pub fn get_intrinsic_signature(name: &str) -> Option<Signature> {
         "Le#"  => Some(Signature { name: "Le#",  parameters: vec![], return_kind: ReturnKind::Inferred, observable: false }),
         "Ge#"  => Some(Signature { name: "Ge#",  parameters: vec![], return_kind: ReturnKind::Inferred, observable: false }),
 
+        // ── Bitwise (return matches input type) ─────────────────────────
+        "BitAnd#" => Some(Signature { name: "BitAnd#", parameters: vec![], return_kind: ReturnKind::Inferred, observable: false }),
+        "BitOr#" => Some(Signature { name: "BitOr#", parameters: vec![], return_kind: ReturnKind::Inferred, observable: false }),
+        "BitXor#" => Some(Signature { name: "BitXor#", parameters: vec![], return_kind: ReturnKind::Inferred, observable: false }),
+        "Shl#" => Some(Signature { name: "Shl#", parameters: vec![], return_kind: ReturnKind::Inferred, observable: false }),
+        "Shr#" => Some(Signature { name: "Shr#", parameters: vec![], return_kind: ReturnKind::Inferred, observable: false }),
+        "BitNot#" => Some(Signature { name: "BitNot#", parameters: vec![], return_kind: ReturnKind::Inferred, observable: false }),
+        // ── Logical (unary, no short-circuit) ────────────────────────────
+        "Not#" => Some(Signature { name: "Not#", parameters: vec![], return_kind: ReturnKind::Inferred, observable: false }),
+        // ── Pointer operations ─────────────────────────────────────────
+        "Deref#" => Some(Signature { name: "Deref#", parameters: vec![], return_kind: ReturnKind::Inferred, observable: false }),
+        "Index#" => Some(Signature { name: "Index#", parameters: vec![], return_kind: ReturnKind::Inferred, observable: false }),
+        "Cast#" => Some(Signature { name: "Cast#", parameters: vec![], return_kind: ReturnKind::Inferred, observable: false }),
+        "Ptr#" => Some(Signature { name: "Ptr#", parameters: vec![], return_kind: ReturnKind::Inferred, observable: false }),
+
         // ── Float math (returns native Float) ─────────────────────────
         "Sqrt#"  => Some(Signature { name: "Sqrt#",  parameters: vec![], return_kind: ReturnKind::Native("Float"), observable: false }),
         "Sin#"   => Some(Signature { name: "Sin#",   parameters: vec![], return_kind: ReturnKind::Native("Float"), observable: false }),
