@@ -238,7 +238,6 @@ type Char <: Bits {
 type String {
     data: Int;
     len: Int;
-    bytes <~ 16;
     alignment <~ 8;
     encoding <~ "UTF-8";
     tbaa <~ "String";

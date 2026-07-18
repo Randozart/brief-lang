@@ -210,10 +210,23 @@ fn register_typedefs(items: &[TopLevel], universe: &mut TypeUniverse, prim_confi
             TopLevel::TypeDef(td) => td,
             _ => continue,
         };
-        // Determine byte size: check metadata first, then layout pattern, else 8
+        // Determine byte size: explicit metadata, field-derived, layout pattern, else 8
         let bytes = td.body.metadata.get("bytes")
             .and_then(|pv| {
                 if let PropertyValue::Int(n) = pv { Some(*n as u64) } else { None }
+            })
+            .or_else(|| {
+                // 2026-07-18: Derive bytes from struct fields when no explicit bytes.
+                // Sum each field's resolved byte size. Ptr fields are always 8.
+                if td.body.slots.is_empty() { return None; }
+                let total: u64 = td.body.slots.iter().map(|slot| {
+                    if matches!(slot.ty, crate::ast::Type::Ptr(_)) { return 8u64; }
+                    slot.ty.universe_key()
+                        .and_then(|k| universe.get(k))
+                        .map(|rt| rt.bytes)
+                        .unwrap_or(8)
+                }).sum();
+                Some(total)
             })
             .or_else(|| {
                 // Try to compute from layout pattern: sum field widths / 8

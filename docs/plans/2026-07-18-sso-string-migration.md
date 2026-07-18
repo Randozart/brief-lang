@@ -332,6 +332,26 @@ Removed:
 
 Note: `bootstrap.bv` sets `bytes` for memory accounting (memory_spec.rs reads this) and `tbaa` for alias analysis. The field declarations (`data: Int; len: Int;`) are informational (the primordial already carries them) — the normalizer reconciles the TypeDef with the primordial during register().
 
+#### A7. Derive bytes from fields when present
+
+Currently `bytes` is set explicitly on every type, even when it can be computed from field types. With `fields` now available, the compiler should derive `bytes` from fields when present, with explicit metadata as override.
+
+Rules:
+- **Struct types** (fields non-empty): `bytes = sum of each field's resolved byte size`. E.g. String with `[("data", Int), ("len", Int)]` → `bytes = 8 + 8 = 16`.
+- **Scalar types** (fields empty): Use explicit `bytes` from metadata or primordial table.
+- **Override**: Explicit `bytes <~ N` in metadata takes precedence over field-derived value.
+
+Changes:
+
+| Site | Change |
+|------|--------|
+| `seed_primordial_types()` | String primordial: derive `bytes` from `fields` (16) instead of hardcoded 24. Scalar primordials keep explicit `bytes`. |
+| `register_typedefs` | After populating `fields`, compute `bytes` from field types if no explicit `bytes` metadata. Remove the `bytes` metadata lookup — it's an override, not the primary source. |
+| `mod.rs:1613-1628` (Struct registration) | Already computes bytes from fields — keep as-is. |
+| `memory_spec.rs:estimate_type_size` | Still hardcoded `"String" => 24` — update to read from universe (or remove special case, use generic field-based computation). |
+
+This eliminates the redundant explicit `bytes` for struct-like types while keeping it for scalars where it's the only source of truth.
+
 #### Test gate
 
 ```
