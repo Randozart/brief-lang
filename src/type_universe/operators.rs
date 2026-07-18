@@ -42,31 +42,38 @@ fn rune_to_op_name(rune: &str) -> Option<&'static str> {
 ///
 /// This is the critical path: every operation in every program routes through here.
 /// Must be fast and correct.
+///
+/// 2026-07-18: Phase 0 — reads from the type's metadata["op.Add"] (dot format)
+/// which is populated by the parser's `op Add ~> "int.add"` handler.
+/// Falls back to builtin_operator_binding() if no universe entry exists.
 pub fn get_operator_intrinsic(universe: &TypeUniverse, rune: &str, ty: &Type) -> Option<OpBinding> {
     let op_name = rune_to_op_name(rune)?;
     let type_name = type_name_str(ty)?;
 
-    // Check the type's properties for "op X" binding
+    // Check the type's properties for "op.Add" binding (dot format, from parser)
     let rt = universe.get(type_name)?;
-    let key = format!("op {}", op_name);
-    let binding = rt.properties.get(&key)?;
-    match binding {
-        crate::ast::PropertyValue::Identifier(s) => {
-            if s.ends_with('#') {
-                Some(OpBinding::Intrinsic(s.clone()))
-            } else {
-                Some(OpBinding::Function(s.clone()))
+    let key = format!("op.{}", op_name);
+    if let Some(binding) = rt.properties.get(&key) {
+        return match binding {
+            crate::ast::PropertyValue::Identifier(s) => {
+                if s.ends_with('#') {
+                    Some(OpBinding::Intrinsic(s.clone()))
+                } else {
+                    Some(OpBinding::Function(s.clone()))
+                }
             }
-        }
-        crate::ast::PropertyValue::String(s) => {
-            if s.ends_with('#') {
-                Some(OpBinding::Intrinsic(s.clone()))
-            } else {
-                Some(OpBinding::Function(s.clone()))
+            crate::ast::PropertyValue::String(s) => {
+                if s.ends_with('#') {
+                    Some(OpBinding::Intrinsic(s.clone()))
+                } else {
+                    Some(OpBinding::Function(s.clone()))
+                }
             }
-        }
-        _ => None,
+            _ => None,
+        };
     }
+    // Phase 0 fallback: universe prop was stripped or not set — try builtin table
+    builtin_operator_binding(rune, ty)
 }
 
 /// Get the string name of a type for property lookup.
@@ -191,7 +198,9 @@ mod tests {
     #[test]
     fn test_universe_lookup_empty() {
         let uni = empty_universe();
+        // 2026-07-18: Phase 0 — falls back to builtin_operator_binding
+        // when no universe property exists for the type.
         let result = get_operator_intrinsic(&uni, "+", &Type::int());
-        assert_eq!(result, None); // no types registered in empty universe
+        assert_eq!(result, Some(OpBinding::Intrinsic("AddI64#".into())));
     }
 }

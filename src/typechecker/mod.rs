@@ -15,7 +15,7 @@ pub use validate::*;
 use crate::ast::*;
 use crate::errors::{SyntaxError, TypeError};
 use crate::intrinsic_signatures::{get_intrinsic_signature, ReturnKind, Signature};
-use crate::type_universe::{builtin_operator_binding, TypeUniverse};
+use crate::type_universe::{get_operator_intrinsic, TypeUniverse};
 use std::collections::HashMap;
 
 /// Type-check context: variable bindings and type universe.
@@ -232,8 +232,11 @@ fn infer_binary_op(
             // Arithmetic/bitwise: return LHS type
             // Check via operator resolution
             let rune = format!("{}", kind);
-            let binding = builtin_operator_binding(&rune, &lhs_ty)
-                .or_else(|| builtin_operator_binding(&rune, &rhs_ty));
+            // 2026-07-18: Phase 0 — use universe-driven dispatch with
+            // builtin fallback (get_operator_intrinsic already chains to
+            // builtin_operator_binding when no universe property exists).
+            let binding = get_operator_intrinsic(ctx.universe, &rune, &lhs_ty)
+                .or_else(|| get_operator_intrinsic(ctx.universe, &rune, &rhs_ty));
             match binding {
                 Some(_) => lhs_ty.clone(),
                 None => {
