@@ -287,23 +287,34 @@ impl LlvmBackend {
                 let src = self.emit_expr(out, expr, indent);
                 let target_ll = lower_type(target);
                 let src_ll = lower_type(&src.ty);
-                if target_ll == "double" {
-                    writeln!(out, "{}{} = sitofp i64 {} to double", indent, v, src.name).ok();
-                } else if target_ll == "i64" && src_ll == "double" {
-                    writeln!(out, "{}{} = fptosi double {} to i64", indent, v, src.name).ok();
-                } else if src_ll == "i64" && target_ll == "ptr" {
-                    // 2026-07-14: Int → String: call runtime helper
-                    writeln!(out, "{}{} = call i64 @__int_to_str__(i64 {})", indent, v, src.name).ok();
-                } else if src_ll == "ptr" && target_ll == "i64" {
-                    // 2026-07-14: String → Int: call runtime with ptr
-                    writeln!(out, "{}{} = call i64 @__str_to_int(ptr {})", indent, v, src.name).ok();
-                } else if self.is_string_chain(expr) && target_ll == "i64" {
-                    // 2026-07-16: String-producing expr → Int: ptrtoint was
-                    // already done by emit_string_literal, so inttoptr back
-                    // and call __str_to_int.
+                // 2026-07-17: Priorities for cast dispatch:
+                // 1. Ptr<T> target → inttoptr (never String — String/Data have Custom type)
+                // 2. String/Data target → runtime helper
+                // 3. i64 target + Ptr<T> source → ptrtoint
+                // 4. i64 target + string-producing expr → __str_to_int
+                // 5. double/i64 float conversions
+                // 6. Generic bitcast
+                if matches!(target, Type::Ptr(_)) {
+                    writeln!(out, "{}{} = inttoptr i64 {} to ptr", indent, v, src.name).ok();
+                } else if *target == Type::string() || *target == Type::data() {
+                    if src_ll == "i64" {
+                        writeln!(out, "{}{} = call i64 @__int_to_str__(i64 {})", indent, v, src.name).ok();
+                    } else {
+                        let ip = self.fun.gen_reg();
+                        writeln!(out, "{}{} = inttoptr i64 {} to ptr", indent, ip, src.name).ok();
+                        writeln!(out, "{}{} = call i64 @__str_to_int(ptr {})", indent, v, ip).ok();
+                    }
+                } else if target_ll == "i64" && matches!(src.ty, Type::Ptr(_)) {
+                    writeln!(out, "{}{} = ptrtoint ptr {} to i64", indent, v, src.name).ok();
+                } else if target_ll == "i64" && self.is_string_chain(expr) {
+                    // String literal or string-producing expr → Int
                     let ip = self.fun.gen_reg();
                     writeln!(out, "{}{} = inttoptr i64 {} to ptr", indent, ip, src.name).ok();
                     writeln!(out, "{}{} = call i64 @__str_to_int(ptr {})", indent, v, ip).ok();
+                } else if target_ll == "double" {
+                    writeln!(out, "{}{} = sitofp i64 {} to double", indent, v, src.name).ok();
+                } else if target_ll == "i64" && src_ll == "double" {
+                    writeln!(out, "{}{} = fptosi double {} to i64", indent, v, src.name).ok();
                 } else {
                     writeln!(out, "{}{} = bitcast {} {} to {}", indent, v, src_ll, src.name, target_ll).ok();
                 }
@@ -539,11 +550,24 @@ impl LlvmBackend {
         // actually 32-bit float values loaded from constants or state fields.
         let ty_str = if is_double { "double" } else if is_float { "float" } else { "i64" };
         let fast = if is_float { " fast" } else { "" };
-        let ret_ty = if is_double { Type::float64() } else if is_float { Type::float() } else { Type::int() };
+        let mut ret_ty = if is_double { Type::float64() } else if is_float { Type::float() } else { Type::int() };
         match kind {
             crate::ast::BinaryOpKind::Add => {
-                // 2026-07-14: Add must branch on is_float — fadd i64 is invalid LLVM IR
-                if is_float {
+                // 2026-07-17: Pointer-offset arithmetic: `buf + N` emits GEP.
+                // When one operand is Ptr<T> and the other is Int, emit:
+                //   %gep = getelementptr T, ptr %ptr, i64 %offset
+                // preserving the pointer type for subsequent dereference.
+                if matches!(l.ty, Type::Ptr(_)) && !is_float {
+                    let ptr_ty = match &l.ty { Type::Ptr(i) => *i.clone(), _ => Type::int() };
+                    writeln!(out, "{}{} = getelementptr {}, ptr {}, i64 {}", indent, v,
+                        crate::backend::llvm::types::lower_type(&ptr_ty), l.name, r.name).ok();
+                    ret_ty = l.ty.clone();
+                } else if matches!(r.ty, Type::Ptr(_)) && !is_float {
+                    let ptr_ty = match &r.ty { Type::Ptr(i) => *i.clone(), _ => Type::int() };
+                    writeln!(out, "{}{} = getelementptr {}, ptr {}, i64 {}", indent, v,
+                        crate::backend::llvm::types::lower_type(&ptr_ty), r.name, l.name).ok();
+                    ret_ty = r.ty.clone();
+                } else if is_float {
                     writeln!(out, "{}{} = fadd{} {} {}, {}", indent, v, fast, ty_str, l.name, r.name).ok();
                 } else {
                     writeln!(out, "{}{} = add nsw i64 {}, {}", indent, v, l.name, r.name).ok();

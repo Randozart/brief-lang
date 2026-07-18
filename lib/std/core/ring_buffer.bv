@@ -4,13 +4,44 @@
 //
 // RingBuffer<T> <: List<T> — same interface as List: <- for push, <- for pop.
 // The InsertAt/ExtractFrom strategy bindings redirect these operations to
-// the RingPush#/RingPop# intrinsics, which the LLVM backend inlines as
-// head/tail arithmetic (~10-15 instructions vs ~40+ for arena List).
+// the ring_push/ring_pop functions defined below, which use Ptr arithmetic.
 //
 // Capacity is fixed at init time (power of 2). The mask = capacity - 1
 // enables bitwise wrap: (ptr + 1) & mask.
+//
+// RingBuf struct layout (4 × i64, 32 bytes total):
+//   +0: data  (i64 — ptrtoint of element buffer)
+//   +1: head  (i64 — read index)
+//   +2: tail  (i64 — write index)
+//   +3: mask  (i64 — capacity-1, power of 2)
 
 type RingBuffer<T> <: List<T> {
     InsertAt <~ ring_push;
     ExtractFrom <~ ring_pop;
+};
+
+defn ring_push(handle: Int, val: Int) -> Int {
+    let buf: Ptr<Int> = handle as Ptr<Int>;
+    let tail: Int = *(buf + 2);
+    let mask: Int = *(buf + 3);
+    let data: Ptr<Int> = *(buf) as Ptr<Int>;
+    let idx: Int = tail & mask;
+    data[idx] = val;
+    *(buf + 2) = (tail + 1) & mask;
+    term 0;
+};
+
+defn ring_pop(handle: Int) -> Int {
+    let buf: Ptr<Int> = handle as Ptr<Int>;
+    let head: Int = *(buf);
+    let tail: Int = *(buf + 2);
+    let mask: Int = *(buf + 3);
+    let empty: Bool = head == tail;
+    [empty] {
+        term -1;
+    };
+    let data: Ptr<Int> = *(buf) as Ptr<Int>;
+    let val: Int = data[head & mask];
+    *(buf) = (head + 1) & mask;
+    term val;
 };

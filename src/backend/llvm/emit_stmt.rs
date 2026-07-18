@@ -81,6 +81,17 @@ pub fn emit_statement(backend: &mut LlvmBackend, out: &mut String, stmt: &Statem
                 // 2026-07-17: Push: `&queue <- value` → Assign(AddrOf(target), value).
                 // The `&` on the LHS is optional — the type-based check above handles
                 // the bare-identifier case. The AddrOf arm is kept for explicit usage.
+                // 2026-07-17: Dereference-assign: `*ptr = val`. Compute the
+                // pointer address and store the value through it. Supports
+                // pointer-offset arithmetic (buf + N) via GEP in emit_expr.
+                Expr::Deref(inner) => {
+                    let ptr_reg = backend.emit_expr(out, inner, indent);
+                    let store_ty = crate::backend::llvm::types::lower_type(&val.ty);
+                    writeln!(out, "{}store {} {}, ptr {}", indent, store_ty, val.name, ptr_reg.name).ok();
+                }
+                // 2026-07-17: Push: `&queue <- value` → Assign(AddrOf(target), value).
+                // The `&` on the LHS is optional — the type-based check above handles
+                // the bare-identifier case. The AddrOf arm is kept for explicit usage.
                 Expr::AddrOf(target) => {
                     emit_ring_push(backend, out, indent, target, &val);
                 }
@@ -103,11 +114,6 @@ pub fn emit_statement(backend: &mut LlvmBackend, out: &mut String, stmt: &Statem
                         writeln!(out, "{}{} = getelementptr i64, ptr {}, i64 {}", indent, gep, ptr, offset).ok();
                         writeln!(out, "{}store i64 {}, ptr {}", indent, val.name, gep).ok();
                     }
-                }
-                // 2026-07-17: Push: `&queue <- value` → Assign(AddrOf(target), value).
-                // The LHS is an AddrOf expression marking the collection target.
-                Expr::AddrOf(target) => {
-                    emit_ring_push(backend, out, indent, target, &val);
                 }
                 _ => {}
             }
