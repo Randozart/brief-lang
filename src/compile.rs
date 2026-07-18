@@ -73,6 +73,9 @@ pub struct BuildOptions {
     /// When ON, String is a 2-field \`{ i64, i64 }\` struct with inline storage for ≤6
     /// bytes, heap for longer. When OFF (default), String is passed as \`i8*\` (legacy).
     pub feature_sso_strings: bool,
+    /// 2026-07-18: SVO (Small Vector Optimization) — inline storage for
+    /// small List<T> elements (≤ N where N is from svo <~ N metadata).
+    pub feature_svo: bool,
     /// 2026-07-18: Maximum size in bytes for stack allocation (alloca).
     /// Allocations exceeding this threshold fall back to heap (malloc).
     /// Used by the runtime fallback check in emit_dynamic_alloc.
@@ -211,6 +214,7 @@ pub fn check_source(file_path: &str, source: &str) -> Result<(), String> {
         trg_unresolved_action: TrgUnresolvedAction::Warn,
         extra_objects: vec![],
         feature_sso_strings: false,
+        feature_svo: false,
         stack_threshold: 4096,
     };
     let (_items, _universe) = parse_and_check(file_path, source, &default_opts)?;
@@ -264,12 +268,14 @@ fn codegen(
             let mut b = LlvmBackend::new()
                 .with_alloc_strategies(alloc_strategies)
                 .with_sso_strings(opts.feature_sso_strings)
+                .with_svo(opts.feature_svo)
                 .with_stack_threshold(opts.stack_threshold)
                 .with_optimize_budget(opts.optimize_budget)
                 .with_type_universe(universe.clone())
                 .with_trg_unresolved_action(opts.trg_unresolved_action);
             if opts.gpu_offload {
                 b = b.with_gpu_offload(true);
+                b = b.with_svo(opts.feature_svo);
             }
             // Apply target config if available
             let ext = get_extension(&opts.file_path);
@@ -300,10 +306,14 @@ fn codegen(
             let mut b = LlvmBackend::new()
                 .with_alloc_strategies(alloc_strategies)
                 .with_sso_strings(opts.feature_sso_strings)
+                .with_svo(opts.feature_svo)
                 .with_stack_threshold(opts.stack_threshold)
                 .with_optimize_budget(opts.optimize_budget)
                 .with_type_universe(universe.clone())
-                .with_gpu_offload(true);
+                .with_trg_unresolved_action(opts.trg_unresolved_action);
+            if opts.gpu_offload {
+                b = b.with_gpu_offload(true);
+            }
             // Apply target config (same logic as Llvm)
             let ext = get_extension(&opts.file_path);
             let target_config = load_target_config(opts);

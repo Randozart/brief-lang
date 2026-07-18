@@ -729,6 +729,12 @@ pub struct LlvmBackend {
     // for longer strings. When disabled (default), String is a single i64
     // (ptrtoint of heap/stack pointer, legacy 16-byte header format).
     pub feature_sso_strings: bool,
+
+    // ── SVO List Optimization ────────────────────────────────
+    // 2026-07-18: Small Vector Optimization — List<T> becomes a
+    // multi-slot struct with inline storage for ≤N elements (N from
+    // svo <~ metadata). Tag bit 0 distinguishes inline vs heap.
+    pub feature_svo: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -818,11 +824,18 @@ impl LlvmBackend {
             trg_unresolved_action: TrgUnresolvedAction::Warn,
             analysis_alloc_strategies: None,
             feature_sso_strings: false,
+            feature_svo: false,
         }
     }
 
     pub fn with_alloc_strategies(mut self, strategies: std::collections::HashMap<usize, AllocStrategy>) -> Self {
         self.analysis_alloc_strategies = Some(strategies);
+        self
+    }
+
+    // 2026-07-18: Enable SVO (Small Vector Optimization) for List types.
+    pub fn with_svo(mut self, enabled: bool) -> Self {
+        self.feature_svo = enabled;
         self
     }
 
@@ -867,21 +880,30 @@ impl LlvmBackend {
         // to always return "i64" for state fields — this keeps %State struct
         // layout uniform and avoids type mismatches in codegen paths that
         // assume i64 (load i64, store i64, add i64, icmp i64, etc.).
-        // 2026-07-18: SSO String / Utf8View fields occupy 2 consecutive i64 slots
-        // (data+tag in slot 0, length in slot 1). The field_index_map entry points
-        // to slot 0; slot 1 is implicitly at index+1. State load/store must emit
-        // extractvalue/insertvalue on the {i64,i64} struct.
-        // Utf8View always gets 2 slots (always {i64,i64}) regardless of SSO flag.
+        // 2026-07-18: SSO String / Utf8View fields occupy 2 consecutive i64 slots.
         if matches!(ty, Type::Custom(name) if name == "Utf8View")
             || (self.feature_sso_strings
                 && self.ctx.type_universe.as_ref().map_or(false, |u| u.is_string_like(ty)))
         {
-            // 2026-07-18: Push 2 slots for SSO string handles ({data, len}).
             self.ctx.field_types.push("i64".to_string());
             self.ctx.field_brief_types.push(ty.clone());
             self.ctx.field_types.push("i64".to_string());
             self.ctx.field_brief_types.push(ty.clone());
             return;
+        }
+        // 2026-07-18: SVO List — push N+1 slots (N inline data + 1 len+cap).
+        if self.feature_svo
+            && self.ctx.type_universe.as_ref().map_or(false, |u| u.is_vector_like(ty))
+        {
+            let cap = self.ctx.type_universe.as_ref()
+                .map(|u| u.svo_capacity(ty)).unwrap_or(0);
+            if cap > 0 {
+                for _ in 0..=cap {  // cap + 1 slots
+                    self.ctx.field_types.push("i64".to_string());
+                    self.ctx.field_brief_types.push(ty.clone());
+                }
+                return;
+            }
         }
         self.ctx.field_types.push("i64".to_string());
         self.ctx.field_brief_types.push(ty.clone());

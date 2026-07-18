@@ -247,6 +247,34 @@ impl TypeUniverse {
             && rt.fields[1].1 == Type::int()
             && rt.properties.contains_key("encoding")
     }
+
+    /// 2026-07-18: Check if a type is a vector-like type eligible for SVO.
+    /// Detects types with `op.SVO <~ N` metadata (typically List<T>).
+    /// N specifies the inline capacity in elements (e.g. N=3 means 3 elements
+    /// stored inline before promoting to heap).
+    pub fn is_vector_like(&self, ty: &Type) -> bool {
+        let name = match ty {
+            Type::Custom(n) | Type::Applied(n, _) => n,
+            _ => return false,
+        };
+        let Some(rt) = self.types.get(name) else { return false; };
+        rt.properties.contains_key("op.SVO")
+    }
+
+    /// 2026-07-18: Get the SVO inline capacity N for a vector-like type.
+    /// Returns 0 if not a vector-like type or no capacity metadata.
+    pub fn svo_capacity(&self, ty: &Type) -> usize {
+        let name = match ty {
+            Type::Custom(n) | Type::Applied(n, _) => n,
+            _ => return 0,
+        };
+        let Some(rt) = self.types.get(name) else { return 0; };
+        match rt.properties.get("op.SVO") {
+            Some(crate::ast::PropertyValue::Identifier(s)) => s.parse().unwrap_or(0),
+            Some(crate::ast::PropertyValue::String(s)) => s.parse().unwrap_or(0),
+            _ => 0,
+        }
+    }
 }
 
 #[cfg(test)]

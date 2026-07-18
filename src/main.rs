@@ -203,6 +203,7 @@ fn parse_build_args(args: &[String]) -> Result<compile::BuildOptions, String> {
         trg_unresolved_action,
         extra_objects: vec![],
         feature_sso_strings: false,
+        feature_svo: false,
         stack_threshold: 4096,
     })
 }

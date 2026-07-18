@@ -98,6 +98,10 @@ type List <: Bits @/0..191 {
     Size         <~ _ :> Len;
     IsEmpty      <~ _ :> Size == 0;
     At(i)        = _ :> Ptr :> LoadElem#(i);
+
+    // 2026-07-18: SVO — inline storage for ≤3 Int elements.
+    // Tag bit 0: 0 = heap (existing ptr/len/cap), 1 = inline (packed in state).
+    svo          <~ 3;
 };
 
 // ─────────────────────────────────────────────────────────────

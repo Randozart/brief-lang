@@ -332,6 +332,18 @@ impl LlvmBackend {
                 return "{ i64, i64 }".to_string();
             }
         }
+        // 2026-07-18: SVO List — return multi-slot struct type for vector-like types.
+        if self.feature_svo {
+            if self.ctx.type_universe.as_ref().map_or(false, |u| u.is_vector_like(ty)) {
+                let cap = self.ctx.type_universe.as_ref()
+                    .map(|u| u.svo_capacity(ty)).unwrap_or(0);
+                if cap > 0 {
+                    let slots = cap + 1; // N data slots + 1 len+cap slot
+                    return format!("{{ {} }}", std::iter::repeat("i64").take(slots)
+                        .collect::<Vec<_>>().join(", "));
+                }
+            }
+        }
         if self.feature_sso_strings {
             if let Type::Custom(name) = ty {
                 if name == "String" {
