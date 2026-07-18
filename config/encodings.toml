@@ -1,0 +1,33 @@
+# ── Encoding Config ──────────────────────────────────────────────────────
+# 2026-07-18: Custom encoding definitions for the encoding registry.
+# PascalCase names (ASCII, UTF8, UTF16, UTF32, Latin1) are hardcoded in
+# src/encoding_registry.rs — do not redefine them here.
+#
+# Quoted names like "shift_jis" are resolved through this file.
+# char_width:
+#   0 = variable-width encoding (Index# delegates to runtime scan)
+#   1+ = fixed-width encoding (Index# emits direct GEP, O(1))
+
+[encoding.shift_jis]
+char_width = 0
+
+[encoding.windows_1252]
+char_width = 1
+
+[encoding.iso_8859_15]
+char_width = 1
+
+[encoding.utf_16le]
+char_width = 0
+
+[encoding.utf_16be]
+char_width = 0
+
+[encoding.euc_jp]
+char_width = 0
+
+[encoding.gb2312]
+char_width = 0
+
+[encoding.koi8_r]
+char_width = 1

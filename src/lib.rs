@@ -39,6 +39,7 @@ pub mod cache;
 pub mod dbrief;
 pub mod derive;
 pub mod desugarer;
+pub mod encoding_registry;
 pub mod errors;
 pub mod ffi;
 pub mod fuzz_checker;
