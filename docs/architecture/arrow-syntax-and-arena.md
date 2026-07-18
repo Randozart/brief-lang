@@ -29,8 +29,12 @@ whether a variable is a collection type (RingBuffer, List, etc.):
 
 - **AST**: `Expr::AddrOf(Box<Expr>)` in `src/ast/expr.rs`
 - **Parser**: `Token::ArrowLeft` handling in `src/parser/statements.rs`
-- **Codegen**: `emit_ring_push`/`emit_ring_pop` in `src/backend/llvm/emit_stmt.rs`
+- **Codegen**: Strategy dispatch via property values (`#L`, `#R`, `#T`) in
+  `src/backend/llvm/emit_stmt.rs`. Emits `call @strategy_fn(handle, value)`
+  which LLVM -O3 inlines. See `docs/architecture/hash-words.md`.
 - **Field metadata**: `RingbufInlineFields` in `src/backend/llvm/context.rs`
+- **Inline field registration**: `mod.rs:3206-3239` — 4 extra %State fields
+  for RingBuffer variables (data, head, tail, mask)
 
 ## Arena Allocation
 
