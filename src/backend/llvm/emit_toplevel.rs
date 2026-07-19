@@ -1538,7 +1538,18 @@ impl LlvmBackend {
                 }
             })
         };
-        let inline_str = inline_attr.as_deref().unwrap_or("");
+        // 2026-07-19: Auto-inline small callable txns — few params, small body,
+        // no frgn calls. Lets LLVM optimize cross-function (e.g. memcmp_loop).
+        let auto_inline = if inline_attr.is_none()
+            && txn.parameters.len() < 8
+            && txn.body.len() < 20
+            && !crate::analysis::region::has_ffi_or_trigger_stmt_in_chain(&txn.body)
+        {
+            " alwaysinline"
+        } else {
+            ""
+        };
+        let inline_str = inline_attr.as_deref().unwrap_or(auto_inline);
 
         write!(out, "define {} @{}(", ret_llvm, name).ok();
         write!(out, "ptr noalias nocapture align 8 %state").ok();

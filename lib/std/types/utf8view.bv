@@ -18,6 +18,15 @@ txn memcmp_loop(a: Int, b: Int, len: Int, i: Int)
 
 defn memcmp(a: Int, b: Int, len: Int) -> Int {
     when len == 0 { term 0; };
+    // 2026-07-19: Fast path for 8-byte comparison — load both as i64,
+    // single compare. Avoids byte-by-byte memcmp_loop overhead.
+    when len == 8 {
+        let av: Int = Load#(a, 8);
+        let bv: Int = Load#(b, 8);
+        when av < bv { term -1; };
+        when bv < av { term 1; };
+        term 0;
+    };
     term memcmp_loop(a, b, len, 0);
 };
 
