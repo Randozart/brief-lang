@@ -213,6 +213,13 @@ This prevents "I'll fix it later" from fossilizing into architecture.
     it's a one-off. The second time, extract it. The third time is a bug
     waiting to happen. See `docs/plans/2026-07-19-dry-consolidation.md`.
 
+17. **MIGRATE WHEN TOUCHED**: Remaining pre-DRY sites should not be migrated
+    in bulk — that risks regression with low reward. Instead, when you modify
+    a file for any other reason, migrate its hand-rolled GEP+load/store
+    instances to the centralized `emit_state_load_*` / `emit_state_store_*`
+    helpers at the same time. The centralized helpers already exist; this rule
+    ensures they are adopted incrementally without dedicated refactoring passes.
+
 ## Plan Directives
 
 Every plan document and every implementation commit must adhere to these five
