@@ -16,7 +16,7 @@ impl<'a> Parser<'a> {
         if let Some(item) = self.pending_types.next() {
             return Ok(item);
         }
-        if self.eat_identifier("export") {
+        if self.eat(&Token::Export) {
             return self.parse_export();
         }
         match self.peek() {

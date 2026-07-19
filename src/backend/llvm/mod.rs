@@ -1645,7 +1645,7 @@ impl LlvmBackend {
         // runtime loop. If FFI exists, warn that compile-time eval is blocked.
 
         let precomputed_final_values = if analysis.region_analyzer.is_fully_precomputable(self.ctx.optimize_budget) {
-            analysis.region_analyzer.collect_final_values(items)
+            analysis.region_analyzer.collect_final_values(&items)
         } else if !analysis.region_analyzer.composed_chains.is_empty() {
             // A002 already covers empty-chains case: no precomputable program.
             // Only emit A001 when chains exist but budget/FFI prevents evaluation.
@@ -2242,9 +2242,18 @@ impl LlvmBackend {
 
         // Definitions
         for item in items {
-            if let TopLevel::Definition(d) = item {
-                self.emit_definition(&mut out, d);
-                writeln!(out).ok();
+            match item {
+                TopLevel::Definition(d) => {
+                    self.emit_definition(&mut out, d);
+                    writeln!(out).ok();
+                }
+                TopLevel::Export(e) => {
+                    if let TopLevel::Definition(d) = e.inner.as_ref() {
+                        self.emit_definition(&mut out, d);
+                        writeln!(out).ok();
+                    }
+                }
+                _ => {}
             }
         }
         // User-defined inop# intrinsics

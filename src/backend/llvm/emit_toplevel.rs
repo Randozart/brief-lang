@@ -1098,7 +1098,15 @@ impl LlvmBackend {
         self.fun.returns_i64 = has_ret;
         // Rename user `main` to `brief_main` to avoid collision with
         // the runtime entry point `define i32 @main()` in loop_engine.rs.
-        let ll_name: &str = if d.name == "main" { "brief_main" } else { &d.name };
+        // 2026-07-19: In --shared mode, prefix internal function names so
+        // the C-callable export wrapper can use the original name.
+        let ll_name = if self.ctx.is_shared_lib {
+            format!("_internal_{}", d.name)
+        } else if d.name == "main" {
+            "brief_main".to_string()
+        } else {
+            d.name.clone()
+        };
         write!(out, "define {} @{}(", ll_ret_ty, ll_name).ok();
         write!(out, "ptr noalias nocapture align 8 %state").ok();
         for (i, (n, t)) in d.parameters.iter().enumerate() {
@@ -2127,8 +2135,13 @@ impl LlvmBackend {
             writeln!(out, "define dso_local {} @{}({}) #0 {{", ret_ty, name, param_strs.join(", ")).ok();
             writeln!(out, "  %state = alloca %State, align 8").ok();
             writeln!(out, "  call void @__brief_init_state(ptr %state)").ok();
-            let args: Vec<String> = (0..params.len()).map(|i| format!("%arg{}", i)).collect();
-            writeln!(out, "  %result = call {} @brief_impl_{}(ptr %state, {})", ret_ty, name, args.join(", ")).ok();
+            let args: Vec<String> = params.iter().enumerate()
+                .map(|(i, (_, t))| {
+                    let ty = if *t == Type::float() { "double" } else { "i64" };
+                    format!("{} %arg{}", ty, i)
+                })
+                .collect();
+            writeln!(out, "  %result = call {} @_internal_{}(ptr %state, {})", ret_ty, name, args.join(", ")).ok();
             writeln!(out, "  ret {} %result", ret_ty).ok();
             writeln!(out, "}}").ok();
             writeln!(out).ok();
@@ -2136,12 +2149,14 @@ impl LlvmBackend {
         writeln!(out, "define dso_local void @__brief_init_state(ptr %state) #0 {{").ok();
         writeln!(out, "  ret void").ok();
         writeln!(out, "}}").ok();
-        writeln!(out, "define void @__brief_init() __attribute__((constructor)) #0 {{").ok();
+        writeln!(out, "define void @__brief_init() #0 {{").ok();
         writeln!(out, "  ret void").ok();
         writeln!(out, "}}").ok();
-        writeln!(out, "define void @__brief_fini() __attribute__((destructor)) #0 {{").ok();
+        writeln!(out, "define void @__brief_fini() #0 {{").ok();
         writeln!(out, "  ret void").ok();
         writeln!(out, "}}").ok();
+        // Register with LLVM's global constructor mechanism
+        writeln!(out, "@llvm.global_ctors = appending global [1 x {{ i32, ptr, ptr }}] [{{ i32, ptr, ptr }} {{ i32 65535, ptr @__brief_init, ptr null }}]").ok();
     }
 
     /// Called when `self.ctx.library_mode` is true.
