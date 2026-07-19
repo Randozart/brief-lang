@@ -47,4 +47,4 @@ These `#` tokens exist but are NOT compiler words — they are syntax:
 
 | Token | Purpose |
 |-------|---------|
-| `#` suffix on identifiers | Intrinsic marker: `Malloc#`, `Print#`, `Sqrt#` |
+| `#` suffix on identifiers | Intrinsic marker: `Malloc#`, `SysCall#`, `Sqrt#` |

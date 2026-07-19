@@ -214,7 +214,7 @@ A backend can start with just `bytes` and be fully correct. It then opts into `p
 |--------|---------|
 | `normalizer.rs` | Shared helpers: `attach_llvm_types()`, `validate_intrinsics()`, `collect_intrinsic_calls()` |
 | `llvm/normalizer.rs` | `LlvmNormalizer` — attaches `llvm_type`, strips irrelevant metadata |
-| `circt/normalizer.rs` | `CirctNormalizer` — attaches `bit_width`, rejects Print#/Malloc# |
+| `circt/normalizer.rs` | `CirctNormalizer` — attaches `bit_width` |
 | `webstack/normalizer.rs` | `WebstackNormalizer` — attaches `js_type` |
 | `gpu/normalizer.rs` | `GpuNormalizer` — attaches `llvm_type`, marks kernel entry points |
 
