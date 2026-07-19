@@ -925,6 +925,12 @@ impl LlvmBackend {
                 writeln!(out, "{}{} = or {} {}, {}", indent, v, cmp_ty, l.name, r.name).ok();
                 TypedRegister { name: v.to_string(), ty: Type::bool_() }
             }
+            crate::ast::BinaryOpKind::Concat => {
+                // 2026-07-19: Wire SSO concat — handle SSO inline (≤6 bytes)
+                // and heap paths via emit_inline_concat. Previously fell through
+                // to add i64, producing garbage for string ++.
+                self.emit_inline_concat(out, indent, l, r)
+            }
             _ => {
                 writeln!(out, "{}{} = add i64 {}, {}", indent, v, l.name, r.name).ok();
                 TypedRegister { name: v.to_string(), ty: Type::int() }
