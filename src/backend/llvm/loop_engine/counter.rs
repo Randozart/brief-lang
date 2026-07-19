@@ -202,7 +202,10 @@ impl LlvmBackend {
         self.emit_state_store_i64_by_idx(out, "  ", counter_idx, &next);
         writeln!(out, "  br label %.fm_loop").ok();
         writeln!(out, ".fm_end:").ok();
-        // 2026-07-19: Emit hoisted post-loop prints (swan song).
+        // 2026-07-19: Clear reg_float_cache before hoisted prints — prevents
+        // reuse of non-dominating float registers from inside the loop body.
+        // Same pattern as emit_countable_main line 383 (nbody_newton bug).
+        self.fun.reg_float_cache.clear();
         let hoisted = self.fun.pending_post_hoist.clone();
         if !hoisted.is_empty() {
             self.load_last_val_temps(out);
