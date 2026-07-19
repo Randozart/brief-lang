@@ -357,6 +357,7 @@ fn collect_strings_tl(tl: &TopLevel, seen: &mut std::collections::HashSet<String
     match tl {
         TopLevel::Transaction(t) => { for s in &t.body { collect_strings_stmt(s, seen, out); } }
         TopLevel::Definition(d) => { for s in &d.body { collect_strings_stmt(s, seen, out); } }
+        TopLevel::Export(e) => collect_strings_tl(&e.inner, seen, out),
         TopLevel::Cell(c) => {
             // 2026-07-13: Field.default removed in new AST.
             for _ in &c.fields { }
