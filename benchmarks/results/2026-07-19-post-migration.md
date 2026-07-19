@@ -1,4 +1,4 @@
-# Benchmark Results — Post Intrinsic Migration + Stabilization
+# Benchmark Results — Post Intrinsic Migration (Final) + Stabilization
 
 **Date:** 2026-07-19
 **Build:** `cargo build --release`
@@ -20,7 +20,7 @@
 | float_math_nonzero | MATCH | MATCH | — |
 | sparse_dispatch | MATCH | MATCH | — |
 | print_loop | MATCH | MATCH | — |
-| nbody_newton | MATCH | MATCH | ~2.2× slower than Phase 3 (13.5s vs 6.1s). Cause: per-field phi loop (emit_countable_main) with 7+ phi nodes + backedge regs. Memory counter loop (Phase 3 style) can't be used due to swan song float→i64 type conversion in load_last_val_temps. See docs/plans/2026-07-19-close-loop-engine-gap.md. |
+| nbody_newton | MATCH | MATCH | 11.5s (memory counter loop, Phase 3 style). Was 13.5s with per-field phi. See docs/plans/2026-07-19-close-loop-engine-gap.md. |
 | nbody_sqrt | SKIP | **MATCH** | ✅ SSA fix |
 | nbody_sqrt_idio | MISMATCH | **MATCH** | ✅ SSO + print fix |
 | fasta | MISMATCH | **MATCH** | ✅ SSO + print fix |
@@ -45,6 +45,20 @@
 | brief_str_to_c handles SSO + C strings | `lib/runtime/brief_rt.c` | All frgn string parameters work under SSO mode |
 | Print plugin Float32/Float64 dispatch | `src/plugin/print_plugin.rs` | Float-typed variables (nbody energy) print correctly |
 | Loop engine detects __print_* calls | `src/backend/llvm/loop_engine/analysis.rs` | Precomputation no longer eliminates output calls |
+
+## Runtime Performance Comparison
+
+| Benchmark | Phase 3 Baseline | Current | Ratio vs Phase 3 |
+|-----------|-----------------|---------|------------------|
+| nbody_newton | 6.1s | 11.5s | 1.89× (memory loop) |
+| mandelbrot | 0.70s (C) | 0.71s | 1.01× |
+| fannkuch_redux | 0.079s (C) | 0.068s | 0.86× |
+| print_loop | 0.067s (C) | 0.062s | 0.93× |
+
+nbody_newton is the only remaining performance gap — the memory loop (Phase 3 style) gives 11.5s vs 13.5s per-field phi, but still not Phase 3's 6.1s. The gap is from:
+- `needs_state_stores_in_body = true` — stores ALL state fields to %State each iteration (33 fields × 8 bytes = 264 bytes)
+- Per-field phi loop avoids this by tracking values in phi registers
+- Future optimization: detect when the body DOES store all fields and skip the explicit stores (they're redundant)
 
 ## Remaining Issues
 
