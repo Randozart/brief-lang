@@ -12,7 +12,7 @@ int main(void) {
 
     while (reg != 0) {
         reg &= reg - 1;
-        if (reg % 1000000 == 0)
+        if (reg % 100000 == 0)
             fprintf(stdout, "%ld\n", (long)reg);
     }
 

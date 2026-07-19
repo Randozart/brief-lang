@@ -25,6 +25,11 @@ impl Plugin for EnvPlugin {
         program: &mut Vec<TopLevel>,
         _universe: &mut TypeUniverse,
     ) -> Result<(), String> {
+        // 2026-07-19: First pass — resolve const-level !GetEnv/!GetEnvInt to
+        // literal values. This allows `const N = !GetEnvInt("BOUND")` to work
+        // even though get_env_int is a regular function (not an intrinsic).
+        resolve_const_env_vars(program);
+        // Second pass — normal resolution for non-const contexts
         let orig_count = count_intercepts(program);
         for item in program.iter_mut() {
             walk_item(item);
@@ -33,6 +38,30 @@ impl Plugin for EnvPlugin {
             let _new_count = count_intercepts(program);
         }
         Ok(())
+    }
+}
+
+/// Evaluate !GetEnv/!GetEnvInt inside const declarations at compile time.
+fn resolve_const_env_vars(program: &mut [TopLevel]) {
+    for item in program.iter_mut() {
+        let TopLevel::Constant(c) = item else { continue };
+        let Expr::PluginIntercept { name, args, .. } = &c.expr else { continue };
+        let key = extract_string_arg(args).unwrap_or_default();
+        let val = std::env::var(&key).unwrap_or_default();
+        c.expr = match name.as_str() {
+            "GetEnvInt" => Expr::Decimal(val.parse::<i64>().unwrap_or(0)),
+            "GetEnv"    => Expr::Quoted(val.as_bytes().to_vec()),
+            _           => continue,
+        };
+    }
+}
+
+/// Extract a string literal argument from a PluginIntercept call.
+fn extract_string_arg(args: &[Expr]) -> Option<String> {
+    if let Some(Expr::Quoted(bytes)) = args.first() {
+        String::from_utf8(bytes.clone()).ok()
+    } else {
+        None
     }
 }
 

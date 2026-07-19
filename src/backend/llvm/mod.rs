@@ -2675,13 +2675,16 @@ impl LlvmBackend {
                 // Multi-txn all-pure folding: when NO triggers exist and ALL
                 // reactive async txns have bounded_pre + increments with pure
                 // bodies, fold them into a single register-pipeline main loop.
+                // 2026-07-19: Removed is_pure_body requirement. The multi-txn
+                // fold calls @txn_<name> which handles guard checks including
+                // observable effects. We only need deterministic convergence
+                // (bounded_pre + increments) so the loop bounds are known.
                 let multi_foldable = enumerable.is_none()
                     && !has_wake_triggers
                     && !self.async_txn_names.is_empty()
                     && self.async_txn_names.iter().all(|name| {
                         graph.nodes.iter().find(|n| n.name == *name).map_or(false, |node| {
-                            (node.is_pure_body || node.is_effectively_pure)
-                            && node.bounded_pre.is_some()
+                            node.bounded_pre.is_some()
                             && node.increments.is_some()
                         })
                     });
