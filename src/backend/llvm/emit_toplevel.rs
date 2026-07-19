@@ -1452,9 +1452,10 @@ impl LlvmBackend {
             self.fun.in_callable_txn = false;
             self.fun.returns_i64 = false;
             self.fun.fn_ret_ty = "void".to_string();
-            // 2026-07-19: Arena init deferred — triggers pre-existing terminator bug
-            // in standard path guard emission. The arena fields are in %State but
-            // not initialized for the standard path yet.
+            // 2026-07-19: Arena init — uses next_reg_with_prefix (txn_counter)
+            // for unique names, stored in %State system fields. Cross-function
+            // accessible via emit_arena_alloc's load_state_ptr macro.
+            self.emit_arena_init(out, "  ");
             if !matches!(txn.contract.pre_condition, Expr::Bool(true)) {
                 self.emit_precondition_check(out, &txn.contract.pre_condition, "  ");
             }

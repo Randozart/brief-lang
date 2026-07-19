@@ -224,7 +224,7 @@ fn emit_alloc(
                     }
                     AllocStrategy::Arena => {
                         let result = backend.emit_arena_alloc(out, indent, &size);
-                        writeln!(out, "{}{} = ptrtoint ptr {} to i64", indent, v, result).ok();
+                        writeln!(out, "{}{} = add i64 0, {}", indent, v, result).ok();
                         backend.fun.alloc_strategies.insert(v.to_string(), AllocStrategy::Arena);
                         BTypedRegister { name: v.to_string(), ty: Type::int() }
                     }
@@ -268,8 +268,10 @@ fn emit_alloc(
     // 2026-07-19: Arena is in %State fields — available in any function that
     // has %state (all txns, callable txns, and their helpers by inheritance).
     if backend.arena_ptr_idx.is_some() {
+        // 2026-07-19: emit_arena_alloc returns the old bump pointer as i64.
+        // The caller receives it directly — no ptrtoint needed.
         let result = backend.emit_arena_alloc(out, indent, &size);
-        writeln!(out, "{}{} = ptrtoint ptr {} to i64", indent, v, result).ok();
+        writeln!(out, "{}{} = add i64 0, {}", indent, v, result).ok();
         backend.fun.alloc_strategies.insert(v.to_string(), AllocStrategy::Arena);
         return BTypedRegister { name: v.to_string(), ty: Type::int() };
     }
