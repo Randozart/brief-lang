@@ -500,38 +500,23 @@ impl LlvmBackend {
     // ═══════════════════════════════════════════════════════════════
 
     /// Load last-value temps into registers for post-loop printing.
-    /// State fields are stored as i64 (via adapt_to_i64 boxing). Float fields
-    /// are loaded as i64 and then unboxed to the native type so the hoisted
-    /// print body receives the correct LLVM type.
+    /// State fields are now stored with their native LLVM type in %State.
+    /// Float fields are loaded as float directly — no unboxing needed.
     pub(crate) fn load_last_val_temps(&mut self, out: &mut String) {
         let mut sorted_keys: Vec<String> = self.fun.last_val_temps.keys().cloned().collect();
         sorted_keys.sort();
         for name in &sorted_keys {
             if let Some(&idx) = self.ctx.field_index_map.get(name) {
                 let brief_ty = self.ctx.field_brief_types.get(idx).cloned().unwrap_or(Type::int());
+                let llvm_ty = self.ctx.field_types.get(idx).cloned().unwrap_or_else(|| "i64".to_string());
                 let gep = self.fun.next_reg_with_prefix("lvt");
                 writeln!(out, "  {} = getelementptr inbounds %State, ptr %state, i32 0, i32 {}",
                     gep, idx).ok();
                 let val = self.fun.next_reg_with_prefix("lvv");
-                writeln!(out, "  {} = load i64, ptr {}, align 8", val, gep).ok();
-                // 2026-07-19: Float fields stored as i64 in %State — unbox to
-                // native type so hoisted prints receive the correct LLVM type.
-                if brief_ty == Type::float64() {
-                    let dbl = self.fun.next_reg_with_prefix("lvf");
-                    writeln!(out, "  {} = bitcast i64 {} to double", dbl, val).ok();
-                    self.fun.last_val_temps.insert(name.clone(), dbl.clone());
-                    self.fun.last_val_types.insert(name.clone(), Type::float64());
-                } else if brief_ty == Type::float() {
-                    let tr = self.fun.next_reg_with_prefix("lvtr");
-                    let fl = self.fun.next_reg_with_prefix("lvfl");
-                    writeln!(out, "  {} = trunc i64 {} to i32", tr, val).ok();
-                    writeln!(out, "  {} = bitcast i32 {} to float", fl, tr).ok();
-                    self.fun.last_val_temps.insert(name.clone(), fl.clone());
-                    self.fun.last_val_types.insert(name.clone(), Type::float());
-                } else {
-                    self.fun.last_val_temps.insert(name.clone(), val.clone());
-                    self.fun.last_val_types.insert(name.clone(), brief_ty);
-                }
+                writeln!(out, "  {} = load {}, ptr {}, align {}", val, llvm_ty, gep,
+                    if llvm_ty == "float" { 4 } else { 8 }).ok();
+                self.fun.last_val_temps.insert(name.clone(), val.clone());
+                self.fun.last_val_types.insert(name.clone(), brief_ty);
             }
         }
     }

@@ -2035,45 +2035,55 @@ impl LlvmBackend {
 
     /// Load a state field as i64. Returns (register_name, brief_type).
     /// The brief type can be passed to ensure_typed_value for float unboxing.
+    /// Load a state field with its native LLVM type. Returns (register_name, brief_type).
     pub(crate) fn emit_state_load_i64(&mut self, out: &mut String, indent: &str, name: &str) -> Option<(String, Type)> {
         let idx = *self.ctx.field_index_map.get(name)?;
+        self.load_field_type(out, indent, idx)
+    }
+
+    /// Store a value to a state field with the native LLVM type.
+    /// The value should match the field's LLVM type (float, double, i64, etc.).
+    pub(crate) fn emit_state_store_i64(&mut self, out: &mut String, indent: &str, name: &str, val: &str) -> Option<()> {
+        let idx = *self.ctx.field_index_map.get(name)?;
+        self.store_field_type(out, indent, idx, val)
+    }
+
+    /// Load a state field with its native LLVM type by index. Returns (register_name, brief_type).
+    pub(crate) fn emit_state_load_i64_by_idx(&mut self, out: &mut String, indent: &str, idx: usize) -> (String, Type) {
+        self.load_field_type(out, indent, idx).unwrap_or_else(|| {
+            let v = self.fun.next_reg_with_prefix("slf");
+            writeln!(out, "{}{} = add i64 0, 0", indent, v).ok();
+            (v, Type::int())
+        })
+    }
+
+    /// Store a value to a state field by index with the native LLVM type.
+    pub(crate) fn emit_state_store_i64_by_idx(&mut self, out: &mut String, indent: &str, idx: usize, val: &str) {
+        self.store_field_type(out, indent, idx, val);
+    }
+
+    /// Internal helper: load a state field with its native LLVM type.
+    fn load_field_type(&mut self, out: &mut String, indent: &str, idx: usize) -> Option<(String, Type)> {
         let brief_ty = self.ctx.field_brief_types.get(idx).cloned().unwrap_or(Type::int());
+        let llvm_ty = self.ctx.field_types.get(idx).cloned().unwrap_or_else(|| "i64".to_string());
         let gep = self.fun.gen_reg();
         writeln!(out, "{}{} = getelementptr inbounds %State, ptr %state, i32 0, i32 {}",
             indent, gep, idx).ok();
         let val = self.fun.gen_reg();
-        writeln!(out, "{}{} = load i64, ptr {}, align 8", indent, val, gep).ok();
+        writeln!(out, "{}{} = load {}, ptr {}, align {}", indent, val, llvm_ty, gep,
+            self.align_of(&llvm_ty)).ok();
         Some((val, brief_ty))
     }
 
-    /// Store an i64 value to a state field. The value should already be boxed
-    /// via adapt_to_i64 if its brief type is float/double/bool.
-    pub(crate) fn emit_state_store_i64(&mut self, out: &mut String, indent: &str, name: &str, val: &str) -> Option<()> {
-        let idx = *self.ctx.field_index_map.get(name)?;
+    /// Internal helper: store a value to a state field with its native LLVM type.
+    fn store_field_type(&mut self, out: &mut String, indent: &str, idx: usize, val: &str) -> Option<()> {
+        let llvm_ty = self.ctx.field_types.get(idx).cloned().unwrap_or_else(|| "i64".to_string());
         let gep = self.fun.gen_reg();
         writeln!(out, "{}{} = getelementptr inbounds %State, ptr %state, i32 0, i32 {}",
             indent, gep, idx).ok();
-        writeln!(out, "{}store i64 {}, ptr {}, align 8", indent, val, gep).ok();
+        writeln!(out, "{}store {} {}, ptr {}, align {}", indent, llvm_ty, val, gep,
+            self.align_of(&llvm_ty)).ok();
         Some(())
-    }
-
-    /// Load i64 from a state field by index. Returns (register_name, brief_type).
-    pub(crate) fn emit_state_load_i64_by_idx(&mut self, out: &mut String, indent: &str, idx: usize) -> (String, Type) {
-        let brief_ty = self.ctx.field_brief_types.get(idx).cloned().unwrap_or(Type::int());
-        let gep = self.fun.next_reg_with_prefix("slg");
-        writeln!(out, "{}{} = getelementptr inbounds %State, ptr %state, i32 0, i32 {}",
-            indent, gep, idx).ok();
-        let val = self.fun.next_reg_with_prefix("slv");
-        writeln!(out, "{}{} = load i64, ptr {}, align 8", indent, val, gep).ok();
-        (val, brief_ty)
-    }
-
-    /// Store i64 to a state field by index.
-    pub(crate) fn emit_state_store_i64_by_idx(&mut self, out: &mut String, indent: &str, idx: usize, val: &str) {
-        let gep = self.fun.next_reg_with_prefix("ssg");
-        writeln!(out, "{}{} = getelementptr inbounds %State, ptr %state, i32 0, i32 {}",
-            indent, gep, idx).ok();
-        writeln!(out, "{}store i64 {}, ptr {}, align 8", indent, val, gep).ok();
     }
 
     /// Ensure the value register has the expected LLVM type, inserting
