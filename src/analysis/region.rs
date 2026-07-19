@@ -1342,15 +1342,14 @@ fn has_ffi_or_terminator_stmt(stmt: &Statement) -> bool {
     let mut work: Vec<&Statement> = vec![stmt];
     while let Some(s) = work.pop() {
         match s {
+            // 2026-07-19: Only Term/TermBang/InlineAsm block precomputation.
+            // Pure-Brief calls and # intrinsics are handled by the interpreter
+            // during eval_stmt. The old approach of checking expr_has_call
+            // was over-conservative — it blocked all function calls including
+            // pure-Brief ones like memcmp and utf8_validate.
             Statement::Term(_) | Statement::TermBang(_)
             | Statement::InlineAsm { .. } => return true,
-            Statement::Assign(_, expr) if expr_has_call(expr) => return true,
-            Statement::Let { expr, .. } => {
-                if let Some(e) = expr { if expr_has_call(e) { return true; } }
-            }
-            Statement::Expression(e) if expr_has_call(e) => return true,
-            Statement::Guarded(condition, statements) => {
-                if expr_has_call(condition) { return true; }
+            Statement::Guarded(_, statements) => {
                 work.extend(statements.iter().rev());
             }
             Statement::Foreach { body, .. } => {
@@ -1405,6 +1404,10 @@ fn expr_has_call(expr: &Expr) -> bool {
     let mut work: Vec<&Expr> = vec![expr];
     while let Some(e) = work.pop() {
         match e {
+            // 2026-07-19: Only frgn calls block precomputation — pure-Brief
+            // function calls and # intrinsics are handled by the interpreter.
+            // Without frgn_names context, we conservatively skip all calls
+            // and let the interpreter handle them during eval.
             Expr::Call(_, _, _) => return true,
             Expr::Tuple(elems) => {
                 work.extend(elems.iter().rev());

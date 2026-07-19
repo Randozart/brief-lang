@@ -41,7 +41,8 @@ static int utf8_validate(const uint8_t *data, int64_t len) {
 }
 
 int main(void) {
-    const long N = 50000000L;
+    char* env = getenv("BOUND");
+    long N = env ? atol(env) : 50000000L;
     long ops = 0;
     long checksum = 0;
 

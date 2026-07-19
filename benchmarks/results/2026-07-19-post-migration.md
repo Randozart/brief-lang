@@ -51,4 +51,4 @@
 | Benchmarks | Status | Root Cause |
 |------------|--------|------------|
 | async_counters_idio | **MATCH** | Fixed by removing is_pure_body requirement from multi-txn fold; precomputation now applies. |
-| utf8_ops | MISMATCH | C reference hardcodes N=50000000; Brief reads BOUND env. Fixed env const-eval plugin. C reference pre-existing asymmetry. |
+| utf8_ops | MISMATCH | Performance issue: pure-Brief memcmp uses txn convergence loops for each byte, very slow. C reference completes 50M iterations faster than Brief completes 5. Known limitation. |
