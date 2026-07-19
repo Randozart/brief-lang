@@ -113,23 +113,13 @@ impl LlvmBackend {
                         indent, gep, idx).ok();
                     let brief_ty = self.ctx.field_brief_types.get(idx)
                         .cloned().unwrap_or(Type::int());
-                    writeln!(out, "{}{} = load i64, ptr {}", indent, v, gep).ok();
-                    // 2026-07-17: Float fields packed as i64 in state — unbox.
-                    if brief_ty == Type::float64() {
-                        let dbl = self.fun.gen_reg();
-                        writeln!(out, "{}{} = bitcast i64 {} to double", indent, dbl, v).ok();
-                        self.fun.reg_float_cache.insert(v.to_string(), dbl.clone());
-                        TypedRegister { name: dbl, ty: Type::float64() }
-                    } else if brief_ty == Type::float() {
-                        let tr = self.fun.gen_reg();
-                        let fl = self.fun.gen_reg();
-                        writeln!(out, "{}{} = trunc i64 {} to i32", indent, tr, v).ok();
-                        writeln!(out, "{}{} = bitcast i32 {} to float", indent, fl, tr).ok();
-                        self.fun.reg_float_cache.insert(v.to_string(), fl.clone());
-                        TypedRegister { name: fl, ty: Type::float() }
-                    } else {
-                        TypedRegister { name: v.to_string(), ty: brief_ty }
-                    }
+                    // 2026-07-19: Load with native type from field_types (e.g. "float",
+                    // "double", "i64"). No unboxing needed — LLVM type matches %State
+                    // struct layout. Phi registers remain i64 (handled above).
+                    let llvm_ty = &self.ctx.field_types[idx];
+                    writeln!(out, "{}{} = load {}, ptr {}, align {}", indent, v, llvm_ty, gep,
+                        self.align_of(llvm_ty)).ok();
+                    TypedRegister { name: v.to_string(), ty: brief_ty }
                 } else if let Some((ty, _)) = self.ctx.constants.get(name) {
                     // 2026-07-17: Load global constants with the correct LLVM
                     // type. Float constants are declared as `constant float` in

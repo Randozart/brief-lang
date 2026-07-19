@@ -94,9 +94,17 @@ pub fn emit_statement(backend: &mut LlvmBackend, out: &mut String, stmt: &Statem
                     } else if let Some(&idx) = backend.ctx.field_index_map.get(name) {
                         let ptr = backend.fun.gen_reg();
                         writeln!(out, "{}{} = getelementptr %State, ptr %state, i32 0, i32 {}", indent, ptr, idx).ok();
-                        // 2026-07-17: State stores always i64 — box via adapt_to_i64.
-                        let boxed = backend.adapt_to_i64(out, indent, &val);
-                        writeln!(out, "{}store i64 {}, ptr {}", indent, boxed, ptr).ok();
+                        // 2026-07-19: Store with native type from field_types.
+                        // When the value's LLVM type matches the field type, store
+                        // directly (no boxing). Otherwise box via adapt_to_i64.
+                        let field_ty = &backend.ctx.field_types[idx];
+                        let val_ty = backend.llvm_type(&val.ty);
+                        if val_ty == *field_ty {
+                            writeln!(out, "{}store {} {}, ptr {}", indent, field_ty, val.name, ptr).ok();
+                        } else {
+                            let boxed = backend.adapt_to_i64(out, indent, &val);
+                            writeln!(out, "{}store i64 {}, ptr {}", indent, boxed, ptr).ok();
+                        }
                     }
                 }
                 // 2026-07-17: Push: `&queue <- value` → Assign(AddrOf(target), value).

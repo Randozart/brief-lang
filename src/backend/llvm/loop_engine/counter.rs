@@ -523,11 +523,20 @@ impl LlvmBackend {
                         // computes the new value, but it's never stored back to %State.
                         if self.fun.needs_state_stores_in_body {
                             if let Some(&idx) = self.ctx.field_index_map.get(n) {
-                                let boxed = self.adapt_to_i64(out, "  ", &val);
+                                // 2026-07-19: Store with native type for %State struct
+                                // compatibility. Phi backedge uses i64, but the state
+                                // store matches the field's LLVM type (float/double).
+                                let field_ty = &self.ctx.field_types[idx];
+                                let val_ty = self.llvm_type(&val.ty);
                                 let gep = self.fun.next_reg_with_prefix("cms");
                                 writeln!(out, "  {} = getelementptr inbounds %State, ptr %state, i32 0, i32 {}",
                                     gep, idx).ok();
-                                writeln!(out, "  store i64 {}, ptr {}, align 8", boxed, gep).ok();
+                                if val_ty == *field_ty {
+                                    writeln!(out, "  store {} {}, ptr {}, align 8", field_ty, val.name, gep).ok();
+                                } else {
+                                    let boxed = self.adapt_to_i64(out, "  ", &val);
+                                    writeln!(out, "  store i64 {}, ptr {}, align 8", boxed, gep).ok();
+                                }
                             }
                         }
                         self.fun.last_val_temps.insert(n.clone(), val.name.clone());

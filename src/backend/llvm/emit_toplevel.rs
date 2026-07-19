@@ -809,29 +809,41 @@ impl LlvmBackend {
                 // 2026-07-17: State fields are always i64. Box float via
                 // bitcast to i32 + zext to i64 before storing.
                 let h = float_to_llvm_hex(f);
-                let bits_reg = field_reg("b");
-                writeln!(out, "{}{} = bitcast i32 {} to float", indent, bits_reg, h).ok();
-                let boxed = field_reg("z");
-                writeln!(out, "{}{} = bitcast float {} to i32", indent, boxed, bits_reg).ok();
-                let zext = field_reg("x");
-                writeln!(out, "{}{} = zext i32 {} to i64", indent, zext, boxed).ok();
-                writeln!(out, "{}store i64 {}, ptr {}, align {}", indent, zext, gep, self.align_of("i64")).ok();
+                if ty == "float" {
+                    let bits_reg = field_reg("b");
+                    writeln!(out, "{}{} = bitcast i32 {} to float", indent, bits_reg, h).ok();
+                    writeln!(out, "{}store float {}, ptr {}, align 4", indent, bits_reg, gep).ok();
+                } else {
+                    let bits_reg = field_reg("b");
+                    writeln!(out, "{}{} = bitcast i32 {} to float", indent, bits_reg, h).ok();
+                    let boxed = field_reg("z");
+                    writeln!(out, "{}{} = bitcast float {} to i32", indent, boxed, bits_reg).ok();
+                    let zext = field_reg("x");
+                    writeln!(out, "{}{} = zext i32 {} to i64", indent, zext, boxed).ok();
+                    writeln!(out, "{}store i64 {}, ptr {}, align {}", indent, zext, gep, self.align_of("i64")).ok();
+                }
             }
             // 2026-07-14: Float and Float32 unified to Expr::Float(f64).
             // Negative values handled via Expr::UnaryOp(UnaryOpKind::Neg, Expr::Float(f)).
             Some(Expr::UnaryOp(crate::ast::UnaryOpKind::Neg, ref inner)) => {
                 match inner.as_ref() {
                     Expr::Float(f) => {
-                        // 2026-07-17: State fields are always i64. Box float via
-                        // bitcast to i32 + zext to i64 before storing.
+                        // 2026-07-19: Native float fields store directly.
                         let h = float_to_llvm_hex(-*f);
-                        let bits_reg = field_reg("b");
-                        writeln!(out, "{}{} = bitcast i32 {} to float", indent, bits_reg, h).ok();
-                        let boxed = field_reg("z");
-                        writeln!(out, "{}{} = bitcast float {} to i32", indent, boxed, bits_reg).ok();
-                        let zext = field_reg("x");
-                        writeln!(out, "{}{} = zext i32 {} to i64", indent, zext, boxed).ok();
-                        writeln!(out, "{}store i64 {}, ptr {}, align {}", indent, zext, gep, self.align_of("i64")).ok();
+                        if ty == "float" {
+                            let h = float_to_llvm_hex(-*f);
+                            let bits_reg = field_reg("b");
+                            writeln!(out, "{}{} = bitcast i32 {} to float", indent, bits_reg, h).ok();
+                            writeln!(out, "{}store float {}, ptr {}, align 4", indent, bits_reg, gep).ok();
+                        } else {
+                            let bits_reg = field_reg("b");
+                            writeln!(out, "{}{} = bitcast i32 {} to float", indent, bits_reg, h).ok();
+                            let boxed = field_reg("z");
+                            writeln!(out, "{}{} = bitcast float {} to i32", indent, boxed, bits_reg).ok();
+                            let zext = field_reg("x");
+                            writeln!(out, "{}{} = zext i32 {} to i64", indent, zext, boxed).ok();
+                            writeln!(out, "{}store i64 {}, ptr {}, align {}", indent, zext, gep, self.align_of("i64")).ok();
+                        }
                     }
                     Expr::Decimal(n) => {
                         writeln!(out, "{}store i64 -{}, ptr {}, align {}", indent, n, gep, self.align_of("i64")).ok();
@@ -870,12 +882,16 @@ impl LlvmBackend {
             }
             Some(expr) => {
                 let val_reg = self.emit_expr(out, &expr, indent);
-                // 2026-07-17: State fields are always i64 (push_field_type
-                // overrides all types to "i64"). adapt_to_i64 boxes the value
-                // (float→i32→i64, ptr→i64 passthrough, double→i64 bitcast).
-                // Store directly as i64 — no ensure_typed_value needed.
-                let boxed = self.adapt_to_i64(out, indent, &val_reg);
-                writeln!(out, "{}store i64 {}, ptr {}, align {}", indent, boxed, gep, self.align_of("i64")).ok();
+                // 2026-07-19: Store with native type when possible. Skip
+                // adapt_to_i64 boxing when the value's LLVM type matches the
+                // field's LLVM type (float→"float", double→"double").
+                let val_ty = self.llvm_type(&val_reg.ty);
+                if val_ty == *ty {
+                    writeln!(out, "{}store {} {}, ptr {}, align {}", indent, ty, val_reg.name, gep, self.align_of(ty)).ok();
+                } else {
+                    let boxed = self.adapt_to_i64(out, indent, &val_reg);
+                    writeln!(out, "{}store i64 {}, ptr {}, align {}", indent, boxed, gep, self.align_of("i64")).ok();
+                }
             }
             None => {
                 if ty == "i8*" {

@@ -919,17 +919,11 @@ impl LlvmBackend {
                 return;
             }
         }
-        // 2026-07-17: ALL state fields are stored as i64 in %State, regardless
-        // of their Brief type (Float, Float64, Ptr, etc.). The adapt_to_i64 /
-        // ensure_typed_value functions handle the conversion between i64 and
-        // the field's natural type at load/store time. Override llvm_type(ty)
-        // to always return "i64" for state fields — this keeps %State struct
-        // layout uniform and avoids type mismatches in codegen paths that
-        // assume i64 (load i64, store i64, add i64, icmp i64, etc.).
-        // 2026-07-19: Reverted from native types — phi registers, backedge values,
-        // and boxing/unboxing all assume i64. Full native type support requires
-        // a coordinated change across all codegen paths (noted in plan).
-        self.ctx.field_types.push("i64".to_string());
+        // 2026-07-19: Use native LLVM type from Brief type metadata.
+        // Float32 → "float", Float64 → "double", Int → "i64", Bool → "i8".
+        // Cell state types already use native types (mod.rs:3546).
+        // LLVM verifier catches any codegen path that mismatches the struct.
+        self.ctx.field_types.push(self.llvm_type(ty));
         self.ctx.field_brief_types.push(ty.clone());
     }
 
