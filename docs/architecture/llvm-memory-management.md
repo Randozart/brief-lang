@@ -19,6 +19,127 @@ Without contracts, the compiler would need runtime guards; with contracts,
 it proves at compile time what can live on the stack, what can be
 scalarized, and what can be precomputed.
 
+## 0. Allocation Strategy Overview
+
+The compiler selects an allocation strategy per `Alloc#()` call site through
+a three-layer dispatch system:
+
+```
+Layer 1: Phase 4 DAG analysis (pre-codegen)
+  Builds a dataflow graph of each txn/defn body, traces every allocation
+  through assignments/returns/calls, detects escapes (returned, stored to
+  state, passed to foreign calls). Assigns strategy per analysis_id.
+
+Layer 2: Explicit override (2nd arg to Alloc#)
+  Alloc#(size, Arena)       — PascalCase: intrinsic strategy
+  Alloc#(size, "pool_serial") — quoted string: config template
+  Alloc#(size, my_alloc_fn)  — identifier: user Brief function
+
+Layer 3: Default heuristics (no analysis, no override)
+  Arena scope active       → arena bump allocate
+  Bounded scope + no escape → stack alloca (with runtime fallback)
+  Default                  → @malloc
+```
+
+**Strategies:**
+
+| Strategy | Storage | Free# behavior | Best for |
+|----------|---------|----------------|----------|
+| `Inline` | Parent struct field | No-op | Fixed-size ≤8B, no escape (SSO/SVO) |
+| `Alloca` | Stack frame | No-op | Fixed-size, bounded scope |
+| `Arena` | Arena (bump) | No-op | Many allocs with same lifetime |
+| `RingBuffer` | Circular buffer | No-op (overwrite) | Streaming, producer-consumer |
+| `Malloc` | Heap | `@free` | Dynamic lifetime, escape |
+| `Config(name)` | Custom template | Config-dependent | Application-specific pools |
+
+### 0.1 Allocation DAG Analysis (Phase 4)
+
+**File:** `src/analysis/allocation.rs`
+
+A pre-codegen pass builds a dataflow DAG for each txn/defn body:
+
+```
+Node types: Alloc, Assign, Return, StateWrite, Call
+Edges: via variable names (producer → consumer)
+
+Forward trace: from each Alloc node through all consumer edges.
+  If any reachable node is Return / StateWrite / Call → ESCAPED → Malloc
+  If no escape path → default scope strategy (Arena / Alloca / Inline)
+```
+
+Three pillars:
+1. **Draw predictable paths** — DAG builder traces every dataflow edge
+2. **Fold predictable paths** — non-escaping allocs become Inline/Alloca/Arena
+3. **Verify DAGs** — provenance tracking (`is_local_provenance`) confirms escapes
+
+Post-processing applies Inline rule: ≤8B constant-size + no escape → Inline.
+
+### 0.2 Runtime Fallback
+
+For dynamic-size allocs with Alloca strategy, emit a runtime size check:
+
+```llvm
+%cmp = icmp ule i64 %size, 4096
+br i1 %cmp, label %stack, label %heap
+stack:
+  %s = alloca i8, i64 %size
+  br label %done
+heap:
+  %h = call ptr @malloc(i64 %size)
+  br label %done
+done:
+  %v = phi i64 [ %s, %stack ], [ %h, %heap ]
+```
+
+The threshold is configurable via `BuildOptions.stack_threshold` (default 4096).
+
+### 0.3 Thread-Safe Arena
+
+When `has_async_txns` is true (parallel dispatch), the arena allocator uses
+CAS (`cmpxchg`) for concurrent bump allocation:
+
+```llvm
+; Sequential: load + add + store (racy in parallel)
+%cur = load ptr, ptr %arptr
+%new = getelementptr i8, ptr %cur, i64 %size
+store ptr %new, ptr %arptr
+
+; Parallel: cmpxchg loop (atomic, correct)
+retry:
+  %cur = load ptr, ptr %arptr
+  %new = getelementptr i8, ptr %cur, i64 %size
+  %cas = cmpxchg ptr %arptr, ptr %cur, ptr %new monotonic monotonic
+  %ok = extractvalue { ptr, i1 } %cas, 1
+  br i1 %ok, label %done, label %retry
+done:
+  ; %cur is the allocation address
+```
+
+On overflow (arena exhausted), acquires a mutex through `__mutex_lock__` /
+`__mutex_unlock__`, re-checks under lock, grows via `realloc` if needed.
+The growth path is taken only on the rare case of arena exhaustion.
+
+### 0.4 Config-Driven Free# Dispatching
+
+`emit_free` reads the allocation strategy from the `alloc_strategies` map:
+
+| Strategy | emit_free behavior |
+|----------|-------------------|
+| `Inline` | No-op |
+| `Alloca` | No-op |
+| `Arena` | No-op |
+| `RingBuffer` | No-op |
+| `Malloc` | `call @free(ptr)` |
+| `Config(name)` | Checks config: `free = "none"` → no-op, `free = "fn"` → `call @fn(ptr)` |
+
+Config entries in `config/alloc-strategies.toml` can declare a `free` field:
+
+```toml
+[alloc.pool_serial]
+template = "call ptr @pool_alloc(i64 {size})"
+free = "none"  # pool reuse — no per-element free
+```
+
 ## 1. Foundation: Stack-Allocated State
 
 Every `main()` entry allocates `%State` via `alloca`:
@@ -128,7 +249,122 @@ Identifier expressions read from `ssa_old_*_regs` (populated by
 `pre_load_all_fields` or `phi_regs_to_ssa_old`) directly — zero memory
 traffic for the hot path.
 
-## 2. Precomputation (A000)
+## 2. Small String Optimization (SSO)
+
+**Feature flag:** `feature_sso_strings` (default false, gated behind CLI)
+
+When enabled, `String` becomes a `{ i64, i64 }` struct instead of a single
+heap pointer:
+
+```
+Handle layout:
+  handle[0] = packed data (≤6 bytes) << 3 | tag (SSO=0b001)  — inline
+           or ptrtoint & -8                                    — heap
+  handle[1] = byte length (both inline and heap)
+
+Tag bits (lower 3 bits of handle[0]):
+  000 = heap pointer
+  001 = SSO inline (≤6 bytes stored in handle[0] >> 3)
+  010 = static literal (reserved)
+  100 = temporary heap (allocated in txn, freed at tick end)
+```
+
+### 2.1 State Layout
+
+When SSO is ON, `push_field_type` pushes 2 consecutive i64 slots per
+String field (instead of 1). The `field_index_map` entry points to slot 0;
+slot 1 is implicitly at index+1. State load/store emits `extractvalue`/
+`insertvalue` on the `{i64, i64}` struct.
+
+### 2.2 Literal Emission
+
+Short strings (≤6 bytes) are packed inline:
+```llvm
+%t0 = or i64 <packed_bytes << 3>, 1   ; data + SSO tag
+%t1 = insertvalue { i64, i64 } undef, i64 %t0, 0
+%t2 = insertvalue { i64, i64 } %t1, i64 <len>, 1
+```
+
+Long strings (>6 bytes) use a stack-allocated buffer with ptrtoint
+(no 16-byte heap header — the SSO SSO format doesn't use one).
+
+### 2.3 Concat
+
+When SSO is ON and `a_len + b_len ≤ 6`, both operands are SSO inline.
+The concat packs both into a new SSO handle:
+```llvm
+%a_data = lshr i64 %a_dtag, 3           ; extract inline data
+%b_data = lshr i64 %b_dtag, 3
+%shifted = shl i64 %b_data, %a_len_8   ; position b after a
+%combined = or i64 %a_data, %shifted
+%new_tag = shl i64 %combined, 3 | 1    ; new SSO handle
+```
+
+When total > 6, allocates raw heap buffer (no header), copies both
+sources, null-terminates. Returns heap handle.
+
+## 3. Small Vector Optimization (SVO)
+
+**Feature flag:** `feature_svo` (default false)
+
+Extends the SSO inline-storage pattern to `List<T>`. When SVO is ON and
+the type has `op.SVO <~ N` metadata (e.g., `svo <~ 3` on List), the
+`List<T>` handle becomes an N+1 slot struct:
+
+```
+Handle layout (cap = 3):
+  slot[0..cap-1] = element values (i64 each)
+  slot[cap]      = (len << 32) | (cap << 32) | 1  (tag bit 0 = inline)
+
+Tag bit 0 of slot[cap]:
+  1 = inline (elements in slots 0..cap-1)
+  0 = heap (slot[0] = ptrtoint, slot[1] = len, slot[2] = cap)
+```
+
+### 3.1 State Layout
+
+`push_field_type` pushes `cap + 1` slots for vector-like types.
+The `llvm_type` override returns `{ i64, i64, ..., i64 }` (N+1 slots).
+
+### 3.2 List Literal Emission
+
+Small list literals (≤3 elements) emit inline handles via `insertvalue`:
+```llvm
+%t0 = insertvalue { i64, i64, i64, i64 } undef, i64 10, 0  ; elem 0
+%t1 = insertvalue { i64, i64, i64, i64 } %t0, i64 20, 1   ; elem 1
+%t2 = insertvalue { i64, i64, i64, i64 } %t1, i64 30, 2   ; elem 2
+%tag = add i64 0, <(3<<32)|(3<<32)|1>                       ; len|cap|tag
+%t3 = insertvalue { i64, i64, i64, i64 } %t2, i64 %tag, 3   ; tag slot
+```
+
+### 3.3 Indexing
+
+SVO indexing uses a stack array + GEP for dynamic indices (extractvalue
+requires constant indices):
+
+```llvm
+; Copy inline data to stack array
+%arr = alloca [3 x i64], align 8
+%slot0 = extractvalue { i64, i64, i64, i64 } %handle, 0
+store i64 %slot0, ptr %arr_gep0
+; ... (repeat for slots 1, 2)
+
+; Check tag branch
+%tag = extractvalue { i64, i64, i64, i64 } %handle, 3
+%is_inline = and i64 %tag, 1
+br i1 %is_inline, label %inline, label %heap
+
+inline:
+  %gep = getelementptr [3 x i64], ptr %arr, i64 0, i64 %idx
+  %val = load i64, ptr %gep
+
+heap:
+  %ptr = extractvalue { i64, i64, i64, i64 } %handle, 0
+  %hgep = getelementptr i64, ptr %ptr, i64 %idx+1
+  %val = load i64, ptr %hgep
+```
+
+## 4. Precomputation (A000)
 
 When the region analyzer proves the entire program is precomputable within
 `--optimize-budget`, `emit_precomputed_main()` (`emit_expr.rs:4448-4485`)

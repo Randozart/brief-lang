@@ -69,6 +69,8 @@ Each backend reads what it needs and ignores the rest.
 | `properties["llvm_type"]` | Set by normalizer; direct read, no recomputation | LLVM type string (`"i64"`, `"float"`, `"ptr"`, ...) |
 | `properties["alu"] == "Float"` | Determines float arithmetic vs integer | `fadd`/`fsub`/`fmul` vs `add`/`sub`/`mul` |
 | `is_string_like(ty, universe)` | Shape (2 Int fields) + encoding property | SSO handle or heap-allocated string helpers |
+| `is_vector_like(ty, universe)` | Has `op.SVO <~ N` metadata | SVO inline list handle (N+1 slot struct) |
+| `svo_capacity(ty, universe)` | Reads `N` from `op.SVO` metadata | Number of inline elements before heap promotion |
 | `properties["encoding"]` | Looked up in `config/encodings.toml` for `char_width` and stdlib ops | `Index#` emits GEP (fixed-width) or stdlib call (variable-width) |
 | `properties["op.Add"]` etc. | Generic identifier used for config dispatch | `OP_CONFIG.lookup("Add", "Int", 8)` → template fill |
 | `bytes` | Storage width. Derived from fields for struct types | `alloca`, `malloc` size, GEP offsets |
@@ -312,3 +314,44 @@ The only way a type gets semantics is through source declarations that populate 
 
 `Type::int()`, `Type::float()`, etc. are pure name constructors — they create `Custom("Int")`,
 `Custom("Float")` with zero semantics attached. Resolution comes from the universe or not at all.
+
+---
+
+## String Type Dispatch (SSO)
+
+With `feature_sso_strings = true`, String is lowered as `{ i64, i64 }` instead
+of `ptr`. The `llvm_type` override in `emit_toplevel.rs` checks for
+`name == "String" && feature_sso_strings` and returns `"{ i64, i64 }"`.
+`push_field_type` allocates 2 state slots per String field.
+
+When SSO is OFF, String is a single `i64` (ptrtoint of heap/stack buffer).
+The `.#data` and `.#len` field access uses layout field read (bit offset
+from the type's field properties), which works for both representations
+via `Load#(addr + offset, width)`.
+
+## Utf8View Dispatch
+
+`Utf8View` is always `{ i64, i64 }` regardless of `feature_sso_strings`.
+It is excluded from `type_is_heap_allocated` (never owns memory). Always
+2 state slots. The `encoding` property is hardcoded to `"UTF-8"`.
+
+## SmallString64 Dispatch
+
+`SmallString64` has 9 Int fields (60 bytes data + length), making the LLVM
+type `{ i64 x 9 }` = 72 bytes. Not detected by `is_string_like()` (needs
+exactly 2 Int fields). Never heap-allocated. Operations read/write bytes
+from individual slots using `when`-chained slot selection based on `i / 8`.
+
+## Vector Type Dispatch (SVO)
+
+With `feature_svo = true` and `op.SVO <~ N` metadata on a type, the type is
+detected as vector-like via `is_vector_like()`. The LLVM type becomes
+`{ i64 x (N+1) }` — N data slots + 1 len+cap+tag slot. `push_field_type`
+allocates N+1 state slots per field.
+
+Tag bit 0 of the last slot: `1` = inline, `0` = heap (ptr in slot 0).
+Inline elements are stored directly in the struct slots. Heap elements use
+the existing ptr/len/cap format in slots 0..2.
+
+Indexing uses a stack array + GEP for dynamic indices (extractvalue requires
+constant indices). The tag branch selects inline vs heap access.

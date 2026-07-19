@@ -259,6 +259,7 @@ Combined impact: 3.85x → 0.98x (brief ties C).
 
 | File | Role |
 |------|------|
+| `src/backend/llvm/loop_engine/mod.rs` | `emit_main`: natural convergence exit, `emit_ssa_main`: convergence check with `any_active` tracking |
 | `src/backend/llvm/loop_engine.rs` | Direct SSA loop, folded SSA A005a, folded memory A005b, pure counter A001 |
 | `src/backend/llvm/mod.rs` | Field index map, exit condition, codegen dispatch (A005 vs A006 decision) |
 | `src/backend/llvm/emit_expr.rs` | Expr codegen (per-field GEP, copy elimination) |
@@ -269,3 +270,56 @@ Combined impact: 3.85x → 0.98x (brief ties C).
 | `src/analysis/region_analyzer.rs` | Precomputation budget analysis |
 | `src/analysis/transition_graph.rs` | Dispatch collapse, is_counter_bounded |
 | `src/analysis/proof_engine.rs` | `prove_linear()`, `check_satisfiable()`, `extract_bound/eq_pair` |
+
+---
+
+## Natural Convergence Exit
+
+When all reactive transactions have converged (their postconditions are met
+and preconditions can never become true again), the program should exit
+naturally — not spin forever in the main loop.
+
+**Detection — one-shot vs restartable:**
+
+A transaction is *restartable* if external input can make its precondition
+true again after convergence. This happens with wake triggers, async workers,
+or timer-based wake conditions. Transactions without these are *one-shot*:
+once the postcondition is met and precondition is false, they'll never run again.
+
+**Main loop convergence check (emit_main):**
+
+```llvm
+; After reactor_tick:
+; For one-shot programs (no wake, no async), check if any txn ran this tick.
+; If none ran, all are converged — exit.
+%any_active = load i64, ptr %active_slot
+%done = icmp eq i64 %any_active, 0
+br i1 %done, label %.end, label %.loop
+```
+
+**SSA loop convergence check (emit_ssa_main):**
+
+```llvm
+; Track whether any txn body executed this iteration.
+; Body sets active flag; convergence check reads it.
+store i64 0, ptr %any_active   ; reset
+; ...txn precondition check + body execution...
+store i64 1, ptr %any_active   ; body ran
+; ...after all txns checked:
+%check = load i64, ptr %any_active
+%done = icmp eq i64 %check, 0
+br i1 %done, label %.end, label %.loop
+```
+
+**Natural death logic** (`mod.rs:2239`): Builds a synthetic exit condition
+from bounded-counter txns (those with `bounded_pre` + `increments` analysis).
+When all bounded counters reach their bounds, the exit condition is met.
+
+**Halting guarantee:** The halting proof is established at compile time.
+Every `rct txn` is checked for `bounded_pre` + `increments` via the
+transition graph analysis. If any txn lacks a provably bounded
+precondition, the exit condition is not set, and the program must rely
+on the one-shot convergence check (which triggers when no txn runs for
+a full iteration).
+
+**See also:** Block 14 in `docs/plans/2026-07-18-master-overview.md`

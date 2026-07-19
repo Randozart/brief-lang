@@ -27,13 +27,26 @@ Source ─► ... ─► Resolve ─► serialize ─► [PLUGIN CHAIN] ─► d
                                                                                    after normalization
 
 
-                         BACKEND DISPATCH (--backend selects)
+                          BACKEND DISPATCH (--backend selects)
 Source → Parse → Resolve → NORMALIZE (reads configs, annotates AST) → Codegen
-                              │                                          │
-                         Reads backend configs                       Reads annotations
-                         Walks AST once                              Never reads configs
-                         Attaches llvm_type/bit_width/js_type         Never matches on primitive
-                         to every type reference                     Just emits annotated AST
+                               │                                          │
+                          Reads backend configs                       Reads annotations
+                          Walks AST once                              Never reads configs
+                          Attaches llvm_type/bit_width/js_type         Never matches on primitive
+                          to every type reference                     Just emits annotated AST
+
+                     OPTIONAL PRE-CODEGEN ANALYSES
+                         ┌─────────────────────┐
+                         │ Allocation DAG      │
+                         │ (analyze_alloc_     │
+                         │  strategies)        │
+                         │ → per-call-site     │
+                         │   strategy map      │
+                         └─────────────────────┘
+                         ┌─────────────────────┐
+                         │ Provenance Analysis │
+                         │ (dangling pointers) │
+                         └─────────────────────┘
 
 ## Normalizer Stage
 
@@ -231,6 +244,37 @@ A backend can start with just `bytes` and be fully correct. It then opts into `p
 | `circt.rs` | `CirctBackend` — MLIR emission |
 | `webstack.rs` | `WebstackGenerator` — TypeScript + WASM |
 
+## Feature Flags
+
+| Flag | Default | Effect |
+|------|---------|--------|
+| `feature_sso_strings` | `false` | SSO: String becomes `{i64,i64}` struct, ≤6 bytes inline |
+| `feature_svo` | `false` | SVO: `List<T>` becomes (N+1)-slot struct, ≤3 elements inline |
+
+## Build Modes
+
+| Mode | Command | Output |
+|------|---------|--------|
+| Default | `briefc build file.bv` | Executable binary |
+| LLVM IR | `briefc build --llvm` | `file.ll` |
+| Static library | `briefc library file.bv` | `libfile.a` |
+| Shared library | `briefc build --shared` | `file.so` |
+
+## Pure-Brief Standard Library Functions
+
+Several byte-string operations are implemented in pure Brief (no frgn) using
+`Load#` + convergent `txn` loops with convergence contracts:
+
+| Function | File | Algorithm |
+|----------|------|-----------|
+| `memcmp(a, b, len)` | `lib/std/types/utf8view.bv` | Byte-by-byte loop via `txn [i < len][i == len]` |
+| `utf8_find(hay, hay_len, needle, needle_len)` | `lib/std/types/utf8view.bv` | Nested txns: `find_loop` calls `memcmp_at` per position |
+| `utf8_validate(data, len)` | `lib/std/types/utf8view.bv` | Single txn decodes lead byte, checks continuations, validates code points |
+| `smallstring_get`, `push_byte`, etc. | `lib/std/types/small_string.bv` | `when`-chained slot selection for inline 64-byte buffer |
+
+These replace the earlier `frgn` declarations. The compiler can optimize
+the convergent txn loops through SROA + loop unrolling.
+
 ## Config Files
 
 | File | Purpose |
@@ -239,6 +283,8 @@ A backend can start with just `bytes` and be fully correct. It then opts into `p
 | `config/ctd-llvm-mappings.toml` | (ctd, bytes) → LLVM type string |
 | `config/llvm-ops.toml` | (operation, primitive, bytes) → LLVM IR template |
 | `config/circt-ops.toml` | (operation, primitive, bytes) → MLIR template |
+| `config/alloc-strategies.toml` | Custom allocation strategy templates + Free# dispatch |
+| `config/encodings.toml` | String encoding metadata (char_width, ops for index_at/char_len) |
 | `config/webstack-ops.toml` | (operation, primitive, bytes) → JS/TS template |
 
 ## Key Source Files
