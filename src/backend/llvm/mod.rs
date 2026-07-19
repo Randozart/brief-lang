@@ -2627,6 +2627,20 @@ impl LlvmBackend {
                                 self.warnings.push(format!("info: txn '{}' dispatched via inline SSA (EmitInlineSsa, {}/{} fields written)", &node.name, write_count, total_fields));
                                 self.emit_folded_main(&mut out, &node.name, counter_idx, total_idx, total_const_name, false, Some(&body_stmts));
                                 true
+                            // 2026-07-19: Memory counter loop for programs without
+                            // hoisted swan songs (post_hoist empty). When swan song
+                            // exists, per-field phi loop handles hoisted print type
+                            // conversion (float → i64 in state, load_last_val_temps
+                            // loads as i64, hoisted print expects native type).
+                            } else if post_hoist.is_empty() && write_density >= 0.8 && total_fields >= 8 {
+                                // 2026-07-19: Memory counter loop — for dense-write programs
+                                // with many fields where per-field phis don't help SROA.
+                                // Uses GEP+load+store for all state fields (Phase 3 style).
+                                // Avoids per-field phi overhead (7+ phis + backedge regs).
+                                self.fun.pending_post_hoist = post_hoist;
+                                self.warnings.push(format!("info: txn '{}' dispatched via memory counter loop (EmitMemoryCounter, {}/{} fields written)", &node.name, write_count, total_fields));
+                                self.emit_folded_memory_main(&mut out, &node.name, counter_idx, total_idx, total_const_name, &body_stmts);
+                                true
                             } else {
                                 let mut capped_set: HashSet<String> = HashSet::new();
                                 capped_set.insert(bp.var.clone());

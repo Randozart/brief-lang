@@ -160,7 +160,10 @@ impl LlvmBackend {
     }
 
     /// Emit a foldable loop using memory-based counter (EmitMemoryCounter path).
-    /// Counter is tracked via GEP+load+store rather than SSA phi.
+    /// 2026-07-19: Reactivated for dense-write single-txn programs where per-field
+    /// phi nodes add overhead without SROA benefit (e.g. nbody_newton: 33 fields,
+    /// all written every iteration). Counter is tracked via GEP+load+store without
+    /// phi nodes — all state fields stored to %State each iteration.
     pub(crate) fn emit_folded_memory_main(
         &mut self,
         out: &mut String,
@@ -177,10 +180,6 @@ impl LlvmBackend {
         let c0 = self.fun.txn_counter;
         let bound_reg = self.fun.next_reg_with_prefix("fmb");
         self.emit_countable_load_bound(out, &bound_reg, total_idx, total_const_name, c0);
-        // 2026-07-18: Preallocate push targets before memory-counter loop.
-        // Same pattern as emit_folded_loop — collects push targets using
-        // over-approximation (all Assign(Ident, _) in body) and allocates
-        // slot count = bound + 2 per target.
         {
             let mut push_targets: Vec<String> = Vec::new();
             crate::backend::llvm::collect_push_targets(body, &mut push_targets);
@@ -201,14 +200,27 @@ impl LlvmBackend {
         writeln!(out, "  {} = icmp slt i64 {}, {}", done, counter_val, bound_reg).ok();
         writeln!(out, "  br i1 {}, label %.fm_body, label %.fm_end", done).ok();
         writeln!(out, ".fm_body:").ok();
+        // 2026-07-19: Memory-based loop — all state fields must be stored to
+        // %State each iteration so the next iteration reads correct values.
+        // When hoisted post-loop prints exist, needs_state_stores_in_body is
+        // already true (set by caller in dispatch).
+        let prev = self.fun.needs_state_stores_in_body;
+        self.fun.needs_state_stores_in_body = true;
         let write_set: HashSet<String> = HashSet::new();
         let mut hoisted = Vec::new();
         self.emit_countable_body(out, body, &write_set, &mut hoisted);
+        self.fun.needs_state_stores_in_body = prev;
         let next = self.fun.next_reg_with_prefix("fmn");
         writeln!(out, "  {} = add i64 {}, 1", next, counter_val).ok();
         writeln!(out, "  store i64 {}, ptr {}, align 8", next, counter_gep).ok();
         writeln!(out, "  br label %.fm_loop").ok();
         writeln!(out, ".fm_end:").ok();
+        // 2026-07-19: Emit hoisted post-loop prints (swan song).
+        let hoisted = self.fun.pending_post_hoist.clone();
+        if !hoisted.is_empty() {
+            self.load_last_val_temps(out);
+            self.emit_hoisted_post_loop_prints(out, &hoisted);
+        }
         writeln!(out, "  ret i32 0").ok();
         writeln!(out, "}}").ok();
         writeln!(out).ok();

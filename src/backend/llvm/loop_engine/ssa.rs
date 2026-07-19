@@ -500,6 +500,9 @@ impl LlvmBackend {
     // ═══════════════════════════════════════════════════════════════
 
     /// Load last-value temps into registers for post-loop printing.
+    /// All state fields are stored as i64 in %State; loads always use i64.
+    /// The hoisted print body handles type conversion via the register's name
+    /// resolution (last_val_types tracks the abstract Brief type).
     pub(crate) fn load_last_val_temps(&mut self, out: &mut String) {
         let mut sorted_keys: Vec<String> = self.fun.last_val_temps.keys().cloned().collect();
         sorted_keys.sort();
