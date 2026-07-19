@@ -34,10 +34,8 @@ impl LlvmBackend {
         counter_idx: usize,
         total_value: i64,
     ) {
-        let gep = self.fun.next_reg_with_prefix("fpc");
-        writeln!(out, "  {} = getelementptr inbounds %State, ptr %state, i32 0, i32 {}",
-            gep, counter_idx).ok();
-        writeln!(out, "  store i64 {}, ptr {}, align 8", total_value, gep).ok();
+        let store_val = format!("{}", total_value);
+        self.emit_state_store_i64_by_idx(out, "  ", counter_idx, &store_val);
     }
 
     // ═══════════════════════════════════════════════════════════════
@@ -65,11 +63,7 @@ impl LlvmBackend {
         let c0 = self.fun.txn_counter;
         let bound_reg = self.fun.next_reg_with_prefix("flb");
         self.emit_countable_load_bound(out, &bound_reg, total_idx, total_const_name, c0);
-        let gep = self.fun.next_reg_with_prefix("flg");
-        writeln!(out, "  {} = getelementptr inbounds %State, ptr %state, i32 0, i32 {}",
-            gep, counter_idx).ok();
-        let init_name = self.fun.next_reg_with_prefix("fli");
-        writeln!(out, "  {} = load i64, ptr {}, align 8", init_name, gep).ok();
+        let (init_name, _) = self.emit_state_load_i64_by_idx(out, "  ", counter_idx);
         // 2026-07-18: Preallocate push targets before the loop body.
         // Collects all Assign(Ident, _) targets from the body and allocates
         // (bound + 2) * 8 bytes per target from the arena (or @malloc if
@@ -129,10 +123,7 @@ impl LlvmBackend {
         }
         writeln!(out, "  br label %{}.header", label_prefix).ok();
         writeln!(out, "{}:", exit_label).ok();
-        let final_gep = self.fun.next_reg_with_prefix("flg");
-        writeln!(out, "  {} = getelementptr inbounds %State, ptr %state, i32 0, i32 {}",
-            final_gep, counter_idx).ok();
-        writeln!(out, "  store i64 {}, ptr {}, align 8", counter_name, final_gep).ok();
+        self.emit_state_store_i64_by_idx(out, "  ", counter_idx, &counter_name);
     }
 
     /// Emit a folded loop wrapped in a main() function.
@@ -191,11 +182,7 @@ impl LlvmBackend {
         }
         writeln!(out, "  br label %.fm_loop").ok();
         writeln!(out, ".fm_loop:").ok();
-        let counter_gep = self.fun.next_reg_with_prefix("fmg");
-        writeln!(out, "  {} = getelementptr inbounds %State, ptr %state, i32 0, i32 {}",
-            counter_gep, counter_idx).ok();
-        let counter_val = self.fun.next_reg_with_prefix("fmv");
-        writeln!(out, "  {} = load i64, ptr {}, align 8", counter_val, counter_gep).ok();
+        let (counter_val, _) = self.emit_state_load_i64_by_idx(out, "  ", counter_idx);
         let done = self.fun.next_reg_with_prefix("fmd");
         writeln!(out, "  {} = icmp slt i64 {}, {}", done, counter_val, bound_reg).ok();
         writeln!(out, "  br i1 {}, label %.fm_body, label %.fm_end", done).ok();
@@ -212,7 +199,7 @@ impl LlvmBackend {
         self.fun.needs_state_stores_in_body = prev;
         let next = self.fun.next_reg_with_prefix("fmn");
         writeln!(out, "  {} = add i64 {}, 1", next, counter_val).ok();
-        writeln!(out, "  store i64 {}, ptr {}, align 8", next, counter_gep).ok();
+        self.emit_state_store_i64_by_idx(out, "  ", counter_idx, &next);
         writeln!(out, "  br label %.fm_loop").ok();
         writeln!(out, ".fm_end:").ok();
         // 2026-07-19: Emit hoisted post-loop prints (swan song).
