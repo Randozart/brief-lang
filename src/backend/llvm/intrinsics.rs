@@ -305,7 +305,9 @@ fn emit_alloc_with_strategy(
         Expr::Identifier(name) => {
             match name.as_str() {
                 "Arena" => {
-                    let _result = backend.emit_arena_alloc(out, indent, size);
+                    let result = backend.emit_arena_alloc(out, indent, size);
+                    // 2026-07-19: emit_arena_alloc returns i64 — route to v.
+                    writeln!(out, "{}{} = add i64 0, {}", indent, v, result).ok();
                     backend.fun.alloc_strategies.insert(v.to_string(), AllocStrategy::Arena);
                 }
                 "Malloc" => {

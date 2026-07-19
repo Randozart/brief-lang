@@ -203,6 +203,16 @@ This prevents "I'll fix it later" from fossilizing into architecture.
     The absence of a provenance comment is itself a decision — it means
     "this change needs no justification," which should be rare.
 
+16. **DON'T REPEAT YOURSELF**: Every code pattern that appears in 3+ places
+    must be extracted into a centralized helper. Before writing a new backend
+    IR emission sequence, check if an existing function already does it:
+    `emit_state_gep`, `ensure_typed_value`, `adapt_to_i64`, etc.
+    When changing a function's return type or behavior, grep ALL call sites
+    — don't assume you found them all. A pattern repeated in N places means
+    every bug fix must be applied N times. The first time you write a pattern,
+    it's a one-off. The second time, extract it. The third time is a bug
+    waiting to happen. See `docs/plans/2026-07-19-dry-consolidation.md`.
+
 ## Plan Directives
 
 Every plan document and every implementation commit must adhere to these five

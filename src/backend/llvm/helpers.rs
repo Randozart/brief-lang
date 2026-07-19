@@ -776,13 +776,16 @@ impl LlvmBackend {
         let lb = self.emit_load_length(out, indent, &hb, "clq", "clb");
         let total = self.emit_add_const(out, indent, &la, &lb, "ctl");
         let alloc_size = self.compute_alloc_size(out, indent, &total, "chs", "cas");
-        let result = self.emit_arena_alloc(out, indent, &alloc_size);
-        self.emit_write_header(out, indent, &result, &total, "chp", "cba", "cdp", "cls");
-        self.emit_copy_data(out, indent, &result, &ha, &la, &a_clean, "cad", "cac", "cds", "cdo");
-        self.emit_copy_data(out, indent, &result, &hb, &lb, &b_clean, "cbd", "cbc", "cdo_off", "cdo2");
-        self.emit_null_terminate(out, indent, &result, &total, "cnt");
+        let result_i64 = self.emit_arena_alloc(out, indent, &alloc_size);
+        // 2026-07-19: emit_arena_alloc returns i64 — inttoptr to ptr for helpers.
+        let result_ptr = self.fun.next_reg_with_prefix("crp");
+        writeln!(out, "{}{} = inttoptr i64 {} to ptr", indent, result_ptr, result_i64).ok();
+        self.emit_write_header(out, indent, &result_ptr, &total, "chp", "cba", "cdp", "cls");
+        self.emit_copy_data(out, indent, &result_ptr, &ha, &la, &a_clean, "cad", "cac", "cds", "cdo");
+        self.emit_copy_data(out, indent, &result_ptr, &hb, &lb, &b_clean, "cbd", "cbc", "cdo_off", "cdo2");
+        self.emit_null_terminate(out, indent, &result_ptr, &total, "cnt");
         self.emit_free_temporaries(out, indent, &a_boxed, &b_boxed, "cta", "cia", "ctb", "cib");
-        self.emit_box_concat_result(out, indent, &result, "t")
+        self.emit_box_concat_result(out, indent, &result_ptr, "t")
     }
 
     // 2026-07-18: SSO-aware concat. When both operands are SSO inline and total
@@ -849,7 +852,10 @@ impl LlvmBackend {
         // Allocate raw bytes + null terminator (no 16-byte header)
         let alloc_sz = self.fun.gen_reg();
         writeln!(out, "{}{} = add i64 {}, 1", indent, alloc_sz, total_len).ok();
-        let heap_buf = self.emit_arena_alloc(out, indent, &alloc_sz);
+        let heap_buf_i64 = self.emit_arena_alloc(out, indent, &alloc_sz);
+        // 2026-07-19: emit_arena_alloc returns i64 — inttoptr to ptr for use.
+        let heap_buf = self.fun.gen_reg();
+        writeln!(out, "{}{} = inttoptr i64 {} to ptr", indent, heap_buf, heap_buf_i64).ok();
         // Mask tag bits for data pointer: handle[0] & -8
         let a_ptr_raw = self.fun.gen_reg();
         writeln!(out, "{}{} = and i64 {}, -8", indent, a_ptr_raw, a_dtag).ok();
