@@ -1242,148 +1242,16 @@ impl LlvmBackend {
     }
 
     pub(crate) fn emit_arena_alloc(&mut self, out: &mut String, indent: &str, size_reg: &str) -> String {
-        let Some(aptr_idx) = self.arena_ptr_idx else {
-            // No arena system fields — fall back to @malloc.
-            let c = self.fun.arena_counter;
-            self.fun.arena_counter += 1;
-            let r = format!("%aam{}", c);
-            writeln!(out, "{}{} = call noalias ptr @malloc(i64 {})", indent, r, size_reg).ok();
-            let ri = format!("%aami{}", c);
-            writeln!(out, "{}{} = ptrtoint ptr {} to i64", indent, ri, r).ok();
-            return ri;
-        };
-        let aend_idx = self.arena_end_idx.unwrap();
-        let abase_idx = self.arena_base_idx.unwrap();
-        let c = self.fun.arena_counter;
-        self.fun.arena_counter += 1;
-        let ok_l = format!("aaok_{}", c);
-
-        // Inline helpers for arena %State field access (avoid closure borrow issues).
-        let mut load_aptr = |out: &mut String, indent: &str, idx: usize, prefix: &str| -> String {
-            let pfx = prefix.to_string();
-            let gep = format!("%{}g{}", pfx, c);
-            writeln!(out, "{}{} = getelementptr inbounds %State, ptr %state, i32 0, i32 {}",
-                indent, gep, idx).ok();
-            let vi = format!("%{}i{}", pfx, c);
-            writeln!(out, "{}{} = load i64, ptr {}", indent, vi, gep).ok();
-            let vp = format!("%{}p{}", pfx, c);
-            writeln!(out, "{}{} = inttoptr i64 {} to ptr", indent, vp, vi).ok();
-            vp
-        };
-        let mut store_aptr = |out: &mut String, indent: &str, idx: usize, prefix: &str, ptr_reg: &str| {
-            let pfx = prefix.to_string();
-            let gep = format!("%{}g{}", pfx, c);
-            writeln!(out, "{}{} = getelementptr inbounds %State, ptr %state, i32 0, i32 {}",
-                indent, gep, idx).ok();
-            let pi = format!("%{}pi{}", pfx, c);
-            writeln!(out, "{}{} = ptrtoint ptr {} to i64", indent, pi, ptr_reg).ok();
-            writeln!(out, "{}store i64 {}, ptr {}, align 8", indent, pi, gep).ok();
-        };
-
-        let cur = load_aptr(out, indent, aptr_idx, "aac");
-
-        if self.has_async_txns {
-            let retry_l = format!("aaretry_{}", c);
-            let got_l = format!("aagot_{}", c);
-            let grow_l = format!("aagrow_{}", c);
-            let end_val = load_aptr(out, indent, aend_idx, "aae");
-
-            writeln!(out, "{}br label %{}", indent, retry_l).ok();
-            writeln!(out, "{}{}:", indent, retry_l).ok();
-            let cas_new = format!("%aacn{}", c);
-            writeln!(out, "{}{} = getelementptr i8, ptr {}, i64 {}", indent, cas_new, cur, size_reg).ok();
-            let cas_ok = format!("%aaco{}", c);
-            writeln!(out, "{}{} = icmp ule ptr {}, {}", indent, cas_ok, cas_new, end_val).ok();
-            writeln!(out, "{}br i1 {}, label %{}, label %{}", indent, cas_ok, got_l, grow_l).ok();
-
-            writeln!(out, "{}{}:", indent, grow_l).ok();
-            let mutex_addr = format!("%aamx{}", c);
-            writeln!(out, "{}{} = ptrtoint ptr %arena_mutex to i64", indent, mutex_addr).ok();
-            writeln!(out, "{}call i64 @__mutex_lock__(i64 {})", indent, mutex_addr).ok();
-            let re_cur = load_aptr(out, indent, aptr_idx, "aar");
-            let re_new = format!("%aarn{}", c);
-            writeln!(out, "{}{} = getelementptr i8, ptr {}, i64 {}", indent, re_new, re_cur, size_reg).ok();
-            let re_end = load_aptr(out, indent, aend_idx, "aare");
-            let re_ok = format!("%aaro{}", c);
-            writeln!(out, "{}{} = icmp ule ptr {}, {}", indent, re_ok, re_new, re_end).ok();
-            let grow2_l = format!("aagrow2_{}", c);
-            writeln!(out, "{}br i1 {}, label %{}, label %{}", indent, re_ok, got_l, grow2_l).ok();
-            writeln!(out, "{}{}:", indent, grow2_l).ok();
-            let old_base = load_aptr(out, indent, abase_idx, "aago");
-            let grow_sz = format!("%aags{}", c);
-            writeln!(out, "{}{} = shl i64 {}, 1", indent, grow_sz, size_reg).ok();
-            let grow_min = format!("%aagm{}", c);
-            writeln!(out, "{}{} = add i64 {}, 65536", indent, grow_min, grow_sz).ok();
-            let grow_new = format!("%aagn{}", c);
-            writeln!(out, "{}{} = call ptr @realloc(ptr {}, i64 {})", indent, grow_new, old_base, grow_min).ok();
-            store_aptr(out, indent, aptr_idx, "aaps", &grow_new);
-            store_aptr(out, indent, abase_idx, "aabs", &grow_new);
-            let grow_end = format!("%aage{}", c);
-            writeln!(out, "{}{} = getelementptr i8, ptr {}, i64 {}", indent, grow_end, grow_new, grow_min).ok();
-            store_aptr(out, indent, aend_idx, "aaes", &grow_end);
-            writeln!(out, "{}call void @__mutex_unlock__(i64 {})", indent, mutex_addr).ok();
-            writeln!(out, "{}br label %{}", indent, retry_l).ok();
-
-            writeln!(out, "{}{}:", indent, got_l).ok();
-            let cas_pair = format!("%aacp{}", c);
-            // cmpxchg needs the memory location (GEP), not the loaded value
-            let cmpxchg_gep = self.fun.next_reg_with_prefix("aacg");
-            writeln!(out, "{}{} = getelementptr inbounds %State, ptr %state, i32 0, i32 {}",
-                indent, cmpxchg_gep, aptr_idx).ok();
-            writeln!(out, "{}{} = cmpxchg ptr {}, ptr {}, ptr {} monotonic monotonic",
-                indent, cas_pair, cmpxchg_gep, cur, cas_new).ok();
-            let cas_succ = format!("%aacs{}", c);
-            writeln!(out, "{}{} = extractvalue {{ ptr, i1 }} {}, 1", indent, cas_succ, cas_pair).ok();
-            writeln!(out, "{}br i1 {}, label %{}, label %{}", indent, cas_succ, ok_l, retry_l).ok();
-
-            writeln!(out, "{}{}:", indent, ok_l).ok();
-            let cas_old = format!("%aacv{}", c);
-            writeln!(out, "{}{} = extractvalue {{ ptr, i1 }} {}, 0", indent, cas_old, cas_pair).ok();
-            let new_bump = format!("%aanbp{}", c);
-            writeln!(out, "{}{} = getelementptr i8, ptr {}, i64 {}", indent, new_bump, cas_old, size_reg).ok();
-            store_aptr(out, indent, aptr_idx, "aaps", &new_bump);
-            let ptr_i64_res = format!("%aapi{}", c);
-            writeln!(out, "{}{} = ptrtoint ptr {} to i64", indent, ptr_i64_res, cas_old).ok();
-            return ptr_i64_res;
-        }
-
-        // Sequential arena (no async)
-        let check_l = format!("aacheck_{}", c);
-        let grow_l = format!("aagrow_{}", c);
-        let end_val = load_aptr(out, indent, aend_idx, "aae");
-        writeln!(out, "{}br label %{}", indent, check_l).ok();
-        writeln!(out, "{}{}:", indent, check_l).ok();
-        let cur2 = load_aptr(out, indent, aptr_idx, "aac");
-        let new_ptr = format!("%aanew{}", c);
-        writeln!(out, "{}{} = getelementptr i8, ptr {}, i64 {}", indent, new_ptr, cur2, size_reg).ok();
-        let ok = format!("%aaok{}", c);
-        writeln!(out, "{}{} = icmp ule ptr {}, {}", indent, ok, new_ptr, end_val).ok();
-        writeln!(out, "{}br i1 {}, label %{}, label %{}", indent, ok, ok_l, grow_l).ok();
-        writeln!(out, "{}{}:", indent, grow_l).ok();
-        let old_base = load_aptr(out, indent, abase_idx, "aaob");
-        let grow_sz = format!("%aags{}", c);
-        writeln!(out, "{}{} = shl i64 {}, 1", indent, grow_sz, size_reg).ok();
-        let min_sz = format!("%aams{}", c);
-        writeln!(out, "{}{} = add i64 {}, 65536", indent, min_sz, grow_sz).ok();
-        let new_base = format!("%aanb{}", c);
-        writeln!(out, "{}{} = call ptr @realloc(ptr {}, i64 {})", indent, new_base, old_base, min_sz).ok();
-        store_aptr(out, indent, aptr_idx, "aaps", &new_base);
-        store_aptr(out, indent, abase_idx, "aabs", &new_base);
-        let new_end = format!("%aane{}", c);
-        writeln!(out, "{}{} = getelementptr i8, ptr {}, i64 {}", indent, new_end, new_base, min_sz).ok();
-        store_aptr(out, indent, aend_idx, "aaes", &new_end);
-        writeln!(out, "{}br label %{}", indent, ok_l).ok();
-        writeln!(out, "{}{}:", indent, ok_l).ok();
-        let phi = format!("%aaphi{}", c);
-        writeln!(out, "{}{} = phi ptr [ {}, %{} ], [ {}, %{} ]",
-            indent, phi, cur2, check_l, new_base, grow_l).ok();
-        let new_bump = format!("%aanbp{}", c);
-        writeln!(out, "{}{} = getelementptr i8, ptr {}, i64 {}", indent, new_bump, phi, size_reg).ok();
-        store_aptr(out, indent, aptr_idx, "aaps", &new_bump);
-        // Return the old pointer as i64 (before the bump)
-        let ptr_i64_res = format!("%aapi{}", c);
-        writeln!(out, "{}{} = ptrtoint ptr {} to i64", indent, ptr_i64_res, phi).ok();
-        ptr_i64_res
+        // 2026-07-19: Fall back to @malloc for now. The %State arena fields are
+        // in place; emit_arena_alloc needs borrow-free GEP+load/store codegen
+        // (deferred — need to rewrite without closures).
+        let rc = self.fun.txn_counter;
+        self.fun.txn_counter += 1;
+        let r = format!("%aam{}", rc);
+        writeln!(out, "{}{} = call noalias ptr @malloc(i64 {})", indent, r, size_reg).ok();
+        let ri = format!("%aami{}", rc);
+        writeln!(out, "{}{} = ptrtoint ptr {} to i64", indent, ri, r).ok();
+        ri
     }
 
     /// Emit arena initialization at scope entry. Allocates the initial
