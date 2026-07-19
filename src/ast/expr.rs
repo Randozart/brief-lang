@@ -51,8 +51,7 @@ pub enum Expr {
     AddrOf(Box<Expr>),
 
     // ── Plugin intercept ────────────────────────────────────────
-    // 2026-07-19: name!(args). Must be resolved by a Front-stage plugin.
-    // Compiler error if any remain after Front plugins run.
+    // 2026-07-19: name!(args). Resolved by Front or Mid stage plugins.
     PluginIntercept {
         name: String,
         args: Vec<Expr>,

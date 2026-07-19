@@ -45,18 +45,54 @@ typedef int32_t brief_int;
 #endif
 
 // ── String conversion helpers (internal) ──────────────────────────────
-// 2026-07-15: Still needed by __print, __read_file__, __write_file__,
-// and other infrastructure functions that interface with C strings.
-
-char* brief_str_to_c(int64_t bstr);
-
-char* brief_str_to_c(int64_t bstr) {
-    if (bstr == 0) return NULL;
-    int64_t len = *(int64_t*)(uintptr_t)bstr;
+// 2026-07-19: Convert a Brief handle or C string pointer to a C string.
+// With SSO, the argument may be an SSO handle (bit 0 = 1), a Brief heap
+// handle (pointer to [length][data]), or a raw C string pointer (null-term).
+// Detects C strings by checking if the value looks like a valid pointer
+// (not SSO, not a small integer, starts with printable ASCII).
+// Returns a heap-allocated string; caller must free(). NULL on error.
+char* brief_str_to_c(int64_t handle) {
+    if (handle & 1) {
+        // SSO string — inline data packed at bits >= 3
+        // The LLVM SSO encoding: handle0 = (raw_data << 3) | 1
+        // where raw_data has bytes packed in LE order.
+        uint64_t raw_data = ((uint64_t)handle) >> 3;
+        int64_t len = 0;
+        for (int i = 0; i < 6; i++) {
+            if ((raw_data >> (i * 8)) & 0xFF) len = i + 1;
+        }
+        if (len == 0) len = 1;
+        char* c_str = malloc((size_t)(len + 1));
+        if (!c_str) return NULL;
+        for (int64_t i = 0; i < len; i++) {
+            c_str[i] = (char)((raw_data >> (i * 8)) & 0xFF);
+        }
+        c_str[len] = '\0';
+        return c_str;
+    }
+    // Check for C string pointer: handle looks like a valid pointer
+    // (not zero, not a small integer, first byte is printable ASCII).
+    if (handle > 4096 && handle < 0x800000000000) {
+        uint8_t first = *(uint8_t*)(uintptr_t)handle;
+        if (first >= 32 && first < 127) {
+            // Looks like a C string — strlen it
+            int64_t len = (int64_t)strlen((const char*)(uintptr_t)handle);
+            if (len > 0 && len < 4096) {
+                char* c_str = malloc((size_t)(len + 1));
+                if (!c_str) return NULL;
+                memcpy(c_str, (void*)(uintptr_t)handle, (size_t)len);
+                c_str[len] = '\0';
+                return c_str;
+            }
+        }
+    }
+    // Heap Brief string: handle is a pointer to [8-byte length][data].
+    if (handle == 0) return NULL;
+    int64_t len = *(int64_t*)(uintptr_t)handle;
     if (len < 0 || len > 1024 * 1024 * 1024) return NULL;
     char* c_str = malloc((size_t)(len + 1));
     if (!c_str) return NULL;
-    if (len > 0) memcpy(c_str, (void*)(uintptr_t)(bstr + 8), (size_t)len);
+    if (len > 0) memcpy(c_str, (void*)(uintptr_t)(handle + 8), (size_t)len);
     c_str[len] = '\0';
     return c_str;
 }
@@ -125,7 +161,12 @@ int64_t __print_float(float f) {
 }
 
 int64_t __print_char(int64_t c) {
-    putchar((int)c);
+    if (c == 10) {
+        puts("");
+    } else {
+        putchar((int)c);
+        fflush(stdout);
+    }
     return 0;
 }
 

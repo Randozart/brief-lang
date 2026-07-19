@@ -15,7 +15,7 @@
 // C reference: cancel_math_c.c
 
 
-let N: Int = GetEnvInt!(")BOUND");
+let N: Int = GetEnvInt!("BOUND");
 let count: Int = 0;
 let acc: Int = 0;
 
@@ -26,7 +26,7 @@ rct txn step [count < N][count == N] {
     count = count + (R + 1 - R);
 
     [count % 5000000 == 0] {
-        Print!(acc);
+        PrintLn!(acc);
     };
 
     term;

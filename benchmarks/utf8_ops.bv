@@ -14,7 +14,7 @@
 
 import "std/types/utf8view.bv";
 
-const TOTAL: Int = GetEnvInt!(")BOUND");
+const TOTAL: Int = GetEnvInt!("BOUND");
 const SEED: Int = GetEnvInt!(")SEED");
 
 let ops: Int = 0;
@@ -32,7 +32,7 @@ rct txn work [ops < TOTAL][ops == TOTAL] {
     checksum = checksum + cmp + valid;
     ops = ops + 1;
     [ops % 5000000 == 0] {
-        Print!(checksum);
+        PrintLn!(checksum);
     };
     term;
 };

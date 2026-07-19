@@ -29,7 +29,7 @@ rct txn enqueue [ops < TOTAL][ops == TOTAL] {
     ops = ops + 1;
     [ops % 5000000 == 0] {
         let filled: Int = tail - head;
-        Print!(filled);
+        PrintLn!(filled);
     };
     term;
 };

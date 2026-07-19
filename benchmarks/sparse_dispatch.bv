@@ -13,13 +13,13 @@
 
 
 let count: Int = 0;
-let total: Int = GetEnvInt!(")BOUND");
+let total: Int = GetEnvInt!("BOUND");
 
-rct txn ping  [count < total && count % 8 == 0][count == total] { count = count + 1; [count % 5000000 == 4999999] { Print!(count + 1); }; term; };
-rct txn ack   [count < total && count % 8 == 1][count == total] { count = count + 1; [count % 5000000 == 4999999] { Print!(count + 1); }; term; };
-rct txn err   [count < total && count % 8 == 2][count == total] { count = count + 1; [count % 5000000 == 4999999] { Print!(count + 1); }; term; };
-rct txn debug [count < total && count % 8 == 3][count == total] { count = count + 1; [count % 5000000 == 4999999] { Print!(count + 1); }; term; };
-rct txn data  [count < total && count % 8 == 4][count == total] { count = count + 1; [count % 5000000 == 4999999] { Print!(count + 1); }; term; };
-rct txn ctrl  [count < total && count % 8 == 5][count == total] { count = count + 1; [count % 5000000 == 4999999] { Print!(count + 1); }; term; };
-rct txn sync_ [count < total && count % 8 == 6][count == total] { count = count + 1; [count % 5000000 == 4999999] { Print!(count + 1); }; term; };
-rct txn stat  [count < total && count % 8 == 7][count == total] { count = count + 1; [count % 5000000 == 4999999] { Print!(count + 1); }; term; };
+rct txn ping  [count < total && count % 8 == 0][count == total] { count = count + 1; [count % 5000000 == 4999999] { PrintLn!(count + 1); }; term; };
+rct txn ack   [count < total && count % 8 == 1][count == total] { count = count + 1; [count % 5000000 == 4999999] { PrintLn!(count + 1); }; term; };
+rct txn err   [count < total && count % 8 == 2][count == total] { count = count + 1; [count % 5000000 == 4999999] { PrintLn!(count + 1); }; term; };
+rct txn debug [count < total && count % 8 == 3][count == total] { count = count + 1; [count % 5000000 == 4999999] { PrintLn!(count + 1); }; term; };
+rct txn data  [count < total && count % 8 == 4][count == total] { count = count + 1; [count % 5000000 == 4999999] { PrintLn!(count + 1); }; term; };
+rct txn ctrl  [count < total && count % 8 == 5][count == total] { count = count + 1; [count % 5000000 == 4999999] { PrintLn!(count + 1); }; term; };
+rct txn sync_ [count < total && count % 8 == 6][count == total] { count = count + 1; [count % 5000000 == 4999999] { PrintLn!(count + 1); }; term; };
+rct txn stat  [count < total && count % 8 == 7][count == total] { count = count + 1; [count % 5000000 == 4999999] { PrintLn!(count + 1); }; term; };

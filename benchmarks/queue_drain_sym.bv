@@ -9,14 +9,14 @@
 // C reference: queue_drain_sym_c.c
 
 
-let N: Int = GetEnvInt!(")BOUND");
+let N: Int = GetEnvInt!("BOUND");
 let count: Int = 0;
 
 rct txn work [count < N][count == N] {
     count = count + 1;
 
     [count % 5000000 == 0] {
-        Print!(count);
+        PrintLn!(count);
     };
 
     term;

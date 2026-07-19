@@ -1,7 +1,7 @@
 # Intrinsic Migration: Print/PutChar/GetEnv → Stdlib
 
 **Date:** 2026-07-19
-**Status:** Plan — ready for implementation
+**Status:** Implemented — Phase 1 + Phase 2 complete. 20/24 benchmarks passing.
 **Prerequisite:** July 18 master plan (SSO, SVO, Ptr Level 3, allocation strategy) + benchmark stabilization plan — both implemented
 **Resumes after:** `docs/plans/2026-07-19-benchmark-stabilization.md` — Phase 4 (benchmark comparison)
 **Directives:** AGENTS.md Plan Directives — flat control flow, rationale comments, example updates, doc updates, behavioral tests

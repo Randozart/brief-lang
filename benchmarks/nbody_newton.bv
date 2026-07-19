@@ -2,7 +2,7 @@
 // Compares Brief vs C on identical algorithm: inline Newton iterations, unrolled pairs.
 
 
-let bound: Int = GetEnvInt!(")BOUND");
+let bound: Int = GetEnvInt!("BOUND");
 let count: Int = 0;
 
 const pi: Float32 = 3.141592653589793f32;
@@ -350,10 +350,10 @@ rct txn simulate [
     last_energy = energy;
 
     [count % 5000000 == 0] {
-        let __periodic: Bool = Print!(energy);
+        let __periodic: Bool = PrintLn!(energy);
     };
     [count == bound] {
-        term! -> Print!(last_energy);
+        term! -> PrintLn!(last_energy);
     };
     term;
 };

@@ -273,6 +273,9 @@ pub fn is_output_call(expr: &Expr) -> bool {
     match expr {
         Expr::Call(name, _, _) if name == "PrintInt#" || name == "PrintFloat#"
             || name == "Println#" => true,
+        // 2026-07-19: Stdlib print functions (replaced Print#/PutChar# intrinsics)
+        Expr::Call(name, _, _) if name == "__print_int" || name == "__print_float"
+            || name == "__print_str" || name == "__print_char" => true,
         _ => false,
     }
 }
@@ -287,9 +290,27 @@ pub fn observable_field_refs(
         Statement::TermBang(Some(e)) | Statement::Term(Some(e)) => {
             collect_expr_field_refs(e, &mut result, field_index_map);
         }
+        // 2026-07-19: Detect output calls in Expression statements.
+        // These come from !Print/!PrintLn which resolve to __print_*
+        // frgn calls. The optimizer must not eliminate these.
+        Statement::Expression(e) => {
+            if contains_output_call(e) {
+                collect_expr_field_refs(e, &mut result, field_index_map);
+            }
+        }
         _ => {}
     }
     result
+}
+
+/// Check if an expression contains a __print_* call (observable output).
+fn contains_output_call(expr: &Expr) -> bool {
+    match expr {
+        Expr::Call(name, _, _) => name == "__print_int" || name == "__print_float"
+            || name == "__print_str" || name == "__print_char",
+        Expr::Block(stmts) => stmts.iter().any(|s| matches!(s, Statement::Expression(e) if contains_output_call(e))),
+        _ => false,
+    }
 }
 
 /// Extract the target field name from an assignment LHS expression.
@@ -311,8 +332,16 @@ pub fn seed_observable_idents(
     for f in obs {
         live.insert(f.clone());
     }
-    if let Statement::TermBang(Some(e)) = stmt {
-        seed_from_expr(e, let_fields, live);
+    match stmt {
+        Statement::TermBang(Some(e)) | Statement::Term(Some(e)) => {
+            seed_from_expr(e, let_fields, live);
+        }
+        // 2026-07-19: Output calls in Expression statements (from !Print/!PrintLn)
+        // also mark their referenced fields as live.
+        Statement::Expression(e) if contains_output_call(e) => {
+            seed_from_expr(e, let_fields, live);
+        }
+        _ => {}
     }
 }
 
@@ -340,6 +369,14 @@ fn seed_from_expr(
         Expr::Call(_, args, _) => {
             for arg in args {
                 seed_from_expr(arg, let_fields, live);
+            }
+        }
+        // 2026-07-19: Handle Block expressions from !PrintLn!() resolution.
+        Expr::Block(stmts) => {
+            for stmt in stmts {
+                if let crate::ast::Statement::Expression(e) = stmt {
+                    seed_from_expr(e, let_fields, live);
+                }
             }
         }
         _ => {}

@@ -3,7 +3,7 @@
 
 
 let count: Int = 0;
-let N: Int = GetEnvInt!(")BOUND");
+let N: Int = GetEnvInt!("BOUND");
 let seed: Int = 42;
 const IM: Int = 139968;
 const IA: Int = 3877;

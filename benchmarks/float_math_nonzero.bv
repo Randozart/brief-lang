@@ -6,7 +6,7 @@ let p00: Float = 0.0;
 let p11: Float = 0.0;
 let p22: Float = 0.0;
 let count: Int = 0;
-let total: Int = GetEnvInt!(")BOUND");
+let total: Int = GetEnvInt!("BOUND");
 
 const A00: Float = 1.0;
 const A01: Float = 0.01;
@@ -34,7 +34,7 @@ rct txn tick [
     count = count + 1;
     [count % 5000000 == 0] {
         let trace: Float = p00 + p11 + p22;
-        Print!(x0 + x1 + x2 + trace);
+        PrintLn!(x0 + x1 + x2 + trace);
     };
     term;
 };

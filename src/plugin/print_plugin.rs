@@ -1,9 +1,11 @@
-// ── Print Plugin — Front + Mid Stage ───────────────────────────────────
-// 2026-07-19: Resolves !Print(x) and !PrintLn(x) to typed stdlib calls
-// (print_int, print_str, print_float).
+// ── Print Plugin — Front Stage ────────────────────────────────────────
+// 2026-07-19: Resolves !Print(x) and !PrintLn(x) to typed C runtime calls
+// (__print_int, __print_str, __print_float, __print_char for newline).
 //
-// Front stage: collect variable type annotations from let declarations.
-// Mid stage: resolve PluginIntercept using collected types + literal inference.
+// Runs at Front stage (before typechecking). Collects variable type
+// annotations from `let name: Type = ...` declarations. For literals
+// (Quoted, Decimal, Float) dispatches directly. Falls back to __print_int
+// when the type can't be determined (all benchmarks use Int as default).
 
 use crate::ast::{Expr, StageKind, TopLevel, Type};
 use crate::plugin::Plugin;
@@ -28,26 +30,19 @@ impl Plugin for PrintPlugin {
         _universe: &mut TypeUniverse,
     ) -> Result<(), String> {
         let mut known_types: HashMap<String, Type> = HashMap::new();
-
-        // Front pass: collect let binding type annotations
-        for item in program.iter() {
-            collect_binding_types(item, &mut known_types);
-        }
-
-        // Mid pass: resolve PluginIntercept using known types
-        let ctx = TypeEnv { known_types: &known_types };
-        for item in program.iter_mut() {
-            walk_item(item, &ctx);
-        }
+        collect_binding_types(program, &mut known_types);
+        resolve_prints(program, &known_types);
         Ok(())
     }
 }
 
-struct TypeEnv<'a> {
-    known_types: &'a HashMap<String, Type>,
+fn collect_binding_types(program: &[TopLevel], map: &mut HashMap<String, Type>) {
+    for item in program {
+        collect_item_types(item, map);
+    }
 }
 
-fn collect_binding_types(item: &TopLevel, map: &mut HashMap<String, Type>) {
+fn collect_item_types(item: &TopLevel, map: &mut HashMap<String, Type>) {
     match item {
         TopLevel::Definition(d) => collect_from_stmts(&d.body, map),
         TopLevel::Transaction(t) => collect_from_stmts(&t.body, map),
@@ -72,110 +67,135 @@ fn collect_from_stmt(stmt: &crate::ast::Statement, map: &mut HashMap<String, Typ
     }
 }
 
-fn walk_item(item: &mut TopLevel, ctx: &TypeEnv) {
+fn resolve_prints(program: &mut Vec<TopLevel>, known_types: &HashMap<String, Type>) {
+    for item in program.iter_mut() {
+        walk_item(item, known_types);
+    }
+}
+
+fn walk_item(item: &mut TopLevel, known_types: &HashMap<String, Type>) {
     match item {
-        TopLevel::Definition(d) => walk_stmts(&mut d.body, ctx),
-        TopLevel::Transaction(t) => walk_stmts(&mut t.body, ctx),
-        TopLevel::Constant(c) => walk_expr(&mut c.expr, ctx),
-        TopLevel::Statement(stmt) => walk_stmt(stmt, ctx),
+        TopLevel::Definition(d) => walk_stmts(&mut d.body, known_types),
+        TopLevel::Transaction(t) => walk_stmts(&mut t.body, known_types),
+        TopLevel::Constant(c) => walk_expr(&mut c.expr, known_types),
+        TopLevel::Statement(stmt) => walk_stmt(stmt, known_types),
         _ => {}
     }
 }
 
-fn walk_stmts(stmts: &mut [crate::ast::Statement], ctx: &TypeEnv) {
+fn walk_stmts(stmts: &mut [crate::ast::Statement], known_types: &HashMap<String, Type>) {
     for stmt in stmts.iter_mut() {
-        walk_stmt(stmt, ctx);
+        walk_stmt(stmt, known_types);
     }
 }
 
-fn walk_stmt(stmt: &mut crate::ast::Statement, ctx: &TypeEnv) {
+fn walk_stmt(stmt: &mut crate::ast::Statement, known_types: &HashMap<String, Type>) {
     match stmt {
         crate::ast::Statement::Assign(_, expr)
         | crate::ast::Statement::Let { expr: Some(expr), .. }
         | crate::ast::Statement::Expression(expr)
         | crate::ast::Statement::Term(Some(expr))
         | crate::ast::Statement::TermBang(Some(expr)) => {
-            walk_expr(expr, ctx);
+            walk_expr(expr, known_types);
         }
-        crate::ast::Statement::Guarded(_, body) => walk_stmts(body, ctx),
+        crate::ast::Statement::Guarded(_, body) => walk_stmts(body, known_types),
         _ => {}
     }
 }
 
-fn walk_expr(expr: &mut Expr, ctx: &TypeEnv) {
+fn walk_expr(expr: &mut Expr, known_types: &HashMap<String, Type>) {
     match expr {
         Expr::PluginIntercept { name, args, type_args: _ } => {
-            if let Some(replacement) = resolve_print(name, args, ctx) {
+            if let Some(replacement) = resolve_print(name, args, known_types) {
                 *expr = replacement;
             }
         }
-        Expr::BinaryOp(_, lhs, rhs) => { walk_expr(lhs, ctx); walk_expr(rhs, ctx); }
-        Expr::UnaryOp(_, inner) => walk_expr(inner, ctx),
-        Expr::Call(_, args, _) => { for a in args { walk_expr(a, ctx); } }
+        Expr::BinaryOp(_, lhs, rhs) => { walk_expr(lhs, known_types); walk_expr(rhs, known_types); }
+        Expr::UnaryOp(_, inner) => walk_expr(inner, known_types),
+        Expr::Call(_, args, _) => { for a in args { walk_expr(a, known_types); } }
         Expr::If(cond, then, else_) => {
-            walk_expr(cond, ctx); walk_expr(then, ctx);
-            if let Some(el) = else_ { walk_expr(el, ctx); }
+            walk_expr(cond, known_types); walk_expr(then, known_types);
+            if let Some(el) = else_ { walk_expr(el, known_types); }
         }
-        Expr::Match(_, arms) => { for arm in arms { walk_expr(&mut arm.body, ctx); } }
-        Expr::Block(stmts) => walk_stmts(stmts, ctx),
-        Expr::Tuple(elems) | Expr::List(elems) => { for e in elems { walk_expr(e, ctx); } }
-        Expr::Field(obj, _) | Expr::Index(obj, _) => walk_expr(obj, ctx),
+        Expr::Match(_, arms) => { for arm in arms { walk_expr(&mut arm.body, known_types); } }
+        Expr::Block(stmts) => walk_stmts(stmts, known_types),
+        Expr::Tuple(elems) | Expr::List(elems) => { for e in elems { walk_expr(e, known_types); } }
+        Expr::Field(obj, _) | Expr::Index(obj, _) => walk_expr(obj, known_types),
         Expr::Cast(inner, _) | Expr::IsType(inner, _) | Expr::Deref(inner)
-        | Expr::AddrOf(inner) => walk_expr(inner, ctx),
-        Expr::Within(body, _) => walk_expr(body, ctx),
-        Expr::Lambda(_, body) => walk_expr(body, ctx),
+        | Expr::AddrOf(inner) => walk_expr(inner, known_types),
+        Expr::Within(body, _) => walk_expr(body, known_types),
+        Expr::Lambda(_, body) => walk_expr(body, known_types),
         Expr::DerivationBlock(db) => {
             for ex in &mut db.examples {
-                for inp in &mut ex.inputs { walk_expr(inp, ctx); }
-                walk_expr(&mut ex.output, ctx);
+                for inp in &mut ex.inputs { walk_expr(inp, known_types); }
+                walk_expr(&mut ex.output, known_types);
             }
         }
         _ => {}
     }
 }
 
-/// Determine the type of an expression for dispatch.
-fn expr_type(expr: &Expr, ctx: &TypeEnv) -> Option<&'static str> {
+/// Determine an expression's print category for dispatch.
+fn kind_from_expr(expr: &Expr, known_types: &HashMap<String, Type>) -> &'static str {
     match expr {
-        Expr::Quoted(_) => Some("String"),
-        Expr::Decimal(_) => Some("Int"),
-        Expr::Float(_) => Some("Float"),
+        Expr::Quoted(_) => "String",
+        Expr::Decimal(_) => "Int",
+        Expr::Float(_) => "Float",
         Expr::Identifier(name) => {
-            ctx.known_types.get(name).map(|t| {
-                if *t == Type::int() || *t == Type::bits(8) { "Int" }
-                else if *t == Type::string() { "String" }
-                else if *t == Type::float() || *t == Type::float64() { "Float" }
-                else { "Int" } // default fallback
-            })
+            match known_types.get(name) {
+                Some(t) => kind_from_type(t),
+                None => "Int", // default fallback
+            }
         }
-        // For complex expressions, try the first argument of calls
-        Expr::Call(_, args, _) => args.first().and_then(|a| expr_type(a, ctx)),
-        _ => None,
+        _ => "Int", // complex expression — default to Int
     }
 }
 
-/// Resolve !Print(x) or !PrintLn(x) to a typed stdlib call.
-fn resolve_print(name: &str, args: &[Expr], ctx: &TypeEnv) -> Option<Expr> {
-    if args.is_empty() {
-        return None;
+/// Determine print dispatch kind from a Type annotation.
+/// Uses the type's name (Custom variant) to avoid fragile value equality.
+fn kind_from_type(t: &Type) -> &'static str {
+    match t {
+        Type::Custom(name) => {
+            if name == "Int" || name == "Int8" || name == "Int16" || name == "Int32"
+               || name == "Int64" || name == "UInt" || name == "UInt8"
+               || name == "UInt16" || name == "UInt32" || name == "UInt64"
+               || name == "Bits" || name == "Byte" || name == "Bool" {
+                "Int"
+            } else if name == "String" || name == "StaticString" || name == "SmallString64" {
+                "String"
+            } else if name == "Float" || name == "Float32" || name == "Float64"
+               || name == "Double" {
+                "Float"
+            } else {
+                "Int" // unknown — default to Int
+            }
+        }
+        _ => "Int",
     }
-    let value = &args[0];
+}
 
-    let print_fn = expr_type(value, ctx).and_then(|t| match t {
-        "String" => Some("__print_str"),
-        "Float" => Some("__print_float"),
-        _ => Some("__print_int"),
-    }).unwrap_or("__print_int");
+/// Resolve !Print(x) or !PrintLn(x) to a typed C runtime call.
+fn resolve_print(name: &str, args: &[Expr], known_types: &HashMap<String, Type>) -> Option<Expr> {
+    let value = args.first()?;
+    let kind = kind_from_expr(value, known_types);
+
+    let print_fn = match kind {
+        "String" => "__print_str",
+        "Float" => "__print_float",
+        _ => "__print_int",
+    };
 
     let print_call = Expr::Call(print_fn.to_string(), vec![value.clone()], None);
 
     if name == "PrintLn" {
-        let newline_call = Expr::Call("__print_char".to_string(), vec![Expr::Decimal(10)], None);
+        let newline = Expr::Call("__print_char".to_string(), vec![Expr::Decimal(10)], None);
+        eprintln!("print plugin: PrintLn -> {} + __print_char", print_fn);
         Some(Expr::Block(vec![
             crate::ast::Statement::Expression(print_call),
-            crate::ast::Statement::Expression(newline_call),
+            crate::ast::Statement::Expression(newline),
         ]))
     } else {
+        eprintln!("print plugin: Print -> {}", print_fn);
         Some(print_call)
     }
 }
