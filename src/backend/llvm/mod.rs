@@ -802,8 +802,10 @@ pub(crate) fn collect_push_targets(body: &[Statement], out: &mut Vec<String>) {
             Statement::Block(body) | Statement::SyncBlock(body) => {
                 collect_push_targets(body, out);
             }
-            Statement::Assign(Expr::Identifier(name), _) => {
-                out.push(name.clone());
+            Statement::Assign(Expr::AddrOf(inner), _) => {
+                if let Expr::Identifier(name) = inner.as_ref() {
+                    out.push(name.clone());
+                }
             }
             _ => {}
         }
@@ -2631,6 +2633,14 @@ impl LlvmBackend {
                                 self.fun.pending_post_hoist = post_hoist;
                                 self.warnings.push(format!("info: txn '{}' dispatched via inline SSA (EmitInlineSsa, {}/{} fields written)", &node.name, write_count, total_fields));
                                 self.emit_folded_main(&mut out, &node.name, counter_idx, total_idx, total_const_name, false, Some(&body_stmts));
+                                true
+                            } else if write_density >= 0.8 && total_fields >= 8 {
+                                // 2026-07-19: Memory counter loop for dense-write programs.
+                                // Uses GEP+load+store (Phase 3 style) — avoids per-field phi
+                                // overhead. last_val_temps cleared before hoisted prints.
+                                self.fun.pending_post_hoist = post_hoist;
+                                self.warnings.push(format!("info: txn '{}' dispatched via memory counter loop (EmitMemoryCounter, {}/{} fields written)", &node.name, write_count, total_fields));
+                                self.emit_folded_memory_main(&mut out, &node.name, counter_idx, total_idx, total_const_name, &body_stmts);
                                 true
                             } else {
                                 let mut capped_set: HashSet<String> = HashSet::new();
