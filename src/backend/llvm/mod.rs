@@ -2078,10 +2078,14 @@ impl LlvmBackend {
         writeln!(out, "declare i32 @printf(ptr, ...) #1").ok();
         writeln!(out, "declare i32 @fputc(i32, ptr) #1").ok();
         writeln!(out, "declare i32 @fflush(ptr) #1").ok();
+        // 2026-07-19: putchar — used by PutChar# intrinsic (character output)
+        writeln!(out, "declare i32 @putchar(i32) #1").ok();
         // 2026-07-15: atol used by getenv — kept, no conflict with defn wrappers
         writeln!(out, "declare i64 @atol(ptr) #1").ok();
         // 2026-07-15: getenv — used by emit_get_env (GetEnv# intrinsic)
         writeln!(out, "declare ptr @getenv(ptr) #1").ok();
+        // 2026-07-19: strlen — used by emit_get_env to compute String length
+        writeln!(out, "declare i64 @strlen(ptr) #1").ok();
         // 2026-07-15: Async dispatch runtime functions
         writeln!(out, "declare void @__wait_for_trigger__() #1").ok();
         // 2026-07-15: Removed conflicting POSIX declares (getuid, sched_yield,

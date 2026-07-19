@@ -14,5 +14,5 @@ defn exit(code: Int) -> Int {
 };
 
 defn getenv(name: Ptr<Byte>) -> Int {
-    term GetEnv#(name);
+    term GetEnvInt#(name);
 };

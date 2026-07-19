@@ -14,7 +14,7 @@
 // C reference: interval_step_c.c
 
 
-let N: Int = GetEnv#("BOUND");
+let N: Int = GetEnvInt#("BOUND");
 let count: Int = 0;
 let acc: Int = 0;
 

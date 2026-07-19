@@ -11,7 +11,7 @@
 // against the symmetric variant's C reference.
 
 
-let N: Int = GetEnv#("BOUND");
+let N: Int = GetEnvInt#("BOUND");
 let count: Int = 0;
 let queue: List<Int> = [0];
 

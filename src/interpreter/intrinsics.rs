@@ -176,9 +176,14 @@ pub fn execute_intrinsic(
         }
         "GetEnv#" => {
             let name = arg_as_string(args, 0)?;
+            let val = std::env::var(&name).unwrap_or_default();
+            Ok(Value::bits(val.as_bytes().to_vec()))
+        }
+        "GetEnvInt#" => {
+            let name = arg_as_string(args, 0)?;
             let val = std::env::var(&name)
                 .ok().and_then(|s| s.parse::<i64>().ok()).unwrap_or(0);
-            Ok(i64_to_bits(val))
+            Ok(Value::Int(val))
         }
 
         // ── String / Conversion ─────────────────────────────────────

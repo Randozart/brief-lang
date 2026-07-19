@@ -2,7 +2,7 @@
 // Compares Brief vs C on identical algorithm: inline Newton iterations, unrolled pairs.
 
 
-let bound: Int = GetEnv#("BOUND");
+let bound: Int = GetEnvInt#("BOUND");
 let count: Int = 0;
 
 const pi: Float32 = 3.141592653589793f32;

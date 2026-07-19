@@ -9,7 +9,7 @@
 // C reference: queue_drain_sym_c.c
 
 
-let N: Int = GetEnv#("BOUND");
+let N: Int = GetEnvInt#("BOUND");
 let count: Int = 0;
 
 rct txn work [count < N][count == N] {

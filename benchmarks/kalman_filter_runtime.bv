@@ -7,7 +7,7 @@
 //       --out benchmarks --optimize-budget 256
 
 
-let bound: Int = GetEnv#("BOUND");
+let bound: Int = GetEnvInt#("BOUND");
 let count: Int = 0;
 
 // State vector (3 floats)

@@ -450,7 +450,8 @@ fn build_supported_ops(config: &OpConfig) -> HashSet<String> {
                    "AtomicLoad#", "AtomicStore#", "AtomicCas#", "AtomicXchg#",
                    "AtomicAdd#", "Fence#",
                    "DlOpen#", "DlSym#", "DlClose#",
-                   "Backtrace#", "WorkgroupSize#"] {
+                    "Backtrace#", "WorkgroupSize#",
+                    "PutChar#"] {
         set.insert(name.to_string());
     }
     set

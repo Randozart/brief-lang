@@ -36,8 +36,9 @@ pub fn emit_intrinsic_call(
         "Copy#" => return emit_copy(backend, out, v, args, indent),
         "Fill#" => return emit_fill(backend, out, v, args, indent),
         "Print#" => return emit_print(backend, out, v, args, indent),
+        "PutChar#" => return emit_putchar(backend, out, v, args, indent),
         "GetEnv#" => return emit_get_env(backend, out, v, args, indent),
-        "GetEnvInt#" => return emit_get_env(backend, out, v, args, indent),
+        "GetEnvInt#" => return emit_get_env_int(backend, out, v, args, indent),
         "GetGlobalId#" => return emit_get_global_id(backend, out, v, args, indent),
         "GetGlobalSize#" => return emit_external_call(backend, out, v, name, args, indent),
         "GetLocalId#" => return emit_external_call(backend, out, v, name, args, indent),
@@ -194,6 +195,23 @@ fn emit_print(
         }
     }
     writeln!(out, "{}{} = add i64 0, 0", indent, v).ok();
+    BTypedRegister { name: v.to_string(), ty: Type::int() }
+}
+
+// ─── PutChar# (character output via C putchar) ─────────────────────────
+
+fn emit_putchar(
+    backend: &mut LlvmBackend, out: &mut String, v: &str,
+    args: &[Expr], indent: &str,
+) -> BTypedRegister {
+    let reg = emit_arg(backend, out, &args[0], indent);
+    // 2026-07-19: C putchar takes int (i32), but Brief Int is i64.
+    // Truncate to i32 for the call, then zext the result back to i64.
+    let truncated = backend.fun.gen_reg();
+    writeln!(out, "{}{} = trunc i64 {} to i32", indent, truncated, reg).ok();
+    let raw = backend.fun.gen_reg();
+    writeln!(out, "{}{} = call i32 @putchar(i32 {})", indent, raw, truncated).ok();
+    writeln!(out, "{}{} = zext i32 {} to i64", indent, v, raw).ok();
     BTypedRegister { name: v.to_string(), ty: Type::int() }
 }
 
@@ -549,13 +567,51 @@ fn emit_fill(
 
 // ─── GetEnv# ──────────────────────────────────────────────────────────
 
+// 2026-07-19: GetEnv# returns the raw env var value as a String.
+// Returns empty string {0, 0} if the env var is not found.
 fn emit_get_env(
     backend: &mut LlvmBackend, out: &mut String, v: &str,
     args: &[Expr], indent: &str,
 ) -> BTypedRegister {
     let name_reg = emit_arg(backend, out, &args[0], indent);
     let ptr_reg = backend.fun.gen_reg();
-    // 2026-07-15: name_reg is i64 — convert to ptr for C runtime
+    writeln!(out, "{}{} = inttoptr i64 {} to ptr", indent, ptr_reg, name_reg).ok();
+    // Call getenv — may return null
+    let env_ptr = backend.fun.gen_reg();
+    writeln!(out, "{}{} = call ptr @getenv(ptr {})", indent, env_ptr, ptr_reg).ok();
+    let is_null = backend.fun.gen_reg();
+    writeln!(out, "{}{} = icmp eq ptr {}, null", indent, is_null, env_ptr).ok();
+    // Allocate a fallback 1-byte null-terminated buffer for the null case
+    let fb = backend.fun.gen_reg();
+    writeln!(out, "{}{} = alloca i8, i64 1", indent, fb).ok();
+    writeln!(out, "{}store i8 0, ptr {}", indent, fb).ok();
+    // Safe pointer: fallback buffer when null, real pointer otherwise
+    let safe_ptr = backend.fun.gen_reg();
+    writeln!(out, "{}{} = select i1 {}, ptr {}, ptr {}", indent, safe_ptr, is_null, fb, env_ptr).ok();
+    // Compute length via strlen on the safe pointer
+    let len = backend.fun.gen_reg();
+    writeln!(out, "{}{} = call i64 @strlen(ptr {})", indent, len, safe_ptr).ok();
+    // Data: 0 when null, ptrtoint(env_ptr) otherwise
+    let data_raw = backend.fun.gen_reg();
+    writeln!(out, "{}{} = ptrtoint ptr {} to i64", indent, data_raw, env_ptr).ok();
+    let data = backend.fun.gen_reg();
+    writeln!(out, "{}{} = select i1 {}, i64 0, i64 {}", indent, data, is_null, data_raw).ok();
+    // Pack into {i64, i64} SSO string struct
+    let t1 = backend.fun.gen_reg();
+    writeln!(out, "{}{} = insertvalue {{ i64, i64 }} undef, i64 {}, 0", indent, t1, data).ok();
+    let t2 = backend.fun.gen_reg();
+    writeln!(out, "{}{} = insertvalue {{ i64, i64 }} %{}, i64 {}, 1", indent, t2, t1, len).ok();
+    BTypedRegister { name: t2, ty: Type::string() }
+}
+
+// 2026-07-19: GetEnvInt# returns the env var value parsed as Int.
+// Returns 0 if the env var is missing or unparseable (matches atol behavior).
+fn emit_get_env_int(
+    backend: &mut LlvmBackend, out: &mut String, v: &str,
+    args: &[Expr], indent: &str,
+) -> BTypedRegister {
+    let name_reg = emit_arg(backend, out, &args[0], indent);
+    let ptr_reg = backend.fun.gen_reg();
     writeln!(out, "{}{} = inttoptr i64 {} to ptr", indent, ptr_reg, name_reg).ok();
     let env_ptr = backend.fun.gen_reg();
     writeln!(out, "{}{} = call ptr @getenv(ptr {})", indent, env_ptr, ptr_reg).ok();

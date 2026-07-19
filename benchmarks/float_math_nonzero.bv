@@ -6,7 +6,7 @@ let p00: Float = 0.0;
 let p11: Float = 0.0;
 let p22: Float = 0.0;
 let count: Int = 0;
-let total: Int = GetEnv#("BOUND");
+let total: Int = GetEnvInt#("BOUND");
 
 const A00: Float = 1.0;
 const A01: Float = 0.01;
