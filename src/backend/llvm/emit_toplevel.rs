@@ -282,15 +282,16 @@ impl LlvmBackend {
         // with the defn wrappers in std/os/ (which now use SysCall# internally).
     }
 
-    /// 2026-07-08: Phase 2D — fallback uses bit_width() bridge table
-    /// instead of listing every Custom type by name. Kept as fallback for
-    /// types not in the universe (test code, custom types before registration).
-    /// Note: Bool→"i8" (stored as 1 byte, not 1 bit) and Char→"i32" are
-    /// special cases where LLVM storage type != to_bits().
+    /// 2026-07-08: Fallback for types not in the universe (test code,
+    /// custom types before registration).
+    /// 2026-07-19: Fixed Float→"float" vs Float64→"double" mapping.
+    /// The normalizer handles all properly registered types via category
+    /// inference + config lookup; this is a last-resort fallback.
     fn fallback_llvm_type(ty: &Type) -> &'static str {
         match ty {
             Type::Ptr(_) => "ptr",
-            Type::Custom(__t) if __t == "Float" || __t == "Float64" => "double",
+            Type::Custom(__t) if __t == "Float" => "float",
+            Type::Custom(__t) if __t == "Float64" || __t == "Double" => "double",
             Type::Custom(__t) if __t == "Bool" => "i8",
             Type::Custom(__t) if __t == "Char" => "i32",
             Type::Custom(__t) if __t == "String" || __t == "Data" => "ptr",

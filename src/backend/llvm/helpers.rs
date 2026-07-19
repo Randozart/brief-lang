@@ -634,27 +634,35 @@ impl LlvmBackend {
     }
 
     /// Look up the LLVM codegen type for a Brief type.
-    /// Returns `"float"` for Native storage types ≤32 bits, `"double"`
-    /// for >32, and `"i64"` for Boxed or unknown types.
-    /// 2026-07-17: Reads ALU property instead of primitive().
-    fn operator_llvm_type(&self, ty: &Type) -> &'static str {
+    /// 2026-07-19: Uses stamped `llvm_type` from universe (set by normalizer's
+    /// category inference). For float types, this returns the actual LLVM type
+    /// (float, double, bfloat, half) instead of guessing from byte width.
+    /// Falls back to the previous byte-width heuristic if no universe.
+    fn operator_llvm_type(&self, ty: &Type) -> String {
+        // 2026-07-19: Read stamped llvm_type from universe first.
+        // The normalizer sets this for ALL types via category inference + config.
         if let Some(ref universe) = self.ctx.type_universe {
             if let Some(rt) = ty.universe_key().and_then(|k| universe.get(k)) {
+                if let Some(crate::ast::PropertyValue::String(s)) = rt.properties.get("llvm_type") {
+                    return s.clone();
+                }
+                // Fallback: use ALU + byte-width for types that bypassed normalizer
                 let is_float = rt.properties.get("alu").and_then(|pv| match pv {
                     crate::ast::PropertyValue::Identifier(s) => Some(s.as_str() == "Float"),
                     _ => None,
                 }).unwrap_or(false);
-                if is_float && rt.bytes <= 4 { return "float"; }
-                if is_float { return "double"; }
-                return "i64";
+                if is_float && rt.bytes <= 4 { return "float".to_string(); }
+                if is_float { return "double".to_string(); }
+                return "i64".to_string();
             }
         }
+        // No universe or type not found: hardcoded fallback
         if ty == &Type::float() {
-            "float"
+            "float".to_string()
         } else if ty == &Type::float64() {
-            "double"
+            "double".to_string()
         } else {
-            "i64"
+            "i64".to_string()
         }
     }
 
@@ -1196,14 +1204,16 @@ impl LlvmBackend {
         Some(TypedRegister { name: v, ty: Type::int() })
     }
 
-    /// Check if a type is a native float (float/double) via the universe.
-    /// 2026-07-17: Reads ALU property instead of primitive().
+    /// Check if a type is a native float via the universe.
+    /// 2026-07-19: Reads `category` property (set by normalizer's structural
+    /// inference) instead of ALU. This handles all float-like types uniformly
+    /// (Float, Float64, Bfloat16, FP16, user-defined float types).
     fn is_native_float(&self, ty: &Type) -> bool {
         self.ctx.type_universe.as_ref()
             .and_then(|u| ty.universe_key().and_then(|k| u.get(k)))
             .map(|r| {
-                r.properties.get("alu").and_then(|pv| match pv {
-                    crate::ast::PropertyValue::Identifier(s) => Some(s.as_str() == "Float"),
+                r.properties.get("category").and_then(|pv| match pv {
+                    crate::ast::PropertyValue::String(s) => Some(s == "Float"),
                     _ => None,
                 }).unwrap_or(false)
             })

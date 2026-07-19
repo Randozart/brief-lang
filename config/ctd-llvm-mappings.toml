@@ -31,3 +31,6 @@
 
 [ctd.Data]
 8 = "ptr"
+
+[ctd.Void]
+0 = "void"

@@ -10,7 +10,6 @@
 type Int <: Bits {
     bytes <~ 8;
     alignment <~ 8;
-    llvm <~ "i64";
     tbaa <~ "Int";
     default_width <~ 64;
     commuting <~ true;
@@ -31,7 +30,6 @@ type Int <: Bits {
 type UInt <: Bits {
     bytes <~ 8;
     alignment <~ 8;
-    llvm <~ "i64";
     tbaa <~ "Int";
     default_width <~ 64;
     commuting <~ true;
@@ -51,7 +49,6 @@ type UInt <: Bits {
 type Int8 <: Bits {
     bytes <~ 1;
     alignment <~ 1;
-    llvm <~ "i8";
     tbaa <~ "Int";
     default_width <~ 8;
     commuting <~ true;
@@ -72,7 +69,6 @@ type Int8 <: Bits {
 type UInt8 <: Bits {
     bytes <~ 1;
     alignment <~ 1;
-    llvm <~ "i8";
     tbaa <~ "Int";
     default_width <~ 8;
     commuting <~ true;
@@ -92,7 +88,6 @@ type UInt8 <: Bits {
 type Int16 <: Bits {
     bytes <~ 2;
     alignment <~ 2;
-    llvm <~ "i16";
     tbaa <~ "Int";
     default_width <~ 16;
     commuting <~ true;
@@ -113,7 +108,6 @@ type Int16 <: Bits {
 type UInt16 <: Bits {
     bytes <~ 2;
     alignment <~ 2;
-    llvm <~ "i16";
     tbaa <~ "Int";
     default_width <~ 16;
     commuting <~ true;
@@ -133,7 +127,6 @@ type UInt16 <: Bits {
 type Int32 <: Bits {
     bytes <~ 4;
     alignment <~ 4;
-    llvm <~ "i32";
     tbaa <~ "Int";
     default_width <~ 32;
     commuting <~ true;
@@ -154,7 +147,6 @@ type Int32 <: Bits {
 type UInt32 <: Bits {
     bytes <~ 4;
     alignment <~ 4;
-    llvm <~ "i32";
     tbaa <~ "Int";
     default_width <~ 32;
     commuting <~ true;
@@ -174,7 +166,6 @@ type UInt32 <: Bits {
 type Float <: Bits {
     bytes <~ 4;
     alignment <~ 4;
-    llvm <~ "float";
     tbaa <~ "Float";
     default_width <~ 32;
     commuting <~ true;
@@ -195,7 +186,6 @@ type Float <: Bits {
 type Float64 <: Bits {
     bytes <~ 8;
     alignment <~ 8;
-    llvm <~ "double";
     tbaa <~ "Float";
     default_width <~ 64;
     commuting <~ true;
@@ -216,7 +206,6 @@ type Float64 <: Bits {
 type Bool <: Bits {
     bytes <~ 1;
     alignment <~ 1;
-    llvm <~ "i8";
     tbaa <~ "Bool";
     default_width <~ 1;
     commuting <~ true;
@@ -230,7 +219,6 @@ type Bool <: Bits {
 type Char <: Bits {
     bytes <~ 4;
     alignment <~ 4;
-    llvm <~ "i32";
     tbaa <~ "Char";
     default_width <~ 32;
 };
@@ -286,7 +274,6 @@ type SmallString64 {
 type Data <: Bits {
     bytes <~ 8;
     alignment <~ 8;
-    llvm <~ "i8*";
     tbaa <~ "String";
     default_width <~ 64;
 };

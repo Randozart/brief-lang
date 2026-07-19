@@ -8,21 +8,22 @@ use crate::config::{derive_llvm_type, OpConfig, TypeConfig};
 use crate::type_universe::TypeUniverse;
 
 /// 2026-07-14: Normalize the AST for LLVM backend emission.
-/// Attaches llvm_type property to every ResolvedType in the universe.
-/// For types with fixed-width layout, parses the pattern and attaches
-/// field-level bit offset annotations. For melds with layout mappings,
-/// synthesizes bit-shuffle instructions.
+/// Attaches category and llvm_type to every ResolvedType in the universe.
 ///
-/// 2026-07-17: llvm_type is always computed from CTD via ctd_to_llvm().
-/// The normalizer is the single authority — no more skipping types with
-/// pre-existing llvm_type. ALU × CTD validation catches incompatible combos.
+/// 2026-07-19: Category-driven architecture. The normalizer:
+///   1. Validates ALU × CTD for every type (first pass)
+///   2. Registers TypeDefs from the AST (register_typedefs)
+///   3. Infers category from structure, derives llvm_type (second pass)
+/// The normalizer is the single authority for llvm_type — stdlib never
+/// sets it directly.
 pub fn normalize(items: &mut Vec<TopLevel>, universe: &mut TypeUniverse) -> Result<(), String> {
     let prim_config = TypeConfig::load();
 
-    // 2026-07-17: Compute llvm_type from CTD for EVERY type. No skipping.
-    // The normalizer is the single authority for backend-specific types.
+    // ── Pass 1: ALU × CTD validation only ─────────────────────────────────
+    // 2026-07-19: llvm_type and category are computed in Pass 2 (after
+    // register_typedefs), so struct types have their fields set for
+    // category inference (String-likeness detection).
     for rt in universe.types.values_mut() {
-        // Read CTD and ALU from primordial properties
         let ctd = rt.properties.get("ctd").and_then(|pv| match pv {
             PropertyValue::Identifier(s) => Some(s.as_str()),
             _ => None,
@@ -32,21 +33,12 @@ pub fn normalize(items: &mut Vec<TopLevel>, universe: &mut TypeUniverse) -> Resu
             _ => None,
         });
 
-        // Validate ALU × CTD for built-in PascalCase identifiers
-        // Quoted ALUs are backend-specific and bypass validation
         if let (Some(a), Some(c)) = (alu, ctd) {
             if let Err(e) = validate_alu_ctd(a, c) {
                 return Err(e);
             }
         }
 
-        // Compute llvm_type: CTD → LLVM type directly, with derive_llvm_type fallback
-        let llvm_ty = ctd.and_then(|c| ctd_to_llvm(c, rt.bytes).map(|s| s.to_string()))
-            .unwrap_or_else(|| derive_llvm_type(None, rt.bytes, &prim_config));
-        rt.properties.insert("llvm_type".into(), PropertyValue::String(llvm_ty));
-
-        // 2026-07-14: Parse layout pattern and attach field annotations
-        // 2026-07-16: Strip leading '<' that read_layout_body includes
         if let Some(PropertyValue::String(layout_str)) = rt.properties.get("layout") {
             let cleaned = layout_str.strip_prefix('<').unwrap_or(layout_str);
             if let Ok(pat) = crate::bvir::layout::parse_layout_pattern(cleaned) {
@@ -58,6 +50,40 @@ pub fn normalize(items: &mut Vec<TopLevel>, universe: &mut TypeUniverse) -> Resu
     // 2026-07-16: Register all TopLevel::TypeDef items into the TypeUniverse
     // before meld processing, so validate_bit_permutation can find types.
     register_typedefs(items, universe, &prim_config);
+
+    // ── Pass 2: Infer category and derive llvm_type for ALL types ──────────
+    // 2026-07-19: Runs after register_typedefs so struct types from
+    // bootstrap.bv (like String with fields=[data:Int, len:Int]) are
+    // available for structural category inference.
+    // Category overrides CTD as the primary dispatch axis.
+    for rt in universe.types.values_mut() {
+        let category = infer_category(rt);
+        rt.properties.insert("category".into(), PropertyValue::String(category.to_string()));
+
+        let ctd = rt.properties.get("ctd").and_then(|pv| match pv {
+            PropertyValue::Identifier(s) => Some(s.as_str()),
+            _ => None,
+        });
+
+        // 2026-07-19: User-provided llvm override (only in user code, not stdlib).
+        // Validate against known LLVM type strings; reject invalid values.
+        let explicit_llvm = rt.properties.get("llvm").and_then(|pv| match pv {
+            PropertyValue::String(s) => Some(s.as_str()),
+            _ => None,
+        });
+
+        let llvm_ty = if let Some(llvm_val) = explicit_llvm {
+            validate_explicit_llvm(llvm_val)?;
+            llvm_val.to_string()
+        } else {
+            match category {
+                "Float" => derive_llvm_type(ctd, rt.bytes, &prim_config),
+                "String" => "{ i64, i64 }".to_string(),
+                _ => derive_llvm_type(ctd, rt.bytes, &prim_config),
+            }
+        };
+        rt.properties.insert("llvm_type".into(), PropertyValue::String(llvm_ty));
+    }
 
     // 2026-07-16: P0+P6 — Process meld layout declarations in a single pass.
     //  1. Synthesize bit-shuffle metadata
@@ -97,12 +123,17 @@ pub fn normalize(items: &mut Vec<TopLevel>, universe: &mut TypeUniverse) -> Resu
     }
 
     // Strip metadata LLVM doesn't use
-    // 2026-07-17: Keep ctd and alu (replaces primitive), llvm_type, encoding, layout
+    // 2026-07-17: Keep ctd, alu, llvm_type, encoding, layout
+    // 2026-07-19: Keep category (structural inference), tbaa_parent (TBAA hierarchy)
     // 2026-07-18: Keep ALL op.* entries (op.Add, op.Sub, etc.) for universe-driven
     // operator dispatch. op.InsertAt/op.ExtractFrom are also op.*, covered by prefix.
-    let keep: HashSet<String> = ["ctd", "alu", "llvm_type", "encoding", "layout", "svo",
-        "op.InsertAt", "op.ExtractFrom"]
-        .iter().map(|s| s.to_string()).collect();
+    // Note: "llvm" (user-facing property) is NOT kept — it's consumed by Pass 2
+    // and replaced with derived "llvm_type".
+    let keep: HashSet<String> = [
+        "ctd", "alu", "category", "llvm_type", "encoding", "layout", "svo",
+        "tbaa", "tbaa_parent",
+        "op.InsertAt", "op.ExtractFrom",
+    ].iter().map(|s| s.to_string()).collect();
     for rt in universe.types.values_mut() {
         // 2026-07-18: Keep all op.* keys — the hardcoded list above is
         // the minimum; any other op.* is also valid operator metadata.
@@ -149,6 +180,71 @@ fn validate_alu_ctd(alu: &str, ctd: &str) -> Result<(), String> {
             Err(format!("ALU '{}' is incompatible with CTD '{}': integer hardware cannot process boolean values (use ALU Bool)", alu, ctd)),
         _ => Ok(()),
     }
+}
+
+/// 2026-07-19: Infer a type's category from its structure and properties.
+/// "String" — 2 Int fields + encoding property (structural duck test).
+/// "Float"  — ALU property says "Float" (uses float hardware).
+/// "Bits"   — default for everything else (integer types, custom types).
+fn infer_category(rt: &crate::type_universe::ResolvedType) -> &'static str {
+    // String-like: two Int fields (data, len) + encoding property.
+    // Catches user-defined `type MyString { data: Int; len: Int; encoding <~ "UTF-8" }`
+    // without requiring any PascalCase CTD or explicit declaration.
+    if rt.fields.len() == 2
+        && rt.fields[0].1 == Type::int()
+        && rt.fields[1].1 == Type::int()
+        && rt.properties.contains_key("encoding")
+    {
+        return "String";
+    }
+    // Float-like: ALU says Float. Set by primordial type system
+    // (Float → ALU=Float) or by user's `alu <~ "Float"` declaration.
+    if let Some(PropertyValue::Identifier(s)) = rt.properties.get("alu") {
+        if s == "Float" {
+            return "Float";
+        }
+    }
+    // Bits: default for all other types (Int, Bool, Char, Data, Posit32, etc.)
+    "Bits"
+}
+
+/// 2026-07-19: Validate that a user-provided LLVM type string (`llvm <~ "..."`)
+/// is syntactically valid. Called when a user type has an explicit `llvm`
+/// property — stdlib types never set this, the normalizer derives it.
+fn validate_explicit_llvm(llvm_val: &str) -> Result<(), String> {
+    // Native float types
+    match llvm_val {
+        "half" | "bfloat" | "float" | "double" | "fp128"
+        | "x86_fp80" | "ppc_fp128" => return Ok(()),
+        _ => {}
+    }
+    // Native integer types: i1, i8, i16, i32, i64, i128, i256
+    if llvm_val.starts_with('i') {
+        let bits = &llvm_val[1..];
+        if bits.parse::<u64>().is_ok() {
+            return Ok(());
+        }
+    }
+    // Pointer
+    if llvm_val == "ptr" {
+        return Ok(());
+    }
+    // Void
+    if llvm_val == "void" {
+        return Ok(());
+    }
+    // Simple struct: { type, type, ... }
+    if llvm_val.starts_with('{') && llvm_val.ends_with('}') {
+        return Ok(());
+    }
+    // Vector: <N x type>
+    if llvm_val.starts_with('<') && llvm_val.contains(" x ") && llvm_val.ends_with('>') {
+        return Ok(());
+    }
+    Err(format!(
+        "invalid LLVM type '{}': expected a known LLVM type (float, double, half, bfloat, iN, ptr, ...)",
+        llvm_val
+    ))
 }
 
 /// 2026-07-16: Compute total bits from a layout pattern string.
@@ -207,7 +303,7 @@ fn layout_pattern_bits(pat: &crate::ast::layout::LayoutPattern) -> Option<u64> {
 /// 2026-07-16: Register all TopLevel::TypeDef items into the TypeUniverse.
 /// Extracts byte size from layout metadata or slots, attaches field annotations,
 /// and registers each type so meld validation can look it up.
-fn register_typedefs(items: &[TopLevel], universe: &mut TypeUniverse, prim_config: &TypeConfig) {
+fn register_typedefs(items: &[TopLevel], universe: &mut TypeUniverse, _prim_config: &TypeConfig) {
     for item in items {
         let td = match item {
             TopLevel::TypeDef(td) => td,
@@ -347,17 +443,9 @@ fn register_typedefs(items: &[TopLevel], universe: &mut TypeUniverse, prim_confi
                 }
             }
         }
-        // Attach llvm_type (same as the main loop does for existing types)
-        // 2026-07-17: Use ctd_to_llvm with derive_llvm_type fallback.
-        // If ctd was inherited from the primordial above, this correctly maps
-        // String→"ptr", Data→"ptr", etc.
-        let ctd = rt.properties.get("ctd").and_then(|pv| match pv {
-            PropertyValue::Identifier(s) => Some(s.as_str()),
-            _ => None,
-        });
-        let llvm_ty = ctd.and_then(|c| ctd_to_llvm(c, rt.bytes).map(|s| s.to_string()))
-            .unwrap_or_else(|| derive_llvm_type(None, rt.bytes, prim_config));
-        rt.properties.insert("llvm_type".into(), PropertyValue::String(llvm_ty));
+        // 2026-07-19: llvm_type is set by Pass 2 of the main normalize()
+        // function (category-driven inference). No need to compute it here.
+        // category is also set by Pass 2.
         universe.register(rt);
     }
 }
