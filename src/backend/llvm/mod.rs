@@ -2862,6 +2862,10 @@ impl LlvmBackend {
                 self.emit_thread_pool_metadata(&mut out);
             } else if self.ctx.library_mode {
                 self.emit_library_shim(&mut out, &txns);
+            } else if self.ctx.is_shared_lib {
+                // 2026-07-19: Shared library mode — emit export wrappers and
+                // reactive entry points. No main loop, no reactor tick.
+                self.emit_shared_lib_exports(&mut out, items);
             } else if !txns.is_empty()
                 && self.async_txn_names.is_empty()
                 && self.ctx.mmio_fields.is_empty()

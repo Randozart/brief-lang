@@ -1,5 +1,5 @@
 use crate::analysis::bild_asm;
-use crate::ast::{BinaryOpKind, Expr, Statement, TopLevel, Type};
+use crate::ast::{BinaryOpKind, Expr, OutputType, Statement, TopLevel, Type};
 use crate::backend::llvm::emit_stmt::emit_statement;
 use crate::backend::llvm::{float_to_llvm_hex, float64_to_llvm_hex, LlvmBackend, TypedRegister};
 use crate::type_universe::{ResolvedType, TypeUniverse};
@@ -2105,6 +2105,45 @@ fn sig_number(name: &str) -> i32 {
 impl LlvmBackend {
     /// Emit a library shim — no main function, only `__brief_init_state`
     /// and dso_local wrappers for #export functions.
+    /// 2026-07-19: Emit wrappers for exported functions in shared library.
+    pub(super) fn emit_shared_lib_exports(&mut self, out: &mut String, items: &[TopLevel]) {
+        for item in items {
+            let (name, params, output_ty) = match item {
+                TopLevel::Export(e) => match e.inner.as_ref() {
+                    TopLevel::Definition(d) => (d.name.clone(), &d.parameters, &d.output_type),
+                    _ => continue,
+                },
+                _ => continue,
+            };
+            let param_strs: Vec<String> = params.iter()
+                .enumerate()
+                .map(|(i, (_, t))| {
+                    let llvm_ty = if *t == Type::float() { "double" } else { "i64" };
+                    format!("{} %arg{}", llvm_ty, i)
+                })
+                .collect();
+            let ret_ty = if matches!(output_ty, Some(OutputType::Single(t)) if *t == Type::float())
+                { "double".to_string() } else { "i64".to_string() };
+            writeln!(out, "define dso_local {} @{}({}) #0 {{", ret_ty, name, param_strs.join(", ")).ok();
+            writeln!(out, "  %state = alloca %State, align 8").ok();
+            writeln!(out, "  call void @__brief_init_state(ptr %state)").ok();
+            let args: Vec<String> = (0..params.len()).map(|i| format!("%arg{}", i)).collect();
+            writeln!(out, "  %result = call {} @brief_impl_{}(ptr %state, {})", ret_ty, name, args.join(", ")).ok();
+            writeln!(out, "  ret {} %result", ret_ty).ok();
+            writeln!(out, "}}").ok();
+            writeln!(out).ok();
+        }
+        writeln!(out, "define dso_local void @__brief_init_state(ptr %state) #0 {{").ok();
+        writeln!(out, "  ret void").ok();
+        writeln!(out, "}}").ok();
+        writeln!(out, "define void @__brief_init() __attribute__((constructor)) #0 {{").ok();
+        writeln!(out, "  ret void").ok();
+        writeln!(out, "}}").ok();
+        writeln!(out, "define void @__brief_fini() __attribute__((destructor)) #0 {{").ok();
+        writeln!(out, "  ret void").ok();
+        writeln!(out, "}}").ok();
+    }
+
     /// Called when `self.ctx.library_mode` is true.
     pub(super) fn emit_library_shim(&mut self, out: &mut String, txns: &[(String, &crate::ast::Transaction)]) {
         // The #export wrappers are already emitted by emit_definition (called
