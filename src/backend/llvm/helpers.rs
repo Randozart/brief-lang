@@ -141,6 +141,11 @@ impl LlvmBackend {
             Expr::AddrOf(inner) => Expr::AddrOf(
                 Box::new(Self::rewrite_cell_identifiers(inner, cell_name)),
             ),
+            Expr::PluginIntercept { name, args, .. } => Expr::PluginIntercept {
+                name: name.clone(),
+                args: args.iter().map(|a| Self::rewrite_cell_identifiers(a, cell_name)).collect(),
+                type_args: vec![],
+            },
         }
     }
 

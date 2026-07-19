@@ -184,6 +184,14 @@ pub fn infer_expression(expr: &Expr, ctx: &mut TypecheckContext) -> Result<(Type
         Expr::Match(expr, arms) => {
             infer_match(expr, arms, ctx).map(|ty| (ty, Provenance::Unknown))
         }
+        // 2026-07-19: Plugin-intercept calls must be resolved by Front plugins
+        // before typechecking. If one reaches here, the plugin system failed.
+        Expr::PluginIntercept { name, .. } => {
+            Err(TypeError::InvalidOperation {
+                operation: format!("plugin-intercept {}", name),
+                type_name: "unresolved".to_string(),
+            })
+        }
     }
 }
 

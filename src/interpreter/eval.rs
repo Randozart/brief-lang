@@ -115,6 +115,12 @@ pub fn eval_expr(
 
         // ── Formatting annotation ────────────────────────────────
         Expr::FormattingAnnotation(_) => Ok(Value::Void),
+
+        // 2026-07-19: Plugin-intercept calls must be resolved by Front plugins
+        // before evaluation. If one reaches here, the plugin system failed.
+        Expr::PluginIntercept { name, .. } => {
+            Err(RuntimeError::UnsupportedIntrinsic(format!("plugin-intercept {}", name)))
+        }
     }
 }
 

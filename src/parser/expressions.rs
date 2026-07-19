@@ -249,6 +249,27 @@ impl<'a> Parser<'a> {
                 let index = self.parse_expression()?;
                 self.expect(Token::RBracket)?;
                 expr = Expr::Index(Box::new(expr), Box::new(index));
+            } else if self.eat(&Token::Not) {
+                // 2026-07-19: Plugin-intercept: name!(args)
+                // ! after an expression is the plugin-intercept marker.
+                if !self.eat(&Token::LParen) {
+                    return self.error_at_current("expected '(' after '!' for plugin-intercept call");
+                }
+                let name = match expr {
+                    Expr::Identifier(n) => n,
+                    _ => return self.error_at_current("only named functions can be plugin-intercepted"),
+                };
+                let mut args = Vec::new();
+                if !self.check(&Token::RParen) {
+                    loop {
+                        args.push(self.parse_expression()?);
+                        if !self.eat(&Token::Comma) {
+                            break;
+                        }
+                    }
+                }
+                self.expect(Token::RParen)?;
+                expr = Expr::PluginIntercept { name, args, type_args: vec![] };
             } else {
                 break;
             }

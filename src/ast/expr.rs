@@ -50,7 +50,14 @@ pub enum Expr {
     Deref(Box<Expr>),
     AddrOf(Box<Expr>),
 
-
+    // ── Plugin intercept ────────────────────────────────────────
+    // 2026-07-19: name!(args). Must be resolved by a Front-stage plugin.
+    // Compiler error if any remain after Front plugins run.
+    PluginIntercept {
+        name: String,
+        args: Vec<Expr>,
+        type_args: Vec<Type>,
+    },
 
     // ── Metadata ────────────────────────────────────────────────
     PropertyGet(String),

@@ -489,3 +489,18 @@ Every modified code site must carry a `// 2026-07-19: <why>` comment:
 | Intrinsics vs stdlib | `docs/architecture/intrinsics-vs-stdlib.md` |
 | Hash words | `docs/architecture/hash-words.md` |
 | AGENTS.md Golden Rules | `AGENTS.md` — NO MAGIC (Rule 2), INTRINSICS BEFORE FRGN (Rule 3) |
+
+---
+
+## Syntax Decision: `name!()` not `!name()`
+
+The `!` prefix conflicted with the `Not` unary operator (`!expr`). The `name!()` postfix syntax avoids this entirely:
+
+```
+!PrintLn("hello")     // REJECTED — ambiguous with Not operator
+PrintLn!("hello")     // ACCEPTED — parallels frgn!, Ptr!, term!, syscall!
+```
+
+**How it parses:** Lexer sees `PrintLn` → `Identifier("PrintLn")`, then `!` → `Token::Not`, then `(` → `Token::LParen`. The parser's `parse_postfix` checks for `name!(args)` and produces `Expr::PluginIntercept { name: "PrintLn", args: [...] }`.
+
+**No new token needed** — `name!()` reuses `Token::Not` in postfix position (after an expression), which never conflicts with the prefix `Not` operator (`!expr`).

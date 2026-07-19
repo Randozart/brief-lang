@@ -276,6 +276,9 @@ fn collect_expr_ids_inner(expr: &Expr, ids: &mut Vec<String>) {
             collect_expr_ids_inner(inner, ids);
         }
         Expr::PropertyGet(_) | Expr::FormattingAnnotation(_) | Expr::DerivationBlock(_) => {}
+        Expr::PluginIntercept { args, .. } => {
+            for a in args { collect_expr_ids_inner(a, ids); }
+        }
     }
 }
 

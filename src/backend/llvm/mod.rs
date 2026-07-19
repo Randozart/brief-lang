@@ -451,6 +451,9 @@ fn collect_strings_expr(expr: &Expr, seen: &mut std::collections::HashSet<String
         Expr::AddrOf(inner) => {
             collect_strings_expr(inner, seen, out);
         }
+        Expr::PluginIntercept { args, .. } => {
+            for a in args { collect_strings_expr(a, seen, out); }
+        }
         // Leaves — no sub-expressions
         Expr::Decimal(_) | Expr::Bool(_) | Expr::Float(_) | Expr::Identifier(_)
         | Expr::PropertyGet(_) | Expr::FormattingAnnotation(_) => {}

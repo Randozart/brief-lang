@@ -425,6 +425,11 @@ impl LlvmBackend {
                 writeln!(out, "{}{} = add i64 0, 0", indent, v).ok();
                 TypedRegister { name: v.to_string(), ty: Type::void() }
             }
+            // 2026-07-19: Plugin-intercept calls must be resolved by Front plugins
+            // before codegen. If one reaches here, the plugin system failed.
+            Expr::PluginIntercept { .. } => {
+                panic!("unresolved plugin-intercept call reached codegen");
+            }
         }
     }
 

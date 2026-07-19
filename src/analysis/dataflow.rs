@@ -143,6 +143,9 @@ impl<'a> DataflowAnalyzer<'a> {
                 }
             }
             Expr::PropertyGet(_) | Expr::FormattingAnnotation(_) | Expr::DerivationBlock(_) => {}
+            Expr::PluginIntercept { args, .. } => {
+                for a in args { self.extract_ids_recursive(a, ids); }
+            }
         }
     }
 

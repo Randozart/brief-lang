@@ -178,6 +178,11 @@ impl Annotator {
             | Expr::Bool(..)
             | Expr::Float(..)
             | Expr::Identifier(..) => {}
+            Expr::PluginIntercept { args, .. } => {
+                for a in args {
+                    self.collect_calls_from_expr(a, calls);
+                }
+            }
         }
     }
 
@@ -553,6 +558,10 @@ impl Annotator {
             Expr::AddrOf(inner) => format!("&{}", self.format_expr(inner)),
             Expr::PropertyGet(name) => format!("property '{}'", name),
             Expr::FormattingAnnotation(f) => format!("formatting <~ {}", f.name()),
+            Expr::PluginIntercept { name, args, .. } => {
+                let args_str: Vec<String> = args.iter().map(|a| self.format_expr(a)).collect();
+                format!("{}!({})", name, args_str.join(", "))
+            }
         }
     }
 }

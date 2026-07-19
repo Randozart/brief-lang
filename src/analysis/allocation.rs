@@ -287,6 +287,9 @@ impl<'a> DagBuilder<'a> {
             Expr::Quoted(_) | Expr::Decimal(_) | Expr::Bool(_) | Expr::Float(_)
             | Expr::Identifier(_) | Expr::Lambda(_, _) | Expr::Within(_, _)
             | Expr::DerivationBlock(_) | Expr::PropertyGet(_) | Expr::FormattingAnnotation(_) => {}
+            Expr::PluginIntercept { args, .. } => {
+                for a in args { self.walk_expr(a); }
+            }
         }
     }
 }

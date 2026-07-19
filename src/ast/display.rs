@@ -87,6 +87,14 @@ impl fmt::Display for Expr {
             Expr::DerivationBlock(block) => fmt::Display::fmt(block, f),
             Expr::Deref(inner) => write!(f, "*{}", inner),
             Expr::AddrOf(inner) => write!(f, "&{}", inner),
+            Expr::PluginIntercept { name, args, type_args: _ } => {
+                write!(f, "{}!(", name)?;
+                for (i, arg) in args.iter().enumerate() {
+                    if i > 0 { write!(f, ", ")?; }
+                    write!(f, "{}", arg)?;
+                }
+                write!(f, ")")
+            }
             Expr::PropertyGet(name) => write!(f, "property '{}'", name),
             Expr::FormattingAnnotation(fmt_) => write!(f, "formatting <~ {}", fmt_.name()),
         }

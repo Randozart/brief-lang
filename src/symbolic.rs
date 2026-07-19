@@ -274,6 +274,8 @@ pub fn eval_symbolic(expr: &Expr, state: &SymbolicState) -> SymbolicValue {
         Expr::Deref(inner) => eval_symbolic(inner, state),
         // Address-of
         Expr::AddrOf(inner) => eval_symbolic(inner, state),
+        // 2026-07-19: Plugin-intercept calls — unknown at symbolic eval
+        Expr::PluginIntercept { .. } => SymbolicValue::Unknown,
     }
 }
 
