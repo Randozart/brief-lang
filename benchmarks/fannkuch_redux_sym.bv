@@ -8,7 +8,7 @@
 
 
 let count: Int = 0;
-let N: Int = GetEnvInt#("BOUND");
+let N: Int = GetEnvInt!(")BOUND");
 let seed: Int = 42;
 let max_flips: Int = 0;
 let checksum: Int = 0;

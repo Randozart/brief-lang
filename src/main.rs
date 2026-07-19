@@ -90,6 +90,7 @@ fn parse_build_args(args: &[String]) -> Result<compile::BuildOptions, String> {
     let mut out_dir: Option<String> = None;
     let mut optimize_budget = 256u64;
     let mut gpu_offload = false;
+    let mut shared = false;
     let mut emit_bvir: Vec<BvirStage> = Vec::new();
     let mut backend_override: Option<String> = None;
     let mut no_stdlib = false;
@@ -111,6 +112,9 @@ fn parse_build_args(args: &[String]) -> Result<compile::BuildOptions, String> {
             let val = args.get(i + 1).ok_or("--config-dir requires a directory argument")?;
             config_dir = Some(val.clone());
             i += 2;
+        } else if arg == "--shared" {
+            shared = true;
+            i += 1;
         } else if arg == "--out" {
             let val = args.get(i + 1).ok_or("--out requires a directory argument")?;
             out_dir = Some(val.clone());
@@ -202,6 +206,7 @@ fn parse_build_args(args: &[String]) -> Result<compile::BuildOptions, String> {
         enable_plugins,
         trg_unresolved_action,
         extra_objects: vec![],
+        shared,
         feature_sso_strings: false,
         feature_svo: false,
         stack_threshold: 4096,

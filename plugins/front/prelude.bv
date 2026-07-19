@@ -14,4 +14,6 @@ $(Front @ highest) {
     InsertLiteralImport$("std/os/atomic.bv");
     InsertLiteralImport$("std/core/ptr.bv");
     InsertLiteralImport$("std/core/string_builder.bv");
+    // 2026-07-19: Auto-import env and io for !GetEnv/!GetEnvInt/!Print/!PrintLn
+    InsertLiteralImport$("std/env.bv");
 };

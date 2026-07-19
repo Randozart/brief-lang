@@ -46,8 +46,15 @@ with a stable ABI, no GC dependency, and contract-proven memory safety.
 ┌─ C host ─────────────────────────────────────────────────────┐
 │                                                               │
 │  void *lib = dlopen("./component.so", RTLD_NOW);              │
+│                                                               │
+│  // Stateless call-return exports                              │
 │  int64_t (*fn)(int64_t, int64_t) = dlsym(lib, "process");     │
 │  int64_t result = fn(input, len); // thread-safe per call      │
+│                                                               │
+│  // Reactive entry point — runs convergence loop to completion │
+│  void (*run)(void) = dlsym(lib, "run_reactive");              │
+│  run(); // halts when all txns converge (proven at compile time)│
+│                                                               │
 │  dlclose(lib);                                                 │
 │                                                               │
 └───────────────────────────────────────────────────────────────┘
@@ -94,11 +101,25 @@ let args = vec![
 
 ---
 
+**Reactive collections** — `export rct txn` exports the entire reactive
+transaction set as a single `run_reactive` entry point. The host calls this
+to run all reactive transactions to convergence:
+
+```brief
+export rct txn process [x < TOTAL][x == TOTAL] {
+    x = x + 1;
+    term;
+};
+```
+This compiles to a `run_reactive()` function that blocks until all exported
+reactive txns have converged. Multiple `export rct txn` declarations form
+a single convergence loop together (same scheduling as the standard reactor).
+
 ### L2: Export annotation
 
 **Files:** `src/ast/top.rs`, `src/parser/definitions.rs`, `src/backend/llvm/mod.rs`
 
-**Parser:** Accept optional `export` keyword before `defn`:
+**Parser:** Accept optional `export` keyword before `defn` or `rct txn`:
 ```rust
 // src/parser/definitions.rs
 fn parse_definition(&mut self) -> Result<TopLevel, SyntaxError> {
@@ -106,9 +127,13 @@ fn parse_definition(&mut self) -> Result<TopLevel, SyntaxError> {
     // ... existing defn parsing ...
     Ok(TopLevel::Definition(Definition { is_export, .. }))
 }
+// Also in parse_transaction:
+let is_export = self.eat(&Token::Export);
 ```
 
-**AST:** Add `pub is_export: bool` to `Definition` struct.
+**AST:** Add `pub is_export: bool` to `Definition` and `Transaction` struct.
+When a Transaction has `is_export = true`, the emitted symbol is the reactive
+entry point (e.g., `run_reactive_process`), not a per-call wrapper.
 
 **Backend registration:** In `LlvmBackend::generate()`, collect exported function names:
 ```rust
@@ -210,11 +235,49 @@ define void @__brief_fini() __attribute__((destructor)) {
 }
 ```
 
-**Reactive transactions are NOT supported in `--shared` mode** — they require a
-main loop and barrier synchronization. The compiler emits a diagnostic:
+**Reactive transactions ARE supported in `--shared` mode.** The main loop runs
+until all transactions have converged (their postconditions are met and
+preconditions can never become true again), then returns control to the host:
+
+```llvm
+; Reactive entry point for shared library
+define void @run_reactive() {
+entry:
+  call void @__brief_init()
+  br label %.ss_main_loop
+
+.ss_main_loop:
+  ; Check preconditions, dispatch active txns (same as Block 14)
+  ; After reactor tick, check convergence:
+  %any_active = call i1 @check_any_txn_active()
+  br i1 %any_active, label %.loop, label %.end
+
+.end:
+  call void @__brief_fini()
+  ret void
+}
 ```
-error: --shared mode does not support reactive transactions
+
+**Halting guarantee** — The compiler proves halting at compile time by
+verifying that every reactive txn has a `bounded_pre` + `increments` contract
+(e.g., `[x < N][x == N]` with `x` monotonically increasing). If any txn lacks
+a provably bounded precondition, the compiler emits:
 ```
+error: shared library reactive txn 'name' must have a bounded convergence
+       contract (e.g. [x < TOTAL][x == TOTAL]) to guarantee halting
+```
+This uses the existing transition graph analysis (`bounded_pre` + `increments`
+checks in `mod.rs:2253-2274`) and the natural convergence exit infrastructure
+(Block 14).
+
+**Reactive entry point naming** — By default, the reactive loop function is
+named `run_reactive`. If multiple reactive sections exist, each gets a separate
+name based on the first txn's name (e.g., `run_reactive_process`).
+
+**Async/parallel reactive** — `rct async txn` with thread pool workers is
+supported, provided the same halting proof holds per worker. The barrier
+synchronization (`__barrier_release__` / `__barrier_wait__`) happens inside
+the `run_reactive` call — the host is blocked until convergence.
 
 **Rollback:** Remove `is_shared_lib` checks, restore main loop emission.
 
@@ -329,3 +392,10 @@ cc -o test_host test_host.c -ldl
 4. **Multiple `.so` loading** — If two Brief `.so` files are loaded into the
    same process, their arena globals might conflict (symbol interposition).
    Recommendation: prefix all exported symbols and globals with a module hash.
+
+5. **Halting guarantee scope** — The bounded-precondition proof covers single-txn
+   counters (x < N). For multi-txn convergence (N txns must all hit their bounds),
+   the proof is a conjunction of all bounded_pre checks. This is sound but
+   conservative — a txn with `[x < N][x == N]` and `x` only sometimes incremented
+   would be rejected even if it eventually converges. Recommendation: add a
+   `[halting]` annotation for cases the compiler can't prove automatically.

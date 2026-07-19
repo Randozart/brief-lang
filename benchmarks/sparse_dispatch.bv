@@ -13,7 +13,7 @@
 
 
 let count: Int = 0;
-let total: Int = GetEnvInt#("BOUND");
+let total: Int = GetEnvInt!(")BOUND");
 
 rct txn ping  [count < total && count % 8 == 0][count == total] { count = count + 1; [count % 5000000 == 4999999] { Print#(count + 1); }; term; };
 rct txn ack   [count < total && count % 8 == 1][count == total] { count = count + 1; [count % 5000000 == 4999999] { Print#(count + 1); }; term; };

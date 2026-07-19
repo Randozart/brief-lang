@@ -58,6 +58,7 @@ pub struct CompilerContext {
     pub explain: bool,
     pub dump_layout: bool,
     pub library_mode: bool,
+    pub is_shared_lib: bool,
 
     // State layout (built during generate(), then read-only)
     pub field_index_map: HashMap<String, usize>,
@@ -173,6 +174,7 @@ impl CompilerContext {
             explain: false,
             dump_layout: false,
             library_mode: false,
+            is_shared_lib: false,
             field_index_map: HashMap::new(),
             field_types: Vec::new(),
             field_brief_types: Vec::new(),

@@ -4,7 +4,7 @@
 
 
 let count: Int = 0;
-let N: Int = GetEnvInt#("BOUND");
+let N: Int = GetEnvInt!("BOUND");
 let seed: Int = 42;
 let zr: Int = 100;
 let zi: Int = 0;

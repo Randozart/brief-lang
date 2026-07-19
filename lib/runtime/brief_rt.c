@@ -63,6 +63,41 @@ char* brief_str_to_c(int64_t bstr) {
 
 // ── Core intrinsics (kept) ────────────────────────────────────────────
 
+// 2026-07-19: Returns the environ pointer (char **environ) as an Int.
+// Used by pure-Brief getenv to scan the environment block.
+int64_t __get_environ(void) {
+    extern char **environ;
+    return (int64_t)(uintptr_t)environ;
+}
+
+// 2026-07-19: Returns the value of an env var as a heap-allocated Brief string
+// (null-terminated UTF-8 data preceded by 8-byte length header).
+// Caller takes ownership of the returned pointer.
+int64_t __getenv_brief(int64_t key_bstr) {
+    char* c_key = brief_str_to_c(key_bstr);
+    if (!c_key) return 0;
+    char* val = getenv(c_key);
+    free(c_key);
+    if (!val) return 0;
+    int64_t len = (int64_t)strlen(val);
+    int64_t* bstr = (int64_t*)malloc((size_t)(len + 8 + 1));
+    if (!bstr) return 0;
+    bstr[0] = len;
+    memcpy((char*)(bstr + 1), val, (size_t)len);
+    ((char*)(bstr + 1))[len] = '\0';
+    return (int64_t)(uintptr_t)bstr;
+}
+
+// 2026-07-19: Returns the value of an env var parsed as Int.
+int64_t __getenv_int(int64_t key_bstr) {
+    char* c_key = brief_str_to_c(key_bstr);
+    if (!c_key) return 0;
+    char* val = getenv(c_key);
+    free(c_key);
+    if (!val) return 0;
+    return atol(val);
+}
+
 int64_t brief_syscall(int64_t num, int64_t a1, int64_t a2, int64_t a3, int64_t a4, int64_t a5, int64_t a6) {
     return syscall((long)num, (long)a1, (long)a2, (long)a3, (long)a4, (long)a5, (long)a6);
 }

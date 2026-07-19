@@ -255,21 +255,21 @@ impl<'a> Parser<'a> {
                 if !self.eat(&Token::LParen) {
                     return self.error_at_current("expected '(' after '!' for plugin-intercept call");
                 }
-                let name = match expr {
-                    Expr::Identifier(n) => n,
+                let p_name = match &expr {
+                    Expr::Identifier(n) => n.clone(),
                     _ => return self.error_at_current("only named functions can be plugin-intercepted"),
                 };
-                let mut args = Vec::new();
+                let mut p_args = Vec::new();
                 if !self.check(&Token::RParen) {
                     loop {
-                        args.push(self.parse_expression()?);
+                        p_args.push(self.parse_expression()?);
                         if !self.eat(&Token::Comma) {
                             break;
                         }
                     }
                 }
                 self.expect(Token::RParen)?;
-                expr = Expr::PluginIntercept { name, args, type_args: vec![] };
+                expr = Expr::PluginIntercept { name: p_name, args: p_args, type_args: vec![] };
             } else {
                 break;
             }

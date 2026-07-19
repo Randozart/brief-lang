@@ -69,6 +69,8 @@ pub struct BuildOptions {
     pub trg_unresolved_action: TrgUnresolvedAction,
     /// 2026-07-16: P4 — Pre-compiled .o / .so / .a objects linked into the binary.
     pub extra_objects: Vec<PathBuf>,
+    /// 2026-07-18: Build a shared library (.so) instead of an executable.
+    pub shared: bool,
     /// 2026-07-18: Phase B — Enable SSO (Short String Optimization) for String types.
     /// When ON, String is a 2-field \`{ i64, i64 }\` struct with inline storage for ≤6
     /// bytes, heap for longer. When OFF (default), String is passed as \`i8*\` (legacy).
@@ -184,12 +186,17 @@ pub fn compile_source(file_path: &str, source: &str, opts: &BuildOptions) -> Res
     }
 
     if !opts.emit_ir_only {
-        let binary_path = out_path.strip_suffix(ext).unwrap_or(&out_path);
+        let binary_base = out_path.strip_suffix(ext).unwrap_or(&out_path);
+        let binary_path = if opts.shared {
+            format!("{}.so", binary_base)
+        } else {
+            binary_base.to_string()
+        };
         if opts.backend == BackendKind::Llvm || opts.backend == BackendKind::Gpu {
             // Merge CLI-provided extra_objects with ones collected from frgn declarations
             let mut all_objects = opts.extra_objects.clone();
             all_objects.extend(extra_objects);
-            compile_ll_to_binary(&out_path, binary_path, &all_objects)?;
+            compile_ll_to_binary(&out_path, &binary_path, &all_objects, opts.shared)?;
         }
     }
 
@@ -213,6 +220,7 @@ pub fn check_source(file_path: &str, source: &str) -> Result<(), String> {
         enable_plugins: vec![],
         trg_unresolved_action: TrgUnresolvedAction::Warn,
         extra_objects: vec![],
+        shared: false,
         feature_sso_strings: false,
         feature_svo: false,
         stack_threshold: 4096,
@@ -231,6 +239,9 @@ fn build_plugin_manager(file_path: &str, opts: &BuildOptions) -> PluginManager {
 
     // Discover system plugins from plugins/{front,mid,post,back}/
     discover_system_plugins(&mut pm);
+
+    // Register built-in Rust plugins
+    pm.register(Box::new(brief_compiler::plugin::env_plugin::EnvPlugin));
 
     // Apply per-extension filtering from config/targets.toml
     let ext = get_extension(file_path);
@@ -269,6 +280,7 @@ fn codegen(
                 .with_alloc_strategies(alloc_strategies)
                 .with_sso_strings(opts.feature_sso_strings)
                 .with_svo(opts.feature_svo)
+                .with_shared_lib(opts.shared)
                 .with_stack_threshold(opts.stack_threshold)
                 .with_optimize_budget(opts.optimize_budget)
                 .with_type_universe(universe.clone())
@@ -307,6 +319,7 @@ fn codegen(
                 .with_alloc_strategies(alloc_strategies)
                 .with_sso_strings(opts.feature_sso_strings)
                 .with_svo(opts.feature_svo)
+                .with_shared_lib(opts.shared)
                 .with_stack_threshold(opts.stack_threshold)
                 .with_optimize_budget(opts.optimize_budget)
                 .with_type_universe(universe.clone())
@@ -470,11 +483,16 @@ fn compile_source_to_object(source_path: &Path, cache_dir: &Path) -> Result<Path
 }
 
 /// Compile a `.ll` file to a binary using clang.
-fn compile_ll_to_binary(ll_path: &str, binary_path: &str, extra_objects: &[PathBuf]) -> Result<(), String> {
-    let rt_path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("lib/runtime/brief_rt.c");
-    let rt_str = rt_path.to_string_lossy().to_string();
+fn compile_ll_to_binary(ll_path: &str, binary_path: &str, extra_objects: &[PathBuf], shared: bool) -> Result<(), String> {
     let mut cmd = Command::new("clang");
-    cmd.args(["-O3", "-march=native", "-ffast-math", ll_path, &rt_str]);
+    if shared {
+        // 2026-07-18: Shared library — no runtime, no main(), position-independent.
+        cmd.args(["-O3", "-shared", "-fPIC", ll_path]);
+    } else {
+        let rt_path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("lib/runtime/brief_rt.c");
+        let rt_str = rt_path.to_string_lossy().to_string();
+        cmd.args(["-O3", "-march=native", "-ffast-math", ll_path, &rt_str]);
+    }
     for obj in extra_objects {
         cmd.arg(obj.as_os_str());
     }

@@ -7,7 +7,7 @@
 //       --out benchmarks --optimize-budget 2048
 
 
-let bound: Int = GetEnvInt#("BOUND");
+let bound: Int = GetEnvInt!(")BOUND");
 let count: Int = 0;
 
 const pi: Float32 = 3.141592653589793f32;

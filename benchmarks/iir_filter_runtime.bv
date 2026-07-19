@@ -8,7 +8,7 @@
 //       --out benchmarks --optimize-budget 256
 
 
-let bound: Int = GetEnvInt#("BOUND");
+let bound: Int = GetEnvInt!(")BOUND");
 let x1: Float = 0.0;
 let x2: Float = 0.0;
 let y1: Float = 0.0;

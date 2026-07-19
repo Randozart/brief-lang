@@ -3,7 +3,7 @@
 
 
 let count: Int = 0;
-let N: Int = GetEnvInt#("BOUND");
+let N: Int = GetEnvInt!(")BOUND");
 let seed: Int = 42;
 let hash: Int = 0;
 let chksum: Int = 0;

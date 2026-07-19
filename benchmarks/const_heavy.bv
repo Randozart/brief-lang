@@ -10,7 +10,7 @@ const C14: Int = 1500; const C15: Int = 1600;
 const C16: Int = 1700; const C17: Int = 1800;
 const C18: Int = 1900; const C19: Int = 2000;
 
-let total: Int = GetEnvInt#("BOUND");
+let total: Int = GetEnvInt!(")BOUND");
 let count: Int = 0;
 let acc: Int = 0;
 

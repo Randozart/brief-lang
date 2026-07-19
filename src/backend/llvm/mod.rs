@@ -986,6 +986,13 @@ impl LlvmBackend {
         self
     }
 
+    /// 2026-07-18: Build a shared library (.so). When true, no main loop
+    /// is emitted; only exported wrappers and reactive convergence entry.
+    pub fn with_shared_lib(mut self, v: bool) -> Self {
+        self.ctx.is_shared_lib = v;
+        self
+    }
+
     /// Set the LLVM target triple for generated IR.
     /// Also updates the data layout to match.
     /// 2026-07-11: Phase 6 — WASM target support.
@@ -2083,12 +2090,6 @@ impl LlvmBackend {
         writeln!(out, "declare i32 @fflush(ptr) #1").ok();
         // 2026-07-19: putchar — used by PutChar# intrinsic (character output)
         writeln!(out, "declare i32 @putchar(i32) #1").ok();
-        // 2026-07-15: atol used by getenv — kept, no conflict with defn wrappers
-        writeln!(out, "declare i64 @atol(ptr) #1").ok();
-        // 2026-07-15: getenv — used by emit_get_env (GetEnv# intrinsic)
-        writeln!(out, "declare ptr @getenv(ptr) #1").ok();
-        // 2026-07-19: strlen — used by emit_get_env to compute String length
-        writeln!(out, "declare i64 @strlen(ptr) #1").ok();
         // 2026-07-15: Async dispatch runtime functions
         writeln!(out, "declare void @__wait_for_trigger__() #1").ok();
         // 2026-07-15: Removed conflicting POSIX declares (getuid, sched_yield,
