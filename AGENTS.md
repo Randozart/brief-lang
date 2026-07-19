@@ -147,6 +147,30 @@ This prevents "I'll fix it later" from fossilizing into architecture.
     silently regressing others. The baseline must be from a clean `cargo build
     --release` + `bash benchmarks/build_and_bench.sh --runtime` run.
 
+11b. **PERSISTENT BASELINE WORKTREE**: A permanent git worktree at
+    `../brief-compiler-baseline` holds the Phase 3 anchor commit (`8a827db`)
+    for regression detection. Always compare against this baseline before
+    committing performance-sensitive changes:
+
+    ```bash
+    bash benchmarks/compare_baseline.sh <benchmark_name>
+    ```
+
+    The worktree is a detached HEAD at the pinned commit. It shares git
+    objects with the main worktree (no duplication). Update only when ALL
+    current benchmarks equal or exceed the baseline:
+
+    ```bash
+    rm -rf ../brief-compiler-baseline
+    git worktree prune
+    git worktree add ../brief-compiler-baseline <new-tip-commit>
+    cd ../brief-compiler-baseline && cargo build --release
+    ```
+
+    This provides a controlled A/B experiment (same machine, same hardware)
+    that eliminates "system noise" as an excuse — per Golden Rule 11 in
+    AGENTS_HISTORY.md. See `docs/plans/2026-07-19-baseline-comparison.md`.
+
 12. **DOCUMENTATION MAINTENANCE IN PLANS**: Every optimization plan MUST
     include a "Documentation" section that specifies:
     - Which `///` doc comments need updating (function signatures, new params)
@@ -352,6 +376,9 @@ and the warning comment at `src/backend/llvm/context.rs:223`.
 - **Compile RBV**: `./target/release/brief-compiler rbv <file.rbv>`
 - **Benchmark**: `bash benchmarks/build_and_bench.sh` — always use this harness.
   Ad-hoc timing produces false hangs and imprecise numbers.
+- **Compare against baseline**: `bash benchmarks/compare_baseline.sh <name>` —
+  compiles and times a benchmark on both the main worktree and the permanent
+  baseline worktree at `../brief-compiler-baseline` (Phase 3 anchor `8a827db`).
 
 ## Anti-Patterns (NEVER DO)
 
