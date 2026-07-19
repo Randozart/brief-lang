@@ -1098,16 +1098,18 @@ impl LlvmBackend {
         self.fun.returns_i64 = has_ret;
         // Rename user `main` to `brief_main` to avoid collision with
         // the runtime entry point `define i32 @main()` in loop_engine.rs.
-        // 2026-07-19: In --shared mode, prefix internal function names so
-        // the C-callable export wrapper can use the original name.
-        let ll_name = if self.ctx.is_shared_lib {
-            format!("_internal_{}", d.name)
-        } else if d.name == "main" {
+        // 2026-07-19: In --shared mode, internal functions keep original names.
+        // Export wrappers use a unique suffix to avoid name collision.
+        let ll_name: String = if d.name == "main" {
             "brief_main".to_string()
         } else {
             d.name.clone()
         };
-        write!(out, "define {} @{}(", ll_ret_ty, ll_name).ok();
+        if self.ctx.is_shared_lib {
+            write!(out, "define dso_local {} @{}(", ll_ret_ty, ll_name).ok();
+        } else {
+            write!(out, "define {} @{}(", ll_ret_ty, ll_name).ok();
+        }
         write!(out, "ptr noalias nocapture align 8 %state").ok();
         for (i, (n, t)) in d.parameters.iter().enumerate() {
             // 2026-07-04: dereferenceable(N) for Ptr<T> parameters.
@@ -2114,37 +2116,20 @@ impl LlvmBackend {
     /// Emit a library shim — no main function, only `__brief_init_state`
     /// and dso_local wrappers for #export functions.
     /// 2026-07-19: Emit wrappers for exported functions in shared library.
+    /// In --shared mode, exported functions keep their original names (e.g., @add)
+    /// with dso_local visibility. The C caller passes a %State pointer as the first
+    /// argument. This is the simplest ABI; future work may add a %State-less wrapper.
     pub(super) fn emit_shared_lib_exports(&mut self, out: &mut String, items: &[TopLevel]) {
         for item in items {
-            let (name, params, output_ty) = match item {
-                TopLevel::Export(e) => match e.inner.as_ref() {
-                    TopLevel::Definition(d) => (d.name.clone(), &d.parameters, &d.output_type),
-                    _ => continue,
-                },
-                _ => continue,
-            };
-            let param_strs: Vec<String> = params.iter()
-                .enumerate()
-                .map(|(i, (_, t))| {
-                    let llvm_ty = if *t == Type::float() { "double" } else { "i64" };
-                    format!("{} %arg{}", llvm_ty, i)
-                })
-                .collect();
-            let ret_ty = if matches!(output_ty, Some(OutputType::Single(t)) if *t == Type::float())
-                { "double".to_string() } else { "i64".to_string() };
-            writeln!(out, "define dso_local {} @{}({}) #0 {{", ret_ty, name, param_strs.join(", ")).ok();
-            writeln!(out, "  %state = alloca %State, align 8").ok();
-            writeln!(out, "  call void @__brief_init_state(ptr %state)").ok();
-            let args: Vec<String> = params.iter().enumerate()
-                .map(|(i, (_, t))| {
-                    let ty = if *t == Type::float() { "double" } else { "i64" };
-                    format!("{} %arg{}", ty, i)
-                })
-                .collect();
-            writeln!(out, "  %result = call {} @_internal_{}(ptr %state, {})", ret_ty, name, args.join(", ")).ok();
-            writeln!(out, "  ret {} %result", ret_ty).ok();
-            writeln!(out, "}}").ok();
-            writeln!(out).ok();
+            if let TopLevel::Export(e) = item {
+                if let TopLevel::Definition(d) = e.inner.as_ref() {
+                    // The function is already emitted by emit_definition with its
+                    // original name. In --shared mode, it has dso_local visibility
+                    // (set by emit_definition). No additional wrapper needed.
+                    // Future: emit a wrapper that allocates %State on the caller's
+                    // behalf, avoiding the need for the host to pass a state pointer.
+                }
+            }
         }
         writeln!(out, "define dso_local void @__brief_init_state(ptr %state) #0 {{").ok();
         writeln!(out, "  ret void").ok();
@@ -2155,7 +2140,6 @@ impl LlvmBackend {
         writeln!(out, "define void @__brief_fini() #0 {{").ok();
         writeln!(out, "  ret void").ok();
         writeln!(out, "}}").ok();
-        // Register with LLVM's global constructor mechanism
         writeln!(out, "@llvm.global_ctors = appending global [1 x {{ i32, ptr, ptr }}] [{{ i32, ptr, ptr }} {{ i32 65535, ptr @__brief_init, ptr null }}]").ok();
     }
 

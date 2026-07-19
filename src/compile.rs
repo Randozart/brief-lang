@@ -486,12 +486,11 @@ fn compile_source_to_object(source_path: &Path, cache_dir: &Path) -> Result<Path
 /// Compile a `.ll` file to a binary using clang.
 fn compile_ll_to_binary(ll_path: &str, binary_path: &str, extra_objects: &[PathBuf], shared: bool) -> Result<(), String> {
     let mut cmd = Command::new("clang");
+    let rt_path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("lib/runtime/brief_rt.c");
+    let rt_str = rt_path.to_string_lossy().to_string();
     if shared {
-        // 2026-07-18: Shared library — no runtime, no main(), position-independent.
-        cmd.args(["-O3", "-shared", "-fPIC", ll_path]);
+        cmd.args(["-O3", "-shared", "-fPIC", ll_path, &rt_str]);
     } else {
-        let rt_path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("lib/runtime/brief_rt.c");
-        let rt_str = rt_path.to_string_lossy().to_string();
         cmd.args(["-O3", "-march=native", "-ffast-math", ll_path, &rt_str]);
     }
     for obj in extra_objects {
