@@ -14,8 +14,8 @@
 
 import "std/types/utf8view.bv";
 
-const TOTAL: Int = GetEnvInt!("BOUND");
-const SEED: Int = GetEnvInt!(")SEED");
+let TOTAL: Int = GetEnvInt!("BOUND");
+let SEED: Int = GetEnvInt!("SEED");
 
 let ops: Int = 0;
 let checksum: Int = 0;

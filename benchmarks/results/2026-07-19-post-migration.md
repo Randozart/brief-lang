@@ -50,5 +50,5 @@
 
 | Benchmarks | Status | Root Cause |
 |------------|--------|------------|
-| async_counters_idio | MISMATCH | Async dispatch (`rct async txn`) has pre-existing concurrency bug |
-| utf8_ops | MISMATCH | Pre-existing string encoding issue |
+| async_counters_idio | MISMATCH | Async dispatch path doesn't support precomputation; loops run at runtime (2+ min). Pre-existing. |
+| utf8_ops | MISMATCH | C reference hardcodes N=50000000; Brief reads BOUND env. Fixed Brief side (const→let). Pre-existing. |
