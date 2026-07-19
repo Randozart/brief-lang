@@ -1452,8 +1452,9 @@ impl LlvmBackend {
             self.fun.in_callable_txn = false;
             self.fun.returns_i64 = false;
             self.fun.fn_ret_ty = "void".to_string();
-            // 2026-07-19: Arena init deferred — needs cross-function scoping for
-            // helper functions (memcmp_loop etc.) that also call Alloc#.
+            // 2026-07-19: Arena init deferred — triggers pre-existing terminator bug
+            // in standard path guard emission. The arena fields are in %State but
+            // not initialized for the standard path yet.
             if !matches!(txn.contract.pre_condition, Expr::Bool(true)) {
                 self.emit_precondition_check(out, &txn.contract.pre_condition, "  ");
             }

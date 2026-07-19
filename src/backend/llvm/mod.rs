@@ -718,6 +718,13 @@ pub struct LlvmBackend {
     pub(crate) spirv_kernels: Vec<String>,
     pub(crate) spirv_blobs: Vec<Vec<u8>>,
 
+    // ── Arena Allocator (cross-function) ────────────────────
+    // 2026-07-19: Arena system field indices in %State. Set during generate(),
+    // used by emit_arena_init/emit_arena_alloc to access arena state.
+    pub(crate) arena_ptr_idx: Option<usize>,
+    pub(crate) arena_end_idx: Option<usize>,
+    pub(crate) arena_base_idx: Option<usize>,
+
     // ── Dynamic Trigger Safety ─────────────────────────────
     // 2026-07-15: Phase 7i — Controls null-check emission for @ *ptr.
     pub(crate) trg_unresolved_action: TrgUnresolvedAction,
@@ -826,6 +833,9 @@ impl LlvmBackend {
             spirv_kernels: Vec::new(),
             spirv_blobs: Vec::new(),
             trg_unresolved_action: TrgUnresolvedAction::Warn,
+            arena_ptr_idx: None,
+            arena_end_idx: None,
+            arena_base_idx: None,
             analysis_alloc_strategies: None,
             feature_sso_strings: false,
             feature_svo: false,
@@ -1232,198 +1242,223 @@ impl LlvmBackend {
     }
 
     pub(crate) fn emit_arena_alloc(&mut self, out: &mut String, indent: &str, size_reg: &str) -> String {
-        let (ptr_slot, end_slot, base_slot) = match self.fun.arena_slots.clone() {
-            Some(slots) => slots,
-            None => {
-                let c = self.fun.arena_counter;
-                self.fun.arena_counter += 1;
-                let r = format!("%aam{}", c);
-                writeln!(out, "{}{} = call noalias ptr @malloc(i64 {})", indent, r, size_reg).ok();
-                return r;
-            }
+        let Some(aptr_idx) = self.arena_ptr_idx else {
+            // No arena system fields — fall back to @malloc.
+            let c = self.fun.arena_counter;
+            self.fun.arena_counter += 1;
+            let r = format!("%aam{}", c);
+            writeln!(out, "{}{} = call noalias ptr @malloc(i64 {})", indent, r, size_reg).ok();
+            let ri = format!("%aami{}", c);
+            writeln!(out, "{}{} = ptrtoint ptr {} to i64", indent, ri, r).ok();
+            return ri;
         };
+        let aend_idx = self.arena_end_idx.unwrap();
+        let abase_idx = self.arena_base_idx.unwrap();
         let c = self.fun.arena_counter;
         self.fun.arena_counter += 1;
         let ok_l = format!("aaok_{}", c);
+
+        // Inline helpers for arena %State field access (avoid closure borrow issues).
+        let mut load_aptr = |out: &mut String, indent: &str, idx: usize, prefix: &str| -> String {
+            let pfx = prefix.to_string();
+            let gep = format!("%{}g{}", pfx, c);
+            writeln!(out, "{}{} = getelementptr inbounds %State, ptr %state, i32 0, i32 {}",
+                indent, gep, idx).ok();
+            let vi = format!("%{}i{}", pfx, c);
+            writeln!(out, "{}{} = load i64, ptr {}", indent, vi, gep).ok();
+            let vp = format!("%{}p{}", pfx, c);
+            writeln!(out, "{}{} = inttoptr i64 {} to ptr", indent, vp, vi).ok();
+            vp
+        };
+        let mut store_aptr = |out: &mut String, indent: &str, idx: usize, prefix: &str, ptr_reg: &str| {
+            let pfx = prefix.to_string();
+            let gep = format!("%{}g{}", pfx, c);
+            writeln!(out, "{}{} = getelementptr inbounds %State, ptr %state, i32 0, i32 {}",
+                indent, gep, idx).ok();
+            let pi = format!("%{}pi{}", pfx, c);
+            writeln!(out, "{}{} = ptrtoint ptr {} to i64", indent, pi, ptr_reg).ok();
+            writeln!(out, "{}store i64 {}, ptr {}, align 8", indent, pi, gep).ok();
+        };
+
+        let cur = load_aptr(out, indent, aptr_idx, "aac");
 
         if self.has_async_txns {
             let retry_l = format!("aaretry_{}", c);
             let got_l = format!("aagot_{}", c);
             let grow_l = format!("aagrow_{}", c);
+            let end_val = load_aptr(out, indent, aend_idx, "aae");
 
             writeln!(out, "{}br label %{}", indent, retry_l).ok();
             writeln!(out, "{}{}:", indent, retry_l).ok();
-            let cas_cur = format!("%aacc{}", c);
-            writeln!(out, "{}{} = load ptr, ptr {}, align 8", indent, cas_cur, ptr_slot).ok();
             let cas_new = format!("%aacn{}", c);
-            writeln!(out, "{}{} = getelementptr i8, ptr {}, i64 {}", indent, cas_new, cas_cur, size_reg).ok();
-            let cas_end = format!("%aace{}", c);
-            writeln!(out, "{}{} = load ptr, ptr {}, align 8", indent, cas_end, end_slot).ok();
+            writeln!(out, "{}{} = getelementptr i8, ptr {}, i64 {}", indent, cas_new, cur, size_reg).ok();
             let cas_ok = format!("%aaco{}", c);
-            writeln!(out, "{}{} = icmp ule ptr {}, {}", indent, cas_ok, cas_new, cas_end).ok();
+            writeln!(out, "{}{} = icmp ule ptr {}, {}", indent, cas_ok, cas_new, end_val).ok();
             writeln!(out, "{}br i1 {}, label %{}, label %{}", indent, cas_ok, got_l, grow_l).ok();
 
-            // ── Overflow: grow under mutex ─────────────────────────────────
             writeln!(out, "{}{}:", indent, grow_l).ok();
             let mutex_addr = format!("%aamx{}", c);
             writeln!(out, "{}{} = ptrtoint ptr %arena_mutex to i64", indent, mutex_addr).ok();
             writeln!(out, "{}call i64 @__mutex_lock__(i64 {})", indent, mutex_addr).ok();
-            let re_cur = format!("%aarc{}", c);
-            writeln!(out, "{}{} = load ptr, ptr {}, align 8", indent, re_cur, ptr_slot).ok();
+            let re_cur = load_aptr(out, indent, aptr_idx, "aar");
             let re_new = format!("%aarn{}", c);
             writeln!(out, "{}{} = getelementptr i8, ptr {}, i64 {}", indent, re_new, re_cur, size_reg).ok();
-            let re_end = format!("%aare{}", c);
-            writeln!(out, "{}{} = load ptr, ptr {}, align 8", indent, re_end, end_slot).ok();
+            let re_end = load_aptr(out, indent, aend_idx, "aare");
             let re_ok = format!("%aaro{}", c);
             writeln!(out, "{}{} = icmp ule ptr {}, {}", indent, re_ok, re_new, re_end).ok();
             let grow2_l = format!("aagrow2_{}", c);
             writeln!(out, "{}br i1 {}, label %{}, label %{}", indent, re_ok, got_l, grow2_l).ok();
             writeln!(out, "{}{}:", indent, grow2_l).ok();
-            let old_base = format!("%aago{}", c);
-            writeln!(out, "{}{} = load ptr, ptr {}, align 8", indent, old_base, base_slot).ok();
+            let old_base = load_aptr(out, indent, abase_idx, "aago");
             let grow_sz = format!("%aags{}", c);
             writeln!(out, "{}{} = shl i64 {}, 1", indent, grow_sz, size_reg).ok();
             let grow_min = format!("%aagm{}", c);
             writeln!(out, "{}{} = add i64 {}, 65536", indent, grow_min, grow_sz).ok();
             let grow_new = format!("%aagn{}", c);
             writeln!(out, "{}{} = call ptr @realloc(ptr {}, i64 {})", indent, grow_new, old_base, grow_min).ok();
-            writeln!(out, "{}store ptr {}, ptr {}, align 8", indent, grow_new, ptr_slot).ok();
-            writeln!(out, "{}store ptr {}, ptr {}, align 8", indent, grow_new, base_slot).ok();
+            store_aptr(out, indent, aptr_idx, "aaps", &grow_new);
+            store_aptr(out, indent, abase_idx, "aabs", &grow_new);
             let grow_end = format!("%aage{}", c);
             writeln!(out, "{}{} = getelementptr i8, ptr {}, i64 {}", indent, grow_end, grow_new, grow_min).ok();
-            writeln!(out, "{}store ptr {}, ptr {}, align 8", indent, grow_end, end_slot).ok();
+            store_aptr(out, indent, aend_idx, "aaes", &grow_end);
             writeln!(out, "{}call void @__mutex_unlock__(i64 {})", indent, mutex_addr).ok();
             writeln!(out, "{}br label %{}", indent, retry_l).ok();
 
-            // ── CAS: atomically reserve space ──────────────────────────────
             writeln!(out, "{}{}:", indent, got_l).ok();
             let cas_pair = format!("%aacp{}", c);
+            // cmpxchg needs the memory location (GEP), not the loaded value
+            let cmpxchg_gep = self.fun.next_reg_with_prefix("aacg");
+            writeln!(out, "{}{} = getelementptr inbounds %State, ptr %state, i32 0, i32 {}",
+                indent, cmpxchg_gep, aptr_idx).ok();
             writeln!(out, "{}{} = cmpxchg ptr {}, ptr {}, ptr {} monotonic monotonic",
-                indent, cas_pair, ptr_slot, cas_cur, cas_new).ok();
+                indent, cas_pair, cmpxchg_gep, cur, cas_new).ok();
             let cas_succ = format!("%aacs{}", c);
             writeln!(out, "{}{} = extractvalue {{ ptr, i1 }} {}, 1", indent, cas_succ, cas_pair).ok();
             writeln!(out, "{}br i1 {}, label %{}, label %{}", indent, cas_succ, ok_l, retry_l).ok();
 
-            // ── Success path (CAS succeeded) ───────────────────────────────
             writeln!(out, "{}{}:", indent, ok_l).ok();
             let cas_old = format!("%aacv{}", c);
             writeln!(out, "{}{} = extractvalue {{ ptr, i1 }} {}, 0", indent, cas_old, cas_pair).ok();
             let new_bump = format!("%aanbp{}", c);
             writeln!(out, "{}{} = getelementptr i8, ptr {}, i64 {}", indent, new_bump, cas_old, size_reg).ok();
-            writeln!(out, "{}store ptr {}, ptr {}, align 8", indent, new_bump, ptr_slot).ok();
-            return cas_old;
+            store_aptr(out, indent, aptr_idx, "aaps", &new_bump);
+            let ptr_i64_res = format!("%aapi{}", c);
+            writeln!(out, "{}{} = ptrtoint ptr {} to i64", indent, ptr_i64_res, cas_old).ok();
+            return ptr_i64_res;
         }
 
-        // 2026-07-18: Sequential arena — simple load+add+store (no atomic)
+        // Sequential arena (no async)
         let check_l = format!("aacheck_{}", c);
         let grow_l = format!("aagrow_{}", c);
+        let end_val = load_aptr(out, indent, aend_idx, "aae");
         writeln!(out, "{}br label %{}", indent, check_l).ok();
         writeln!(out, "{}{}:", indent, check_l).ok();
-        let cur = format!("%aacur{}", c);
-        writeln!(out, "{}{} = load ptr, ptr {}, align 8", indent, cur, ptr_slot).ok();
+        let cur2 = load_aptr(out, indent, aptr_idx, "aac");
         let new_ptr = format!("%aanew{}", c);
-        writeln!(out, "{}{} = getelementptr i8, ptr {}, i64 {}", indent, new_ptr, cur, size_reg).ok();
-        let end_val = format!("%aaend{}", c);
-        writeln!(out, "{}{} = load ptr, ptr {}, align 8", indent, end_val, end_slot).ok();
+        writeln!(out, "{}{} = getelementptr i8, ptr {}, i64 {}", indent, new_ptr, cur2, size_reg).ok();
         let ok = format!("%aaok{}", c);
         writeln!(out, "{}{} = icmp ule ptr {}, {}", indent, ok, new_ptr, end_val).ok();
         writeln!(out, "{}br i1 {}, label %{}, label %{}", indent, ok, ok_l, grow_l).ok();
         writeln!(out, "{}{}:", indent, grow_l).ok();
-        let old_base = format!("%aaob{}", c);
-        writeln!(out, "{}{} = load ptr, ptr {}, align 8", indent, old_base, base_slot).ok();
+        let old_base = load_aptr(out, indent, abase_idx, "aaob");
         let grow_sz = format!("%aags{}", c);
         writeln!(out, "{}{} = shl i64 {}, 1", indent, grow_sz, size_reg).ok();
         let min_sz = format!("%aams{}", c);
         writeln!(out, "{}{} = add i64 {}, 65536", indent, min_sz, grow_sz).ok();
         let new_base = format!("%aanb{}", c);
         writeln!(out, "{}{} = call ptr @realloc(ptr {}, i64 {})", indent, new_base, old_base, min_sz).ok();
-        writeln!(out, "{}store ptr {}, ptr {}, align 8", indent, new_base, ptr_slot).ok();
-        writeln!(out, "{}store ptr {}, ptr {}, align 8", indent, new_base, base_slot).ok();
+        store_aptr(out, indent, aptr_idx, "aaps", &new_base);
+        store_aptr(out, indent, abase_idx, "aabs", &new_base);
         let new_end = format!("%aane{}", c);
         writeln!(out, "{}{} = getelementptr i8, ptr {}, i64 {}", indent, new_end, new_base, min_sz).ok();
-        writeln!(out, "{}store ptr {}, ptr {}, align 8", indent, new_end, end_slot).ok();
+        store_aptr(out, indent, aend_idx, "aaes", &new_end);
         writeln!(out, "{}br label %{}", indent, ok_l).ok();
         writeln!(out, "{}{}:", indent, ok_l).ok();
         let phi = format!("%aaphi{}", c);
         writeln!(out, "{}{} = phi ptr [ {}, %{} ], [ {}, %{} ]",
-            indent, phi, cur, check_l, new_base, grow_l).ok();
+            indent, phi, cur2, check_l, new_base, grow_l).ok();
         let new_bump = format!("%aanbp{}", c);
         writeln!(out, "{}{} = getelementptr i8, ptr {}, i64 {}", indent, new_bump, phi, size_reg).ok();
-        writeln!(out, "{}store ptr {}, ptr {}, align 8", indent, new_bump, ptr_slot).ok();
-        phi
+        store_aptr(out, indent, aptr_idx, "aaps", &new_bump);
+        // Return the old pointer as i64 (before the bump)
+        let ptr_i64_res = format!("%aapi{}", c);
+        writeln!(out, "{}{} = ptrtoint ptr {} to i64", indent, ptr_i64_res, phi).ok();
+        ptr_i64_res
     }
 
     /// Emit arena initialization at scope entry. Allocates the initial
     /// 64KB arena buffer, sets up ptr/end/base alloca slots.
     pub(crate) fn emit_arena_init(&mut self, out: &mut String, indent: &str) {
+        let Some(aptr_idx) = self.arena_ptr_idx else { return; };
+        let Some(aend_idx) = self.arena_end_idx else { return; };
+        let Some(abase_idx) = self.arena_base_idx else { return; };
         let c = self.fun.arena_counter;
         self.fun.arena_counter += 1;
-        let ptr = format!("%arptr{}", c);
-        let end = format!("%arend{}", c);
-        let base = format!("%arbase{}", c);
-        writeln!(out, "{}{} = alloca i8*, align 8", indent, ptr).ok();
-        writeln!(out, "{}{} = alloca i8*, align 8", indent, end).ok();
-        writeln!(out, "{}{} = alloca i8*, align 8", indent, base).ok();
-        // 2026-07-18: Thread-safe arena mutex (used when has_async_txns).
-        // A simple i64 used as a spinlock by the pthread mutex runtime.
+        // 2026-07-19: Arena state stored in %State system fields (not allocas).
+        // Any function with ptr %state can access the arena — enables cross-function
+        // arena sharing for helpers (memcmp_loop, etc.) that call Alloc#.
         if self.has_async_txns {
             writeln!(out, "{}%arena_mutex = alloca i64, align 8", indent).ok();
             writeln!(out, "{}store i64 0, ptr %arena_mutex, align 8", indent).ok();
         }
         let init = format!("%arinit{}", c);
         writeln!(out, "{}{} = call ptr @malloc(i64 65536)", indent, init).ok();
-        writeln!(out, "{}store ptr {}, ptr {}, align 8", indent, init, ptr).ok();
-        writeln!(out, "{}store ptr {}, ptr {}, align 8", indent, init, base).ok();
+        let init_i64 = format!("%arii{}", c);
+        writeln!(out, "{}{} = ptrtoint ptr {} to i64", indent, init_i64, init).ok();
+        // Store arena_ptr and arena_base
+        let apgep = self.fun.next_reg_with_prefix("apg");
+        writeln!(out, "{}{} = getelementptr inbounds %State, ptr %state, i32 0, i32 {}",
+            indent, apgep, aptr_idx).ok();
+        writeln!(out, "{}store i64 {}, ptr {}, align 8", indent, init_i64, apgep).ok();
+        let abgep = self.fun.next_reg_with_prefix("abg");
+        writeln!(out, "{}{} = getelementptr inbounds %State, ptr %state, i32 0, i32 {}",
+            indent, abgep, abase_idx).ok();
+        writeln!(out, "{}store i64 {}, ptr {}, align 8", indent, init_i64, abgep).ok();
+        // Compute and store arena_end
         let init_end = format!("%arieu{}", c);
         writeln!(out, "{}{} = getelementptr i8, ptr {}, i64 65536", indent, init_end, init).ok();
-        writeln!(out, "{}store ptr {}, ptr {}, align 8", indent, init_end, end).ok();
-        self.fun.arena_slots = Some((ptr, end, base));
+        let end_i64 = format!("%arie{}", c);
+        writeln!(out, "{}{} = ptrtoint ptr {} to i64", indent, end_i64, init_end).ok();
+        let aegep = self.fun.next_reg_with_prefix("aeg");
+        writeln!(out, "{}{} = getelementptr inbounds %State, ptr %state, i32 0, i32 {}",
+            indent, aegep, aend_idx).ok();
+        writeln!(out, "{}store i64 {}, ptr {}, align 8", indent, end_i64, aegep).ok();
     }
 
     /// Emit arena reset: rewinds the bump pointer to the base, preserving
     /// the allocated memory for reuse in the next scope iteration.
-    /// This is Phase 3 — cross-tick arena pool — keeps pages alive across
-    /// loop ticks instead of free+malloc per cycle.
+    /// 2026-07-19: Arena state is in %State — reload base from there.
     pub(crate) fn emit_arena_reset(&mut self, out: &mut String, indent: &str) {
-        if let Some((ref ptr, _end, ref base)) = self.fun.arena_slots.clone() {
-            let r = format!("%arr{}", self.fun.arena_counter);
-            self.fun.arena_counter += 1;
-            writeln!(out, "{}{} = load ptr, ptr {}, align 8", indent, r, base).ok();
-            writeln!(out, "{}store i8* {}, ptr {}, align 8", indent, r, ptr).ok();
-            // Slots stay alive (arena is not freed). Memory is reused on next tick.
-        }
+        let Some(aptr_idx) = self.arena_ptr_idx else { return; };
+        let Some(abase_idx) = self.arena_base_idx else { return; };
+        let base_gep = self.fun.next_reg_with_prefix("arb");
+        writeln!(out, "{}{} = getelementptr inbounds %State, ptr %state, i32 0, i32 {}",
+            indent, base_gep, abase_idx).ok();
+        let base_val = format!("%arbv{}", self.fun.arena_counter);
+        self.fun.arena_counter += 1;
+        writeln!(out, "{}{} = load i64, ptr {}", indent, base_val, base_gep).ok();
+        let base_ptr = format!("%arbp{}", self.fun.arena_counter);
+        writeln!(out, "{}{} = inttoptr i64 {} to ptr", indent, base_ptr, base_val).ok();
+        let ptr_gep = self.fun.next_reg_with_prefix("arp");
+        writeln!(out, "{}{} = getelementptr inbounds %State, ptr %state, i32 0, i32 {}",
+            indent, ptr_gep, aptr_idx).ok();
+        writeln!(out, "{}store i64 {}, ptr {}, align 8", indent, base_val, ptr_gep).ok();
     }
 
-    /// Emit arena teardown at program exit. Frees the arena buffer and
-    /// clears the arena_slots flag. After this, dynamic allocations
-    /// fall back to @malloc.
+    /// Emit arena teardown at program exit. Frees the arena buffer.
+    /// 2026-07-19: Arena state is in %State — free base pointer from there.
     pub(crate) fn emit_arena_fini(&mut self, out: &mut String, indent: &str) {
-        if let Some((_ptr, _end, ref base)) = self.fun.arena_slots.clone() {
-            let c = self.fun.arena_counter;
-            self.fun.arena_counter += 1;
-            // 2026-07-18: Load base pointer and poison the arena memory with
-            // 0xFE to catch use-after-free (reads of freed memory return 0xFE).
-            let poison = format!("%arp{}", c);
-            let sz = format!("%arsz{}", c);
-            writeln!(out, "{}{} = load ptr, ptr {}, align 8", indent, poison, base).ok();
-            writeln!(out, "{}{} = load ptr, ptr {}, align 8", indent, sz, _end).ok();
-            writeln!(out, "{}{} = ptrtoint ptr {} to i64", indent, sz, poison).ok(); // not needed
-            // Use Fill#(ptr, byte, count) or @memset to poison
-            let ptr_int = format!("%arpi{}", c);
-            writeln!(out, "{}{} = ptrtoint ptr {} to i64", indent, ptr_int, poison).ok();
-            let end_int = format!("%arei{}", c);
-            writeln!(out, "{}{} = load i64, ptr {}, align 8", indent, end_int, _end).ok();
-            // Don't actually memset — just emit a store to the first word as
-            // a canary. Full-memset poisons large arenas (64KB+) which is slow.
-            let zero = format!("%arzero{}", c);
-            writeln!(out, "{}{} = add i64 0, 0x7E7E7E7E7E7E7E7E", indent, zero).ok();
-            writeln!(out, "{}store i64 {}, ptr {}", indent, zero, poison).ok();
-            // Free the buffer (still valid — poison first, then free)
-            let f = format!("%arf{}", c);
-            writeln!(out, "{}{} = load ptr, ptr {}, align 8", indent, f, base).ok();
-            writeln!(out, "{}call void @free(ptr {})", indent, f).ok();
-            self.fun.arena_slots = None;
-        }
+        let Some(abase_idx) = self.arena_base_idx else { return; };
+        let c = self.fun.arena_counter;
+        self.fun.arena_counter += 1;
+        let base_gep = self.fun.next_reg_with_prefix("afb");
+        writeln!(out, "{}{} = getelementptr inbounds %State, ptr %state, i32 0, i32 {}",
+            indent, base_gep, abase_idx).ok();
+        let base_val = format!("%afbv{}", c);
+        writeln!(out, "{}{} = load i64, ptr {}", indent, base_val, base_gep).ok();
+        let base_ptr = format!("%afp{}", c);
+        writeln!(out, "{}{} = inttoptr i64 {} to ptr", indent, base_ptr, base_val).ok();
+        writeln!(out, "{}call void @free(ptr {})", indent, base_ptr).ok();
     }
 
     // 2026-07-18: Check if we're in a scope with a known contract-proven bound.
@@ -1707,6 +1742,28 @@ impl LlvmBackend {
             self.ctx.field_types.push("i64".to_string());
             self.ctx.field_brief_types.push(Type::int());
             self.ctx.field_initializers.insert("cycle_count".to_string(), Some(Expr::Decimal(0)));
+        }
+        // 2026-07-19: Arena system fields — arena_ptr, arena_end, arena_base.
+        // Stored as i64 (pointers cast to int) in %State. Any function that
+        // receives %state can access the arena via these fields.
+        {
+            let aptr = self.ctx.field_index_map.len();
+            self.ctx.field_index_map.insert("__arena_ptr".to_string(), aptr);
+            self.ctx.field_types.push("i64".to_string());
+            self.ctx.field_brief_types.push(Type::int());
+            self.arena_ptr_idx = Some(aptr);
+
+            let aend = self.ctx.field_index_map.len();
+            self.ctx.field_index_map.insert("__arena_end".to_string(), aend);
+            self.ctx.field_types.push("i64".to_string());
+            self.ctx.field_brief_types.push(Type::int());
+            self.arena_end_idx = Some(aend);
+
+            let abase = self.ctx.field_index_map.len();
+            self.ctx.field_index_map.insert("__arena_base".to_string(), abase);
+            self.ctx.field_types.push("i64".to_string());
+            self.ctx.field_brief_types.push(Type::int());
+            self.arena_base_idx = Some(abase);
         }
         self.validate_schema_types();
         self.ctx.triggers.clear();
@@ -3681,6 +3738,13 @@ impl LlvmBackend {
         // by the tick loop, not by txn body code.
         if let Some(idx) = self.ctx.field_index_map.get("cycle_count") {
             self.ctx.field_modes.insert("cycle_count".to_string(), crate::analysis::FieldMode::Always);
+        }
+        // 2026-07-19: Arena system fields must never be eliminated — they're
+        // accessed by emit_arena_alloc via %State field indices, not by identifiers.
+        for arena_name in &["__arena_ptr", "__arena_end", "__arena_base"] {
+            if let Some(idx) = self.ctx.field_index_map.get(*arena_name) {
+                self.ctx.field_modes.insert(arena_name.to_string(), crate::analysis::FieldMode::Always);
+            }
         }
         // 2026-07-02: RingBuffer inline fields must never be eliminated.
         // Even though they appear dead (not in exit condition), they're used

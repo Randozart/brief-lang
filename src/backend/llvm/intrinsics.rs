@@ -265,7 +265,9 @@ fn emit_alloc(
     }
     // Default triple dispatch (no strategy arg).
     // Strategy 1: Arena scope active → bump allocate.
-    if backend.fun.arena_slots.is_some() {
+    // 2026-07-19: Arena is in %State fields — available in any function that
+    // has %state (all txns, callable txns, and their helpers by inheritance).
+    if backend.arena_ptr_idx.is_some() {
         let result = backend.emit_arena_alloc(out, indent, &size);
         writeln!(out, "{}{} = ptrtoint ptr {} to i64", indent, v, result).ok();
         backend.fun.alloc_strategies.insert(v.to_string(), AllocStrategy::Arena);
