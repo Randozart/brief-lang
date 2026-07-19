@@ -104,36 +104,27 @@ impl OpConfig {
             .map_err(|e| format!("parse error in '{}': {}", path.display(), e))?;
 
         let mut op = HashMap::new();
-        for (key, value) in raw {
-            if let Some(rest) = key.strip_prefix("op.") {
-                // 2026-07-17: Split key like "Sqrt.Float" into op_name="Sqrt"
-                // and primitive="Float". TOML dotted keys create nested tables
-                // but toml::from_str parses them as flat keys with '.' in the
-                // name. We split on the FIRST '.' to separate op from primitive.
-                let (op_name, primitive) = match rest.split_once('.') {
-                    Some((n, p)) => (n.to_string(), Some(p.to_string())),
-                    None => (rest.to_string(), None),
-                };
-                let mut prim_map: HashMap<String, HashMap<String, String>> = HashMap::new();
-                if let toml::Value::Table(table) = value {
-                    for (prim_or_bytes, bytes_val) in table {
-                        if let toml::Value::String(tmpl) = &bytes_val {
-                            let mut bytes_map = HashMap::new();
-                            bytes_map.insert(prim_or_bytes.clone(), tmpl.clone());
-                            prim_map.insert(primitive.clone().unwrap_or_else(|| "_".to_string()), bytes_map);
-                        } else if let toml::Value::Table(bytes_table) = bytes_val {
+        // 2026-07-19: toml v0.8 deserializes [op.Shl.Int] as nested tables:
+        //   {"op": {Shl: {Int: {8: "shl i64 %a, %b"}}}}
+        // Previous code expected flat dotted keys {"op.Shl.Int": ...}.
+        // Walk nested tables instead.
+        if let Some(toml::Value::Table(ops)) = raw.get("op") {
+            for (op_name, primitives) in ops {
+                if let toml::Value::Table(entries) = primitives {
+                    let mut prim_map: HashMap<String, HashMap<String, String>> = HashMap::new();
+                    for (primitive, sizes) in entries {
+                        if let toml::Value::Table(bytes_table) = sizes {
                             let mut bytes_map = HashMap::new();
                             for (byte_key, byte_val) in bytes_table {
                                 if let toml::Value::String(tmpl) = byte_val {
-                                    bytes_map.insert(byte_key, tmpl);
+                                    bytes_map.insert(byte_key.clone(), tmpl.clone());
                                 }
                             }
-                            let prim_name = primitive.clone().unwrap_or(prim_or_bytes);
-                            prim_map.insert(prim_name, bytes_map);
+                            prim_map.insert(primitive.clone(), bytes_map);
                         }
                     }
+                    op.insert(op_name.clone(), prim_map);
                 }
-                op.insert(op_name, prim_map);
             }
         }
         Ok(OpConfig { op })

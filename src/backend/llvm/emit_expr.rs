@@ -781,10 +781,23 @@ impl LlvmBackend {
             .map(|rt| rt.bytes)
             .unwrap_or(8u64);
         let tmpl = OP_CONFIG.lookup(op_name, type_name, bytes)?;
-        // Fill template: %a and %b are the operand placeholders
+        // 2026-07-19: Comparison ops (icmp/fcmp) return i1, but Bool is
+        // represented as i8 in this codebase. Add a zext i1 to i8.
+        let is_cmp = matches!(kind,
+            BinaryOpKind::Eq | BinaryOpKind::Neq
+            | BinaryOpKind::Lt | BinaryOpKind::Le
+            | BinaryOpKind::Gt | BinaryOpKind::Ge);
         let line = tmpl.replace("%a", &l.name).replace("%b", &r.name);
-        writeln!(out, "{}{} = {}", indent, v, line).ok();
-        Some(TypedRegister { name: v.to_string(), ty: ret_ty.clone() })
+        if is_cmp {
+            let icmp_reg = self.fun.gen_reg();
+            writeln!(out, "{}{} = {}", indent, icmp_reg, line).ok();
+            // 2026-07-19: Bool represented as i8 in this codebase.
+            writeln!(out, "{}{} = zext i1 {} to i8", indent, v, icmp_reg).ok();
+            Some(TypedRegister { name: v.to_string(), ty: Type::bool_() })
+        } else {
+            writeln!(out, "{}{} = {}", indent, v, line).ok();
+            Some(TypedRegister { name: v.to_string(), ty: ret_ty.clone() })
+        }
     }
 
     /// Emit a binary operation.

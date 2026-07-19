@@ -382,6 +382,12 @@ impl LlvmBackend {
         // defined inside a conditional that never fires for small BOUND values,
         // producing 0.0 from LLVM's undefined value handling — nbody_newton bug.
         self.fun.reg_float_cache.clear();
+        // 2026-07-19: Clear last-value temps before hoisted post-loop prints.
+        // Without this, identifier resolution uses SSA registers from the loop
+        // body which don't dominate the exit block — SSA dominance violation.
+        // The hoisted prints must resolve via phi registers or %State loads.
+        self.fun.last_val_temps.clear();
+        self.fun.last_val_types.clear();
         let hoist = self.fun.pending_post_hoist.clone();
         self.emit_hoisted_post_loop_prints(out, &hoist);
         let final_gep = self.fun.next_reg_with_prefix("cmg");
