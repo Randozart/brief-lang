@@ -1841,7 +1841,11 @@ impl LlvmBackend {
             if self.fun.terminated { break; }
             emit_statement(self, out, s, "  ");
         }
-        if !self.fun.terminated { writeln!(out, "  ret void").ok(); }
+        // 2026-07-19: term; sets terminated=true but emits no terminator —
+        // always branch to the done label so the block is not left dangling.
+        // If the body already emitted a ret (not typical for async void fn),
+        // this br is dead code after a terminator (harmless).
+        writeln!(out, "  br label %{}_done", async_name).ok();
         writeln!(out, "{}_done:", async_name).ok();
         writeln!(out, "  ret void").ok();
         writeln!(out, "}}").ok();

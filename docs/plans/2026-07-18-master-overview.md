@@ -3,6 +3,7 @@
 **Author:** Compiler agent
 **Scope:** All 5 active plans consolidated into sequential implementation steps
 **Test baseline:** `cargo test --lib` = 931 tests passing
+**Latest update:** SVO (Block 13) implemented — feature flag, `is_vector_like()`, `svo <~ 3` metadata, multi-slot state layout, inline list literal emission via `insertvalue`, tag-aware index with stack array GEP for dynamic indices.
 **Status key:** ✅ Done | ⚡ In progress | ❌ Remaining
 
 ---

@@ -167,16 +167,9 @@ pub fn emit_statement(backend: &mut LlvmBackend, out: &mut String, stmt: &Statem
                     writeln!(out, "{}ret {} {}", indent, ret_ty, reg.name).ok();
                     backend.fun.terminated = true;
                 } else {
-                    // 2026-07-19: Void reactive txn — emit ret to provide a valid
-                    // LLVM block terminator. Without this, guard/async body blocks
-                    // using term! are left dangling (no terminator instruction).
-                    writeln!(out, "{}ret void", indent).ok();
                     backend.fun.terminated = true;
                 }
             } else {
-                // 2026-07-19: Same as above — valueless term in void reactive txn
-                // needs a ret to terminate the basic block.
-                writeln!(out, "{}ret void", indent).ok();
                 backend.fun.terminated = true;
             }
             TypedRegister { name: backend.fun.gen_reg(), ty: Type::void() }
@@ -211,11 +204,13 @@ pub fn emit_statement(backend: &mut LlvmBackend, out: &mut String, stmt: &Statem
             for stmt in body {
                 emit_statement(backend, out, stmt, indent);
             }
-            // 2026-07-18: Always emit end label (referenced by br i1 false branch).
-            // The next statement's code is emitted after this label.
-            if !backend.fun.terminated {
-                writeln!(out, "{}br label %{}", indent, end_lbl).ok();
-            }
+            // 2026-07-19: Always emit br to end label — the guard body always
+            // converges to guard.endN regardless of term! or term; inside it.
+            // Previously this was conditional on !terminated, but term! inside
+            // a guard body sets terminated=true without emitting a real LLVM
+            // terminator, leaving the guard.thenN block dangling. The branch
+            // is harmless dead code if the body already has a ret.
+            writeln!(out, "{}br label %{}", indent, end_lbl).ok();
             writeln!(out, "{}{}:", indent, end_lbl).ok();
             backend.fun.terminated = false;
             backend.fun.terminated = false;
