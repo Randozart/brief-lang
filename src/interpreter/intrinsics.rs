@@ -167,25 +167,6 @@ pub fn execute_intrinsic(
             Ok(Value::Void)
         }
 
-        // ── I/O (observable) ────────────────────────────────────────
-        "Print#" => {
-            if let Ok(n) = arg_as_i64(args, 0) { eprintln!("{}", n); }
-            else if let Ok(f) = arg_as_f64(args, 0) { eprintln!("{}", f); }
-            else { let s = arg_as_string(args, 0)?; eprintln!("{}", s); }
-            Ok(Value::Void)
-        }
-        "GetEnv#" => {
-            let name = arg_as_string(args, 0)?;
-            let val = std::env::var(&name).unwrap_or_default();
-            Ok(Value::bits(val.as_bytes().to_vec()))
-        }
-        "GetEnvInt#" => {
-            let name = arg_as_string(args, 0)?;
-            let val = std::env::var(&name)
-                .ok().and_then(|s| s.parse::<i64>().ok()).unwrap_or(0);
-            Ok(Value::Int(val))
-        }
-
         // ── String / Conversion ─────────────────────────────────────
         "Concat#"   => Err(RuntimeError::UnsupportedIntrinsic("Concat#".to_string())),
         "Length#"   => Err(RuntimeError::UnsupportedIntrinsic("Length#".to_string())),
@@ -543,13 +524,6 @@ mod tests {
         let addr = execute_intrinsic("Alloc#", &[i64_to_bits(32)], &mut heap).unwrap();
         let ptr = addr.as_i64().unwrap() as u64;
         assert!(heap.contains(ptr));
-    }
-
-    #[test]
-    fn test_print_int() {
-        let mut heap = VirtualHeap::new();
-        let r = execute_intrinsic("Print#", &[i64_to_bits(42)], &mut heap);
-        assert!(r.is_ok());
     }
 
     #[test]

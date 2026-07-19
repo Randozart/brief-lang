@@ -242,6 +242,7 @@ fn build_plugin_manager(file_path: &str, opts: &BuildOptions) -> PluginManager {
 
     // Register built-in Rust plugins
     pm.register(Box::new(brief_compiler::plugin::env_plugin::EnvPlugin));
+    pm.register(Box::new(brief_compiler::plugin::print_plugin::PrintPlugin));
 
     // Apply per-extension filtering from config/targets.toml
     let ext = get_extension(file_path);

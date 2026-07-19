@@ -41,7 +41,7 @@ rct txn process [bound > 0 && count < bound][count == bound] {
 
     count = count + 1;
     [count % 5000000 == 0] {
-        Print#(out);
+        Print!(out);
     };
     term;
 };

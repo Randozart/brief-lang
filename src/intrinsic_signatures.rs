@@ -78,11 +78,8 @@ pub fn get_intrinsic_signature(name: &str) -> Option<Signature> {
         "Pow#"   => Some(Signature { name: "Pow#",   parameters: vec![], return_kind: ReturnKind::Inferred, observable: false }),
 
         // ── Runtime (observable) ────────────────────────────────────
-        "GetEnvInt#" => Some(Signature { name: "GetEnvInt#", parameters: vec![("name", Type::string())], return_kind: ReturnKind::Exact(Type::int()), observable: true }),
-        "PrintInt#" => Some(Signature { name: "PrintInt#", parameters: vec![("val", Type::int())], return_kind: ReturnKind::Exact(Type::void()), observable: true }),
-        "PrintStr#" => Some(Signature { name: "PrintStr#", parameters: vec![("val", Type::string())], return_kind: ReturnKind::Exact(Type::void()), observable: true }),
-        // 2026-07-19: Single character output — maps to C putchar(int).
-        "PutChar#" => Some(Signature { name: "PutChar#", parameters: vec![("c", Type::int())], return_kind: ReturnKind::Exact(Type::int()), observable: true }),
+        // 2026-07-19: GetEnv#/GetEnvInt# moved to stdlib env.bv via ! plugin.
+        // Print#/PutChar# moved to stdlib ffi/io.bv via ! plugin.
 
         // ── Memory (observable) ─────────────────────────────────────
         "Malloc#"  => Some(Signature { name: "Malloc#",  parameters: vec![("size", Type::int())], return_kind: ReturnKind::Exact(Type::ptr(Type::bits(1))), observable: true }),
@@ -94,11 +91,6 @@ pub fn get_intrinsic_signature(name: &str) -> Option<Signature> {
         "Store#"   => Some(Signature { name: "Store#",   parameters: vec![], return_kind: ReturnKind::Exact(Type::void()), observable: true }),
         "Copy#"    => Some(Signature { name: "Copy#",    parameters: vec![], return_kind: ReturnKind::Exact(Type::void()), observable: true }),
         "Fill#"    => Some(Signature { name: "Fill#",    parameters: vec![], return_kind: ReturnKind::Exact(Type::void()), observable: true }),
-
-        // ── I/O (observable) ──────────────────────────────────────────
-        "Print#"  => Some(Signature { name: "Print#",  parameters: vec![], return_kind: ReturnKind::Exact(Type::void()), observable: true }),
-        // 2026-07-19: Returns raw env var string, empty on not found.
-        "GetEnv#" => Some(Signature { name: "GetEnv#", parameters: vec![("name", Type::string())], return_kind: ReturnKind::Exact(Type::string()), observable: true }),
 
         // ── String ───────────────────────────────────────────────────
         "Concat#"    => Some(Signature { name: "Concat#",    parameters: vec![], return_kind: ReturnKind::Inferred, observable: false }),
@@ -231,8 +223,6 @@ mod tests {
             "Eq#", "Neq#", "Lt#", "Gt#", "Le#", "Ge#",
             "Sqrt#", "Sin#", "Cos#", "Fabs#", "Ceil#", "Floor#", "Pow#",
             "Malloc#", "Alloc#", "Free#", "Load#", "Store#", "Copy#", "Fill#",
-            "Print#", "GetEnv#", "GetEnvInt#",
-            "PutChar#",
             "Concat#", "Length#", "ToInt#", "ToFloat#", "ToString#",
             "Get#", "Insert#",
             "GetGlobalId#", "GetGlobalSize#", "GetLocalId#", "WorkgroupSize#",
@@ -258,14 +248,10 @@ mod tests {
 
     #[test]
     fn test_observable_intrinsics() {
-        assert!(get_intrinsic_signature("Print#").unwrap().observable);
         assert!(get_intrinsic_signature("Malloc#").unwrap().observable);
         assert!(get_intrinsic_signature("Free#").unwrap().observable);
         assert!(get_intrinsic_signature("Load#").unwrap().observable);
         assert!(get_intrinsic_signature("Copy#").unwrap().observable);
-        assert!(get_intrinsic_signature("GetEnv#").unwrap().observable);
-        assert!(get_intrinsic_signature("GetEnvInt#").unwrap().observable);
-        assert!(get_intrinsic_signature("PutChar#").unwrap().observable);
         assert!(get_intrinsic_signature("Insert#").unwrap().observable);
         assert!(!get_intrinsic_signature("Add#").unwrap().observable);
         assert!(!get_intrinsic_signature("Eq#").unwrap().observable);

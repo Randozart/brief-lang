@@ -194,7 +194,7 @@ rct txn simulate [
     let energy: Float32 = ep + ek0 + ek1 + ek2 + ek3 + ek4;
 
     [count % 5000000 == 0] {
-        let __printed: Bool = Print#(energy);
+        let __printed: Bool = Print!(energy);
     };
     count = count + 1;
     term;

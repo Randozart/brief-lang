@@ -49,7 +49,7 @@ rct txn fan [count < N][count == N] {
     let f: Int = p0;
     [f == 0] {
         checksum = checksum - ns;
-        term! -> Print#(count);
+        term! -> Print!(count);
     };
     [f != 0] {
         checksum = checksum + ns;

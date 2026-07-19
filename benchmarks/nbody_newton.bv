@@ -350,10 +350,10 @@ rct txn simulate [
     last_energy = energy;
 
     [count % 5000000 == 0] {
-        let __periodic: Bool = Print#(energy);
+        let __periodic: Bool = Print!(energy);
     };
     [count == bound] {
-        term! -> Print#(last_energy);
+        term! -> Print!(last_energy);
     };
     term;
 };

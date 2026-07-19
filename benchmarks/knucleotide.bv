@@ -19,7 +19,7 @@ rct txn kn [count < N][count == N] {
     let nhash: Int = ((hash << 2) | (nseed & 3)) & MASK;
     let nchksum: Int = chksum + nhash % 13;
     seed = nseed;  hash = nhash;  chksum = nchksum;
-    [count % 5000000 == 0] { Print#(nchksum); };
+    [count % 5000000 == 0] { Print!(nchksum); };
     count = count + 1;
     term;
 };

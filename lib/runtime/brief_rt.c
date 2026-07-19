@@ -119,6 +119,16 @@ int64_t __print_int(int64_t n) {
     return 0;
 }
 
+int64_t __print_float(float f) {
+    printf("%g", (double)f);
+    return 0;
+}
+
+int64_t __print_char(int64_t c) {
+    putchar((int)c);
+    return 0;
+}
+
 void __exit(int64_t code) {
     exit((int)code);
 }

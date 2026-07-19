@@ -26,7 +26,7 @@ rct txn step [count < N][count == N] {
     count = (count + R1) - R2;
 
     [count % 5000000 == 0] {
-        Print#(acc);
+        Print!(acc);
     };
 
     term;

@@ -296,7 +296,6 @@ fn is_gpu_safe_intrinsic(name: &str) -> bool {
         | "GetGlobalId#" | "GetLocalId#"
         | "GetGroupId#" | "GetNumGroups#"
         | "SubGroupBarrier#"
-        | "PrintInt#" | "PutChar#" | "PrintFloat#"
     )
 }
 
@@ -553,7 +552,7 @@ fn has_print_intrinsics(body: &[Statement]) -> bool {
 fn has_print_intrinsics_expr(expr: &Expr) -> bool {
     match expr {
         Expr::Call(name, _, _) => matches!(name.as_str(),
-            "PrintInt#" | "PrintFloat#" | "PutChar#"
+            "__print_int" | "__print_float" | "__print_char"
         ),
         Expr::BinaryOp(_, l, r) => {
             has_print_intrinsics_expr(l) || has_print_intrinsics_expr(r)
@@ -978,29 +977,6 @@ fn emit_spirv_intrinsic(
             let v = emit_spirv_expr(&args[0], ir, indent, field_offsets, loaded_regs, field_types, write_fields);
             let reg = format!("%floor{}", ir.len());
             ir.push_str(&format!("{}{} = call float @llvm.floor.f32(float {})\n", indent, reg, v));
-            reg
-        }
-        // GPU I/O intrinsics — write to print buffer, host drains after dispatch.
-        // These use %base_print, which is emitted in emit_spirv_module only when
-        // has_print_intrinsics() returns true (guaranteed by the caller).
-        "PrintInt#" => {
-            let v = emit_spirv_expr(&args[0], ir, indent, field_offsets, loaded_regs, field_types, write_fields);
-            let reg = format!("%pr{}", ir.len());
-            ir.push_str(&format!("{}store i64 {}, i8* %base_print, align 8\n", indent, v));
-            reg
-        }
-        "PrintFloat#" => {
-            let v = emit_spirv_expr(&args[0], ir, indent, field_offsets, loaded_regs, field_types, write_fields);
-            let bc = format!("%prbc{}", ir.len());
-            let reg = format!("%pr{}", ir.len());
-            ir.push_str(&format!("{}{} = bitcast ptr %base_print to float*\n", indent, bc));
-            ir.push_str(&format!("{}store float {}, float* {}, align 4\n", indent, v, bc));
-            reg
-        }
-        "PutChar#" => {
-            let v = emit_spirv_expr(&args[0], ir, indent, field_offsets, loaded_regs, field_types, write_fields);
-            let reg = format!("%pr{}", ir.len());
-            ir.push_str(&format!("{}store i8 {}, i8* %base_print, align 1\n", indent, v));
             reg
         }
         _ => {

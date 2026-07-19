@@ -272,7 +272,7 @@ pub fn build_let_field_refs(
 pub fn is_output_call(expr: &Expr) -> bool {
     match expr {
         Expr::Call(name, _, _) if name == "PrintInt#" || name == "PrintFloat#"
-            || name == "PutChar#" || name == "Print#" || name == "Println#" => true,
+            || name == "Println#" => true,
         _ => false,
     }
 }

@@ -22,6 +22,7 @@
 pub mod env_plugin;
 pub mod intrinsics;
 pub mod loader;
+pub mod print_plugin;
 
 use crate::ast::{StageKind, TopLevel};
 use crate::target::TargetConfig;
@@ -231,6 +232,7 @@ impl PluginManager {
         for entry in self.active_plugins(None) {
             let plugin = &entry.plugin;
             if plugin.stages().contains(&StageKind::Mid) {
+                eprintln!("run_mid_ast: active plugin '{}'", plugin.name());
                 plugin.on_ast(program, universe)?;
             }
         }

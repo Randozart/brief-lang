@@ -706,21 +706,9 @@ impl WebstackGenerator {
                     format!("await this.{}({})", ts_name, ts_args.join(", "))
                 } else {
                     match name.as_str() {
-                        "PrintInt#" | "PrintFloat#" => {
-                            format!("console.log({})", ts_args.join(", "))
-                        }
-                        "PutChar#" => {
-                            format!("process.stdout.write(String.fromCharCode({}))", ts_args.join(", "))
-                        }
-                        "GetEnvInt#" => {
-                            format!("Number(process.env[{}] || \"0\")", ts_args.join(", "))
-                        }
                         "SetStdoutBuf#" => {
                             let msg = format!("set_stdout_buf#({}) is a no-op in WASM", ts_args.join(", "));
                             format!("(() => {{ console.warn(\"{}\"); return 1; }})()", msg)
-                        }
-                        "GetEnv#" => {
-                            format!("(process.env[{}] || \"\")", ts_args.join(", "))
                         }
                         "Strlen#" => {
                             ts_args.first().map(|a| format!("({}).length", a)).unwrap_or_else(|| "0".to_string())
@@ -1009,11 +997,6 @@ impl WebstackGenerator {
                 let rust_args: Vec<String> = args.iter().map(|a| self.expr_to_rust(a)).collect();
                 let joined = rust_args.join(", ");
                 match name.as_str() {
-                    "PrintInt#" | "PrintFloat#" => {
-                        format!("print_int({})", joined)
-                    }
-                    "PutChar#" => format!("put_char({})", joined),
-                    "GetEnvInt#" => format!("get_env_int({})", joined),
                     "SetStdoutBuf#" => format!("set_stdout_buf({})", joined),
                     "Strlen#" => format!("strlen({})", joined),
                     "ReadFile#" => format!("read_file({})", joined),

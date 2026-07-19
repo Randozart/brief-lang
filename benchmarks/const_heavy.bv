@@ -21,7 +21,7 @@ rct txn tick [count < total][count == total] {
           + C15 + C16 + C17 + C18 + C19;
     count = count + 1;
     [count % 5000000 == 0] {
-        Print#(acc);
+        Print!(acc);
     };
     term;
 };

@@ -681,10 +681,15 @@ impl LlvmBackend {
             .map(|reg| format!("{} {}", self.llvm_type(&reg.ty), reg.name))
             .collect();
         let ret_type = sig.result_type.return_type().unwrap_or(Type::int());
-        // 2026-07-16: Meld inverse on return value (identity for now)
+        // 2026-07-19: Void-returning functions must not have a name assignment.
         let ret_llvm = self.llvm_type(&ret_type);
-        writeln!(out, "{}{} = call {} @{}({})", indent, v, ret_llvm, sig.name, arg_strs.join(", ")).ok();
-        TypedRegister { name: v.to_string(), ty: ret_type }
+        if ret_type == Type::Void {
+            writeln!(out, "{}call {} @{}({})", indent, ret_llvm, sig.name, arg_strs.join(", ")).ok();
+            TypedRegister { name: v.to_string(), ty: ret_type }
+        } else {
+            writeln!(out, "{}{} = call {} @{}({})", indent, v, ret_llvm, sig.name, arg_strs.join(", ")).ok();
+            TypedRegister { name: v.to_string(), ty: ret_type }
+        }
     }
 
     /// Emit a user function call.

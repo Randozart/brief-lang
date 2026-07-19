@@ -35,8 +35,7 @@ pub fn emit_intrinsic_call(
         "Store#" => return emit_store(backend, out, v, args, indent),
         "Copy#" => return emit_copy(backend, out, v, args, indent),
         "Fill#" => return emit_fill(backend, out, v, args, indent),
-        "Print#" => return emit_print(backend, out, v, args, indent),
-        "PutChar#" => return emit_putchar(backend, out, v, args, indent),
+
         "GetEnv#" => return emit_get_env(backend, out, v, args, indent),
         "GetEnvInt#" => return emit_get_env_int(backend, out, v, args, indent),
         "GetGlobalId#" => return emit_get_global_id(backend, out, v, args, indent),
@@ -172,47 +171,6 @@ fn emit_args(backend: &mut LlvmBackend, out: &mut String, args: &[Expr], indent:
 
 fn emit_arg(backend: &mut LlvmBackend, out: &mut String, arg: &Expr, indent: &str) -> String {
     backend.emit_expr(out, arg, indent).name
-}
-
-// ─── Print# (polymorphic — prints int, float, or string) ──────────────
-
-fn emit_print(
-    backend: &mut LlvmBackend, out: &mut String, v: &str,
-    args: &[Expr], indent: &str,
-) -> BTypedRegister {
-    let reg = backend.emit_expr(out, &args[0], indent);
-    // 2026-07-17: CTD replaces primitive — Float and String CTDs match directly.
-    match resolve_arg_ctd(backend, &reg).as_str() {
-        "Float" => {
-            let fl = backend.ensure_float_reg(out, indent, &reg);
-            writeln!(out, "{}call i32 (ptr, ...) @printf(ptr @FMT_FLOAT, double {})", indent, fl).ok();
-        }
-        "String" => {
-            writeln!(out, "{}call i32 (ptr, ...) @printf(ptr @FMT_STR, ptr {})", indent, reg.name).ok();
-        }
-        _ => {
-            writeln!(out, "{}call i32 (ptr, ...) @printf(ptr @FMT_INT, i64 {})", indent, reg.name).ok();
-        }
-    }
-    writeln!(out, "{}{} = add i64 0, 0", indent, v).ok();
-    BTypedRegister { name: v.to_string(), ty: Type::int() }
-}
-
-// ─── PutChar# (character output via C putchar) ─────────────────────────
-
-fn emit_putchar(
-    backend: &mut LlvmBackend, out: &mut String, v: &str,
-    args: &[Expr], indent: &str,
-) -> BTypedRegister {
-    let reg = emit_arg(backend, out, &args[0], indent);
-    // 2026-07-19: C putchar takes int (i32), but Brief Int is i64.
-    // Truncate to i32 for the call, then zext the result back to i64.
-    let truncated = backend.fun.gen_reg();
-    writeln!(out, "{}{} = trunc i64 {} to i32", indent, truncated, reg).ok();
-    let raw = backend.fun.gen_reg();
-    writeln!(out, "{}{} = call i32 @putchar(i32 {})", indent, raw, truncated).ok();
-    writeln!(out, "{}{} = zext i32 {} to i64", indent, v, raw).ok();
-    BTypedRegister { name: v.to_string(), ty: Type::int() }
 }
 
 // ─── Memory intrinsics ────────────────────────────────────────────────
