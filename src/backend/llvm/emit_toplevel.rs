@@ -363,17 +363,6 @@ impl LlvmBackend {
     }
 
 
-    pub(super) fn native_float_or_box(&mut self, out: &mut String, indent: &str, val_reg: &str) -> String {
-        if let Some(cached) = self.fun.reg_float_cache.get(val_reg) {
-            return cached.clone();
-        }
-        let tr = format!("%nftr{}", self.fun.txn_counter); self.fun.txn_counter += 1;
-        let fl = format!("%nffl{}", self.fun.txn_counter); self.fun.txn_counter += 1;
-        writeln!(out, "{}{} = trunc i64 {} to i32", indent, tr, val_reg).ok();
-        writeln!(out, "{}{} = bitcast i32 {} to float", indent, fl, tr).ok();
-        fl
-    }
-
     pub(super) fn ensure_float_reg(&mut self, out: &mut String, indent: &str, reg: &TypedRegister) -> String {
         // Check cache first — even float-typed registers may have their
         // native float counterpart cached (e.g. parameter marshaling boxes

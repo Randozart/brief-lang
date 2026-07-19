@@ -582,17 +582,6 @@ impl LlvmBackend {
 
     /// Convert an i64 boxed float to a native float register.
     /// Checks the `reg_float_cache` first to avoid duplicate bitcast chains.
-    pub(crate) fn i64_to_float_reg(&mut self, out: &mut String, reg: &str, indent: &str) -> String {
-        if let Some(cached) = self.fun.reg_float_cache.get(reg) {
-            return cached.clone();
-        }
-        let tr = self.next_reg_with_prefix("ftr");
-        let fl = self.next_reg_with_prefix("ffl");
-        writeln!(out, "{}{} = trunc i64 {} to i32", indent, tr, reg).ok();
-        writeln!(out, "{}{} = bitcast i32 {} to float", indent, fl, tr).ok();
-        fl
-    }
-
     /// Truncate an i64 (Int) register to i1 (Bool) for branch conditions.
     /// Non-Int types pass through as-is (already bool-width).
     pub(super) fn as_bool_reg(
