@@ -544,6 +544,14 @@ impl LlvmBackend {
                     Statement::TermBang(Some(e)) | Statement::Term(Some(e)) | Statement::Expression(e) => {
                         self.emit_expr(out, e, "  ");
                     }
+                    // 2026-07-19: Emit let bindings inside the hoisted guard
+                    // body so downstream identifier lookups resolve correctly.
+                    // Without this, let bindings (e.g. nbody's `let energy:
+                    // Float32 = ...`) are silently skipped, and the identifier
+                    // fallback creates an undefined global reference (@energy).
+                    Statement::Let { .. } => {
+                        self.emit_statement(out, stmt, "  ");
+                    }
                     _ => {}
                 }
             }
