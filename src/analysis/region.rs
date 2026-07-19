@@ -1342,18 +1342,43 @@ fn has_ffi_or_terminator_stmt(stmt: &Statement) -> bool {
     let mut work: Vec<&Statement> = vec![stmt];
     while let Some(s) = work.pop() {
         match s {
-            // 2026-07-19: Only Term/TermBang/InlineAsm block precomputation.
-            // Pure-Brief calls and # intrinsics are handled by the interpreter
-            // during eval_stmt. The old approach of checking expr_has_call
-            // was over-conservative — it blocked all function calls including
-            // pure-Brief ones like memcmp and utf8_validate.
             Statement::Term(_) | Statement::TermBang(_)
             | Statement::InlineAsm { .. } => return true,
-            Statement::Guarded(_, statements) => {
+            // 2026-07-19: Block precomputation for non-# calls (frgn, pure-Brief).
+            // # intrinsics are handled by the interpreter's execute_intrinsic
+            // and can be precomputed. All other calls prevent precomputation
+            // because the interpreter can't evaluate them efficiently.
+            Statement::Assign(_, expr) if expr_has_non_hash_call(expr) => return true,
+            Statement::Let { expr, .. } => {
+                if let Some(e) = expr { if expr_has_non_hash_call(e) { return true; } }
+            }
+            Statement::Expression(e) if expr_has_non_hash_call(e) => return true,
+            Statement::Guarded(condition, statements) => {
+                if expr_has_non_hash_call(condition) { return true; }
                 work.extend(statements.iter().rev());
             }
             Statement::Foreach { body, .. } => {
                 work.extend(body.iter().rev());
+            }
+            _ => {}
+        }
+    }
+    false
+}
+
+/// Check if an expression contains a call that does NOT end with '#'
+/// (# intrinsics are handled by the interpreter and can be precomputed).
+fn expr_has_non_hash_call(expr: &Expr) -> bool {
+    let mut work: Vec<&Expr> = vec![expr];
+    while let Some(s) = work.pop() {
+        match s {
+            Expr::Call(name, _, _) if !name.ends_with('#') => return true,
+            Expr::Tuple(elems) => work.extend(elems.iter().rev()),
+            Expr::Index(l, i) => { work.push(i); work.push(l); }
+            Expr::Field(o, _) => { work.push(o); }
+            Expr::Match(value, arms) => {
+                for arm in arms.iter().rev() { work.push(&arm.body); }
+                work.push(value);
             }
             _ => {}
         }

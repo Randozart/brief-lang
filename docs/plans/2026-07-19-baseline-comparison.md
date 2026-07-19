@@ -45,10 +45,12 @@ The old baseline is discarded. The new baseline is the current tip.
 ## Current Baseline Commit
 
 ```
-334a168 Fix: emit hoisted let bindings in post-loop prints
+8a827db 2026-07-11: Phase 3.4 — fix remaining = in type bodies across std lib
 ```
 
-This is the last commit before the intrinsic migration started (July 19). Includes Phase 1 fixes (terminator, SSO concat) but none of the migration/stabilization changes.
+This is the Phase 3 anchor commit. The Phase 3 benchmark results (benchmarks/results/2026-07-11-phase3-complete.md) were recorded at this point.
+
+Note: The performance difference between this baseline and the current compiler comes from the loop engine dispatch changed between Phase 3 and the July 18 feature set. Phase 3 uses a simple `loop_hdr`/`latch` direct loop. The current compiler uses a convergence-check loop (`.cm_`/`.cm_`) with per-field phi nodes, which is inherently slower per iteration. This is a known trade-off — the convergence loop enables better compile-time analysis and supports async dispatch, but at a runtime cost of ~2.2x for tight loops like nbody_newton.
 
 ## Comparison Script
 

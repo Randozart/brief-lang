@@ -20,7 +20,7 @@
 | float_math_nonzero | MATCH | MATCH | — |
 | sparse_dispatch | MATCH | MATCH | — |
 | print_loop | MATCH | MATCH | — |
-| nbody_newton | MATCH | MATCH | — |
+| nbody_newton | MATCH | MATCH | ~2.2× slower than Phase 3. Loop engine emit_countable_main convergence-check loop vs simple loop_hdr/latch (see baseline comparison doc) |
 | nbody_sqrt | SKIP | **MATCH** | ✅ SSA fix |
 | nbody_sqrt_idio | MISMATCH | **MATCH** | ✅ SSO + print fix |
 | fasta | MISMATCH | **MATCH** | ✅ SSO + print fix |
