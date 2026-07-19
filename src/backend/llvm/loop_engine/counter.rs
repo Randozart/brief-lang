@@ -206,6 +206,12 @@ impl LlvmBackend {
         // reuse of non-dominating float registers from inside the loop body.
         // Same pattern as emit_countable_main line 383 (nbody_newton bug).
         self.fun.reg_float_cache.clear();
+        // 2026-07-19: Clear last-val temps before hoisted prints — prevents
+        // SSA dominance violations from non-state let bindings (vx01,
+        // energy_step) that were defined in .fm_body but don't dominate
+        // .fm_end. load_last_val_temps repopulates state fields from %State.
+        self.fun.last_val_temps.clear();
+        self.fun.last_val_types.clear();
         let hoisted = self.fun.pending_post_hoist.clone();
         if !hoisted.is_empty() {
             self.load_last_val_temps(out);
