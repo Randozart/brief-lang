@@ -2123,9 +2123,12 @@ impl LlvmBackend {
         // allocating separate storage.
         let mut dedup_map: HashMap<String, String> = HashMap::new(); // key → canonical_name
         let mut alias_map: HashMap<String, String> = HashMap::new(); // name → canonical_name
-        for (name, (ty, expr)) in &self.ctx.constants {
+        // 2026-07-19: Sorted for deterministic IR order.
+        let mut sorted_constants: Vec<String> = self.ctx.constants.keys().cloned().collect();
+        sorted_constants.sort();
+        for name in &sorted_constants {
+            let (ty, expr) = &self.ctx.constants[name];
             let llvm_ty = match ty {
-                // 2026-06-29: Updated for fixed-width types
                 Type::Custom(__t) if __t == "Float64" => "double",
                 Type::Custom(__t) if __t == "Float" => "float",
                 Type::Custom(__t) if __t == "Int" || __t == "UInt" => "i64",
@@ -2155,7 +2158,11 @@ impl LlvmBackend {
             }
         }
         // Emit declaration for canonical names only; emit alias for duplicates
-        for (name, (ty, expr)) in &self.ctx.constants {
+        // 2026-07-19: Sorted for deterministic IR order.
+        let mut sorted_constants2: Vec<String> = self.ctx.constants.keys().cloned().collect();
+        sorted_constants2.sort();
+        for name in &sorted_constants2 {
+            let (ty, expr) = &self.ctx.constants[name];
             let canonical = alias_map.get(name).cloned().unwrap_or_else(|| name.clone());
             if canonical != *name {
                 let llvm_ty = match ty {
@@ -2352,10 +2359,12 @@ impl LlvmBackend {
         writeln!(out).ok();
 
         // Emit cell channel globals and persistent cell thread functions
-        let persistent_cells: Vec<crate::ast::CellDef> = self.ctx.cell_defs.values()
+        // 2026-07-19: Sorted for deterministic IR.
+        let mut persistent_cells: Vec<crate::ast::CellDef> = self.ctx.cell_defs.values()
             .filter(|c| c.is_persistent)
             .cloned()
             .collect();
+        persistent_cells.sort_by_key(|c| c.name.clone());
         for cell in &persistent_cells {
             if self.cell_thread_names.contains(&cell.name) {
                 self.emit_cell_channel_globals(&mut out, cell);

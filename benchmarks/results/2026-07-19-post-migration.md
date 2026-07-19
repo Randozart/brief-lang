@@ -20,7 +20,7 @@
 | float_math_nonzero | MATCH | MATCH | — |
 | sparse_dispatch | MATCH | MATCH | — |
 | print_loop | MATCH | MATCH | — |
-| nbody_newton | MATCH | MATCH | ~2.2× slower than Phase 3. Loop engine emit_countable_main convergence-check loop vs simple loop_hdr/latch (see baseline comparison doc) |
+| nbody_newton | MATCH | MATCH | ~2.2× slower than Phase 3 (13.5s vs 6.1s). Cause: per-field phi loop (emit_countable_main) with 7+ phi nodes + backedge regs. Memory counter loop (Phase 3 style) can't be used due to swan song float→i64 type conversion in load_last_val_temps. See docs/plans/2026-07-19-close-loop-engine-gap.md. |
 | nbody_sqrt | SKIP | **MATCH** | ✅ SSA fix |
 | nbody_sqrt_idio | MISMATCH | **MATCH** | ✅ SSO + print fix |
 | fasta | MISMATCH | **MATCH** | ✅ SSO + print fix |

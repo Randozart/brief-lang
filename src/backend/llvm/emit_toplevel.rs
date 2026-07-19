@@ -637,7 +637,11 @@ impl LlvmBackend {
 
     pub(super) fn declare_state_type(&mut self, out: &mut String) {
         // Emit %CellState.<name> types for persistent cells (used by thread functions)
-        for (cell_name, (cs_imap, cs_tys)) in &self.ctx.cell_state_types {
+        // 2026-07-19: Sorted for deterministic IR.
+        let mut sorted_cell_types: Vec<&String> = self.ctx.cell_state_types.keys().collect();
+        sorted_cell_types.sort();
+        for cell_name in &sorted_cell_types {
+            let (cs_imap, cs_tys) = &self.ctx.cell_state_types[*cell_name];
             write!(out, "%CellState.{} = type {{ ", cell_name).ok();
             for (i, f) in cs_tys.iter().enumerate() {
                 if i > 0 { write!(out, ", ").ok(); }
@@ -986,8 +990,15 @@ impl LlvmBackend {
             self.emit_field_init_value(out, indent, init_clone, &ty, &gep_reg, *idx, true);
         }
         // Initialize cache slots for LazyCached fields: cache_value = 0, valid_flag = 0
-        for (_field_name, targets) in &self.ctx.cache_slots {
-            for (_target_name, &(cache_idx, valid_idx)) in targets {
+        // 2026-07-19: Sorted for deterministic IR.
+        let mut sorted_cache: Vec<&String> = self.ctx.cache_slots.keys().collect();
+        sorted_cache.sort();
+        for _field_name in &sorted_cache {
+            let targets = &self.ctx.cache_slots[*_field_name];
+            let mut sorted_targets: Vec<&String> = targets.keys().collect();
+            sorted_targets.sort();
+            for _target_name in &sorted_targets {
+                let &(cache_idx, valid_idx) = &targets[*_target_name];
                 let cp = format!("%icp_{}", cache_idx);
                 writeln!(out, "{}{} = getelementptr inbounds %State, ptr {}, i32 0, i32 {}", indent, cp, state_ptr, cache_idx).ok();
                 writeln!(out, "{}store i64 0, ptr {}, align {}", indent, cp, self.align_of("i64")).ok();
