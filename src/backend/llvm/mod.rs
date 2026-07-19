@@ -923,9 +923,16 @@ impl LlvmBackend {
         }
         // 2026-07-19: Use native LLVM type from Brief type metadata.
         // Float32 → "float", Float64 → "double", Int → "i64", Bool → "i8".
+        // Ptr<T> stays as "i64" — existing codegen paths load it and use
+        // inttoptr i64 to ptr. Changing to "ptr" would break those paths.
         // Cell state types already use native types (mod.rs:3546).
         // LLVM verifier catches any codegen path that mismatches the struct.
-        self.ctx.field_types.push(self.llvm_type(ty));
+        let push_ty = if matches!(ty, Type::Ptr(_)) {
+            "i64".to_string()
+        } else {
+            self.llvm_type(ty)
+        };
+        self.ctx.field_types.push(push_ty);
         self.ctx.field_brief_types.push(ty.clone());
     }
 
