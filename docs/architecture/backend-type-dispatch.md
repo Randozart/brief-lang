@@ -1,5 +1,16 @@
 # Backend Type Dispatch Architecture
 
+> **2026-07-20:** This document describes the superseded CTD/ALU/config
+> architecture. See `docs/architecture/casting-protocol.md` for the current
+> hashword-based system. Key changes:
+>
+> - `ctd` and `alu` metadata: **removed** — hashwords in op signatures replace them
+> - `config/llvm-ops.toml`: **removed** — backend has intrinsic `#Category` knowledge
+> - `config/ctd-llvm-mappings.toml`: **removed** — `llvm_type` derived from structure
+> - `op Add ~> "int.add"` (string binding): **replaced** by `op Add(#Int, #Int)`
+>
+> The document is retained for historical reference during the transition.
+
 ## Design Philosophy
 
 The Brief compiler does NOT hardcode primitive type mappings in Rust match arms.

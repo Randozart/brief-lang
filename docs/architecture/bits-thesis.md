@@ -1,8 +1,32 @@
 # The Bits Thesis
 
 **Date:** 2026-07-11  
+**Updated:** 2026-07-20 (hashword protocol architecture)  
 **Status:** Foundational  
 **Applies to:** Brief compiler core architecture, interpreter, type system, backends
+
+---
+
+## 2026-07-20 Update: Hashword Protocol Architecture
+
+The metadata properties `primitive`, `ctd`, and `alu` are superseded by
+the **hashword protocol system**. Types no longer carry `primitive <~ "Int"`
+to tell the backend what they are. Instead, they declare ops using `#Category`
+hashwords — `op Add(#Int, #Int)` — which are backend directives.
+
+| Old mechanism | Replaced by |
+|---|---|
+| `primitive <~ "Int"` + `llvm <~ "i64"` | Structure + `op Add(#Int)` |
+| `ctd <~ "Float"` + `alu <~ "Float"` | Structure + `op Add(#Float)` |
+| `op Add ~> "int.add"` (string binding) | `op Add(#Int, #Int)` (hashword directive) |
+| TOML config (`llvm-ops.toml`, `ctd-llvm-mappings.toml`) | Removed — hashword backend intrinsics |
+| `category` inference (2026-07-19 attempt) | Removed — types don't belong to categories |
+
+**The Bits thesis is unaffected.** `Bits` remains the sole primitive. What
+changes is how types express their semantics: through ops with hashword
+signatures, not through metadata tags. See `docs/architecture/casting-protocol.md`
+and `docs/plans/2026-07-20-extensible-number-types-final.md` for the full
+architecture.
 
 ---
 

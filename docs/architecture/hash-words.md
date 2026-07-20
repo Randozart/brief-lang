@@ -3,6 +3,30 @@
 Compiler-internal tokens prefixed with `#` that carry special meaning.
 They are lexed as distinct tokens, never as identifiers.
 
+## 2026-07-20: Hashword Categories (`#Int`, `#Float`, `#String`, etc.)
+
+Hashwords now serve an additional role as **backend category directives** in
+op signatures:
+
+```brief
+type Int <: Bits {
+    op Add(#Int, #Int);       // "backend, emit whatever i64 add means to you"
+    op Sub(#Int, #Int);
+    op Mul(#Int, #Int);
+};
+
+type Bfloat16 { data: Bits<16>;
+    op Add(#Float, #Float) = bfloat_add(#L, #R);  // override with custom fn
+};
+```
+
+A hashword in an op signature tells the backend: **handle this operation
+using your intrinsic knowledge of the `#Category` protocol.** The backend
+decides what `#Int` addition means in its own terms (LLVM → `add i64`,
+CIRCT → hardware adder, SPIR-V → `OpIAdd`).
+
+See `docs/architecture/casting-protocol.md` for the protocol system.
+
 ## Current Words
 
 | Token | Meaning | Used In |

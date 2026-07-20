@@ -1,5 +1,12 @@
 # Brief Compiler Architecture Overview
 
+> **2026-07-20:** The three-layer architecture (CTD + ALU + TOML config) described
+> below is superseded by the **hashword protocol system**. See
+> `docs/architecture/casting-protocol.md` and
+> `docs/plans/2026-07-20-extensible-number-types-final.md`. TOML config files
+> (`llvm-ops.toml`, `ctd-llvm-mappings.toml`) are removed; hashwords in op
+> signatures are the replacement.
+
 ## Pipeline
 
 ```

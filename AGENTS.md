@@ -58,7 +58,11 @@ arithmetic replaces a compiler intrinsic + Rust match arm. A user writing
 `MyQueue<T>` with `InsertAt <~ my_push(#L, #R)` gets the same `<-` syntax
 without touching the compiler.
 
-### Three-Layer Architecture
+### Three-Layer Architecture (Pre-2026-07-20)
+
+**Superseded:** The TOML config layer and CTD/ALU metadata are replaced by
+the hashword protocol system. See `docs/architecture/casting-protocol.md`
+and `docs/plans/2026-07-20-extensible-number-types-final.md`.
 
 | Layer | File | Role |
 |-------|------|------|
@@ -72,11 +76,35 @@ stdlib map `+` to the right op per type. A missing config template for a
 given type+width should be caught early — the frontend knows what the backend
 can compile.
 
+### Hashword Protocol Architecture (Current)
+
+Types declare operations using hashword categories as backend directives:
+
+```brief
+type Int <: Bits {
+    op Add(#Int, #Int);       // backend emits its native integer add
+    op Sub(#Int, #Int);
+};
+```
+
+| Concept | What it replaces | Mechanism |
+|---|---|---|
+| Hashword `#Category` | TOML `(op, primitive, bytes)` template | Backend intrinsic knowledge |
+| `op Add(#Float)` | `op Add ~> "float.add"` + config entry | Backend knows `fadd` |
+| Structure + fields | `ctd <~ "Float"` + `llvm <~ "float"` | `llvm_type` derived from layout |
+| `op Add(Posit32) = fn(#L, #R)` | TOML custom template | Auto-`alwaysinline` |
+| `Cast(#Bits)` implicit | `ctd_to_llvm()` fallback chain | Every type IS bits |
+
 ### Hash Words Convention
 
 `#L`, `#R`, `#T` are compiler-internal positional markers for op bindings.
 They are lexed as distinct tokens (not identifiers) and resolved at codegen
 time to concrete registers. See `docs/architecture/hash-words.md`.
+
+**`#Category` hashwords** (`#Int`, `#Float`, `#String`, `#Bool`, `#Char`,
+`#Bits`) serve as backend directives in op signatures. `op Add(#Int)` means
+"backend, use your intrinsic knowledge of integer addition" — no TOML config
+file needed. See `docs/architecture/casting-protocol.md`.
 
 ### Provenance Tracking
 

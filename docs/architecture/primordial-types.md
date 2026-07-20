@@ -1,8 +1,26 @@
 # Primordial Types — Pragmatic Companion to the Bits Thesis
 
 **Date:** 2026-07-16
+**Updated:** 2026-07-20 (hashword protocol architecture)
 **Status:** Active
 **Applies to:** TypeUniverse, normalizer, all backends
+
+> **2026-07-20:** The `primitive`, `ctd`, and `alu` metadata properties
+> described in this document are superseded. Primordial types now carry
+> hashword op signatures instead of metadata tags:
+>
+> ```brief
+> type Int <: Bits {
+>     op Add(#Int, #Int);  // not primitive <~ "Int" + llvm <~ "i64"
+> };
+> ```
+>
+> The primordial seed table still exists as a convenience — it pre-populates
+> the universe with well-known type names so `--no-stdlib` works. But the
+> semantic identity of a type is now determined by its op signatures, not
+> by `primitive`/`ctd`/`alu` metadata.
+>
+> See `docs/architecture/casting-protocol.md`.
 
 ---
 
@@ -119,24 +137,25 @@ struct type lowering, state slot width, and `is_string_like` detection.
 
 ## Override Semantics
 
-When a source file defines `type Int <: Bits { bytes <~ 4; ... }`, the
+When a source file defines `type Int <: Bits { data: Bits<32>; ... }`, the
 normalizer's `register_typedefs` function calls `universe.register(rt)`,
 which does `self.types.insert("Int", rt)`. This **replaces** the primordial
-`Int` entry. The replacement is complete — all primordial metadata is lost,
-and the user's metadata is authoritative.
+`Int` entry. The replacement is complete — all primordial ops and layout
+are lost, and the user's definition is authoritative.
 
 This means:
 
-- `type Int <: Bits { bytes <~ 4; primitive <~ float; }` → Int is now a
-  4-byte float named "Int". Backends see `primitive=float`, `bytes=4` and
-  emit `float` LLVM type. The name is irrelevant to codegen.
-- `type String <: Bits { bytes <~ 4; primitive <~ signed; }` → String is
-  now a 4-byte signed integer. Melds that reference `String` will validate
-  against this new definition.
+- `type Int { data: Bits<32>; op Add(#Float, #Float) = int_add_float(#L,#R); }`
+  → Int is now a 32-bit type that adds like a float. The name "Int" is
+  irrelevant to codegen — only the layout and ops matter.
+- `type String { data: Bits<32>; }` → String is now a 32-bit scalar.
+  Operations that expected `#String` protocol ops (`Extract(#Char)`,
+  `InsertAt(#Char)`, `Concat(#String)`) will fail at the typechecker
+  because the user's definition doesn't declare them.
 
 The "deals with it" contract: once you declare a type with a given name, you
 own its semantics. The compiler will not warn you that `String` is now a
-float — it will emit a float called `String`.
+float-like type — it will emit whatever the layout and ops dictate.
 
 ---
 

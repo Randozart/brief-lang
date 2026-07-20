@@ -1,5 +1,12 @@
 # Intrinsics vs Stdlib — The Dividing Line
 
+> **2026-07-20:** The TOML config layer described in this document
+> (`config/llvm-ops.toml`, `config/ctd-llvm-mappings.toml`) is removed.
+> Hashword categories (`#Int`, `#Float`, `#String`) in op signatures are the
+> replacement — the backend has intrinsic knowledge of `#Category` operations.
+> Custom types use explicit `op Add(MyType) = fn(#L, #R)` bindings with
+> auto-`alwaysinline`. See `docs/architecture/casting-protocol.md`.
+
 ## The Rule
 
 **Everything that MUST hold with no stdlib loaded is an intrinsic.**

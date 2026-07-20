@@ -1,0 +1,368 @@
+# Extensible Number Types — Final Architecture
+
+**Date:** 2026-07-20
+**Status:** Plan — ready for implementation
+
+---
+
+## The Core Question
+
+How can a programmer define a type (Posit32, ASCIIString, Bfloat16, Decimal64) in pure Brief —
+layout + operations — and have the backend compile it without hardcoded compiler knowledge,
+without TOML config files, and with LLVM optimizing the result as well as equivalent C code?
+
+## The Answer
+
+**Types are layout + ops. Hashwords (`#Category`) are backend directives, not type
+declarations. A type never "belongs to" a category — it interacts with one through
+its op signatures.**
+
+## Architecture
+
+### Layer 0: Bits (the only primitive)
+
+```brief
+// Exists implicitly. No layout. Only bitwise ops.
+op And(#Bits, #Bits);
+op Or(#Bits, #Bits);
+op Xor(#Bits, #Bits);
+op Not(#Bits);
+op Shl(#Bits, #Bits);
+op Shr(#Bits, #Bits);
+```
+
+Every type implicitly inherits from Bits. No explicit `<: Bits` needed.
+
+### Layer 1: Structure (fields determine layout)
+
+A type's layout is determined by its fields — not by metadata properties:
+
+```brief
+type ASCIIString {
+    data: Bits<64>;     // pointer
+    len: Bits<64>;      // length
+    op Add(#String) = ascii_concat(#L, #R);
+};
+```
+
+The normalizer computes `bytes = 16` from the fields. `llvm_type = "{ i64, i64 }"`.
+No `bytes <~`, no `alignment <~`, no `ctd <~`, no `alu <~` metadata needed.
+
+For flat numeric types without field syntax:
+
+```brief
+type Bfloat16 { data: Bits<16>; };
+// normalizer: bytes=2, llvm_type="i16" (raw bits)
+// With op Add(#Float): backend knows to use bfloat hardware
+```
+
+### Layer 2: Operations (ops define interaction)
+
+```brief
+type Bfloat16 {
+    data: Bits<16>;
+    op Add(#Float, #Float) = bfloat_add(#L, #R);  // backend intrinsic
+    op Mul(#Float, #Float) = bfloat_mul(#L, #R);
+};
+
+type Posit32 {
+    data: Bits<32>;
+    // No hashword ops — fully defined through explicit defn bindings
+    op Add(Posit32) = posit32_add(#L, #R);
+    op Mul(Posit32) = posit32_mul(#L, #R);
+};
+```
+
+Hashwords in op signatures are BACKEND DIRECTIVES:
+- `op Add(#Int, #Int)` = "backend, handle this as integer addition — you know what that is"
+- `op Add(#Float, #Float)` = "backend, handle this as float addition — you know what that is"
+- `op Add(#String, #String)` = "backend, handle this as string concatenation"
+
+No TOML config needed. The backend has intrinsic knowledge of `#Category` operations.
+
+### Layer 3: No TOML Config
+
+| File | Status | Why |
+|---|---|---|
+| `config/llvm-ops.toml` | **Removed** | Backend has intrinsic knowledge of `#Category` ops |
+| `config/ctd-llvm-mappings.toml` | **Removed** | Normalizer derives `llvm_type` from structure alone |
+| `config/targets.toml` | **Kept** | Target selection, plugin wiring, compiler rewiring |
+
+The only op mechanism that isn't backend-intrinsic is `op Add(Posit32) = fn(#L, #R)` —
+explicit bindings to `defn` functions, which are auto-`alwaysinline`.
+
+### Layer 4: Hashword Property Access (`#Category.#property`)
+
+`#Category :> property` extracts compile-time structural properties:
+
+| Expression | Resolves to | LLVM emission |
+|---|---|---|
+| `#Float.#bytes` | `4` | `add i64 0, 4` (constant) |
+| `#String.#fields.0` | data pointer field | `extractvalue {i64, i64} %reg, 0` |
+| `#String.#fields.1` | length field | `extractvalue {i64, i64} %reg, 1` |
+| `#String.#Fields(0,1)` | both fields | `extractvalue` pair |
+
+The `:>` projection system already exists (`list :> Size`, `val :> Bytes`).
+`#Category.#property` extends it: the source is a hashword category, not a value.
+
+### Layer 5: Protocol Ops (Category Universal Currency)
+
+Every hashword category defines a set of ops that ALL backends must implement.
+These form the "common language" for cross-category type conversions:
+
+| Category | Protocol ops | Universal currency |
+|---|---|---|
+| `#String` | `Extract(#Char)`, `InsertAt(#Char)`, `Concat(#String)`, `:> Size`, `Cast(#Bits)` | `Char` |
+| `#Char` | `Cast(#Int)`, `Eq(#Char)`, `Lt(#Char)` | Unicode scalar (`UInt32`) |
+| `#Int` | `Add(#Int)`, `Sub(#Int)`, `Mul(#Int)`, `Div(#Int)`, `And(#Bits)`, `Not(#Bits)` | Bit pattern (`#Bits`) |
+| `#Float` | `Add(#Float)`, `Mul(#Float)`, `Sqrt(#Float)`, `Cast(Float64)`, `Cast(#Bits)` | IEEE 754 `Float64` |
+| `#Bits` | `And(#Bits)`, `Or(#Bits)`, `Xor(#Bits)`, `Not(#Bits)`, `Shl(#Bits)`, `Shr(#Bits)` | Raw integer width |
+
+A conversion function between two `#String` types speaks `Char` — the universal text
+currency. The backend's `Extract(#Char)` and `InsertAt(#Char)` decode/encode at the
+boundary, hiding the internal encoding.
+
+```brief
+inline defn any_string_to_ascii(source: #String) -> ASCIIString {
+    let len = source :> Size;
+    let result = ASCIIString::alloc(len);
+    let mut i = 0;
+    do {
+        let c: Char = source :> Extract(i);
+        result :> InsertAt(i, c);
+        i = i + 1;
+    } while i < len;
+    result
+};
+```
+
+Float conversion similarly uses `Float64` (IEEE 754 double) as the universal currency:
+
+```brief
+inline defn any_float_to_posit(source: #Float) -> Posit32 {
+    let intermediate: Float64 = source :> Cast(Float64);
+    posit_from_double(intermediate)
+};
+```
+
+### Layer 6: Inheritance (`<:`)
+
+```brief
+type ASCIIString <: String {
+    op Add(ASCIIString) = ascii_add(#L, #R);  // override String::Add
+};
+```
+
+Inherits all of String's ops. Overrides only what's declared. String is a primordial
+type that exists by default — the user overwrites it by redeclaring.
+
+---
+
+## What Gets Removed
+
+### From stdlib .bv files
+
+```diff
+ type Int <: Bits {
+-    bytes <~ 8;
+-    alignment <~ 8;
+-    llvm <~ "i64";
+-    tbaa <~ "Int";
+-    default_width <~ 64;
+-    commuting <~ true;
+-    op Add ~> "int.add";
+-    op Sub ~> "int.sub";
++    // Layout: implicit from Bits<64> or equivalent
++    op Add(#Int, #Int);
++    op Sub(#Int, #Int);
++    op Mul(#Int, #Int);
++    op Div(#Int, #Int);
++    op And(#Bits, #Bits);
++    op Or(#Bits, #Bits);
++    op Xor(#Bits, #Bits);
++    op Not(#Bits);
++    op Shl(#Bits, #Bits);
++    op Shr(#Bits, #Bits);
++    op Cast(#Bits);
+ };
+```
+
+No `llvm <~`. No `alu <~`. No `op ... ~> "..."` string names. Op signatures use
+`#Category` hashwords. The backend decides what `add i64` means.
+
+### From the compiler
+
+- `config/llvm-ops.toml` — **removed entirely**
+- `config/ctd-llvm-mappings.toml` — **removed entirely**
+- `src/config.rs` — `OpConfig`, `TypeConfig` types **removed** (or reduced to empty)
+- `ctd_to_llvm()` hardcoded table — **replaced** with structure-driven inference
+- `alu` property — **removed** from the keep list, no longer stamped or read
+- `category` property — **removed** from the normalizer (types don't belong to categories)
+- `operator_llvm_type()` — **simplified** to read `llvm_type` from structure
+- `is_native_float()` — **simplified** to check op signatures, not properties
+- `derive_llvm_type()` config fallback — **removed** with TOML config
+
+### What stays
+
+- `config/targets.toml` — target selection, plugin wiring
+- `config/module-registry.toml` — import path resolution
+- `config/alloc-strategies.toml` — allocation templates
+
+## What the Normalizer Does (Revised)
+
+The normalizer's job shrinks to:
+
+1. **Compute `llvm_type` from structure**: fields determine layout. No metadata needed.
+   - Struct with two `Bits<64>` fields → `{ i64, i64 }`
+   - Single `Bits<N>` field → `i{N}` (e.g., `Bits<32>` → `i32`)
+   - 2-byte struct with `op Add(#Float)` → `bfloat` or `half` based on naming convention
+   - Explicit `llvm <~ "..."` override validated and used as-is
+
+2. **Parse layout + compute bytes/alignment** from field structure (already exists)
+
+3. **Stamp `llvm_type` on every type** (already exists, just simplified)
+
+4. **Validate op signatures**: hashword categories must be recognized by the backend.
+   Unknown hashwords (`#MyCustomCategory`) produce a compiler error
+   ("backend does not understand #MyCustomCategory").
+
+5. **Metadata keep list**: stripped down to just `llvm_type`, `fields`, and `tbaa`.
+
+## Implementation Phases
+
+### Phase 1: Simplify Normalizer (remove metadata-driven inference)
+
+Remove all metadata properties that are no longer needed:
+- Remove `alu` from the keep list
+- Remove `ctd` from the keep list
+- Remove `category` inference (types don't belong to categories)
+- Remove `encoding` from the keep list
+- Remove `tbaa_parent` (for now — revisit in Phase 5)
+- Simplify `llvm_type` computation to use structure only
+
+**Rationale:** `ctd` was the old identity system. `alu` was the old hardware dispatch.
+`category` was our intermediate attempt at structural inference. None are needed —
+hashwords in op signatures replace all three.
+
+### Phase 2: Remove TOML Config Files
+
+- Delete `config/llvm-ops.toml` — backend has intrinsic knowledge of `#Category` ops
+- Delete `config/ctd-llvm-mappings.toml` — normalizer derives `llvm_type` from structure
+- Remove `OpConfig::load()` and `TypeConfig::load()` calls from codegen
+- Remove `derive_llvm_type()` (no more TOML fallback)
+- Simplify `ctd_to_llvm()` — or remove entirely, replaced by structure-driven inference
+
+### Phase 3: Rewrite Stdlib Type Declarations
+
+Remove all metadata properties from stdlib `.bv` files:
+- Remove `bytes <~`, `alignment <~`, `llvm <~`, `tbaa <~`, `default_width <~`, `commuting <~`
+- Replace `op Add ~> "int.add"` with `op Add(#Int, #Int)`
+- Replace all named op bindings with hashword category directives
+
+The stdlib becomes purely about what ops each type declares, not how they're implemented.
+
+### Phase 4: Rewrite Op Signatures in Backend (Hashword Dispatch)
+
+The codegen's op dispatch changes from:
+```
+look up op template in TOML config → emit template string
+```
+To:
+```
+read op signature → if RHS type is #Category → emit backend intrinsic
+                      else → emit call to bound defn (auto-alwaysinline)
+```
+
+The backend has intrinsic handlers for each `#Category` kenn it recognizes:
+- `emit_int_binop(op, regs, llvm_ty)` for `#Int` ops
+- `emit_float_binop(op, regs, llvm_ty)` for `#Float` ops
+- `emit_string_op(op, regs, llvm_ty)` for `#String` ops
+- etc.
+
+### Phase 5: Protocol Ops Validation
+
+The typechecker validates that `#Category` types implement the required protocol ops:
+- `#String` types must `op Extract(#Char)` and `op InsertAt(#Char)`
+- `#Float` types must `op Cast(Float64)`
+- etc.
+
+This is a validation pass, not a codegen concern.
+
+### Phase 6: Extend `:>` Projection for Hashwords
+
+Extend the existing `:>` projection system to work with hashword categories:
+- `#String.#fields.0` — compile-time field extraction
+- `#Float.#bytes` — compile-time byte width
+- `#Type.#llvm` — compile-time LLVM type string
+
+### Phase 7: Target Config (<:> targets.toml)
+
+Extend `config/targets.toml` to declare which hashwords a backend supports:
+```toml
+[".bv"]
+backend = "llvm"
+hashwords = ["#Int", "#Float", "#Bool", "#Char", "#String", "#Bits"]
+```
+
+A type declaring `op Add(#MyCustomHashword)` on a backend that doesn't recognize
+`#MyCustomHashword` produces a compile error.
+
+---
+
+## Documentation Updates
+
+| Document | What changes |
+|---|---|
+| `docs/architecture/overview.md` | Architecture section — add type-ops-hashword model |
+| `docs/architecture/intrinsics-vs-stdlib.md` | Hashwords replace TOML config |
+| `docs/architecture/backend-type-dispatch.md` | Complete rewrite — hashword dispatch |
+| `docs/architecture/hash-words.md` | Add `#Category` semantics, `:#property` access |
+| `docs/plans/2026-07-20-extensible-number-types-final.md` | This file |
+
+## Key Decisions (for Review)
+
+| Decision | What it replaces | Why |
+|---|---|---|
+| Hashwords are backend directives | TOML op templates | Backend has intrinsic knowledge of its own primitives |
+| Structure determines layout | `bytes <~`, `ctd <~`, `alu <~` | A type IS its fields — metadata is optional hints |
+| Types don't belong to categories | Category inference | A type interacts with `#Int` when its ops say so |
+| Protocol ops define universal currency | Ad-hoc conversion logic | `Char` for String, `Float64` for Float, `#Bits` for Int |
+| `:>` is compile-time property access | Hardcoded projection list | Every type's fields are accessible generically |
+| `defn` bound to `op` = auto-`alwaysinline` | `inline` keyword | The binding declares the intent |
+| TOML removed except `targets.toml` | Full config directory | The config was bridging a gap that doesn't exist |
+
+---
+
+## Protocol Shapes (Adopted from LLVM)
+
+| Hashword | Protocol shape | Backend contract |
+|---|---|---|
+| `#Int` | `i64` | Add, Sub, Mul, Div, And, Or, Xor, Not, Shl, Shr |
+| `#Float` | IEEE 754 binary32/64 | Add, Sub, Mul, Div, Sqrt, FMA, Cast(Float64) |
+| `#Bool` | `i1` (zero-extended to i8 for storage) | And, Or, Not |
+| `#Char` | Unicode scalar (`i32`) | Cast(#Int), Eq, Lt |
+| `#String` | UTF-8 byte sequence | Extract(#Char), InsertAt(#Char), Concat(#String), :> Size |
+| `#Bits` | Raw `iN` (width varies) | And, Or, Xor, Not, Shl, Shr, Cast(N) — the universal fallback |
+
+Every backend MUST be able to translate these protocol shapes to its own internal
+representation. A backend that cannot represent `i64` (e.g., a pure FPGA synthesis
+backend with no 64-bit datapath) would decompose it into smaller units, but must
+still provide the `#Int` protocol ops.
+
+The programmer's guarantee: `#Int` always means `i64` at the protocol level.
+`#String` always means UTF-8. A custom type can rely on these shapes for its
+`inline defn` implementations.
+
+---
+
+## Open Questions (for the Architecture Doc)
+
+1. **2-byte float ambiguity**: Structure alone can't distinguish `half` from `bfloat`.
+   Options: name convention (contains "bf" → bfloat), or a minimal hint property.
+   The user suggested a hint that says "if you can't figure it out, pick this."
+
+2. **Field syntax for flat types**: `type Bfloat16 { data: Bits<16>; }` vs. a layout
+   attribute. The field syntax is consistent but may feel verbose for single-field types.
+
+3. **Bits parameter vs type parameter**: `Bits<16>` could be `Bits<:16>` or just
+   `#Int` category with specific bytes. Needs syntax resolution.
