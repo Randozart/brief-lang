@@ -414,6 +414,26 @@ Resolution priority:
 The discriminator is purely a routing hint — the conversion function's
 implementation handles the actual semantics (hex decoding, unit conversion).
 
+### Discriminator validation
+
+The parser validates that `pre:`/`suf:` values do not contain symbols that
+conflict with language operators:
+
+```brief
+op Parse(Decimal, pre: "@hex") = parse_hex(#L);  // ERROR: '@' is reserved
+op Parse(Decimal, pre: "0x") = parse_hex(#L);    // OK
+```
+
+Forbidden symbols: `# ! @ & $ ( ) [ ] < > * , ; : = ~ % { } " ' | \`.
+
+### TaggedLiteral (AST representation)
+
+When the lexer encounters a prefixed or suffixed literal like `0xFF00FF`
+or `FF00FFh`, the parser produces an `Expr::TaggedLiteral(i64, String)`
+variant where the second field carries the discriminator tag (`"0x"`,
+`"h"`, `"bf"`, etc.). The typechecker's `try_coerce_via_parse` matches
+the discriminator against `pre:`/`suf:` qualifiers on Parse ops.
+
 ### Parse + Cast interaction
 
 After Parse constructs a value, `Cast#()` may fire if the parsed value's
@@ -541,8 +561,10 @@ A subtype may override with its own `op Parse(Form) = fn(#L)`.
 | 7. Meld (explicit) | ⏳ Specified | Need updated meld parser + validation |
 | 8. Protocol shapes | ✅ Documented | casting-protocol.md |
 | 9. Type param constraints | ✅ Complete | compile.rs validate_constraints |
-| 10. Parse protocol | ⏳ Specified | Need op Parse parser + resolution |
-| 10a. Round-trip verification | ⏳ Specified | Need symbolic exec of Parse→Cast→Produce |
+| 10. Parse protocol | ✅ Complete | Parser, typechecker, try_coerce_via_parse |
+| 10a. Round-trip verification | ✅ Complete | protocol_verify.rs — symbolic exec |
+| 10b. Discriminator qualifiers | ✅ Complete | pre:/suf:, validate_discriminator |
+| 10c. TaggedLiteral | ✅ Complete | TaggedLiteral(i64, String) AST variant |
 
 ---
 
@@ -561,4 +583,7 @@ A subtype may override with its own `op Parse(Form) = fn(#L)`.
 | `src/type_universe/operators.rs` | Parse op resolution in literal construction |
 | `src/backend/llvm/emit_expr.rs` | Expr::Quoted/Decimal/Bare dispatch through Parse ops |
 | `src/interpreter/mod.rs` | Compile-time literal construction via Parse ops |
+| `src/protocol_verify.rs` | Round-trip verification engine (new file) |
+| `src/typechecker/mod.rs` | try_coerce_via_parse, find_parse_op, TaggedLiteral handling |
+| `src/ast/expr.rs` | Expr::TaggedLiteral(i64, String) variant |
 | `lib/std/types/bootstrap.bv` | Add `op Parse(#Int)`, `op Parse(#Float)`, `op Parse(#String)` |

@@ -481,6 +481,23 @@ Parse ops can declare optional prefix and suffix qualifiers:
 Resolution: discriminator match always wins over unqualified match.
 The most specific qualifying Parse op is chosen before the fallback.
 
+### Discriminator validation
+
+The parser validates that `pre:`/`suf:` values contain no symbols that
+conflict with language operators. Forbidden symbols:
+`# ! @ & $ ( ) [ ] < > * , ; : = ~ % { } " ' | \`.
+
+```brief
+op Parse(Decimal, pre: "@hex") = parse_hex(#L);  // ERROR: '@' reserved
+```
+
+### TaggedLiteral AST variant
+
+When the lexer encounters a prefixed literal (`0xFF00FF`) or suffixed
+literal (`FF00FFh`), the parser produces `Expr::TaggedLiteral(i64, String)`
+with the discriminator tag. The typechecker matches discriminator tags
+against `pre:`/`suf:` qualifiers on Parse ops.
+
 ### Replacement of `formatting <~`
 
 The `formatting <~` metadata property and the `codec { ... }` declaration form

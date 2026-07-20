@@ -1,262 +1,162 @@
 # Defining Custom Types
 
 Brief lets you define types that behave like built-in `Int`, `Float`, and
-`String`. The same machinery (TypeUniverse) that handles primitives also
-handles your custom types — no special compiler support needed.
+`String`. The same hashword protocol system that drives primitives also
+drives your custom types — no special compiler support needed.
 
-## 1. `type MyType <: Base { ... }`
+## 1. `type MyType { ... }`
 
-Use the `type` keyword to define a new type:
+Use the `type` keyword to define a new type. Layout comes from fields;
+operations come from `op` declarations:
 
 ```brief
-type MyInt <: Bits {
-    bytes <~ 8;
-    alignment <~ 8;
-    llvm <~ "i64";
-    storage <~ "Boxed";
-    op Add(MyInt) -> MyInt = "add nsw";
-    op Sub(MyInt) -> MyInt = "sub nsw";
-    op Mul(MyInt) -> MyInt = "mul nsw";
+type MyInt {
+    data: Bits<64>;          // layout: 8 bytes, llvm_type: i64
+    op Add(#Int, #Int);      // backend knows integer addition
+    op Sub(#Int, #Int);      // backend knows integer subtraction
+    op Parse(#Int);           // identity literal construction — 42 → MyInt
+    op Parse(Decimal);        // numeric literal via conversion function
 };
 ```
 
-- `<: Bits` — the type is a lens over raw bits
-- `bytes <~ N` — size in bytes (required)
-- `alignment <~ N` — alignment in bytes (required)
-- `llvm <~ "type"` — LLVM type for storage/memory operations
-- `storage <~ "Boxed"` or `"Native"` — boxed (i64) or native (float/double)
-- `op ...` — operator declarations mapping Brief ops to LLVM opcodes
+- **Layout**: determined by fields (`data: Bits<N>`, `field: Type`)
+- **Hashword ops**: `Add(#Int)` — backend dispatches to its intrinsic handlers
+- **Parse ops**: `Parse(#Int)` — identity literal construction (zero-cost)
+- **Parse ops**: `Parse(Decimal) = fn(#L)` — custom literal construction
 
-## 2. Built-in Type Examples
+No `bytes <~`, `alignment <~`, `llvm <~`, `storage <~`, `default_width`,
+`commuting`, or LLVM opcode strings needed.
 
-The bootstrap file (`lib/std/types/bootstrap.bv`) defines all primitives:
+## 2. Protocol-Centric Ops
 
-### Integer Types
+The hashword in an op signature tells the backend to dispatch to its
+intrinsic handler for that category:
 
 ```brief
-type Int <: Bits {
-    bytes <~ 8;          // 64 bits
-    alignment <~ 8;
-    llvm <~ "i64";
-    storage <~ "Boxed";  // boxed to i64 in state
-    default_width <~ 64;
-    commuting <~ true;
-    op Add(Int) -> Int = "add nsw";
-    op Sub(Int) -> Int = "sub nsw";
-    op Mul(Int) -> Int = "mul nsw";
-    op Div(Int) -> Int = "sdiv";
-    op Eq(Int) -> Bool = "icmp eq";
-    op Ne(Int) -> Bool = "icmp ne";
-    op Neg() -> Int = "neg";
+type Bfloat16 {
+    data: Bits<16>;
+    op Add(#Float, #Float) = bfloat_add(#L, #R);   // override with custom fn
+    op Mul(#Float, #Float) = bfloat_mul(#L, #R);
+    op Parse(#Float);                                // identity — literal IS float
 };
 ```
 
-### Float Types
+| Op form | Meaning | Conversion function? |
+|---|---|---|
+| `op Add(#Int, #Int)` | Backend intrinsic integer add | No |
+| `op Add(#Float) = fn(#L,#R)` | Override float add with custom fn | Yes — auto-alwaysinline |
+| `op Add(Posit32) = fn(#L,#R)` | Custom op for this type only | Yes — auto-alwaysinline |
+| `op Parse(#Category)` | Identity literal construction | No |
+| `op Parse(Form) = fn(#L)` | Custom literal construction | Yes — auto-alwaysinline |
+
+Functions bound to ops via `= fn(...)` are emitted with LLVM's `alwaysinline`.
+
+## 3. Protocol Variants
+
+Hashwords can be parameterized by protocol variant:
 
 ```brief
-type Float <: Bits {
-    bytes <~ 4;          // 32 bits
-    alignment <~ 4;
-    llvm <~ "float";
-    storage <~ "Native";  // native LLVM float ops
-    default_width <~ 32;
-    commuting <~ true;
-    op Add(Float) -> Float = "fadd fast";
-    op Sub(Float) -> Float = "fsub fast";
-    op Mul(Float) -> Float = "fmul fast";
-    op Neg() -> Float = "fneg";
-    op Eq(Float) -> Bool = "fcmp oeq";
+type ASCIIString {
+    data: Bits<64>;
+    len: Bits<64>;
+    op CastTo(#String<utf8>) = ascii_to_utf8(#L);   // produce UTF-8
+    op CastFrom(#String<utf8>) = utf8_to_ascii(#L);  // consume UTF-8
 };
 ```
 
-### Bool
+Bare hashwords resolve to their default variant at parse time:
+
+| Hashword | Default variant | Also writable as |
+|---|---|---|
+| `#String` | `utf8` (for all files) | `#String<utf8>`, `#String<ascii>` |
+| `#Float` | `ieee754` | `#Float<ieee754>` |
+| `#Char` | `unicode` | `#Char<unicode>`, `#Char<ascii>` |
+
+Cross-variant calls require explicit protocol. A `.bv` file calling an `.ebv`
+function using `#String` produces a compile error if the default variants
+differ.
+
+## 4. Literal Construction via Parse Ops
+
+Types declare how they are constructed from source text:
 
 ```brief
-type Bool <: Bits {
-    bytes <~ 1;
-    alignment <~ 1;
-    llvm <~ "i8";
-    storage <~ "Boxed";
-    box <~ "zext.i1.to.i64#";
-    unbox <~ "trunc.i64.to.i1#";
-    default_width <~ 1;
-    op Eq(Bool) -> Bool = "icmp eq";
-    op And(Bool) -> Bool = "and";
-    op Or(Bool) -> Bool = "or";
-    op Not() -> Bool = "not";
+type HexColor {
+    data: Bits<24>;
+    op Parse(Bare) = parse_hex(#L);              // FF00FF → HexColor
+    op Cast(#Bits);
+};
+
+type RomanNumeral {
+    data: Bits<16>;
+    op Parse(Bare) = roman_from_identifier(#L);  // XIV → RomanNumeral
+    op CastTo(#Int) = roman_to_int(#L);           // RomanNumeral → Int
+};
+
+type BFloat16 {
+    data: Bits<16>;
+    op Parse(Decimal, pre: "0x") = hex_to_bfloat(#L);  // 0x3F80 → 1.0
+    op Parse(Decimal, suf: "bf") = suffix_bf(#L);       // 1.5bf → bfloat
+    op Parse(#Float);                                     // identity
 };
 ```
 
-## 3. Operator Declarations
+When the compiler encounters a literal, it checks the target type's Parse ops:
 
-Each `op` declaration maps a Brief operation to an LLVM instruction string:
+1. `op Parse(#Category)` — identity, zero-cost, no conversion
+2. `op Parse(Form, pre: "prefix")` — discriminator match, most specific
+3. `op Parse(Form, suf: "suffix")` — discriminator match, most specific
+4. `op Parse(Form)` — fallback, matches any literal of that form
 
-```brief
-op Add(ParamType) -> ReturnType = "llvm opcode";
-```
+## 5. Protocol Conversion (CastTo / CastFrom)
 
-| Brief Op | Param | Return | Typical LLVM |
-|----------|-------|--------|-------------|
-| `a + b` | `Add(T)` | T | `"add nsw"`, `"fadd fast"` |
-| `a - b` | `Sub(T)` | T | `"sub nsw"`, `"fsub fast"` |
-| `a * b` | `Mul(T)` | T | `"mul nsw"`, `"fmul fast"` |
-| `a / b` | `Div(T)` | T | `"sdiv"`, `"fdiv fast"` |
-| `a % b` | `Mod(T)` | T | `"srem"`, `"frem fast"` |
-| `-a` | `Neg()` | T | `"neg"`, `"fneg"` |
-| `a == b` | `Eq(T)` | Bool | `"icmp eq"`, `"fcmp oeq"` |
-| `a < b` | `Lt(T)` | Bool | `"icmp slt"`, `"fcmp olt"` |
-| `!a` | `Not()` | Bool | `"not"` |
-| `a && b` | `And(T)` | Bool | `"and"` |
-
-The operator name (Add, Sub, Eq, etc.) is PascalCase in the declaration and
-maps to the corresponding `OpRune` in the compiler.
-
-## 4. Annotations
-
-### `default_width <~ N`
-
-Sets the default parameter width. When a type is used without explicit
-parameters (`let x: Int = 0`), the `NormalizeTypes` pass resolves it to
-`Int<64>`.
+The `CastTo`/`CastFrom` pair handles conversion between types via the
+protocol category:
 
 ```brief
-type Int <: Bits {
-    default_width <~ 64;
+type Latin1String {
+    data: Bits<64>;
+    len: Bits<64>;
+    op CastTo(#String) = latin1_to_utf8(#L);       // Latin1 → UTF-8
+    op CastFrom(#String) = utf8_to_latin1(#L);      // UTF-8 → Latin1
 };
 ```
 
-### `commuting <~ true|false`
+At compile time, the compiler inlines both functions and LLVM's `InstCombine`
+removes redundant operations. A Latin1→UTF-8→Latin1 round-trip for ASCII data
+(0–127) collapses to a no-op.
 
-Tells the optimizer that operations on this type commute (`a + b = b + a`).
-Defaults to `true`. Set to `false` for non-commutative types (e.g., matrices).
+Cast resolution priority:
+1. `meld Source <-> Target` — structural equivalence
+2. `op Cast(Target)` on source — direct type-to-type
+3. `CastTo(#Category)` → `CastFrom(#Category)` — protocol path
+4. Implicit `Cast(#Bits)` — raw bytes, always available
 
-### `constant_time <~ true|false`
+## 6. Protocol Satisfaction (Compile-Time Verification)
 
-Tells the optimizer to preserve side-channel resistance by avoiding
-data-dependent branching or memory access. Defaults to `false`.
+For every type with both a Parse op and a Cast/CastTo op, the compiler
+performs symbolic execution at compile time to verify round-trip fidelity:
 
-### `box <~ "intrinsic#"` / `unbox <~ "intrinsic#"`
+```
+Parse("FF00FF") → 0xFF00FF → Cast(#Bits) → "FF00FF"  ✓
+```
 
-Box/unbox intrinsics for state marshalling. Boxed types are stored as `i64`
-in state. The box intrinsic widens the native value to `i64`; unbox narrows
-it back:
+If the round-trip fails, a warning with the exact input and output values
+is reported.
+
+## 7. Type Parameter Constraints
 
 ```brief
-type Int8 <: Bits {
-    box <~ "sext.i8.to.i64#";
-    unbox <~ "trunc.i64.to.i8#";
-};
-type Bool <: Bits {
-    box <~ "zext.i1.to.i64#";
-    unbox <~ "trunc.i64.to.i1#";
+type HashMap<K: #String, V> {
+    data: Bits<64>;
+    len: Bits<64>;
+    cap: Bits<64>;
+    op Insert(V) = hashmap_insert(#L, #R1, #R2);
+    op Get(K) -> V = hashmap_get(#L, #R);
 };
 ```
 
-## 5. Creating a Custom Numeric Type
-
-Here's a complete example of a 24-bit unsigned integer:
-
-```brief
-type UInt24 <: Bits {
-    bytes <~ 3;
-    alignment <~ 4;
-    llvm <~ "i32";
-    storage <~ "Boxed";
-    box <~ "zext.i24.to.i64#";
-    unbox <~ "trunc.i64.to.i24#";
-    default_width <~ 24;
-    commuting <~ true;
-    op Add(UInt24) -> UInt24 = "add";
-    op Sub(UInt24) -> UInt24 = "sub";
-    op Mul(UInt24) -> UInt24 = "mul";
-    op Eq(UInt24) -> Bool = "icmp eq";
-    op Ne(UInt24) -> Bool = "icmp ne";
-};
-```
-
-Now `UInt24` can be used anywhere a built-in type can:
-
-```brief
-let x: UInt24 = 42;
-let y: UInt24 = x + 1;      // Uses op Add → "add"
-```
-
-## 6. Custom Types with Struct Layout
-
-Types can also have a struct layout. The compiler uses this for field
-projection codegen. Built-in `String` is an example:
-
-```brief
-// String is a struct: { ptr: Ptr<Bits<8>>, len: Bits(64), codec: Bits(8) }
-// Stored as 24 bytes with struct_layout metadata in the TypeUniverse.
-```
-
-User-defined struct types are defined with the `type` keyword:
-
-```brief
-type Vec3 <: Bits {
-    bytes <~ 12;
-    alignment <~ 4;
-    llvm <~ "{ float, float, float }";
-    storage <~ "Native";
-    op Add(Vec3) -> Vec3 = "fadd fast";
-};
-```
-
-## 7. Codecs (Validation + Custom Literals)
-
-A **codec** packages validation constraints with optional parse/format
-handlers. Types reference a codec via the `codec <~` property:
-
-```brief
-codec PositiveInt {
-    [value > 0];
-    [value < 100];
-};
-
-type Age <: Int {
-    codec <~ PositiveInt;
-};
-```
-
-The codec's constraints are merged into the type's guards at compile time —
-every value of `Age` is guaranteed to be between 1 and 99.
-
-### Custom Literal Parsers (Phase 5)
-
-If the codec declares a `parse <~` handler, bare identifiers in typed
-let-bindings are captured as deferred literals:
-
-```brief
-codec HexColor {
-    parse <~ parse_hex_color;
-};
-
-type Color <: Int {
-    codec <~ HexColor;
-};
-
-let c: Color = FF00FF;  // FF00FF is parsed as a Color literal
-```
-
-The parser sees `FF00FF` as an identifier; the NormalizeTypes pass rewrites
-it to a `DeferredLiteral` when the target type has a codec with a parse
-handler. Currently emits a zero placeholder — full interpreter invocation
-is planned.
-
-## 8. Summary
-
-| Feature | Syntax | Purpose |
-|---------|--------|---------|
-| Type declaration | `type Name <: Bits { ... }` | Define a new type |
-| Size | `bytes <~ N` | Byte size (required) |
-| Alignment | `alignment <~ N` | Alignment (required) |
-| LLVM type | `llvm <~ "t"` | LLVM storage type |
-| Storage | `storage <~ "Boxed"` / `"Native"` | How values are stored in state |
-| Operator | `op Add(T) -> T = "add nsw"` | Map Brief op to LLVM opcode |
-| Default param | `default_width <~ N` | Default type parameter |
-| Commuting | `commuting <~ true/false` | Optimization hint |
-| Constant-time | `constant_time <~ true/false` | Side-channel hint |
-
-The `type` syntax allows users to extend Brief with custom numeric types
-that compile to the same LLVM IR as built-in primitives.
+`K: #String` checks that `K` implements the `#String` protocol ops
+(`CastTo(#String)`, `CastFrom(#String)`, `Extract(#Char)`, `InsertAt(#Char)`,
+`Concat(#String)`, `:> Size`). At instantiation, the concrete type is
+verified against the protocol.
