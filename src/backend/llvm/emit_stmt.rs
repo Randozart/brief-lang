@@ -52,10 +52,8 @@ pub fn emit_statement(backend: &mut LlvmBackend, out: &mut String, stmt: &Statem
                 };
                 if let Some(reg) = backend.fun.let_bindings.get(name) {
                     writeln!(out, "{}store i64 {}, ptr {}", indent, result, reg).ok();
-                } else if let Some(&idx) = backend.ctx.field_index_map.get(name) {
-                    let ptr = backend.fun.gen_reg();
-                    writeln!(out, "{}{} = getelementptr %State, ptr %state, i32 0, i32 {}", indent, ptr, idx).ok();
-                    writeln!(out, "{}store i64 {}, ptr {}", indent, result, ptr).ok();
+                } else if backend.ctx.field_index_map.contains_key(name) {
+                    backend.emit_state_store_i64(out, indent, name, &result);
                 }
                 return TypedRegister { name: result, ty: Type::int() };
             }
@@ -93,8 +91,7 @@ pub fn emit_statement(backend: &mut LlvmBackend, out: &mut String, stmt: &Statem
                         let store_ty = backend.llvm_type(&val.ty);
                         writeln!(out, "{}store volatile {} {}, ptr {}", indent, store_ty, val.name, ptr).ok();
                     } else if let Some(&idx) = backend.ctx.field_index_map.get(name) {
-                        let ptr = backend.fun.gen_reg();
-                        writeln!(out, "{}{} = getelementptr %State, ptr %state, i32 0, i32 {}", indent, ptr, idx).ok();
+                        let ptr = backend.emit_state_gep(out, indent, "as", "%state", idx);
                         // 2026-07-19: Store with native type from field_types.
                         // When the value's LLVM type matches the field type, store
                         // directly (no boxing). Otherwise box via adapt_to_i64.
@@ -315,17 +312,12 @@ fn emit_strategy_fn_call(backend: &mut LlvmBackend, out: &mut String, indent: &s
     // For RingBuf-inline types, use the data buffer field. For all other types,
     // derive the handle from the state field or let-binding alloca.
     let handle = if let Some(rbi) = backend.ctx.ringbuf_inline.get(var_name) {
-        let gep = backend.fun.gen_reg();
-        writeln!(out, "{}{} = getelementptr inbounds %State, ptr %state, i32 0, i32 {}",
-            indent, gep, rbi.data_idx).ok();
+        let gep = backend.emit_state_gep(out, indent, "hnd", "%state", rbi.data_idx);
         let h = backend.fun.gen_reg();
         writeln!(out, "{}{} = ptrtoint ptr {} to i64", indent, h, gep).ok();
         h
     } else if let Some(&idx) = backend.ctx.field_index_map.get(var_name) {
-        // Non-ringbuf state variable — use field address as handle.
-        let gep = backend.fun.gen_reg();
-        writeln!(out, "{}{} = getelementptr inbounds %State, ptr %state, i32 0, i32 {}",
-            indent, gep, idx).ok();
+        let gep = backend.emit_state_gep(out, indent, "hnd", "%state", idx);
         let h = backend.fun.gen_reg();
         writeln!(out, "{}{} = ptrtoint ptr {} to i64", indent, h, gep).ok();
         h
