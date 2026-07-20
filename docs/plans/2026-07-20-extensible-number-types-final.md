@@ -505,6 +505,41 @@ Files changed:
 
 ---
 
+## InsertAt / ExtractFrom — Metadata Property Migration
+
+The `<-` (push/pop) operator dispatch currently reads operator bindings from
+`ResolvedType.properties["op.InsertAt"]` — metadata stored by the parser's
+`<~` handler. This is the last remaining metadata-based dispatch path.
+
+### Target
+
+Full refactor: backend reads `OperatorDef` from `CompilerContext.operator_defs`
+instead of properties. No metadata properties, no hardcoded string matches.
+
+### Steps
+
+| # | File | Change |
+|---|------|--------|
+| 1 | `ast/top.rs` | `OperatorDef.impl_fn` → `impl_args: Option<PropertyValue>` (PropertyValue is consumed directly by `emit_strategy_fn_call`) |
+| 2 | `parser/definitions.rs` | `parse_op_with_params`: use `parse_metadata_value_standalone()` for impl args instead of `parse_expression()` (handles `#L`/`#R`/`#T` correctly) |
+| 3 | `parser/definitions.rs` | Remove `is_op` check from `<~` handler — `InsertAt`/`ExtractFrom` no longer get `"op."` prefix |
+| 4 | `normalizer.rs` | Remove `"op.InsertAt"`/`"op.ExtractFrom"` from keep list |
+| 5 | `ring_buffer.bv` | `InsertAt <~ ring_push` → `op InsertAt(T) = ring_push(#L, #R)` (T refers to the enclosing type's param, no `#` needed — resolved via TypeVar at instantiation) |
+| 6 | `context.rs` | Add `operator_defs: HashMap<String, Vec<OperatorDef>>` + builder setter |
+| 7 | `compile.rs` | Extract `OperatorDef`s from `TopLevel::TypeDef` items → pass to backend |
+| 8 | `emit_toplevel.rs` | `check_insert_strategy` → `find_insert_strategy` reading from `operator_defs` |
+| 9 | `emit_stmt.rs` | `emit_strategy_fn_call` takes `&OperatorDef`, callers updated |
+| 10 | `mod.rs` | Remove hardcoded `"ring_push"` string match in `build_field_index` |
+
+### Flat Control Flow / DRY
+
+Every changed function uses guard clauses and early returns. Strategy lookup
+is a single chain: `lookup_strategy_type_name → operator_defs.get → find_by_op`.
+No nesting > 2 levels. The `emit_strategy_fn_call` extracts `impl_args: PropertyValue`
+from the OperatorDef and delegates to the same marker-resolution logic as before.
+
+---
+
 ## Open Questions (for the Architecture Doc)
 
 1. **Field syntax for flat types**: `type Bfloat16 { data: Bits<16>; }` vs. a layout

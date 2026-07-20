@@ -95,37 +95,30 @@ impl LlvmBackend {
         None
     }
 
-    /// Check the target expression for an InsertAt strategy by looking up
-    /// the variable's type's "insert_at" property in the TypeUniverse.
-    /// 2026-07-14: Returns None when insert_strategy is not defined.
-    pub(super) fn check_insert_strategy(&self, target: &crate::ast::Expr) -> Option<crate::ast::PropertyValue> {
-        let tu = self.ctx.type_universe.as_ref()?;
+    /// 2026-07-20: Find an OperatorDef for InsertAt by looking up the
+    /// variable's type in the operator_defs map (populated from AST).
+    /// Returns None when the type has no InsertAt operator definition.
+    pub(super) fn find_insert_strategy(&self, target: &crate::ast::Expr) -> Option<&crate::ast::top::OperatorDef> {
         let var_name = match target {
             crate::ast::Expr::Identifier(n) => n,
             _ => target.as_var_name()?,
         };
         let type_name = self.lookup_strategy_type_name(var_name)?;
-        // 2026-07-18: Key is "op.InsertAt" — the parser stores InsertAt/ExtractFrom
-        // with the "op." prefix since they are operation bindings.
-        tu.get(&type_name)
-            .and_then(|rt| rt.properties.get("op.InsertAt"))
-            .cloned()
+        self.ctx.operator_defs.get(&type_name)?
+            .iter().find(|d| d.op == "InsertAt")
     }
 
-    /// Check the target expression for an ExtractFrom strategy by looking up
-    /// the variable's type's "extract_from" property in the TypeUniverse.
-    /// 2026-07-14: Returns None when extract_strategy is not defined.
-    pub(super) fn check_extract_strategy(&self, target: &crate::ast::Expr) -> Option<crate::ast::PropertyValue> {
-        let tu = self.ctx.type_universe.as_ref()?;
+    /// 2026-07-20: Find an OperatorDef for ExtractFrom by looking up the
+    /// variable's type in the operator_defs map (populated from AST).
+    /// Returns None when the type has no ExtractFrom operator definition.
+    pub(super) fn find_extract_strategy(&self, target: &crate::ast::Expr) -> Option<&crate::ast::top::OperatorDef> {
         let var_name = match target {
             crate::ast::Expr::Identifier(n) => n,
             _ => target.as_var_name()?,
         };
         let type_name = self.lookup_strategy_type_name(var_name)?;
-        // 2026-07-18: Key is "op.ExtractFrom" — follows op. prefix convention.
-        tu.get(&type_name)
-            .and_then(|rt| rt.properties.get("op.ExtractFrom"))
-            .cloned()
+        self.ctx.operator_defs.get(&type_name)?
+            .iter().find(|d| d.op == "ExtractFrom")
     }
 
     pub(super) fn emit_header(&self, out: &mut String) {

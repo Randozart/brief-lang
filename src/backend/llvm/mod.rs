@@ -1000,6 +1000,12 @@ impl LlvmBackend {
         self
     }
 
+    /// 2026-07-20: Set operator definitions for <- operator dispatch.
+    pub fn with_operator_defs(mut self, defs: HashMap<String, Vec<crate::ast::top::OperatorDef>>) -> Self {
+        self.ctx.operator_defs = defs;
+        self
+    }
+
     pub fn with_dump_layout(mut self, v: bool) -> Self {
         self.ctx.dump_layout = v;
         self
@@ -3465,46 +3471,42 @@ impl LlvmBackend {
                         .insert(s.name.clone(), self.ctx.field_types.len());
                     self.push_field_type(&s.ty);
                     self.ctx.field_initializers.insert(s.name.clone(), None);
-                    if let Some(tu) = &self.ctx.type_universe {
+                    // 2026-07-20: Check operator_defs for InsertAt strategy.
+                    // Any type with op InsertAt(...) gets inline ring buffer fields.
+                    let has_insert_strategy = {
                         let type_name = match &s.ty {
                             crate::ast::Type::Custom(n) => n.as_str(),
                             crate::ast::Type::Applied(n, _) => n.as_str(),
                             _ => "",
                         };
-                        // 2026-07-18: The parser stores InsertAt/ExtractFrom as
-                        // "op.InsertAt" / "op.ExtractFrom" with PropertyValue::Identifier.
-                        // Check both Identifier and String for backward compat.
-                        if tu.get(type_name).and_then(|rt| rt.properties.get("op.InsertAt"))
-                            .map_or(false, |strat| {
-                                *strat == crate::ast::PropertyValue::Identifier("ring_push".to_string())
-                                || *strat == crate::ast::PropertyValue::String("ring_push".to_string())
-                            })
-                        {
-                            let data_idx = self.ctx.field_types.len();
-                            self.ctx.field_index_map.insert(format!("{}_data", s.name), data_idx);
-                            self.ctx.field_types.push("i64".to_string());
-                            self.ctx.field_brief_types.push(Type::int());
-                            self.ctx.field_initializers.insert(format!("{}_data", s.name), None);
-                            let head_idx = self.ctx.field_types.len();
-                            self.ctx.field_index_map.insert(format!("{}_head", s.name), head_idx);
-                            self.ctx.field_types.push("i64".to_string());
-                            self.ctx.field_brief_types.push(Type::int());
-                            self.ctx.field_initializers.insert(format!("{}_head", s.name), None);
-                            let tail_idx = self.ctx.field_types.len();
-                            self.ctx.field_index_map.insert(format!("{}_tail", s.name), tail_idx);
-                            self.ctx.field_types.push("i64".to_string());
-                            self.ctx.field_brief_types.push(Type::int());
-                            self.ctx.field_initializers.insert(format!("{}_tail", s.name), None);
-                            let mask_idx = self.ctx.field_types.len();
-                            self.ctx.field_index_map.insert(format!("{}_mask", s.name), mask_idx);
-                            self.ctx.field_types.push("i64".to_string());
-                            self.ctx.field_brief_types.push(Type::int());
-                            self.ctx.field_initializers.insert(format!("{}_mask", s.name), None);
-                            self.ctx.ringbuf_inline.insert(s.name.clone(),
-                                crate::backend::llvm::context::RingbufInlineFields {
-                                    data_idx, head_idx, tail_idx, mask_idx,
-                                });
-                        }
+                        self.ctx.operator_defs.get(type_name)
+                            .map_or(false, |defs| defs.iter().any(|d| d.op == "InsertAt"))
+                    };
+                    if has_insert_strategy {
+                        let data_idx = self.ctx.field_types.len();
+                        self.ctx.field_index_map.insert(format!("{}_data", s.name), data_idx);
+                        self.ctx.field_types.push("i64".to_string());
+                        self.ctx.field_brief_types.push(Type::int());
+                        self.ctx.field_initializers.insert(format!("{}_data", s.name), None);
+                        let head_idx = self.ctx.field_types.len();
+                        self.ctx.field_index_map.insert(format!("{}_head", s.name), head_idx);
+                        self.ctx.field_types.push("i64".to_string());
+                        self.ctx.field_brief_types.push(Type::int());
+                        self.ctx.field_initializers.insert(format!("{}_head", s.name), None);
+                        let tail_idx = self.ctx.field_types.len();
+                        self.ctx.field_index_map.insert(format!("{}_tail", s.name), tail_idx);
+                        self.ctx.field_types.push("i64".to_string());
+                        self.ctx.field_brief_types.push(Type::int());
+                        self.ctx.field_initializers.insert(format!("{}_tail", s.name), None);
+                        let mask_idx = self.ctx.field_types.len();
+                        self.ctx.field_index_map.insert(format!("{}_mask", s.name), mask_idx);
+                        self.ctx.field_types.push("i64".to_string());
+                        self.ctx.field_brief_types.push(Type::int());
+                        self.ctx.field_initializers.insert(format!("{}_mask", s.name), None);
+                        self.ctx.ringbuf_inline.insert(s.name.clone(),
+                            crate::backend::llvm::context::RingbufInlineFields {
+                                data_idx, head_idx, tail_idx, mask_idx,
+                            });
                     }
                 }
             } else if let TopLevel::Trigger(trg) = item {

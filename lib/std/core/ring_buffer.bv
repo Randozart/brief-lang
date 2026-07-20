@@ -16,8 +16,8 @@
 //   +3: mask  (i64 — capacity-1, power of 2)
 
 type RingBuffer<T> <: List<T> {
-    InsertAt <~ ring_push;
-    ExtractFrom <~ ring_pop;
+    op InsertAt(T) = ring_push(#L, #R);
+    op ExtractFrom(T) = ring_pop(#L, #R);
 };
 
 defn ring_push(handle: Int, val: Int) -> Int {

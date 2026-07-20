@@ -274,6 +274,16 @@ fn codegen(
     opts: &BuildOptions,
     alloc_strategies: std::collections::HashMap<usize, brief_compiler::backend::llvm::AllocStrategy>,
 ) -> Result<(String, &'static str), String> {
+    // 2026-07-20: Extract operator definitions from AST for backend dispatch.
+    let mut operator_defs: std::collections::HashMap<String, Vec<brief_compiler::ast::top::OperatorDef>> = std::collections::HashMap::new();
+    for item in items.iter() {
+        if let brief_compiler::ast::TopLevel::TypeDef(td) = item {
+            if !td.body.operators.is_empty() {
+                operator_defs.insert(td.name.clone(), td.body.operators.clone());
+            }
+        }
+    }
+
     let mut output;
     let ext: &str = match opts.backend {
         BackendKind::Llvm => {
@@ -285,6 +295,7 @@ fn codegen(
                 .with_stack_threshold(opts.stack_threshold)
                 .with_optimize_budget(opts.optimize_budget)
                 .with_type_universe(universe.clone())
+                .with_operator_defs(operator_defs)
                 .with_trg_unresolved_action(opts.trg_unresolved_action);
             if opts.gpu_offload {
                 b = b.with_gpu_offload(true);

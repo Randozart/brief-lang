@@ -135,6 +135,12 @@ pub struct CompilerContext {
     pub is_embedded: bool,
     pub type_universe: Option<TypeUniverse>,
 
+    // Operator definitions (extracted from AST TypeDef bodies)
+    /// 2026-07-20: Operator definitions per type, used by <- operator dispatch.
+    /// Populated from TopLevel::TypeDef.body.operators in compile.rs before
+    /// backend.generate(). Empty HashMap means all ops are backend-intrinsics.
+    pub operator_defs: HashMap<String, Vec<crate::ast::top::OperatorDef>>,
+
     // Dependency graph (built during generate(), then read-only)
     pub dep_graph: DependencyGraph,
 }
@@ -224,6 +230,7 @@ impl CompilerContext {
             gpu_backend: "vulkan".to_string(),
             is_embedded: false,
             type_universe: None,
+            operator_defs: HashMap::new(),
             dep_graph: DependencyGraph {
                 topo_order: Vec::new(),
                 bit_index: HashMap::new(),

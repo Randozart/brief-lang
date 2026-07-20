@@ -725,20 +725,22 @@ pub struct ProjectionDef {
 
 /// 2026-07-20: Operator definition from a type body.
 /// Two forms:
-///   op Add(#Int, #Int);        — declarative: params are hashword categories
-///   op Add(Posit32) = fn(#L,#R); — binding: explicit implementation function
+///   op Add(#Int, #Int);              — declarative: params are hashword categories
+///   op InsertAt(#RingBuffer) = fn(#L,#R); — binding: explicit implementation
 ///
-/// The `impl_name` field stores the old `op Add ~> "int.add"` string value
-/// for backward compat during migration.
+/// The `impl_args` field stores the implementation function + marker references
+/// as a PropertyValue, matching the format produced by parse_metadata_value_standalone():
+///   Identifier("ring_push")                    — convention-based (no markers)
+///   List([Identifier("ring_push"), HashL, HashR]) — marker-based (#L = first arg)
 #[derive(Debug, Clone)]
 pub struct OperatorDef {
     pub op: String,
     /// 2026-07-20: Parameter types (hashwords or concrete types).
-    /// Empty for the old `op Add ~> "string"` syntax.
     pub params: Vec<Type>,
-    /// 2026-07-20: Optional implementation function name + argument expressions.
-    /// None for declarative ops, Some(name, args) for binding ops.
-    pub impl_fn: Option<(String, Vec<Expr>)>,
+    /// 2026-07-20: Implementation args: fn name + marker references.
+    /// None for declarative ops, Some(PropertyValue) for binding ops.
+    /// Consumed directly by emit_strategy_fn_call() in the backend.
+    pub impl_args: Option<PropertyValue>,
     /// Old-style implementation name string (from `op Add ~> "string"`).
     pub impl_name: String,
     pub span: Option<Span>,

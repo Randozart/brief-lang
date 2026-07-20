@@ -948,16 +948,13 @@ impl<'a> Parser<'a> {
                     self.parse_op_binding(&mut operators)?;
                     continue;
                 }
-                // 2026-07-18: op binding via <~: InsertAt <~ ring_push.
-                // Known ops (InsertAt, ExtractFrom) get the "op." prefix so they
-                // match the normalizer keep set and the LLVM dispatch lookup.
-                // Unknown slot names are stored as-is (general metadata).
+                // 2026-07-20: Slot-name property binding via <~ (general metadata).
+                // InsertAt/ExtractFrom are now parsed via `op InsertAt(T) = fn(#L,#R)`
+                // in the op handler above. They no longer get special "op." prefix treatment.
                 if self.eat(&Token::TildeArrow) {
                     let pv = self.parse_metadata_value_standalone()?;
                     self.eat(&Token::Semicolon);
-                    let is_op = slot_name == "InsertAt" || slot_name == "ExtractFrom";
-                    let key = if is_op { format!("op.{}", slot_name) } else { slot_name };
-                    metadata.insert(key, pv);
+                    metadata.insert(slot_name, pv);
                     continue;
                 }
                 self.expect(Token::Colon)?;
@@ -1010,24 +1007,16 @@ impl<'a> Parser<'a> {
         // Declarative: op Add(#Int, #Int);
         if self.eat(&Token::Semicolon) {
             operators.push(OperatorDef {
-                op: op_name, params, impl_fn: None, impl_name: String::new(), span: None,
+                op: op_name, params, impl_args: None, impl_name: String::new(), span: None,
             });
             return Ok(());
         }
-        // Binding: op Add(Posit32) = posit32_add(#L, #R);
+        // Binding: op InsertAt(#RingBuffer, #T) = ring_push(#L, #R);
         self.expect(Token::Eq)?;
-        let fn_name = self.expect_identifier()?;
-        self.expect(Token::LParen)?;
-        let mut args = Vec::new();
-        loop {
-            let arg = self.parse_expression()?;
-            args.push(arg);
-            if !self.eat(&Token::Comma) { break; }
-        }
-        self.expect(Token::RParen)?;
+        let impl_args = self.parse_metadata_value_standalone()?;
         self.expect(Token::Semicolon)?;
         operators.push(OperatorDef {
-            op: op_name, params, impl_fn: Some((fn_name, args)),
+            op: op_name, params, impl_args: Some(impl_args),
             impl_name: String::new(), span: None,
         });
         Ok(())

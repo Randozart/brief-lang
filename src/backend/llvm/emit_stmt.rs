@@ -36,14 +36,14 @@ pub fn emit_statement(backend: &mut LlvmBackend, out: &mut String, stmt: &Statem
             // Detect this pattern BEFORE emitting the RHS (which would get the
             // address, not the popped value). Emit the ring buffer pop directly.
             // 2026-07-18: Pop — emit call @fn_name(handle), store result to lhs.
+            // 2026-07-20: Uses find_extract_strategy (reads OperatorDef from context).
             if let Expr::AddrOf(source) = rhs {
-                let strat = backend.check_extract_strategy(source)
-                    .or_else(|| backend.check_extract_strategy(rhs));
-                // Extract fn_name from property value — no hardcoded strings.
-                let Some(pv) = &strat else {
+                let strat = backend.find_extract_strategy(source)
+                    .or_else(|| backend.find_extract_strategy(rhs));
+                let Some(op_def) = strat else {
                     return TypedRegister { name: backend.fun.gen_reg(), ty: Type::void() };
                 };
-                let Some(result) = emit_strategy_fn_call(backend, out, indent, source, pv, None) else {
+                let Some(result) = emit_strategy_fn_call(backend, out, indent, source, &op_def.clone(), None) else {
                     return TypedRegister { name: backend.fun.gen_reg(), ty: Type::void() };
                 };
                 // Store popped result to the LHS variable.
@@ -64,9 +64,10 @@ pub fn emit_statement(backend: &mut LlvmBackend, out: &mut String, stmt: &Statem
             match lhs {
                 Expr::Identifier(name) => {
                     // 2026-07-18: Push — emit call @fn_name(handle, val).
-                    let strat = backend.check_insert_strategy(lhs);
-                    if let Some(pv) = &strat {
-                        emit_strategy_fn_call(backend, out, indent, lhs, pv, Some(&val.name));
+                    // 2026-07-20: Uses find_insert_strategy (reads OperatorDef from context).
+                    let insert_strat = backend.find_insert_strategy(lhs).cloned();
+                    if let Some(op_def) = &insert_strat {
+                        emit_strategy_fn_call(backend, out, indent, lhs, op_def, Some(&val.name));
                     } else if let Some(reg) = backend.fun.let_bindings.get(name).cloned() {
                         // 2026-07-18: If the binding is a value register (not an alloca),
                         // the variable is being mutated — create an alloca and redirect.
@@ -145,11 +146,12 @@ pub fn emit_statement(backend: &mut LlvmBackend, out: &mut String, stmt: &Statem
         Statement::Expression(expr) => {
             // 2026-07-17: Discard: `<- &queue` → Expression(AddrOf(source)).
             // Pop from collection and discard the result.
+            // 2026-07-20: Uses find_extract_strategy (reads OperatorDef from context).
             if let Expr::AddrOf(source) = expr {
-                let strat = backend.check_extract_strategy(source)
-                    .or_else(|| backend.check_extract_strategy(expr));
-                if let Some(pv) = &strat {
-                    emit_strategy_fn_call(backend, out, indent, source, pv, None);
+                let strat = backend.find_extract_strategy(source)
+                    .or_else(|| backend.find_extract_strategy(expr));
+                if let Some(op_def) = strat {
+                    emit_strategy_fn_call(backend, out, indent, source, &op_def.clone(), None);
                 }
                 TypedRegister { name: backend.fun.gen_reg(), ty: Type::void() }
             } else {
@@ -288,7 +290,8 @@ pub fn emit_statement(backend: &mut LlvmBackend, out: &mut String, stmt: &Statem
 ///   and PropertyValue::List([Identifier("ring_push"), HashL, HashR]) for
 ///   explicit marker-based dispatch like InsertAt <~ ring_push(#L, #R).
 fn emit_strategy_fn_call(backend: &mut LlvmBackend, out: &mut String, indent: &str,
-    target: &Expr, pv: &crate::ast::PropertyValue, value: Option<&str>) -> Option<String> {
+    target: &Expr, op_def: &crate::ast::top::OperatorDef, value: Option<&str>) -> Option<String> {
+    let pv = op_def.impl_args.as_ref()?;
     let (fn_name, markers): (&str, &[crate::ast::PropertyValue]) = match pv {
         crate::ast::PropertyValue::Identifier(s) => {
             const EMPTY: &[crate::ast::PropertyValue] = &[];
