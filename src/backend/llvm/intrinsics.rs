@@ -954,6 +954,24 @@ fn emit_intrinsic_cast(
     let src_ll = backend.llvm_type(&src.ty);
     let target_ll = if src.ty == Type::float64() { "double" } else if src.ty == Type::float() { "float" } else { "i64" };
 
+    // Step 1: Check for direct op Cast(Target) on source type
+    let src_name = type_name_str(&src.ty);
+    if let Some(name) = &src_name {
+        if let Some(impl_args) = find_cast_impl(backend, name, "Cast") {
+            let result = emit_simple_call(backend, out, v, &src, &impl_args, indent);
+            return BTypedRegister { name: result, ty: src.ty.clone() };
+        }
+    }
+
+    // Step 2: Check for CastTo(#Category) → CastFrom(#Category) protocol path
+    if let (Some(s_name), Some(t_name)) = (src_name.as_ref(), type_name_str_from_llvm(&target_ll).as_ref()) {
+        let protocol_path = try_cast_protocol_path(backend, s_name, t_name);
+        if let Some(impl_args) = protocol_path {
+            let result = emit_simple_call(backend, out, v, &src, &impl_args, indent);
+            return BTypedRegister { name: result, ty: src.ty.clone() };
+        }
+    }
+
     // Step 3: Check for meld shuffle metadata (structural bit remapping)
     let shuffle_data: Option<Vec<(u64, u64, u64)>> = (|| {
         let tu = backend.ctx.type_universe.as_ref()?;
@@ -1006,6 +1024,75 @@ fn emit_meld_shuffle(
     }
 
     BTypedRegister { name: acc, ty: src.ty.clone() }
+}
+
+/// Extract type name string from a Type for operator_defs lookup.
+fn type_name_str(ty: &Type) -> Option<String> {
+    match ty {
+        Type::Custom(n) | Type::Applied(n, _) => Some(n.clone()),
+        _ => None,
+    }
+}
+
+/// Extract a type name string from an LLVM type string (simplified).
+fn type_name_str_from_llvm(llvm_ty: &str) -> Option<String> {
+    // Map common LLVM types back to Brief type names
+    match llvm_ty {
+        "double" => Some("Float64".to_string()),
+        "float" => Some("Float".to_string()),
+        "i64" => Some("Int".to_string()),
+        _ => None,
+    }
+}
+
+/// Find a Cast/CastTo/CastFrom implementation on a type via operator_defs.
+fn find_cast_impl(backend: &LlvmBackend, type_name: &str, op_name: &str) -> Option<crate::ast::PropertyValue> {
+    let defs = backend.ctx.operator_defs.get(type_name)?;
+    for d in defs {
+        if d.op == op_name && d.impl_args.is_some() {
+            return d.impl_args.clone();
+        }
+    }
+    None
+}
+
+/// Find a matching CastTo → CastFrom pair between two types.
+fn try_cast_protocol_path(backend: &LlvmBackend, src_name: &str, dst_name: &str) -> Option<crate::ast::PropertyValue> {
+    let src_defs = backend.ctx.operator_defs.get(src_name)?.clone();
+    let dst_defs = backend.ctx.operator_defs.get(dst_name)?.clone();
+
+    let cast_to = src_defs.iter().find(|d| d.op == "CastTo" && d.impl_args.is_some())?.clone();
+    let cast_cat = category_from_params(&cast_to.params).map(|s| s.to_string());
+
+    let cast_from = dst_defs.iter().find(|d| {
+        d.op == "CastFrom" && d.impl_args.is_some()
+            && category_from_params(&d.params).map(|s| s.to_string()) == cast_cat
+    })?.clone();
+
+    cast_to.impl_args
+}
+
+fn category_from_params(params: &[Type]) -> Option<&str> {
+    if params.len() != 1 { return None; }
+    match &params[0] {
+        Type::HashWord(s) => Some(s.strip_prefix('#').unwrap_or(s)),
+        Type::HashWordVariant(s, _) => Some(s.strip_prefix('#').unwrap_or(s)),
+        _ => None,
+    }
+}
+
+/// Emit a simple function call with a single argument.
+fn emit_simple_call(
+    backend: &mut LlvmBackend, out: &mut String, v: &str,
+    src: &BTypedRegister, impl_args: &crate::ast::PropertyValue, indent: &str,
+) -> String {
+    let fn_name = match impl_args {
+        crate::ast::PropertyValue::Identifier(s) => s.clone(),
+        _ => return v.to_string(),
+    };
+    let ll_ty = backend.llvm_type(&src.ty);
+    writeln!(out, "{}{} = call i64 @{}({} {})", indent, v, fn_name, ll_ty, src.name).ok();
+    v.to_string()
 }
 
 fn get_shuffle_int_owned(properties: &std::collections::HashMap<String, crate::ast::PropertyValue>, key: &str) -> u64 {
