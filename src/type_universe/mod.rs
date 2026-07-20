@@ -53,16 +53,6 @@ pub struct TypeUniverse {
 /// Return the default ALU for a given Common Type Definition.
 // 2026-07-17: ALU describes what hardware computes with values of this type.
 // PascalCase = known to all backends; lowercase-quoted = backend-specific.
-fn default_alu(ctd: &str) -> &'static str {
-    match ctd {
-        // Float and Double use the FPU; Bool uses boolean logic;
-        // everything else (Int, UInt, Char, String, Data, Ptr, Void) uses integer ALU.
-        "Float" | "Double" => "Float",
-        "Bool" => "Bool",
-        _ => "Int",
-    }
-}
-
 impl TypeUniverse {
     pub fn new() -> Self {
         let mut universe = TypeUniverse {
@@ -75,41 +65,38 @@ impl TypeUniverse {
 
     /// 2026-07-16: Seed the universe with primordial type entries so that
     /// `Int`, `Float`, etc. are available without stdlib import. User
-    /// `type X <: Bits { ... }` declarations override these via register().
+    /// `type X { ... }` declarations override these via register().
     ///
-    /// 2026-07-17: Types now store `ctd` (Common Type Definition — what the
-    /// type is semantically) and `alu` (what hardware computes with it) instead
-    /// of `primitive` + `llvm_type`. llvm_type is set by the backend normalizer.
+    /// 2026-07-20: Simplified for hashword protocol architecture.
+    /// No `ctd`, `alu`, or `encoding` properties. Types get `llvm_type`
+    /// set directly here so the normalizer (which only derives "i{N*8}"
+    /// from bytes) doesn't re-derive well-known types as raw integers.
+    /// Hashword op signatures are the new dispatch mechanism.
     fn seed_primordial_types(&mut self) {
-        // Table: (name, bytes, alignment, ctd)
-        // CTD is a PascalCase identifier from the exhaustive set:
-        //   Int, UInt, Float, Double, Bool, Char, String, Data, Ptr, Void
-        // ALU is derived from CTD via default_alu() and can be overridden.
+        // Table: (name, bytes, alignment, llvm_type)
         const PRIMORDIALS: &[(&str, u64, u64, &str)] = &[
-            ("Int",    8, 8, "Int"),
-            ("UInt",   8, 8, "UInt"),
-            ("Int8",   1, 1, "Int"),
-            ("UInt8",  1, 1, "UInt"),
-            ("Int16",  2, 2, "Int"),
-            ("UInt16", 2, 2, "UInt"),
-            ("Int32",  4, 4, "Int"),
-            ("UInt32", 4, 4, "UInt"),
-            ("Int64",  8, 8, "Int"),
-            ("UInt64", 8, 8, "UInt"),
-            ("Float",  4, 4, "Float"),
-            ("Float32",4, 4, "Float"),
-            ("Float64",8, 8, "Double"),
-            ("Double", 8, 8, "Double"),
-            ("Bool",   1, 1, "Bool"),
-            ("Char",   4, 4, "Char"),
-            ("Data",   8, 8, "Data"),
-            ("Void",   0, 0, "Void"),
+            ("Int",    8, 8, "i64"),
+            ("UInt",   8, 8, "i64"),
+            ("Int8",   1, 1, "i8"),
+            ("UInt8",  1, 1, "i8"),
+            ("Int16",  2, 2, "i16"),
+            ("UInt16", 2, 2, "i16"),
+            ("Int32",  4, 4, "i32"),
+            ("UInt32", 4, 4, "i32"),
+            ("Int64",  8, 8, "i64"),
+            ("UInt64", 8, 8, "i64"),
+            ("Float",  4, 4, "float"),
+            ("Float32",4, 4, "float"),
+            ("Float64",8, 8, "double"),
+            ("Double", 8, 8, "double"),
+            ("Bool",   1, 1, "i8"),
+            ("Char",   4, 4, "i32"),
+            ("Data",   8, 8, "i8*"),
+            ("Void",   0, 0, "void"),
         ];
-        for &(name, bytes, alignment, ctd) in PRIMORDIALS {
+        for &(name, bytes, alignment, llvm_ty) in PRIMORDIALS {
             let mut properties = std::collections::HashMap::new();
-            properties.insert("ctd".into(), crate::ast::PropertyValue::Identifier(ctd.to_string()));
-            // 2026-07-17: Default ALU per CTD. User types can override via alu ~> ...;
-            properties.insert("alu".into(), crate::ast::PropertyValue::Identifier(default_alu(ctd).to_string()));
+            properties.insert("llvm_type".into(), crate::ast::PropertyValue::String(llvm_ty.to_string()));
             properties.insert("alignment".into(), crate::ast::PropertyValue::Int(alignment as i64));
             self.types.insert(name.to_string(), ResolvedType {
                 name: name.to_string(),
@@ -121,15 +108,12 @@ impl TypeUniverse {
             });
         }
         // 2026-07-18: String primordial — 2-field struct (data: Int, len: Int)
-        // with encoding property. Codegen currently maps via CTD="String" to "ptr";
-        // Phase B will switch to shape+encoding (is_string_like) for SSO handle.
-        // The `encoding` property is set here for --no-stdlib support.
+        // llvm_type is "{ i64, i64 }" (SSO-capable struct). The hashword
+        // protocol (#String category ops) drives codegen behavior.
         {
             let mut p = std::collections::HashMap::new();
-            p.insert("ctd".into(), crate::ast::PropertyValue::Identifier("String".to_string()));
-            p.insert("alu".into(), crate::ast::PropertyValue::Identifier("Int".to_string()));
+            p.insert("llvm_type".into(), crate::ast::PropertyValue::String("{ i64, i64 }".to_string()));
             p.insert("alignment".into(), crate::ast::PropertyValue::Int(8));
-            p.insert("encoding".into(), crate::ast::PropertyValue::String("UTF-8".to_string()));
             self.types.insert("String".to_string(), ResolvedType {
                 name: "String".to_string(),
                 base: "Bits".to_string(),
@@ -222,30 +206,21 @@ impl TypeUniverse {
             .unwrap_or(crate::ast::Formatting::None)
     }
 
-    /// 2026-07-18: Check if a type is string-like by shape + properties.
-    /// Phase A: matches via CTD="String" for backward compat.
-    /// Phase B: switches to 2-Int-fields + encoding check, removing CTD fallback.
-    /// User-defined `type MyStr { data: Int; len: Int; encoding <~ "UTF-8" }`
-    /// will be detected without any compiler changes.
+    /// 2026-07-18: Check if a type is string-like by shape (2 Int fields).
+    /// A type with `{ data: Int; len: Int; }` structure is string-like
+    /// regardless of encoding or CTD. Hashword op signatures provide the
+    /// backend with the specific encoding variant.
+    /// 2026-07-20: Removed CTD property check and encoding property check.
+    /// Structure alone determines layout — protocol ops determine behavior.
     pub fn is_string_like(&self, ty: &Type) -> bool {
         let name = match ty {
             Type::Custom(n) | Type::Applied(n, _) => n,
             _ => return false,
         };
         let Some(rt) = self.types.get(name) else { return false; };
-        // Phase A: CTD="String" is the primary identifier (matches current String primordial).
-        // Phase B: this fallback is removed — pure shape+encoding drives detection.
-        if rt.properties.get("ctd").map_or(false, |v| {
-            matches!(v, crate::ast::PropertyValue::Identifier(s) if s == "String")
-        }) {
-            return true;
-        }
-        // Shape + encoding check: 2 Int fields + encoding property.
-        // Works for future SSO String and user-defined string-like types.
         rt.fields.len() == 2
             && rt.fields[0].1 == Type::int()
             && rt.fields[1].1 == Type::int()
-            && rt.properties.contains_key("encoding")
     }
 
     /// 2026-07-18: Check if a type is a vector-like type eligible for SVO.

@@ -370,6 +370,73 @@ error listing available alternatives.
 
 ---
 
+## File Change Audit (Complete)
+
+Audit conducted 2026-07-20. Every code site referencing the old CTD/ALU/TOML
+architecture, organized by phase.
+
+### Phase 1: Normalizer Simplification
+
+| File | Change | Est. Lines |
+|---|---|---|
+| `src/backend/llvm/normalizer.rs` | Remove `ctd_to_llvm()`, `validate_alu_ctd()`, `infer_category()`. Strip `ctd`/`alu`/`category`/`encoding` from keep list. Remove Pass 1 ALU×CTD validation. Simplify `llvm_type` to derive from structure only. | ~100 removed, ~50 rewritten |
+| `src/backend/llvm/normalizer.rs` (imports) | Remove `OpConfig::load()`, `TypeConfig::load()`, `derive_llvm_type()` | 3 lines |
+
+### Phase 2: TOML Config Removal
+
+**Files to delete:**
+- `config/ctd-llvm-mappings.toml` (36 lines)
+- `config/llvm-ops.toml` (222 lines)
+- `config/spirv-ops.toml` (78 lines)
+
+**Rust files to gut/remove:**
+| File | Change | Lines |
+|---|---|---|
+| `src/config.rs` | Remove completely — `TypeConfig`, `OpConfig`, `derive_llvm_type()`, `derive_alu_type()` | 210 |
+| `src/config_resolver.rs` | Remove completely — config file resolution pipeline | 279 |
+
+**Files to keep (orthogonal):**
+- `config/targets.toml` — backend routing
+- `config/alloc-strategies.toml` — allocation templates
+- `config/module-registry.toml` — import resolution
+- `config/address-map.toml` — address mapping for `AddressOf#`
+
+### Phase 3: Intrinsic / Codegen Rewrite
+
+| File | Change | Lines |
+|---|---|---|
+| `src/backend/llvm/intrinsics.rs` | Remove `OP_CONFIG` static, replace config lookup with hashword category dispatch | ~50 |
+| `src/backend/llvm/emit_expr.rs` | `emit_binop_from_config()` — replace with hashword dispatch | ~50 |
+| `src/backend/llvm/helpers.rs` | Remove `ctd`/`alu` fallback reads in `rt_llvm_type()`, `operator_llvm_type()`, `emit_operator_call()` | ~30 |
+| `src/backend/llvm/emit_toplevel.rs` | Remove `ctd` fallback in `rt_llvm_type()` | ~10 |
+
+### Phase 4: Primordial / Stdlib Migration
+
+| File | Change | Lines |
+|---|---|---|
+| `src/type_universe/mod.rs` | Stop setting `ctd`/`alu` in primordial seeds. Remove `default_alu()`. Replace `is_string_like()` with hashword variant check. | ~30 |
+| `lib/std/types/bootstrap.bv` | Replace `op Add ~> "int.add"` with `op Add(#Int)` — ~121 occurrences | 121 replacements |
+
+### Phase 5: Other Backend Normalizers
+
+| File | Change | Lines |
+|---|---|---|
+| `src/backend/webstack_normalizer.rs` | Remove `ctd`-based `js_type` derivation | ~20 |
+| `src/backend/spirv/normalizer.rs` | Remove `derive_alu_type()` fallback, `ctd` reads | ~20 |
+
+### Summary
+
+| Metric | Count |
+|---|---|
+| Files modified | ~15 |
+| Files deleted (config) | 3 |
+| Files deleted (Rust) | 2 (`config.rs`, `config_resolver.rs`) |
+| Lines removed | ~900 |
+| Lines rewritten | ~300 |
+| Total churn | ~1,400 lines |
+
+---
+
 ## Open Questions (for the Architecture Doc)
 
 1. **2-byte float ambiguity**: Structure alone can't distinguish `half` from `bfloat`.
