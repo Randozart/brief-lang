@@ -62,7 +62,10 @@ fn parse_and_check(file_path: &str, source: &str) -> Result<Vec<brief_compiler::
         .map(|r| (r.unwrap(), 0..0))
         .collect();
 
-    let mut parser = brief_compiler::parser::Parser::new(tokens, source);
+    let ext = Path::new(file_path).extension()
+        .and_then(|s| s.to_str()).unwrap_or("bv");
+    let mut parser = brief_compiler::parser::Parser::new(tokens, source)
+        .with_protocol_default(ext);
     let items = parser.parse_program()
         .map_err(|e| format!("parse error: {}", e))?;
 

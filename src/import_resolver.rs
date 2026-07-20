@@ -526,7 +526,10 @@ impl ImportResolver {
             .map_err(|e| format!("Failed to read '{}': {}", resolved_path.display(), e))?;
 
         let tokens = lex_source(&source)?;
-        let mut parser = crate::parser::Parser::new(tokens, &source);
+        let ext = resolved_path.extension()
+            .and_then(|s| s.to_str()).unwrap_or("bv");
+        let mut parser = crate::parser::Parser::new(tokens, &source)
+            .with_protocol_default(ext);
         // 2026-07-14: Parse errors in imported files are non-fatal — the
         // imported file may use syntax (struct literals, etc.) that the
         // parser supports as AST but not yet as a fully parseable form.
@@ -706,7 +709,10 @@ impl ImportResolver {
             .map_err(|e| format!("Failed to read '{}': {}", candidate.display(), e))?;
 
         let tokens = lex_source(&source)?;
-        let mut parser = crate::parser::Parser::new(tokens, &source);
+        let ext = candidate.extension()
+            .and_then(|s| s.to_str()).unwrap_or("bv");
+        let mut parser = crate::parser::Parser::new(tokens, &source)
+            .with_protocol_default(ext);
         let imported_program = parser.parse_program().unwrap_or_default();
 
         let resolved = self.resolve_imports(imported_program, &candidate)?;
