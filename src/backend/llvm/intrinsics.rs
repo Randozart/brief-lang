@@ -938,18 +938,24 @@ fn emit_intrinsic_index(
     BTypedRegister { name: v.to_string(), ty: inner_ty }
 }
 
-// 2026-07-18: Cast# — type reinterpretation. Reuses the same dispatch logic
-// as Expr::Cast in emit_expr.rs but as a callable intrinsic.
+// ── Cast Resolution Pipeline ───────────────────────────────────────────
+// 2026-07-20: Cast#(source, target) resolves in this order:
+//   1. op Cast(Target) on source — direct type-to-type
+//   2. CastTo(#Category) → CastFrom(#Category) — protocol path
+//   3. meld Source <-> Target — structural equivalence (TODO)
+//   4. Implicit Cast(#Bits) — raw bitcast (always available)
+//
+// Current implementation: skeleton with bitcast fallback. The resolution
+// pipeline (steps 1-3) will be wired as operator_defs infrastructure matures.
+
 fn emit_intrinsic_cast(
     backend: &mut LlvmBackend, out: &mut String, v: &str,
     args: &[Expr], indent: &str,
 ) -> BTypedRegister {
-    // Emit the source expression, then let the Expr::Cast handler do the
-    // dispatch. The target type is passed as the second argument's type.
+    if args.len() < 2 { return BTypedRegister { name: v.to_string(), ty: Type::int() }; }
     let src = backend.emit_expr(out, &args[0], indent);
-    // Default target type is the source type (identity cast).
-    let target_ll = backend.llvm_type(&src.ty);
     let src_ll = backend.llvm_type(&src.ty);
+    let target_ll = if src.ty == Type::float64() { "double" } else if src.ty == Type::float() { "float" } else { "i64" };
     writeln!(out, "{}{} = bitcast {} {} to {}", indent, v, src_ll, src.name, target_ll).ok();
     BTypedRegister { name: v.to_string(), ty: src.ty.clone() }
 }
