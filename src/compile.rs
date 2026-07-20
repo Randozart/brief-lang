@@ -577,8 +577,45 @@ fn parse(file_path: &str, tokens: &[(Token, std::ops::Range<usize>)], source: &s
     parser.parse_program().map_err(|e| format!("{}: parse error: {}", file_path, e))
 }
 
+/// 2026-07-20: Validate type parameter bounds (K: #String, V: #Float).
+/// Checks that types declaring bounded type params have at least one
+/// operator referencing the bound hashword in their params.
+fn validate_constraints(items: &[brief_compiler::ast::TopLevel]) -> Result<(), String> {
+    for item in items {
+        let brief_compiler::ast::TopLevel::TypeDef(td) = item else { continue; };
+        for tp in &td.type_params {
+            let brief_compiler::ast::top::TypeParam { name, bound: Some(bound) } = tp else { continue; };
+            let bound_category = match bound {
+                brief_compiler::ast::Type::HashWord(c) => c.as_str(),
+                brief_compiler::ast::Type::HashWordVariant(c, _) => c.as_str(),
+                _ => continue,
+            };
+            // Check at least one operator references this hashword in its params
+            let has_op = td.body.operators.iter().any(|op| {
+                op.params.iter().any(|p| {
+                    matches!(p,
+                        brief_compiler::ast::Type::HashWord(c) if c == bound_category
+                    ) || matches!(p,
+                        brief_compiler::ast::Type::HashWordVariant(c, _) if c == bound_category
+                    )
+                })
+            });
+            if !has_op {
+                return Err(format!(
+                    "constraint '{}: {}' in type '{}' is unsatisfiable — \
+                     no operator references {} in its parameters. \
+                     Add an op declaration like 'op ...({}, ...)' to use this constraint.",
+                    name, bound, td.name, bound, bound
+                ));
+            }
+        }
+    }
+    Ok(())
+}
+
 /// Type-check the program against a TypeUniverse.
 fn check_types(items: &[brief_compiler::ast::TopLevel], universe: &TypeUniverse) -> Result<(), String> {
+    validate_constraints(items)?;
     brief_compiler::typechecker::check_program(items, universe)
         .map_err(|errors| {
             let msgs: Vec<String> = errors.iter().map(|e| format!("{}", e)).collect();

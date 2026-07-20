@@ -740,11 +740,13 @@ impl<'a> Parser<'a> {
         self.pos += 1; // consume `type` token
         // 2026-07-16: All type names are Token::Identifier after Type token removal.
         let name = self.expect_identifier()?;
+        // 2026-07-20: Parse type parameters: type List<T: #String, V>
+        let type_params = self.parse_type_params()?;
         // 2026-07-16: P2 — Check for .[ext, ...] extension group syntax
         if self.eat(&Token::Dot) && self.eat(&Token::LBracket) {
             return self.parse_extension_group_body(&name);
         }
-        self.parse_type_body(name)
+        self.parse_type_body(name, type_params)
     }
 
     /// 2026-07-16: P2 — Parse extension group body after `Name.[` has been consumed.
@@ -893,7 +895,7 @@ impl<'a> Parser<'a> {
 
     /// 2026-07-16: P2 — Parse `type Name <: Parent { body }` (single type, not a group).
     /// Extracted from the original parse_type_definition body block.
-    fn parse_type_body(&mut self, name: String) -> Result<Box<TypeDef>, SyntaxError> {
+    fn parse_type_body(&mut self, name: String, type_params: Vec<crate::ast::top::TypeParam>) -> Result<Box<TypeDef>, SyntaxError> {
         let base = if self.eat(&Token::LtColon) {
             self.parse_expression()?
         } else {
@@ -966,7 +968,7 @@ impl<'a> Parser<'a> {
         }
         Ok(Box::new(TypeDef {
             name,
-            type_params: vec![],
+            type_params,
             base: Box::new(base),
             bit_range: None,
             body: TypeDefBody {
