@@ -35,10 +35,15 @@ impl<'a> Parser<'a> {
                             self.expect(Token::Gt)?;
                             return Ok(Type::HashWordVariant(name, variant));
                         }
-                        // 2026-07-20: Resolve bare hashwords per file extension default.
-                        // #String → #String<utf8> (.bv) or #String<ascii> (.ebv)
-                        if name == "#String" || name == "#Float" || name == "#Char" {
-                            return Ok(Type::HashWordVariant(name, self.protocol_default.to_string()));
+                        // 2026-07-20: Resolve bare hashwords per category default.
+                        let variant = match name.as_str() {
+                            "#String" => self.protocol_default,       // .bv→utf8, .ebv→ascii
+                            "#Float" => "ieee754",
+                            "#Char" => "unicode",
+                            _ => "",
+                        };
+                        if !variant.is_empty() {
+                            return Ok(Type::HashWordVariant(name, variant.to_string()));
                         }
                         return Ok(Type::HashWord(name));
                     }

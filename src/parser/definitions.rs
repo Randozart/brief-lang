@@ -1206,4 +1206,86 @@ mod tests {
         let reg = FromSpec::CompilerRegistry("xxhash.c".into());
         assert_eq!(reg.as_str(), "xxhash.c");
     }
+
+    // ── Hashword type parsing ────────────────────────────────────────
+
+    #[test]
+    fn test_hashword_int_no_variant() {
+        let ty = parse_type("#Int").unwrap();
+        assert_eq!(ty, crate::ast::Type::HashWord("#Int".into()));
+    }
+
+    #[test]
+    fn test_hashword_bits_no_variant() {
+        let ty = parse_type("#Bits").unwrap();
+        assert_eq!(ty, crate::ast::Type::HashWord("#Bits".into()));
+    }
+
+    #[test]
+    fn test_hashword_string_with_default_variant() {
+        // Parser with default .bv protocol resolves bare #String → utf8
+        let tokens = crate::lexer::tokenize("#String").unwrap();
+        let mut p = Parser::new(tokens, "#String");
+        p.protocol_default = "utf8";
+        let ty = p.parse_type().unwrap();
+        assert_eq!(ty, crate::ast::Type::HashWordVariant("#String".into(), "utf8".into()));
+    }
+
+    #[test]
+    fn test_hashword_string_with_explicit_variant() {
+        let ty = parse_type("#String<utf8>").unwrap();
+        assert_eq!(ty, crate::ast::Type::HashWordVariant("#String".into(), "utf8".into()));
+    }
+
+    #[test]
+    fn test_hashword_string_with_explicit_ascii_variant() {
+        let ty = parse_type("#String<ascii>").unwrap();
+        assert_eq!(ty, crate::ast::Type::HashWordVariant("#String".into(), "ascii".into()));
+    }
+
+    #[test]
+    fn test_hashword_float_with_explicit_variant() {
+        let ty = parse_type("#Float<ieee754>").unwrap();
+        assert_eq!(ty, crate::ast::Type::HashWordVariant("#Float".into(), "ieee754".into()));
+    }
+
+    // ── Op declaration parsing ───────────────────────────────────────
+
+    fn parse_op_from_type_def(src: &str) -> Vec<crate::ast::top::OperatorDef> {
+        let tokens = crate::lexer::tokenize(src).unwrap();
+        let mut p = Parser::new(tokens, src);
+        match p.parse_top_level() {
+            Ok(crate::ast::TopLevel::TypeDef(td)) => td.body.operators,
+            _ => panic!("expected TypeDef"),
+        }
+    }
+
+    #[test]
+    fn test_op_declarative_hashword() {
+        let ops = parse_op_from_type_def("type T { op Add(#Int, #Int); };");
+        assert_eq!(ops.len(), 1);
+        assert_eq!(ops[0].op, "Add");
+        assert_eq!(ops[0].params.len(), 2);
+        assert_eq!(ops[0].params[0], crate::ast::Type::HashWord("#Int".into()));
+        assert_eq!(ops[0].params[1], crate::ast::Type::HashWord("#Int".into()));
+        assert!(ops[0].impl_args.is_none());
+    }
+
+    #[test]
+    fn test_op_declarative_multiple_params() {
+        let ops = parse_op_from_type_def("type T { op Add(#Float, #Float); };");
+        assert_eq!(ops.len(), 1);
+        assert_eq!(ops[0].params[0], crate::ast::Type::HashWordVariant("#Float".into(), "ieee754".into()));
+    }
+
+    #[test]
+    fn test_op_binding_with_markers() {
+        let ops = parse_op_from_type_def(
+            "type T { op InsertAt(T) = ring_push(#L, #R); };"
+        );
+        assert_eq!(ops.len(), 1);
+        assert_eq!(ops[0].op, "InsertAt");
+        assert_eq!(ops[0].params.len(), 1);
+        assert!(ops[0].impl_args.is_some());
+    }
 }
