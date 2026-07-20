@@ -108,15 +108,16 @@ The `:>` projection system already exists (`list :> Size`, `val :> Bytes`).
 ### Layer 5: Protocol Ops (Category Universal Currency)
 
 Every hashword category defines a set of ops that ALL backends must implement.
-These form the "common language" for cross-category type conversions:
+Types declare `CastTo(#Category)` and `CastFrom(#Category)` to produce and
+consume the protocol shape — no intermediate currency needed.
 
-| Category | Protocol ops | Universal currency |
+| Category | Protocol ops | Protocol shape |
 |---|---|---|
-| `#String` | `Extract(#Char)`, `InsertAt(#Char)`, `Concat(#String)`, `:> Size`, `Cast(#Bits)` | `Char` |
-| `#Char` | `Cast(#Int)`, `Eq(#Char)`, `Lt(#Char)` | Unicode scalar (`UInt32`) |
-| `#Int` | `Add(#Int)`, `Sub(#Int)`, `Mul(#Int)`, `Div(#Int)`, `And(#Bits)`, `Not(#Bits)` | Bit pattern (`#Bits`) |
-| `#Float` | `Add(#Float)`, `Mul(#Float)`, `Sqrt(#Float)`, `Cast(Float64)`, `Cast(#Bits)` | IEEE 754 `Float64` |
-| `#Bits` | `And(#Bits)`, `Or(#Bits)`, `Xor(#Bits)`, `Not(#Bits)`, `Shl(#Bits)`, `Shr(#Bits)` | Raw integer width |
+| `#String` | `CastTo(#Char)`, `CastFrom(#Char)`, `Extract(#Char)`, `InsertAt(#Char)`, `Concat(#String)`, `:> Size`, `CastTo(#Bits)`, `CastFrom(#Bits)` | UTF-8 byte sequence |
+| `#Char` | `CastTo(#Int)`, `CastFrom(#Int)`, `Eq(#Char)`, `Lt(#Char)` | Unicode scalar (i32) |
+| `#Int` | `CastTo(#Bits)`, `CastFrom(#Bits)`, `Add(#Int)`, `Sub(#Int)`, `Mul(#Int)`, `Div(#Int)`, `And(#Bits)`, `Not(#Bits)` | Two's complement i64 |
+| `#Float` | `CastTo(Float64)`, `CastFrom(Float64)`, `Add(#Float)`, `Mul(#Float)`, `Sqrt(#Float)`, `CastTo(#Bits)`, `CastFrom(#Bits)` | IEEE 754 binary32/64 |
+| `#Bits` | `And(#Bits)`, `Or(#Bits)`, `Xor(#Bits)`, `Not(#Bits)`, `Shl(#Bits)`, `Shr(#Bits)` | Raw iN |
 
 A conversion function between two `#String` types speaks `Char` — the universal text
 currency. The backend's `Extract(#Char)` and `InsertAt(#Char)` decode/encode at the
@@ -136,7 +137,7 @@ inline defn any_string_to_ascii(source: #String) -> ASCIIString {
 };
 ```
 
-Float conversion similarly uses `Float64` (IEEE 754 double) as the universal currency:
+Float conversion goes through the `CastTo`/`CastFrom` pair directly:
 
 ```brief
 inline defn any_float_to_posit(source: #Float) -> Posit32 {
@@ -326,7 +327,7 @@ A type declaring `op Add(#MyCustomHashword)` on a backend that doesn't recognize
 | Hashwords are backend directives | TOML op templates | Backend has intrinsic knowledge of its own primitives |
 | Structure determines layout | `bytes <~`, `ctd <~`, `alu <~` | A type IS its fields — metadata is optional hints |
 | Types don't belong to categories | Category inference | A type interacts with `#Int` when its ops say so |
-| Protocol ops define universal currency | Ad-hoc conversion logic | `Char` for String, `Float64` for Float, `#Bits` for Int |
+| CastTo/CastFrom pair handles conversion | Ad-hoc conversion logic | Direct `CastTo`/`CastFrom` inlining |
 | `:>` is compile-time property access | Hardcoded projection list | Every type's fields are accessible generically |
 | `defn` bound to `op` = auto-`alwaysinline` | `inline` keyword | The binding declares the intent |
 | TOML removed except `targets.toml` | Full config directory | The config was bridging a gap that doesn't exist |

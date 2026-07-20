@@ -111,43 +111,39 @@ default switching.
 
 ---
 
-## Layer 5: Protocol currencies (the common language)
+## Layer 5: Protocol shapes — the common language
 
-Each hashword category has a universal currency for cross-type conversion.
-Types declare `CastTo(#Category)` to produce the currency, and
-`CastFrom(#Category)` to consume it:
+Each hashword category has a well-defined protocol shape that types must
+produce and consume through `CastTo`/`CastFrom`:
 
-| Category | Currency | Protocol ops required |
-|---|---|---|
-| `#String` | `Char` (Unicode scalar, i32) | `CastTo(#Char)`, `CastFrom(#Char)`, `Extract(#Char)`, `InsertAt(#Char)`, `:> Size` |
-| `#Char` | `#Int` (Unicode scalar value) | `CastTo(#Int)`, `CastFrom(#Int)`, `Eq(#Char)`, `Lt(#Char)` |
-| `#Float` | `Float64` (IEEE 754 double) | `CastTo(Float64)`, `CastFrom(Float64)` |
-| `#Int` | `#Bits` (raw integer) | `CastTo(#Bits)`, `CastFrom(#Bits)`, `Add(#Int)`, `Sub(#Int)` |
-| `#Bits` | (itself) | (implicit) |
+| Category | Protocol shape | Production | Consumption |
+|---|---|---|---|
+| `#String` | UTF-8 byte sequence | `op CastTo(#String)` — emit UTF-8 bytes | `op CastFrom(#String)` — accept UTF-8 bytes |
+| `#Int` | Two's complement `i64` | `op CastTo(#Int)` — emit integer value | `op CastFrom(#Int)` — accept integer value |
+| `#Float` | IEEE 754 binary32/64 | `op CastTo(#Float)` — emit float bytes | `op CastFrom(#Float)` — accept float bytes |
+| `#Bool` | `i1` (single bit) | `op CastTo(#Bool)` | `op CastFrom(#Bool)` |
+| `#Char` | Unicode scalar (`i32`) | `op CastTo(#Char)` | `op CastFrom(#Char)` |
+| `#Bits` | Raw `iN` | (implicit) | (implicit) |
 
-A conversion function between two `#String` types:
+Conversion happens through the `CastTo`/`CastFrom` pair directly — there is
+no intermediate currency type. The compiler inlines both ops and LLVM
+eliminates any redundant transformations:
 
 ```brief
 inline defn any_string_to_ascii(source: #String) -> ASCIIString {
-    let len = source :> Size;
-    let result = ASCIIString::alloc(len);
-    let mut i = 0;
-    do {
-        let c: Char = source :> Extract(i);         // decode to universal currency
-        result :> InsertAt(i, c);                    // encode from universal currency
-        i = i + 1;
-    } while i < len;
+    let bytes = source :> CastTo(#Bits);        // raw bytes
+    let result = ASCIIString::from_bytes(bytes); // construct from bytes
     result
 };
 ```
 
-When both sides operate on ASCII-range data, LLVM inlines the `Extract`/`InsertAt`
-and eliminates the intermediate `Char`:
+When `CastTo(#String)` and `CastFrom(#String)` are both inlined, LLVM sees:
 
 ```
-Extract: load i8 %src, %idx → zext i8 to i32    (made Char)
-InsertAt: trunc i32 to i8 → store i8 %dest, %idx  (unmade Char)
-→ LLVM sees: load i8, store i8  (identity eliminated)
+Source.CastTo(#String) → emit UTF-8 bytes
+Target.CastFrom(#String) → consume UTF-8 bytes
+→ For ASCII-range data: both sides produce/consume identical bytes
+→ LLVM's InstCombine eliminates the pair
 ```
 
 ---
@@ -162,8 +158,8 @@ programmer writes `(TargetType)source`, the compiler internally emits
 
 | Op | Direction | Example | When it fires |
 |---|---|---|---|
-| `op CastTo(#String)` | Source **→** Protocol | `Latin1 → UTF-8` | Source produces protocol currency |
-| `op CastFrom(#String)` | Protocol **→** Source | `UTF-8 → ASCII` | Target consumes protocol currency |
+| `op CastTo(#String)` | Source **→** Protocol | `Latin1 → UTF-8` | Source emits UTF-8 bytes |
+| `op CastFrom(#String)` | Protocol **→** Source | `UTF-8 → ASCII` | Target accepts UTF-8 bytes |
 | `op Cast(ConcreteType)` | Source **→** Concrete | `Posit32 → Int` | Direct type-to-type (no protocol) |
 
 `CastTo` and `CastFrom` are always oriented toward the `#Category` protocol:
@@ -232,9 +228,9 @@ overlapping range (0-127). For values >127, the Latin-1 `CastTo` must emit
 multi-byte UTF-8, and ASCII's `CastFrom` rejects them — correct behavior
 preserved.
 
-The protocol path never goes through a **third type** — it goes through the
-protocol currency (`Char`, `Float64`), which is a compile-time abstraction,
-not a runtime allocation.
+The protocol path goes through the `CastTo`/`CastFrom` pair directly — no
+intermediate type, no runtime allocation. The protocol shape (UTF-8 bytes,
+IEEE 754 float, etc.) is a compile-time contract, not a runtime object.
 
 ---
 
@@ -278,14 +274,14 @@ the result fits and the transformation is invertible.
 
 ## Layer 8: Protocol shapes (backend contract)
 
-| Hashword | Protocol shape | Required ops | Universal currency |
-|---|---|---|---|
-| `#Int` | `i64` | Add, Sub, Mul, Div, CastTo(#Bits), CastFrom(#Bits) | `#Bits` |
-| `#Float` | IEEE 754 binary32/64 | Add, Sub, Mul, Div, Sqrt, CastTo(Float64), CastFrom(Float64), CastTo(#Bits), CastFrom(#Bits) | `Float64` |
-| `#Bool` | `i1` (stored i8) | And, Or, Not, CastTo(#Bits), CastFrom(#Bits) | `#Bits` |
-| `#Char` | Unicode scalar (i32) | CastTo(#Int), CastFrom(#Int), Eq, Lt | `#Int` |
-| `#String` | UTF-8 byte sequence | CastTo(#Char), CastFrom(#Char), Extract(#Char), InsertAt(#Char), Concat(#String), :> Size, CastTo(#Bits), CastFrom(#Bits) | `Char` |
-| `#Bits` | Raw `iN` | And, Or, Xor, Not, Shl, Shr, CastTo(iN), CastFrom(iN) | (itself) |
+| Hashword | Protocol shape | Required ops |
+|---|---|---|
+| `#Int` | `i64` | Add, Sub, Mul, Div, CastTo(#Bits), CastFrom(#Bits) |
+| `#Float` | IEEE 754 binary32/64 | Add, Sub, Mul, Div, Sqrt, CastTo(Float64), CastFrom(Float64), CastTo(#Bits), CastFrom(#Bits) |
+| `#Bool` | `i1` (stored i8) | And, Or, Not, CastTo(#Bits), CastFrom(#Bits) |
+| `#Char` | Unicode scalar (i32) | CastTo(#Int), CastFrom(#Int), Eq, Lt |
+| `#String` | UTF-8 byte sequence | CastTo(#Char), CastFrom(#Char), Extract(#Char), InsertAt(#Char), Concat(#String), :> Size, CastTo(#Bits), CastFrom(#Bits) |
+| `#Bits` | Raw `iN` | And, Or, Xor, Not, Shl, Shr, CastTo(iN), CastFrom(iN) |
 
 Every backend MUST be able to translate these protocol shapes. A backend that
 cannot represent `i64` decomposes it into smaller units but still provides
@@ -400,8 +396,7 @@ warning: Parse → Cast round-trip failed for type 'HexColor'
   Cast(#String) → '00FF00' (expected 'FF00FF')
 ```
 
-Verification uses the protocol's universal currency as the intermediate.
-For `#String` protocol, the currency is `Char`:
+Verification uses the protocol's `CastTo`/`CastFrom` pair directly:
 
 ```brief
 // Parse: "FF00FF" → HexColor via parse_hex_color

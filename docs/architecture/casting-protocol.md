@@ -22,8 +22,8 @@ in order:
 
 | Op | Direction | Purpose |
 |---|---|---|
-| `op CastTo(#String)` | Source **→** protocol | Produce protocol currency (e.g., emit `Char` from Latin-1) |
-| `op CastFrom(#String)` | Protocol **→** Source | Consume protocol currency (e.g., build ASCII from `Char`) |
+| `op CastTo(#String)` | Source **→** protocol | Produce UTF-8 bytes for `#String` |
+| `op CastFrom(#String)` | Protocol **→** Source | Consume UTF-8 bytes from `#String` |
 | `op Cast(ConcreteType)` | Source **→** Target | Direct conversion between two concrete types |
 
 `CastTo` and `CastFrom` are always oriented toward the `#Category` protocol.
@@ -160,7 +160,7 @@ backends must be able to produce and consume:
 
 The protocol ops (`Extract(#Char)`, `InsertAt(#Char)`, etc.) are the same
 regardless of variant. The backend's protocol handler translates between
-the variant's internal representation and the protocol currency (`Char`).
+the variant's internal representation and the protocol shape (UTF-8 bytes).
 
 ---
 
@@ -344,28 +344,24 @@ bytes + category ops produce multiple valid representations.
 ### `#String` protocol
 
 ```
+op CastTo(#String) = fn(#L);         // emit UTF-8 bytes
+op CastFrom(#String) = fn(#L);       // consume UTF-8 bytes
 op Extract(#Char) = fn(#L, #R);     // extract char at index
 op InsertAt(#Char) = fn(#L, #R);    // insert char at index
 op Concat(#String) = fn(#L, #R);    // append another string-type
 :> Size                              // get length in characters
-Cast(#Bits)                          // raw bytes
+CastTo(#Bits)                        // raw bytes
+CastFrom(#Bits)                      // from raw bytes
 ```
 
-These ops let ANY two `#String` types communicate via `Char` — the universal
-text currency. A conversion function between two opaque string representations
-uses `Extract(#Char)` and `InsertAt(#Char)` without knowing the encoding.
+These ops let ANY two `#String` types communicate through the `CastTo`/`CastFrom`
+pair — they negotiate the UTF-8 protocol shape without an intermediate type.
 
 ```brief
 inline defn any_string_to_ascii(source: #String) -> #String<ascii> {
-    let len = source :> Size;
-    let result = #String<ascii>::alloc(len);
-    let mut i = 0;
-    do {
-        let c: Char = source :> Extract(i);
-        result :> InsertAt(i, c);
-        i = i + 1;
-    } while i < len;
-    result
+    let bytes = source :> CastTo(#Bits);
+    // bytes are UTF-8 — validate, then construct ASCIIString
+    // ...
 };
 ```
 
@@ -377,12 +373,15 @@ Mul(#Float)
 Sub(#Float)
 Div(#Float)
 Sqrt(#Float)
-Cast(Float64)     // IEEE 754 double — universal currency
-Cast(#Bits)       // raw bits
+CastTo(#Float)     // produce IEEE 754 bytes
+CastFrom(#Float)   // consume IEEE 754 bytes
+CastTo(#Bits)      // raw bits
+CastFrom(#Bits)    // from raw bits
 ```
 
-`Float64` is the universal float currency. A Posit32 backend converts to
-`Float64` at the protocol boundary.
+The `CastTo`/`CastFrom` pair handles float conversion directly — no intermediate
+type. A Posit32 backend implements `CastTo(#Float)` to produce IEEE 754 bytes
+and `CastFrom(#Float)` to consume them.
 
 ### `#Int` protocol
 
@@ -400,7 +399,7 @@ Shr(#Bits)
 ```
 
 Int ops are backend-intrinsic — every backend knows how to add integers.
-The universal currency is `#Bits` (the raw integer representation).
+The protocol shape for `#Int` is `i64`. Conversion goes through `CastTo(#Bits)` / `CastFrom(#Bits)`.
 
 ---
 
@@ -447,7 +446,7 @@ Cast happens during codegen. However, Parse ops may invoke Cast internally
 
 | Form | Implementation? | Meaning |
 |---|---|---|
-| `op Parse(#Category)` | No — identity | "This type IS the protocol currency for parsing" |
+| `op Parse(#Category)` | No — identity | "This type IS the protocol shape for parsing" |
 | `op Parse(Bare) = fn(#L)` | Yes — required | Construct from bareword identifier |
 | `op Parse(Decimal) = fn(#L)` | Yes — required | Construct from numeric literal |
 | `op Parse(Quoted) = fn(#L)` | Yes — required | Construct from quoted string |

@@ -376,7 +376,7 @@ type HexColor {
 positional markers (`#L`, `#R`), and inheritance through `<:`. `op Parse`
 integrates literal construction into the same system rather than maintaining
 a parallel `codec` mechanism. Additionally, `op Parse(#Category)` provides a
-zero-cost identity path: when the target type IS the protocol currency,
+zero-cost identity path: when the target type IS the protocol shape,
 parsing is a no-op.
 
 **The three token forms (QuotedValue, DecimalValue, Bareword) remain compiler
