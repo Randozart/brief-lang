@@ -361,7 +361,9 @@ type HexColor {
 |---|---|---|
 | `op Parse(#Category)` | Compile-time identity — target IS the protocol | No — literal bytes are already valid |
 | `op Parse(Bare)` | Construct from bareword identifier `FF00FF` | Yes — required |
-| `op Parse(Decimal)` | Construct from numeric literal `42` or `3.14` | Yes — required |
+| `op Parse(Decimal)` | Construct from numeric literal `42` | Yes — required |
+| `op Parse(Decimal, pre: "0x")` | Hex-prefixed numeric `0xFF00FF` | Yes — required |
+| `op Parse(Decimal, suf: "h")` | Hex-suffixed numeric `FF00FFh` | Yes — required |
 | `op Parse(Quoted)` | Construct from quoted string `"..."` | Yes — required |
 
 `Parse(#Category)` is a hashword op — it declares identity with the protocol,
@@ -370,19 +372,47 @@ form ops that ALWAYS require a conversion function, because the compiler has
 no intrinsic knowledge of how barewords, numbers, or quoted strings map to
 arbitrary type values.
 
+`pre:` and `suf:` are optional qualifiers that filter by literal syntax
+(prefix or suffix). Without them, the Parse op matches all literals of
+that form. With them, it only matches literals with the matching discriminator.
+More specific qualifiers win over unqualified ops.
+
 ### Parse resolution pipeline
 
 When the compiler encounters a literal expression assigned to type `T`:
 
 ```
 1. Determine the literal's syntactic form (Bare, Decimal, or Quoted)
+   and any prefix/suffix discriminator (0x, h, bf, etc.)
 2. Does T declare op Parse(#Category) where #Category matches the
    literal's protocol? → Use identity (zero-cost, no emission)
-3. Does T declare op Parse(Form) with a conversion function?
-   → Call the inlined defn at compile time
-4. Does T's parent (via <:) have a Parse op? → Check inheritance
-5. No match → compile error: "type T does not accept Decimal literals"
+3. Does T declare op Parse(Form, pre: "0x") or op Parse(Form, suf: "h")
+   matching the literal's discriminator? → Most specific match wins
+4. Does T declare op Parse(Form) without discriminator?
+   → Call the inlined defn at compile time (fallback)
+5. Does T's parent (via <:) have a Parse op? → Check inheritance
+6. No match → compile error: "type T does not accept Decimal literals"
 ```
+
+### Discriminator qualifiers: pre: and suf:
+
+Parse ops can declare optional prefix and suffix discriminators to match
+syntactic patterns in source code:
+
+| Op declaration | Matches | Example |
+|---|---|---|
+| `op Parse(Decimal, pre: "0x")` | Hex-prefixed numeric literal | `0xFF00FF` |
+| `op Parse(Decimal, suf: "h")` | Hex-suffixed numeric literal | `FF00FFh` |
+| `op Parse(Decimal, suf: "bf")` | Bfloat-suffixed numeric literal | `1.5bf` |
+| `op Parse(Decimal)` | Any decimal literal (fallback) | `42` |
+
+Resolution priority:
+1. Match with discriminator wins over match without discriminator
+2. Among discriminators, exact match wins
+3. Fallback: unqualified `op Parse(Form)` accepts any literal of that form
+
+The discriminator is purely a routing hint — the conversion function's
+implementation handles the actual semantics (hex decoding, unit conversion).
 
 ### Parse + Cast interaction
 

@@ -737,9 +737,12 @@ pub struct OperatorDef {
     pub op: String,
     /// 2026-07-20: Parameter types (hashwords or concrete types).
     pub params: Vec<Type>,
+    /// 2026-07-20: Optional prefix discriminator for Parse ops: pre: "0x"
+    pub pre: Option<String>,
+    /// 2026-07-20: Optional suffix discriminator for Parse ops: suf: "h"
+    pub suf: Option<String>,
     /// 2026-07-20: Implementation args: fn name + marker references.
     /// None for declarative ops, Some(PropertyValue) for binding ops.
-    /// Consumed directly by emit_strategy_fn_call() in the backend.
     pub impl_args: Option<PropertyValue>,
     /// Old-style implementation name string (from `op Add ~> "string"`).
     pub impl_name: String,

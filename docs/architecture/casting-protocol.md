@@ -448,20 +448,38 @@ Cast happens during codegen. However, Parse ops may invoke Cast internally
 |---|---|---|
 | `op Parse(#Category)` | No — identity | "This type IS the protocol shape for parsing" |
 | `op Parse(Bare) = fn(#L)` | Yes — required | Construct from bareword identifier |
-| `op Parse(Decimal) = fn(#L)` | Yes — required | Construct from numeric literal |
-| `op Parse(Quoted) = fn(#L)` | Yes — required | Construct from quoted string |
+| `op Parse(Decimal) = fn(#L)` | Yes — required | Construct from numeric literal `42` |
+| `op Parse(Decimal, pre: "0x") = fn(#L)` | Yes — required | Construct from hex literal `0xFF00FF` |
+| `op Parse(Decimal, suf: "h") = fn(#L)` | Yes — required | Construct from hex suffix literal `FF00FFh` |
+| `op Parse(Quoted) = fn(#L)` | Yes — required | Construct from quoted string `"..."` |
 
 ### Parse resolution pipeline
 
 When the compiler encounters a literal `42` assigned to type `T`:
 
-1. Determine the literal's syntactic form (Bare/Decimal/Quoted)
+1. Determine the literal's syntactic form (Bare/Decimal/Quoted) and any
+   prefix/suffix discriminator (0x, h, bf, etc.)
 2. Does `T` declare `op Parse(#Category)` where the category matches the
    literal's protocol? → Use identity (zero-cost, no emission)
-3. Does `T` declare `op Parse(Form)` with a conversion function?
-   → Call the inlined defn at compile time
-4. Does `T`'s parent (via `<:`) have a Parse op? → Check inheritance
-5. No match → compile error: "type T does not accept Decimal literals"
+3. Does `T` declare `op Parse(Form, pre: "0x")` or `op Parse(Form, suf: "h")`
+   matching the literal's discriminator? → Most specific match wins
+4. Does `T` declare `op Parse(Form)` without discriminator?
+   → Call the inlined defn at compile time (fallback)
+5. Does `T`'s parent (via `<:`) have a Parse op? → Check inheritance
+6. No match → compile error: "type T does not accept Decimal literals"
+
+### Discriminator qualifiers: pre: and suf:
+
+Parse ops can declare optional prefix and suffix qualifiers:
+
+| Declaration | Matches | Priority |
+|---|---|---|
+| `op Parse(Decimal, pre: "0x")` | `0xFF00FF` | Highest — exact discriminator match |
+| `op Parse(Decimal, suf: "h")` | `FF00FFh` | Highest — exact discriminator match |
+| `op Parse(Decimal)` | `42` | Lower — fallback for unprefixed literals |
+
+Resolution: discriminator match always wins over unqualified match.
+The most specific qualifying Parse op is chosen before the fallback.
 
 ### Replacement of `formatting <~`
 

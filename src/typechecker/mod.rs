@@ -45,14 +45,35 @@ impl<'a> TypecheckContext<'a> {
 
     /// 2026-07-20: Find a Parse op on a type that could accept a literal form.
     /// form: "Decimal", "Quoted", "Bare", or a hashword category like "#Int".
+    /// discriminator: optional prefix/suffix hint ("0x", "h", "bf", etc.)
     /// Returns the OperatorDef if a matching Parse op exists.
-    pub fn find_parse_op(&self, type_name: &str, form: &str) -> Option<&crate::ast::top::OperatorDef> {
+    /// Qualified ops (with pre:/suf:) win over unqualified ops.
+    pub fn find_parse_op(&self, type_name: &str, form: &str,
+                         discriminator: Option<&str>) -> Option<&crate::ast::top::OperatorDef> {
         let defs = self.parse_ops.get(type_name)?;
-        // First check for exact form match (e.g., Parse(Decimal))
-        if let Some(def) = defs.iter().find(|d| matches_form(&d.params, form)) {
+        // First: try to find an exact discriminator match
+        if let Some(d) = discriminator {
+            if let Some(def) = defs.iter().find(|op| {
+                matches_form(&op.params, form)
+                    && (op.pre.as_deref() == Some(d) || op.suf.as_deref() == Some(d))
+            }) {
+                return Some(def);
+            }
+        }
+        // Second: find a qualified match (has pre: or suf: but not matching discriminator)
+        // Only use this if the literal has no discriminator and the op has one
+        if discriminator.is_none() {
+            if let Some(def) = defs.iter().find(|op| {
+                matches_form(&op.params, form) && (op.pre.is_some() || op.suf.is_some())
+            }) {
+                return Some(def);
+            }
+        }
+        // Third: find an unqualified match (no pre:/suf:)
+        if let Some(def) = defs.iter().find(|d| matches_form(&d.params, form) && d.pre.is_none() && d.suf.is_none()) {
             return Some(def);
         }
-        // Fallback: check for hashword identity (e.g., Parse(#Int) for Decimal)
+        // Fallback: hashword identity (e.g., Parse(#Int) for Decimal)
         defs.iter().find(|d| matches_parse_identity(&d.params, form))
     }
 
@@ -253,18 +274,18 @@ pub fn infer_expression(expr: &Expr, ctx: &mut TypecheckContext) -> Result<(Type
 /// via Parse ops. Returns true if the value can be accepted via Parse.
 /// Only works for literal expressions (Decimal, Quoted, Identifier).
 fn try_coerce_via_parse(expr: &Expr, arg_ty: &Type, target_ty: &Type, ctx: &TypecheckContext) -> bool {
-    let form = match expr {
-        Expr::Decimal(_) => "Decimal",
-        Expr::Float(_) => "Decimal",
-        Expr::Quoted(_) => "Quoted",
-        Expr::Identifier(_) => "Bare",
-        _ => return false,
+    let (form, discriminator) = match expr {
+        Expr::Decimal(_) => ("Decimal", None),
+        Expr::Float(_) => ("Decimal", None),
+        Expr::Quoted(_) => ("Quoted", None),
+        Expr::Identifier(_) => ("Bare", None),
+        _ => return (false),
     };
     let target_name = match target_ty {
         Type::Custom(n) => n.as_str(),
         _ => return false,
     };
-    ctx.find_parse_op(target_name, form).is_some()
+    ctx.find_parse_op(target_name, form, discriminator).is_some()
 }
 
 /// 2026-07-18: Convenience wrapper — infer type without provenance.

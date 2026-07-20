@@ -995,13 +995,29 @@ impl<'a> Parser<'a> {
     }
 
     /// 2026-07-20: Parse op Add(#Int, #Int) or op Add(Posit32) = fn(#L, #R).
+    /// Also parses optional discriminator qualifiers:
+    ///   op Parse(Decimal, pre: "0x")
+    ///   op Parse(Decimal, suf: "h")
     fn parse_op_with_params(&mut self, op_name: String,
                             operators: &mut Vec<OperatorDef>) -> Result<(), SyntaxError> {
         let mut params = Vec::new();
+        let mut pre: Option<String> = None;
+        let mut suf: Option<String> = None;
         if !self.check(&Token::RParen) {
             loop {
                 let pty = self.parse_type()?;
                 params.push(pty);
+                // 2026-07-20: Check for discriminator qualifiers after the type
+                if self.eat_identifier("pre") {
+                    self.eat(&Token::Colon);
+                    let val = self.expect_string()?;
+                    pre = Some(val);
+                }
+                if self.eat_identifier("suf") {
+                    self.eat(&Token::Colon);
+                    let val = self.expect_string()?;
+                    suf = Some(val);
+                }
                 if !self.eat(&Token::Comma) { break; }
             }
         }
@@ -1009,7 +1025,8 @@ impl<'a> Parser<'a> {
         // Declarative: op Add(#Int, #Int);
         if self.eat(&Token::Semicolon) {
             operators.push(OperatorDef {
-                op: op_name, params, impl_args: None, impl_name: String::new(), span: None,
+                op: op_name, params, pre, suf,
+                impl_args: None, impl_name: String::new(), span: None,
             });
             return Ok(());
         }
@@ -1018,7 +1035,8 @@ impl<'a> Parser<'a> {
         let impl_args = self.parse_metadata_value_standalone()?;
         self.expect(Token::Semicolon)?;
         operators.push(OperatorDef {
-            op: op_name, params, impl_args: Some(impl_args),
+            op: op_name, params, pre, suf,
+            impl_args: Some(impl_args),
             impl_name: String::new(), span: None,
         });
         Ok(())
