@@ -62,6 +62,7 @@ pub mod parser;
 pub mod normalize_types;
 pub mod plugin;
 pub mod proof_engine;
+pub mod protocol_verify;
 pub mod rbv;
 pub mod reactor;
 pub mod resolver;

@@ -141,10 +141,12 @@ pub fn compile_source(file_path: &str, source: &str, opts: &BuildOptions) -> Res
             brief_compiler::backend::webstack_normalizer::normalize(&mut items, &mut universe)?;
         }
         BackendKind::Spirv => {
-            // 2026-07-15: SPIR-V normalizer resolves types, flags kernels
             brief_compiler::backend::spirv::normalizer::normalize(&mut items, &mut universe)?;
         }
     }
+
+    // 2026-07-20: Protocol round-trip verification (Parse → Cast → Parse)
+    brief_compiler::protocol_verify::verify_roundtrips(&items, &universe)?;
 
     // BVIR snapshot at Post stage (after normalizer, before codegen)
     emit_bvir_snapshot(file_path, BvirStage::Post, &items, &universe, opts)?;
