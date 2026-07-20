@@ -27,6 +27,10 @@ pub struct TypecheckContext<'a> {
     /// state fields from immutable let-bindings for PtrConst inference.
     pub state_keys: std::collections::HashSet<String>,
     pub universe: &'a TypeUniverse,
+    /// 2026-07-20: Parse ops per type, for literal construction resolution.
+    /// Populated from AST TypeDef bodies in check_program.
+    /// Key: type_name → Vec of Parse OperatorDefs.
+    parse_ops: HashMap<String, Vec<crate::ast::top::OperatorDef>>,
 }
 
 impl<'a> TypecheckContext<'a> {
@@ -35,6 +39,30 @@ impl<'a> TypecheckContext<'a> {
             bindings: HashMap::new(),
             state_keys: std::collections::HashSet::new(),
             universe,
+            parse_ops: HashMap::new(),
+        }
+    }
+
+    /// 2026-07-20: Find a Parse op on a type that could accept a literal form.
+    /// form: "Decimal", "Quoted", "Bare", or a hashword category like "#Int".
+    /// Returns the OperatorDef if a matching Parse op exists.
+    pub fn find_parse_op(&self, type_name: &str, form: &str) -> Option<&crate::ast::top::OperatorDef> {
+        let defs = self.parse_ops.get(type_name)?;
+        // First check for exact form match (e.g., Parse(Decimal))
+        if let Some(def) = defs.iter().find(|d| matches_form(&d.params, form)) {
+            return Some(def);
+        }
+        // Fallback: check for hashword identity (e.g., Parse(#Int) for Decimal)
+        defs.iter().find(|d| matches_parse_identity(&d.params, form))
+    }
+
+    /// 2026-07-20: Register Parse ops from a type's definitions.
+    pub fn register_parse_ops(&mut self, type_name: &str, ops: Vec<crate::ast::top::OperatorDef>) {
+        let parse_ops: Vec<_> = ops.into_iter()
+            .filter(|d| d.op == "Parse")
+            .collect();
+        if !parse_ops.is_empty() {
+            self.parse_ops.insert(type_name.to_string(), parse_ops);
         }
     }
 
@@ -42,6 +70,36 @@ impl<'a> TypecheckContext<'a> {
     /// Used by AddrOf to decide Ptr<T> (mutable) vs Ptr<const T> (immutable).
     pub fn is_mutable_location(&self, name: &str) -> bool {
         self.state_keys.contains(name)
+    }
+}
+
+/// Check if an op's params match a literal form (Decimal, Quoted, Bare, #Int, etc.)
+fn matches_form(params: &[Type], form: &str) -> bool {
+    if params.len() != 1 { return false; }
+    match &params[0] {
+        Type::Custom(n) => n == form,
+        Type::HashWord(s) => s.strip_prefix('#') == Some(form) || s.as_str() == form,
+        Type::HashWordVariant(s, _) => s.strip_prefix('#') == Some(form) || s.as_str() == form,
+        _ => false,
+    }
+}
+
+/// Check if a hashword identity op matches a literal form.
+/// op Parse(#Int) matches Decimal literal (Int is the protocol for numbers).
+/// op Parse(#String) matches Quoted literal (String is the protocol for text).
+fn matches_parse_identity(params: &[Type], form: &str) -> bool {
+    if params.len() != 1 { return false; }
+    let hashword_category = match &params[0] {
+        Type::HashWord(s) => s.strip_prefix('#').unwrap_or(s),
+        Type::HashWordVariant(s, _) => s.strip_prefix('#').unwrap_or(s),
+        _ => return false,
+    };
+    match (hashword_category, form) {
+        ("Int", "Decimal") => true,
+        ("Float", "Decimal") => true,
+        ("String", "Quoted") => true,
+        ("Bool", "Bare") => true,
+        _ => false,
     }
 }
 
@@ -488,14 +546,13 @@ pub fn infer_statement(stmt: &Statement, ctx: &mut TypecheckContext) -> Result<(
 pub fn check_program(items: &[TopLevel], universe: &TypeUniverse) -> Result<(), Vec<TypeError>> {
     // 2026-07-14: Pre-collect state variable bindings from top-level `let`
     // so they are visible to all transactions and definitions.
-    let state_bindings: HashMap<String, Type> = items.iter().filter_map(|item| {
+    let state_bindings: std::collections::HashMap<String, Type> = items.iter().filter_map(|item| {
         match item {
             TopLevel::Statement(stmt) => {
                 if let Statement::Let { name, ty, .. } = stmt.as_ref() {
                     return ty.clone().map(|t| (name.clone(), t));
                 }
             }
-            // 2026-07-15: Also collect top-level const so it's visible in txn bodies
             TopLevel::Constant(c) => {
                 return Some((c.name.clone(), c.ty.clone()));
             }
