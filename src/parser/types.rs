@@ -29,6 +29,12 @@ impl<'a> Parser<'a> {
                     "Data" => ("Data", Type::data()),
                     _ if name.starts_with('#') => {
                         // 2026-07-20: Hashword category: #Int, #Float, #String, etc.
+                        // Optional protocol variant: #String<utf8>, #Float<ieee754>
+                        if self.eat(&Token::Lt) {
+                            let variant = self.expect_identifier()?;
+                            self.expect(Token::Gt)?;
+                            return Ok(Type::HashWordVariant(name, variant));
+                        }
                         return Ok(Type::HashWord(name));
                     }
                     _ => {

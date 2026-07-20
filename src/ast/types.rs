@@ -43,6 +43,10 @@ pub enum Type {
     /// A backend directive used in op signatures and type parameter constraints.
     /// Not a concrete type — resolved at codegen by the backend's intrinsic knowledge.
     HashWord(String),
+    /// 2026-07-20: Hashword category with protocol variant: #String<utf8>,
+    /// #Float<ieee754>. Variant is a string tag that differentiates encodings
+    /// or representations within the same category.
+    HashWordVariant(String, String),  // (category_name, variant_name)
 }
 
 // 2026-07-12: Named type factories. These create Custom() references that
