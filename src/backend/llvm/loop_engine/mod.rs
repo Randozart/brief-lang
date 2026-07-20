@@ -298,19 +298,15 @@ pub(crate) fn emit_main(&mut self, out: &mut String, has_wake_triggers: bool) {
     /// Pre-extract float fields into SSA registers before loop body.
     /// Allows LLVM SROA to handle float fields as scalars.
     pub(crate) fn pre_extract_float_fields(&mut self, out: &mut String) {
-        for (name, idx) in &self.ctx.field_index_map {
-            if idx >= &self.ctx.field_types.len() {
-                continue;
-            }
-            let ft = &self.ctx.field_types[*idx];
-            if ft != "float" {
-                continue;
-            }
-            let gep = self.fun.next_reg_with_prefix("pfg");
-            writeln!(out, "  {} = getelementptr inbounds %State, ptr %state, i32 0, i32 {}",
-                gep, idx).ok();
-            let reg = self.fun.next_reg_with_prefix("pfl");
-            writeln!(out, "  {} = load float, ptr {}, align 4", reg, gep).ok();
+        // Collect indices first to avoid borrow conflict with emit_state_load_i64_by_idx
+        let float_indices: Vec<(String, usize)> = self.ctx.field_index_map.iter()
+            .filter(|&(_, &idx)| {
+                idx < self.ctx.field_types.len() && self.ctx.field_types[idx] == "float"
+            })
+            .map(|(n, &idx)| (n.clone(), idx))
+            .collect();
+        for (name, idx) in float_indices {
+            let (reg, _) = self.emit_state_load_i64_by_idx(out, "  ", idx);
             self.fun.last_val_temps.insert(name.clone(), reg.clone());
             self.fun.last_val_types.insert(name.clone(), Type::float());
         }
@@ -318,19 +314,14 @@ pub(crate) fn emit_main(&mut self, out: &mut String, has_wake_triggers: bool) {
 
     /// Pre-extract integer fields into SSA registers before loop body.
     pub(crate) fn pre_extract_int_fields(&mut self, out: &mut String) {
-        for (name, idx) in &self.ctx.field_index_map {
-            if idx >= &self.ctx.field_types.len() {
-                continue;
-            }
-            let ft = &self.ctx.field_types[*idx];
-            if ft != "i64" {
-                continue;
-            }
-            let gep = self.fun.next_reg_with_prefix("pig");
-            writeln!(out, "  {} = getelementptr inbounds %State, ptr %state, i32 0, i32 {}",
-                gep, idx).ok();
-            let reg = self.fun.next_reg_with_prefix("pil");
-            writeln!(out, "  {} = load i64, ptr {}, align 8", reg, gep).ok();
+        let int_indices: Vec<(String, usize)> = self.ctx.field_index_map.iter()
+            .filter(|&(_, &idx)| {
+                idx < self.ctx.field_types.len() && self.ctx.field_types[idx] == "i64"
+            })
+            .map(|(n, &idx)| (n.clone(), idx))
+            .collect();
+        for (name, idx) in int_indices {
+            let (reg, _) = self.emit_state_load_i64_by_idx(out, "  ", idx);
             self.fun.last_val_temps.insert(name.clone(), reg.clone());
             self.fun.last_val_types.insert(name.clone(), Type::int());
         }

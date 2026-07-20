@@ -260,11 +260,7 @@ impl LlvmBackend {
         let c0 = self.fun.txn_counter;
         let bound_reg = self.fun.next_reg_with_prefix("cmb");
         self.emit_countable_load_bound(out, &bound_reg, total_idx, total_const_name, c0);
-        let gep = self.fun.next_reg_with_prefix("cmi");
-        writeln!(out, "  {} = getelementptr inbounds %State, ptr %state, i32 0, i32 {}",
-            gep, counter_idx).ok();
-        let init_name = self.fun.next_reg_with_prefix("cmv");
-        writeln!(out, "  {} = load i64, ptr {}, align 8", init_name, gep).ok();
+        let (init_name, _) = self.emit_state_load_i64_by_idx(out, "  ", counter_idx);
 
         // 2026-07-17: Pre-load all field initial values from state for per-field phis.
         // Sort deterministically to avoid HashMap iteration non-determinism.
@@ -272,14 +268,12 @@ impl LlvmBackend {
         sorted_fields.sort();
         let mut phi_field_init: HashMap<String, String> = HashMap::new();
         for fname in &sorted_fields {
-            if let Some(&idx) = self.ctx.field_index_map.get(fname.as_str()) {
-                let igep = self.fun.next_reg_with_prefix("cmi");
-                writeln!(out, "  {} = getelementptr inbounds %State, ptr %state, i32 0, i32 {}",
-                    igep, idx).ok();
-                let init_f = self.fun.next_reg_with_prefix("cmf");
-                writeln!(out, "  {} = load i64, ptr {}, align 8", init_f, igep).ok();
-                phi_field_init.insert((*fname).clone(), init_f);
-            }
+            let idx = match self.ctx.field_index_map.get(fname.as_str()) {
+                Some(&i) => i,
+                None => continue,
+            };
+            let (init_f, _) = self.emit_state_load_i64_by_idx(out, "  ", idx);
+            phi_field_init.insert((*fname).clone(), init_f);
         }
 
         // 2026-07-17: Pre-generate backedge register names for per-field phis
@@ -398,10 +392,7 @@ impl LlvmBackend {
         self.fun.last_val_types.clear();
         let hoist = self.fun.pending_post_hoist.clone();
         self.emit_hoisted_post_loop_prints(out, &hoist);
-        let final_gep = self.fun.next_reg_with_prefix("cmg");
-        writeln!(out, "  {} = getelementptr inbounds %State, ptr %state, i32 0, i32 {}",
-            final_gep, counter_idx).ok();
-        writeln!(out, "  store i64 {}, ptr {}, align 8", counter_name, final_gep).ok();
+        self.emit_state_store_i64_by_idx(out, "  ", counter_idx, &counter_name);
         writeln!(out, "  ret i32 0").ok();
         writeln!(out, "}}").ok();
         writeln!(out).ok();
@@ -464,6 +455,8 @@ impl LlvmBackend {
         total_const_name: Option<&str>,
         _c0: usize,
     ) {
+        // 2026-07-20: Pre-allocated bound_reg — use hand-rolled GEP+load
+        // because the centralized helper creates its own register name.
         if let Some(ti) = total_idx {
             let gep = self.fun.next_reg_with_prefix("clb");
             writeln!(out, "  {} = getelementptr inbounds %State, ptr %state, i32 0, i32 {}",
@@ -471,9 +464,6 @@ impl LlvmBackend {
             writeln!(out, "  {} = load i64, ptr {}, align 8", bound_reg, gep).ok();
         } else if let Some(tcn) = total_const_name {
             // 2026-07-17: Resolve bound from compile-time constant value first.
-            // The tcn is the bound variable name. It may be a const (like
-            // `const total: Int = 500`) rather than a state field — in which
-            // case we read the literal from `self.ctx.constants`.
             if let Some((_, Expr::Decimal(val))) = self.ctx.constants.get(tcn) {
                 writeln!(out, "  {} = add i64 0, {}", bound_reg, val).ok();
             } else if let Some(&idx) = self.ctx.field_index_map.get(tcn) {

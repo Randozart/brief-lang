@@ -268,10 +268,9 @@ impl LlvmBackend {
                     continue;
                 }
                 if let Some(&idx) = self.ctx.field_index_map.get(var) {
-                    let ty = &self.ctx.field_types[idx];
-                    let gp = format!("%gp_{}", var);
-                    writeln!(out, "  {} = getelementptr inbounds %State, ptr %state, i32 0, i32 {}", gp, idx).ok();
-                    Self::emit_precomputed_store(out, &gp, ty, val);
+                    let ty = self.ctx.field_types[idx].clone();
+                    let gp = self.emit_state_gep(out, "  ", "gp", "%state", idx);
+                    Self::emit_precomputed_store(out, &gp, &ty, val);
                 } else if let Some(&addr) = self.ctx.mmio_fields.get(var) {
                     let gp = format!("%gp_{}", var);
                     self.emit_inttoptr(out, "  ", &gp, &addr.to_string());

@@ -131,11 +131,7 @@ impl LlvmBackend {
         writeln!(out, "  %state = alloca %State, align 8").ok();
         self.emit_inline_init_stores(out, "%state");
         let counter_idx = self.ctx.field_index_map.get(counter_name).copied().unwrap_or(0);
-        let c_gep = self.fun.next_reg_with_prefix("msp");
-        writeln!(out, "  {} = getelementptr inbounds %State, ptr %state, i32 0, i32 {}",
-            c_gep, counter_idx).ok();
-        let c_val = self.fun.next_reg_with_prefix("msv");
-        writeln!(out, "  {} = load i64, ptr {}, align 8", c_val, c_gep).ok();
+        let (c_val, _) = self.emit_state_load_i64_by_idx(out, "  ", counter_idx);
         let mod_val = self.fun.next_reg_with_prefix("msm");
         writeln!(out, "  {} = srem i64 {}, {}", mod_val, c_val, divisor).ok();
         writeln!(out, "  switch i64 {}, label %.end [", mod_val).ok();
@@ -176,6 +172,7 @@ impl LlvmBackend {
         writeln!(out, "  br label %.mr_loop").ok();
         writeln!(out, ".mr_loop:").ok();
         let counter_idx = self.ctx.field_index_map.get(counter_name).copied().unwrap_or(0);
+        // 2026-07-20: Keep GEP for counter (reused by store at mr_latch).
         let c_gep = self.fun.next_reg_with_prefix("mrp");
         writeln!(out, "  {} = getelementptr inbounds %State, ptr %state, i32 0, i32 {}",
             c_gep, counter_idx).ok();
@@ -184,11 +181,7 @@ impl LlvmBackend {
         // 2026-07-17: Bound check — exit when counter >= total.
         // The total field name may not be directly after counter; find by name.
         let total_idx = self.ctx.field_index_map.get("total").copied().unwrap_or(counter_idx + 1);
-        let b_gep = self.fun.next_reg_with_prefix("mrb");
-        writeln!(out, "  {} = getelementptr inbounds %State, ptr %state, i32 0, i32 {}",
-            b_gep, total_idx).ok();
-        let bound_val = self.fun.next_reg_with_prefix("mrbv");
-        writeln!(out, "  {} = load i64, ptr {}, align 8", bound_val, b_gep).ok();
+        let (bound_val, _) = self.emit_state_load_i64_by_idx(out, "  ", total_idx);
         let done = self.fun.next_reg_with_prefix("mrd");
         writeln!(out, "  {} = icmp sge i64 {}, {}", done, c_val, bound_val).ok();
         writeln!(out, "  br i1 {}, label %.mr_end, label %.mr_cont", done).ok();
@@ -231,16 +224,9 @@ impl LlvmBackend {
         b_idx: usize,
         cname: &str,
     ) {
-        let c_gep = self.fun.next_reg_with_prefix("ssc");
-        writeln!(out, "  {} = getelementptr inbounds %State, ptr %state, i32 0, i32 {}",
-            c_gep, self.ctx.field_index_map.get(cname).copied().unwrap_or(0)).ok();
-        let init = self.fun.next_reg_with_prefix("ssi");
-        writeln!(out, "  {} = load i64, ptr {}, align 8", init, c_gep).ok();
-        let b_gep = self.fun.next_reg_with_prefix("ssb");
-        writeln!(out, "  {} = getelementptr inbounds %State, ptr %state, i32 0, i32 {}",
-            b_gep, b_idx).ok();
-        let bound = self.fun.next_reg_with_prefix("ssv");
-        writeln!(out, "  {} = load i64, ptr {}, align 8", bound, b_gep).ok();
+        let c_idx = self.ctx.field_index_map.get(cname).copied().unwrap_or(0);
+        let (init, _) = self.emit_state_load_i64_by_idx(out, "  ", c_idx);
+        let (bound, _) = self.emit_state_load_i64_by_idx(out, "  ", b_idx);
         writeln!(out, "  br label %.ss_loop").ok();
         writeln!(out, ".ss_loop:").ok();
         let counter = self.fun.next_reg_with_prefix("ssc");
@@ -437,24 +423,23 @@ impl LlvmBackend {
         writeln!(out, "entry:").ok();
         writeln!(out, "  %state = alloca %State, align 8").ok();
         self.emit_inline_init_stores(out, "%state");
-        let bound_reg = self.fun.next_reg_with_prefix("fmb");
-        if let Some(ti) = total_idx {
-            let gep = self.fun.next_reg_with_prefix("fmgb");
-            writeln!(out, "  {} = getelementptr inbounds %State, ptr %state, i32 0, i32 {}",
-                gep, ti).ok();
-            writeln!(out, "  {} = load i64, ptr {}, align 8", bound_reg, gep).ok();
+        let bound_reg = if let Some(ti) = total_idx {
+            let (br, _) = self.emit_state_load_i64_by_idx(out, "  ", ti);
+            br
         } else if let Some(tcn) = total_const_name {
             if let Some(&idx) = self.ctx.field_index_map.get(tcn) {
-                let gep = self.fun.next_reg_with_prefix("fmgb");
-                writeln!(out, "  {} = getelementptr inbounds %State, ptr %state, i32 0, i32 {}",
-                    gep, idx).ok();
-                writeln!(out, "  {} = load i64, ptr {}, align 8", bound_reg, gep).ok();
+                let (br, _) = self.emit_state_load_i64_by_idx(out, "  ", idx);
+                br
             } else {
-                writeln!(out, "  {} = add i64 0, 1", bound_reg).ok();
+                let r = self.fun.next_reg_with_prefix("fmb");
+                writeln!(out, "  {} = add i64 0, 1", r).ok();
+                r
             }
         } else {
-            writeln!(out, "  {} = add i64 0, 1", bound_reg).ok();
-        }
+            let r = self.fun.next_reg_with_prefix("fmb");
+            writeln!(out, "  {} = add i64 0, 1", r).ok();
+            r
+        };
         // 2026-07-18: Preallocate push targets for all txn bodies in the
         // multi-txn main loop. Each body's push targets are collected via
         // over-approximation and deduplicated, then preallocated once with
@@ -507,14 +492,7 @@ impl LlvmBackend {
         sorted_keys.sort();
         for name in &sorted_keys {
             if let Some(&idx) = self.ctx.field_index_map.get(name) {
-                let brief_ty = self.ctx.field_brief_types.get(idx).cloned().unwrap_or(Type::int());
-                let llvm_ty = self.ctx.field_types.get(idx).cloned().unwrap_or_else(|| "i64".to_string());
-                let gep = self.fun.next_reg_with_prefix("lvt");
-                writeln!(out, "  {} = getelementptr inbounds %State, ptr %state, i32 0, i32 {}",
-                    gep, idx).ok();
-                let val = self.fun.next_reg_with_prefix("lvv");
-                writeln!(out, "  {} = load {}, ptr {}, align {}", val, llvm_ty, gep,
-                    if llvm_ty == "float" { 4 } else { 8 }).ok();
+                let (val, brief_ty) = self.emit_state_load_i64_by_idx(out, "  ", idx);
                 self.fun.last_val_temps.insert(name.clone(), val.clone());
                 self.fun.last_val_types.insert(name.clone(), brief_ty);
             }
