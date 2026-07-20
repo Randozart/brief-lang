@@ -240,6 +240,28 @@ error: target 'embedded-riscv' does not support protocol '#String<utf8>'.
   Available protocols on this target: #String<ascii>, #Int, #Bool, ...
 ```
 
+### Cross-variant detection
+
+The typechecker treats `#String<utf8>` and `#String<ascii>` as distinct types.
+Passing one where the other is expected produces:
+
+```
+type mismatch: expected #String<ascii> for parameter 1, found #String<utf8>
+```
+
+The file extension determines the default variant at parse time:
+- `.bv` files: bare `#String` → `#String<utf8>`
+- `.ebv` files: bare `#String` → `#String<ascii>`
+
+When a `.bv` file calls an `.ebv` function using `#String`, the default
+variants differ (`utf8` vs `ascii`), and the typechecker's existing
+mismatch detection catches it automatically. The programmer adds the
+explicit variant at the call site:
+
+```brief
+fn cross(a: #String<utf8>, b: #String<ascii>) { ... };
+```
+
 ### Adding new protocols
 
 Adding a new protocol variant is additive:
