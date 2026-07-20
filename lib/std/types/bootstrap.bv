@@ -10,6 +10,8 @@
 type Int <: Bits {
     bytes <~ 8;
     alignment <~ 8;
+    op Parse(#Int);
+    op Parse(Decimal);
     op Add(#Int, #Int);
     op Sub(#Int, #Int);
     op Mul(#Int, #Int);
@@ -27,6 +29,8 @@ type Int <: Bits {
 type UInt <: Bits {
     bytes <~ 8;
     alignment <~ 8;
+    op Parse(#Int);
+    op Parse(Decimal);
     op Add(#Int, #Int);
     op Sub(#Int, #Int);
     op Mul(#Int, #Int);
@@ -142,6 +146,8 @@ type UInt32 <: Bits {
 type Float <: Bits {
     bytes <~ 4;
     alignment <~ 4;
+    op Parse(#Float);
+    op Parse(Decimal);
     op Add(#Int, #Int);
     op Sub(#Int, #Int);
     op Mul(#Int, #Int);
@@ -159,6 +165,8 @@ type Float <: Bits {
 type Float64 <: Bits {
     bytes <~ 8;
     alignment <~ 8;
+    op Parse(#Float);
+    op Parse(Decimal);
     op Add(#Int, #Int);
     op Sub(#Int, #Int);
     op Mul(#Int, #Int);
