@@ -205,13 +205,7 @@ impl<'a> Parser<'a> {
         let metadata = self.parse_body_metadata()?;
         Ok(Definition {
             name,
-            type_params: type_params
-                .into_iter()
-                .map(|n| TypeParam {
-                    name: n,
-                    bound: None,
-                })
-                .collect(),
+            type_params,
             parameters,
             output_type: output_type.clone(),
             outputs: vec![],
@@ -772,6 +766,7 @@ impl<'a> Parser<'a> {
         };
         let mut slots = Vec::new();
         let mut metadata = std::collections::HashMap::new();
+        let mut operators: Vec<OperatorDef> = Vec::new();
         if self.eat(&Token::LBrace) {
             while !self.check(&Token::RBrace) && !self.is_at_end() {
                 let slot_name = self.expect_identifier()?;
@@ -869,7 +864,7 @@ impl<'a> Parser<'a> {
                     metadata: metadata.clone(),
                     projections: vec![],
                     bindings: vec![],
-                    operators: vec![],
+                    operators: operators.clone(),
                     constraints: vec![],
                     span: None,
                 },
@@ -888,7 +883,7 @@ impl<'a> Parser<'a> {
                 metadata,
                 projections: vec![],
                 bindings: vec![],
-                operators: vec![],
+                operators,
                 constraints: vec![],
                 span: None,
             },
@@ -906,6 +901,7 @@ impl<'a> Parser<'a> {
         };
         let mut slots = Vec::new();
         let mut metadata = std::collections::HashMap::new();
+        let mut operators: Vec<OperatorDef> = Vec::new();
         if self.eat(&Token::LBrace) {
             while !self.check(&Token::RBrace) && !self.is_at_end() {
                 let slot_name = self.expect_identifier()?;
@@ -949,29 +945,7 @@ impl<'a> Parser<'a> {
                     continue;
                 }
                 if slot_name == "op" {
-                    let op_name = self.expect_identifier()?;
-                    self.expect(Token::TildeArrow)?;
-                    // 2026-07-18: Accept string ("int.add") or identifier (int_add)
-                    // for the generic op identifier. Parenthesized param list is
-                    // optional syntactic sugar (currently discarded — the generic
-                    // ID uniquely identifies the operation).
-                    let impl_val = if self.check(&Token::String(String::new())) {
-                        self.expect_string()?
-                    } else {
-                        self.expect_identifier()?
-                    };
-                    if self.eat(&Token::LParen) {
-                        // Skip parameter types (documentation only)
-                        while !self.check(&Token::RParen) {
-                            if self.check(&Token::Identifier(String::new())) || self.check(&Token::String(String::new())) {
-                                self.advance();
-                            } else { break; }
-                            if !self.check(&Token::RParen) { self.eat(&Token::Comma); }
-                        }
-                        self.expect(Token::RParen)?;
-                    }
-                    self.eat(&Token::Semicolon);
-                    metadata.insert(format!("op.{}", op_name), PropertyValue::String(impl_val));
+                    self.parse_op_binding(&mut metadata, &mut operators)?;
                     continue;
                 }
                 // 2026-07-18: op binding via <~: InsertAt <~ ring_push.
@@ -1003,12 +977,76 @@ impl<'a> Parser<'a> {
                 metadata,
                 projections: vec![],
                 bindings: vec![],
-                operators: vec![],
+                operators,
                 constraints: vec![],
                 span: None,
             },
             span: None,
         }))
+    }
+
+    /// 2026-07-20: Parse an op binding within a type body.
+    /// Three forms:
+    ///   op Add(#Int, #Int);                                     — declarative hashword dispatch
+    ///   op Add(Posit32) = posit32_add(#L, #R);                  — binding with explicit function
+    ///   op Add ~> "int.add";                                    — old-style string binding
+    ///
+    /// Flat control flow: each form is an early return from helper functions.
+    fn parse_op_binding(&mut self, metadata: &mut std::collections::HashMap<String, PropertyValue>,
+                        operators: &mut Vec<OperatorDef>) -> Result<(), SyntaxError> {
+        let op_name = self.expect_identifier()?;
+        // 2026-07-20: New syntax — parenthesized parameter types
+        if self.eat(&Token::LParen) {
+            return self.parse_op_with_params(op_name, operators);
+        }
+        // Fallback: old-style op Add ~> "int.add";
+        self.expect(Token::TildeArrow)?;
+        let impl_val = if self.check(&Token::String(String::new())) {
+            self.expect_string()?
+        } else {
+            self.expect_identifier()?
+        };
+        self.eat(&Token::Semicolon);
+        metadata.insert(format!("op.{}", op_name), PropertyValue::String(impl_val));
+        Ok(())
+    }
+
+    /// 2026-07-20: Parse op Add(#Int, #Int) or op Add(Posit32) = fn(#L, #R).
+    fn parse_op_with_params(&mut self, op_name: String,
+                            operators: &mut Vec<OperatorDef>) -> Result<(), SyntaxError> {
+        let mut params = Vec::new();
+        if !self.check(&Token::RParen) {
+            loop {
+                let pty = self.parse_type()?;
+                params.push(pty);
+                if !self.eat(&Token::Comma) { break; }
+            }
+        }
+        self.expect(Token::RParen)?;
+        // Declarative: op Add(#Int, #Int);
+        if self.eat(&Token::Semicolon) {
+            operators.push(OperatorDef {
+                op: op_name, params, impl_fn: None, impl_name: String::new(), span: None,
+            });
+            return Ok(());
+        }
+        // Binding: op Add(Posit32) = posit32_add(#L, #R);
+        self.expect(Token::Eq)?;
+        let fn_name = self.expect_identifier()?;
+        self.expect(Token::LParen)?;
+        let mut args = Vec::new();
+        loop {
+            let arg = self.parse_expression()?;
+            args.push(arg);
+            if !self.eat(&Token::Comma) { break; }
+        }
+        self.expect(Token::RParen)?;
+        self.expect(Token::Semicolon)?;
+        operators.push(OperatorDef {
+            op: op_name, params, impl_fn: Some((fn_name, args)),
+            impl_name: String::new(), span: None,
+        });
+        Ok(())
     }
 
     /// 2026-07-16: Parse struct-format layout body: { field: Type, ... }.

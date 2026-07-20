@@ -723,9 +723,23 @@ pub struct ProjectionDef {
     pub span: Option<Span>,
 }
 
+/// 2026-07-20: Operator definition from a type body.
+/// Two forms:
+///   op Add(#Int, #Int);        — declarative: params are hashword categories
+///   op Add(Posit32) = fn(#L,#R); — binding: explicit implementation function
+///
+/// The `impl_name` field stores the old `op Add ~> "int.add"` string value
+/// for backward compat during migration.
 #[derive(Debug, Clone)]
 pub struct OperatorDef {
     pub op: String,
+    /// 2026-07-20: Parameter types (hashwords or concrete types).
+    /// Empty for the old `op Add ~> "string"` syntax.
+    pub params: Vec<Type>,
+    /// 2026-07-20: Optional implementation function name + argument expressions.
+    /// None for declarative ops, Some(name, args) for binding ops.
+    pub impl_fn: Option<(String, Vec<Expr>)>,
+    /// Old-style implementation name string (from `op Add ~> "string"`).
     pub impl_name: String,
     pub span: Option<Span>,
 }

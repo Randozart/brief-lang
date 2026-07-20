@@ -39,6 +39,10 @@ pub enum Type {
     Constrained(Box<Type>, BitRange),
     /// Layout-constrained pointer
     LayoutPtr(LayoutConstraint),
+    /// 2026-07-20: Hashword category: #Int, #Float, #String, #Bits, #Bool, #Char.
+    /// A backend directive used in op signatures and type parameter constraints.
+    /// Not a concrete type — resolved at codegen by the backend's intrinsic knowledge.
+    HashWord(String),
 }
 
 // 2026-07-12: Named type factories. These create Custom() references that

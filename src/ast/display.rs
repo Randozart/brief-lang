@@ -143,6 +143,7 @@ impl fmt::Display for Type {
             Type::Bits(n) => write!(f, "Bits({})", n),
             Type::Void => write!(f, "void"),
             Type::Custom(name) => write!(f, "{}", name),
+            Type::HashWord(name) => write!(f, "{}", name),
             Type::Generic(name, args) => {
                 write!(f, "{}<", name)?;
                 for (i, arg) in args.iter().enumerate() {

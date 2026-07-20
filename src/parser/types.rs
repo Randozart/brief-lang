@@ -27,6 +27,10 @@ impl<'a> Parser<'a> {
                     "Void" => return Ok(Type::void()),
                     "Char" => ("Char", Type::char_()),
                     "Data" => ("Data", Type::data()),
+                    _ if name.starts_with('#') => {
+                        // 2026-07-20: Hashword category: #Int, #Float, #String, etc.
+                        return Ok(Type::HashWord(name));
+                    }
                     _ => {
                         // Unknown name — delegate to parse_named_type_body
                         // (handles Ptr<T>, Foo<T>, .ext suffixes, Custom types)
@@ -147,12 +151,18 @@ impl<'a> Parser<'a> {
     }
 
     /// Parse type parameters: `<T, U>` or nothing.
-    pub fn parse_type_params(&mut self) -> Result<Vec<String>, SyntaxError> {
+    pub fn parse_type_params(&mut self) -> Result<Vec<crate::ast::top::TypeParam>, SyntaxError> {
         if self.eat(&Token::Lt) {
             let mut params = Vec::new();
             loop {
                 let name = self.expect_identifier()?;
-                params.push(name);
+                // 2026-07-20: Optional bound: K: #String or K: String
+                let bound = if self.eat(&Token::Colon) {
+                    Some(self.parse_type()?)
+                } else {
+                    None
+                };
+                params.push(crate::ast::top::TypeParam { name, bound });
                 if !self.eat(&Token::Comma) {
                     break;
                 }
