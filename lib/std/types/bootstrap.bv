@@ -10,7 +10,6 @@
 type Int <: Bits {
     bytes <~ 8;
     alignment <~ 8;
-    tbaa <~ "Int";
     default_width <~ 64;
     commuting <~ true;
     op Add(#Int, #Int);
@@ -30,7 +29,6 @@ type Int <: Bits {
 type UInt <: Bits {
     bytes <~ 8;
     alignment <~ 8;
-    tbaa <~ "Int";
     default_width <~ 64;
     commuting <~ true;
     op Add(#Int, #Int);
@@ -49,7 +47,6 @@ type UInt <: Bits {
 type Int8 <: Bits {
     bytes <~ 1;
     alignment <~ 1;
-    tbaa <~ "Int";
     default_width <~ 8;
     commuting <~ true;
     op Add(#Int, #Int);
@@ -69,7 +66,6 @@ type Int8 <: Bits {
 type UInt8 <: Bits {
     bytes <~ 1;
     alignment <~ 1;
-    tbaa <~ "Int";
     default_width <~ 8;
     commuting <~ true;
     op Add(#Int, #Int);
@@ -88,7 +84,6 @@ type UInt8 <: Bits {
 type Int16 <: Bits {
     bytes <~ 2;
     alignment <~ 2;
-    tbaa <~ "Int";
     default_width <~ 16;
     commuting <~ true;
     op Add(#Int, #Int);
@@ -108,7 +103,6 @@ type Int16 <: Bits {
 type UInt16 <: Bits {
     bytes <~ 2;
     alignment <~ 2;
-    tbaa <~ "Int";
     default_width <~ 16;
     commuting <~ true;
     op Add(#Int, #Int);
@@ -127,7 +121,6 @@ type UInt16 <: Bits {
 type Int32 <: Bits {
     bytes <~ 4;
     alignment <~ 4;
-    tbaa <~ "Int";
     default_width <~ 32;
     commuting <~ true;
     op Add(#Int, #Int);
@@ -147,7 +140,6 @@ type Int32 <: Bits {
 type UInt32 <: Bits {
     bytes <~ 4;
     alignment <~ 4;
-    tbaa <~ "Int";
     default_width <~ 32;
     commuting <~ true;
     op Add(#Int, #Int);
@@ -166,7 +158,6 @@ type UInt32 <: Bits {
 type Float <: Bits {
     bytes <~ 4;
     alignment <~ 4;
-    tbaa <~ "Float";
     default_width <~ 32;
     commuting <~ true;
     op Add(#Int, #Int);
@@ -186,7 +177,6 @@ type Float <: Bits {
 type Float64 <: Bits {
     bytes <~ 8;
     alignment <~ 8;
-    tbaa <~ "Float";
     default_width <~ 64;
     commuting <~ true;
     op Add(#Int, #Int);
@@ -206,7 +196,6 @@ type Float64 <: Bits {
 type Bool <: Bits {
     bytes <~ 1;
     alignment <~ 1;
-    tbaa <~ "Bool";
     default_width <~ 1;
     commuting <~ true;
     op Eq(#Int, #Int);
@@ -219,7 +208,6 @@ type Bool <: Bits {
 type Char <: Bits {
     bytes <~ 4;
     alignment <~ 4;
-    tbaa <~ "Char";
     default_width <~ 32;
 };
 
@@ -228,7 +216,6 @@ type String {
     len: Int;
     alignment <~ 8;
     encoding <~ "UTF-8";
-    tbaa <~ "String";
 };
 
 // 2026-07-18: Utf8View — borrowed, trusted-UTF-8 view of byte data.
@@ -240,7 +227,6 @@ type Utf8View {
     len: Int;
     alignment <~ 8;
     encoding <~ "UTF-8";
-    tbaa <~ "Utf8View";
 };
 
 // 2026-07-18: StaticString — compile-time-known string data in ROM (.rodata).
@@ -250,7 +236,6 @@ type Utf8View {
 type StaticString {
     data: Int;
     len: Int;
-    tbaa <~ "StaticString";
 };
 
 // 2026-07-18: SmallString64 — inline buffer string for embedded systems.
@@ -274,6 +259,5 @@ type SmallString64 {
 type Data <: Bits {
     bytes <~ 8;
     alignment <~ 8;
-    tbaa <~ "String";
     default_width <~ 64;
 };
