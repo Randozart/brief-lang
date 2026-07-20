@@ -10,7 +10,11 @@ use crate::errors::Span;
 pub enum Expr {
     // ── Literals ────────────────────────────────────────────────
     Quoted(Vec<u8>), // "..." raw bytes
-    Decimal(i64),    // 42, 0xFF
+    Decimal(i64),    // 42, 16711680
+    /// 2026-07-20: Tagged literal with discriminator prefix/suffix.
+    /// Second field is the discriminator tag: "0x", "h", "bf", etc.
+    /// Used by op Parse(Decimal, pre: "0x") for routing.
+    TaggedLiteral(i64, String), // 0xFF00FF, FF00FFh, 1.5bf
     Bool(bool),      // true, false
     Float(f64),      // 3.14
 
@@ -146,28 +150,62 @@ impl Expr {
     fn collect_vars_into(&self, acc: &mut Vec<String>) {
         match self {
             Expr::Identifier(name) => acc.push(name.clone()),
-            Expr::BinaryOp(_, l, r) => { l.collect_vars_into(acc); r.collect_vars_into(acc); }
+            Expr::BinaryOp(_, l, r) => {
+                l.collect_vars_into(acc);
+                r.collect_vars_into(acc);
+            }
             Expr::UnaryOp(_, e) => e.collect_vars_into(acc),
             Expr::Field(e, _) => e.collect_vars_into(acc),
-            Expr::Index(l, r) => { l.collect_vars_into(acc); r.collect_vars_into(acc); }
-            Expr::Call(_, args, _) => { for a in args { a.collect_vars_into(acc); } }
+            Expr::Index(l, r) => {
+                l.collect_vars_into(acc);
+                r.collect_vars_into(acc);
+            }
+            Expr::Call(_, args, _) => {
+                for a in args {
+                    a.collect_vars_into(acc);
+                }
+            }
             Expr::Block(_stmts) => {}
             Expr::If(c, t, e) => {
                 c.collect_vars_into(acc);
                 t.collect_vars_into(acc);
-                if let Some(e) = e { e.collect_vars_into(acc); }
+                if let Some(e) = e {
+                    e.collect_vars_into(acc);
+                }
             }
             Expr::Match(e, arms) => {
                 e.collect_vars_into(acc);
-                for arm in arms { arm.body.collect_vars_into(acc); if let Some(g) = &arm.guard { g.collect_vars_into(acc); } }
+                for arm in arms {
+                    arm.body.collect_vars_into(acc);
+                    if let Some(g) = &arm.guard {
+                        g.collect_vars_into(acc);
+                    }
+                }
             }
-            Expr::Tuple(items) => { for i in items { i.collect_vars_into(acc); } }
-            Expr::List(items) => { for i in items { i.collect_vars_into(acc); } }
+            Expr::Tuple(items) => {
+                for i in items {
+                    i.collect_vars_into(acc);
+                }
+            }
+            Expr::List(items) => {
+                for i in items {
+                    i.collect_vars_into(acc);
+                }
+            }
             Expr::Lambda(_, body) => body.collect_vars_into(acc),
             Expr::Cast(e, _) => e.collect_vars_into(acc),
             Expr::IsType(e, _) => e.collect_vars_into(acc),
-            Expr::Within(l, r) => { l.collect_vars_into(acc); r.collect_vars_into(acc); }
-            Expr::DerivationBlock(d) => { for ex in &d.examples { for inp in &ex.inputs { inp.collect_vars_into(acc); } } }
+            Expr::Within(l, r) => {
+                l.collect_vars_into(acc);
+                r.collect_vars_into(acc);
+            }
+            Expr::DerivationBlock(d) => {
+                for ex in &d.examples {
+                    for inp in &ex.inputs {
+                        inp.collect_vars_into(acc);
+                    }
+                }
+            }
             Expr::Deref(inner) | Expr::AddrOf(inner) => inner.collect_vars_into(acc),
             _ => {}
         }

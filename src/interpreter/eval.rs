@@ -20,6 +20,7 @@ pub fn eval_expr(
     match expr {
         // ── Literals ────────────────────────────────────────────
         Expr::Decimal(n) => Ok(i64_to_bits(*n)),
+        Expr::TaggedLiteral(n, _) => Ok(i64_to_bits(*n)),
         Expr::Float(f) => Ok(f64_to_bits(*f)),
         Expr::Bool(b) => Ok(bool_to_bits(*b)),
         Expr::Quoted(bytes) => Ok(Value::bits(bytes.clone())),
@@ -118,9 +119,10 @@ pub fn eval_expr(
 
         // 2026-07-19: Plugin-intercept calls must be resolved by Front plugins
         // before evaluation. If one reaches here, the plugin system failed.
-        Expr::PluginIntercept { name, .. } => {
-            Err(RuntimeError::UnsupportedIntrinsic(format!("plugin-intercept {}", name)))
-        }
+        Expr::PluginIntercept { name, .. } => Err(RuntimeError::UnsupportedIntrinsic(format!(
+            "plugin-intercept {}",
+            name
+        ))),
     }
 }
 

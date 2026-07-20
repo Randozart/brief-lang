@@ -437,7 +437,7 @@ fn collect_strings_expr(expr: &Expr, seen: &mut std::collections::HashSet<String
             for a in args { collect_strings_expr(a, seen, out); }
         }
         // Leaves — no sub-expressions
-        Expr::Decimal(_) | Expr::Bool(_) | Expr::Float(_) | Expr::Identifier(_)
+        Expr::Decimal(_) | Expr::TaggedLiteral(_, _) | Expr::Bool(_) | Expr::Float(_) | Expr::Identifier(_)
         | Expr::PropertyGet(_) | Expr::FormattingAnnotation(_) => {}
     }
 }

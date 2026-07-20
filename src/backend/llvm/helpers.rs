@@ -65,9 +65,13 @@ impl LlvmBackend {
         let prefix = |name: &str| -> String { format!("cell${}${}", cell_name, name) };
         match expr {
             // Leaves — no identifiers to rewrite
-            Expr::Decimal(_) | Expr::Bool(_) | Expr::Float(_)
-            | Expr::Quoted(_) | Expr::PropertyGet(_)
-            | Expr::FormattingAnnotation(_) => expr.clone(),
+            Expr::Decimal(_)
+            | Expr::Bool(_)
+            | Expr::Float(_)
+            | Expr::Quoted(_)
+            | Expr::PropertyGet(_)
+            | Expr::FormattingAnnotation(_)
+            | Expr::TaggedLiteral(_, _) => expr.clone(),
 
             // Identifier leaf
             Expr::Identifier(name) => Expr::Identifier(prefix(name)),
@@ -78,13 +82,14 @@ impl LlvmBackend {
                 Box::new(Self::rewrite_cell_identifiers(l, cell_name)),
                 Box::new(Self::rewrite_cell_identifiers(r, cell_name)),
             ),
-            Expr::UnaryOp(k, e) => Expr::UnaryOp(
-                *k,
-                Box::new(Self::rewrite_cell_identifiers(e, cell_name)),
-            ),
+            Expr::UnaryOp(k, e) => {
+                Expr::UnaryOp(*k, Box::new(Self::rewrite_cell_identifiers(e, cell_name)))
+            }
             Expr::Call(name, args, _) => Expr::Call(
                 name.clone(),
-                args.iter().map(|a| Self::rewrite_cell_identifiers(a, cell_name)).collect(),
+                args.iter()
+                    .map(|a| Self::rewrite_cell_identifiers(a, cell_name))
+                    .collect(),
                 None,
             ),
             Expr::Field(obj, field) => Expr::Field(
@@ -96,23 +101,34 @@ impl LlvmBackend {
                 Box::new(Self::rewrite_cell_identifiers(idx, cell_name)),
             ),
             Expr::Block(stmts) => Expr::Block(
-                stmts.iter().map(|s| Self::rewrite_cell_stmt_identifiers(s, cell_name)).collect(),
+                stmts
+                    .iter()
+                    .map(|s| Self::rewrite_cell_stmt_identifiers(s, cell_name))
+                    .collect(),
             ),
             Expr::If(cond, then_, else_) => Expr::If(
                 Box::new(Self::rewrite_cell_identifiers(cond, cell_name)),
                 Box::new(Self::rewrite_cell_identifiers(then_, cell_name)),
-                else_.as_ref().map(|e| Box::new(Self::rewrite_cell_identifiers(e, cell_name))),
+                else_
+                    .as_ref()
+                    .map(|e| Box::new(Self::rewrite_cell_identifiers(e, cell_name))),
             ),
             Expr::Match(value, arms) => Expr::Match(
                 Box::new(Self::rewrite_cell_identifiers(value, cell_name)),
-                arms.iter().map(|arm| crate::ast::MatchArm {
-                    pattern: arm.pattern.clone(),
-                    guard: arm.guard.as_ref()
-                        .map(|g| Self::rewrite_cell_identifiers(g, cell_name)),
-                    body: Box::new(Self::rewrite_cell_identifiers(&arm.body, cell_name)),
-                }).collect(),
+                arms.iter()
+                    .map(|arm| crate::ast::MatchArm {
+                        pattern: arm.pattern.clone(),
+                        guard: arm
+                            .guard
+                            .as_ref()
+                            .map(|g| Self::rewrite_cell_identifiers(g, cell_name)),
+                        body: Box::new(Self::rewrite_cell_identifiers(&arm.body, cell_name)),
+                    })
+                    .collect(),
             ),
-            Expr::Tuple(items) | Expr::List(items) => Self::rewrite_tuple_or_list(expr, items, cell_name),
+            Expr::Tuple(items) | Expr::List(items) => {
+                Self::rewrite_tuple_or_list(expr, items, cell_name)
+            }
             Expr::Lambda(params, body) => Expr::Lambda(
                 params.clone(),
                 Box::new(Self::rewrite_cell_identifiers(body, cell_name)),
@@ -130,15 +146,18 @@ impl LlvmBackend {
                 Box::new(Self::rewrite_cell_identifiers(fallback, cell_name)),
             ),
             Expr::DerivationBlock(db) => Self::rewrite_derivation(db, cell_name),
-            Expr::Deref(inner) => Expr::Deref(
-                Box::new(Self::rewrite_cell_identifiers(inner, cell_name)),
-            ),
-            Expr::AddrOf(inner) => Expr::AddrOf(
-                Box::new(Self::rewrite_cell_identifiers(inner, cell_name)),
-            ),
+            Expr::Deref(inner) => {
+                Expr::Deref(Box::new(Self::rewrite_cell_identifiers(inner, cell_name)))
+            }
+            Expr::AddrOf(inner) => {
+                Expr::AddrOf(Box::new(Self::rewrite_cell_identifiers(inner, cell_name)))
+            }
             Expr::PluginIntercept { name, args, .. } => Expr::PluginIntercept {
                 name: name.clone(),
-                args: args.iter().map(|a| Self::rewrite_cell_identifiers(a, cell_name)).collect(),
+                args: args
+                    .iter()
+                    .map(|a| Self::rewrite_cell_identifiers(a, cell_name))
+                    .collect(),
                 type_args: vec![],
             },
         }
@@ -147,8 +166,10 @@ impl LlvmBackend {
     /// Shared helper for Tuple/List rewrite to avoid duplicating the
     /// match-guard logic in the parent function.
     fn rewrite_tuple_or_list(expr: &Expr, items: &[Expr], cell_name: &str) -> Expr {
-        let mapped: Vec<Expr> = items.iter()
-            .map(|a| Self::rewrite_cell_identifiers(a, cell_name)).collect();
+        let mapped: Vec<Expr> = items
+            .iter()
+            .map(|a| Self::rewrite_cell_identifiers(a, cell_name))
+            .collect();
         if matches!(expr, Expr::Tuple(_)) {
             Expr::Tuple(mapped)
         } else {
@@ -159,13 +180,22 @@ impl LlvmBackend {
     /// Rewrite identifiers inside a DerivationBlock.
     fn rewrite_derivation(db: &crate::ast::DerivationBlock, cell_name: &str) -> Expr {
         Expr::DerivationBlock(crate::ast::DerivationBlock {
-            examples: db.examples.iter().map(|ex| crate::ast::DerivationExample {
-                inputs: ex.inputs.iter()
-                    .map(|i| Self::rewrite_cell_identifiers(i, cell_name)).collect(),
-                output: Box::new(Self::rewrite_cell_identifiers(&ex.output, cell_name)),
-                span: ex.span,
-            }).collect(),
-            synthesized: db.synthesized.as_ref()
+            examples: db
+                .examples
+                .iter()
+                .map(|ex| crate::ast::DerivationExample {
+                    inputs: ex
+                        .inputs
+                        .iter()
+                        .map(|i| Self::rewrite_cell_identifiers(i, cell_name))
+                        .collect(),
+                    output: Box::new(Self::rewrite_cell_identifiers(&ex.output, cell_name)),
+                    span: ex.span,
+                })
+                .collect(),
+            synthesized: db
+                .synthesized
+                .as_ref()
                 .map(|s| Box::new(Self::rewrite_cell_identifiers(s, cell_name))),
             span: db.span,
         })
@@ -180,39 +210,72 @@ impl LlvmBackend {
             ),
             Statement::Guarded(cond, stmts) => Statement::Guarded(
                 Self::rewrite_cell_identifiers(cond, cell_name),
-                stmts.iter().map(|s| Self::rewrite_cell_stmt_identifiers(s, cell_name)).collect(),
+                stmts
+                    .iter()
+                    .map(|s| Self::rewrite_cell_stmt_identifiers(s, cell_name))
+                    .collect(),
             ),
-            Statement::Term(e) => Statement::Term(e.as_ref()
-                .map(|e| Self::rewrite_cell_identifiers(e, cell_name))),
-            Statement::TermBang(e) => Statement::TermBang(e.as_ref()
-                .map(|e| Self::rewrite_cell_identifiers(e, cell_name))),
-            Statement::Return(e) => Statement::Return(e.as_ref()
-                .map(|e| Self::rewrite_cell_identifiers(e, cell_name))),
-            Statement::Escape(e) => Statement::Escape(e.as_ref()
-                .map(|e| Self::rewrite_cell_identifiers(e, cell_name))),
+            Statement::Term(e) => Statement::Term(
+                e.as_ref()
+                    .map(|e| Self::rewrite_cell_identifiers(e, cell_name)),
+            ),
+            Statement::TermBang(e) => Statement::TermBang(
+                e.as_ref()
+                    .map(|e| Self::rewrite_cell_identifiers(e, cell_name)),
+            ),
+            Statement::Return(e) => Statement::Return(
+                e.as_ref()
+                    .map(|e| Self::rewrite_cell_identifiers(e, cell_name)),
+            ),
+            Statement::Escape(e) => Statement::Escape(
+                e.as_ref()
+                    .map(|e| Self::rewrite_cell_identifiers(e, cell_name)),
+            ),
             Statement::Expression(e) => {
                 Statement::Expression(Self::rewrite_cell_identifiers(e, cell_name))
             }
-            Statement::Let { name, ty, expr, modifiers } => Statement::Let {
+            Statement::Let {
+                name,
+                ty,
+                expr,
+                modifiers,
+            } => Statement::Let {
                 name: name.clone(),
                 ty: ty.clone(),
-                expr: expr.as_ref()
+                expr: expr
+                    .as_ref()
                     .map(|e| Self::rewrite_cell_identifiers(e, cell_name)),
                 modifiers: modifiers.clone(),
             },
             Statement::If(cond, then_b, else_b) => Statement::If(
                 Self::rewrite_cell_identifiers(cond, cell_name),
-                then_b.iter().map(|s| Self::rewrite_cell_stmt_identifiers(s, cell_name)).collect(),
-                else_b.iter().map(|s| Self::rewrite_cell_stmt_identifiers(s, cell_name)).collect(),
+                then_b
+                    .iter()
+                    .map(|s| Self::rewrite_cell_stmt_identifiers(s, cell_name))
+                    .collect(),
+                else_b
+                    .iter()
+                    .map(|s| Self::rewrite_cell_stmt_identifiers(s, cell_name))
+                    .collect(),
             ),
             Statement::Block(stmts) => Statement::Block(
-                stmts.iter().map(|s| Self::rewrite_cell_stmt_identifiers(s, cell_name)).collect(),
+                stmts
+                    .iter()
+                    .map(|s| Self::rewrite_cell_stmt_identifiers(s, cell_name))
+                    .collect(),
             ),
             Statement::SyncBlock(stmts) => Statement::SyncBlock(
-                stmts.iter().map(|s| Self::rewrite_cell_stmt_identifiers(s, cell_name)).collect(),
+                stmts
+                    .iter()
+                    .map(|s| Self::rewrite_cell_stmt_identifiers(s, cell_name))
+                    .collect(),
             ),
             Statement::InlineAsm { .. } => stmt.clone(),
-            Statement::TrgBinding { name, instance, port } => Statement::TrgBinding {
+            Statement::TrgBinding {
+                name,
+                instance,
+                port,
+            } => Statement::TrgBinding {
                 name: name.clone(),
                 instance: Self::rewrite_cell_identifiers(instance, cell_name),
                 port: port.clone(),
@@ -220,8 +283,10 @@ impl LlvmBackend {
             Statement::Foreach { item, list, body } => Statement::Foreach {
                 item: item.clone(),
                 list: Box::new(Self::rewrite_cell_identifiers(list, cell_name)),
-                body: body.iter()
-                    .map(|s| Self::rewrite_cell_stmt_identifiers(s, cell_name)).collect(),
+                body: body
+                    .iter()
+                    .map(|s| Self::rewrite_cell_stmt_identifiers(s, cell_name))
+                    .collect(),
             },
             Statement::MetadataAssignment(..) => stmt.clone(),
         }
@@ -234,16 +299,21 @@ impl LlvmBackend {
     /// Extract all output variable names from an `OutputType` tree.
     /// Recursively collects names from Named, Tuple, and Union wrappers.
     pub(super) fn extract_output_names_llvm(ot: &Option<OutputType>) -> Vec<String> {
-        let Some(ot) = ot else { return Vec::new(); };
+        let Some(ot) = ot else {
+            return Vec::new();
+        };
         match ot {
             OutputType::Named(name, inner) => {
                 let mut names = vec![name.clone()];
-                names.extend(Self::extract_output_names_llvm(&Some(inner.as_ref().clone())));
+                names.extend(Self::extract_output_names_llvm(&Some(
+                    inner.as_ref().clone(),
+                )));
                 names
             }
-            OutputType::Tuple(types) | OutputType::Union(types) => {
-                types.iter().flat_map(|t| Self::extract_output_names_llvm(&Some(t.clone()))).collect()
-            }
+            OutputType::Tuple(types) | OutputType::Union(types) => types
+                .iter()
+                .flat_map(|t| Self::extract_output_names_llvm(&Some(t.clone())))
+                .collect(),
             OutputType::Single(_) | OutputType::Array(_) => Vec::new(),
         }
     }
@@ -257,7 +327,12 @@ impl LlvmBackend {
         out: &mut String,
         final_values: &[(Vec<String>, HashMap<String, i64>)],
     ) {
-        writeln!(out, "define i32 @main() local_unnamed_addr {} {{", self.slp_attr("main", "#0")).ok();
+        writeln!(
+            out,
+            "define i32 @main() local_unnamed_addr {} {{",
+            self.slp_attr("main", "#0")
+        )
+        .ok();
         writeln!(out, "  entry:").ok();
         writeln!(out, "  %state = alloca %State, align 8").ok();
         self.emit_inline_init_stores(out, "%state");
@@ -274,7 +349,12 @@ impl LlvmBackend {
                 } else if let Some(&addr) = self.ctx.mmio_fields.get(var) {
                     let gp = format!("%gp_{}", var);
                     self.emit_inttoptr(out, "  ", &gp, &addr.to_string());
-                    writeln!(out, "  store volatile i64 {}, ptr %gp_{}, align 1", val, var).ok();
+                    writeln!(
+                        out,
+                        "  store volatile i64 {}, ptr %gp_{}, align 1",
+                        val, var
+                    )
+                    .ok();
                 }
             }
         }
@@ -288,7 +368,12 @@ impl LlvmBackend {
         match ty.as_ref() {
             "float" => {
                 let bits = *val as i32 as u32;
-                writeln!(out, "  store float bitcast (i32 {} to float), ptr {}, align 4", bits, gp).ok();
+                writeln!(
+                    out,
+                    "  store float bitcast (i32 {} to float), ptr {}, align 4",
+                    bits, gp
+                )
+                .ok();
             }
             "i8" => {
                 writeln!(out, "  store i8 {}, ptr {}, align 1", val, gp).ok();
@@ -308,8 +393,17 @@ impl LlvmBackend {
             return;
         }
         let count = wake_symbols.len();
-        let sym_list = wake_symbols.iter().map(|s| format!("ptr @{}", s)).collect::<Vec<_>>().join(", ");
-        writeln!(out, "@llvm.wake_triggers = constant [{} x ptr] [{}]", count, sym_list).ok();
+        let sym_list = wake_symbols
+            .iter()
+            .map(|s| format!("ptr @{}", s))
+            .collect::<Vec<_>>()
+            .join(", ");
+        writeln!(
+            out,
+            "@llvm.wake_triggers = constant [{} x ptr] [{}]",
+            count, sym_list
+        )
+        .ok();
         writeln!(out, "!llvm.wake_triggers = !{{!6}}").ok();
         write!(out, "!6 = !{{").ok();
         for (i, sym) in wake_symbols.iter().enumerate() {
@@ -329,17 +423,29 @@ impl LlvmBackend {
             return;
         }
         let count = self.async_txn_names.len();
-        let fn_list: Vec<String> = self.async_txn_names.iter()
+        let fn_list: Vec<String> = self
+            .async_txn_names
+            .iter()
             .map(|n| format!("i8* bitcast (void (ptr)* @async_body_{} to ptr)", n))
             .collect();
-        writeln!(out, "@llvm.thread_pool = constant [{} x ptr] [{}]",
-            count, fn_list.join(", ")).ok();
-        writeln!(out, "@thread_pool_fns = private constant [{} x void (ptr)*] [{}]",
+        writeln!(
+            out,
+            "@llvm.thread_pool = constant [{} x ptr] [{}]",
             count,
-            self.async_txn_names.iter()
+            fn_list.join(", ")
+        )
+        .ok();
+        writeln!(
+            out,
+            "@thread_pool_fns = private constant [{} x void (ptr)*] [{}]",
+            count,
+            self.async_txn_names
+                .iter()
                 .map(|n| format!("void (ptr)* @async_body_{}", n))
-                .collect::<Vec<_>>().join(", "),
-        ).ok();
+                .collect::<Vec<_>>()
+                .join(", "),
+        )
+        .ok();
     }
 
     /// Emit the async phase calls in main: set state for workers, release
@@ -354,7 +460,12 @@ impl LlvmBackend {
         }
         writeln!(out, "  call void @__set_async_state__(ptr {})", state_var).ok();
         writeln!(out, "  call void @__barrier_release__()").ok();
-        writeln!(out, "  call void @reactor_tick(ptr noalias nocapture {})", state_var).ok();
+        writeln!(
+            out,
+            "  call void @reactor_tick(ptr noalias nocapture {})",
+            state_var
+        )
+        .ok();
         writeln!(out, "  call void @__barrier_wait__()").ok();
     }
 
@@ -365,12 +476,18 @@ impl LlvmBackend {
         &self,
         txns: &[(String, &crate::ast::Transaction)],
     ) -> Vec<(String, String)> {
-        let items: Vec<crate::ast::TopLevel> = txns.iter()
-            .map(|(_, t)| crate::ast::TopLevel::Transaction((*t).clone())).collect();
+        let items: Vec<crate::ast::TopLevel> = txns
+            .iter()
+            .map(|(_, t)| crate::ast::TopLevel::Transaction((*t).clone()))
+            .collect();
         let mut pairs = crate::backend::detect_fusable_pairs(&items);
         pairs.retain(|(a, b)| {
-            let Some((_, ta)) = txns.iter().find(|(n, _)| n == a) else { return false; };
-            let Some((_, tb)) = txns.iter().find(|(n, _)| n == b) else { return false; };
+            let Some((_, ta)) = txns.iter().find(|(n, _)| n == a) else {
+                return false;
+            };
+            let Some((_, tb)) = txns.iter().find(|(n, _)| n == b) else {
+                return false;
+            };
             if ta.is_async || tb.is_async {
                 return false;
             }
@@ -471,7 +588,11 @@ impl LlvmBackend {
             ("Char", "String") => self.cast_char_to_string(out, indent, dst, src),
             ("String", "Char") => self.cast_string_to_char(out, indent, dst, src),
             ("Int" | "UInt", "String") => {
-                let _ = writeln!(out, "{}{} = call i64 @__int_to_str__(i64 {})", indent, dst, src);
+                let _ = writeln!(
+                    out,
+                    "{}{} = call i64 @__int_to_str__(i64 {})",
+                    indent, dst, src
+                );
             }
             ("String", "Int" | "UInt") => self.cast_string_to_int(out, indent, dst, src),
             ("String", "Bool") => self.cast_string_to_bool(out, indent, dst, src),
@@ -511,7 +632,11 @@ impl LlvmBackend {
         let fl = self.next_reg_with_prefix("cbffl");
         let fi = self.next_reg_with_prefix("cbffi");
         let _ = writeln!(out, "{}{} = icmp ne i64 {}, 0", indent, ci, src);
-        let _ = writeln!(out, "{}{} = select i1 {}, float 1.000000e+00, float 0.000000e+00", indent, fl, ci);
+        let _ = writeln!(
+            out,
+            "{}{} = select i1 {}, float 1.000000e+00, float 0.000000e+00",
+            indent, fl, ci
+        );
         let _ = writeln!(out, "{}{} = bitcast float {} to i32", indent, fi, fl);
         let _ = writeln!(out, "{}{} = zext i32 {} to i64", indent, dst, fi);
     }
@@ -529,15 +654,27 @@ impl LlvmBackend {
         let _ = writeln!(out, "{}{} = add i64 {}, 16", indent, dp, base);
         let _ = writeln!(out, "{}store i64 {}, ptr {}, align 8", indent, dp, hp);
         let ls = self.next_reg_with_prefix("ccls");
-        let _ = writeln!(out, "{}{} = getelementptr i64, ptr {}, i64 1", indent, ls, hp);
+        let _ = writeln!(
+            out,
+            "{}{} = getelementptr i64, ptr {}, i64 1",
+            indent, ls, hp
+        );
         let _ = writeln!(out, "{}store i64 1, ptr {}, align 8", indent, ls);
         let cs = self.next_reg_with_prefix("cccs");
-        let _ = writeln!(out, "{}{} = getelementptr i8, ptr {}, i64 16", indent, cs, alloc);
+        let _ = writeln!(
+            out,
+            "{}{} = getelementptr i8, ptr {}, i64 16",
+            indent, cs, alloc
+        );
         let tb = self.next_reg_with_prefix("cctb");
         let _ = writeln!(out, "{}{} = trunc i32 {} to i8", indent, tb, tr);
         let _ = writeln!(out, "{}store i8 {}, ptr {}, align 1", indent, tb, cs);
         let nt = self.next_reg_with_prefix("ccnt");
-        let _ = writeln!(out, "{}{} = getelementptr i8, ptr {}, i64 17", indent, nt, alloc);
+        let _ = writeln!(
+            out,
+            "{}{} = getelementptr i8, ptr {}, i64 17",
+            indent, nt, alloc
+        );
         let _ = writeln!(out, "{}store i8 0, ptr {}, align 1", indent, nt);
         let _ = writeln!(out, "{}{} = ptrtoint ptr {} to i64", indent, dst, alloc);
     }
@@ -553,7 +690,11 @@ impl LlvmBackend {
     fn cast_string_to_int(&mut self, out: &mut String, indent: &str, dst: &str, src: &str) {
         let ip = self.next_reg_with_prefix("csii");
         self.emit_inttoptr(out, indent, &ip, &src);
-        let _ = writeln!(out, "{}{} = call i64 @__str_to_int(i8* {})", indent, dst, ip);
+        let _ = writeln!(
+            out,
+            "{}{} = call i64 @__str_to_int(i8* {})",
+            indent, dst, ip
+        );
     }
 
     fn cast_string_to_bool(&mut self, out: &mut String, indent: &str, dst: &str, src: &str) {
@@ -600,7 +741,12 @@ impl LlvmBackend {
 
     /// Convert a String/Data typed register to i64 for C ABI calls.
     /// Int/Bool/Char/Float registers pass through as-is.
-    fn ptrtoint_if_string(&mut self, out: &mut String, indent: &str, reg: &TypedRegister) -> String {
+    fn ptrtoint_if_string(
+        &mut self,
+        out: &mut String,
+        indent: &str,
+        reg: &TypedRegister,
+    ) -> String {
         if type_is(&self.ctx.type_universe, &reg.ty, "String")
             || type_is(&self.ctx.type_universe, &reg.ty, "Data")
         {
@@ -641,12 +787,20 @@ impl LlvmBackend {
                     return s.clone();
                 }
                 // Fallback: use ALU + byte-width for types that bypassed normalizer
-                let is_float = rt.properties.get("alu").and_then(|pv| match pv {
-                    crate::ast::PropertyValue::Identifier(s) => Some(s.as_str() == "Float"),
-                    _ => None,
-                }).unwrap_or(false);
-                if is_float && rt.bytes <= 4 { return "float".to_string(); }
-                if is_float { return "double".to_string(); }
+                let is_float = rt
+                    .properties
+                    .get("alu")
+                    .and_then(|pv| match pv {
+                        crate::ast::PropertyValue::Identifier(s) => Some(s.as_str() == "Float"),
+                        _ => None,
+                    })
+                    .unwrap_or(false);
+                if is_float && rt.bytes <= 4 {
+                    return "float".to_string();
+                }
+                if is_float {
+                    return "double".to_string();
+                }
                 return "i64".to_string();
             }
         }
@@ -662,12 +816,19 @@ impl LlvmBackend {
 
     /// Check if an expression is a reference to a linked String-like trigger.
     fn is_linked_string_trigger(&self, expr: &Expr) -> bool {
-        let Expr::Identifier(name) = expr else { return false; };
-        let Some(trg) = self.ctx.triggers.get(name) else { return false; };
+        let Expr::Identifier(name) = expr else {
+            return false;
+        };
+        let Some(trg) = self.ctx.triggers.get(name) else {
+            return false;
+        };
         // 2026-07-18: Replaced `type_is(..., "String")` with `is_string_like`.
         // `is_string_like` matches via CTD="String" (Phase A) or shape+encoding (Phase B).
         // Data is still checked by name since it has no encoding property.
-        self.ctx.type_universe.as_ref().map_or(false, |u| u.is_string_like(&trg.ty))
+        self.ctx
+            .type_universe
+            .as_ref()
+            .map_or(false, |u| u.is_string_like(&trg.ty))
             || type_is(&self.ctx.type_universe, &trg.ty, "Data")
     }
 
@@ -687,46 +848,102 @@ impl LlvmBackend {
             Expr::Identifier(n) => n.clone(),
             _ => return None,
         };
-        let &(cache_idx, valid_idx) = self.ctx.cache_slots.get(&field_name)
+        let &(cache_idx, valid_idx) = self
+            .ctx
+            .cache_slots
+            .get(&field_name)
             .and_then(|targets| targets.get(target_name))?;
 
         let v = self.next_reg_with_prefix("t");
         let valid_gep = self.next_reg_with_prefix("cvp");
-        writeln!(out, "{}{} = getelementptr inbounds %State, ptr %state, i32 0, i32 {}",
-            indent, valid_gep, valid_idx).ok();
+        writeln!(
+            out,
+            "{}{} = getelementptr inbounds %State, ptr %state, i32 0, i32 {}",
+            indent, valid_gep, valid_idx
+        )
+        .ok();
         let valid_load = self.next_reg_with_prefix("cvv");
-        writeln!(out, "{}{} = load i8, ptr {}, align 1", indent, valid_load, valid_gep).ok();
+        writeln!(
+            out,
+            "{}{} = load i8, ptr {}, align 1",
+            indent, valid_load, valid_gep
+        )
+        .ok();
         let valid_cond = self.next_reg_with_prefix("cvc");
-        writeln!(out, "{}{} = icmp ne i8 {}, 0", indent, valid_cond, valid_load).ok();
+        writeln!(
+            out,
+            "{}{} = icmp ne i8 {}, 0",
+            indent, valid_cond, valid_load
+        )
+        .ok();
 
         let hit_label = format!(".chit{}", self.fun.txn_counter);
         let miss_label = format!(".cmiss{}", self.fun.txn_counter);
         let merge_label = format!(".cmerge{}", self.fun.txn_counter);
         self.fun.txn_counter += 1;
-        writeln!(out, "{}br i1 {}, label %{}, label %{}", indent, valid_cond, hit_label, miss_label).ok();
+        writeln!(
+            out,
+            "{}br i1 {}, label %{}, label %{}",
+            indent, valid_cond, hit_label, miss_label
+        )
+        .ok();
         writeln!(out, "{}:", hit_label).ok();
         let cache_gep = self.next_reg_with_prefix("cve");
-        writeln!(out, "{}{} = getelementptr inbounds %State, ptr %state, i32 0, i32 {}",
-            indent, cache_gep, cache_idx).ok();
+        writeln!(
+            out,
+            "{}{} = getelementptr inbounds %State, ptr %state, i32 0, i32 {}",
+            indent, cache_gep, cache_idx
+        )
+        .ok();
         let cache_val = self.next_reg_with_prefix("cvv");
-        writeln!(out, "{}{} = load i64, ptr {}, align 8, !tbaa !1", indent, cache_val, cache_gep).ok();
+        writeln!(
+            out,
+            "{}{} = load i64, ptr {}, align 8, !tbaa !1",
+            indent, cache_val, cache_gep
+        )
+        .ok();
         writeln!(out, "{}br label %{}", indent, merge_label).ok();
         writeln!(out, "{}:", miss_label).ok();
         writeln!(out, "{}{} = add i64 0, {}", indent, v, src_val.name).ok();
         let store_gep = self.next_reg_with_prefix("cse");
-        writeln!(out, "{}{} = getelementptr inbounds %State, ptr %state, i32 0, i32 {}",
-            indent, store_gep, cache_idx).ok();
-        writeln!(out, "{}store i64 {}, ptr {}, align 8, !tbaa !1", indent, v, store_gep).ok();
+        writeln!(
+            out,
+            "{}{} = getelementptr inbounds %State, ptr %state, i32 0, i32 {}",
+            indent, store_gep, cache_idx
+        )
+        .ok();
+        writeln!(
+            out,
+            "{}store i64 {}, ptr {}, align 8, !tbaa !1",
+            indent, v, store_gep
+        )
+        .ok();
         let valid_store_gep = self.next_reg_with_prefix("csve");
-        writeln!(out, "{}{} = getelementptr inbounds %State, ptr %state, i32 0, i32 {}",
-            indent, valid_store_gep, valid_idx).ok();
-        writeln!(out, "{}store i8 1, ptr {}, align 1", indent, valid_store_gep).ok();
+        writeln!(
+            out,
+            "{}{} = getelementptr inbounds %State, ptr %state, i32 0, i32 {}",
+            indent, valid_store_gep, valid_idx
+        )
+        .ok();
+        writeln!(
+            out,
+            "{}store i8 1, ptr {}, align 1",
+            indent, valid_store_gep
+        )
+        .ok();
         writeln!(out, "{}br label %{}", indent, merge_label).ok();
         writeln!(out, "{}:", merge_label).ok();
         let phi_reg = self.next_reg_with_prefix("cp");
-        writeln!(out, "{}{} = phi i64 [ {}, %{} ], [ {}, %{} ]",
-            indent, phi_reg, cache_val, hit_label, v, miss_label).ok();
-        Some(TypedRegister { name: phi_reg, ty: Type::int() })
+        writeln!(
+            out,
+            "{}{} = phi i64 [ {}, %{} ], [ {}, %{} ]",
+            indent, phi_reg, cache_val, hit_label, v, miss_label
+        )
+        .ok();
+        Some(TypedRegister {
+            name: phi_reg,
+            ty: Type::int(),
+        })
     }
 
     // ═══════════════════════════════════════════════════════════════
@@ -770,10 +987,37 @@ impl LlvmBackend {
         let result_i64 = self.emit_arena_alloc(out, indent, &alloc_size);
         // 2026-07-19: emit_arena_alloc returns i64 — inttoptr to ptr for helpers.
         let result_ptr = self.fun.next_reg_with_prefix("crp");
-        writeln!(out, "{}{} = inttoptr i64 {} to ptr", indent, result_ptr, result_i64).ok();
+        writeln!(
+            out,
+            "{}{} = inttoptr i64 {} to ptr",
+            indent, result_ptr, result_i64
+        )
+        .ok();
         self.emit_write_header(out, indent, &result_ptr, &total, "chp", "cba", "cdp", "cls");
-        self.emit_copy_data(out, indent, &result_ptr, &ha, &la, &a_clean, "cad", "cac", "cds", "cdo");
-        self.emit_copy_data(out, indent, &result_ptr, &hb, &lb, &b_clean, "cbd", "cbc", "cdo_off", "cdo2");
+        self.emit_copy_data(
+            out,
+            indent,
+            &result_ptr,
+            &ha,
+            &la,
+            &a_clean,
+            "cad",
+            "cac",
+            "cds",
+            "cdo",
+        );
+        self.emit_copy_data(
+            out,
+            indent,
+            &result_ptr,
+            &hb,
+            &lb,
+            &b_clean,
+            "cbd",
+            "cbc",
+            "cdo_off",
+            "cdo2",
+        );
         self.emit_null_terminate(out, indent, &result_ptr, &total, "cnt");
         self.emit_free_temporaries(out, indent, &a_boxed, &b_boxed, "cta", "cia", "ctb", "cib");
         self.emit_box_concat_result(out, indent, &result_ptr, "t")
@@ -793,16 +1037,41 @@ impl LlvmBackend {
         let b_reg = &b.name;
         // Extract handle[1] (length) from both
         let a_len = self.fun.gen_reg();
-        writeln!(out, "{}{} = extractvalue {{ i64, i64 }} {}, 1", indent, a_len, a_reg).ok();
+        writeln!(
+            out,
+            "{}{} = extractvalue {{ i64, i64 }} {}, 1",
+            indent, a_len, a_reg
+        )
+        .ok();
         let b_len = self.fun.gen_reg();
-        writeln!(out, "{}{} = extractvalue {{ i64, i64 }} {}, 1", indent, b_len, b_reg).ok();
+        writeln!(
+            out,
+            "{}{} = extractvalue {{ i64, i64 }} {}, 1",
+            indent, b_len, b_reg
+        )
+        .ok();
         let total_len = self.fun.gen_reg();
-        writeln!(out, "{}{} = add i64 {}, {}", indent, total_len, a_len, b_len).ok();
+        writeln!(
+            out,
+            "{}{} = add i64 {}, {}",
+            indent, total_len, a_len, b_len
+        )
+        .ok();
         // Extract handle[0] (data/tag) from both
         let a_dtag = self.fun.gen_reg();
-        writeln!(out, "{}{} = extractvalue {{ i64, i64 }} {}, 0", indent, a_dtag, a_reg).ok();
+        writeln!(
+            out,
+            "{}{} = extractvalue {{ i64, i64 }} {}, 0",
+            indent, a_dtag, a_reg
+        )
+        .ok();
         let b_dtag = self.fun.gen_reg();
-        writeln!(out, "{}{} = extractvalue {{ i64, i64 }} {}, 0", indent, b_dtag, b_reg).ok();
+        writeln!(
+            out,
+            "{}{} = extractvalue {{ i64, i64 }} {}, 0",
+            indent, b_dtag, b_reg
+        )
+        .ok();
         // Check if total ≤ 6 (SSO threshold) — if so, use SSO inline path
         let cmp = self.fun.gen_reg();
         writeln!(out, "{}{} = icmp ule i64 {}, 6", indent, cmp, total_len).ok();
@@ -810,7 +1079,12 @@ impl LlvmBackend {
         let heap_label = format!("heap_con_{}", self.fun.txn_counter);
         let done_label = format!("done_con_{}", self.fun.txn_counter);
         self.fun.txn_counter += 1;
-        writeln!(out, "{}br i1 {}, label %{}, label %{}", indent, cmp, sso_label, heap_label).ok();
+        writeln!(
+            out,
+            "{}br i1 {}, label %{}, label %{}",
+            indent, cmp, sso_label, heap_label
+        )
+        .ok();
         // ── SSO inline path ──────────────────────────────────────────
         writeln!(out, "{}{}:", indent, sso_label).ok();
         // Extract packed data: (handle[0] >> 3) & mask for SSO, or memcpy for heap
@@ -823,10 +1097,20 @@ impl LlvmBackend {
         let b_shifted = self.fun.gen_reg();
         let a_len_8 = self.fun.gen_reg();
         writeln!(out, "{}{} = shl i64 {}, 3", indent, a_len_8, a_len).ok();
-        writeln!(out, "{}{} = shl i64 {}, {}", indent, b_shifted, b_data, a_len_8).ok();
+        writeln!(
+            out,
+            "{}{} = shl i64 {}, {}",
+            indent, b_shifted, b_data, a_len_8
+        )
+        .ok();
         // Combine: result_data = a_data | b_shifted
         let combined = self.fun.gen_reg();
-        writeln!(out, "{}{} = or i64 {}, {}", indent, combined, a_data, b_shifted).ok();
+        writeln!(
+            out,
+            "{}{} = or i64 {}, {}",
+            indent, combined, a_data, b_shifted
+        )
+        .ok();
         // Shift left 3 for tag and set SSO tag (bit 0)
         let sso_tag = self.fun.gen_reg();
         writeln!(out, "{}{} = shl i64 {}, 3", indent, sso_tag, combined).ok();
@@ -834,9 +1118,19 @@ impl LlvmBackend {
         writeln!(out, "{}{} = or i64 {}, 1", indent, new_handle0, sso_tag).ok();
         // Build {i64, i64} result
         let sso_iv = self.fun.gen_reg();
-        writeln!(out, "{}{} = insertvalue {{ i64, i64 }} undef, i64 {}, 0", indent, sso_iv, new_handle0).ok();
+        writeln!(
+            out,
+            "{}{} = insertvalue {{ i64, i64 }} undef, i64 {}, 0",
+            indent, sso_iv, new_handle0
+        )
+        .ok();
         let sso_res = self.fun.gen_reg();
-        writeln!(out, "{}{} = insertvalue {{ i64, i64 }} %{}, i64 {}, 1", indent, sso_res, sso_iv, total_len).ok();
+        writeln!(
+            out,
+            "{}{} = insertvalue {{ i64, i64 }} %{}, i64 {}, 1",
+            indent, sso_res, sso_iv, total_len
+        )
+        .ok();
         writeln!(out, "{}br label %{}", indent, done_label).ok();
         // ── Heap path ────────────────────────────────────────────────
         writeln!(out, "{}{}:", indent, heap_label).ok();
@@ -846,7 +1140,12 @@ impl LlvmBackend {
         let heap_buf_i64 = self.emit_arena_alloc(out, indent, &alloc_sz);
         // 2026-07-19: emit_arena_alloc returns i64 — inttoptr to ptr for use.
         let heap_buf = self.fun.gen_reg();
-        writeln!(out, "{}{} = inttoptr i64 {} to ptr", indent, heap_buf, heap_buf_i64).ok();
+        writeln!(
+            out,
+            "{}{} = inttoptr i64 {} to ptr",
+            indent, heap_buf, heap_buf_i64
+        )
+        .ok();
         // Mask tag bits for data pointer: handle[0] & -8
         let a_ptr_raw = self.fun.gen_reg();
         writeln!(out, "{}{} = and i64 {}, -8", indent, a_ptr_raw, a_dtag).ok();
@@ -854,50 +1153,115 @@ impl LlvmBackend {
         writeln!(out, "{}{} = and i64 {}, -8", indent, b_ptr_raw, b_dtag).ok();
         // Convert to pointers
         let a_ptr = self.fun.gen_reg();
-        writeln!(out, "{}{} = inttoptr i64 {} to ptr", indent, a_ptr, a_ptr_raw).ok();
+        writeln!(
+            out,
+            "{}{} = inttoptr i64 {} to ptr",
+            indent, a_ptr, a_ptr_raw
+        )
+        .ok();
         let b_ptr = self.fun.gen_reg();
-        writeln!(out, "{}{} = inttoptr i64 {} to ptr", indent, b_ptr, b_ptr_raw).ok();
+        writeln!(
+            out,
+            "{}{} = inttoptr i64 {} to ptr",
+            indent, b_ptr, b_ptr_raw
+        )
+        .ok();
         let dest = self.fun.gen_reg();
-        writeln!(out, "{}{} = getelementptr i8, ptr {}, i64 0", indent, dest, heap_buf).ok();
+        writeln!(
+            out,
+            "{}{} = getelementptr i8, ptr {}, i64 0",
+            indent, dest, heap_buf
+        )
+        .ok();
         // memcpy a's data into buffer
-        writeln!(out, "{}call void @llvm.memcpy.p0i8.p0i8.i64(i8* {}, ptr {}, i64 {}, i1 false)",
-            indent, dest, a_ptr, a_len).ok();
+        writeln!(
+            out,
+            "{}call void @llvm.memcpy.p0i8.p0i8.i64(i8* {}, ptr {}, i64 {}, i1 false)",
+            indent, dest, a_ptr, a_len
+        )
+        .ok();
         // memcpy b's data after a's data
         let b_dest = self.fun.gen_reg();
-        writeln!(out, "{}{} = getelementptr i8, ptr {}, i64 {}", indent, b_dest, heap_buf, a_len).ok();
-        writeln!(out, "{}call void @llvm.memcpy.p0i8.p0i8.i64(i8* {}, ptr {}, i64 {}, i1 false)",
-            indent, b_dest, b_ptr, b_len).ok();
+        writeln!(
+            out,
+            "{}{} = getelementptr i8, ptr {}, i64 {}",
+            indent, b_dest, heap_buf, a_len
+        )
+        .ok();
+        writeln!(
+            out,
+            "{}call void @llvm.memcpy.p0i8.p0i8.i64(i8* {}, ptr {}, i64 {}, i1 false)",
+            indent, b_dest, b_ptr, b_len
+        )
+        .ok();
         // null terminator
         let nt = self.fun.gen_reg();
-        writeln!(out, "{}{} = getelementptr i8, ptr {}, i64 {}", indent, nt, heap_buf, total_len).ok();
+        writeln!(
+            out,
+            "{}{} = getelementptr i8, ptr {}, i64 {}",
+            indent, nt, heap_buf, total_len
+        )
+        .ok();
         writeln!(out, "{}store i8 0, ptr {}", indent, nt).ok();
         // Build {i64, i64} with heap tag (0b000 — no bits set)
         let heap_p2i = self.fun.gen_reg();
-        writeln!(out, "{}{} = ptrtoint ptr {} to i64", indent, heap_p2i, heap_buf).ok();
+        writeln!(
+            out,
+            "{}{} = ptrtoint ptr {} to i64",
+            indent, heap_p2i, heap_buf
+        )
+        .ok();
         let heap_iv = self.fun.gen_reg();
-        writeln!(out, "{}{} = insertvalue {{ i64, i64 }} undef, i64 {}, 0", indent, heap_iv, heap_p2i).ok();
+        writeln!(
+            out,
+            "{}{} = insertvalue {{ i64, i64 }} undef, i64 {}, 0",
+            indent, heap_iv, heap_p2i
+        )
+        .ok();
         let heap_res = self.fun.gen_reg();
-        writeln!(out, "{}{} = insertvalue {{ i64, i64 }} %{}, i64 {}, 1", indent, heap_res, heap_iv, total_len).ok();
+        writeln!(
+            out,
+            "{}{} = insertvalue {{ i64, i64 }} %{}, i64 {}, 1",
+            indent, heap_res, heap_iv, total_len
+        )
+        .ok();
         writeln!(out, "{}br label %{}", indent, done_label).ok();
         // ── Done: phi the result ─────────────────────────────────────
         writeln!(out, "{}{}:", indent, done_label).ok();
         let phi_res = self.fun.gen_reg();
-        writeln!(out, "{}{} = phi {{ i64, i64 }} [ %{}, %{} ], [ %{}, %{} ]",
-            indent, phi_res, sso_res, sso_label, heap_res, heap_label).ok();
-        TypedRegister { name: phi_res, ty: Type::string() }
+        writeln!(
+            out,
+            "{}{} = phi {{ i64, i64 }} [ %{}, %{} ], [ %{}, %{} ]",
+            indent, phi_res, sso_res, sso_label, heap_res, heap_label
+        )
+        .ok();
+        TypedRegister {
+            name: phi_res,
+            ty: Type::string(),
+        }
     }
 
     /// Mask off tag bits (bit 0 = static, bit 1 = temp) from a boxed string.
     fn emit_mask_tag(&mut self, out: &mut String, indent: &str, val: &str, prefix: &str) -> String {
         let r = self.fun.next_reg_with_prefix(prefix);
         // 2026-07-18: SSO uses 3 tag bits (AND -8); legacy uses 2 bits (AND -4).
-        let mask = if self.feature_sso_strings { -8i64 } else { -4i64 };
+        let mask = if self.feature_sso_strings {
+            -8i64
+        } else {
+            -4i64
+        };
         writeln!(out, "{}{} = and i64 {}, {}", indent, r, val, mask).ok();
         r
     }
 
     /// Ptrtoint for a string register: load data pointer.
-    fn emit_inttoptr_reg(&mut self, out: &mut String, indent: &str, prefix: &str, val: &str) -> String {
+    fn emit_inttoptr_reg(
+        &mut self,
+        out: &mut String,
+        indent: &str,
+        prefix: &str,
+        val: &str,
+    ) -> String {
         let r = self.fun.next_reg_with_prefix(prefix);
         self.emit_inttoptr(out, indent, &r, &val);
         r
@@ -913,7 +1277,12 @@ impl LlvmBackend {
         load_prefix: &str,
     ) -> String {
         let lp = self.fun.next_reg_with_prefix(gep_prefix);
-        writeln!(out, "{}{} = getelementptr i64, ptr {}, i64 1", indent, lp, header_ptr).ok();
+        writeln!(
+            out,
+            "{}{} = getelementptr i64, ptr {}, i64 1",
+            indent, lp, header_ptr
+        )
+        .ok();
         let l = self.fun.next_reg_with_prefix(load_prefix);
         writeln!(out, "{}{} = load i64, ptr {}, align 8", indent, l, lp).ok();
         l
@@ -970,7 +1339,12 @@ impl LlvmBackend {
         writeln!(out, "{}{} = add i64 {}, 16", indent, dp, base).ok();
         writeln!(out, "{}store i64 {}, ptr {}, align 8", indent, dp, hp).ok();
         let ls = self.fun.next_reg_with_prefix(len_prefix);
-        writeln!(out, "{}{} = getelementptr i64, ptr {}, i64 1", indent, ls, hp).ok();
+        writeln!(
+            out,
+            "{}{} = getelementptr i64, ptr {}, i64 1",
+            indent, ls, hp
+        )
+        .ok();
         writeln!(out, "{}store i64 {}, ptr {}, align 8", indent, total, ls).ok();
     }
 
@@ -993,9 +1367,18 @@ impl LlvmBackend {
         let chars = self.fun.next_reg_with_prefix(chars_prefix);
         self.emit_inttoptr(out, indent, &chars, &dp);
         let dest = self.fun.next_reg_with_prefix(dest_prefix);
-        writeln!(out, "{}{} = getelementptr i8, ptr {}, i64 16", indent, dest, result).ok();
-        writeln!(out, "{}call void @llvm.memcpy.p0i8.p0i8.i64(i8* {}, ptr {}, i64 {}, i1 false)",
-            indent, dest, chars, length).ok();
+        writeln!(
+            out,
+            "{}{} = getelementptr i8, ptr {}, i64 16",
+            indent, dest, result
+        )
+        .ok();
+        writeln!(
+            out,
+            "{}call void @llvm.memcpy.p0i8.p0i8.i64(i8* {}, ptr {}, i64 {}, i1 false)",
+            indent, dest, chars, length
+        )
+        .ok();
         let _ = dest_off_prefix; // keep for API compatibility
     }
 
@@ -1009,7 +1392,12 @@ impl LlvmBackend {
         prefix: &str,
     ) {
         let nt = self.fun.next_reg_with_prefix(prefix);
-        writeln!(out, "{}{} = getelementptr i8, ptr {}, i64 {}", indent, nt, result, total).ok();
+        writeln!(
+            out,
+            "{}{} = getelementptr i8, ptr {}, i64 {}",
+            indent, nt, result, total
+        )
+        .ok();
         writeln!(out, "{}store i8 0, ptr {}, align 1", indent, nt).ok();
     }
 
@@ -1029,8 +1417,24 @@ impl LlvmBackend {
         if self.fun.arena_slots.is_some() {
             return;
         }
-        self.emit_free_one_temp(out, indent, a_boxed, tag_a_prefix, is_a_prefix, "free_a", "af_a");
-        self.emit_free_one_temp(out, indent, b_boxed, tag_b_prefix, is_b_prefix, "free_b", "af_b");
+        self.emit_free_one_temp(
+            out,
+            indent,
+            a_boxed,
+            tag_a_prefix,
+            is_a_prefix,
+            "free_a",
+            "af_a",
+        );
+        self.emit_free_one_temp(
+            out,
+            indent,
+            b_boxed,
+            tag_b_prefix,
+            is_b_prefix,
+            "free_b",
+            "af_b",
+        );
     }
 
     /// Check tag bit 1 (legacy) or bit 2 (SSO) and conditionally free a
@@ -1054,7 +1458,12 @@ impl LlvmBackend {
         let fl = format!("{}_{}", free_label, self.fun.txn_counter);
         let afl = format!("{}_{}", after_label, self.fun.txn_counter);
         self.fun.txn_counter += 1;
-        writeln!(out, "{}br i1 {}, label %{}, label %{}", indent, is_temp, fl, afl).ok();
+        writeln!(
+            out,
+            "{}br i1 {}, label %{}, label %{}",
+            indent, is_temp, fl, afl
+        )
+        .ok();
         writeln!(out, "{}{}:", indent, fl).ok();
         let clean = self.emit_mask_tag(out, indent, boxed, &format!("cc{}", tag_prefix));
         let free_ptr = self.emit_inttoptr_reg(out, indent, &format!("cf{}", tag_prefix), &clean);
@@ -1077,7 +1486,10 @@ impl LlvmBackend {
         writeln!(out, "{}{} = ptrtoint ptr {} to i64", indent, vi, v).ok();
         let vi_tagged = self.fun.next_reg_with_prefix(prefix);
         writeln!(out, "{}{} = or i64 {}, 2", indent, vi_tagged, vi).ok();
-        TypedRegister { name: vi_tagged, ty: Type::int() }
+        TypedRegister {
+            name: vi_tagged,
+            ty: Type::int(),
+        }
     }
 
     /// Recursively detect if an expression chain produces a String/Data value.
@@ -1088,13 +1500,21 @@ impl LlvmBackend {
         match e {
             Expr::Quoted(_) => true,
             Expr::Identifier(name) => self.is_string_identifier(name),
-            Expr::BinaryOp(k, l, r) if matches!(k, crate::ast::BinaryOpKind::Add | crate::ast::BinaryOpKind::Concat) => {
+            Expr::BinaryOp(k, l, r)
+                if matches!(
+                    k,
+                    crate::ast::BinaryOpKind::Add | crate::ast::BinaryOpKind::Concat
+                ) =>
+            {
                 self.is_string_chain(l) || self.is_string_chain(r)
             }
             Expr::Cast(inner, target_ty) => {
                 // Phase A: is_string_like (CTD="String") + Data name check.
                 // Phase B: pure is_string_like (shape+encoding) replaces both.
-                self.ctx.type_universe.as_ref().map_or(false, |u| u.is_string_like(target_ty))
+                self.ctx
+                    .type_universe
+                    .as_ref()
+                    .map_or(false, |u| u.is_string_like(target_ty))
                     || type_is(&self.ctx.type_universe, target_ty, "Data")
                     || self.is_string_chain(inner)
             }
@@ -1107,16 +1527,31 @@ impl LlvmBackend {
     /// 2026-07-18: Replaced `type_is(..., "String")` with `is_string_like`.
     fn is_string_identifier(&self, name: &str) -> bool {
         let is_like = |t: &Type| -> bool {
-            self.ctx.type_universe.as_ref().map_or(false, |u| u.is_string_like(t))
+            self.ctx
+                .type_universe
+                .as_ref()
+                .map_or(false, |u| u.is_string_like(t))
                 || type_is(&self.ctx.type_universe, t, "Data")
         };
-        if self.fun.let_binding_types.get(name).map_or(false, |t| is_like(t)) {
+        if self
+            .fun
+            .let_binding_types
+            .get(name)
+            .map_or(false, |t| is_like(t))
+        {
             return true;
         }
-        if self.fun.let_original_types.get(name).map_or(false, |t| is_like(t)) {
+        if self
+            .fun
+            .let_original_types
+            .get(name)
+            .map_or(false, |t| is_like(t))
+        {
             return true;
         }
-        self.ctx.field_index_map.get(name)
+        self.ctx
+            .field_index_map
+            .get(name)
             .and_then(|&idx| self.ctx.field_types.get(idx))
             .map(|ft| ft == "i8*" || ft == "ptr")
             .unwrap_or(false)
@@ -1152,10 +1587,17 @@ impl LlvmBackend {
         let b = self.emit_expr(out, r, indent);
         let a_is_native = self.is_native_float(&a.ty);
         let b_is_native = self.is_native_float(&b.ty);
-        let dedup_key = self.build_dedup_key(Self::dedup_op(a_is_native, b_is_native, int_op, float_op), &a, &b);
+        let dedup_key = self.build_dedup_key(
+            Self::dedup_op(a_is_native, b_is_native, int_op, float_op),
+            &a,
+            &b,
+        );
         if let Some(cached) = self.check_dedup_cache(&dedup_key) {
             let result_ty = a.ty.clone();
-            return TypedRegister { name: cached, ty: result_ty };
+            return TypedRegister {
+                name: cached,
+                ty: result_ty,
+            };
         }
         let ptr_ty = self.infer_ptr_type(&a.ty, &b.ty);
         if a_is_native && b_is_native && a.ty == b.ty {
@@ -1179,7 +1621,9 @@ impl LlvmBackend {
         r: &Expr,
         int_op: &str,
     ) -> Option<TypedRegister> {
-        let (Expr::Decimal(li), Expr::Decimal(ri)) = (l, r) else { return None; };
+        let (Expr::Decimal(li), Expr::Decimal(ri)) = (l, r) else {
+            return None;
+        };
         let result = match int_op {
             "add" => Some(li.wrapping_add(*ri)),
             "sub" => Some(li.wrapping_sub(*ri)),
@@ -1195,7 +1639,10 @@ impl LlvmBackend {
         let folded = result?;
         let v = self.fun.next_reg();
         writeln!(out, "{}{} = add i64 0, {}", indent, v, folded).ok();
-        Some(TypedRegister { name: v, ty: Type::int() })
+        Some(TypedRegister {
+            name: v,
+            ty: Type::int(),
+        })
     }
 
     /// Check if a type is a native float via the universe.
@@ -1203,13 +1650,18 @@ impl LlvmBackend {
     /// inference) instead of ALU. This handles all float-like types uniformly
     /// (Float, Float64, Bfloat16, FP16, user-defined float types).
     fn is_native_float(&self, ty: &Type) -> bool {
-        self.ctx.type_universe.as_ref()
+        self.ctx
+            .type_universe
+            .as_ref()
             .and_then(|u| ty.universe_key().and_then(|k| u.get(k)))
             .map(|r| {
-                r.properties.get("category").and_then(|pv| match pv {
-                    crate::ast::PropertyValue::String(s) => Some(s == "Float"),
-                    _ => None,
-                }).unwrap_or(false)
+                r.properties
+                    .get("category")
+                    .and_then(|pv| match pv {
+                        crate::ast::PropertyValue::String(s) => Some(s == "Float"),
+                        _ => None,
+                    })
+                    .unwrap_or(false)
             })
             .unwrap_or_else(|| {
                 type_is(&self.ctx.type_universe, ty, "Float")
@@ -1218,12 +1670,26 @@ impl LlvmBackend {
     }
 
     /// Choose the dedup opcode based on float vs int.
-    fn dedup_op<'a>(a_is_native: bool, b_is_native: bool, int_op: &'a str, float_op: &'a str) -> &'a str {
-        if a_is_native || b_is_native { float_op } else { int_op }
+    fn dedup_op<'a>(
+        a_is_native: bool,
+        b_is_native: bool,
+        int_op: &'a str,
+        float_op: &'a str,
+    ) -> &'a str {
+        if a_is_native || b_is_native {
+            float_op
+        } else {
+            int_op
+        }
     }
 
     /// Build the dedup cache key if the opcode is long enough.
-    fn build_dedup_key(&self, op: &str, a: &TypedRegister, b: &TypedRegister) -> Option<(String, String, String)> {
+    fn build_dedup_key(
+        &self,
+        op: &str,
+        a: &TypedRegister,
+        b: &TypedRegister,
+    ) -> Option<(String, String, String)> {
         if op.len() >= 3 {
             Some((op.to_string(), a.name.clone(), b.name.clone()))
         } else {
@@ -1262,12 +1728,20 @@ impl LlvmBackend {
         let fb = self.ensure_float_reg(out, indent, b);
         let llvm_ty = self.operator_llvm_type(&a.ty);
         let fr = self.fun.next_reg_with_prefix("bfr");
-        writeln!(out, "{}{} = {} fast {} {}, {}", indent, fr, float_op, llvm_ty, fa, fb).ok();
+        writeln!(
+            out,
+            "{}{} = {} fast {} {}, {}",
+            indent, fr, float_op, llvm_ty, fa, fb
+        )
+        .ok();
         self.fun.reg_float_cache.insert(fr.clone(), fr.clone());
         if let Some(key) = dedup_key {
             self.fun.expr_dedup_cache.insert(key.clone(), fr.clone());
         }
-        TypedRegister { name: fr, ty: a.ty.clone() }
+        TypedRegister {
+            name: fr,
+            ty: a.ty.clone(),
+        }
     }
 
     /// Emit a mixed float/int binary operation (box both to i64).
@@ -1288,7 +1762,10 @@ impl LlvmBackend {
         if let Some(key) = dedup_key {
             self.fun.expr_dedup_cache.insert(key.clone(), v.clone());
         }
-        TypedRegister { name: v, ty: ptr_ty.unwrap_or(Type::int()) }
+        TypedRegister {
+            name: v,
+            ty: ptr_ty.unwrap_or(Type::int()),
+        }
     }
 
     /// Emit a fixed-width integer binary operation (native width, no boxing).
@@ -1303,11 +1780,19 @@ impl LlvmBackend {
     ) -> TypedRegister {
         let v = self.fun.next_reg_with_prefix("t");
         let llvm_ty_str = self.llvm_type(&a.ty).to_string();
-        writeln!(out, "{}{} = {} {} {}, {}", indent, v, int_op, llvm_ty_str, a.name, b.name).ok();
+        writeln!(
+            out,
+            "{}{} = {} {} {}, {}",
+            indent, v, int_op, llvm_ty_str, a.name, b.name
+        )
+        .ok();
         if let Some(key) = dedup_key {
             self.fun.expr_dedup_cache.insert(key.clone(), v.clone());
         }
-        TypedRegister { name: v, ty: a.ty.clone() }
+        TypedRegister {
+            name: v,
+            ty: a.ty.clone(),
+        }
     }
 
     /// Emit a generic i64 boxed binary operation fallback.
@@ -1328,7 +1813,10 @@ impl LlvmBackend {
         if let Some(key) = dedup_key {
             self.fun.expr_dedup_cache.insert(key.clone(), v.clone());
         }
-        TypedRegister { name: v, ty: ptr_ty.unwrap_or(Type::int()) }
+        TypedRegister {
+            name: v,
+            ty: ptr_ty.unwrap_or(Type::int()),
+        }
     }
 
     /// Emit a resolved operator call.
@@ -1349,30 +1837,47 @@ impl LlvmBackend {
     ) -> TypedRegister {
         let v = self.fun.next_reg();
         // 2026-07-17: Read ALU property instead of primitive()
-        let is_native = self.ctx.type_universe.as_ref()
+        let is_native = self
+            .ctx
+            .type_universe
+            .as_ref()
             .and_then(|u| a.ty.universe_key().and_then(|k| u.get(k)))
             .map(|r| {
-                r.properties.get("alu").and_then(|pv| match pv {
-                    crate::ast::PropertyValue::Identifier(s) => Some(s.as_str() == "Float"),
-                    _ => None,
-                }).unwrap_or(false)
+                r.properties
+                    .get("alu")
+                    .and_then(|pv| match pv {
+                        crate::ast::PropertyValue::Identifier(s) => Some(s.as_str() == "Float"),
+                        _ => None,
+                    })
+                    .unwrap_or(false)
             })
             .unwrap_or(false);
         let (op_a, op_b) = if is_native {
-            (self.ensure_float_reg(out, indent, a), self.ensure_float_reg(out, indent, b))
+            (
+                self.ensure_float_reg(out, indent, a),
+                self.ensure_float_reg(out, indent, b),
+            )
         } else {
             (a.name.clone(), b.name.clone())
         };
         let llvm_ty = self.operator_llvm_type(&a.ty);
         match implementation {
             Expr::Identifier(name) => {
-                writeln!(out, "{}{} = call i64 @{}(i64 {}, i64 {})",
-                    indent, v, name, op_a, op_b).ok();
+                writeln!(
+                    out,
+                    "{}{} = call i64 @{}(i64 {}, i64 {})",
+                    indent, v, name, op_a, op_b
+                )
+                .ok();
             }
             Expr::Quoted(llvm_op) => {
                 let llvm_op_str = String::from_utf8_lossy(llvm_op);
-                writeln!(out, "{}{} = {} {} {}, {}",
-                    indent, v, llvm_op_str, llvm_ty, op_a, op_b).ok();
+                writeln!(
+                    out,
+                    "{}{} = {} {} {}, {}",
+                    indent, v, llvm_op_str, llvm_ty, op_a, op_b
+                )
+                .ok();
                 if is_native {
                     self.fun.reg_float_cache.insert(v.clone(), v.clone());
                 }
@@ -1381,7 +1886,10 @@ impl LlvmBackend {
                 writeln!(out, "{}{} = {} 0, {}", indent, v, llvm_ty, op_a).ok();
             }
         }
-        TypedRegister { name: v, ty: a.ty.clone() }
+        TypedRegister {
+            name: v,
+            ty: a.ty.clone(),
+        }
     }
 
     /// Emit LLVM IR for a comparison between two expressions.
@@ -1401,19 +1909,37 @@ impl LlvmBackend {
         if let Some(result) = self.try_string_trigger_cmp(out, indent, l, r, cond) {
             return result;
         }
-        let (a, b) = (self.emit_expr(out, l, indent), self.emit_expr(out, r, indent));
+        let (a, b) = (
+            self.emit_expr(out, l, indent),
+            self.emit_expr(out, r, indent),
+        );
         let c = self.fun.next_reg_with_prefix("c");
-        if type_is(&self.ctx.type_universe, &a.ty, "Float") || type_is(&self.ctx.type_universe, &b.ty, "Float") {
+        if type_is(&self.ctx.type_universe, &a.ty, "Float")
+            || type_is(&self.ctx.type_universe, &b.ty, "Float")
+        {
             let fa = self.ensure_float_reg(out, indent, &a);
             let fb = self.ensure_float_reg(out, indent, &b);
-            writeln!(out, "{}{} = fcmp fast {} float {}, {}", indent, c, cond, fa, fb).ok();
+            writeln!(
+                out,
+                "{}{} = fcmp fast {} float {}, {}",
+                indent, c, cond, fa, fb
+            )
+            .ok();
         } else {
             let icmp_cond = self.fcmp_to_icmp(cond);
             let a_i64 = self.adapt_to_i64(out, indent, &a);
             let b_i64 = self.adapt_to_i64(out, indent, &b);
-            writeln!(out, "{}{} = icmp {} i64 {}, {}", indent, c, icmp_cond, a_i64, b_i64).ok();
+            writeln!(
+                out,
+                "{}{} = icmp {} i64 {}, {}",
+                indent, c, icmp_cond, a_i64, b_i64
+            )
+            .ok();
         }
-        TypedRegister { name: c, ty: Type::bool_() }
+        TypedRegister {
+            name: c,
+            ty: Type::bool_(),
+        }
     }
 
     /// Fold constant integer comparisons at compile time.
@@ -1425,7 +1951,9 @@ impl LlvmBackend {
         r: &Expr,
         cond: &str,
     ) -> Option<TypedRegister> {
-        let (Expr::Decimal(li), Expr::Decimal(ri)) = (l, r) else { return None; };
+        let (Expr::Decimal(li), Expr::Decimal(ri)) = (l, r) else {
+            return None;
+        };
         let result = match cond {
             "oeq" => li == ri,
             "one" => li != ri,
@@ -1441,7 +1969,10 @@ impl LlvmBackend {
         } else {
             writeln!(out, "{}{} = xor i8 1, 1", indent, v).ok();
         }
-        Some(TypedRegister { name: v, ty: Type::bool_() })
+        Some(TypedRegister {
+            name: v,
+            ty: Type::bool_(),
+        })
     }
 
     /// Try to compare a string trigger's first byte against a quoted literal.
@@ -1454,9 +1985,17 @@ impl LlvmBackend {
         cond: &str,
     ) -> Option<TypedRegister> {
         let (trigger_expr, quoted) = if let Expr::Quoted(s) = r {
-            if self.is_linked_string_trigger(l) { (l, s) } else { return None; }
+            if self.is_linked_string_trigger(l) {
+                (l, s)
+            } else {
+                return None;
+            }
         } else if let Expr::Quoted(s) = l {
-            if self.is_linked_string_trigger(r) { (r, s) } else { return None; }
+            if self.is_linked_string_trigger(r) {
+                (r, s)
+            } else {
+                return None;
+            }
         } else {
             return None;
         };
@@ -1470,8 +2009,16 @@ impl LlvmBackend {
         writeln!(out, "{}{} = zext i8 {} to i64", indent, z, b).ok();
         let byte_val = quoted.first().copied().unwrap_or(0u8) as i64;
         let c = self.fun.next_reg_with_prefix("fc");
-        writeln!(out, "{}{} = icmp {} i64 {}, {}", indent, c, icmp_cond, z, byte_val).ok();
-        Some(TypedRegister { name: c, ty: Type::bool_() })
+        writeln!(
+            out,
+            "{}{} = icmp {} i64 {}, {}",
+            indent, c, icmp_cond, z, byte_val
+        )
+        .ok();
+        Some(TypedRegister {
+            name: c,
+            ty: Type::bool_(),
+        })
     }
 
     /// Convert LLVM float comparison condition to integer icmp condition.
@@ -1506,7 +2053,10 @@ impl LlvmBackend {
         };
         let v = self.fun.next_reg_with_prefix("fnm");
         writeln!(out, "{}{} = or i64 {}, 0", indent, v, 0).ok();
-        Some(TypedRegister { name: v, ty: Type::int() })
+        Some(TypedRegister {
+            name: v,
+            ty: Type::int(),
+        })
     }
 
     /// Emit native LLVM IR for well-known projection operations
@@ -1569,12 +2119,28 @@ impl LlvmBackend {
         };
         if is_cmp {
             let cmp = self.fun.next_reg_with_prefix("pcmp");
-            writeln!(out, "{}{} = {} i64 {}, {}", indent, cmp, op, src.name, rhs.name).ok();
+            writeln!(
+                out,
+                "{}{} = {} i64 {}, {}",
+                indent, cmp, op, src.name, rhs.name
+            )
+            .ok();
             writeln!(out, "{}{} = zext i1 {} to i64", indent, v, cmp).ok();
-            Some(TypedRegister { name: v.to_string(), ty: Type::int() })
+            Some(TypedRegister {
+                name: v.to_string(),
+                ty: Type::int(),
+            })
         } else {
-            writeln!(out, "{}{} = {} i64 {}, {}", indent, v, op, src.name, rhs.name).ok();
-            Some(TypedRegister { name: v.to_string(), ty: Type::int() })
+            writeln!(
+                out,
+                "{}{} = {} i64 {}, {}",
+                indent, v, op, src.name, rhs.name
+            )
+            .ok();
+            Some(TypedRegister {
+                name: v.to_string(),
+                ty: Type::int(),
+            })
         }
     }
 
@@ -1603,14 +2169,30 @@ impl LlvmBackend {
         };
         if is_cmp {
             let cmp = self.fun.next_reg_with_prefix("pcmp");
-            writeln!(out, "{}{} = {} float {}, {}", indent, cmp, op, src.name, rhs.name).ok();
+            writeln!(
+                out,
+                "{}{} = {} float {}, {}",
+                indent, cmp, op, src.name, rhs.name
+            )
+            .ok();
             let ext = self.fun.next_reg_with_prefix("pce");
             writeln!(out, "{}{} = zext i1 {} to i64", indent, ext, cmp).ok();
             writeln!(out, "{}{} = sitofp i64 {} to float", indent, v, ext).ok();
-            Some(TypedRegister { name: v.to_string(), ty: Type::float() })
+            Some(TypedRegister {
+                name: v.to_string(),
+                ty: Type::float(),
+            })
         } else {
-            writeln!(out, "{}{} = {} float {}, {}", indent, v, op, src.name, rhs.name).ok();
-            Some(TypedRegister { name: v.to_string(), ty: Type::float() })
+            writeln!(
+                out,
+                "{}{} = {} float {}, {}",
+                indent, v, op, src.name, rhs.name
+            )
+            .ok();
+            Some(TypedRegister {
+                name: v.to_string(),
+                ty: Type::float(),
+            })
         }
     }
 
@@ -1627,19 +2209,41 @@ impl LlvmBackend {
         match name {
             "And" => {
                 writeln!(out, "{}{} = and i1 {}, {}", indent, v, src.name, rhs.name).ok();
-                Some(TypedRegister { name: v.to_string(), ty: Type::bool_() })
+                Some(TypedRegister {
+                    name: v.to_string(),
+                    ty: Type::bool_(),
+                })
             }
             "Or" => {
                 writeln!(out, "{}{} = or i1 {}, {}", indent, v, src.name, rhs.name).ok();
-                Some(TypedRegister { name: v.to_string(), ty: Type::bool_() })
+                Some(TypedRegister {
+                    name: v.to_string(),
+                    ty: Type::bool_(),
+                })
             }
             "Eq" => {
-                writeln!(out, "{}{} = icmp eq i1 {}, {}", indent, v, src.name, rhs.name).ok();
-                Some(TypedRegister { name: v.to_string(), ty: Type::bool_() })
+                writeln!(
+                    out,
+                    "{}{} = icmp eq i1 {}, {}",
+                    indent, v, src.name, rhs.name
+                )
+                .ok();
+                Some(TypedRegister {
+                    name: v.to_string(),
+                    ty: Type::bool_(),
+                })
             }
             "Ne" => {
-                writeln!(out, "{}{} = icmp ne i1 {}, {}", indent, v, src.name, rhs.name).ok();
-                Some(TypedRegister { name: v.to_string(), ty: Type::bool_() })
+                writeln!(
+                    out,
+                    "{}{} = icmp ne i1 {}, {}",
+                    indent, v, src.name, rhs.name
+                )
+                .ok();
+                Some(TypedRegister {
+                    name: v.to_string(),
+                    ty: Type::bool_(),
+                })
             }
             _ => None,
         }
@@ -1668,12 +2272,20 @@ impl LlvmBackend {
         };
         let (partner, route) = {
             let universe = self.ctx.type_universe.as_ref()?;
-            let meld_entry = universe.melds.iter().find(|((a, b), _decl)| {
-                a.as_str() == custom_name || b.as_str() == custom_name
-            });
+            let meld_entry = universe
+                .melds
+                .iter()
+                .find(|((a, b), _decl)| a.as_str() == custom_name || b.as_str() == custom_name);
             let ((name_a, name_b), meld_decl) = meld_entry?;
-            let partner: String = if name_a.as_str() == custom_name { name_b.clone() } else { name_a.clone() };
-            let route = meld_decl.routes.iter().find(|r| r.accessor == target_name)?;
+            let partner: String = if name_a.as_str() == custom_name {
+                name_b.clone()
+            } else {
+                name_a.clone()
+            };
+            let route = meld_decl
+                .routes
+                .iter()
+                .find(|r| r.accessor == target_name)?;
             (partner, route.clone())
         };
         let result = self.emit_route_expression(out, &route.dest_expr, src_val, &partner, indent);
@@ -1700,7 +2312,12 @@ impl LlvmBackend {
     ) -> Option<TypedRegister> {
         match expr {
             // Pattern 1: identity projection — "Ptr" or "Size" on the backing value
-            Expr::Identifier(name) if matches!(name.as_str(), "Ptr" | "Size" | "Bytes" | "Alignment" | "Type") => {
+            Expr::Identifier(name)
+                if matches!(
+                    name.as_str(),
+                    "Ptr" | "Size" | "Bytes" | "Alignment" | "Type"
+                ) =>
+            {
                 self.emit_direct_projection(out, src_val, name, indent)
             }
             // Pattern 2: intrinsic call — strlen#(Ptr) etc.
@@ -1709,7 +2326,9 @@ impl LlvmBackend {
             }
             // Pattern 3: field access on the partner type — "CString.ptr"
             Expr::Field(obj, field) => {
-                let Expr::Identifier(n) = obj.as_ref() else { return None; };
+                let Expr::Identifier(n) = obj.as_ref() else {
+                    return None;
+                };
                 if n != partner {
                     return None;
                 }
@@ -1735,8 +2354,16 @@ impl LlvmBackend {
             "Ptr" | "Size" | "Bytes" => {
                 let v = self.fun.next_reg_with_prefix("t");
                 let proj_reg = self.emit_direct_projection(out, src_val, arg_name, indent)?;
-                writeln!(out, "{}{} = call i64 @__strlen__(i64 {})", indent, v, proj_reg.name).ok();
-                Some(TypedRegister { name: v, ty: Type::int() })
+                writeln!(
+                    out,
+                    "{}{} = call i64 @__strlen__(i64 {})",
+                    indent, v, proj_reg.name
+                )
+                .ok();
+                Some(TypedRegister {
+                    name: v,
+                    ty: Type::int(),
+                })
             }
             _ => None,
         }
@@ -1768,19 +2395,29 @@ impl LlvmBackend {
             return val.clone();
         }
         let (routes, target_fields) = {
-            let Some(universe) = self.ctx.type_universe.as_ref() else { return val.clone(); };
-            let Some(meld_decl) = universe.find_meld(&backing, &target_name) else { return val.clone(); };
-            let Some(target_fields) = self.ctx.struct_types.get(&target_name) else { return val.clone(); };
+            let Some(universe) = self.ctx.type_universe.as_ref() else {
+                return val.clone();
+            };
+            let Some(meld_decl) = universe.find_meld(&backing, &target_name) else {
+                return val.clone();
+            };
+            let Some(target_fields) = self.ctx.struct_types.get(&target_name) else {
+                return val.clone();
+            };
             (meld_decl.routes.clone(), target_fields.clone())
         };
-        let field_results = self.derive_fields_via_meld(out, val, &backing, &routes, &target_fields, indent);
+        let field_results =
+            self.derive_fields_via_meld(out, val, &backing, &routes, &target_fields, indent);
 
         if field_results.is_empty() {
             return val.clone();
         }
         if field_results.len() == 1 {
             let (_, ref ty, ref reg) = field_results[0];
-            return TypedRegister { name: reg.clone(), ty: ty.clone() };
+            return TypedRegister {
+                name: reg.clone(),
+                ty: ty.clone(),
+            };
         }
         self.emit_multi_field_struct(out, indent, &field_results, &target_name)
     }
@@ -1799,7 +2436,9 @@ impl LlvmBackend {
         let mut results = Vec::new();
         for (field_name, field_ty) in target_fields {
             let reg = if let Some(route) = routes.iter().find(|r| r.accessor == *field_name) {
-                if let Some(reg) = self.emit_route_expression(out, &route.dest_expr, val, backing, indent) {
+                if let Some(reg) =
+                    self.emit_route_expression(out, &route.dest_expr, val, backing, indent)
+                {
                     reg.name
                 } else {
                     self.emit_zero_placeholder(out, indent)
@@ -1829,15 +2468,38 @@ impl LlvmBackend {
     ) -> TypedRegister {
         let total_size = field_results.len() * 8;
         let alloc = self.fun.next_reg_with_prefix("t");
-        writeln!(out, "{}{} = call ptr @malloc(i64 {})", indent, alloc, total_size).ok();
+        writeln!(
+            out,
+            "{}{} = call ptr @malloc(i64 {})",
+            indent, alloc, total_size
+        )
+        .ok();
         let struct_ptr = self.fun.next_reg_with_prefix("t");
-        writeln!(out, "{}{} = bitcast ptr {} to ptr", indent, struct_ptr, alloc).ok();
+        writeln!(
+            out,
+            "{}{} = bitcast ptr {} to ptr",
+            indent, struct_ptr, alloc
+        )
+        .ok();
         for (i, (_name, _ty, reg)) in field_results.iter().enumerate() {
             let gep = self.fun.next_reg_with_prefix("t");
-            writeln!(out, "{}{} = getelementptr i64, ptr {}, i64 {}", indent, gep, struct_ptr, i).ok();
-            writeln!(out, "{}store i64 {}, ptr {}, align 8, !tbaa !1", indent, reg, gep).ok();
+            writeln!(
+                out,
+                "{}{} = getelementptr i64, ptr {}, i64 {}",
+                indent, gep, struct_ptr, i
+            )
+            .ok();
+            writeln!(
+                out,
+                "{}store i64 {}, ptr {}, align 8, !tbaa !1",
+                indent, reg, gep
+            )
+            .ok();
         }
-        TypedRegister { name: struct_ptr, ty: Type::Custom(target_name.to_string()) }
+        TypedRegister {
+            name: struct_ptr,
+            ty: Type::Custom(target_name.to_string()),
+        }
     }
 
     /// Emit a direct projection on a value without going through the meld
@@ -1854,27 +2516,52 @@ impl LlvmBackend {
         match target_name {
             "Ptr" => {
                 writeln!(out, "{}{} = add i64 0, {} ; ptr", indent, v, src_val.name).ok();
-                Some(TypedRegister { name: v, ty: Type::int() })
+                Some(TypedRegister {
+                    name: v,
+                    ty: Type::int(),
+                })
             }
             "Size" => {
                 let hp = self.fun.next_reg_with_prefix("drphp");
                 self.emit_inttoptr(out, indent, &hp, &src_val.name);
                 let lp = self.fun.next_reg_with_prefix("drplp");
-                writeln!(out, "{}{} = getelementptr i64, ptr {}, i64 1", indent, lp, hp).ok();
-                writeln!(out, "{}{} = load i64, ptr {}, align 8, !tbaa !1", indent, v, lp).ok();
-                Some(TypedRegister { name: v, ty: Type::int() })
+                writeln!(
+                    out,
+                    "{}{} = getelementptr i64, ptr {}, i64 1",
+                    indent, lp, hp
+                )
+                .ok();
+                writeln!(
+                    out,
+                    "{}{} = load i64, ptr {}, align 8, !tbaa !1",
+                    indent, v, lp
+                )
+                .ok();
+                Some(TypedRegister {
+                    name: v,
+                    ty: Type::int(),
+                })
             }
             "Bytes" => {
                 writeln!(out, "{}{} = add i64 0, 8 ; bytes", indent, v).ok();
-                Some(TypedRegister { name: v, ty: Type::int() })
+                Some(TypedRegister {
+                    name: v,
+                    ty: Type::int(),
+                })
             }
             "Alignment" => {
                 writeln!(out, "{}{} = add i64 0, 8 ; alignment", indent, v).ok();
-                Some(TypedRegister { name: v, ty: Type::int() })
+                Some(TypedRegister {
+                    name: v,
+                    ty: Type::int(),
+                })
             }
             "Type" => {
                 writeln!(out, "{}{} = add i64 0, 6 ; type=custom", indent, v).ok();
-                Some(TypedRegister { name: v, ty: Type::int() })
+                Some(TypedRegister {
+                    name: v,
+                    ty: Type::int(),
+                })
             }
             _ => None,
         }
@@ -1904,7 +2591,9 @@ impl LlvmBackend {
             Expr::BinaryOp(k, l, r) => (k, l.as_ref().clone(), r.as_ref().clone()),
             _ => return None,
         };
-        let (Expr::Cast(_, lt), Expr::Cast(_, rt)) = (&lhs, &rhs) else { return None; };
+        let (Expr::Cast(_, lt), Expr::Cast(_, rt)) = (&lhs, &rhs) else {
+            return None;
+        };
         if lt != rt {
             return None;
         }
@@ -1951,8 +2640,15 @@ impl LlvmBackend {
         let ze = self.fun.next_reg_with_prefix("eor_ze");
         writeln!(out, "{}{} = zext i32 {} to i64", indent, ze, bi).ok();
         self.fun.reg_float_cache.insert(ze.clone(), v.to_string());
-        let ret_ty = if cast_ty == &Type::float64() { Type::float64() } else { Type::float() };
-        Some(TypedRegister { name: ze, ty: ret_ty })
+        let ret_ty = if cast_ty == &Type::float64() {
+            Type::float64()
+        } else {
+            Type::float()
+        };
+        Some(TypedRegister {
+            name: ze,
+            ty: ret_ty,
+        })
     }
 
     /// Emit EOR integer path: emit integer binary op directly.
@@ -1974,7 +2670,10 @@ impl LlvmBackend {
             _ => return None,
         };
         writeln!(out, "{}{} = {} i64 {}, {}", indent, v, i_op, a.name, b.name).ok();
-        Some(TypedRegister { name: v.to_string(), ty: cast_ty.clone() })
+        Some(TypedRegister {
+            name: v.to_string(),
+            ty: cast_ty.clone(),
+        })
     }
 
     // ═══════════════════════════════════════════════════════════════
@@ -1984,7 +2683,12 @@ impl LlvmBackend {
     /// Box a typed register to i64 for uniform state storage.
     /// Handles Float64(double)→bitcast→i64, Float(float)→bitcast→i32→zext→i64,
     /// Bool(i8)→zext→i64, String/Data(i8*)→ptrtoint→i64. Int is already i64 (identity).
-    pub(crate) fn adapt_to_i64(&mut self, out: &mut String, indent: &str, reg: &TypedRegister) -> String {
+    pub(crate) fn adapt_to_i64(
+        &mut self,
+        out: &mut String,
+        indent: &str,
+        reg: &TypedRegister,
+    ) -> String {
         match &reg.ty {
             Type::Custom(t) if t == "Float64" => {
                 let tr = self.fun.gen_reg();
@@ -2004,13 +2708,23 @@ impl LlvmBackend {
                 writeln!(out, "{}{} = zext i8 {} to i64", indent, tr, reg.name).ok();
                 tr
             }
-            Type::Custom(t) if (t == "String" || t == "Data")
-                && self.feature_sso_strings
-                && self.ctx.type_universe.as_ref().map_or(false, |u| u.is_string_like(&reg.ty))
-            => {
+            Type::Custom(t)
+                if (t == "String" || t == "Data")
+                    && self.feature_sso_strings
+                    && self
+                        .ctx
+                        .type_universe
+                        .as_ref()
+                        .map_or(false, |u| u.is_string_like(&reg.ty)) =>
+            {
                 // 2026-07-18: SSO String is {i64, i64} — extract handle[0] (data/tag).
                 let tr = self.fun.gen_reg();
-                writeln!(out, "{}{} = extractvalue {{ i64, i64 }} {}, 0", indent, tr, reg.name).ok();
+                writeln!(
+                    out,
+                    "{}{} = extractvalue {{ i64, i64 }} {}, 0",
+                    indent, tr, reg.name
+                )
+                .ok();
                 tr
             }
             Type::Custom(t) if t == "String" || t == "Data" => {
@@ -2027,10 +2741,21 @@ impl LlvmBackend {
 
     /// Emit a getelementptr for a state field and return the GEP register name.
     /// `prefix` is used to make register names unique within a function.
-    pub(crate) fn emit_state_gep(&mut self, out: &mut String, indent: &str, _prefix: &str, state_ptr: &str, idx: usize) -> String {
+    pub(crate) fn emit_state_gep(
+        &mut self,
+        out: &mut String,
+        indent: &str,
+        _prefix: &str,
+        state_ptr: &str,
+        idx: usize,
+    ) -> String {
         let r = self.fun.gen_reg();
-        writeln!(out, "{}{} = getelementptr inbounds %State, ptr {}, i32 0, i32 {}",
-            indent, r, state_ptr, idx).ok();
+        writeln!(
+            out,
+            "{}{} = getelementptr inbounds %State, ptr {}, i32 0, i32 {}",
+            indent, r, state_ptr, idx
+        )
+        .ok();
         r
     }
 
@@ -2040,20 +2765,36 @@ impl LlvmBackend {
     /// Load a state field as i64. Returns (register_name, brief_type).
     /// The brief type can be passed to ensure_typed_value for float unboxing.
     /// Load a state field with its native LLVM type. Returns (register_name, brief_type).
-    pub(crate) fn emit_state_load_i64(&mut self, out: &mut String, indent: &str, name: &str) -> Option<(String, Type)> {
+    pub(crate) fn emit_state_load_i64(
+        &mut self,
+        out: &mut String,
+        indent: &str,
+        name: &str,
+    ) -> Option<(String, Type)> {
         let idx = *self.ctx.field_index_map.get(name)?;
         self.load_field_type(out, indent, idx)
     }
 
     /// Store a value to a state field with the native LLVM type.
     /// The value should match the field's LLVM type (float, double, i64, etc.).
-    pub(crate) fn emit_state_store_i64(&mut self, out: &mut String, indent: &str, name: &str, val: &str) -> Option<()> {
+    pub(crate) fn emit_state_store_i64(
+        &mut self,
+        out: &mut String,
+        indent: &str,
+        name: &str,
+        val: &str,
+    ) -> Option<()> {
         let idx = *self.ctx.field_index_map.get(name)?;
         self.store_field_type(out, indent, idx, val)
     }
 
     /// Load a state field with its native LLVM type by index. Returns (register_name, brief_type).
-    pub(crate) fn emit_state_load_i64_by_idx(&mut self, out: &mut String, indent: &str, idx: usize) -> (String, Type) {
+    pub(crate) fn emit_state_load_i64_by_idx(
+        &mut self,
+        out: &mut String,
+        indent: &str,
+        idx: usize,
+    ) -> (String, Type) {
         self.load_field_type(out, indent, idx).unwrap_or_else(|| {
             let v = self.fun.next_reg_with_prefix("slf");
             writeln!(out, "{}{} = add i64 0, 0", indent, v).ok();
@@ -2062,38 +2803,104 @@ impl LlvmBackend {
     }
 
     /// Store a value to a state field by index with the native LLVM type.
-    pub(crate) fn emit_state_store_i64_by_idx(&mut self, out: &mut String, indent: &str, idx: usize, val: &str) {
+    pub(crate) fn emit_state_store_i64_by_idx(
+        &mut self,
+        out: &mut String,
+        indent: &str,
+        idx: usize,
+        val: &str,
+    ) {
         self.store_field_type(out, indent, idx, val);
     }
 
     /// Internal helper: load a state field with its native LLVM type.
-    fn load_field_type(&mut self, out: &mut String, indent: &str, idx: usize) -> Option<(String, Type)> {
-        let brief_ty = self.ctx.field_brief_types.get(idx).cloned().unwrap_or(Type::int());
-        let llvm_ty = self.ctx.field_types.get(idx).cloned().unwrap_or_else(|| "i64".to_string());
+    fn load_field_type(
+        &mut self,
+        out: &mut String,
+        indent: &str,
+        idx: usize,
+    ) -> Option<(String, Type)> {
+        let brief_ty = self
+            .ctx
+            .field_brief_types
+            .get(idx)
+            .cloned()
+            .unwrap_or(Type::int());
+        let llvm_ty = self
+            .ctx
+            .field_types
+            .get(idx)
+            .cloned()
+            .unwrap_or_else(|| "i64".to_string());
         let gep = self.fun.gen_reg();
-        writeln!(out, "{}{} = getelementptr inbounds %State, ptr %state, i32 0, i32 {}",
-            indent, gep, idx).ok();
+        writeln!(
+            out,
+            "{}{} = getelementptr inbounds %State, ptr %state, i32 0, i32 {}",
+            indent, gep, idx
+        )
+        .ok();
         let val = self.fun.gen_reg();
-        writeln!(out, "{}{} = load {}, ptr {}, align {}", indent, val, llvm_ty, gep,
-            self.align_of(&llvm_ty)).ok();
+        writeln!(
+            out,
+            "{}{} = load {}, ptr {}, align {}",
+            indent,
+            val,
+            llvm_ty,
+            gep,
+            self.align_of(&llvm_ty)
+        )
+        .ok();
         Some((val, brief_ty))
     }
 
     /// Internal helper: store a value to a state field with its native LLVM type.
-    fn store_field_type(&mut self, out: &mut String, indent: &str, idx: usize, val: &str) -> Option<()> {
-        let llvm_ty = self.ctx.field_types.get(idx).cloned().unwrap_or_else(|| "i64".to_string());
+    fn store_field_type(
+        &mut self,
+        out: &mut String,
+        indent: &str,
+        idx: usize,
+        val: &str,
+    ) -> Option<()> {
+        let llvm_ty = self
+            .ctx
+            .field_types
+            .get(idx)
+            .cloned()
+            .unwrap_or_else(|| "i64".to_string());
         let gep = self.fun.gen_reg();
-        writeln!(out, "{}{} = getelementptr inbounds %State, ptr %state, i32 0, i32 {}",
-            indent, gep, idx).ok();
-        writeln!(out, "{}store {} {}, ptr {}, align {}", indent, llvm_ty, val, gep,
-            self.align_of(&llvm_ty)).ok();
+        writeln!(
+            out,
+            "{}{} = getelementptr inbounds %State, ptr %state, i32 0, i32 {}",
+            indent, gep, idx
+        )
+        .ok();
+        writeln!(
+            out,
+            "{}store {} {}, ptr {}, align {}",
+            indent,
+            llvm_ty,
+            val,
+            gep,
+            self.align_of(&llvm_ty)
+        )
+        .ok();
         Some(())
     }
 
     /// Ensure the value register has the expected LLVM type, inserting
     /// trunc/zext/bitcast as needed. Returns the possibly-converted register name.
-    pub(crate) fn ensure_typed_value(&mut self, out: &mut String, indent: &str, expected_llvm_ty: &str, val: &str, brief_ty: Option<Type>, _universe: Option<&crate::type_universe::TypeUniverse>) -> String {
-        let Some(ref bt) = brief_ty else { return val.to_string(); };
+    pub(crate) fn ensure_typed_value(
+        &mut self,
+        out: &mut String,
+        indent: &str,
+        expected_llvm_ty: &str,
+        val: &str,
+        brief_ty: Option<Type>,
+        _universe: Option<&crate::type_universe::TypeUniverse>,
+    ) -> String {
+        let Some(ref bt) = brief_ty else {
+            return val.to_string();
+        };
         let actual_ty = self.llvm_type(bt);
         if actual_ty == expected_llvm_ty {
             return val.to_string();
@@ -2102,7 +2909,12 @@ impl LlvmBackend {
         match (actual_ty.as_ref(), expected_llvm_ty) {
             ("double", "i64") | ("float", "i64") => {
                 let r = self.fun.gen_reg();
-                writeln!(out, "{}{} = bitcast {} {} to i64", indent, r, actual_ty_clone, val).ok();
+                writeln!(
+                    out,
+                    "{}{} = bitcast {} {} to i64",
+                    indent, r, actual_ty_clone, val
+                )
+                .ok();
                 r
             }
             ("i64", "double") => {

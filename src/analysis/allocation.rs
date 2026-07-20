@@ -284,7 +284,7 @@ impl<'a> DagBuilder<'a> {
             Expr::If(cond, then, else_) => { self.walk_expr(cond); self.walk_expr(then); if let Some(e) = else_ { self.walk_expr(e); } }
             Expr::Match(expr, arms) => { self.walk_expr(expr); for arm in arms.iter_mut() { self.walk_expr(&mut arm.body); } }
             Expr::Block(stmts) => { self.walk_stmts(stmts); }
-            Expr::Quoted(_) | Expr::Decimal(_) | Expr::Bool(_) | Expr::Float(_)
+            Expr::Quoted(_) | Expr::Decimal(_) | Expr::TaggedLiteral(_, _) | Expr::Bool(_) | Expr::Float(_)
             | Expr::Identifier(_) | Expr::Lambda(_, _) | Expr::Within(_, _)
             | Expr::DerivationBlock(_) | Expr::PropertyGet(_) | Expr::FormattingAnnotation(_) => {}
             Expr::PluginIntercept { args, .. } => {
@@ -316,7 +316,7 @@ pub fn analyze_alloc_strategies(items: &mut [TopLevel]) -> HashMap<usize, AllocS
         let strategy = result.get(&id).cloned().unwrap_or(AllocStrategy::Malloc);
         if strategy == AllocStrategy::Malloc { continue; }
         let Some(size_expr) = alloc_sizes.get(&id) else { continue; };
-        let Expr::Decimal(size_val) = size_expr else { continue; };
+        let (Expr::Decimal(size_val) | Expr::TaggedLiteral(size_val, _)) = size_expr else { continue; };
         if *size_val <= 8 {
             result.insert(id, AllocStrategy::Inline);
         }

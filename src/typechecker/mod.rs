@@ -48,8 +48,12 @@ impl<'a> TypecheckContext<'a> {
     /// discriminator: optional prefix/suffix hint ("0x", "h", "bf", etc.)
     /// Returns the OperatorDef if a matching Parse op exists.
     /// Qualified ops (with pre:/suf:) win over unqualified ops.
-    pub fn find_parse_op(&self, type_name: &str, form: &str,
-                         discriminator: Option<&str>) -> Option<&crate::ast::top::OperatorDef> {
+    pub fn find_parse_op(
+        &self,
+        type_name: &str,
+        form: &str,
+        discriminator: Option<&str>,
+    ) -> Option<&crate::ast::top::OperatorDef> {
         let defs = self.parse_ops.get(type_name)?;
         // First: try to find an exact discriminator match
         if let Some(d) = discriminator {
@@ -63,25 +67,28 @@ impl<'a> TypecheckContext<'a> {
         // Second: find a qualified match (has pre: or suf: but not matching discriminator)
         // Only use this if the literal has no discriminator and the op has one
         if discriminator.is_none() {
-            if let Some(def) = defs.iter().find(|op| {
-                matches_form(&op.params, form) && (op.pre.is_some() || op.suf.is_some())
-            }) {
+            if let Some(def) = defs
+                .iter()
+                .find(|op| matches_form(&op.params, form) && (op.pre.is_some() || op.suf.is_some()))
+            {
                 return Some(def);
             }
         }
         // Third: find an unqualified match (no pre:/suf:)
-        if let Some(def) = defs.iter().find(|d| matches_form(&d.params, form) && d.pre.is_none() && d.suf.is_none()) {
+        if let Some(def) = defs
+            .iter()
+            .find(|d| matches_form(&d.params, form) && d.pre.is_none() && d.suf.is_none())
+        {
             return Some(def);
         }
         // Fallback: hashword identity (e.g., Parse(#Int) for Decimal)
-        defs.iter().find(|d| matches_parse_identity(&d.params, form))
+        defs.iter()
+            .find(|d| matches_parse_identity(&d.params, form))
     }
 
     /// 2026-07-20: Register Parse ops from a type's definitions.
     pub fn register_parse_ops(&mut self, type_name: &str, ops: Vec<crate::ast::top::OperatorDef>) {
-        let parse_ops: Vec<_> = ops.into_iter()
-            .filter(|d| d.op == "Parse")
-            .collect();
+        let parse_ops: Vec<_> = ops.into_iter().filter(|d| d.op == "Parse").collect();
         if !parse_ops.is_empty() {
             self.parse_ops.insert(type_name.to_string(), parse_ops);
         }
@@ -96,7 +103,9 @@ impl<'a> TypecheckContext<'a> {
 
 /// Check if an op's params match a literal form (Decimal, Quoted, Bare, #Int, etc.)
 fn matches_form(params: &[Type], form: &str) -> bool {
-    if params.len() != 1 { return false; }
+    if params.len() != 1 {
+        return false;
+    }
     match &params[0] {
         Type::Custom(n) => n == form,
         Type::HashWord(s) => s.strip_prefix('#') == Some(form) || s.as_str() == form,
@@ -109,7 +118,9 @@ fn matches_form(params: &[Type], form: &str) -> bool {
 /// op Parse(#Int) matches Decimal literal (Int is the protocol for numbers).
 /// op Parse(#String) matches Quoted literal (String is the protocol for text).
 fn matches_parse_identity(params: &[Type], form: &str) -> bool {
-    if params.len() != 1 { return false; }
+    if params.len() != 1 {
+        return false;
+    }
     let hashword_category = match &params[0] {
         Type::HashWord(s) => s.strip_prefix('#').unwrap_or(s),
         Type::HashWordVariant(s, _) => s.strip_prefix('#').unwrap_or(s),
@@ -128,23 +139,27 @@ fn matches_parse_identity(params: &[Type], form: &str) -> bool {
 /// Infer the type of an expression. Returns both the type and provenance.
 /// 2026-07-18: Phase 2 — Thread Provenance through type inference for
 /// pointer tracking and dangling-borrow detection.
-pub fn infer_expression(expr: &Expr, ctx: &mut TypecheckContext) -> Result<(Type, Provenance), TypeError> {
+pub fn infer_expression(
+    expr: &Expr,
+    ctx: &mut TypecheckContext,
+) -> Result<(Type, Provenance), TypeError> {
     match expr {
         // ── Literals ────────────────────────────────────────────
-        Expr::Decimal(_) => Ok((Type::int(), Provenance::Unknown)),
+        Expr::Decimal(_) | Expr::TaggedLiteral(_, _) => Ok((Type::int(), Provenance::Unknown)),
         Expr::Float(_) => Ok((Type::float(), Provenance::Unknown)),
         Expr::Bool(_) => Ok((Type::bool_(), Provenance::Unknown)),
         Expr::Quoted(_) => Ok((Type::string(), Provenance::Unknown)),
 
         // ── References ──────────────────────────────────────────
         Expr::Identifier(name) => {
-            let ty = ctx.bindings
-                .get(name)
-                .cloned()
-                .ok_or_else(|| TypeError::UndefinedVariable {
-                    name: name.clone(),
-                    available: ctx.bindings.keys().cloned().collect(),
-                })?;
+            let ty =
+                ctx.bindings
+                    .get(name)
+                    .cloned()
+                    .ok_or_else(|| TypeError::UndefinedVariable {
+                        name: name.clone(),
+                        available: ctx.bindings.keys().cloned().collect(),
+                    })?;
             Ok((ty, Provenance::Known(name.clone())))
         }
 
@@ -174,16 +189,24 @@ pub fn infer_expression(expr: &Expr, ctx: &mut TypecheckContext) -> Result<(Type
             infer_if(cond, then, else_, ctx).map(|ty| (ty, Provenance::Unknown))
         }
         Expr::Tuple(elems) => {
-            let types: Result<Vec<Type>, _> =
-                elems.iter().map(|e| infer_expression(e, ctx).map(|(t, _)| t)).collect();
+            let types: Result<Vec<Type>, _> = elems
+                .iter()
+                .map(|e| infer_expression(e, ctx).map(|(t, _)| t))
+                .collect();
             Ok((Type::Tuple(types?), Provenance::Unknown))
         }
         Expr::List(elems) => {
             if let Some(first) = elems.first() {
                 let (elem_ty, _) = infer_expression(first, ctx)?;
-                Ok((Type::Applied("List".into(), vec![elem_ty]), Provenance::Unknown))
+                Ok((
+                    Type::Applied("List".into(), vec![elem_ty]),
+                    Provenance::Unknown,
+                ))
             } else {
-                Ok((Type::Applied("List".into(), vec![Type::int()]), Provenance::Unknown))
+                Ok((
+                    Type::Applied("List".into(), vec![Type::int()]),
+                    Provenance::Unknown,
+                ))
             }
         }
         Expr::Lambda(params, body) => {
@@ -191,25 +214,34 @@ pub fn infer_expression(expr: &Expr, ctx: &mut TypecheckContext) -> Result<(Type
                 ctx.bindings.insert(param.clone(), Type::int());
             }
             let (ret_ty, _) = infer_expression(body, ctx)?;
-            Ok((Type::Function(
-                params.iter().map(|_| Type::int()).collect(),
-                Box::new(ret_ty),
-            ), Provenance::Unknown))
+            Ok((
+                Type::Function(
+                    params.iter().map(|_| Type::int()).collect(),
+                    Box::new(ret_ty),
+                ),
+                Provenance::Unknown,
+            ))
         }
         Expr::Field(obj, name) => {
             let (obj_ty, obj_prov) = infer_expression(obj, ctx)?;
-            Ok((obj_ty, Provenance::FieldAccess {
-                base: Box::new(obj_prov),
-                field: name.clone(),
-            }))
+            Ok((
+                obj_ty,
+                Provenance::FieldAccess {
+                    base: Box::new(obj_prov),
+                    field: name.clone(),
+                },
+            ))
         }
         Expr::Index(obj, index) => {
             let (_, obj_prov) = infer_expression(obj, ctx)?;
             let (_, idx_prov) = infer_expression(index, ctx)?;
-            Ok((Type::int(), Provenance::Index {
-                base: Box::new(obj_prov),
-                index: Box::new(idx_prov),
-            }))
+            Ok((
+                Type::int(),
+                Provenance::Index {
+                    base: Box::new(obj_prov),
+                    index: Box::new(idx_prov),
+                },
+            ))
         }
         Expr::Cast(expr, target_ty) => {
             let (_, prov) = infer_expression(expr, ctx)?;
@@ -248,7 +280,9 @@ pub fn infer_expression(expr: &Expr, ctx: &mut TypecheckContext) -> Result<(Type
         Expr::Deref(inner) => {
             let (inner_ty, inner_prov) = infer_expression(inner, ctx)?;
             match inner_ty {
-                Type::Ptr(pointee) => Ok(((*pointee).clone(), Provenance::Deref(Box::new(inner_prov)))),
+                Type::Ptr(pointee) => {
+                    Ok(((*pointee).clone(), Provenance::Deref(Box::new(inner_prov))))
+                }
                 _ => Err(TypeError::InvalidOperation {
                     operation: format!("cannot dereference non-pointer type '{}'", inner_ty),
                     type_name: inner_ty.to_string(),
@@ -260,9 +294,7 @@ pub fn infer_expression(expr: &Expr, ctx: &mut TypecheckContext) -> Result<(Type
             available: vec![],
         }),
         Expr::FormattingAnnotation(_) => Ok((Type::void(), Provenance::Unknown)),
-        Expr::Match(expr, arms) => {
-            infer_match(expr, arms, ctx).map(|ty| (ty, Provenance::Unknown))
-        }
+        Expr::Match(expr, arms) => infer_match(expr, arms, ctx).map(|ty| (ty, Provenance::Unknown)),
         // 2026-07-19: Plugin-intercept calls are resolved by Front or Mid
         // stage plugins. The typechecker passes them through with Void return;
         // the plugin is responsible for final dispatch.
@@ -273,7 +305,12 @@ pub fn infer_expression(expr: &Expr, ctx: &mut TypecheckContext) -> Result<(Type
 /// 2026-07-20: Try to coerce a value from its inferred type to a target type
 /// via Parse ops. Returns true if the value can be accepted via Parse.
 /// Only works for literal expressions (Decimal, Quoted, Identifier).
-fn try_coerce_via_parse(expr: &Expr, arg_ty: &Type, target_ty: &Type, ctx: &TypecheckContext) -> bool {
+fn try_coerce_via_parse(
+    expr: &Expr,
+    arg_ty: &Type,
+    target_ty: &Type,
+    ctx: &TypecheckContext,
+) -> bool {
     let (form, discriminator) = match expr {
         Expr::Decimal(_) => ("Decimal", None),
         Expr::Float(_) => ("Decimal", None),
@@ -285,7 +322,8 @@ fn try_coerce_via_parse(expr: &Expr, arg_ty: &Type, target_ty: &Type, ctx: &Type
         Type::Custom(n) => n.as_str(),
         _ => return false,
     };
-    ctx.find_parse_op(target_name, form, discriminator).is_some()
+    ctx.find_parse_op(target_name, form, discriminator)
+        .is_some()
 }
 
 /// 2026-07-18: Convenience wrapper — infer type without provenance.
@@ -354,7 +392,9 @@ fn infer_intrinsic_call(
         ReturnKind::Native("Bool") => Type::bool_(),
         ReturnKind::Inferred => {
             // Infer from first argument's type
-            args.first().map(|a| infer_type_only(a, ctx)).unwrap_or(Ok(Type::int()))?
+            args.first()
+                .map(|a| infer_type_only(a, ctx))
+                .unwrap_or(Ok(Type::int()))?
         }
         ReturnKind::Exact(t) => t.clone(),
         _ => Type::int(), // fallback for unknown Native kinds
@@ -589,20 +629,23 @@ pub fn infer_statement(stmt: &Statement, ctx: &mut TypecheckContext) -> Result<(
 pub fn check_program(items: &[TopLevel], universe: &TypeUniverse) -> Result<(), Vec<TypeError>> {
     // 2026-07-14: Pre-collect state variable bindings from top-level `let`
     // so they are visible to all transactions and definitions.
-    let state_bindings: std::collections::HashMap<String, Type> = items.iter().filter_map(|item| {
-        match item {
-            TopLevel::Statement(stmt) => {
-                if let Statement::Let { name, ty, .. } = stmt.as_ref() {
-                    return ty.clone().map(|t| (name.clone(), t));
+    let state_bindings: std::collections::HashMap<String, Type> = items
+        .iter()
+        .filter_map(|item| {
+            match item {
+                TopLevel::Statement(stmt) => {
+                    if let Statement::Let { name, ty, .. } = stmt.as_ref() {
+                        return ty.clone().map(|t| (name.clone(), t));
+                    }
                 }
+                TopLevel::Constant(c) => {
+                    return Some((c.name.clone(), c.ty.clone()));
+                }
+                _ => {}
             }
-            TopLevel::Constant(c) => {
-                return Some((c.name.clone(), c.ty.clone()));
-            }
-            _ => {}
-        }
-        None
-    }).collect();
+            None
+        })
+        .collect();
 
     let mut errors = Vec::new();
     for item in items {
@@ -618,7 +661,11 @@ pub fn check_program(items: &[TopLevel], universe: &TypeUniverse) -> Result<(), 
 }
 
 /// Type-check a top-level item.
-fn check_top_level(item: &TopLevel, universe: &TypeUniverse, state_bindings: &HashMap<String, Type>) -> Result<(), TypeError> {
+fn check_top_level(
+    item: &TopLevel,
+    universe: &TypeUniverse,
+    state_bindings: &HashMap<String, Type>,
+) -> Result<(), TypeError> {
     let mut ctx = TypecheckContext::new(universe);
     // 2026-07-14: Inject state variable bindings so transactions/defns can reference them.
     for (name, ty) in state_bindings {
@@ -674,5 +721,3 @@ impl BinaryOpKind {
         matches!(self, BinaryOpKind::And | BinaryOpKind::Or)
     }
 }
-
-

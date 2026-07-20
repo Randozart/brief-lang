@@ -92,7 +92,7 @@ impl<'a> DataflowAnalyzer<'a> {
     fn extract_ids_recursive(&self, expr: &Expr, ids: &mut HashSet<String>) {
         match expr {
             Expr::Identifier(name) => { ids.insert(name.clone()); }
-            Expr::Decimal(_) | Expr::Float(_) | Expr::Quoted(_) | Expr::Bool(_) => {}
+            Expr::Decimal(_) | Expr::TaggedLiteral(_, _) | Expr::Float(_) | Expr::Quoted(_) | Expr::Bool(_) => {}
             Expr::BinaryOp(_, l, r) => {
                 self.extract_ids_recursive(l, ids);
                 self.extract_ids_recursive(r, ids);
@@ -256,7 +256,7 @@ impl<'a> DataflowAnalyzer<'a> {
 
     fn eval_to_int(&self, expr: &Expr) -> Option<i64> {
         match expr {
-            Expr::Decimal(n) => Some(*n),
+            Expr::Decimal(n) | Expr::TaggedLiteral(n, _) => Some(*n),
             _ => None,
         }
     }
@@ -308,7 +308,7 @@ impl TransactionProtocolVerifier {
                 let mut required = Vec::new();
                 if let Expr::BinaryOp(BinaryOpKind::Eq, lhs, rhs) = &txn.contract.pre_condition {
                     if let Expr::Identifier(name) = lhs.as_ref() {
-                        if let Expr::Decimal(val) = rhs.as_ref() {
+                        if let Expr::Decimal(val) | Expr::TaggedLiteral(val, _) = rhs.as_ref() {
                             required.push(format!("{}={}", name, val));
                         }
                     }
