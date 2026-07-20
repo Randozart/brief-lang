@@ -942,11 +942,8 @@ fn emit_intrinsic_index(
 // 2026-07-20: Cast#(source, target) resolves in this order:
 //   1. op Cast(Target) on source — direct type-to-type
 //   2. CastTo(#Category) → CastFrom(#Category) — protocol path
-//   3. meld Source <-> Target — structural equivalence (TODO)
+//   3. meld Source <-> Target — structural bit shuffle
 //   4. Implicit Cast(#Bits) — raw bitcast (always available)
-//
-// Current implementation: skeleton with bitcast fallback. The resolution
-// pipeline (steps 1-3) will be wired as operator_defs infrastructure matures.
 
 fn emit_intrinsic_cast(
     backend: &mut LlvmBackend, out: &mut String, v: &str,
@@ -956,8 +953,65 @@ fn emit_intrinsic_cast(
     let src = backend.emit_expr(out, &args[0], indent);
     let src_ll = backend.llvm_type(&src.ty);
     let target_ll = if src.ty == Type::float64() { "double" } else if src.ty == Type::float() { "float" } else { "i64" };
+
+    // Step 3: Check for meld shuffle metadata (structural bit remapping)
+    let shuffle_data: Option<Vec<(u64, u64, u64)>> = (|| {
+        let tu = backend.ctx.type_universe.as_ref()?;
+        let key = src.ty.universe_key()?;
+        let rt = tu.get(key)?;
+        let fields: Vec<String> = rt.properties.keys()
+            .filter(|k| k.starts_with("shuffle.") && k.ends_with(".src_offset"))
+            .map(|k| k.strip_prefix("shuffle.").unwrap()
+                 .strip_suffix(".src_offset").unwrap().to_string())
+            .collect();
+        if fields.is_empty() { return None; }
+        let data: Vec<(u64, u64, u64)> = fields.iter().map(|f| {
+            let src_off = get_shuffle_int_owned(&rt.properties, &format!("shuffle.{}.src_offset", f));
+            let src_wid = get_shuffle_int_owned(&rt.properties, &format!("shuffle.{}.src_width", f));
+            let dst_off = get_shuffle_int_owned(&rt.properties, &format!("shuffle.{}.dst_offset", f));
+            (src_off, src_wid, dst_off)
+        }).collect();
+        Some(data)
+    })();
+    if let Some(data) = shuffle_data {
+        if !data.is_empty() {
+            return emit_meld_shuffle(backend, out, v, &src, &data, indent);
+        }
+    }
+
+    // Step 4: Implicit Cast(#Bits) — raw bitcast
     writeln!(out, "{}{} = bitcast {} {} to {}", indent, v, src_ll, src.name, target_ll).ok();
     BTypedRegister { name: v.to_string(), ty: src.ty.clone() }
+}
+
+/// 2026-07-20: Emit lshr/and/shl/or sequence for meld structural remapping.
+fn emit_meld_shuffle(
+    backend: &mut LlvmBackend, out: &mut String, v: &str,
+    src: &BTypedRegister, shuffle_data: &[(u64, u64, u64)],
+    indent: &str,
+) -> BTypedRegister {
+    let mut acc = backend.fun.gen_reg();
+    writeln!(out, "{}{} = add i64 0, 0", indent, acc).ok();
+
+    for &(src_offset, src_width, dst_offset) in shuffle_data {
+        let shifted = backend.fun.gen_reg();
+        let masked = backend.fun.gen_reg();
+        let repositioned = backend.fun.gen_reg();
+        let mask = if src_width < 64 { (1u64 << src_width) - 1 } else { !0u64 };
+
+        writeln!(out, "{}{} = lshr i64 {}, {}", indent, shifted, src.name, src_offset).ok();
+        writeln!(out, "{}{} = and i64 {}, {}", indent, masked, shifted, mask).ok();
+        writeln!(out, "{}{} = shl i64 {}, {}", indent, repositioned, masked, dst_offset).ok();
+        writeln!(out, "{}{} = or i64 {}, {}", indent, acc, acc, repositioned).ok();
+    }
+
+    BTypedRegister { name: acc, ty: src.ty.clone() }
+}
+
+fn get_shuffle_int_owned(properties: &std::collections::HashMap<String, crate::ast::PropertyValue>, key: &str) -> u64 {
+    properties.get(key)
+        .and_then(|pv| if let crate::ast::PropertyValue::Int(n) = pv { Some(*n as u64) } else { None })
+        .unwrap_or(0)
 }
 
 // ─── External call fallback ──────────────────────────────────────────
