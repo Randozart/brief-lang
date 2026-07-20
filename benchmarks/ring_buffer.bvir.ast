@@ -1,0 +1,236 @@
+(
+  (
+  "Int16"
+  ("bytes" "2")
+  ("alignment" "2")
+  ("properties" ("llvm_type" "i16") ("alignment" 2))
+)
+  (
+  "Float64"
+  ("bytes" "8")
+  ("alignment" "8")
+  ("properties" ("llvm_type" "double") ("alignment" 8))
+)
+  (
+  "Void"
+  ("bytes" "0")
+  ("alignment" "0")
+  ("properties" ("llvm_type" "void") ("alignment" 0))
+)
+  (
+  "String"
+  ("bytes" "16")
+  ("alignment" "8")
+  ("properties" ("alignment" 8) ("llvm_type" "{ i64, i64 }"))
+)
+  (
+  "UInt8"
+  ("bytes" "1")
+  ("alignment" "1")
+  ("properties" ("llvm_type" "i8") ("alignment" 1))
+)
+  (
+  "UInt32"
+  ("bytes" "4")
+  ("alignment" "4")
+  ("properties" ("llvm_type" "i32") ("alignment" 4))
+)
+  (
+  "UInt64"
+  ("bytes" "8")
+  ("alignment" "8")
+  ("properties" ("llvm_type" "i64") ("alignment" 8))
+)
+  (
+  "Float32"
+  ("bytes" "4")
+  ("alignment" "4")
+  ("properties" ("llvm_type" "float") ("alignment" 4))
+)
+  (
+  "Int"
+  ("bytes" "8")
+  ("alignment" "8")
+  ("properties" ("alignment" 8) ("llvm_type" "i64"))
+)
+  (
+  "Int64"
+  ("bytes" "8")
+  ("alignment" "8")
+  ("properties" ("alignment" 8) ("llvm_type" "i64"))
+)
+  (
+  "Float"
+  ("bytes" "4")
+  ("alignment" "4")
+  ("properties" ("llvm_type" "float") ("alignment" 4))
+)
+  (
+  "Data"
+  ("bytes" "8")
+  ("alignment" "8")
+  ("properties" ("alignment" 8) ("llvm_type" "i8*"))
+)
+  (
+  "Int8"
+  ("bytes" "1")
+  ("alignment" "1")
+  ("properties" ("llvm_type" "i8") ("alignment" 1))
+)
+  (
+  "Int32"
+  ("bytes" "4")
+  ("alignment" "4")
+  ("properties" ("alignment" 4) ("llvm_type" "i32"))
+)
+  (
+  "Char"
+  ("bytes" "4")
+  ("alignment" "4")
+  ("properties" ("llvm_type" "i32") ("alignment" 4))
+)
+  (
+  "UInt16"
+  ("bytes" "2")
+  ("alignment" "2")
+  ("properties" ("alignment" 2) ("llvm_type" "i16"))
+)
+  (
+  "Bool"
+  ("bytes" "1")
+  ("alignment" "1")
+  ("properties" ("llvm_type" "i8") ("alignment" 1))
+)
+  (
+  "Double"
+  ("bytes" "8")
+  ("alignment" "8")
+  ("properties" ("llvm_type" "double") ("alignment" 8))
+)
+  (
+  "UInt"
+  ("bytes" "8")
+  ("alignment" "8")
+  ("properties" ("llvm_type" "i64") ("alignment" 8))
+)
+  (
+  "toplevel"
+  "Import(Import { kind: Literal("std/io.bv"), symbols: ["print_int"], span: None })"
+)
+  ("constant" "CAP" "Int" 1024)
+  ("constant" "TOTAL" "Int" 50000000)
+  (
+  "toplevel"
+  "Statement(Let { name: "data", ty: Some(Ptr(Custom("Int"))), expr: Some(Call("Malloc#", [BinaryOp(Mul, Identifier("CAP"), Decimal(8))], None)), modifiers: [] })"
+)
+  (
+  "toplevel"
+  "Statement(Let { name: "head", ty: Some(Custom("Int")), expr: Some(Decimal(0)), modifiers: [] })"
+)
+  (
+  "toplevel"
+  "Statement(Let { name: "tail", ty: Some(Custom("Int")), expr: Some(Decimal(0)), modifiers: [] })"
+)
+  (
+  "toplevel"
+  "Statement(Let { name: "ops", ty: Some(Custom("Int")), expr: Some(Decimal(0)), modifiers: [] })"
+)
+  (
+  "txn"
+  "enqueue"
+  ":reactive"
+  ("params")
+  (
+  "contract"
+  ("pre" ("binop" "Lt" ("ident" "ops") ("ident" "TOTAL")))
+  ("post" ("binop" "Eq" ("ident" "ops") ("ident" "TOTAL")))
+)
+  ("body")
+  (
+  "assign"
+  (
+  "index"
+  ("ident" "data")
+  ("binop" "Mod" ("ident" "tail") ("ident" "CAP"))
+)
+  ("ident" "ops")
+)
+  (
+  "assign"
+  ("ident" "tail")
+  ("binop" "Add" ("ident" "tail") 1)
+)
+  (
+  "assign"
+  ("ident" "ops")
+  ("binop" "Add" ("ident" "ops") 1)
+)
+  (
+  "guarded"
+  ("binop" "Eq" ("binop" "Mod" ("ident" "ops") 5000000) 0)
+  ("body")
+  (
+  "let"
+  "filled"
+  ("binop" "Sub" ("ident" "tail") ("ident" "head"))
+)
+  (
+  "expr"
+  "Block([Expression(Call("__print_int", [Identifier("filled")], None)), Expression(Call("__print_char", [Decimal(10)], None))])"
+)
+)
+  ("term")
+)
+  (
+  "toplevel"
+  "Import(Import { kind: Literal("std/types/bootstrap.bv"), symbols: [], span: None })"
+)
+  (
+  "toplevel"
+  "Import(Import { kind: Literal("std/os/fs.bv"), symbols: [], span: None })"
+)
+  (
+  "toplevel"
+  "Import(Import { kind: Literal("std/os/net.bv"), symbols: [], span: None })"
+)
+  (
+  "toplevel"
+  "Import(Import { kind: Literal("std/os/signal.bv"), symbols: [], span: None })"
+)
+  (
+  "toplevel"
+  "Import(Import { kind: Literal("std/os/ipc.bv"), symbols: [], span: None })"
+)
+  (
+  "toplevel"
+  "Import(Import { kind: Literal("std/os/thread.bv"), symbols: [], span: None })"
+)
+  (
+  "toplevel"
+  "Import(Import { kind: Literal("std/os/user.bv"), symbols: [], span: None })"
+)
+  (
+  "toplevel"
+  "Import(Import { kind: Literal("std/os/mem.bv"), symbols: [], span: None })"
+)
+  (
+  "toplevel"
+  "Import(Import { kind: Literal("std/os/atomic.bv"), symbols: [], span: None })"
+)
+  (
+  "toplevel"
+  "Import(Import { kind: Literal("std/core/ptr.bv"), symbols: [], span: None })"
+)
+  (
+  "toplevel"
+  "Import(Import { kind: Literal("std/core/string_builder.bv"), symbols: [], span: None })"
+)
+  (
+  "toplevel"
+  "Import(Import { kind: Literal("std/env.bv"), symbols: [], span: None })"
+)
+  (
+  "toplevel"
+  "Import(Import { kind: Literal("std/io.bv"), symbols: [], span: None })"
+)
+)

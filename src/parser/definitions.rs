@@ -1225,11 +1225,8 @@ mod tests {
 
     #[test]
     fn test_hashword_string_with_default_variant() {
-        // Parser with default .bv protocol resolves bare #String → utf8
-        let tokens = crate::lexer::tokenize("#String").unwrap();
-        let mut p = Parser::new(tokens, "#String");
-        p.protocol_default = "utf8";
-        let ty = p.parse_type().unwrap();
+        // Bare #String resolves to utf8 (universal default)
+        let ty = parse_type("#String").unwrap();
         assert_eq!(ty, crate::ast::Type::HashWordVariant("#String".into(), "utf8".into()));
     }
 

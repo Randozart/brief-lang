@@ -35,9 +35,10 @@ impl<'a> Parser<'a> {
                             self.expect(Token::Gt)?;
                             return Ok(Type::HashWordVariant(name, variant));
                         }
-                        // 2026-07-20: Resolve bare hashwords per category default.
+                        // 2026-07-20: Bare hashwords resolve to their default variant.
+                        // UTF-8 is the universal default for all files.
                         let variant = match name.as_str() {
-                            "#String" => self.protocol_default,       // .bv→utf8, .ebv→ascii
+                            "#String" => "utf8",
                             "#Float" => "ieee754",
                             "#Char" => "unicode",
                             _ => "",

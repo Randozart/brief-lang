@@ -6,15 +6,6 @@ use crate::ast::TopLevel;
 use crate::errors::{Span, SyntaxError};
 use crate::lexer::Token;
 
-/// 2026-07-20: File extension → default protocol mapping.
-/// .bv files default to utf8, .ebv files default to ascii.
-fn default_protocol_for_ext(ext: &str) -> &str {
-    match ext {
-        "ebv" => "ascii",
-        _ => "utf8",
-    }
-}
-
 pub struct Parser<'a> {
     pub tokens: Vec<(Token, std::ops::Range<usize>)>,
     pub pos: usize,
@@ -22,9 +13,6 @@ pub struct Parser<'a> {
     pub strict_mode: bool,
     /// 2026-07-16: P2 — Extension group expansion stores extra TypeDefs here.
     pub pending_types: std::vec::IntoIter<TopLevel>,
-    /// 2026-07-20: Default protocol variant for bare hashwords (#String → #String<utf8>).
-    /// Set from file extension: .bv → "utf8", .ebv → "ascii".
-    pub protocol_default: &'a str,
 }
 
 impl<'a> Parser<'a> {
@@ -35,14 +23,7 @@ impl<'a> Parser<'a> {
             source,
             strict_mode: false,
             pending_types: Vec::new().into_iter(),
-            protocol_default: "utf8",
         }
-    }
-
-    /// 2026-07-20: Set the default protocol from a file extension.
-    pub fn with_protocol_default(mut self, ext: &'a str) -> Self {
-        self.protocol_default = default_protocol_for_ext(ext);
-        self
     }
 
     pub fn with_strict_mode(mut self, mode: bool) -> Self {
