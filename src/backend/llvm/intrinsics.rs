@@ -130,7 +130,12 @@ pub fn emit_intrinsic_call(
 /// Phase 3 will replace this with proper hashword category dispatch.
 pub(crate) fn template_for_op(op_name: &str, llvm_ty: &str, bytes: u64) -> Option<String> {
     let is_float = matches!(llvm_ty, "float" | "double" | "half" | "bfloat" | "fp128");
-    let float_llvm = if bytes <= 4 { "float" } else { "double" };
+    let float_llvm = match llvm_ty {
+        "float" | "half" | "bfloat" => "float",
+        "double" => "double",
+        _ if bytes <= 4 => "float",
+        _ => "double",
+    };
     let int_llvm = format!("i{}", bytes * 8);
 
     match (op_name, is_float) {
