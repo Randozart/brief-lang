@@ -312,25 +312,8 @@ impl std::fmt::Display for TypedRegister {
     }
 }
 
-/// Map Brief Type to native LLVM type string.
-/// This is the single source of truth — eliminates i64 boxing for strings, chars, bools.
-impl TypedRegister {
-    pub fn llvm(&self) -> &'static str {
-        if self.ty == Type::bool_() {
-            "i1"
-        } else if self.ty == Type::char_() {
-            "i32"
-        } else if self.ty == Type::int() || self.ty == Type::Custom("UInt".to_string()) {
-            "i64"
-        } else if self.ty == Type::float() {
-            "float"
-        } else if self.ty == Type::string() || self.ty == Type::data() {
-            "i8*"
-        } else {
-            "i64"
-        }
-    }
-}
+// TypedRegister has no llvm() method — use LlvmBackend::llvm_type() instead.
+// See emit_toplevel.rs:298 for the canonical type mapping.
 
 use std::collections::{HashMap, HashSet};
 use std::fmt::{Display, Write};
