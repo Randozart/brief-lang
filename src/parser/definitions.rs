@@ -945,7 +945,7 @@ impl<'a> Parser<'a> {
                     continue;
                 }
                 if slot_name == "op" {
-                    self.parse_op_binding(&mut metadata, &mut operators)?;
+                    self.parse_op_binding(&mut operators)?;
                     continue;
                 }
                 // 2026-07-18: op binding via <~: InsertAt <~ ring_push.
@@ -986,29 +986,13 @@ impl<'a> Parser<'a> {
     }
 
     /// 2026-07-20: Parse an op binding within a type body.
-    /// Three forms:
+    /// Two forms:
     ///   op Add(#Int, #Int);                                     — declarative hashword dispatch
     ///   op Add(Posit32) = posit32_add(#L, #R);                  — binding with explicit function
-    ///   op Add ~> "int.add";                                    — old-style string binding
-    ///
-    /// Flat control flow: each form is an early return from helper functions.
-    fn parse_op_binding(&mut self, metadata: &mut std::collections::HashMap<String, PropertyValue>,
-                        operators: &mut Vec<OperatorDef>) -> Result<(), SyntaxError> {
+    fn parse_op_binding(&mut self, operators: &mut Vec<OperatorDef>) -> Result<(), SyntaxError> {
         let op_name = self.expect_identifier()?;
-        // 2026-07-20: New syntax — parenthesized parameter types
-        if self.eat(&Token::LParen) {
-            return self.parse_op_with_params(op_name, operators);
-        }
-        // Fallback: old-style op Add ~> "int.add";
-        self.expect(Token::TildeArrow)?;
-        let impl_val = if self.check(&Token::String(String::new())) {
-            self.expect_string()?
-        } else {
-            self.expect_identifier()?
-        };
-        self.eat(&Token::Semicolon);
-        metadata.insert(format!("op.{}", op_name), PropertyValue::String(impl_val));
-        Ok(())
+        self.expect(Token::LParen)?;
+        self.parse_op_with_params(op_name, operators)
     }
 
     /// 2026-07-20: Parse op Add(#Int, #Int) or op Add(Posit32) = fn(#L, #R).

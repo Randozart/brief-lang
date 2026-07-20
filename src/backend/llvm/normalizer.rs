@@ -87,19 +87,17 @@ pub fn normalize(items: &mut Vec<TopLevel>, universe: &mut TypeUniverse) -> Resu
     }
 
     // Strip metadata LLVM doesn't use
-    // 2026-07-20: Only keep llvm_type and tbaa. All metadata-driven
-    // properties (ctd, alu, category, encoding) are removed — hashword
-    // op signatures replace them.
-    // 2026-07-18: Keep ALL op.* entries (op.Add, op.Sub, etc.) for universe-driven
-    // operator dispatch. op.InsertAt/op.ExtractFrom are also op.*, covered by prefix.
-    let keep: HashSet<String> = [
-        "llvm_type", "tbaa",
-    ].iter().map(|s| s.to_string()).collect();
-    for rt in universe.types.values_mut() {
-        // 2026-07-18: Keep all op.* keys — the hardcoded list above is
-        // the minimum; any other op.* is also valid operator metadata.
-        rt.properties.retain(|k, _| keep.contains(k) || k.starts_with("op."));
-    }
+        // 2026-07-20: Keep llvm_type, tbaa, and the <- operator bindings.
+        // op.InsertAt and op.ExtractFrom are used by the <- (push/pop) operator
+        // dispatch (e.g., stdlib's InsertAt <~ ring_push). Old-style op Add ~>
+        // "string" metadata is no longer retained — hashword OperatorDef from
+        // the AST replaces it.
+        let keep: HashSet<String> = [
+            "llvm_type", "tbaa", "op.InsertAt", "op.ExtractFrom",
+        ].iter().map(|s| s.to_string()).collect();
+        for rt in universe.types.values_mut() {
+            rt.properties.retain(|k, _| keep.contains(k));
+        }
 
     Ok(())
 }

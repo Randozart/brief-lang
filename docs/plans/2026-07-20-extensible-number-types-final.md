@@ -437,6 +437,39 @@ architecture, organized by phase.
 
 ---
 
+## Old Syntax Cleanup
+
+After implementing parser support for `op Add(#Int, #Int)` hashword syntax,
+the old `op Add ~> "int.add"` string-binding syntax must be removed.
+
+### Step 1: Stdlib `.bv` files — 121 replacements
+
+**`lib/std/types/bootstrap.bv`** — Replace all `op Xxx ~> "type.op"` bindings
+with hashword syntax. Every integer type gets `(#Int, #Int)` for arithmetic,
+every float type gets `(#Float, #Float)`, Bool gets `(#Bool, #Bool)`, Char
+gets `(#Char, #Char)`.
+
+**`lib/std/types/float.bv`** — Same for Float16 and Float4 vector types.
+
+### Step 2: Parser — remove `<~` fallback in `parse_op_binding()`
+
+Remove the string-binding fallback path. `op` declarations now REQUIRE
+parenthesized parameter types. The `metadata` parameter is removed from
+`parse_op_binding()` and its call sites, since old-style metadata insertion
+(`metadata["op.Add"] = PropertyValue::String("int.add")`) is no longer needed.
+
+### Step 3: Normalizer — remove `op.*` from metadata retention
+
+The `rt.properties.retain(|k, _| keep.contains(k) || k.starts_with("op."))`
+clause is dead after the migration. Remove `|| k.starts_with("op.")`.
+
+### Step 4: Operators — remove `metadata["op.Add"]` fallback
+
+Remove any code that reads `metadata["op.Add"]` from type resolver functions.
+All op dispatch now goes through `TypeDefBody.operators` structs.
+
+---
+
 ## Open Questions (for the Architecture Doc)
 
 1. **2-byte float ambiguity**: Structure alone can't distinguish `half` from `bfloat`.

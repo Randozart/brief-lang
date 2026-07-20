@@ -13,18 +13,18 @@ type Int <: Bits {
     tbaa <~ "Int";
     default_width <~ 64;
     commuting <~ true;
-    op Add ~> "int.add";
-    op Sub ~> "int.sub";
-    op Mul ~> "int.mul";
-    op Div ~> "int.div";
-    op Mod ~> "int.mod";
-    op Neg ~> "int.neg";
-    op Eq ~> "int.eq";
-    op Ne ~> "int.ne";
-    op Lt ~> "int.lt";
-    op Le ~> "int.le";
-    op Gt ~> "int.gt";
-    op Ge ~> "int.ge";
+    op Add(#Int, #Int);
+    op Sub(#Int, #Int);
+    op Mul(#Int, #Int);
+    op Div(#Int, #Int);
+    op Mod(#Int, #Int);
+    op Neg(#Int);
+    op Eq(#Int, #Int);
+    op Ne(#Int, #Int);
+    op Lt(#Int, #Int);
+    op Le(#Int, #Int);
+    op Gt(#Int, #Int);
+    op Ge(#Int, #Int);
 };
 
 type UInt <: Bits {
@@ -33,17 +33,17 @@ type UInt <: Bits {
     tbaa <~ "Int";
     default_width <~ 64;
     commuting <~ true;
-    op Add ~> "int.add";
-    op Sub ~> "int.sub";
-    op Mul ~> "int.mul";
-    op Div ~> "int.div";
-    op Mod ~> "int.mod";
-    op Eq ~> "int.eq";
-    op Ne ~> "int.ne";
-    op Lt ~> "int.lt";
-    op Le ~> "int.le";
-    op Gt ~> "int.gt";
-    op Ge ~> "int.ge";
+    op Add(#Int, #Int);
+    op Sub(#Int, #Int);
+    op Mul(#Int, #Int);
+    op Div(#Int, #Int);
+    op Mod(#Int, #Int);
+    op Eq(#Int, #Int);
+    op Ne(#Int, #Int);
+    op Lt(#Int, #Int);
+    op Le(#Int, #Int);
+    op Gt(#Int, #Int);
+    op Ge(#Int, #Int);
 };
 
 type Int8 <: Bits {
@@ -52,18 +52,18 @@ type Int8 <: Bits {
     tbaa <~ "Int";
     default_width <~ 8;
     commuting <~ true;
-    op Add ~> "int.add";
-    op Sub ~> "int.sub";
-    op Mul ~> "int.mul";
-    op Div ~> "int.div";
-    op Mod ~> "int.mod";
-    op Neg ~> "int.neg";
-    op Eq ~> "int.eq";
-    op Ne ~> "int.ne";
-    op Lt ~> "int.lt";
-    op Le ~> "int.le";
-    op Gt ~> "int.gt";
-    op Ge ~> "int.ge";
+    op Add(#Int, #Int);
+    op Sub(#Int, #Int);
+    op Mul(#Int, #Int);
+    op Div(#Int, #Int);
+    op Mod(#Int, #Int);
+    op Neg(#Int);
+    op Eq(#Int, #Int);
+    op Ne(#Int, #Int);
+    op Lt(#Int, #Int);
+    op Le(#Int, #Int);
+    op Gt(#Int, #Int);
+    op Ge(#Int, #Int);
 };
 
 type UInt8 <: Bits {
@@ -72,17 +72,17 @@ type UInt8 <: Bits {
     tbaa <~ "Int";
     default_width <~ 8;
     commuting <~ true;
-    op Add ~> "int.add";
-    op Sub ~> "int.sub";
-    op Mul ~> "int.mul";
-    op Div ~> "int.div";
-    op Mod ~> "int.mod";
-    op Eq ~> "int.eq";
-    op Ne ~> "int.ne";
-    op Lt ~> "int.lt";
-    op Le ~> "int.le";
-    op Gt ~> "int.gt";
-    op Ge ~> "int.ge";
+    op Add(#Int, #Int);
+    op Sub(#Int, #Int);
+    op Mul(#Int, #Int);
+    op Div(#Int, #Int);
+    op Mod(#Int, #Int);
+    op Eq(#Int, #Int);
+    op Ne(#Int, #Int);
+    op Lt(#Int, #Int);
+    op Le(#Int, #Int);
+    op Gt(#Int, #Int);
+    op Ge(#Int, #Int);
 };
 
 type Int16 <: Bits {
@@ -91,18 +91,18 @@ type Int16 <: Bits {
     tbaa <~ "Int";
     default_width <~ 16;
     commuting <~ true;
-    op Add ~> "int.add";
-    op Sub ~> "int.sub";
-    op Mul ~> "int.mul";
-    op Div ~> "int.div";
-    op Mod ~> "int.mod";
-    op Neg ~> "int.neg";
-    op Eq ~> "int.eq";
-    op Ne ~> "int.ne";
-    op Lt ~> "int.lt";
-    op Le ~> "int.le";
-    op Gt ~> "int.gt";
-    op Ge ~> "int.ge";
+    op Add(#Int, #Int);
+    op Sub(#Int, #Int);
+    op Mul(#Int, #Int);
+    op Div(#Int, #Int);
+    op Mod(#Int, #Int);
+    op Neg(#Int);
+    op Eq(#Int, #Int);
+    op Ne(#Int, #Int);
+    op Lt(#Int, #Int);
+    op Le(#Int, #Int);
+    op Gt(#Int, #Int);
+    op Ge(#Int, #Int);
 };
 
 type UInt16 <: Bits {
@@ -111,17 +111,17 @@ type UInt16 <: Bits {
     tbaa <~ "Int";
     default_width <~ 16;
     commuting <~ true;
-    op Add ~> "int.add";
-    op Sub ~> "int.sub";
-    op Mul ~> "int.mul";
-    op Div ~> "int.div";
-    op Mod ~> "int.mod";
-    op Eq ~> "int.eq";
-    op Ne ~> "int.ne";
-    op Lt ~> "int.lt";
-    op Le ~> "int.le";
-    op Gt ~> "int.gt";
-    op Ge ~> "int.ge";
+    op Add(#Int, #Int);
+    op Sub(#Int, #Int);
+    op Mul(#Int, #Int);
+    op Div(#Int, #Int);
+    op Mod(#Int, #Int);
+    op Eq(#Int, #Int);
+    op Ne(#Int, #Int);
+    op Lt(#Int, #Int);
+    op Le(#Int, #Int);
+    op Gt(#Int, #Int);
+    op Ge(#Int, #Int);
 };
 
 type Int32 <: Bits {
@@ -130,18 +130,18 @@ type Int32 <: Bits {
     tbaa <~ "Int";
     default_width <~ 32;
     commuting <~ true;
-    op Add ~> "int.add";
-    op Sub ~> "int.sub";
-    op Mul ~> "int.mul";
-    op Div ~> "int.div";
-    op Mod ~> "int.mod";
-    op Neg ~> "int.neg";
-    op Eq ~> "int.eq";
-    op Ne ~> "int.ne";
-    op Lt ~> "int.lt";
-    op Le ~> "int.le";
-    op Gt ~> "int.gt";
-    op Ge ~> "int.ge";
+    op Add(#Int, #Int);
+    op Sub(#Int, #Int);
+    op Mul(#Int, #Int);
+    op Div(#Int, #Int);
+    op Mod(#Int, #Int);
+    op Neg(#Int);
+    op Eq(#Int, #Int);
+    op Ne(#Int, #Int);
+    op Lt(#Int, #Int);
+    op Le(#Int, #Int);
+    op Gt(#Int, #Int);
+    op Ge(#Int, #Int);
 };
 
 type UInt32 <: Bits {
@@ -150,17 +150,17 @@ type UInt32 <: Bits {
     tbaa <~ "Int";
     default_width <~ 32;
     commuting <~ true;
-    op Add ~> "int.add";
-    op Sub ~> "int.sub";
-    op Mul ~> "int.mul";
-    op Div ~> "int.div";
-    op Mod ~> "int.mod";
-    op Eq ~> "int.eq";
-    op Ne ~> "int.ne";
-    op Lt ~> "int.lt";
-    op Le ~> "int.le";
-    op Gt ~> "int.gt";
-    op Ge ~> "int.ge";
+    op Add(#Int, #Int);
+    op Sub(#Int, #Int);
+    op Mul(#Int, #Int);
+    op Div(#Int, #Int);
+    op Mod(#Int, #Int);
+    op Eq(#Int, #Int);
+    op Ne(#Int, #Int);
+    op Lt(#Int, #Int);
+    op Le(#Int, #Int);
+    op Gt(#Int, #Int);
+    op Ge(#Int, #Int);
 };
 
 type Float <: Bits {
@@ -169,18 +169,18 @@ type Float <: Bits {
     tbaa <~ "Float";
     default_width <~ 32;
     commuting <~ true;
-    op Add ~> "int.add";
-    op Sub ~> "int.sub";
-    op Mul ~> "int.mul";
-    op Div ~> "int.div";
-    op Mod ~> "int.mod";
-    op Neg ~> "int.neg";
-    op Eq ~> "int.eq";
-    op Ne ~> "int.ne";
-    op Lt ~> "int.lt";
-    op Le ~> "int.le";
-    op Gt ~> "int.gt";
-    op Ge ~> "int.ge";
+    op Add(#Int, #Int);
+    op Sub(#Int, #Int);
+    op Mul(#Int, #Int);
+    op Div(#Int, #Int);
+    op Mod(#Int, #Int);
+    op Neg(#Int);
+    op Eq(#Int, #Int);
+    op Ne(#Int, #Int);
+    op Lt(#Int, #Int);
+    op Le(#Int, #Int);
+    op Gt(#Int, #Int);
+    op Ge(#Int, #Int);
 };
 
 type Float64 <: Bits {
@@ -189,18 +189,18 @@ type Float64 <: Bits {
     tbaa <~ "Float";
     default_width <~ 64;
     commuting <~ true;
-    op Add ~> "int.add";
-    op Sub ~> "int.sub";
-    op Mul ~> "int.mul";
-    op Div ~> "int.div";
-    op Mod ~> "int.mod";
-    op Neg ~> "int.neg";
-    op Eq ~> "int.eq";
-    op Ne ~> "int.ne";
-    op Lt ~> "int.lt";
-    op Le ~> "int.le";
-    op Gt ~> "int.gt";
-    op Ge ~> "int.ge";
+    op Add(#Int, #Int);
+    op Sub(#Int, #Int);
+    op Mul(#Int, #Int);
+    op Div(#Int, #Int);
+    op Mod(#Int, #Int);
+    op Neg(#Int);
+    op Eq(#Int, #Int);
+    op Ne(#Int, #Int);
+    op Lt(#Int, #Int);
+    op Le(#Int, #Int);
+    op Gt(#Int, #Int);
+    op Ge(#Int, #Int);
 };
 
 type Bool <: Bits {
@@ -209,11 +209,11 @@ type Bool <: Bits {
     tbaa <~ "Bool";
     default_width <~ 1;
     commuting <~ true;
-    op Eq ~> "int.eq";
-    op Ne ~> "int.ne";
-    op And ~> "int.and";
-    op Or ~> "int.or";
-    op Not ~> "int.not";
+    op Eq(#Int, #Int);
+    op Ne(#Int, #Int);
+    op And(#Bits, #Bits);
+    op Or(#Bits, #Bits);
+    op Not(#Bits);
 };
 
 type Char <: Bits {
