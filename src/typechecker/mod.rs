@@ -249,6 +249,24 @@ pub fn infer_expression(expr: &Expr, ctx: &mut TypecheckContext) -> Result<(Type
     }
 }
 
+/// 2026-07-20: Try to coerce a value from its inferred type to a target type
+/// via Parse ops. Returns true if the value can be accepted via Parse.
+/// Only works for literal expressions (Decimal, Quoted, Identifier).
+fn try_coerce_via_parse(expr: &Expr, arg_ty: &Type, target_ty: &Type, ctx: &TypecheckContext) -> bool {
+    let form = match expr {
+        Expr::Decimal(_) => "Decimal",
+        Expr::Float(_) => "Decimal",
+        Expr::Quoted(_) => "Quoted",
+        Expr::Identifier(_) => "Bare",
+        _ => return false,
+    };
+    let target_name = match target_ty {
+        Type::Custom(n) => n.as_str(),
+        _ => return false,
+    };
+    ctx.find_parse_op(target_name, form).is_some()
+}
+
 /// 2026-07-18: Convenience wrapper — infer type without provenance.
 pub fn infer_type_only(expr: &Expr, ctx: &mut TypecheckContext) -> Result<Type, TypeError> {
     infer_expression(expr, ctx).map(|(ty, _)| ty)
@@ -295,13 +313,17 @@ fn infer_intrinsic_call(
     }
     for (i, (_, param_ty)) in sig.parameters.iter().enumerate() {
         let arg_ty = infer_type_only(&args[i], ctx)?;
-        // Simplified type compatibility check
-        if format!("{}", arg_ty) != format!("{}", param_ty) {
-            return Err(TypeError::TypeMismatch {
-                expected: format!("{}", param_ty),
-                found: format!("{}", arg_ty),
-                context: format!("parameter {} of '{}'", i, sig.name),
-            });
+        let arg_str = format!("{}", arg_ty);
+        let param_str = format!("{}", param_ty);
+        if arg_str != param_str {
+            // 2026-07-20: Check for Parse op coercion before reporting error
+            if !try_coerce_via_parse(&args[i], &arg_ty, param_ty, ctx) {
+                return Err(TypeError::TypeMismatch {
+                    expected: param_str,
+                    found: arg_str,
+                    context: format!("parameter {} of '{}'", i, sig.name),
+                });
+            }
         }
     }
     // 2026-07-15: ReturnKind replaces return_type: Option<Type>

@@ -232,6 +232,30 @@ The protocol path goes through the `CastTo`/`CastFrom` pair directly — no
 intermediate type, no runtime allocation. The protocol shape (UTF-8 bytes,
 IEEE 754 float, etc.) is a compile-time contract, not a runtime object.
 
+### Optimization property: only real work remains
+
+The compiler inlines both `CastTo` and `CastFrom`, then LLVM's `InstCombine`
+pass eliminates everything that isn't actual data transformation:
+
+```
+// Source.CastTo(#String) — Latin-1 to UTF-8
+%char = zext i8 %byte to i32
+
+// Target.CastFrom(#String) — UTF-8 to ASCII
+%out = trunc i32 %char to i8
+
+→ LLVM sees: zext + trunc on same value
+→ Eliminates both: %out = %byte  (identity for ASCII range)
+```
+
+If source and target use the same encoding: entire chain → `bitcast` or no-op.
+If source encodes differently (Latin-1 > 127 → multi-byte UTF-8): the
+multi-byte emission survives because it's actual work.
+
+**The programmer writes abstract, semantics-preserving conversions.
+The compiler removes everything that's redundant for the specific data path.
+Only essential bytes remain in the final IR.**
+
 ---
 
 ## Layer 7: Meld — explicit structural equivalence
