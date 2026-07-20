@@ -104,7 +104,18 @@ time to concrete registers. See `docs/architecture/hash-words.md`.
 **`#Category` hashwords** (`#Int`, `#Float`, `#String`, `#Bool`, `#Char`,
 `#Bits`) serve as backend directives in op signatures. `op Add(#Int)` means
 "backend, use your intrinsic knowledge of integer addition" — no TOML config
-file needed. See `docs/architecture/casting-protocol.md`.
+file needed.
+
+**Protocol variants** parameterize hashwords: `#String<utf8>`, `#String<ascii>`,
+`#Float<ieee754>`. The file extension determines the default (`.bv` → utf8,
+`.ebv` → ascii). Cross-variant calls require explicit protocol disambiguation
+at the call site. The compiler errors if a `.bv` file calls a `.ebv` function
+using `#String` without specifying the variant.
+
+Each backend declares supported protocols in `config/targets.toml`. A function
+requiring a protocol the backend doesn't support produces a compile error.
+
+See `docs/architecture/casting-protocol.md`.
 
 ### Provenance Tracking
 

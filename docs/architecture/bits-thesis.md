@@ -14,6 +14,11 @@ the **hashword protocol system**. Types no longer carry `primitive <~ "Int"`
 to tell the backend what they are. Instead, they declare ops using `#Category`
 hashwords — `op Add(#Int, #Int)` — which are backend directives.
 
+Hashwords can be parameterized by **protocol variant** using angle brackets:
+`#String<utf8>`, `#String<ascii>`, `#String<hex>`, `#String<base64>`,
+`#Float<ieee754>`. The file extension determines the default (`.bv` → utf8,
+`.ebv` → ascii). Cross-variant calls require explicit protocol.
+
 | Old mechanism | Replaced by |
 |---|---|
 | `primitive <~ "Int"` + `llvm <~ "i64"` | Structure + `op Add(#Int)` |

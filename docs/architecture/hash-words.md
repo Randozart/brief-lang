@@ -25,7 +25,20 @@ using your intrinsic knowledge of the `#Category` protocol.** The backend
 decides what `#Int` addition means in its own terms (LLVM → `add i64`,
 CIRCT → hardware adder, SPIR-V → `OpIAdd`).
 
-See `docs/architecture/casting-protocol.md` for the protocol system.
+**Protocol variants** parameterize hashwords: `#String<utf8>`, `#String<ascii>`,
+`#Float<ieee754>`. The file extension determines the default (`.bv` → utf8,
+`.ebv` → ascii). Cross-variant calls require explicit protocol disambiguation
+— the compiler errors if a `.bv` file calls a `.ebv` function using `#String`
+without specifying the variant:
+
+```brief
+fn cross(a: #String<utf8>, b: #String<ascii>) { ... };
+```
+
+Each backend declares supported protocols in `config/targets.toml`. A function
+requiring a protocol the backend doesn't support produces a compile error.
+
+See `docs/architecture/casting-protocol.md` for the full protocol system.
 
 ## Current Words
 

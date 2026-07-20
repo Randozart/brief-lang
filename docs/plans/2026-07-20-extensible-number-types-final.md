@@ -333,25 +333,40 @@ A type declaring `op Add(#MyCustomHashword)` on a backend that doesn't recognize
 
 ---
 
-## Protocol Shapes (Adopted from LLVM)
+## Protocol Shapes and Variants
 
-| Hashword | Protocol shape | Backend contract |
-|---|---|---|
-| `#Int` | `i64` | Add, Sub, Mul, Div, And, Or, Xor, Not, Shl, Shr |
-| `#Float` | IEEE 754 binary32/64 | Add, Sub, Mul, Div, Sqrt, FMA, Cast(Float64) |
-| `#Bool` | `i1` (zero-extended to i8 for storage) | And, Or, Not |
-| `#Char` | Unicode scalar (`i32`) | Cast(#Int), Eq, Lt |
-| `#String` | UTF-8 byte sequence | Extract(#Char), InsertAt(#Char), Concat(#String), :> Size |
-| `#Bits` | Raw `iN` (width varies) | And, Or, Xor, Not, Shl, Shr, Cast(N) — the universal fallback |
+Each hashword category can have multiple protocol variants. The file extension
+determines the default (`.bv` → utf8/unicode, `.ebv` → ascii).
 
-Every backend MUST be able to translate these protocol shapes to its own internal
-representation. A backend that cannot represent `i64` (e.g., a pure FPGA synthesis
-backend with no 64-bit datapath) would decompose it into smaller units, but must
-still provide the `#Int` protocol ops.
+| Hashword | Variants | Default (`.bv`) | Default (`.ebv`) | Protocol ops |
+|---|---|---|---|---|
+| `#Int` | *(none)* | — | — | Add, Sub, Mul, Div, And, Or, Xor, Not, Shl, Shr |
+| `#Float` | `ieee754`, `bin32`, `bin64` | `ieee754` | `ieee754` | Add, Sub, Mul, Div, Sqrt, FMA, Cast(Float64) |
+| `#Bool` | *(none)* | — | — | And, Or, Not |
+| `#Char` | `unicode`, `ascii` | `unicode` | `ascii` | Cast(#Int), Eq, Lt |
+| `#String` | `utf8`, `ascii`, `hex`, `base64` | `utf8` | `ascii` | Extract(#Char), InsertAt(#Char), Concat(#String), `:> Size` |
+| `#Bits` | *(none)* | — | — | And, Or, Xor, Not, Shl, Shr, Cast(N) |
 
-The programmer's guarantee: `#Int` always means `i64` at the protocol level.
-`#String` always means UTF-8. A custom type can rely on these shapes for its
-`inline defn` implementations.
+**Cross-variant calls require explicit protocol:**
+
+```brief
+fn cross(a: #String<utf8>, b: #String<ascii>) { ... };
+```
+
+The compiler errors if a `.bv` file calls a `.ebv` function using `#String`
+without specifying the variant. Backends declare supported protocols in
+`config/targets.toml`:
+
+```toml
+[target.desktop]
+protocols = ["#String<utf8>", "#Float<ieee754>", "#Int", "#Bool", "#Bits"]
+
+[target.embedded-riscv]
+protocols = ["#String<ascii>", "#Int", "#Bool", "#Bits"]
+```
+
+A function requiring a protocol the target doesn't support produces a compile
+error listing available alternatives.
 
 ---
 
