@@ -1192,8 +1192,7 @@ impl LlvmBackend {
         let s1 = format!("%ps1_{}", c);
         writeln!(out, "{}{} = getelementptr i64, ptr {}, i64 1", indent, s1, buf_i64).ok();
         writeln!(out, "{}store i64 0, ptr {}, align 8, !tbaa !1", indent, s1).ok();
-        let ap = format!("%pap_{}", c);
-        writeln!(out, "{}{} = getelementptr inbounds %State, ptr %state, i32 0, i32 {}", indent, ap, idx).ok();
+        let ap = self.emit_state_gep(out, indent, "pap", "%state", idx);
         let tn = crate::backend::llvm::tbaa_node(&self.ctx.field_types[idx], self.ctx.type_universe.as_ref());
         writeln!(out, "{}store i64 {}, ptr {}, align 8, !tbaa !{}", indent, base, ap, tn).ok();
         self.fun.field_prealloc_info.insert(field_name.to_string(), (cap, buf_i64));
@@ -1329,25 +1328,14 @@ impl LlvmBackend {
         writeln!(out, "{}{} = call ptr @malloc(i64 65536)", indent, init).ok();
         let init_i64 = self.fun.next_reg_with_prefix("arii");
         writeln!(out, "{}{} = ptrtoint ptr {} to i64", indent, init_i64, init).ok();
-        // Store arena_ptr
-        let apgep = self.fun.next_reg_with_prefix("apg");
-        writeln!(out, "{}{} = getelementptr inbounds %State, ptr %state, i32 0, i32 {}",
-            indent, apgep, aptr_idx).ok();
-        writeln!(out, "{}store i64 {}, ptr {}, align 8", indent, init_i64, apgep).ok();
-        // Store arena_base
-        let abgep = self.fun.next_reg_with_prefix("abg");
-        writeln!(out, "{}{} = getelementptr inbounds %State, ptr %state, i32 0, i32 {}",
-            indent, abgep, abase_idx).ok();
-        writeln!(out, "{}store i64 {}, ptr {}, align 8", indent, init_i64, abgep).ok();
-        // Compute and store arena_end
+        // Store arena_ptr, arena_base, arena_end
+        self.emit_state_store_i64_by_idx(out, indent, aptr_idx, &init_i64);
+        self.emit_state_store_i64_by_idx(out, indent, abase_idx, &init_i64);
         let init_end = self.fun.next_reg_with_prefix("arieu");
         writeln!(out, "{}{} = getelementptr i8, ptr {}, i64 65536", indent, init_end, init).ok();
         let end_i64 = self.fun.next_reg_with_prefix("arie");
         writeln!(out, "{}{} = ptrtoint ptr {} to i64", indent, end_i64, init_end).ok();
-        let aegep = self.fun.next_reg_with_prefix("aeg");
-        writeln!(out, "{}{} = getelementptr inbounds %State, ptr %state, i32 0, i32 {}",
-            indent, aegep, aend_idx).ok();
-        writeln!(out, "{}store i64 {}, ptr {}, align 8", indent, end_i64, aegep).ok();
+        self.emit_state_store_i64_by_idx(out, indent, aend_idx, &end_i64);
     }
 
     /// Emit arena reset: rewinds the bump pointer to the base, preserving
@@ -1356,27 +1344,16 @@ impl LlvmBackend {
     pub(crate) fn emit_arena_reset(&mut self, out: &mut String, indent: &str) {
         let Some(aptr_idx) = self.arena_ptr_idx else { return; };
         let Some(abase_idx) = self.arena_base_idx else { return; };
-        let base_gep = self.fun.next_reg_with_prefix("arb");
-        writeln!(out, "{}{} = getelementptr inbounds %State, ptr %state, i32 0, i32 {}",
-            indent, base_gep, abase_idx).ok();
-        let base_val = self.fun.next_reg_with_prefix("arbv");
-        writeln!(out, "{}{} = load i64, ptr {}", indent, base_val, base_gep).ok();
+        let (base_val, _) = self.emit_state_load_i64_by_idx(out, indent, abase_idx);
         let base_ptr = self.fun.next_reg_with_prefix("arbp");
         writeln!(out, "{}{} = inttoptr i64 {} to ptr", indent, base_ptr, base_val).ok();
-        let ptr_gep = self.fun.next_reg_with_prefix("arp");
-        writeln!(out, "{}{} = getelementptr inbounds %State, ptr %state, i32 0, i32 {}",
-            indent, ptr_gep, aptr_idx).ok();
-        writeln!(out, "{}store i64 {}, ptr {}, align 8", indent, base_val, ptr_gep).ok();
+        self.emit_state_store_i64_by_idx(out, indent, aptr_idx, &base_val);
     }
 
     /// Emit arena teardown at program exit. Frees the arena buffer.
     pub(crate) fn emit_arena_fini(&mut self, out: &mut String, indent: &str) {
         let Some(abase_idx) = self.arena_base_idx else { return; };
-        let base_gep = self.fun.next_reg_with_prefix("afb");
-        writeln!(out, "{}{} = getelementptr inbounds %State, ptr %state, i32 0, i32 {}",
-            indent, base_gep, abase_idx).ok();
-        let base_val = self.fun.next_reg_with_prefix("afbv");
-        writeln!(out, "{}{} = load i64, ptr {}", indent, base_val, base_gep).ok();
+        let (base_val, _) = self.emit_state_load_i64_by_idx(out, indent, abase_idx);
         let base_ptr = self.fun.next_reg_with_prefix("afp");
         writeln!(out, "{}{} = inttoptr i64 {} to ptr", indent, base_ptr, base_val).ok();
         writeln!(out, "{}call void @free(ptr {})", indent, base_ptr).ok();

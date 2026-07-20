@@ -108,18 +108,11 @@ impl LlvmBackend {
                         TypedRegister { name: phi_reg_str, ty: brief_ty }
                     }
                 } else if let Some(&idx) = self.ctx.field_index_map.get(name) {
-                    let gep = self.fun.gen_reg();
-                    writeln!(out, "{}{} = getelementptr inbounds %State, ptr %state, i32 0, i32 {}",
-                        indent, gep, idx).ok();
-                    let brief_ty = self.ctx.field_brief_types.get(idx)
-                        .cloned().unwrap_or(Type::int());
                     // 2026-07-19: Load with native type from field_types (e.g. "float",
                     // "double", "i64"). No unboxing needed — LLVM type matches %State
                     // struct layout. Phi registers remain i64 (handled above).
-                    let llvm_ty = &self.ctx.field_types[idx];
-                    writeln!(out, "{}{} = load {}, ptr {}, align {}", indent, v, llvm_ty, gep,
-                        self.align_of(llvm_ty)).ok();
-                    TypedRegister { name: v.to_string(), ty: brief_ty }
+                    let (loaded, brief_ty) = self.emit_state_load_i64_by_idx(out, indent, idx);
+                    TypedRegister { name: loaded, ty: brief_ty }
                 } else if let Some((ty, _)) = self.ctx.constants.get(name) {
                     // 2026-07-17: Load global constants with the correct LLVM
                     // type. Float constants are declared as `constant float` in
@@ -364,9 +357,7 @@ impl LlvmBackend {
                 match inner.as_ref() {
                     Expr::Identifier(name) => {
                         if let Some(&idx) = self.ctx.field_index_map.get(name) {
-                            let gep = self.fun.gen_reg();
-                            writeln!(out, "{}{} = getelementptr inbounds %State, ptr %state, i32 0, i32 {}",
-                                indent, gep, idx).ok();
+                            let gep = self.emit_state_gep(out, indent, "aof", "%state", idx);
                             let ptr = self.fun.gen_reg();
                             writeln!(out, "{}{} = ptrtoint ptr {} to i64", indent, ptr, gep).ok();
                             TypedRegister { name: ptr, ty: Type::int() }

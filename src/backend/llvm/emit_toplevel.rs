@@ -754,22 +754,14 @@ impl LlvmBackend {
         // %State. This lets LLVM's SROA promote them to SSA registers in the
         // hot loop body, bypassing the inttoptr handle indirection.
         if let Some(inline) = self.ctx.ringbuf_inline.get(field_name) {
-            let data_gep = format!("{}_idg", rb);
-            writeln!(out, "{}{} = getelementptr inbounds %State, ptr %state, i32 0, i32 {}",
-                indent, data_gep, inline.data_idx).ok();
-            writeln!(out, "{}store i64 {}, ptr {}, align 8", indent, dp, data_gep).ok();
-            let head_gep = format!("{}_ihg", rb);
-            writeln!(out, "{}{} = getelementptr inbounds %State, ptr %state, i32 0, i32 {}",
-                indent, head_gep, inline.head_idx).ok();
-            writeln!(out, "{}store i64 0, ptr {}, align 8", indent, head_gep).ok();
-            let tail_gep = format!("{}_itg", rb);
-            writeln!(out, "{}{} = getelementptr inbounds %State, ptr %state, i32 0, i32 {}",
-                indent, tail_gep, inline.tail_idx).ok();
-            writeln!(out, "{}store i64 {}, ptr {}, align 8", indent, n, tail_gep).ok();
-            let mask_gep = format!("{}_img", rb);
-            writeln!(out, "{}{} = getelementptr inbounds %State, ptr %state, i32 0, i32 {}",
-                indent, mask_gep, inline.mask_idx).ok();
-            writeln!(out, "{}store i64 {}, ptr {}, align 8", indent, mask, mask_gep).ok();
+            let data_idx = inline.data_idx;
+            let head_idx = inline.head_idx;
+            let tail_idx = inline.tail_idx;
+            let mask_idx = inline.mask_idx;
+            self.emit_state_store_i64_by_idx(out, indent, data_idx, &dp);
+            self.emit_state_store_i64_by_idx(out, indent, head_idx, "0");
+            self.emit_state_store_i64_by_idx(out, indent, tail_idx, &n.to_string());
+            self.emit_state_store_i64_by_idx(out, indent, mask_idx, &mask.to_string());
         }
     }
 
