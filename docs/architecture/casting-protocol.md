@@ -251,6 +251,34 @@ No changes to the type system, typechecker, or normalizer.
 
 ---
 
+## `disamb` — Disambiguation Hint
+
+The `disamb <~ "value"` metadata property disambiguates representations that
+structure + bytes + protocol ops cannot distinguish. Currently only needed
+for 2-byte floats (`half` vs `bfloat`):
+
+```brief
+type Bfloat16 {
+    data: Bits<16>;
+    disamb <~ "bfloat";
+    op Add(#Float, #Float);
+};
+```
+
+The normalizer reads `disamb` when deriving `llvm_type` for `#Float`-category
+types at 2 bytes:
+
+| `disamb` absent | `disamb <~ "bfloat"` |
+|---|---|
+| `llvm_type = "half"` (IEEE 754) | `llvm_type = "bfloat"` |
+
+`disamb` is a **hint, not a directive** — the normalizer ignores it when
+structure alone is sufficient (e.g., 4-byte `#Float` is always `"float"`,
+8-byte is always `"double"`). It only matters when the combinatorics of
+bytes + category ops produce multiple valid representations.
+
+---
+
 ## Protocol Ops (Required Per Category)
 
 ### `#String` protocol

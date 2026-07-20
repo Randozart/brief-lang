@@ -470,14 +470,45 @@ All op dispatch now goes through `TypeDefBody.operators` structs.
 
 ---
 
+## `disamb` Disambiguation Hint
+
+Resolved decision from Open Questions §1 (2-byte float ambiguity).
+
+The `disamb <~ "value"` metadata property is a **hint** to the normalizer when
+structure + bytes + `#Category` ops are insufficient to determine the concrete
+representation. Currently only needed for 2-byte floats:
+
+```brief
+type Bfloat16 <: Bits {
+    bytes <~ 2;
+    alignment <~ 2;
+    tbaa <~ "Float";
+    disamb <~ "bfloat";
+    op Add(#Float, #Float);
+};
+```
+
+The normalizer's `llvm_type` derivation for the Float category at `bytes == 2`:
+
+| `disamb` value | Resolved `llvm_type` |
+|---|---|
+| `"bfloat"` | `"bfloat"` |
+| *(absent)* | `"half"` (IEEE 754 default) |
+
+No parser changes needed — `disamb <~ "value"` uses the existing `<~` metadata
+handler (`slot_name == "disamb"` falls through to the general TildeArrow path).
+
+Files changed:
+- `src/backend/llvm/normalizer.rs` — add `"disamb"` to keep list + 2-byte float
+  handling in the `llvm_type` derivation path for float-category types.
+- `docs/architecture/casting-protocol.md` — document `disamb`.
+
+---
+
 ## Open Questions (for the Architecture Doc)
 
-1. **2-byte float ambiguity**: Structure alone can't distinguish `half` from `bfloat`.
-   Options: name convention (contains "bf" → bfloat), or a minimal hint property.
-   The user suggested a hint that says "if you can't figure it out, pick this."
-
-2. **Field syntax for flat types**: `type Bfloat16 { data: Bits<16>; }` vs. a layout
+1. **Field syntax for flat types**: `type Bfloat16 { data: Bits<16>; }` vs. a layout
    attribute. The field syntax is consistent but may feel verbose for single-field types.
 
-3. **Bits parameter vs type parameter**: `Bits<16>` could be `Bits<:16>` or just
+2. **Bits parameter vs type parameter**: `Bits<16>` could be `Bits<:16>` or just
    `#Int` category with specific bytes. Needs syntax resolution.

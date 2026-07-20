@@ -50,6 +50,17 @@ pub fn normalize(items: &mut Vec<TopLevel>, universe: &mut TypeUniverse) -> Resu
         let llvm_ty = if let Some(llvm_val) = explicit_llvm {
             validate_explicit_llvm(llvm_val)?;
             llvm_val.to_string()
+        } else if rt.bytes == 2 {
+            // 2026-07-20: 2-byte types are ambiguous between half (IEEE 754),
+            // bfloat (Google Brain), and i16 (integer). The disamb hint
+            // resolves the ambiguity: disamb <~ "bfloat" → "bfloat",
+            // disamb absent or any other value → "half" (IEEE 754 default).
+            // If the type is an integer, the user should set llvm <~ "i16".
+            match rt.properties.get("disamb") {
+                Some(PropertyValue::String(s)) if s == "bfloat" => "bfloat".to_string(),
+                Some(PropertyValue::Identifier(s)) if s == "bfloat" => "bfloat".to_string(),
+                _ => "half".to_string(),
+            }
         } else {
             // No fields, no explicit llvm: derive from bytes
             format!("i{}", rt.bytes * 8)
@@ -93,7 +104,7 @@ pub fn normalize(items: &mut Vec<TopLevel>, universe: &mut TypeUniverse) -> Resu
         // "string" metadata is no longer retained — hashword OperatorDef from
         // the AST replaces it.
         let keep: HashSet<String> = [
-            "llvm_type", "tbaa", "op.InsertAt", "op.ExtractFrom",
+            "llvm_type", "tbaa", "disamb", "op.InsertAt", "op.ExtractFrom",
         ].iter().map(|s| s.to_string()).collect();
         for rt in universe.types.values_mut() {
             rt.properties.retain(|k, _| keep.contains(k));

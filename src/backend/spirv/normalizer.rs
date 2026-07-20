@@ -30,7 +30,7 @@ pub fn normalize(items: &mut Vec<TopLevel>, universe: &mut TypeUniverse) -> Resu
     }
 
     // Strip irrelevant metadata
-    let keep: HashSet<String> = ["is_kernel"].iter().map(|s| s.to_string()).collect();
+    let keep: HashSet<String> = ["is_kernel", "disamb"].iter().map(|s| s.to_string()).collect();
     for rt in universe.types.values_mut() {
         rt.properties.retain(|k, _| keep.contains(k) || k.starts_with("op."));
     }
