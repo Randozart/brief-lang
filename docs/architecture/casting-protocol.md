@@ -428,12 +428,80 @@ type AscHashMap<K: #String<ascii>, V> { ... };
 
 ---
 
+---
+
+## Parse Protocol — Compile-Time Literal Construction
+
+### Distinction from Cast
+
+| Operation | Purpose | When it fires |
+|---|---|---|
+| `Cast#(source, TargetType)` | Convert existing value to different type | Assignment, function call, explicit cast |
+| `op Parse(Form)` | Construct value from source text | Literal in source code: `42`, `"..."`, `FF00FF` |
+
+Parse is NOT a subtype of Cast. Parse happens during early typechecking;
+Cast happens during codegen. However, Parse ops may invoke Cast internally
+(e.g., `op Parse(Decimal) = int_parse_and_cast(#L)`).
+
+### Parse forms
+
+| Form | Implementation? | Meaning |
+|---|---|---|
+| `op Parse(#Category)` | No — identity | "This type IS the protocol currency for parsing" |
+| `op Parse(Bare) = fn(#L)` | Yes — required | Construct from bareword identifier |
+| `op Parse(Decimal) = fn(#L)` | Yes — required | Construct from numeric literal |
+| `op Parse(Quoted) = fn(#L)` | Yes — required | Construct from quoted string |
+
+### Parse resolution pipeline
+
+When the compiler encounters a literal `42` assigned to type `T`:
+
+1. Determine the literal's syntactic form (Bare/Decimal/Quoted)
+2. Does `T` declare `op Parse(#Category)` where the category matches the
+   literal's protocol? → Use identity (zero-cost, no emission)
+3. Does `T` declare `op Parse(Form)` with a conversion function?
+   → Call the inlined defn at compile time
+4. Does `T`'s parent (via `<:`) have a Parse op? → Check inheritance
+5. No match → compile error: "type T does not accept Decimal literals"
+
+### Replacement of `formatting <~`
+
+The `formatting <~` metadata property and the `codec { ... }` declaration form
+are superseded by `op Parse`:
+
+| Old mechanism | Replaced by |
+|---|---|
+| `formatting <~ Bare` + `parse <~ parse_hex` | `op Parse(Bare) = parse_hex(#L)` |
+| `formatting <~ Decimal` + `parse <~ parse_fn` | `op Parse(Decimal) = fn(#L)` |
+| `formatting <~ Quoted` + `parse <~ identity` | `op Parse(#String)` or `op Parse(Quoted) = fn(#L)` |
+| `DefaultQuoted` codec class | Inline `op Parse` on each type |
+
+---
+
+## Round-Trip Verification
+
+For every type that declares both a Parse op and a produce op (`CastTo` or
+`Cast(#Category)`), the compiler performs symbolic execution at compile time:
+
+```brief
+// Parse: "FF00FF" → HexColor via parse_hex_color
+// Cast: HexColor → #String via hex_color_to_string
+// Round-trip: hex_color_to_string(parse_hex_color("FF00FF")) == "FF00FF"
+```
+
+If the round-trip fails, the compiler emits a warning with the exact input
+and output shown. Verification is:
+- **Structural**: the protocol's `Eq` op confirms identity, not literal bytes
+- **Cached**: by type name + SHA-256 of the op implementation
+- **Graceful**: non-invertible types (hashes) emit a warning, not an error
+
+---
+
 ## Implementation Phases
 
 ### Phase 1: Protocol Variant Syntax
 
 - Parse `#Category<variant>` in op signatures
-- File extension → default protocol mapping (.bv → utf8, .ebv → ascii)
 - Cross-variant call detection and error reporting
 
 ### Phase 2: Protocol Graph Skeleton
@@ -453,3 +521,11 @@ type AscHashMap<K: #String<ascii>, V> { ... };
 - `config/targets.toml` → protocol list per target
 - LLVM backend protocol handler match arms
 - Unsupported protocol → compile error listing available protocols
+
+### Phase 5: Parse Protocol
+
+- `op Parse(#Category)` as identity parse (no conversion function)
+- `op Parse(Bare/Decimal/Quoted)` with conversion function
+- Parse resolution in literal construction (typechecker)
+- Round-trip verification in symbolic execution engine
+- Replace `formatting <~` codec property with Parse ops

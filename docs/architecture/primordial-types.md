@@ -11,7 +11,9 @@
 >
 > ```brief
 > type Int <: Bits {
->     op Add(#Int, #Int);  // not primitive <~ "Int" + llvm <~ "i64"
+>     op Add(#Int, #Int);      // not primitive <~ "Int" + llvm <~ "i64"
+>     op Parse(#Int);           // identity literal construction
+>     op Parse(Decimal);        // numeric literal construction
 > };
 > ```
 >
@@ -20,7 +22,11 @@
 > semantic identity of a type is now determined by its op signatures, not
 > by `primitive`/`ctd`/`alu` metadata.
 >
-> See `docs/architecture/casting-protocol.md`.
+> The `formatting <~` codec property described below is also superseded
+> by `op Parse`. See the Parse Ops for Primordial Types section below.
+>
+> See `docs/architecture/casting-protocol.md` and
+> `docs/plans/2026-07-20-protocol-and-meld-architecture.md#layer-10-parse`.
 
 ---
 
@@ -159,15 +165,47 @@ float-like type — it will emit whatever the layout and ops dictate.
 
 ---
 
+## Parse Ops for Primordial Types
+
+Each primordial type implicitly carries `op Parse(#Category)` for its
+protocol category, providing zero-cost identity literal construction:
+
+| Primordial | Protocol | Implicit Parse op | Also accepts |
+|---|---|---|---|
+| `Int` | `#Int` | `op Parse(#Int)` | `op Parse(Decimal)` — numeric literals |
+| `Float` | `#Float` | `op Parse(#Float)` | `op Parse(Decimal)` — numeric literals |
+| `Bool` | `#Bool` | `op Parse(#Bool)` | `op Parse(Bare)` — `true`/`false` |
+| `Char` | `#Char` | `op Parse(#Char)` | `op Parse(Decimal)` — code point value |
+| `String` | `#String` | `op Parse(#String)` | `op Parse(Quoted)` — string literals |
+| `UInt` | `#Int` | `op Parse(#Int)` | `op Parse(Decimal)` |
+| *(all others)* | derived | derived from protocol | derived from structure |
+
+When a user overrides a primordial type via `type Int { ... }`, the Parse ops
+are also overridden. If the user's definition includes `op Parse(#Int)` or
+`op Parse(Decimal)`, those replace the primordial defaults. If neither is
+declared, the type has NO implicit Parse ops — it cannot be constructed
+from literals without an explicit conversion function.
+
+The implicit `op Parse(#Category)` for primordial types is an optimization
+of the primordial seed logic in `TypeUniverse::new()`, not a special case in
+the type system. A user-defined type with the same ops and protocol gets
+identical behavior.
+
+---
+
 ## Implementation
 
 The seed table lives in `TypeUniverse::new()` via a helper
 `fn seed_primordial_types(&mut self)`. Each entry is constructed as a
 `ResolvedType` with properties matching the table above.
 
+The `seed_primordial_types()` helper must also seed the implicit
+`op Parse(#Category)` and `op Parse(Form)` entries for each primordial type.
+These are added to the `ResolvedType.operators` vec just like any other op.
+
 The normalizer's annotation loop checks `rt.properties.contains_key("llvm_type")`
-before calling `derive_llvm_type`, so primordial types with explicit
-`llvm_type` (like `%String`) keep their annotation.
+before deriving it, so primordial types with explicit `llvm_type` keep their
+annotation.
 
 ---
 

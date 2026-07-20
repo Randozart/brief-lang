@@ -78,6 +78,8 @@ type Posit32 {
 | `op Add(#Int, #Int)` | Backend, use your intrinsic integer add | `add i64 %a, %b` |
 | `op Add(#Float, #Float) = fn(#L, #R)` | Override backend's float add with custom fn | `call @fn` (auto-alwaysinline) |
 | `op Add(Posit32) = fn(#L, #R)` | Custom op for this type only | `call @fn` (auto-alwaysinline) |
+| `op Parse(#Category)` | Compile-time identity — literal IS the protocol | No emission (identity, zero-cost) |
+| `op Parse(Bare/Decimal/Quoted)` | Literal construction from source text | Emit call to bound defn (auto-alwaysinline) |
 
 Functions bound to ops via `= fn(...)` are automatically emitted with `alwaysinline`.
 
@@ -314,6 +316,169 @@ At instantiation `HashMap<ASCIIString, Int>`:
 
 ---
 
+## Layer 10: Parse — compile-time literal construction
+
+Types declare how they are constructed from source text at compile time
+using `op Parse` declarations:
+
+```brief
+type Int <: Bits {
+    op Add(#Int, #Int);
+    op Parse(#Int);           // compile-time identity — literal IS an Int
+    op Parse(Decimal);        // "42" constructs an Int via conversion fn
+};
+
+type HexColor {
+    data: Bits<24>;
+    op Parse(Bare) = parse_hex_color(#L);   // "FF00FF" → color
+    op Cast(#Bits);
+};
+```
+
+### Parse forms
+
+| Op form | Meaning | Conversion function? |
+|---|---|---|
+| `op Parse(#Category)` | Compile-time identity — target IS the protocol | No — literal bytes are already valid |
+| `op Parse(Bare)` | Construct from bareword identifier `FF00FF` | Yes — required |
+| `op Parse(Decimal)` | Construct from numeric literal `42` or `3.14` | Yes — required |
+| `op Parse(Quoted)` | Construct from quoted string `"..."` | Yes — required |
+
+`Parse(#Category)` is a hashword op — it declares identity with the protocol,
+so no conversion function is needed. `Parse(Bare/Decimal/Quoted)` are concrete
+form ops that ALWAYS require a conversion function, because the compiler has
+no intrinsic knowledge of how barewords, numbers, or quoted strings map to
+arbitrary type values.
+
+### Parse resolution pipeline
+
+When the compiler encounters a literal expression assigned to type `T`:
+
+```
+1. Determine the literal's syntactic form (Bare, Decimal, or Quoted)
+2. Does T declare op Parse(#Category) where #Category matches the
+   literal's protocol? → Use identity (zero-cost, no emission)
+3. Does T declare op Parse(Form) with a conversion function?
+   → Call the inlined defn at compile time
+4. Does T's parent (via <:) have a Parse op? → Check inheritance
+5. No match → compile error: "type T does not accept Decimal literals"
+```
+
+### Parse + Cast interaction
+
+After Parse constructs a value, `Cast#()` may fire if the parsed value's
+type doesn't match the target expression's expected type:
+
+```brief
+type MyInt { data: Bits<64>;
+    op Parse(Decimal) = myint_from_decimal(#L);
+    op Cast(#Int) = myint_to_int(#L);
+};
+let x: Int = 42;  // Parse(Decimal) → MyInt, then Cast(#Int) → Int
+```
+
+The compiler folds Parse + Cast into a direct conversion when both are inlined.
+
+### Round-trip verification
+
+For every type that declares both a Parse op and a produce op (`CastTo` or
+`Cast(#Category)`), the compiler performs symbolic execution at compile time:
+
+```
+// For every op Parse(Form) = fn(#L):
+//   1. Apply fn to a representative test literal → value
+//   2. Apply op Cast(#Category) or custom produce → back to bytes
+//   3. Assert: original test literal == step 2 result
+```
+
+If the round-trip fails, the compiler emits a warning (or error in strict mode)
+with the exact input and output shown:
+
+```
+warning: Parse → Cast round-trip failed for type 'HexColor'
+  Parse('FF00FF') → 0xFF00FF
+  Cast(#String) → '00FF00' (expected 'FF00FF')
+```
+
+Verification uses the protocol's universal currency as the intermediate.
+For `#String` protocol, the currency is `Char`:
+
+```brief
+// Parse: "FF00FF" → HexColor via parse_hex_color
+// Cast: HexColor → #String via hex_color_to_string
+// Round-trip: hex_color_to_string(parse_hex_color("FF00FF")) == "FF00FF"
+```
+
+### Replacement of `formatting <~`
+
+The `formatting <~` metadata property and the `codec { ... }` declaration form
+are superseded by `op Parse`:
+
+| Old mechanism | Replaced by |
+|---|---|
+| `formatting <~ Bare` + `parse <~ parse_hex` | `op Parse(Bare) = parse_hex(#L)` |
+| `formatting <~ Decimal` + `parse <~ parse_fn` | `op Parse(Decimal) = fn(#L)` |
+| `formatting <~ Quoted` + `parse <~ identity` | `op Parse(#String)` or `op Parse(Quoted) = fn(#L)` |
+| `DefaultQuoted` codec class | Inline `op Parse` on each type |
+
+The `op Parse` system is additive with respect to the `op` system — it uses
+the same operator declaration syntax, the same `#L` positional marker, and
+the same `alwaysinline` semantics for bound functions.
+
+---
+
+## Resolved Design Questions (Parse + Protocol System)
+
+### Q1: Error boundaries — what if round-trip verification fails?
+
+The test value and expected/actual results are shown with source location.
+The user can suppress via `#[allow(protocol_roundtrip)]` annotation on the
+type — but only after explicitly acknowledging the deviation. Suppression
+without acknowledgement is a compile error.
+
+### Q2: Dispatch priority — concrete vs hashword overloads
+
+Concrete type wins over hashword. `op Add(ConcreteType, ConcreteType)` fires
+before `op Add(#String, #String)` because concrete is a more specific match.
+Same principle applies to Parse: `op Parse(Decimal) = fn(#L)` fires before
+`op Parse(#Int)` for numeric literals, because the concrete form is more
+specific.
+
+### Q3: Protocol variant directions — CastTo utf8, CastFrom ascii?
+
+Valid. A transcoder type may `CastFrom(#String<utf8>)` and
+`CastTo(#String<ascii>)` — that's a meaningful conversion.
+The round-trip test handles it: `CastFrom(utf8) → CastTo(ascii)` is tested
+separately from `CastFrom(ascii) → CastTo(utf8)`.
+
+### Q4: How tolerant is round-trip equality? Structural or literal?
+
+Structural equality, not literal bytes. `"XIV"` and `"xiv"` are the same
+RomanNumeral if `Parse(Bare)` is case-insensitive by design. The comparison
+uses the type's own `Eq` op if available, falling back to byte equality.
+
+### Q5: Module caching — duplicated work across modules?
+
+Both, but cached. The round-trip test runs when a type is first defined.
+When another module imports it, the result is cached by type name + SHA-256
+of the op implementation. No duplicated work.
+
+### Q6: Write-only types — Parse without CastTo?
+
+Valid. A type can be constructed from a literal but never serialized back.
+The round-trip test simply doesn't run for directions that aren't declared.
+Useful for opaque handles, capabilities, or types that exist only
+temporarily within a computation.
+
+### Q7: Parse inheritance — does `<: pass Parse ops?
+
+Yes. Parse ops follow the same inheritance rules as other ops.
+If `ASCIIString <: String` and `String` declares `op Parse(#String)`,
+`ASCIIString` inherits it — correct because ASCII IS valid UTF-8.
+A subtype may override with its own `op Parse(Form) = fn(#L)`.
+
+---
+
 ## Implementation Status
 
 | Layer | Status | Files changed |
@@ -327,6 +492,8 @@ At instantiation `HashMap<ASCIIString, Int>`:
 | 7. Meld (explicit) | ⏳ Specified | Need updated meld parser + validation |
 | 8. Protocol shapes | ✅ Documented | casting-protocol.md |
 | 9. Type param constraints | ✅ Complete | compile.rs validate_constraints |
+| 10. Parse protocol | ⏳ Specified | Need op Parse parser + resolution |
+| 10a. Round-trip verification | ⏳ Specified | Need symbolic exec of Parse→Cast→Produce |
 
 ---
 
@@ -341,3 +508,8 @@ At instantiation `HashMap<ASCIIString, Int>`:
 | `src/type_universe/mod.rs` | Keep universe.melds, update find_meld for implicit conversion |
 | `lib/std/types/bootstrap.bv` | Add protocol ops (Extract, InsertAt, etc.) for String |
 | `lib/std/core/ring_buffer.bv` | Already updated (op InsertAt(T) = ring_push(#L,#R)) |
+| `src/parser/definitions.rs` | Parse `op Parse(#Category)` and `op Parse(Bare/Decimal/Quoted)` |
+| `src/type_universe/operators.rs` | Parse op resolution in literal construction |
+| `src/backend/llvm/emit_expr.rs` | Expr::Quoted/Decimal/Bare dispatch through Parse ops |
+| `src/interpreter/mod.rs` | Compile-time literal construction via Parse ops |
+| `lib/std/types/bootstrap.bv` | Add `op Parse(#Int)`, `op Parse(#Float)`, `op Parse(#String)` |

@@ -341,8 +341,66 @@ The `@` prefix modifier converts any token to `QuotedValue(raw_bytes)`,
 bypassing lexer interpretation. `@FF00FF`, `@42`, `@"..."` all produce
 `Expr::Quoted(bytes)`.
 
-No name-based magic. `String` accepts `"..."` because `DefaultQuoted`
-declares `formatting <~ Quoted`, not because the type is named `String`.
+No name-based magic. `String` accepts `"..."` because `String` declares
+`op Parse(#String)` — the identity parse form, meaning the quoted bytes
+are already valid UTF-8. (Legacy: `DefaultQuoted.formatting <~ Quoted`
+still works but is deprecated in favour of `op Parse`.)
+
+### 6.1 Parse Protocol — Replacement for `formatting <~`
+
+**2026-07-20:** The `formatting <~` metadata property and the `codec`
+declaration form are superseded by the `op Parse` protocol:
+
+```brief
+// Old (codec + formatting <~):
+codec HexColor {
+    formatting <~ Bare;
+    parse      <~ parse_hex;
+};
+
+// New (op Parse):
+type HexColor {
+    data: Bits<24>;
+    op Parse(Bare) = parse_hex(#L);   // Bare literal "FF00FF" → HexColor
+};
+```
+
+| Old mechanism | Replaced by |
+|---|---|
+| `formatting <~ Bare` + `parse <~ parse_hex` | `op Parse(Bare) = parse_hex(#L)` |
+| `formatting <~ Decimal` + `parse <~ parse_fn` | `op Parse(Decimal) = fn(#L)` (or `op Parse(#Int)` for identity) |
+| `formatting <~ Quoted` + `parse <~ identity` | `op Parse(#String)` or `op Parse(Quoted) = fn(#L)` |
+| `DefaultQuoted` codec class | Inline `op Parse` on each type definition |
+
+**Why the change:** The `op` system already provides dispatch, `alwaysinline`,
+positional markers (`#L`, `#R`), and inheritance through `<:`. `op Parse`
+integrates literal construction into the same system rather than maintaining
+a parallel `codec` mechanism. Additionally, `op Parse(#Category)` provides a
+zero-cost identity path: when the target type IS the protocol currency,
+parsing is a no-op.
+
+**The three token forms (QuotedValue, DecimalValue, Bareword) remain compiler
+axioms** — only the dispatch mechanism changes from `formatting <~` metadata
+to `op Parse` signatures.
+
+### 6.2 Round-Trip Verification of Parse Ops
+
+Every `op Parse(Form) = fn(#L)` declaration triggers compile-time symbolic
+execution to verify that parsing is invertible:
+
+1. The compiler applies `fn` to a representative constant literal
+2. The compiler applies the corresponding produce op (CastTo or Cast) to
+   the result
+3. The compiler asserts that step 2 produces the original literal bytes
+
+For a type like `HexColor` with `op Cast(#String)`:
+```
+Parse("FF00FF") → 0xFF00FF  →  Cast(#String) → "FF00FF"  ✓  Round-trip OK
+```
+
+If the round-trip fails (e.g., a hash function that loses information),
+the compiler emits a warning but continues. Non-invertible types must
+document this with an explicit annotation.
 
 ### 7. The Complete Type Hierarchy from First Principles
 

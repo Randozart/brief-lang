@@ -54,6 +54,28 @@ User-declarable ops: `CastTo(#Category)`, `CastFrom(#Category)`, and
 
 See `docs/architecture/casting-protocol.md` for the full protocol system.
 
+### `op Parse(#Category)` — Compile-time identity parse
+
+`op Parse(#Category)` uses the same hashword mechanism as `op Add(#Int)`:
+
+| `#Category` | Tells the compiler |
+|---|---|
+| `#Int` | Parse literals as native integer — no conversion needed |
+| `#String` | Parse quoted literals as UTF-8 — no conversion needed |
+| `#Float` | Parse numeric literals as IEEE 754 float |
+
+`op Parse(Bare)`, `op Parse(Decimal)`, and `op Parse(Quoted)` are NOT
+hashword ops — they are concrete-form ops that always require a conversion
+function. Only `op Parse(#Category)` is a hashword op.
+
+```brief
+type Int {
+    op Add(#Int, #Int);       // backend directive: integer add
+    op Parse(#Int);            // identity parse: literal IS an Int
+    op Parse(Decimal);         // concrete form: numeric literal → conversion fn
+};
+```
+
 ## Current Words
 
 | Token | Meaning | Used In |
