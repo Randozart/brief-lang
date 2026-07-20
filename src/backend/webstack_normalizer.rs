@@ -10,19 +10,20 @@ use crate::type_universe::TypeUniverse;
 /// 2026-07-14: Normalize the AST for Webstack (WASM + JS) backend.
 /// Attaches js_type annotation based on primitive metadata.
 pub fn normalize(items: &mut Vec<TopLevel>, universe: &mut TypeUniverse) -> Result<(), String> {
-    // 2026-07-17: Attach js_type from CTD (replaces old primitive() calls)
+    // 2026-07-20: Derive js_type from llvm_type (hashword protocol replaces CTD)
     for rt in universe.types.values_mut() {
-        let ctd = rt.properties.get("ctd").and_then(|pv| match pv {
-            PropertyValue::Identifier(s) => Some(s.as_str()),
+        let llvm_ty = rt.properties.get("llvm_type").and_then(|pv| match pv {
+            PropertyValue::String(s) => Some(s.as_str()),
             _ => None,
         });
-        let js_type = match ctd {
-            Some("Int") | Some("UInt") | Some("Char") => "number",
-            Some("Float") | Some("Double") => "number",
-            Some("Bool") => "boolean",
-            Some("String") => "string",
-            Some("Data") => "Uint8Array",
-            _ => "object",
+        let js_type = match llvm_ty {
+            Some("i64" | "i32" | "i16" | "i8") => "number",
+            Some("float" | "double") => "number",
+            Some("i1" | "i8") => "boolean",
+            _ => match rt.base.as_str() {
+                "String" | "Bits" if rt.fields.len() >= 2 => "string",
+                _ => "object",
+            },
         };
         rt.properties.insert("js_type".into(), PropertyValue::String(js_type.into()));
     }
@@ -35,8 +36,7 @@ pub fn normalize(items: &mut Vec<TopLevel>, universe: &mut TypeUniverse) -> Resu
     }
 
     // Strip hardware-specific metadata
-    // 2026-07-17: ctd/alu replace primitive; js_type is the computed JS type
-    let keep: HashSet<String> = ["ctd", "alu", "js_type", "encoding", "bytes"]
+    let keep: HashSet<String> = ["js_type", "llvm_type"]
         .iter().map(|s| s.to_string()).collect();
     for rt in universe.types.values_mut() {
         rt.properties.retain(|k, _| keep.contains(k));
