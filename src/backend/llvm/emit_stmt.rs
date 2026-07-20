@@ -283,9 +283,12 @@ pub fn emit_statement(backend: &mut LlvmBackend, out: &mut String, stmt: &Statem
 }
 
 /// Resolve a strategy property value to a function name and argument markers,
-/// compute the handle (ptrtoint of first RingBuf inline field), and emit a
+/// compute the handle (pointer to the collection storage), and emit a
 /// generic call @fn_name(arg1, arg2, ...) where args are resolved from markers.
 /// 2026-07-18: Generic dispatch — no hardcoded function names.
+/// 2026-07-20: Handle both ringbuf-inline types (via ringbuf_inline data_idx) and
+///   non-ringbuf types (via field_index_map or let_binding slot). Any type declaring
+///   InsertAt/ExtractFrom in operator_defs gets the same <- behavior.
 /// Supports: PropertyValue::Identifier("ring_push") for convention-based dispatch,
 ///   and PropertyValue::List([Identifier("ring_push"), HashL, HashR]) for
 ///   explicit marker-based dispatch like InsertAt <~ ring_push(#L, #R).
@@ -307,12 +310,33 @@ fn emit_strategy_fn_call(backend: &mut LlvmBackend, out: &mut String, indent: &s
         _ => return None,
     };
     let var_name = target.as_var_name()?;
-    let rbi = backend.ctx.ringbuf_inline.get(var_name)?;
-    let gep = backend.fun.gen_reg();
-    writeln!(out, "{}{} = getelementptr inbounds %State, ptr %state, i32 0, i32 {}",
-        indent, gep, rbi.data_idx).ok();
-    let handle = backend.fun.gen_reg();
-    writeln!(out, "{}{} = ptrtoint ptr {} to i64", indent, handle, gep).ok();
+
+    // 2026-07-20: Compute handle as ptrtoint of the variable's storage location.
+    // For RingBuf-inline types, use the data buffer field. For all other types,
+    // derive the handle from the state field or let-binding alloca.
+    let handle = if let Some(rbi) = backend.ctx.ringbuf_inline.get(var_name) {
+        let gep = backend.fun.gen_reg();
+        writeln!(out, "{}{} = getelementptr inbounds %State, ptr %state, i32 0, i32 {}",
+            indent, gep, rbi.data_idx).ok();
+        let h = backend.fun.gen_reg();
+        writeln!(out, "{}{} = ptrtoint ptr {} to i64", indent, h, gep).ok();
+        h
+    } else if let Some(&idx) = backend.ctx.field_index_map.get(var_name) {
+        // Non-ringbuf state variable — use field address as handle.
+        let gep = backend.fun.gen_reg();
+        writeln!(out, "{}{} = getelementptr inbounds %State, ptr %state, i32 0, i32 {}",
+            indent, gep, idx).ok();
+        let h = backend.fun.gen_reg();
+        writeln!(out, "{}{} = ptrtoint ptr {} to i64", indent, h, gep).ok();
+        h
+    } else if let Some(slot) = backend.fun.let_bindings.get(var_name).cloned() {
+        // Let-binding — use alloca pointer address as handle.
+        let h = backend.fun.gen_reg();
+        writeln!(out, "{}{} = ptrtoint ptr {} to i64", indent, h, slot).ok();
+        h
+    } else {
+        return None; // No storage location found — can't compute handle
+    };
 
     // Resolve markers to argument registers. Convention-based dispatch (no markers)
     // passes (handle, value) for push and (handle) for pop. Marker-based dispatch
