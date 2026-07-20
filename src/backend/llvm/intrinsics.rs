@@ -7,11 +7,9 @@
 use std::sync::LazyLock;
 use crate::ast::{Expr, Type};
 use crate::backend::llvm::{AllocStrategy, LlvmBackend, TypedRegister as BTypedRegister};
-use crate::config::{AllocConfig, OpConfig, derive_llvm_type, TypeConfig};
+use crate::config::AllocConfig;
 use std::fmt::Write;
 
-pub(crate) static OP_CONFIG: LazyLock<OpConfig> = LazyLock::new(|| OpConfig::load());
-static TYPE_CONFIG: LazyLock<TypeConfig> = LazyLock::new(|| TypeConfig::load());
 pub(crate) static ALLOC_CONFIG: LazyLock<AllocConfig> = LazyLock::new(|| AllocConfig::load());
 
 /// Emit an intrinsic call by name. For generic operations (Add#, Eq#, etc.)
@@ -85,49 +83,31 @@ pub fn emit_intrinsic_call(
         return BTypedRegister { name: v.to_string(), ty: Type::void() };
     }
 
-    // Determine ctd and bytes from the first argument's type
-    // 2026-07-17: CTD replaces primitive — ops TOML uses CTD-compatible keys
-    // 2026-07-17: Use the register's type directly instead of resolving through
-    // type_universe (which may not have bootstrap types loaded at intrinsic call
-    // time). Map float()→"Float"/4, float64()→"Double"/8, others→"Int"/8.
-    let (prim, bytes) = if arg_regs[0].ty == Type::float() {
-        ("Float".to_string(), 4u64)
-    } else if arg_regs[0].ty == Type::float64() {
-        ("Double".to_string(), 8u64)
-    } else {
-        (resolve_arg_ctd(backend, &arg_regs[0]), resolve_arg_bytes(backend, &arg_regs[0]).unwrap_or(8))
-    };
+    // Determine llvm type and bytes from the first argument's type
+    // 2026-07-20: Hashword protocol — reads llvm_type from universe.
+    let llvm_ty = backend.llvm_type(&arg_regs[0].ty);
+    let bytes = resolve_arg_bytes(backend, &arg_regs[0]).unwrap_or(8);
 
     let op_name = name.trim_end_matches('#');
     // 2026-07-17: Directly emit float intrinsics (Sqrt#, Sin#, Cos#, etc.)
-    // without config lookup, to work around the TOML dotted-key parsing issue.
-    // The config/llvm-ops.toml has entries like [op.Sqrt.Float] which the TOML
-    // parser flattens to "op.Sqrt.Float" — the config.rs load function doesn't
-    // split this correctly. Bypass the config for math intrinsics.
     let is_float_unary = matches!(op_name, "Sqrt" | "Sin" | "Cos" | "Fabs" | "Ceil" | "Floor");
     if is_float_unary {
         let llvm_name = op_name.to_lowercase();
-        if arg_regs[0].ty == Type::float64() {
-            writeln!(out, "{}{} = call double @llvm.{}.f64(double {})", indent, v, llvm_name, arg_regs[0].name).ok();
-            return BTypedRegister { name: v.to_string(), ty: Type::float64() };
-        } else {
-            writeln!(out, "{}{} = call float @llvm.{}.f32(float {})", indent, v, llvm_name, arg_regs[0].name).ok();
-            return BTypedRegister { name: v.to_string(), ty: Type::float() };
-        }
+        let (float_suffix, float_ty) = match llvm_ty.as_str() {
+            "double" => ("f64", Type::float64()),
+            _ => ("f32", Type::float()),
+        };
+        writeln!(out, "{}{} = call {} @llvm.{}.{}({} {})",
+            indent, v, float_ty, llvm_name, float_suffix, float_ty, arg_regs[0].name).ok();
+        return BTypedRegister { name: v.to_string(), ty: float_ty };
     }
 
-    // 2026-07-18: Resolve %t (type placeholder) for type-dependent templates.
-    let t_ty = if matches!(arg_regs[0].ty, Type::Ptr(_)) {
-        let inner = match &arg_regs[0].ty { Type::Ptr(i) => *i.clone(), _ => Type::int() };
-        backend.llvm_type(&inner)
-    } else {
-        backend.llvm_type(&arg_regs[0].ty)
-    };
-
-    if let Some(template) = OP_CONFIG.lookup(op_name, &prim, bytes) {
+    // 2026-07-20: Simple hardcoded template dispatch for standard ops.
+    // Replaces the old TOML config lookup. Phase 3 will replace this with
+    // proper hashword category dispatch from op signatures.
+    if let Some(template) = template_for_op(op_name, &llvm_ty, bytes) {
         let ir = template
             .replace("%v", v)
-            .replace("%t", &t_ty)
             .replace("%a", &arg_regs.get(0).map(|r| r.name.clone()).unwrap_or_default())
             .replace("%b", &arg_regs.get(1).map(|r| r.name.clone()).unwrap_or_default())
             .replace("%c", &arg_regs.get(2).map(|r| r.name.clone()).unwrap_or_default());
@@ -144,15 +124,52 @@ pub fn emit_intrinsic_call(
     emit_external_call(backend, out, v, name, args, indent)
 }
 
-/// Resolve the CTD metadata for a typed register's type.
-/// 2026-07-17: Replaced primitive() with CTD property read.
-fn resolve_arg_ctd(backend: &LlvmBackend, reg: &BTypedRegister) -> String {
-    backend.ctx.type_universe.as_ref()
-        .and_then(|u| crate::type_universe::resolve_type(u, &reg.ty))
-        .and_then(|rt| rt.properties.get("ctd").and_then(|pv| {
-            if let crate::ast::PropertyValue::Identifier(s) = pv { Some(s.clone()) } else { None }
-        }))
-        .unwrap_or_else(|| "Int".to_string())
+/// 2026-07-20: Simple IR template dispatch, replacing the old TOML config lookup.
+/// Produces the same IR templates that config/llvm-ops.toml provided, but
+/// driven by the type's llvm_type rather than CTD metadata.
+/// Phase 3 will replace this with proper hashword category dispatch.
+pub(crate) fn template_for_op(op_name: &str, llvm_ty: &str, bytes: u64) -> Option<String> {
+    let is_float = matches!(llvm_ty, "float" | "double" | "half" | "bfloat" | "fp128");
+    let float_llvm = if bytes <= 4 { "float" } else { "double" };
+    let int_llvm = format!("i{}", bytes * 8);
+
+    match (op_name, is_float) {
+        ("Add", true) => Some(format!("%v = fadd fast {} %a, %b", float_llvm)),
+        ("Sub", true) => Some(format!("%v = fsub fast {} %a, %b", float_llvm)),
+        ("Mul", true) => Some(format!("%v = fmul fast {} %a, %b", float_llvm)),
+        ("Div", true) => Some(format!("%v = fdiv fast {} %a, %b", float_llvm)),
+        ("Rem", true) => Some(format!("%v = frem fast {} %a, %b", float_llvm)),
+        ("Eq", true) => Some(format!("%v = fcmp oeq {} %a, %b", float_llvm)),
+        ("Neq", true) => Some(format!("%v = fcmp une {} %a, %b", float_llvm)),
+        ("Lt", true) => Some(format!("%v = fcmp olt {} %a, %b", float_llvm)),
+        ("Gt", true) => Some(format!("%v = fcmp ogt {} %a, %b", float_llvm)),
+        ("Le", true) => Some(format!("%v = fcmp ole {} %a, %b", float_llvm)),
+        ("Ge", true) => Some(format!("%v = fcmp oge {} %a, %b", float_llvm)),
+        ("Neg", true) => Some(format!("%v = fneg fast {} %a", float_llvm)),
+        ("Abs", true) => Some(format!("%v = call {} @llvm.fabs.{}({} %a)", float_llvm, float_llvm, float_llvm)),
+
+        ("Add", false) => Some(format!("%v = add nsw {} %a, %b", int_llvm)),
+        ("Sub", false) => Some(format!("%v = sub nsw {} %a, %b", int_llvm)),
+        ("Mul", false) => Some(format!("%v = mul nsw {} %a, %b", int_llvm)),
+        ("Div", false) => Some(format!("%v = sdiv {} %a, %b", int_llvm)),
+        ("Rem", false) => Some(format!("%v = srem {} %a, %b", int_llvm)),
+        ("Eq", false) => Some(format!("%v = icmp eq {} %a, %b", int_llvm)),
+        ("Neq", false) => Some(format!("%v = icmp ne {} %a, %b", int_llvm)),
+        ("Lt", false) => Some(format!("%v = icmp slt {} %a, %b", int_llvm)),
+        ("Gt", false) => Some(format!("%v = icmp sgt {} %a, %b", int_llvm)),
+        ("Le", false) => Some(format!("%v = icmp sle {} %a, %b", int_llvm)),
+        ("Ge", false) => Some(format!("%v = icmp sge {} %a, %b", int_llvm)),
+        ("Neg", false) => Some(format!("%v = sub nsw {} 0, %a", int_llvm)),
+        ("Abs", false) => Some(format!("%v = call {} @llvm.abs.{}({} %a, i1 false)", int_llvm, int_llvm, int_llvm)),
+
+        ("BitAnd", false) => Some(format!("%v = and {} %a, %b", int_llvm)),
+        ("BitOr", false) => Some(format!("%v = or {} %a, %b", int_llvm)),
+        ("BitXor", false) => Some(format!("%v = xor {} %a, %b", int_llvm)),
+        ("Shl", false) => Some(format!("%v = shl {} %a, %b", int_llvm)),
+        ("Shr", false) => Some(format!("%v = ashr {} %a, %b", int_llvm)),
+
+        _ => None,
+    }
 }
 
 fn resolve_arg_bytes(backend: &LlvmBackend, reg: &BTypedRegister) -> Option<u64> {

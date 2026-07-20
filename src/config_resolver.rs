@@ -5,20 +5,19 @@
 // ./.brief/config/ (project) → ~/.config/brief-compiler/active_profile →
 // compile-time baked fallback.
 
-use crate::config::{OpConfig, TypeConfig};
 use crate::target::TargetConfig;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 /// 2026-07-16: Resolved configuration for a single compilation session.
-/// Loaded once at pipeline start and threaded through CompilerContext.
+/// 2026-07-20: Simplified for hashword protocol. No type/op config.
 pub struct ConfigResolver {
+    /// 2026-07-16: The config directory path.
     pub config_dir: PathBuf,
+    /// 2026-07-16: The active target configuration.
     pub target_config: TargetConfig,
-    pub type_config: TypeConfig,
-    pub op_config: OpConfig,
-    pub spirv_op_config: OpConfig,
-    pub module_registry: HashMap<String, String>,
+    /// 2026-07-16: The module registry (import paths).
+    pub module_registry: crate::config_resolver::ModuleRegistry,
 }
 
 impl ConfigResolver {
@@ -42,46 +41,12 @@ impl ConfigResolver {
             })
         };
 
-        let type_config = if config_dir.to_string_lossy() == "__baked__" {
-            TypeConfig::load()
-        } else {
-            // 2026-07-17: Renamed from llvm-primitives.toml to ctd-llvm-mappings.toml
-            let path = config_dir.join("ctd-llvm-mappings.toml");
-            TypeConfig::load_from(&path).unwrap_or_else(|e| {
-                eprintln!("warning: cannot load '{}': {} — using baked fallback", path.display(), e);
-                TypeConfig::load()
-            })
-        };
-
-        let op_config = if config_dir.to_string_lossy() == "__baked__" {
-            OpConfig::load()
-        } else {
-            let path = config_dir.join("llvm-ops.toml");
-            OpConfig::load_from_path(&path).unwrap_or_else(|e| {
-                eprintln!("warning: cannot load '{}': {} — using baked fallback", path.display(), e);
-                OpConfig::load()
-            })
-        };
-
-        let spirv_op_config = if config_dir.to_string_lossy() == "__baked__" {
-            OpConfig::load_from("spirv-ops.toml")
-        } else {
-            let path = config_dir.join("spirv-ops.toml");
-            OpConfig::load_from_path(&path).unwrap_or_else(|e| {
-                eprintln!("warning: cannot load '{}': {} — using baked fallback", path.display(), e);
-                OpConfig::load_from("spirv-ops.toml")
-            })
-        };
-
         let module_registry = Self::load_module_registry(&config_dir);
 
         ConfigResolver {
             config_dir,
             target_config,
-            type_config,
-            op_config,
-            spirv_op_config,
-            module_registry,
+            module_registry: ModuleRegistry { modules: module_registry },
         }
     }
 
@@ -144,7 +109,7 @@ impl ConfigResolver {
 
 /// TOML structure for config/module-registry.toml
 #[derive(serde::Deserialize)]
-struct ModuleRegistry {
+pub struct ModuleRegistry {
     modules: HashMap<String, String>,
 }
 

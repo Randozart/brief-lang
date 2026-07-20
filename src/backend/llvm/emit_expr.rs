@@ -11,7 +11,7 @@
 
 use crate::ast::{Expr, Statement, Type};
 use crate::backend::llvm::{LlvmBackend, TypedRegister};
-use crate::backend::llvm::intrinsics::{emit_intrinsic_call, OP_CONFIG};
+use crate::backend::llvm::intrinsics::{emit_intrinsic_call, template_for_op};
 use crate::ast::*;
 use crate::backend::llvm::emit_stmt;
 
@@ -743,22 +743,16 @@ impl LlvmBackend {
             BinaryOpKind::BitAnd => "BitAnd", BinaryOpKind::BitOr => "BitOr",
             BinaryOpKind::BitXor => "BitXor",
             BinaryOpKind::Concat => "Concat",
-            _ => return None, // Not in config
-        };
-        // Get type name from operand (e.g. "Int", "Float", "Bool")
-        let type_name = match &l.ty {
-            Type::Custom(n) => n.as_str(),
-            Type::Applied(n, _) => n.as_str(),
             _ => return None,
         };
+        // Get the llvm_type of the LHS operand to drive template dispatch
+        let llvm_ty = self.llvm_type(&l.ty);
         // Get byte width from the universe if available
         let bytes = self.ctx.type_universe.as_ref()
             .and_then(|u| l.ty.universe_key().and_then(|k| u.get(k)))
             .map(|rt| rt.bytes)
             .unwrap_or(8u64);
-        let tmpl = OP_CONFIG.lookup(op_name, type_name, bytes)?;
-        // 2026-07-19: Comparison ops (icmp/fcmp) return i1, but Bool is
-        // represented as i8 in this codebase. Add a zext i1 to i8.
+        let tmpl = template_for_op(op_name, &llvm_ty, bytes)?;
         let is_cmp = matches!(kind,
             BinaryOpKind::Eq | BinaryOpKind::Neq
             | BinaryOpKind::Lt | BinaryOpKind::Le
@@ -767,7 +761,6 @@ impl LlvmBackend {
         if is_cmp {
             let icmp_reg = self.fun.gen_reg();
             writeln!(out, "{}{} = {}", indent, icmp_reg, line).ok();
-            // 2026-07-19: Bool represented as i8 in this codebase.
             writeln!(out, "{}{} = zext i1 {} to i8", indent, v, icmp_reg).ok();
             Some(TypedRegister { name: v.to_string(), ty: Type::bool_() })
         } else {

@@ -21,21 +21,16 @@ use std::collections::HashMap;
 use std::fmt::Write;
 use std::sync::LazyLock;
 
-static TYPE_CONFIG: LazyLock<crate::config::TypeConfig> = LazyLock::new(|| {
-    crate::config::TypeConfig::load()
-});
-
-/// Derive LLVM type string from a ResolvedType using the global type config.
-/// 2026-07-17: Reads from normalizer-set llvm_type property first, falls back
-/// to deriving from CTD via derive_llvm_type.
+/// Derive LLVM type string from a ResolvedType.
+/// 2026-07-20: Reads from normalizer-set llvm_type property exclusively.
+/// Every properly normalized type has llvm_type stamped by the normalizer.
+/// This function should only be reached as a safety net — fallback is bysytes.
 fn rt_llvm_type(rt: &ResolvedType) -> String {
     if let Some(crate::ast::PropertyValue::String(s)) = rt.properties.get("llvm_type") {
         return s.clone();
     }
-    let ctd = rt.properties.get("ctd").and_then(|pv| {
-        if let crate::ast::PropertyValue::Identifier(s) = pv { Some(s.as_str()) } else { None }
-    });
-    crate::config::derive_llvm_type(ctd, rt.bytes, &*TYPE_CONFIG)
+    // Safety net: bysytes-based fallback
+    format!("i{}", rt.bytes * 8)
 }
 
 /// 2026-07-12: Check if a type matches a canonical name via property
