@@ -8,14 +8,40 @@
 
 ## Overview
 
-Brief has no built-in `as` cast operator. Type conversion is handled by the
-protocol system: every hashword category defines required `Cast` ops, and
-the compiler finds the shortest path through the protocol graph at compile
-time.
+Brief has no built-in `as` cast operator. Type conversion is triggered by
+the `Cast#()` compiler intrinsic (emitted when the programmer writes
+`(TargetType)expr`). The intrinsick runs a resolution pipeline that checks,
+in order:
 
-Types never "belong to" categories. They *interact with* categories by
-declaring `op Cast(#Category)` in their signature. The presence or absence
-of these declarations determines what conversions are available.
+1. `meld Source <-> Target` — structural equivalence
+2. `op Cast(Target)` on Source — direct type-to-type
+3. `CastTo(#Category)` → `CastFrom(#Category)` — protocol path
+4. Implicit `CastTo(#Bits)` + `CastFrom(#Bits)` — raw bytes (always)
+
+### User-declarable ops
+
+| Op | Direction | Purpose |
+|---|---|---|
+| `op CastTo(#String)` | Source **→** protocol | Produce protocol currency (e.g., emit `Char` from Latin-1) |
+| `op CastFrom(#String)` | Protocol **→** Source | Consume protocol currency (e.g., build ASCII from `Char`) |
+| `op Cast(ConcreteType)` | Source **→** Target | Direct conversion between two concrete types |
+
+`CastTo` and `CastFrom` are always oriented toward the `#Category` protocol.
+`Cast(ConcreteType)` is for direct paths between concrete types — no `To`/`From`
+needed because both sides are concrete and the direction is unambiguous.
+
+### Example
+
+```brief
+type Latin1String {
+    op CastTo(#String) = latin1_to_utf8(#L);      // Latin1 → UTF-8
+    op CastFrom(#String) = utf8_to_latin1(#L);     // UTF-8 → Latin1
+};
+
+type Posit32 {
+    op Cast(Int) = posit32_to_int(#L);             // Posit32 → Int (direct)
+};
+```
 
 ---
 
@@ -166,14 +192,26 @@ Output: sequence of Cast ops, or error
 
 ### Example: `#String<ascii> → #String<utf8>`
 
-If no direct `Cast(#String<utf8>)` exists, the path is:
-`#String<ascii> → #Bits → #String<utf8>`
+If no direct `op Cast(#String<utf8>)` exists, the path is:
+`Source.CastTo(#Bits)` → `Target.CastFrom(#Bits)`
 
-1. `#String<ascii> :> Cast(#Bits)` → raw bytes
-2. `#Bits :> Cast(#String<utf8>)` → construct UTF-8 from raw bytes
+1. `#String<ascii> :> CastTo(#Bits)` → raw bytes
+2. `#Bits :> CastFrom(#String<utf8>)` → construct UTF-8 from raw bytes
 
-The backend implements step 2 in its protocol handler. An optimizing
-backend that uses ASCII internally for both would skip both casts.
+The backend implements step 2 in its protocol handler. An optimizing backend
+that uses ASCII internally for both would skip both casts.
+
+### Example: `Latin1String → ASCIIString` via protocol
+
+`Source.CastTo(#String)` → `Target.CastFrom(#String)`
+
+1. `Latin1String :> CastTo(#String)` — decodes Latin-1 bytes to `Char` (Unicode scalar)
+2. `ASCIIString :> CastFrom(#String)` — encodes `Char` to ASCII bytes
+
+For the ASCII range (0–127): the `zext i8 to i32` (Latin-1 → Char) and
+`trunc i32 to i8` (Char → ASCII) are both inlined. LLVM's `InstCombine`
+eliminates them to a raw byte copy. The protocol overhead is zero for the
+common case.
 
 ---
 

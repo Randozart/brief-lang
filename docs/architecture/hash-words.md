@@ -38,6 +38,20 @@ fn cross(a: #String<utf8>, b: #String<ascii>) { ... };
 Each backend declares supported protocols in `config/targets.toml`. A function
 requiring a protocol the backend doesn't support produces a compile error.
 
+### `Cast#()` — Cast intrinsick
+
+`Cast#()` is a compiler internal intrinsick — not user-declarable. When the
+programmer writes `(TargetType)expr`, the compiler emits `Cast#(expr, TargetType)`,
+which runs the resolution pipeline:
+
+1. `meld Source <-> Target` — structural equivalence
+2. `op Cast(Target)` on Source — direct type-to-type
+3. `CastTo(#Category)` → `CastFrom(#Category)` — protocol path
+4. Implicit `CastTo(#Bits)` + `CastFrom(#Bits)` — raw bytes (always)
+
+User-declarable ops: `CastTo(#Category)`, `CastFrom(#Category)`, and
+`Cast(ConcreteType)`. See `docs/architecture/casting-protocol.md`.
+
 See `docs/architecture/casting-protocol.md` for the full protocol system.
 
 ## Current Words

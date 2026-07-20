@@ -111,14 +111,17 @@ default switching.
 
 ## Layer 5: Protocol currencies (the common language)
 
-Each hashword category has a universal currency for cross-type conversion:
+Each hashword category has a universal currency for cross-type conversion.
+Types declare `CastTo(#Category)` to produce the currency, and
+`CastFrom(#Category)` to consume it:
 
 | Category | Currency | Protocol ops required |
 |---|---|---|
-| `#String` | `Char` (Unicode scalar, i32) | `Extract(#Char)`, `InsertAt(#Char)`, `:> Size` |
-| `#Char` | `#Int` (Unicode scalar value) | `Cast(#Int)`, `Eq(#Char)`, `Lt(#Char)` |
-| `#Float` | `Float64` (IEEE 754 double) | `Cast(Float64)` |
-| `#Int` | `#Bits` (raw integer) | `Add(#Int)`, `Sub(#Int)`, `And(#Bits)`, `Cast(#Bits)` |
+| `#String` | `Char` (Unicode scalar, i32) | `CastTo(#Char)`, `CastFrom(#Char)`, `Extract(#Char)`, `InsertAt(#Char)`, `:> Size` |
+| `#Char` | `#Int` (Unicode scalar value) | `CastTo(#Int)`, `CastFrom(#Int)`, `Eq(#Char)`, `Lt(#Char)` |
+| `#Float` | `Float64` (IEEE 754 double) | `CastTo(Float64)`, `CastFrom(Float64)` |
+| `#Int` | `#Bits` (raw integer) | `CastTo(#Bits)`, `CastFrom(#Bits)`, `Add(#Int)`, `Sub(#Int)` |
+| `#Bits` | (itself) | (implicit) |
 
 A conversion function between two `#String` types:
 
@@ -147,32 +150,63 @@ InsertAt: trunc i32 to i8 → store i8 %dest, %idx  (unmade Char)
 
 ---
 
-## Layer 6: Cast resolution
+## Layer 6: Cast#() intrinsic and resolution
 
-When the compiler encounters `(TargetType)source`:
+`Cast#()` is a **compiler intrinsic** — not user-declarable. When the
+programmer writes `(TargetType)source`, the compiler internally emits
+`Cast#(source, TargetType)`, which runs the resolution pipeline.
+
+### User-declarable ops
+
+| Op | Direction | Example | When it fires |
+|---|---|---|---|
+| `op CastTo(#String)` | Source **→** Protocol | `Latin1 → UTF-8` | Source produces protocol currency |
+| `op CastFrom(#String)` | Protocol **→** Source | `UTF-8 → ASCII` | Target consumes protocol currency |
+| `op Cast(ConcreteType)` | Source **→** Concrete | `Posit32 → Int` | Direct type-to-type (no protocol) |
+
+`CastTo` and `CastFrom` are always oriented toward the `#Category` protocol:
+
+```brief
+type Latin1String {
+    op CastTo(#String) = latin1_to_utf8(#L);      // Latin1 → UTF-8 bytes
+    op CastFrom(#String) = utf8_to_latin1(#L);     // UTF-8 bytes → Latin1
+};
+```
+
+`Cast(ConcreteType)` is for direct paths between concrete types, bypassing
+protocols. No `To`/`From` needed because both sides are concrete:
+
+```brief
+type Posit32 {
+    op Cast(Int) = posit32_to_int(#L);             // Posit32 → Int
+    op Cast(Float) = posit32_to_float(#L);          // Posit32 → Float
+};
+```
+
+### Resolution pipeline
+
+`Cast#(source, Target)` runs:
 
 ```
 ┌─────────────────────────────────────────────────────┐
 │ 1. meld Source <-> Target exists?                   │
-│    └─ Apply declared operations (inline or fn call) │
-│       Meters → Kilometers: #L / 1000                │
-│       String → PyString: pyobj_from_utf8(#L)        │
+│    └─ Apply declared operations (inline or fn call)  │
 │       → Zero-cost. Validated by 5-layer cascade.    │
 ├─────────────────────────────────────────────────────┤
-│ 2. op Cast(Target) = fn(#L) declared on Source?     │
-│    └─ Explicit semantic conversion. Auto-inlined.   │
+│ 2. op Cast(Target) declared on Source?              │
+│    └─ Direct type-to-type conversion. Auto-inlined. │
 ├─────────────────────────────────────────────────────┤
-│ 3. Protocol path via protocol currencies?           │
+│ 3. Protocol path via CastTo/CastFrom?               │
 │    └─ Source.CastTo(#Category) →                   │
 │       Target.CastFrom(#Category)                    │
 │       Both inlined. LLVM optimizes the chain.        │
 │       Example: Latin1String → #String → ASCIIString │
 │       Latin1.CastTo decodes Latin-1 to Char         │
 │       ASCIIString.CastFrom encodes Char to ASCII    │
-│       For ASCII range (0-127): LLVM folds to no-op  │
 ├─────────────────────────────────────────────────────┤
-│ 4. Implicit Cast(#Bits) — raw bytes                 │
-│    └─ Always available. Same width → bitcast        │
+│ 4. Implicit CastTo(#Bits) + CastFrom(#Bits)         │
+│    └─ Raw bytes. Always available.                  │
+│       Same width → bitcast (no-op)                  │
 │       Different width → lshr/and/shl/or remap       │
 └─────────────────────────────────────────────────────┘
 ```
@@ -244,12 +278,12 @@ the result fits and the transformation is invertible.
 
 | Hashword | Protocol shape | Required ops | Universal currency |
 |---|---|---|---|
-| `#Int` | `i64` | Add, Sub, Mul, Div, Cast(#Bits) | `#Bits` |
-| `#Float` | IEEE 754 binary32/64 | Add, Sub, Mul, Div, Sqrt, Cast(Float64), Cast(#Bits) | `Float64` |
-| `#Bool` | `i1` (stored i8) | And, Or, Not, Cast(#Bits) | `#Bits` |
-| `#Char` | Unicode scalar (i32) | Cast(#Int), Eq, Lt | `#Int` |
-| `#String` | UTF-8 byte sequence | Extract(#Char), InsertAt(#Char), Concat(#String), :> Size, Cast(#Bits) | `Char` |
-| `#Bits` | Raw `iN` | And, Or, Xor, Not, Shl, Shr | (itself) |
+| `#Int` | `i64` | Add, Sub, Mul, Div, CastTo(#Bits), CastFrom(#Bits) | `#Bits` |
+| `#Float` | IEEE 754 binary32/64 | Add, Sub, Mul, Div, Sqrt, CastTo(Float64), CastFrom(Float64), CastTo(#Bits), CastFrom(#Bits) | `Float64` |
+| `#Bool` | `i1` (stored i8) | And, Or, Not, CastTo(#Bits), CastFrom(#Bits) | `#Bits` |
+| `#Char` | Unicode scalar (i32) | CastTo(#Int), CastFrom(#Int), Eq, Lt | `#Int` |
+| `#String` | UTF-8 byte sequence | CastTo(#Char), CastFrom(#Char), Extract(#Char), InsertAt(#Char), Concat(#String), :> Size, CastTo(#Bits), CastFrom(#Bits) | `Char` |
+| `#Bits` | Raw `iN` | And, Or, Xor, Not, Shl, Shr, CastTo(iN), CastFrom(iN) | (itself) |
 
 Every backend MUST be able to translate these protocol shapes. A backend that
 cannot represent `i64` decomposes it into smaller units but still provides
