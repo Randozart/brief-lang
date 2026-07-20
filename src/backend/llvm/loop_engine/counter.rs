@@ -419,6 +419,7 @@ impl LlvmBackend {
         self.emit_countable_load_bound(out, &bound_reg, total_idx, total_const_name, c0);
         writeln!(out, "  br label %.cmm_loop").ok();
         writeln!(out, ".cmm_loop:").ok();
+        // 2026-07-20: Intentionally hand-rolled — single GEP serves both load (next line) and store (cmm_body latch).
         let counter_gep = self.fun.next_reg_with_prefix("cmmg");
         writeln!(out, "  {} = getelementptr inbounds %State, ptr %state, i32 0, i32 {}",
             counter_gep, counter_idx).ok();
@@ -513,6 +514,8 @@ impl LlvmBackend {
                         // computes the new value, but it's never stored back to %State.
                         if self.fun.needs_state_stores_in_body {
                             if let Some(&idx) = self.ctx.field_index_map.get(n) {
+                                // 2026-07-20: Intentionally hand-rolled — needs adapt_to_i64
+                                // fallback when val_ty != field_ty (float→i64 store).
                                 // 2026-07-19: Store with native type for %State struct
                                 // compatibility. Phi backedge uses i64, but the state
                                 // store matches the field's LLVM type (float/double).

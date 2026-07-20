@@ -161,17 +161,50 @@ pub fn emit_statement(backend: &mut LlvmBackend, out: &mut String, stmt: &Statem
                 if backend.fun.callable_txn_result.is_some() {
                     // 2026-07-18: In a callable txn, term stores to %result and
                     // branches to post (convergence loop). The 'ret' is at done:.
-                    let ret_ty = backend.llvm_type(&reg.ty);
+                    let val_ty = backend.llvm_type(&reg.ty);
+                    let store_name = if val_ty != backend.fun.fn_ret_ty {
+                        if val_ty == "i64" && backend.fun.fn_ret_ty == "ptr" {
+                            let c = backend.fun.gen_reg();
+                            writeln!(out, "{}{} = inttoptr i64 {} to ptr", indent, c, reg.name).ok();
+                            c
+                        } else if val_ty == "ptr" && backend.fun.fn_ret_ty == "i64" {
+                            let c = backend.fun.gen_reg();
+                            writeln!(out, "{}{} = ptrtoint ptr {} to i64", indent, c, reg.name).ok();
+                            c
+                        } else {
+                            reg.name
+                        }
+                    } else {
+                        reg.name
+                    };
                     if let Some(ref result_slot) = backend.fun.callable_txn_result {
-                        writeln!(out, "{}store {} {}, ptr {}", indent, ret_ty, reg.name, result_slot).ok();
+                        writeln!(out, "{}store {} {}, ptr {}", indent, backend.fun.fn_ret_ty, store_name, result_slot).ok();
                     }
                     if let Some(ref post_label) = backend.fun.callable_txn_post_label {
                         writeln!(out, "{}br label %{}", indent, post_label).ok();
                     }
                     backend.fun.terminated = true;
                 } else if backend.fun.fn_ret_ty != "void" {
-                    let ret_ty = backend.llvm_type(&reg.ty);
-                    writeln!(out, "{}ret {} {}", indent, ret_ty, reg.name).ok();
+                    let val_ty = backend.llvm_type(&reg.ty);
+                    let final_name = if val_ty != backend.fun.fn_ret_ty {
+                        // 2026-07-20: Insert type conversion when the expression type doesn't
+                        // match the function's declared return type (e.g., SysCall# returns i64
+                        // but function returns ptr → need inttoptr).
+                        if val_ty == "i64" && backend.fun.fn_ret_ty == "ptr" {
+                            let c = backend.fun.gen_reg();
+                            writeln!(out, "{}{} = inttoptr i64 {} to ptr", indent, c, reg.name).ok();
+                            c
+                        } else if val_ty == "ptr" && backend.fun.fn_ret_ty == "i64" {
+                            let c = backend.fun.gen_reg();
+                            writeln!(out, "{}{} = ptrtoint ptr {} to i64", indent, c, reg.name).ok();
+                            c
+                        } else {
+                            reg.name
+                        }
+                    } else {
+                        reg.name
+                    };
+                    writeln!(out, "{}ret {} {}", indent, backend.fun.fn_ret_ty, final_name).ok();
                     backend.fun.terminated = true;
                 } else {
                     backend.fun.terminated = true;
@@ -184,8 +217,23 @@ pub fn emit_statement(backend: &mut LlvmBackend, out: &mut String, stmt: &Statem
         Statement::Return(val) => {
             if let Some(val) = val {
                 let reg = backend.emit_expr(out, val, indent);
-                let ret_ty = backend.llvm_type(&reg.ty);
-                writeln!(out, "{}ret {} {}", indent, ret_ty, reg.name).ok();
+                let val_ty = backend.llvm_type(&reg.ty);
+                let final_name = if val_ty != backend.fun.fn_ret_ty {
+                    if val_ty == "i64" && backend.fun.fn_ret_ty == "ptr" {
+                        let c = backend.fun.gen_reg();
+                        writeln!(out, "{}{} = inttoptr i64 {} to ptr", indent, c, reg.name).ok();
+                        c
+                    } else if val_ty == "ptr" && backend.fun.fn_ret_ty == "i64" {
+                        let c = backend.fun.gen_reg();
+                        writeln!(out, "{}{} = ptrtoint ptr {} to i64", indent, c, reg.name).ok();
+                        c
+                    } else {
+                        reg.name
+                    }
+                } else {
+                    reg.name
+                };
+                writeln!(out, "{}ret {} {}", indent, backend.fun.fn_ret_ty, final_name).ok();
                 backend.fun.terminated = true;
             }
             TypedRegister { name: backend.fun.gen_reg(), ty: Type::void() }

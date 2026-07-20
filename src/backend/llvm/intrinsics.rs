@@ -93,13 +93,13 @@ pub fn emit_intrinsic_call(
     let is_float_unary = matches!(op_name, "Sqrt" | "Sin" | "Cos" | "Fabs" | "Ceil" | "Floor");
     if is_float_unary {
         let llvm_name = op_name.to_lowercase();
-        let (float_suffix, float_ty) = match llvm_ty.as_str() {
-            "double" => ("f64", Type::float64()),
-            _ => ("f32", Type::float()),
+        let (float_suffix, float_llvm_ty, ret_ty) = match llvm_ty.as_str() {
+            "double" => ("f64", "double", Type::float64()),
+            _ => ("f32", "float", Type::float()),
         };
         writeln!(out, "{}{} = call {} @llvm.{}.{}({} {})",
-            indent, v, float_ty, llvm_name, float_suffix, float_ty, arg_regs[0].name).ok();
-        return BTypedRegister { name: v.to_string(), ty: float_ty };
+            indent, v, float_llvm_ty, llvm_name, float_suffix, float_llvm_ty, arg_regs[0].name).ok();
+        return BTypedRegister { name: v.to_string(), ty: ret_ty };
     }
 
     // 2026-07-20: Simple hardcoded template dispatch for standard ops.

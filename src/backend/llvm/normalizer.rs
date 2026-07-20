@@ -50,6 +50,13 @@ pub fn normalize(items: &mut Vec<TopLevel>, universe: &mut TypeUniverse) -> Resu
         let llvm_ty = if let Some(llvm_val) = explicit_llvm {
             validate_explicit_llvm(llvm_val)?;
             llvm_val.to_string()
+        } else if rt.name == "Float" {
+            // 2026-07-20: Float is a primitive 32-bit IEEE 754 type, not i32.
+            // Must be mapped before the bytes-based fallback (bytes=4 → "i32").
+            "float".to_string()
+        } else if rt.name == "Float64" {
+            // 2026-07-20: Float64 is a primitive 64-bit IEEE 754 type, not i64.
+            "double".to_string()
         } else if rt.bytes == 2 {
             // 2026-07-20: 2-byte types are ambiguous between half (IEEE 754),
             // bfloat (Google Brain), and i16 (integer). The disamb hint

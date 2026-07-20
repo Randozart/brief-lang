@@ -111,8 +111,23 @@ impl LlvmBackend {
                     // 2026-07-19: Load with native type from field_types (e.g. "float",
                     // "double", "i64"). No unboxing needed — LLVM type matches %State
                     // struct layout. Phi registers remain i64 (handled above).
+                    // 2026-07-20: State fields are always i64 in %State. For float-typed
+                    // fields, trunc+bitcast i64 → float so downstream arithmetic gets
+                    // correct types (matches the phi path at lines 100-104).
                     let (loaded, brief_ty) = self.emit_state_load_i64_by_idx(out, indent, idx);
-                    TypedRegister { name: loaded, ty: brief_ty }
+                    if brief_ty == Type::float64() {
+                        let dbl = self.fun.gen_reg();
+                        writeln!(out, "{}{} = bitcast i64 {} to double", indent, dbl, loaded).ok();
+                        TypedRegister { name: dbl, ty: Type::float64() }
+                    } else if brief_ty == Type::float() {
+                        let tr = self.fun.gen_reg();
+                        let fl = self.fun.gen_reg();
+                        writeln!(out, "{}{} = trunc i64 {} to i32", indent, tr, loaded).ok();
+                        writeln!(out, "{}{} = bitcast i32 {} to float", indent, fl, tr).ok();
+                        TypedRegister { name: fl, ty: Type::float() }
+                    } else {
+                        TypedRegister { name: loaded, ty: brief_ty }
+                    }
                 } else if let Some((ty, _)) = self.ctx.constants.get(name) {
                     // 2026-07-17: Load global constants with the correct LLVM
                     // type. Float constants are declared as `constant float` in
@@ -748,7 +763,10 @@ impl LlvmBackend {
             BinaryOpKind::Eq | BinaryOpKind::Neq
             | BinaryOpKind::Lt | BinaryOpKind::Le
             | BinaryOpKind::Gt | BinaryOpKind::Ge);
-        let line = tmpl.replace("%a", &l.name).replace("%b", &r.name);
+        // 2026-07-20: Templates include "%v = " prefix — strip it since the
+        // caller writes "{v} = {line}" (avoiding double "=").
+        let bare = tmpl.replace("%v = ", "");
+        let line = bare.replace("%a", &l.name).replace("%b", &r.name);
         if is_cmp {
             let icmp_reg = self.fun.gen_reg();
             writeln!(out, "{}{} = {}", indent, icmp_reg, line).ok();

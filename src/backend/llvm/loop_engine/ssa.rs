@@ -458,6 +458,7 @@ impl LlvmBackend {
         }
         writeln!(out, "  br label %.fm_loop").ok();
         writeln!(out, ".fm_loop:").ok();
+        // 2026-07-20: Intentionally hand-rolled — single GEP serves both load (above) and store (fm_loop latch).
         let c_gep = self.fun.next_reg_with_prefix("fmg");
         writeln!(out, "  {} = getelementptr inbounds %State, ptr %state, i32 0, i32 {}",
             c_gep, counter_idx).ok();

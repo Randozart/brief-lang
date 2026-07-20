@@ -403,6 +403,8 @@ impl LlvmBackend {
         // Store epfd in epfd_field slot
         let sge = format!("%sge{}", self.fun.txn_counter); self.fun.txn_counter += 1;
         if let Some(epfd_idx) = self.ctx.field_index_map.get("__trg_epfd") {
+            // 2026-07-20: Intentionally hand-rolled — stores i32 (not i64); centralized
+            // emit_state_store_i64_by_idx only handles i64 stores.
             writeln!(out, "  {} = getelementptr inbounds %State, ptr %state, i32 0, i32 {}", sge, epfd_idx).ok();
             writeln!(out, "  store i32 {}, ptr {}, align 4", epfd, sge).ok();
         }
@@ -899,6 +901,8 @@ impl LlvmBackend {
             .collect();
         fields.sort_by_key(|&(_, idx, _)| idx);
         for (name, idx, ty) in fields {
+            // 2026-07-20: Intentionally hand-rolled — register name %ip_{idx} is referenced by
+            // emit_field_init_value below which passes %ip_{idx} to ringbuf init codegen.
             let p = format!("%ip_{}", idx);
             writeln!(out, "  {} = getelementptr inbounds %State, ptr %state, i32 0, i32 {}", p, idx).ok();
             let init_clone = self.ctx.field_initializers.get(&name).and_then(|e| e.clone());
@@ -984,6 +988,7 @@ impl LlvmBackend {
             sorted_targets.sort();
             for _target_name in &sorted_targets {
                 let &(cache_idx, valid_idx) = &targets[*_target_name];
+                // 2026-07-20: Intentionally hand-rolled — uses parameterized state_ptr (not %state).
                 let cp = format!("%icp_{}", cache_idx);
                 writeln!(out, "{}{} = getelementptr inbounds %State, ptr {}, i32 0, i32 {}", indent, cp, state_ptr, cache_idx).ok();
                 writeln!(out, "{}store i64 0, ptr {}, align {}", indent, cp, self.align_of("i64")).ok();

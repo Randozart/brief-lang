@@ -86,6 +86,8 @@ impl LlvmBackend {
         let Some(&idx) = self.ctx.field_index_map.get(name) else {
             return self.emit_expr(out, &Expr::Identifier(name.to_string()), indent).name;
         };
+        // 2026-07-20: Intentionally hand-rolled — multi-type load with zext/ptrtoint normalization
+        // to i64. The centralized emit_state_load_i64_by_idx assumes i64-only field type.
         let p = self.fun.next_reg_with_prefix("gep_exit");
         writeln!(out, "{}{} = getelementptr inbounds %State, ptr %state, i32 0, i32 {}",
             indent, p, idx).ok();
@@ -345,6 +347,9 @@ pub(crate) fn emit_main(&mut self, out: &mut String, has_wake_triggers: bool) {
                 continue;
             }
             let ft = &self.ctx.field_types[*idx];
+            // 2026-07-20: Intentionally hand-rolled — uses parameterized state_ptr (not %state),
+            // and multi-type load (float/i8/double/i64) with zext normalization to i64.
+            // The centralized emit_state_load_i64_by_idx assumes %state and i64-only.
             let gep = self.fun.next_reg_with_prefix("plg");
             writeln!(out, "  {} = getelementptr inbounds %State, ptr {}, i32 0, i32 {}",
                 gep, state_ptr, idx).ok();

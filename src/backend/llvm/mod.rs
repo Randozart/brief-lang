@@ -902,18 +902,14 @@ impl LlvmBackend {
                 return;
             }
         }
-        // 2026-07-19: Use native LLVM type from Brief type metadata.
-        // Float32 → "float", Float64 → "double", Int → "i64", Bool → "i8".
-        // Ptr<T> stays as "i64" — existing codegen paths load it and use
-        // inttoptr i64 to ptr. Changing to "ptr" would break those paths.
-        // Cell state types already use native types (mod.rs:3546).
-        // LLVM verifier catches any codegen path that mismatches the struct.
-        let push_ty = if matches!(ty, Type::Ptr(_)) {
-            "i64".to_string()
-        } else {
-            self.llvm_type(ty)
-        };
-        self.ctx.field_types.push(push_ty);
+        // 2026-07-20: ALL state fields are stored as i64 in %State, regardless
+        // of their Brief type (Float, Float64, Ptr, etc.). The loop engine phi
+        // nodes and codegen paths assume i64 (phi i64, load i64, store i64,
+        // add i64, icmp i64). Native float types in %State cause type mismatches
+        // in phi nodes and SROA. The adapt_to_i64 / ensure_typed_value functions
+        // handle conversion between i64 and the field's natural type.
+        // Ptr<T> stays as i64 — existing codegen loads it and uses inttoptr.
+        self.ctx.field_types.push("i64".to_string());
         self.ctx.field_brief_types.push(ty.clone());
     }
 
@@ -1782,13 +1778,18 @@ impl LlvmBackend {
                         }
                     }
                 }
-                // 2026-07-14: Register TypeDef slots as struct types so
-                // test_type_with_slots_populates_struct_types passes.
+                // 2026-07-20: Only register TypeDefs with actual data slots.
+                // Primitive types like `type Int <: Bits { op Add(#Int); ... }` have
+                // empty slots (operators and metadata only) — they're NOT struct types.
+                // Struct-like types like `type RingBuffer<T> { data: Ptr<T>; head: Int; }`
+                // have named data slots and need LLVM struct type declarations.
                 TopLevel::TypeDef(td) => {
-                    let fields: Vec<(String, Type)> = td.body.slots.iter()
-                        .map(|s| (s.name.clone(), s.ty.clone()))
-                        .collect();
-                    self.ctx.struct_types.insert(td.name.clone(), fields);
+                    if !td.body.slots.is_empty() {
+                        let fields: Vec<(String, Type)> = td.body.slots.iter()
+                            .map(|s| (s.name.clone(), s.ty.clone()))
+                            .collect();
+                        self.ctx.struct_types.insert(td.name.clone(), fields);
+                    }
                 }
                 TopLevel::Enum(e) => {
                     self.ctx.enum_types.insert(e.name.clone(), e.clone());
