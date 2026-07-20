@@ -1011,11 +1011,13 @@ impl<'a> Parser<'a> {
                 if self.eat_identifier("pre") {
                     self.eat(&Token::Colon);
                     let val = self.expect_string()?;
+                    self.validate_discriminator(&val)?;
                     pre = Some(val);
                 }
                 if self.eat_identifier("suf") {
                     self.eat(&Token::Colon);
                     let val = self.expect_string()?;
+                    self.validate_discriminator(&val)?;
                     suf = Some(val);
                 }
                 if !self.eat(&Token::Comma) { break; }
@@ -1039,6 +1041,25 @@ impl<'a> Parser<'a> {
             impl_args: Some(impl_args),
             impl_name: String::new(), span: None,
         });
+        Ok(())
+    }
+
+    /// 2026-07-20: Validate a pre:/suf: discriminator string.
+    /// Rejects symbols that conflict with language operators or syntax.
+    fn validate_discriminator(&self, val: &str) -> Result<(), crate::errors::SyntaxError> {
+        const FORBIDDEN: &[&str] = &[
+            "#", "!", "@", "&", "$", "(", ")", "[", "]", "<", ">",
+            "*", ",", ";", ":", "=", "~", "%", "{", "}", "\"", "'",
+            "|", "\\",
+        ];
+        for sym in FORBIDDEN {
+            if val.contains(sym) {
+                return Err(crate::errors::SyntaxError::InvalidExpression {
+                    reason: format!("invalid discriminator '{}': symbol '{}' is reserved by the language", val, sym),
+                    span: crate::errors::Span::new(0, 0, 0, 0),
+                });
+            }
+        }
         Ok(())
     }
 
