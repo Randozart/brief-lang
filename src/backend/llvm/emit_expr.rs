@@ -247,18 +247,31 @@ impl LlvmBackend {
 
             // ── BinaryOp ─────────────────────────────────────────────
             Expr::BinaryOp(kind, lhs, rhs) => {
-                // 2026-07-17: Mod with small constant divisor — trunc to i32
-                // so LLVM uses the cheaper imulq-based div magic (1 uop, 3c)
-                // instead of the full 128-bit mulq (3 uops, 4c). Without this,
-                // urem i64 forces LLVM to use mulq for the 64-bit magic constant
-                // division, adding ~2 uops per iteration.
-                // 2026-07-19: Removed i32 trunc optimization for Mod. The
-                // truncation produces wrong results when the dividend exceeds
-                // 32 bits (e.g., reg & (reg - 1) for INT64_MAX). The i64
-                // remainder (srem) is always correct and LLVM handles it.
-                let l = self.emit_expr(out, lhs, indent);
-                let r = self.emit_expr(out, rhs, indent);
-                self.emit_binary_op(out, v, kind, &l, &r, indent)
+                // 2026-07-21: Mod with phi-tracked counter dividend — trunc i64
+                // to i32 so LLVM uses imul $magic (1 uop) instead of mul %reg
+                // (3 uops, 128-bit) for modulo-by-constant optimization. The
+                // counter is bounded by its loop precondition (< 2^31), so the
+                // truncation is safe. Non-counter values skip this optimization.
+                // Check BEFORE emit_expr so we can inspect the AST (field name).
+                if matches!(kind, crate::ast::BinaryOpKind::Mod)
+                    && matches!(lhs.as_ref(), Expr::Identifier(name)
+                        if self.fun.phi_field_regs.contains_key(name))
+                {
+                    let l = self.emit_expr(out, lhs, indent);
+                    let r = self.emit_expr(out, rhs, indent);
+                    let tr_l = self.fun.gen_reg();
+                    let tr_r = self.fun.gen_reg();
+                    writeln!(out, "{}{} = trunc i64 {} to i32", indent, tr_l, l.name).ok();
+                    writeln!(out, "{}{} = trunc i64 {} to i32", indent, tr_r, r.name).ok();
+                    let ur = self.fun.gen_reg();
+                    writeln!(out, "{}{} = urem i32 {}, {}", indent, ur, tr_l, tr_r).ok();
+                    writeln!(out, "{}{} = zext i32 {} to i64", indent, v, ur).ok();
+                    TypedRegister { name: v.to_string(), ty: Type::int() }
+                } else {
+                    let l = self.emit_expr(out, lhs, indent);
+                    let r = self.emit_expr(out, rhs, indent);
+                    self.emit_binary_op(out, v, kind, &l, &r, indent)
+                }
             }
 
             // ── UnaryOp ──────────────────────────────────────────────

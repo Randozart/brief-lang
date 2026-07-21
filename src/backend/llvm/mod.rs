@@ -910,11 +910,10 @@ impl LlvmBackend {
             }
         }
         // 2026-07-20: ALL state fields are stored as i64 in %State, regardless
-        // of their Brief type (Float, Float64, Ptr, etc.). The loop engine phi
-        // nodes and codegen paths assume i64 (phi i64, load i64, store i64,
-        // add i64, icmp i64). Native float types in %State cause type mismatches
-        // in phi nodes and SROA. The adapt_to_i64 / ensure_typed_value functions
-        // handle conversion between i64 and the field's natural type.
+        // of their Brief type. The loop engine phi nodes assume i64 — changing
+        // to native float types requires coordinated changes to phi emission,
+        // backedge identity, and adapt_to_i64. TODO for a future native float
+        // optimization pass.
         // Ptr<T> stays as i64 — existing codegen loads it and uses inttoptr.
         self.ctx.field_types.push("i64".to_string());
         self.ctx.field_brief_types.push(ty.clone());

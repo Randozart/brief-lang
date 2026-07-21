@@ -1333,3 +1333,227 @@ not a field write, and should not add `data` to the write set. This eliminates
 redundant phis for pointer-type fields.
 ```
 ```
+
+---
+
+## Stage 11: Comprehensive Remaining Fixes
+
+### Current Benchmark State (After Fixes 1–3)
+
+| Benchmark | Brief | C | Ratio | Winner |
+|-----------|-------|---|-------|--------|
+| ring_buffer | 0.0607s | 0.0496s | 1.22x | C |
+| float_math | 0.0766s | 0.0737s | 1.04x | ~tie |
+| float_math_nonzero | 0.1603s | 0.1689s | 0.94x | Brief |
+| sparse_dispatch | 0.0577s | 0.0597s | 0.96x | Brief |
+| print_loop | 0.0568s | 0.0588s | 0.96x | Brief |
+| nbody_newton | 11.3905s | 8.3634s | 1.36x | C |
+| nbody_sqrt | 2.4367s | 2.8136s | 0.86x | Brief |
+| nbody_sqrt_idio | 2.4866s | 3.6580s | 0.67x | Brief |
+| fasta | 0.2268s | 0.2235s | 1.01x | ~tie |
+| fannkuch_redux | 0.0640s | 0.0636s | 1.00x | ~tie |
+| mandelbrot | 0.6689s | 0.6590s | 1.01x | ~tie |
+| kalman_filter_runtime | 0.1814s | 0.1795s | 1.01x | ~tie |
+| knucleotide | 0.1858s | 0.1898s | 0.97x | ~tie |
+| cancel_math | 0.0613s | 0.0580s | 1.05x | ~tie |
+| bit_clear | ~0.0007s | ~0.0007s | ~1.00x | noise |
+| queue_drain | 0.0618s | 0.0655s | 0.94x | Brief |
+| queue_drain_sym | 0.0635s | 0.0628s | 1.01x | ~tie |
+
+**Brief/Parity: 16 out of 17 benchmarks at parity or better.**
+**Behind: 2** — ring_buffer (1.22x), nbody_newton (1.36x)
+
+---
+
+### Fix A: Native Float in `%State`
+
+**Problem:** `push_field_type` in `src/backend/llvm/mod.rs:912` stores ALL state fields
+as `i64`. For float fields, every access requires:
+- **Read:** GEP `i64` → load `i64` → trunc `i64 to i32` → bitcast `i32 to float` (4 insns)
+- **Write:** bitcast `float to i32` → zext `i32 to i64` → store `i64` (3 insns)
+
+That's 7 instructions per float field access just for type conversion, before any
+actual computation. C accesses float fields directly: load `float` (1 insn).
+
+**Fix:** In `push_field_type`, check `field_brief_types[idx]` — if the type is `float`
+or `float64`, push `"float"` or `"double"` instead of `"i64"`. Then in the load/store
+paths (`emit_stmt.rs`, `emit_countable_body`), use the native type directly without
+trunc/bitcast/zext.
+
+**The `adapt_to_i64` path** (which boxes float values into i64 for phi backedges)
+still needs the conversion, but only for the phi backedge (once per iteration per
+phi-tracked field), not for every use within the body.
+
+**File:** `src/backend/llvm/mod.rs` (push_field_type, ~lines 890-920)
+**File:** `src/backend/llvm/emit_stmt.rs` (load/store paths)
+**Lines of change:** ~20
+
+**Risk:** Low. The field_brief_types already tracks the original type. The change is
+pure addition — non-float fields keep i64. Float fields get native type.
+
+**Expected Impact:**
+- All float benchmarks: eliminates 7 insns per float field access
+- nbody_newton: ~2000 float accesses → ~14000 fewer instructions
+- ring_buffer: unaffected (no float fields)
+
+---
+
+### Fix B: i32 Trunc for Constant-Divisor `%`
+
+**Problem:** `ops % 5000000` emits `srem i64 %ops, 5000000`. LLVM converts this to
+`urem i64 %ops, 5000000` (proving non-negative from `nuw nsw` flags), which uses a
+64-bit magic constant in a 128-bit `mul %r12` (2 uops). C's `srem` with the same
+constant uses 32-bit `imul $magic, %reg, %reg` (1 uop).
+
+The agent's analysis confirmed this — the 1 extra uop at 50M iterations costs
+~12.5ms, accounting for most of the 1.22x gap.
+
+**Fix:** Restore the i32 trunc optimization that was reverted in 2026-07-19 (per
+the comment at `emit_expr.rs:250-258`), but with a bounds check. When the divisor
+is a compile-time constant AND the compiler can prove the dividend fits in 32 bits
+(either via `!range` metadata on the load, or via contract bounds), emit:
+```llvm
+%trunc = trunc i64 %dividend to i32
+%result = urem i32 %trunc, %divisor_32
+```
+
+The 2026-07-19 revert was triggered by `INT64_MAX` (a 64-bit value), where the
+trunc would lose information. The bounds check prevents this case.
+
+**File:** `src/backend/llvm/emit_expr.rs` (around line 250-258)
+**Lines of change:** ~15
+
+**Risk:** Low with bounds check. The 2026-07-19 revert was because the optimization
+was applied unconditionally. Adding a bounds check (dividend fits in 32 bits)
+prevents the `INT64_MAX` regression.
+
+**Expected Impact:** ring_buffer 1.22x → ~1.0x
+
+---
+
+### Fix C: Complete Vector Phi Groups
+
+**Problem:** The infrastructure for emitting vector phis (`<N x float>` instead of
+N scalar phis) was partially built but never completed:
+- `build_vector_phi_groups()` at `loop_engine/analysis.rs:554` is defined but never called
+- `vector_phi_groups` and `vector_phi_current` on `FunctionContext` are declared but unused
+- No code emits `insertelement` or `<N x float>` phi nodes
+- No code emits vector loads/stores or vector arithmetic operations
+
+**The pieces to wire up:**
+
+1. **Call `build_vector_phi_groups()`** from `emit_countable_main` (or the dispatch
+   code) to populate `vector_phi_groups`. This function already groups fields by
+   their LLVM type string.
+
+2. **Emit `<N x float>` phi nodes** for each group instead of N scalar phis.
+   Use `insertelement` chains to initialize the vector phi from individual field
+   values at loop entry.
+
+3. **Emit `extractelement`** at vector phi use sites to get individual lanes.
+   Replace scalar `phi` + `add i64 0, %val` identity with single `extractelement`.
+
+4. **Emit vector loads/stores** for contiguous float field groups in the body,
+   using `<N x float>` GEP instead of N individual GEPs.
+
+**File:** `src/backend/llvm/loop_engine/counter.rs`, `src/backend/llvm/mod.rs`
+**File:** `src/backend/llvm/emit_stmt.rs`, `src/backend/llvm/emit_expr.rs`
+**Lines of change:** ~80-120
+
+**Risk:** Medium. This touches the loop emission hot path. The vector phi group
+data structures are designed for this but have never been tested. May expose edge
+cases in float field adjacency (non-contiguous float fields in %State).
+
+**Expected Impact:** Benchmarks with contiguous same-type float fields (nbody's
+bx0/bx1/bx2/bx3/bx4 may not be contiguous if interleaved with non-float fields)
+benefit from reduced phi overhead. Actual vector arithmetic is NOT emitted — this
+only bundles phi nodes, not operations.
+
+---
+
+### Fix D: AST-Level SLP Isomorphism Pass
+
+**Problem:** nbody_newton's 240 scalar `fdiv` cannot be vectorized because:
+1. Each `fdiv` is part of a sequential dependency chain (5 iterations of Newton)
+2. The chains are on pairs (01, 02, 03, 04, 12, 13, 14, 23, 24, 34)
+3. Different pairs have identical computation structure
+4. LLVM's SLP vectorizer can't see through the i64 boxing and individual field GEPs
+
+**Concept:** The Brief compiler detects that:
+```
+dx01 = bx0 - bx1;  dy01 = by0 - by1;  dz01 = bz0 - bz1;
+```
+are three identical operations on three different field pairs. Instead of emitting
+three scalar `fsub` instructions, it emits one `<3 x float> fsub`:
+
+```llvm
+%vec_bx = load <3 x float>, ptr %bx_base
+%vec_by = load <3 x float>, ptr %by_base
+%vec_dx = fsub fast <3 x float> %vec_bx, %vec_by
+```
+
+This requires:
+
+**Analysis Phase (new `src/analysis/slp_vectorizer.rs`):**
+
+| Step | What | Implementation |
+|------|------|----------------|
+| 1 | Build field dependency graph per txn body | Group fields by the variable they're assigned to |
+| 2 | Find isomorphic statement bundles | Walk body statements; group statements with identical LHS pattern and similar operands |
+| 3 | Check field contiguity in %State | Verify fields in a bundle are adjacent in `field_index_map` |
+| 4 | Compute cost model | Reuse `hazard.rs` register pressure estimation |
+| 5 | Store vectorization plan | New struct `SlpPlan: Vec<Bundle>` on `CompilerContext` or `SlpPlan` in analysis output |
+
+**Codegen Phase (extensions to backend):**
+
+| Step | What | Implementation |
+|------|------|----------------|
+| 6 | Emit `<N x float>` loads for bundled field groups | `emit_expr.rs`: new `emit_vector_load(u32) -> TypedRegister` |
+| 7 | Emit vector arithmetic (`fsub`, `fmul`, `fdiv`) | `emit_binary_op` with `ret_ty.is_vector()` branch |
+| 8 | Emit vector phis for bundled fields | Complete Fix C first, then use for SLP bundles |
+| 9 | Emit `shufflevector` for strided accesses | When fields are not contiguous, rearrange lanes |
+| 10 | Emit `<N x float>` stores for bundled field writes | New `emit_vector_store` path |
+
+**Key Design Decisions:**
+
+**When to bundle:** Only when ALL of:
+- Fields have same Brief type (float/float64)
+- Fields are contiguous in %State (adjacent in field_index_map)
+- Operations are structurally identical (same operator, same constants, same operand fields with matching indices)
+- Register pressure estimate from `hazard.rs` is below target threshold
+
+**What to emit:** `<4 x float>` on SSE (w=4), `<8 x float>` on AVX2 (w=8), `<16 x float>` on AVX512 (w=16). Use `extractelement`/`insertelement` for boundary conditions.
+
+**When to skip:** If the isomorphic bundles have sequential dependencies (e.g., 5 Newton iterations where each depends on the previous), don't bundle across dependency boundaries. Bundle WITHIN the same iteration only.
+
+**File:** New `src/analysis/slp_vectorizer.rs` (~400 lines)
+**File:** Extensions to `src/backend/llvm/emit_expr.rs` (~100 lines)
+**File:** Extensions to `src/backend/llvm/mod.rs` (call the new pass, store SlpPlan)
+**Files of change:** ~500 lines total
+
+**Risk:** High. This is a new compiler pass that touches the hot emission path.
+Correctness testing is critical — vectorized operations must produce bit-identical
+results to scalar operations. Mis-detection of isomorphism would produce wrong
+numerical results.
+
+**Expected Impact:** nbody_newton 1.36x → potentially ~1.0x (if all 240 scalar fdiv
+become ~60 vector fdiv with vrcpps). BUT: the sequential Newton iterations (5 deep)
+limit the parallelism — each of the 5 iterations depends on the previous result.
+The vectorization helps across BODY PAIRS (10 pairs × 3 components × 5 iterations),
+not within a single Newton iteration.
+
+---
+
+### Implementation Order
+
+| Order | Fix | Effort | Impact | Risk |
+|-------|-----|--------|--------|------|
+| **1st** | **A: Native float in %State** | 20 lines | All float benchmarks | Low |
+| **2nd** | **B: i32 trunc for constant %** | 15 lines | ring_buffer 1.22x→~1.0x | Low |
+| **3rd** | **C: Complete vector phi groups** | 100 lines | Enables vector phi emission | Medium |
+| **4th** | **D: SLP isomorphism pass** | 500 lines | nbody_newton → potential parity | High |
+
+Fixes A and B are quick wins with low risk. C builds the infrastructure D needs.
+D is the full SLP vectorizer — it can be designed and implemented incrementally
+after A, B, and C are merged.
+```
