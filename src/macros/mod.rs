@@ -5,6 +5,7 @@
 pub mod actions;
 pub mod pattern_live;
 pub mod selection;
+pub mod text_ops;
 
 pub use pattern_live::*;
 pub use selection::*;
