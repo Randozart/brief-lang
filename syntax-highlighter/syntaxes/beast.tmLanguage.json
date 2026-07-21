@@ -1,0 +1,94 @@
+{
+  "$schema": "https://raw.githubusercontent.com/martinring/tmlanguage/master/tmlanguage.json",
+  "name": "BEAST",
+  "fileTypes": ["beast"],
+  "firstLineMatch": "^\\(",
+  "patterns": [
+    { "include": "#comments" },
+    { "include": "#strings" },
+    { "include": "#numbers" },
+    { "include": "#booleans" },
+    { "include": "#wildcards" },
+    { "include": "#structural-tags" },
+    { "include": "#expression-tags" },
+    { "include": "#statement-tags" },
+    { "include": "#attribute-tags" },
+    { "include": "#punctuation" },
+    { "include": "#atoms" }
+  ],
+  "repository": {
+    "comments": {
+      "patterns": [{
+        "name": "comment.line.semicolon.beast",
+        "match": ";.*$"
+      }]
+    },
+    "strings": {
+      "patterns": [{
+        "name": "string.quoted.double.beast",
+        "begin": "\"",
+        "end": "\"",
+        "patterns": [{
+          "name": "constant.character.escape.beast",
+          "match": "\\\\."
+        }]
+      }]
+    },
+    "numbers": {
+      "patterns": [
+        { "name": "constant.numeric.float.beast", "match": "\\b[0-9]+\\.[0-9]+([eE][+-]?[0-9]+)?\\b" },
+        { "name": "constant.numeric.integer.beast", "match": "\\b0x[0-9a-fA-F]+\\b|\\b[0-9]+\\b" }
+      ]
+    },
+    "booleans": {
+      "patterns": [
+        { "name": "constant.language.true.beast", "match": "\\btrue\\b" },
+        { "name": "constant.language.false.beast", "match": "\\bfalse\\b" }
+      ]
+    },
+    "wildcards": {
+      "patterns": [
+        { "name": "variable.parameter.beast", "match": "\\?\\?\\*" },
+        { "name": "variable.parameter.beast", "match": "\\?\\*" },
+        { "name": "variable.parameter.beast", "match": "\\?[a-zA-Z_][a-zA-Z0-9_]*" }
+      ]
+    },
+    "structural-tags": {
+      "patterns": [{
+        "name": "entity.name.type.beast",
+        "match": "\\b(defn|txn|universe|typedef|contract|state|trigger|constant|struct|enum|cell|meld|import|export|signature|link|resource|frgn|codec|svg|cfg)\\b"
+      }]
+    },
+    "expression-tags": {
+      "patterns": [{
+        "name": "support.function.beast",
+        "match": "\\b(call|ident|binop|unop|field|index|cast|deref|addrof|is|decimal|float|bool|quoted|tuple|block|if|match|lambda|within)\\b"
+      }]
+    },
+    "statement-tags": {
+      "patterns": [{
+        "name": "keyword.control.beast",
+        "match": "\\b(assign|let|term|term!|return|when|guarded|block|foreach|sync|escape|asm|trg|metadata)\\b"
+      }]
+    },
+    "attribute-tags": {
+      "patterns": [{
+        "name": "entity.other.attribute-name.beast",
+        "match": "\\b(entry|pre|post|bytes|alignment|properties|params|body|reactive|watchdog|is_entry|mmio)\\b"
+      }]
+    },
+    "punctuation": {
+      "patterns": [
+        { "name": "punctuation.bracket.round.beast", "match": "[()]" },
+        { "name": "punctuation.terminator.beast", "match": ";" }
+      ]
+    },
+    "atoms": {
+      "patterns": [{
+        "name": "string.unquoted.beast",
+        "match": "\\b[a-zA-Z_][a-zA-Z0-9_.#]*\\b"
+      }]
+    }
+  },
+  "scopeName": "source.beast"
+}

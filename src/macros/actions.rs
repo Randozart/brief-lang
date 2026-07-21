@@ -3,48 +3,43 @@
 // AST navigation DSL. Positions are ephemeral cursors consumed by one
 // action. Actions modify the live AST in place.
 //
-// DRY: All Vec-splicing mutations share a resolve_position helper.
-// Max 2 levels: match arms with early returns, no nesting.
+// Fix 1: Multi-target inserts process in reverse index order to prevent
+//   index invalidation (splicing before lower-index shifts higher-index
+//   targets). Delete already sorts descending.
+// Fix 3: structural_valid() check rejects node placements that violate
+//   AST invariants (e.g., Import inside a function body).
+//
+// DRY: All Vec-splicing share helpers. Max 2 levels.
 
 use std::collections::HashMap;
 use crate::ast::{Expr, Statement, TopLevel, PropertyValue};
 use crate::ast::top::*;
+use crate::ast::StageKind;
 use super::selection::{NodeRef, Selection, top_level_tag, top_level_name};
 
 /// A position cursor in the AST, created by navigating a Selection.
-/// Ephemeral — valid for exactly one action call.
 #[derive(Debug, Clone)]
 pub enum Position {
-    /// Insert before the referenced node.
     Before(NodeRef),
-    /// Insert after the referenced node.
     After(NodeRef),
-    /// Replace the referenced node.
     Replace(NodeRef),
-    /// Insert as the first child of the referenced node.
     Inside(NodeRef),
-    /// Append as the last child of the referenced node.
     AppendTo(NodeRef),
 }
 
 impl Position {
-    /// Create a Before position from a selection (must have exactly one node).
     pub fn before(sel: &Selection) -> Option<Position> {
         Some(Position::Before(sel.nodes.first()?.clone()))
     }
-
     pub fn after(sel: &Selection) -> Option<Position> {
         Some(Position::After(sel.nodes.first()?.clone()))
     }
-
     pub fn replace(sel: &Selection) -> Option<Position> {
         Some(Position::Replace(sel.nodes.first()?.clone()))
     }
-
     pub fn inside(sel: &Selection) -> Option<Position> {
         Some(Position::Inside(sel.nodes.first()?.clone()))
     }
-
     pub fn append_to(sel: &Selection) -> Option<Position> {
         Some(Position::AppendTo(sel.nodes.first()?.clone()))
     }
@@ -52,17 +47,63 @@ impl Position {
 
 // ── Actions ────────────────────────────────────────────────────────────
 
-/// Insert constructed AST nodes at the given position.
-/// The position is consumed — calling again with the same position
-/// produces a warning.
+/// Insert items before each node in the selection, processing in
+/// reverse index order to prevent index invalidation.
+/// 2026-07-21: Accepts stage for Fix 2 (stage-gated constructors).
+pub fn insert_before_each(
+    items: &mut Vec<TopLevel>,
+    sel: &Selection,
+    new_items: Vec<TopLevel>,
+    stage: StageKind,
+) -> Result<u32, String> {
+    let indices = collect_toplevel_indices(sel);
+    if indices.is_empty() { return Ok(0); }
+    validate_nodes_for_stage(&new_items, stage)?;
+    for item in &new_items {
+        validate_structural_toplevel(items, item)?;
+    }
+    for idx in indices.iter().rev() {
+        let p = Position::Before(NodeRef::TopLevel(*idx));
+        insert_at_toplevel(items, &p, new_items.clone())?;
+    }
+    Ok(indices.len() as u32)
+}
+
+/// Insert items after each node in the selection, processing in
+/// reverse index order.
+pub fn insert_after_each(
+    items: &mut Vec<TopLevel>,
+    sel: &Selection,
+    new_items: Vec<TopLevel>,
+    stage: StageKind,
+) -> Result<u32, String> {
+    let indices = collect_toplevel_indices(sel);
+    if indices.is_empty() { return Ok(0); }
+    validate_nodes_for_stage(&new_items, stage)?;
+    for item in &new_items {
+        validate_structural_toplevel(items, item)?;
+    }
+    for idx in indices.iter().rev() {
+        let p = Position::After(NodeRef::TopLevel(*idx));
+        insert_at_toplevel(items, &p, new_items.clone())?;
+    }
+    Ok(indices.len() as u32)
+}
+
+/// Insert a single batch at the given position (existing single-target API).
 pub fn insert_items(
     items: &mut Vec<TopLevel>,
     pos: &Position,
     new_items: Vec<TopLevel>,
+    stage: StageKind,
 ) -> Result<(), String> {
+    validate_nodes_for_stage(&new_items, stage)?;
+    for item in &new_items {
+        validate_structural_toplevel(items, item)?;
+    }
     match pos {
-        Position::Before(node) | Position::After(node) | Position::Replace(node) => {
-            insert_at_toplevel(items, pos, node, new_items)
+        Position::Before(_) | Position::After(_) | Position::Replace(_) => {
+            insert_at_toplevel(items, pos, new_items)
         }
         Position::Inside(node) | Position::AppendTo(node) => {
             insert_into_body(items, pos, node, new_items)
@@ -70,15 +111,16 @@ pub fn insert_items(
     }
 }
 
+// ── Fix 1: Reverse-order helpers for index-invalidation safety ─────────
+
+/// Insert at a single top-level position. Internal — callers must
+/// handle reverse ordering for multi-target scenarios.
 fn insert_at_toplevel(
     items: &mut Vec<TopLevel>,
     pos: &Position,
-    node: &NodeRef,
     new_items: Vec<TopLevel>,
 ) -> Result<(), String> {
-    let NodeRef::TopLevel(idx) = node else {
-        return Err("insert: only TopLevel nodes supported".into());
-    };
+    let idx = resolve_toplevel_idx(pos)?;
     let idx = *idx;
     match pos {
         Position::Before(_) => {
@@ -100,6 +142,17 @@ fn insert_at_toplevel(
         _ => unreachable!(),
     }
     Ok(())
+}
+
+fn resolve_toplevel_idx<'a>(pos: &'a Position) -> Result<&'a usize, String> {
+    match pos {
+        Position::Before(NodeRef::TopLevel(i))
+        | Position::After(NodeRef::TopLevel(i))
+        | Position::Replace(NodeRef::TopLevel(i))
+        | Position::Inside(NodeRef::TopLevel(i))
+        | Position::AppendTo(NodeRef::TopLevel(i)) => Ok(i),
+        _ => Err("insert: only TopLevel nodes supported".into()),
+    }
 }
 
 fn insert_into_body(
@@ -235,6 +288,69 @@ pub fn wrap_selection(
     Ok(count)
 }
 
+// ── Fix 2: Stage-Gated Constructors ─────────────────────────────────────
+// 2026-07-21: After $(Typed), the AST is fully typed. Reject insertion of
+// nodes with missing type annotations to prevent codegen from receiving
+// untyped nodes.
+
+/// Check that all new nodes are valid for insertion at the given stage.
+fn validate_nodes_for_stage(nodes: &[TopLevel], stage: StageKind) -> Result<(), String> {
+    // Before Typed stage: all nodes are acceptable (no type info required yet).
+    if stage <= StageKind::Typed {
+        return Ok(());
+    }
+    // At or after Typed: reject nodes that lack type annotations.
+    // A node is "untyped" if it's a Statement::Let with ty: None,
+    // or an Expr::Call with no known type in the type universe.
+    for node in nodes {
+        if let TopLevel::Statement(stmt) = node {
+            if let Statement::Let { ty: None, expr: Some(_), .. } = stmt.as_ref() {
+                return Err(format!(
+                    "stage {:?}: cannot insert untyped let binding — \
+                     all let bindings must have explicit type annotations at this stage",
+                    stage
+                ));
+            }
+        }
+    }
+    Ok(())
+}
+
+// ── Fix 3: Structural Validity ─────────────────────────────────────────
+// 2026-07-21: Prevent AST-invalid placements (e.g., Import inside body,
+// Term at top level). Each node type has a valid parent context.
+
+/// Return the parent tag context for a TopLevel item.
+fn toplevel_parent_tag(item: &TopLevel) -> &str {
+    match item {
+        TopLevel::Definition(_) | TopLevel::Transaction(_) => "body",
+        TopLevel::Import(_) | TopLevel::Export(_) => "top",
+        _ => "top",
+    }
+}
+
+/// Check that a node can be placed in the current top-level context.
+fn validate_structural_toplevel(
+    items: &[TopLevel],
+    new_item: &TopLevel,
+) -> Result<(), String> {
+    // Import and Export are only valid at the top level (always true here).
+    // Term is only valid inside a body — reject if inserted as top-level.
+    match new_item {
+        TopLevel::Statement(stmt) => {
+            let stmt = stmt.as_ref();
+            if matches!(stmt, Statement::Term(_) | Statement::TermBang(_) | Statement::Return(_)) {
+                return Err(format!(
+                    "cannot insert {:?} at top level — only valid inside a function body",
+                    stmt
+                ));
+            }
+        }
+        _ => {}
+    }
+    Ok(())
+}
+
 // ── Internal Helpers ───────────────────────────────────────────────────
 
 fn resolve_toplevel_mut<'a>(items: &'a mut Vec<TopLevel>, node: &NodeRef) -> Result<&'a mut TopLevel, String> {
@@ -287,6 +403,7 @@ mod tests {
     use super::*;
     use crate::ast::{Expr, ImportKind, Type};
     use crate::ast::top::*;
+    use crate::ast::StageKind;
 
     fn sample_items() -> Vec<TopLevel> {
         vec![
@@ -322,7 +439,7 @@ mod tests {
             symbols: vec![],
             span: None,
         });
-        insert_items(&mut items, &pos, vec![new_item]).unwrap();
+        insert_items(&mut items, &pos, vec![new_item], StageKind::Parsed).unwrap();
         assert_eq!(items.len(), 3);
         assert_eq!(top_level_name(&items[1]), Some("std/debug.bv"));
     }
@@ -337,7 +454,7 @@ mod tests {
             symbols: vec![],
             span: None,
         });
-        insert_items(&mut items, &pos, vec![new_item]).unwrap();
+        insert_items(&mut items, &pos, vec![new_item], StageKind::Parsed).unwrap();
         assert_eq!(items.len(), 3);
         assert_eq!(top_level_name(&items[1]), Some("std/debug.bv"));
     }

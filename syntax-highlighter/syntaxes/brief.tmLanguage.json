@@ -51,6 +51,24 @@
     },
     {
       "include": "#punctuation"
+    },
+    {
+      "include": "#stage-blocks"
+    },
+    {
+      "include": "#navigation-intrinsics"
+    },
+    {
+      "include": "#ast-constructors"
+    },
+    {
+      "include": "#diagnostics"
+    },
+    {
+      "include": "#targets"
+    },
+    {
+      "include": "#macro-words"
     }
   ],
   "repository": {
@@ -462,6 +480,58 @@
             "4": { "name": "punctuation.separator.key-value.brief" },
             "5": { "name": "string.quoted.double.brief" }
           }
+        }
+      ]
+    },
+    "stage-blocks": {
+      "patterns": [
+        {
+          "name": "entity.name.function.stage-block.brief",
+          "match": "\\$\\((PreLex|Parsed|Resolved|Typed|Normalized|Verified|Allocated|Provenanced|Generated|Optimized|Linked)\\)"
+        },
+        {
+          "name": "entity.name.function.stage-block.deprecated.brief",
+          "match": "\\$\\((Front|Mid|Post|Back)\\)"
+        }
+      ]
+    },
+    "navigation-intrinsics": {
+      "patterns": [
+        {
+          "name": "support.function.navigation.brief",
+          "match": "\\b(All|Tag|Named|WithKey|WithAttr|And|Or|Not|First|Last|Nth|Children|Descendants|Parent|Ancestors|Closest|Next|Prev|Before|After|Replace|Inside|AppendTo|Insert|Delete|ReplaceWith|Set|Wrap|Rename|Count|IsEmpty|Names|Find|Prepend|Append|Lines|Run|ForEach|Bound|Text|Path|Size|ReadBytes|List|Remove)\\$"
+        }
+      ]
+    },
+    "ast-constructors": {
+      "patterns": [
+        {
+          "name": "support.function.constructor.brief",
+          "match": "\\b(Import|Defn|Txn|Contract|Block|Let|Assign|Term|Guarded|Call|Ident|Expr|BinOp|Field|BlockExpr|Bits|Ptr|Tuple|Metadata|Pattern)\\$"
+        }
+      ]
+    },
+    "diagnostics": {
+      "patterns": [
+        {
+          "name": "keyword.other.diagnostic.brief",
+          "match": "\\b(EmitInfo|EmitWarning|EmitError)\\$"
+        }
+      ]
+    },
+    "targets": {
+      "patterns": [
+        {
+          "name": "variable.language.target.brief",
+          "match": "\\b(Source|Ir|Bin|Stage)\\$"
+        }
+      ]
+    },
+    "macro-words": {
+      "patterns": [
+        {
+          "name": "entity.name.function.macro.brief",
+          "match": "\\b[a-zA-Z_][a-zA-Z0-9_]*!"
         }
       ]
     }

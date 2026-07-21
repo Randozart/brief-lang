@@ -115,6 +115,16 @@
           "dark": "./images/c-brief-logo.svg"
         },
         "configuration": "./language-configuration.json"
+      },
+      {
+        "id": "beast",
+        "aliases": ["BEAST", "beast"],
+        "extensions": [".beast"],
+        "icon": {
+          "light": "./images/beast-icon.svg",
+          "dark": "./images/beast-icon.svg"
+        },
+        "configuration": "./language-configuration.json"
       }
     ],
     "grammars": [
@@ -162,6 +172,11 @@
         "language": "cbv",
         "scopeName": "source.brief",
         "path": "./syntaxes/brief.tmLanguage.json"
+      },
+      {
+        "language": "beast",
+        "scopeName": "source.beast",
+        "path": "./syntaxes/beast.tmLanguage.json"
       }
     ],
     "themes": [
