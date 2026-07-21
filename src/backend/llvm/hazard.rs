@@ -332,8 +332,20 @@ impl LlvmBackend {
         let peak =
             (packed_phis + shuffle_pressure + peak_live_floats as usize + const_packed + 2) as u32;
 
+        // 2026-07-21: Don't flag main as SLP-hazardous when all txns are
+        // alwaysinline. These txns will be inlined before codegen, so
+        // function-level SLP hazard is irrelevant — LLVM re-evaluates
+        // after inlining. Without this, nbody_newton gets disable-slp-
+        // vectorize on main, preventing any float vectorization.
+        // Flagging individual txns is harmless (they're inlined away).
+        let all_alwaysinline = txns.iter().all(|(_, t)| {
+            t.modifiers.iter().any(|m| m.name == "inline")
+                || !self.ctx.has_cycles
+        });
         if peak >= r {
-            self.ctx.slp_hazard_fns.insert("main".to_string());
+            if !all_alwaysinline {
+                self.ctx.slp_hazard_fns.insert("main".to_string());
+            }
             for (txn_name, _) in txns {
                 self.ctx.slp_hazard_fns.insert(txn_name.clone());
             }
