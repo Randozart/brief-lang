@@ -38,9 +38,10 @@ pub fn emit_kernel(builder: &mut SpirvBuilder, txn: &Transaction) -> Result<Word
     ]);
     let idx_var_id = builder.gen_id();
 
-    // 2026-07-15: OpConstant for bound
+    // 2026-07-15: OpConstant for bound (result type before value)
     let bound_const = builder.gen_id();
     builder.emit_type(spirv::Op::Constant, bound_const, vec![
+        Operand::IdRef(int_id),
         Operand::LiteralBit64(bound as u64),
     ]);
 

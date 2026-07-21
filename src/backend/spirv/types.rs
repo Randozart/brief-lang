@@ -14,6 +14,8 @@ use std::collections::HashMap;
 pub struct TypeCache {
     cache: HashMap<u64, Word>,
     next_id: Word,
+    /// 2026-07-21: Accumulated type instructions (OpType*).
+    pub types_arena: Vec<rspirv::dr::Instruction>,
 }
 
 impl TypeCache {
@@ -22,6 +24,7 @@ impl TypeCache {
         TypeCache {
             cache: HashMap::new(),
             next_id: 100,
+            types_arena: Vec::new(),
         }
     }
 
@@ -44,35 +47,88 @@ impl TypeCache {
         Ok(id)
     }
 
+    /// 2026-07-21: Push an OpType* instruction into the types arena.
+    fn push_type(&mut self, op: spirv::Op, result_id: Word, operands: Vec<Operand>) {
+        self.types_arena.push(
+            rspirv::dr::Instruction::new(op, None, Some(result_id), operands)
+        );
+    }
+
     fn lower_fresh(&mut self, ty: &Type) -> Result<Word, String> {
         match ty {
             Type::Void => {
-                Ok(self.alloc_id())
+                let id = self.alloc_id();
+                self.push_type(spirv::Op::TypeVoid, id, vec![]);
+                Ok(id)
             }
             Type::Bits(bytes) => {
+                let id = self.alloc_id();
                 if *bytes == 1 {
-                    Ok(self.alloc_id())
+                    self.push_type(spirv::Op::TypeBool, id, vec![]);
                 } else if *bytes == 8 {
-                    Ok(self.alloc_id())
+                    // Bits(8) for i8/u8 — narrower than default i64
+                    self.push_type(spirv::Op::TypeInt, id, vec![
+                        Operand::LiteralBit32(8),
+                        Operand::LiteralBit32(0), // unsigned
+                    ]);
                 } else {
-                    Ok(self.alloc_id())
+                    self.push_type(spirv::Op::TypeInt, id, vec![
+                        Operand::LiteralBit32(*bytes as u32 * 8),
+                        Operand::LiteralBit32(0), // unsigned
+                    ]);
                 }
+                Ok(id)
             }
             Type::Ptr(elem) => {
-                let _ = self.lower(elem)?;
-                Ok(self.alloc_id())
+                let elem_id = self.lower(elem)?;
+                let id = self.alloc_id();
+                self.push_type(spirv::Op::TypePointer, id, vec![
+                    Operand::StorageClass(spirv::StorageClass::Function),
+                    Operand::IdRef(elem_id),
+                ]);
+                Ok(id)
             }
             // 2026-07-15: Resolve well-known custom types to their bit width
-            Type::Custom(name) if name == "Int" || name == "Float" || name == "Float64" => {
-                Ok(self.alloc_id())
+            Type::Custom(name) if name == "Int" => {
+                let id = self.alloc_id();
+                self.push_type(spirv::Op::TypeInt, id, vec![
+                    Operand::LiteralBit32(64),
+                    Operand::LiteralBit32(0), // unsigned
+                ]);
+                Ok(id)
+            }
+            Type::Custom(name) if name == "Float" => {
+                let id = self.alloc_id();
+                self.push_type(spirv::Op::TypeFloat, id, vec![
+                    Operand::LiteralBit32(32),
+                ]);
+                Ok(id)
+            }
+            Type::Custom(name) if name == "Float64" => {
+                let id = self.alloc_id();
+                self.push_type(spirv::Op::TypeFloat, id, vec![
+                    Operand::LiteralBit32(64),
+                ]);
+                Ok(id)
             }
             Type::Custom(name) if name == "Bool" => {
-                Ok(self.alloc_id())
+                let id = self.alloc_id();
+                self.push_type(spirv::Op::TypeBool, id, vec![]);
+                Ok(id)
             }
             Type::Custom(name) if name == "String" => {
                 // String is a 24-byte struct in Brief
-                for _ in 0..3 { self.alloc_id(); } // reserve IDs for fields
-                Ok(self.alloc_id())
+                let ids: Vec<Word> = (0..3).map(|_| self.alloc_id()).collect();
+                for &sub_id in &ids {
+                    self.push_type(spirv::Op::TypeInt, sub_id, vec![
+                        Operand::LiteralBit32(64),
+                        Operand::LiteralBit32(0),
+                    ]);
+                }
+                let id = self.alloc_id();
+                let struct_members: Vec<Operand> = ids.iter().map(|&i| Operand::IdRef(i)).collect();
+                self.push_type(spirv::Op::TypeStruct, id, struct_members);
+                Ok(id)
             }
             _ => Err(format!("SPIR-V: unsupported type {:?}", ty)),
         }

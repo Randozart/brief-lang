@@ -635,7 +635,9 @@ impl WebstackGenerator {
                 }
                 out.push_str("}\n");
             }
-            _ => {}
+            _ => {
+                out.push_str(&format!("// Warning: unhandled statement variant '{:?}'\n", stmt));
+            }
         }
     }
 
@@ -945,7 +947,9 @@ impl WebstackGenerator {
                 }
                 out.push_str("}\n");
             }
-            _ => {}
+            _ => {
+                out.push_str(&format!("// Warning: unhandled statement variant '{:?}'\n", stmt));
+            }
         }
     }
 
@@ -1034,7 +1038,32 @@ impl WebstackGenerator {
         }
     }
 
-    fn expr_to_js_value(&self, _expr: &Expr) -> String { String::new() }
+    fn expr_to_js_value(&self, expr: &Expr) -> String {
+        match expr {
+            Expr::Decimal(n) => format!("JsValue::from_f64({}.0)", n),
+            Expr::Float(n) => format!("JsValue::from_f64({})", n),
+            Expr::Bool(b) => format!("JsValue::from_bool({})", b),
+            Expr::Identifier(name) => {
+                format!("to_js_value!(&state.{})", name.replace('-', "_"))
+            }
+            Expr::BinaryOp(kind, lhs, rhs) => {
+                let l = self.expr_to_js_value(lhs);
+                let r = self.expr_to_js_value(rhs);
+                match kind {
+                    BinaryOpKind::Add => format!("JsValue::from_f64({}.as_f64().unwrap_or(0.0) + {}.as_f64().unwrap_or(0.0))", l, r),
+                    BinaryOpKind::Sub => format!("JsValue::from_f64({}.as_f64().unwrap_or(0.0) - {}.as_f64().unwrap_or(0.0))", l, r),
+                    BinaryOpKind::Mul => format!("JsValue::from_f64({}.as_f64().unwrap_or(0.0) * {}.as_f64().unwrap_or(0.0))", l, r),
+                    BinaryOpKind::Div => format!("JsValue::from_f64({}.as_f64().unwrap_or(0.0) / {}.as_f64().unwrap_or(0.0))", l, r),
+                    _ => l,
+                }
+            }
+            Expr::Quoted(bytes) => {
+                let s = String::from_utf8_lossy(bytes);
+                format!("JsValue::from_str(\"{}\")", s.escape_default())
+            }
+            _ => format!("JsValue::from_str(\"{:?}\")", expr),
+        }
+    }
 }
 
 /// Intent: Default implementation block.

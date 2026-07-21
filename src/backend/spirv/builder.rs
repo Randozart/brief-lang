@@ -29,7 +29,13 @@ impl SpirvBuilder {
     }
 
     /// 2026-07-15: Finalize module and assemble to SPIR-V binary.
-    pub fn build(self) -> Result<Vec<u8>, String> {
+    /// 2026-07-21: Inserts type instructions from TypeCache.types_arena
+    /// into the module's types/global values section before assembly.
+    pub fn build(mut self) -> Result<Vec<u8>, String> {
+        // Transfer type instructions from TypeCache into the module
+        for inst in self.types.types_arena.drain(..) {
+            self.builder.insert_types_global_values(rspirv::dr::InsertPoint::End, inst);
+        }
         let module = self.builder.module();
         let words = module.assemble();
         let mut binary = Vec::with_capacity(words.len() * 4);

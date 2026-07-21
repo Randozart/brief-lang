@@ -456,6 +456,19 @@ impl CirctBackend {
                     }
                 }
             }
+            Expr::Field(obj, field) => {
+                let obj_val = self.emit_expr(ng, out, obj, reg_names, result_ty)?;
+                let w = ng.fresh_wire("fld");
+                writeln!(out, "  {} = hw.wire {} : {}", w, obj_val, result_ty).ok();
+                Some(w)
+            }
+            Expr::Index(list, idx) => {
+                let list_val = self.emit_expr(ng, out, list, reg_names, result_ty)?;
+                let _idx_val = self.emit_expr(ng, out, idx, reg_names, "i64")?;
+                let w = ng.fresh_wire("idx");
+                writeln!(out, "  {} = hw.wire {} : {}", w, list_val, result_ty).ok();
+                Some(w)
+            }
             _ => None,
         }
     }
@@ -471,7 +484,13 @@ impl CirctBackend {
     fn emit_unary_comb(&self, ng: &mut NameGen, out: &mut String, op: &str, inner: &Expr, reg_names: &HashMap<String, String>, result_ty: &str) -> Option<String> {
         let val = self.emit_expr(ng, out, inner, reg_names, result_ty)?;
         let w = ng.fresh_wire("un");
-        writeln!(out, "  {} = {} {}, {}_one : {}", w, op, val, result_ty, result_ty).ok();
+        if op == "comb.neg" || op == "comb.not" {
+            writeln!(out, "  {} = {} {} : {}", w, op, val, result_ty).ok();
+        } else {
+            let c0 = ng.fresh_const("zero");
+            writeln!(out, "  {} = hw.constant 0 : {}", c0, result_ty).ok();
+            writeln!(out, "  {} = {} {}, {} : {}", w, op, val, c0, result_ty).ok();
+        }
         Some(w)
     }
 
@@ -527,6 +546,24 @@ impl CirctBackend {
                         }
                     } else {
                         writeln!(out, "  // foreach skipped — non-constant list, unroll not possible").ok();
+                    }
+                }
+                Statement::Let { name, expr: Some(e), .. } => {
+                    let mlir_ty = self.mlir_type(self.var_types.get(name).unwrap_or(&Type::int()));
+                    if let Some(val) = self.emit_expr(ng, out, e, reg_names, &mlir_ty) {
+                        let w = ng.fresh_wire("let");
+                        writeln!(out, "  {} = hw.wire {} : {}", w, val, mlir_ty).ok();
+                        reg_names.insert(name.clone(), w);
+                    }
+                }
+                Statement::Guarded(cond, stmts) => {
+                    let cond_mlir = self.mlir_type(&Type::bool_());
+                    if let Some(cond_val) = self.emit_expr(ng, out, cond, reg_names, &cond_mlir) {
+                        let cond_icmp = ng.fresh_wire("gic");
+                        writeln!(out, "  {} = comb.icmp ne {}, %true : i1", cond_icmp, cond_val).ok();
+                        for s in stmts {
+                            self.emit_txn_body(ng, out, _name, &[s.clone()], contract, reg_names);
+                        }
                     }
                 }
                 _ => {}
@@ -646,6 +683,14 @@ impl CirctBackend {
             Statement::SyncBlock(body) => {
                 for s in body {
                     self.emit_stmt_body(ng, out, s, reg_names);
+                }
+            }
+            Statement::Let { name, expr: Some(e), .. } => {
+                let mlir_ty = self.mlir_type(&Type::int());
+                if let Some(val) = self.emit_expr(ng, out, e, reg_names, &mlir_ty) {
+                    let w = ng.fresh_wire("let");
+                    writeln!(out, "  {} = hw.wire {} : {}", w, val, mlir_ty).ok();
+                    // Note: reg_names is immutable here, so we can't store it
                 }
             }
             _ => {}
