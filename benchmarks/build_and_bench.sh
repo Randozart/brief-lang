@@ -154,12 +154,13 @@ build_bench() {
         --out benchmarks --optimize-budget "$budget" $gpu_flag 2>&1
 
     if [ ! -f "$bin" ]; then
-        # 2026-07-15: Compile brief_rt.c and link for brief_syscall
-        clang -O3 -c "lib/runtime/brief_rt.c" -o "/tmp/brief_rt.o" 2>&1
+        # 2026-07-21: Compile brief_rt.c with -flto so LTO can inline
+        # __print_char into main() (saves ~5-8 cycles/character at 50M iter).
+        clang -O3 -flto -c "lib/runtime/brief_rt.c" -o "/tmp/brief_rt.o" 2>&1
         if [ -f "benchmarks/${name}.o" ]; then
-            cc -O2 -no-pie -o "$bin" "benchmarks/${name}.o" "/tmp/brief_rt.o" -lm 2>&1 || echo "  (link failed — try manual link)"
+            cc -O2 -flto -no-pie -o "$bin" "benchmarks/${name}.o" "/tmp/brief_rt.o" -lm 2>&1 || echo "  (link failed — try manual link)"
         else
-            clang -O3 -march=native -ffast-math -fdata-sections -ffunction-sections -Wl,--gc-sections "benchmarks/${name}.ll" "/tmp/brief_rt.o" -o "$bin" -lm 2>&1 || echo "  (clang linking skipped — possibly linked by compiler)"
+            clang -O3 -flto -march=native -ffast-math -fdata-sections -ffunction-sections -Wl,--gc-sections "benchmarks/${name}.ll" "/tmp/brief_rt.o" -o "$bin" -lm 2>&1 || echo "  (clang linking skipped — possibly linked by compiler)"
         fi
     fi
     if [ -f "$bin" ]; then

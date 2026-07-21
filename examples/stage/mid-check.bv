@@ -1,7 +1,11 @@
-$(Mid) {
-    // Verify that certain patterns exist after typechecking
-    // $ MatchIR$("(call PrintInt# ?*)", "(call PrintInt# (int 0))");
-    EmitWarning$("Mid stage: type-checked AST ready for inspection");
+// 2026-07-21: Updated from $(Mid) to $(Typed).
+
+$(Typed) {
+    // Count calls to PrintInt# — was previously done via Collect$
+    Let$calls = Tag$("call").Named$("PrintInt#").Count$();
+    If$($calls > 0) {
+        EmitWarning$("Typed stage: " + $calls + " PrintInt# calls found");
+    };
 };
 
 defn compute(x: Int) -> Int {

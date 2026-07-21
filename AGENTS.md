@@ -1014,5 +1014,6 @@ new intrinsic.
 | **Kani harnesses** | `docs/architecture/kani-harnesses.md` |
 | **Plan documents** | `docs/plans/` |
 | **Ptr Level 3 plan** | `docs/plans/2026-07-09-ptr-level3-borrow-checking.md` |
+| **Granular pipeline + AST navigation DSL** | `docs/plans/2026-07-21-granular-pipeline-and-ast-navigation.md` |
 | **Compile-time meta + plugin architecture** | `docs/plans/2026-07-15-compiletime-meta-and-plugin-architecture.md` |
 | **Layout DSL** | `docs/architecture/layout-dsl.md` |

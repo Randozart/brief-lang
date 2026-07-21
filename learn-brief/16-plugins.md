@@ -1,7 +1,74 @@
 # Compiler Plugins
 
-Brief supports built-in compiler plugins that run at defined hooks in the
-compilation pipeline. Plugins are named stages that you can enable or disable.
+Brief supports compile-time plugins that run at defined hooks in the
+compilation pipeline.  Plugins are written in Brief and use a tree-navigation
+DSL to inspect and transform the AST, source text, or generated IR.
+
+## Pipeline Stages
+
+There are 11 stages.  Each runs a specific subset of plugins:
+
+```text
+Source ──► PreLex ──► Parsed ──► Resolved ──► Typed ──► Normalized
+             │           │            │           │            │
+          text ops   tree ops      tree ops    tree ops     tree ops
+
+──► Verified ──► Allocated ──► Provenanced ──► Generated ──► Optimized
+        │             │              │               │              │
+     tree ops      tree ops       tree ops        text ops       text ops
+
+──► Linked
+       │
+    binary ops
+```
+
+## Writing a Plugin
+
+A plugin is a `.bv` file with one or more `$(StageName)` blocks:
+
+```brief
+// my-plugin.bv
+$(Parsed) {
+    // Runs after parsing, before import resolution
+    Tag$("import").First$().Before$()
+        .Insert$(Import$("std/custom.bv"));
+};
+```
+
+### The Navigation Chain
+
+Every operation follows the same pattern:
+
+```
+SELECT ──► TRAVERSE ──► POSITION ──► ACT
+```
+
+```brief
+Tag$("import") .First$() .Before$() .Insert$(Import$("std/x.bv"))
+ └─SELECT──┘  └TRAVERSE┘ └POSITION┘ └────────ACT────────────┘
+```
+
+- **Selectors** find nodes: `Tag$("defn")`, `Named$("main")`, `WithAttr$("entry", true)`
+- **Traversal** narrows: `.First$()`, `.Children$("param")`, `.Descendants$("call")`
+- **Positions** pick where: `.Before$()`, `.After$()`, `.Replace$()`, `.Inside$()`
+- **Actions** do the work: `.Insert$(Import$("..."))`, `.Delete$()`, `.Set$("key", val)`
+
+### Flow Control
+
+```brief
+// Bind a selection to a variable
+Let$imports = Tag$("import");
+
+// Iterate over matches
+ForEach$(Tag$("import")) {
+    $.After$().Insert$(Import$("std/debug.bv"));
+};
+
+// Conditional
+If$(Tag$("import").Count$() == 0) {
+    EmitWarning$("no imports found");
+};
+```
 
 ## Enabling/Disabling Plugins
 
@@ -11,60 +78,48 @@ brief build file.bv --disable-plugin prelude
 
 # Enable a specific plugin
 brief build file.bv --enable-plugin my-custom
+
+# Disable all plugins (equivalent to --no-stdlib)
+brief build file.bv --disable-plugin prelude
 ```
 
-Multiple plugins can be enabled or disabled:
+## Building With Plugins
 
 ```bash
-brief build file.bv --disable-plugin prelude --enable-plugin lint
+# Default: system plugins run automatically
+brief build file.bv
+
+# With BEAST snapshots for debugging
+brief build file.bv --emit-beast parsed
+
+# Custom plugin file
+brief build file.bv --enable-plugin my-plugin
 ```
 
-## What a Plugin Can Do
+## Target Selection
 
-A plugin implements the `Plugin` trait:
+Each stage has a default data target:
 
-```rust
-pub trait Plugin: Debug {
-    fn name(&self) -> &str;
-    fn on_hook(&self, hook: PluginHook, program: &mut Program,
-               universe: &TypeUniverse) -> PluginAction;
-}
+| Stage | Default target | What you can do |
+|-------|---------------|-----------------|
+| `$(PreLex)` | `Source$` (text) | `Find$`, `Prepend$`, `ReplaceWith$` |
+| `$(Parsed)` through `$(Provenanced)` | AST (tree) | `Tag$`, `Named$`, `Insert$`, `Delete$`, `Set$` |
+| `$(Generated)` through `$(Optimized)` | `Ir$` (text) | `Find$`, `InsertBefore$`, `ReplaceWith$` |
+| `$(Linked)` | `Bin$` (binary) | `Run$("command {{path}}")` |
+
+You can always override by prefixing `Source$.`, `Ir$.`, or `Bin$.`:
+
+```brief
+$(Typed) {
+    // Default: AST operations
+    Tag$("defn").Named$("main").Set$("entry", true);
+    // Explicit: source text access (read-only)
+    let lines = Source$.Find$("#define").Count$();
+};
 ```
 
-At each hook point, the plugin receives the current `Program` and
-`TypeUniverse`. It returns `PluginAction::Continue` to proceed or
-`PluginAction::Abort(msg)` to stop compilation with a diagnostic.
+## What's Next
 
-## Hook Points
-
-| Hook | When It Fires |
-|------|---------------|
-| `AfterParse` | After import resolution (not yet wired) |
-| `AfterTypeCheck` | After type checking |
-| `BeforeCodegen` | Before LLVM IR generation |
-| `AfterCodegen` | After LLVM IR generation (not yet wired) |
-
-## Writing a Plugin (Native `.so`)
-
-A native plugin is a shared library exporting `brief_plugin_create`:
-
-```rust
-#[no_mangle]
-pub extern "C" fn brief_plugin_create() -> *mut dyn Plugin {
-    Box::into_raw(Box::new(MyPlugin))
-}
-```
-
-See `src/plugin/loader.rs` for the `ValidationPlugin` example.
-
-## Writing a Plugin (WASM)
-
-WASM plugin loading requires the `plugins` Cargo feature. Plugins are
-compiled to `wasm32-wasi` (use `--triple wasm32-unknown-wasi`). A WIT
-interface defines the contract between the compiler and the plugin.
-
-## Why WASM?
-
-See `docs/architecture/features/plugins.md` for the full rationale:
-sandboxing, language independence, stable ABI via WIT, and microsecond
-instantiation.
+- See `docs/architecture/features/plugins.md` for the full intrinsic reference.
+- See `examples/stage/` for runnable plugin examples.
+- See `docs/plans/2026-07-21-granular-pipeline-and-ast-navigation.md` for the design.

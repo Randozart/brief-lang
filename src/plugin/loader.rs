@@ -1,9 +1,11 @@
 // ── Plugin Loader — Stage Block Plugin & System Discovery ───────────
 //
+// 2026-07-21: Stage directories updated from {front,mid,post,back} to
+// {parsed,resolved,typed,normalized,verified,allocated,provenanced,generated,
+// optimized,linked} as part of the granular pipeline expansion.
 // 2026-07-15: Phase 2 — Provides StageBlockPlugin (wraps $(Stage) blocks
 // into Plugin trait) and discover_system_plugins() which scans
-// plugins/{front,mid,post,back}/ directories for .bv files and extracts
-// their $(Stage) blocks.
+// plugins/{stage}/ directories for .bv files and extracts their $(Stage) blocks.
 //
 // Native (.so) and WASM (.wasm) loaders from Phase 7 (2026-07-11) are
 // retained but will be replaced by the stage-based architecture in
@@ -90,6 +92,13 @@ impl Plugin for StageBlockPlugin {
 // ── System Plugin Discovery ───────────────────────────────────────────
 
 /// Stage directory names under the plugins/ root.
+/// 2026-07-21: Will be updated to granular directories as part of the
+/// granular pipeline implementation:
+///   ("parsed", StageKind::Parsed),
+///   ("typed", StageKind::Typed),
+///   ("verified", StageKind::Verified),
+///   etc.
+/// See docs/plans/2026-07-21-granular-pipeline-and-ast-navigation.md.
 const STAGE_DIRS: &[(&str, StageKind)] = &[
     ("front", StageKind::Front),
     ("mid", StageKind::Mid),

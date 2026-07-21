@@ -1,249 +1,414 @@
-# Plugin Architecture & Prelude Design
+# Plugin Architecture — AST Navigation DSL
 
-**2026-07-15**: Phase 2 decisions. Supersedes `macro.md`.
+**2026-07-21:** Replaces the old Front/Mid/Post/Back four-stage system and the
+`Collect$`/`MatchIR$` serialize-deserialize intrinsics. The new system has 11
+granular pipeline stages and a direct AST navigation DSL that operates on the
+live tree in memory — no `.beast` serialization in the plugin data path.
 
-## How $ intrinsics work
+---
 
-`$` intrinsics (e.g. `InsertRegistryImport$("std/prelude.bv")`) are Rust
-functions that operate directly on `&mut Vec<TopLevel>` (AST) and
-`&mut TypeUniverse` — no text-level expansion. A `$(Front)` block's body
-is a sequence of `$` calls; when the stage runs, each call dispatches to
-the corresponding `execute_$intrinsic()` Rust function inline.
+## How Plugins Work
 
-## Prelude per extension
-
-Not all backends need the same types. The prelude is a system plugin
-(`plugins/front/prelude.bv`) that injects stdlib imports into user code.
-Different extensions get different preludes:
-
-| Extension | Backend | Plugin | Stdlib entry point |
-|-----------|---------|--------|--------------------|
-| `.bv` | LLVM | `prelude` | `std/prelude.bv` — Int, Bool, Float, String, collections, Option, Result |
-| `.ebv` | LLVM embedded | `prelude` | same |
-| `.rbv` | Webstack | `prelude` | same |
-| `.abv` | GPU | `prelude` | same |
-| `.cbv` | CIRCT | `prelude-hw` | `std/hardware.bv` — Cell, Wire, Register, Bit, etc. |
-
-The prelude plugin file is just a `$(Front @ highest)` block that calls
-`InsertRegistryImport$()`. System plugins import what they need manually.
-
-## Plugin naming
-
-System plugins discovered from `plugins/{stage}/<name>.bv` are registered
-with the name `<name>` (the file stem, no prefix/suffix). This lets
-`config/targets.toml` reference them by simple name in the `plugins` list.
-
-## Metaprogramming with Collect$ and MatchIR$
-
-**2026-07-15**: Phase 6. Two `$` intrinsics provide BEAST-level pattern
-matching for compile-time metaprogramming:
-
-- `Collect$(pattern)` — serialize the current program AST to BEAST, match
-  the pattern against all sub-trees, log the match count and first few
-  matches. Useful for inspecting what the compiler sees.
-- `MatchIR$(pattern, replacement)` — serialize, apply pattern-match
-  replacement, deserialize back into the AST. The program is modified
-  in place. Returns an error if the pattern matches nothing.
-
-### Pattern syntax
-
-The BEAST pattern language uses S-expressions with `?` variables:
-
-| Pattern | Meaning |
-|---------|---------|
-| `?x` | Match any single sub-tree, bind to `x` |
-| `?*` | Wildcard: match any single sub-tree, no binding |
-| `??*` | Rest wildcard: match zero or more trailing children |
-| `*` | Wildcard tag: match any list tag (first position) |
-| `(?tag ?x ?y)` | Match list with tag `?tag`, children `?x`, `?y` in order |
-| `(ident ?name)` | Match list with tag `ident`, bind first child to `name` |
-| `(call ?fn ??*)` | Match list with tag `call`, bind `fn`, rest wildcard |
-
-### Collect$ example
+A plugin is a `.bv` file containing one or more `$(StageName)` blocks.
+Each block runs at the corresponding compiler pipeline stage:
 
 ```brief
-$(Mid) {
-    // --emit-beast mid to see what BEAST looks like at this stage
-    Collect$("(call PrintInt# ?*)");
+// plugins/parsed/prelude.bv
+$(Parsed) @ highest {
+    Tag$("import").First$().Before$()
+        .Insert$(Import$("std/types/bootstrap.bv"));
 };
 ```
 
-### MatchIR$ example
+The block body is a sequence of navigation chain statements.  These are
+evaluated at compile time by the AST navigation engine and operate directly
+on the in-memory AST.
+
+### Three-Link Chain
+
+Every transformation follows:
+
+```
+SELECT ──► TRAVERSE ──► POSITION ──► ACT
+```
 
 ```brief
-$(Mid) {
-    // Replace all (add (int 0) ?x) with just ?x
-    MatchIR$("(add (int 0) ?x)", "(?x)");
+Tag$("import") .First$() .Before$() .Insert$(Import$("std/x.bv"))
+ └─SELECT──┘  └TRAVERSE┘ └POSITION┘ └───────────ACT────────────┘
+```
+
+---
+
+## Pipeline Stages
+
+| Stage | Plugin directory | Data | What's available |
+|-------|-----------------|------|------------------|
+| `$(PreLex)` | `plugins/prelex/` | Source text (`Source$`) | Raw `.bv` text before lexing |
+| `$(Parsed)` | `plugins/parsed/` | AST (implicit) | Freshly parsed AST, no imports resolved |
+| `$(Resolved)` | `plugins/resolved/` | AST | All imports resolved and merged |
+| `$(Typed)` | `plugins/typed/` | AST | Full type universe available |
+| `$(Normalized)` | `plugins/normalized/` | AST | Backend type annotations attached |
+| `$(Verified)` | `plugins/verified/` | AST | Protocol round-trip verified |
+| `$(Allocated)` | `plugins/allocated/` | AST | Allocation strategies assigned |
+| `$(Provenanced)` | `plugins/provenanced/` | AST | Pointer provenance validated |
+| `$(Generated)` | `plugins/generated/` | IR text (`Ir$`) | Emitted backend IR (`.ll`, `.mlir`, `.ts`) |
+| `$(Optimized)` | `plugins/optimized/` | IR text (`Ir$`) | Optimized IR |
+| `$(Linked)` | `plugins/linked/` | Binary path (`Bin$`) | Compiled binary |
+
+### Stage Priority
+
+The `@` syntax sets execution priority (lower number = earlier):
+
+```brief
+$(Parsed) @ highest { ... }     // maps to priority 0
+$(Typed) @ 100 { ... }          // explicit priority
+$(Verified) @ lowest { ... }    // maps to priority 999
+```
+
+Default priority is 500.  Within the same stage, plugins run in priority order.
+
+---
+
+## The Four Targets
+
+Navigation operations target one of four data surfaces:
+
+| Target | Type | Operation style | Valid stages |
+|--------|------|----------------|--------------|
+| `Source$` | Source text | Text ops: `Find$`, `ReplaceWith$`, `Prepend$`, `Append$` | All (read-only after PreLex) |
+| AST (implicit) | `Vec<TopLevel>` | Tree ops: `Tag$`, `Named$`, `ForEach$`, `Insert$`, `Delete$` | Parsed – Provenanced |
+| `Ir$` | IR text | Text ops: `Find$`, `ReplaceWith$`, `InsertBefore$` | Generated, Optimized |
+| `Bin$` | Binary path | External: `Run$("command {{path}}")` | Linked |
+
+The default target at each stage is shown in the table above.  You can always
+override by prefixing with `Source$.`, `Ir$.`, or `Bin$.`:
+
+```brief
+$(Parsed) {
+    // Default: AST
+    Tag$("import").First$().Before$().Insert$(Import$("std/x.bv"));
+    // Explicit: source text (read-only at this stage)
+    Source$.Find$("#define").Count$();
+};
+
+$(Generated) {
+    // Default: Ir$
+    Find$("target triple").ReplaceWith$("target triple = \"riscv64\"");
+    // Still can access source for cross-referencing
+    Source$.Find$("// METADATA").Count$();
 };
 ```
 
-## Visualing BEAST with --emit-beast
+---
 
-The `--emit-beast` flag writes BEAST snapshots at pipeline stages so
-metaprogrammers can inspect the AST format when writing `Collect$` and
-`MatchIR$` patterns:
+## Core Intrinsic Reference
+
+### Tree Selectors (AST target)
+
+| Intrinsic | Returns | Description |
+|-----------|---------|-------------|
+| `All$()` | Selection | Every top-level AST node |
+| `Tag$(name)` | Selection | Nodes by S-expression tag (`"defn"`, `"txn"`, `"call"`, `"import"`) |
+| `Pattern$(sexpr)` | Selection | Nodes matching `.beast` pattern with `?var`/`?*`/`??*` |
+| `Named$(name)` | Selection | Nodes whose name field equals `name` |
+| `WithKey$(key)` | Selection | Nodes having metadata key `key` |
+| `WithAttr$(key, val)` | Selection | Nodes with metadata `key` = `val` |
+
+### Text Selectors (Source$, Ir$ target)
+
+| Intrinsic | Returns | Description |
+|-----------|---------|-------------|
+| `Find$(pattern)` | TextSelection | Lines/regions matching regex pattern |
+
+### Selector Combinators
+
+| Intrinsic | Target | Description |
+|-----------|--------|-------------|
+| `.And$(sel)` | Both | Intersection |
+| `.Or$(sel)` | Both | Union |
+| `.Not$(sel)` | Both | Complement |
+
+### Tree Traversal (AST target)
+
+| Intrinsic | Returns | Description |
+|-----------|---------|-------------|
+| `.First$(n?)` | Selection | First N elements (default 1) |
+| `.Last$(n?)` | Selection | Last N elements (default 1) |
+| `.Nth$(n)` | Selection | Nth element (0-indexed) |
+| `.Children$(sel?)` | Selection | Direct children (optionally filtered) |
+| `.Descendants$(sel?)` | Selection | All descendants (optionally filtered) |
+| `.Parent$()` | Selection | Parent(s) |
+| `.Ancestors$(sel)` | Selection | Ancestors matching selector |
+| `.Closest$(sel)` | Selection | Nearest ancestor matching |
+| `.Next$(sel?)` | Selection | Following siblings |
+| `.Prev$(sel?)` | Selection | Preceding siblings |
+
+### Positions
+
+| Intrinsic | Target | Description |
+|-----------|--------|-------------|
+| `.Before$()` | Tree + Text | Insert before each selected |
+| `.After$()` | Tree + Text | Insert after each selected |
+| `.Replace$()` | Tree + Text | Replace each selected |
+| `.Inside$()` | Tree only | Prepend to each selected's children |
+| `.AppendTo$()` | Tree only | Append to each selected's children |
+
+### Actions
+
+| Intrinsic | Target | Description |
+|-----------|--------|-------------|
+| `.Insert$(node...)` | Tree | Insert constructed AST nodes |
+| `.Insert$(text)` | Text | Insert text string |
+| `.Delete$()` | Both | Remove selected |
+| `.ReplaceWith$(node)` | Tree | Substitute AST node |
+| `.ReplaceWith$(text)` | Text | Substitute text |
+| `.Set$(key, val)` | Tree only | Set metadata |
+| `.Wrap$(tag)` | Tree only | Enclose in container |
+| `.Rename$(name)` | Tree only | Rename identifier |
+| `.Prepend$(text)` | Text only | Prepend to entire buffer |
+| `.Append$(text)` | Text only | Append to entire buffer |
+| `.Run$(cmd)` | Binary only | Run external command with `{{path}}` |
+
+### Introspection
+
+| Intrinsic | Returns | Description |
+|-----------|---------|-------------|
+| `.Count$()` | Int | Number of selected nodes |
+| `.IsEmpty$()` | Bool | Selection empty? |
+| `.Names$()` | List[String] | Name fields of selected |
+| `.Lines$()` | List[Int] | Line numbers of text matches (Text target only) |
+
+### Flow Control
+
+| Construct | Description |
+|-----------|-------------|
+| `Let$name = expr;` | Bind selection/position/value |
+| `ForEach$(sel) { body }` | Iterate, `$` = current element |
+| `ForEach$(sel as $name) { body }` | Iterate with named binding |
+| `If$(condition) { body }` | Conditional execution |
+
+Within `ForEach$`, `$` refers to the current element (unless using `as $name`).
+All navigation intrinsics are available on `$`.
+
+---
+
+## AST Constructors
+
+These `PascalCase$` intrinsics construct AST nodes for use with `.Insert$()`
+and `.ReplaceWith$()`.  They are only valid inside `$(Stage)` blocks.
+
+| Constructor | Produces | Example |
+|-------------|----------|---------|
+| `Import$(path, symbols?)` | `TopLevel::Import` | `Import$("std/io.bv")` |
+| `Defn$(name, params, ret, body)` | `TopLevel::Definition` | `Defn$("main", [], Type$("Int"), ...)` |
+| `Txn$(name, params, contract, body)` | `TopLevel::Transaction` | `Txn$("work", [], c, b)` |
+| `Contract$(pre, post, entry?)` | `Contract` | `Contract$(Expr$(true), Expr$(true))` |
+| `Block$(stmts...)` | `Vec<Statement>` | `Block$(Let$(...), ...)` |
+| `Let$(name, ty?, expr?)` | `Statement::Let` | `Let$("x", Type$("Int"), Expr$(42))` |
+| `Assign$(target, expr)` | `Statement::Assign` | `Assign$(Ident$("x"), Expr$(5))` |
+| `Term$(expr?)` | `Statement::Term` | `Term$(Ident$("result"))` |
+| `Call$(fn, args...)` | `Expr::Call` | `Call$("PrintInt#", Ident$("x"))` |
+| `Ident$(name)` | `Expr::Identifier` | `Ident$("x")` |
+| `Expr$(lit)` | Literal expression | `Expr$(42)`, `Expr$("hello")` |
+| `BinOp$(kind, lhs, rhs)` | `Expr::BinaryOp` | `BinOp$("Add", a, b)` |
+| `Type$(name)` | `Type::Custom` | `Type$("Int")` |
+| `Bits$(n)` | `Type::Bits` | `Bits$(64)` |
+| `Ptr$(inner)` | `Type::Ptr` | `Ptr$(Type$("Int"))` |
+| `Metadata$(key, val)` | `(String, PropertyValue)` | `Metadata$("inline", true)` |
+| `Pattern$(sexpr)` | Compiled `Pattern` (for querying) | `Pattern$("(call ?fn ?arg)")` |
+
+---
+
+## Plugin Discovery
+
+### System Plugins
+
+System plugins live in `plugins/{stage}/<name>.bv`.  They are discovered
+automatically at startup:
 
 ```bash
-brief-compiler build program.bv --emit-beast ast    # after parse + front plugins
-brief-compiler build program.bv --emit-beast mid    # after typecheck + mid plugins
-brief-compiler build program.bv --emit-beast post   # after normalizer, before codegen
-brief-compiler build program.bv --emit-beast        # all three stages
+plugins/
+  parsed/
+    prelude.bv        # Injects stdlib imports
+    prelude-hw.bv     # Injects hardware stdlib for .cbv
+  typed/
+    auto-main.bv      # Adds [#] entry marker to main
+    entry-check.bv     # Verifies entry mechanism exists
+  verified/
+    validate-trg.bv   # Checks dynamic trigger targets
 ```
 
-Each stage writes `<file>.beast.{ast,mid,post}`. Use these files to
-understand what patterns match your AST.
+Extension-specific plugin selection is configured in `config/targets.toml`:
 
-## --no-std is now --disable-plugin prelude
+```toml
+[".bv"]
+plugins = ["prelude"]
 
-The old `--no-std` flag still works but is equivalent to
-`--disable-plugin prelude`. The prelude is a system plugin
-(`plugins/front/prelude.bv`) that injects stdlib imports. To disable
-it, use either form.
-
-## Webstack output
-
-The webstack backend emits HTML + CSS + SVG + TypeScript, not WASM.
-`.rbv` uses it.
-
-## Dynamic Trigger Targets via `@ *ptr`
-
-**2026-07-15**: Phase 5 design. Static triggers (`trg x @ fixed_instance.#port`)
-are resolved at compile time. Dynamic triggers use a typed pointer to change
-the target at init time or across reconfigurations.
-
-### Motivation
-
-Embedded and reactive systems often need to bind a handler to an entity that
-isn't known until runtime — a USB device on a hot-swappable bus, a virtual
-device registered by another component, or a memory-mapped peripheral whose
-base address is configurable. Brief's contract system must extend to these
-cases without sacrificing safety.
-
-### The pattern
-
-`AddressOf#<T>(id)` returns `Ptr<T>` — a typed pointer that carries the
-entity's declared shape in its type parameter. Applying `.#field` scopes the
-type further:
-
-```brief
-let uart_rx: Ptr<UartRxPort> = AddressOf#<UartRxPort>("sys:uart/rx").#rx;
-trg x @ *uart_rx;
+[".cbv"]
+plugins = ["prelude-hw"]
 ```
 
-Here `*uart_rx` dereferences the pointer to the target entity. The backend
-resolves the target at _init time_ instead of compile time. Since the type
-`UartRxPort` was already checked when `AddressOf#<T>` was called, the trigger
-binding is statically type-safe.
+Plugins listed in the extension's `plugins` array are active for that extension.
+Plugins not listed are skipped.
 
-### Without explicit field projection
+### Inline Plugins
 
-If `AddressOf#` is called with a type that already describes the port:
+Plugins can also be embedded directly in source files using `$(Stage)` blocks:
 
 ```brief
-trg x @ *AddressOf#<UartRxPort>("sys:uart/rx");
-```
-
-The type `UartRxPort` carries the port shape. No `.#rx` is needed because
-the pointer type already describes exactly what trigger to set up.
-
-### Safety model
-
-| Check | When | What happens on failure |
-|-------|------|------------------------|
-| `T` matches expected port type | Compile (type resolution) | Type error — rejected |
-| Target entity exists at `*ptr` | Init time (runtime) | Warning with `--warn-unresolved-trg` |
-| Entity shape matches `T` | Init time (runtime) | Error with `--error-unresolved-trg` (or warning by default) |
-
-The compile-time contract (`T`) guarantees the _shape_ is correct. The runtime
-check guarantees the _entity exists and matches_. This is two-phase safety:
-static type safety + runtime assertion, mirroring Brief's contract philosophy.
-
-### Example: hot-swappable input device
-
-```brief
-type GamepadInput <: InputPort {
-    // fields: button_a, button_b, dpad_x, dpad_y
+// file.bv
+$(Parsed) {
+    // Custom compile-time logic for this file only
+    Tag$("import").First$().After$()
+        .Insert$(Import$("std/local/custom.bv"));
 };
 
-txn handle_input [has_device][has_device] {
-    let device: Ptr<GamepadInput> = AddressOf#<GamepadInput>("usb:gamepad");
-    [*device != null] {
-        trg x @ *device;
-        term;
-    };
-    [*device == null] {
-        term; // no device — skip
-    };
-};
+defn main() -> Int { term 0; };
 ```
 
-### Implementation approach
+Inline plugins are extracted from the AST before the Parsed stage runs.
+They are registered as plugins for their declared stage.
 
-1. Parser: accept `Expr::Deref(Box<Expr>)` on the instance side of `@`
-   (existing `@` parsing, new deref expr variant)
-2. Type checker: verify `*ptr` resolves to a type compatible with the
-   port's expected trigger shape
-3. Codegen (LLVM): emit an init-time table lookup + null check + listener
-   registration. The table maps entity names to addresses and is populated
-   by the runtime linker.
-4. Codegen (CIRCT/Webstack): backend-specific init-time resolution
-5. Post-stage plugin: inject a validation guard that runs at init and
-   warns on unresolved targets
+### CLI Management
 
-Phase 5 implemented `AddressOf#`, the `*` deref expression
-(`Expr::Deref`), and the two-phase safety model. Phase 6 added the BEAST
-pattern compiler for `Collect$`/`MatchIR$`.
+```bash
+# Disable a system plugin
+brief build file.bv --disable-plugin prelude
 
-## Mid-Stage Plugins (Auto-Entry + Entry Check)
+# Enable only specific plugins
+brief build file.bv --enable-plugin auto-main
 
-Three Mid-stage plugins are enabled by default. They run in priority order:
+# Disable plugin = --no-stdlib (same effect)
+brief build file.bv --no-stdlib
 
-| Plugin | Stage | Priority | Purpose |
-|--------|-------|----------|---------|
-| `auto-main` | Mid | 0 | Adds `[#]` entry marker to `defn main` or `txn main` |
-| `entry-check` | Mid | 1 | Rejects programs with no entry mechanism |
-| `check-reactive` | Mid | 2 | Verifies reactive transactions have live field bindings |
+# Emit BEAST snapshots for plugin debugging
+brief build file.bv --emit-beast typed
+brief build file.bv --emit-beast all
+```
 
-### auto-main (`plugins/mid/auto-main.bv`)
+---
 
-Uses `MatchIR$` to rewrite `defn main` or `txn main`, inserting an `(entry)`
-marker in the contract. This is equivalent to writing `[#]` in the source:
+## Examples
+
+### Prelude — Insert standard library imports
 
 ```brief
-$(Mid) {
-    MatchIR$(
-        "(defn main ?contract ?params ?ret ?body)",
-        "(defn main (contract (entry) (pre true) (post true)) ?params ?ret ?body)"
+$(Parsed) @ highest {
+    Let$anchor = Tag$("import").First$();
+    $anchor.Before$().Insert$(
+        Import$("std/types/bootstrap.bv"),
+        Import$("std/os/fs.bv"),
+        Import$("std/os/net.bv"),
+        Import$("std/os/signal.bv"),
+        Import$("std/os/ipc.bv"),
+        Import$("std/os/thread.bv"),
+        Import$("std/os/user.bv"),
+        Import$("std/os/mem.bv"),
+        Import$("std/os/atomic.bv"),
+        Import$("std/core/ptr.bv"),
+        Import$("std/core/string_builder.bv"),
+        Import$("std/env.bv"),
+        Import$("std/io.bv")
     );
 };
 ```
 
-After this plugin runs, the program has an explicit entry point. Disable
-with `--disable-plugin auto-main`.
-
-### entry-check (`plugins/mid/entry-check.bv`)
-
-Uses `Collect$` to check for `(entry)` markers, reactive transactions, and
-top-level triggers. If none exist, emits `EmitError$`:
+### Auto-main — Set entry marker
 
 ```brief
-$(Mid) {
-    let has_entry = Collect$("(contract (entry) ??*)");
-    let has_trg = Collect$("(trigger ?name ?type @ ?binding)");
-    [has_entry == 0 && has_trg == 0] {
-        CheckReactive$();
+$(Typed) @ highest {
+    Tag$("defn").Named$("main").First$()
+        .Descendants$("contract").First$().Set$("entry", true);
+    Tag$("txn").Named$("main").First$()
+        .Descendants$("contract").First$().Set$("entry", true);
+};
+```
+
+### Entry check — Verify program can start
+
+```brief
+$(Typed) {
+    Let$has_entry = Tag$("contract").WithAttr$("entry", true).Count$();
+    Let$has_trg = Tag$("trigger").Count$();
+    If$($has_entry == 0 && $has_trg == 0) {
+        EmitError$("no entry point: add [#] to defn main or trg declaration");
     };
 };
 ```
 
-This rejects programs that have no way to start executing.
+### PrintLn! expansion
 
-### check-reactive (`CheckReactive$` intrinsic)
+```brief
+$(Parsed) {
+    ForEach$(Tag$("plugin_intercept").Named$("PrintLn") as $intercept) {
+        Let$args = $intercept.Children$();
+        $intercept.ReplaceWith$(Block$(
+            Call$("PrintString#", Expr$("\n")),
+            Call$("PrintInt#", $args.Nth$(0))
+        ));
+    };
+};
+```
 
-A `$` intrinsic (invoked by `entry-check`) that walks the program AST to
-verify at least one reactive transaction has either an `[#]` entry marker or
-reads a top-level `let` binding with an initial value. This ensures reactive
-transactions have something to react to on startup.
+### IR text modification
 
-Disable with `--disable-plugin entry-check` (which also suppresses
-`CheckReactive$` since it's called from `entry-check`).
+```brief
+$(Generated) {
+    Find$("target triple = \"x86_64\"")
+        .ReplaceWith$("target triple = \"arm64\"");
+    Prepend$("; Optimized by Brief plugin\n");
+};
+```
+
+### Post-link binary stripping
+
+```brief
+$(Linked) {
+    Bin$.Run$("strip --strip-unnecessary {{path}}");
+};
+```
+
+---
+
+## Why WASM?
+
+WASM plugin support is unchanged.  See prior documentation for the rationale:
+sandboxing, language independence, stable ABI via WIT, and microsecond
+instantiation.  WASM plugins implement the same `Plugin` trait and receive
+the same `(program, universe)` state.
+
+---
+
+## BEAST Visualization
+
+The `.beast` format is preserved as a **read-only visualization tool** for
+plugin authors.  It shows the AST as S-expressions for human inspection:
+
+```bash
+brief build file.bv --emit-beast parsed    # → file.beast.parse
+brief build file.bv --emit-beast typed     # → file.beast.types
+brief build file.bv --emit-beast all       # all stages
+```
+
+`.beast` snapshots show the AST exactly as the navigation DSL sees it at
+each stage.  This helps when writing `Tag$`, `Pattern$`, and `Named$`
+selectors.  Plugins never read `.beast` text — they operate on the live AST.
+
+---
+
+## Old API Migration
+
+The following table maps every removed intrinsic to its replacement:
+
+| Removed | Replacement |
+|---------|-------------|
+| `InsertLiteralImport$("path")` | `Tag$("import").First$().Before$().Insert$(Import$("path"))` |
+| `InsertRegistryImport$("name")` | `Tag$("import").First$().Before$().Insert$(Import$("name"))` |
+| `Collect$("pattern")` | `Tag$(...).Count$()` or `Pattern$("...").Count$()` |
+| `MatchIR$("pat", "rep")` | `Select$(Pattern$("pat")).ReplaceWith$(Pattern$("rep"))` |
+| `CheckReactive$()` | `If$(Tag$("txn").WithAttr$("reactive", true).Count$() > 0) { ... }` |
+| `$(Front)` for source | `$(PreLex)` |
+| `$(Front)` for AST | `$(Parsed)` |
+| `$(Mid)` | `$(Typed)` |
+| `$(Post)` | `$(Generated)` |
+| `$(Back)` | `$(Optimized)` |

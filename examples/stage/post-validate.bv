@@ -1,6 +1,9 @@
-$(Post) {
-    // Post stage can inspect or validate the generated IR
-    EmitWarning$("Post stage: codegen complete, about to write output");
+// 2026-07-21: Updated from $(Post) to $(Generated).
+
+$(Generated) {
+    // Generated stage: inspect emitted IR text
+    Let$funcs = Find$("define dso_local").Count$();
+    EmitWarning$("Generated stage: " + $funcs + " functions in IR");
 };
 
 defn greet(name: String) -> String {

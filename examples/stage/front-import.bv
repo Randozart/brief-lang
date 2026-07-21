@@ -1,6 +1,9 @@
-$(Front) {
-    // Insert a literal import before the typechecker sees the AST
-    InsertLiteralImport$("std/option.bv");
+// 2026-07-21: Updated from $(Front) + InsertLiteralImport$ to $(Parsed) +
+// direct AST navigation. Inserts an import before the first existing import.
+
+$(Parsed) {
+    Tag$("import").First$().Before$()
+        .Insert$(Import$("std/option.bv"));
 };
 
 // The import inserted above is available here:

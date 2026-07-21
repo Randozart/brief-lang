@@ -28,9 +28,9 @@ use serde::Deserialize;
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
-// 2026-07-15: Phase 4 — Removed hardcoded prelude injection.
-// Prelude is now a system plugin (plugins/front/prelude.bv) that runs
-// at the Front stage via InsertLiteralImport$ calls.
+// 2026-07-21: Prelude is now a system plugin (plugins/parsed/prelude.bv) that
+// runs at the $(Parsed) stage via the AST navigation DSL (Tag$ + Insert$).
+// 2026-07-15: Removed hardcoded prelude injection.
 // Removed fields: use_stdlib, core_imported. Removed method: with_use_stdlib.
 
 #[derive(Deserialize)]

@@ -1,14 +1,12 @@
-// ── Collect$/MatchIR$ BEAST Pattern Example ────────────────────────────
+// ── AST Navigation DSL Example ──────────────────────────────────────────
 //
-// 2026-07-15: Demos BEAST pattern matching in a $(Back) stage block.
-// Collect$ gathers all AST nodes matching a pattern (read-only, logs count).
-// MatchIR$ rewrites matched nodes with a replacement pattern.
-//
-// Build: brief-compiler build examples/stage/collect-match.bv --emit-beast
+// 2026-07-21: Demonstrates the direct AST navigation DSL.
+// Counts all defn declarations using Tag$/Count$ instead of Collect$.
+// Build: brief-compiler build examples/stage/collect-match.bv --emit-beast typed
 
-$(Back) {
-    // Collect all defn declarations and log them
-    Collect$("(defn ?name ?params ?ret ?body)");
+$(Typed) {
+    Let$defns = Tag$("defn").Count$();
+    EmitWarning$("Found " + $defns + " defn(s) in AST");
 };
 
 defn main() -> Int {

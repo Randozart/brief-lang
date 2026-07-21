@@ -1,11 +1,14 @@
-// ── validate-trg: Post-stage guard for dynamic triggers ──────────────
-// 2026-07-15: Phase 7 — Warns at compile time when @ *ptr dynamic
-// trigger references are detected in the generated IR. This is a
-// $(Post) stage plugin that runs after code generation.
+// ── validate-trg: Warn on unresolved dynamic trigger targets ─────────
 //
-// In future phases, this will scan the BEAST for LoadVolatile patterns
-// and flag dereferences of null/unresolved pointers.
+// 2026-07-21: Rewritten with direct AST navigation DSL.
+// Checks each trigger for a resolvable instance reference.
+// Warns for triggers whose target identifier is empty/missing.
 
-$(Post @ 0) {
-    EmitWarning$("validate-trg: post-stage guard active");
+$(Verified) {
+    ForEach$(Tag$("trigger")) {
+        Let$has_target = $.Descendants$(Tag$("ident")).First$().IsEmpty$();
+        If$($has_target) {
+            EmitWarning$("trigger with no target: " + $.Names$().First$());
+        };
+    };
 };

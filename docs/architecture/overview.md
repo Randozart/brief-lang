@@ -6,41 +6,67 @@
 > `docs/plans/2026-07-20-extensible-number-types-final.md`. TOML config files
 > (`llvm-ops.toml`, `ctd-llvm-mappings.toml`) are removed; hashwords in op
 > signatures are the replacement.
+>
+> **2026-07-21:** The four-stage plugin system (Front/Mid/Post/Back) was replaced
+> with 11 granular stages (PreLex/Parsed/Resolved/Typed/Normalized/Verified/
+> Allocated/Provenanced/Generated/Optimized/Linked) and a direct AST navigation DSL.
+> See `docs/plans/2026-07-21-granular-pipeline-and-ast-navigation.md`.
+> The old `Collect$`/`MatchIR$` serialize-deserialize intrinsics are removed.
+> Plugins now navigate the live AST via `Tag$`, `Named$`, `ForEach$`, etc.
 
 ## Pipeline
 
 ```
                          FAST PATH (default, zero overhead)
-Source ─► Lex ─► Parse ─► Resolve ─► [NORMALIZE] ─► Codegen ─► (.ll) ─► clang ─► binary
-                                          │
-                                    Reads backend configs
-                                    Attaches resolved types
-                                    Strips irrelevant metadata
-                                    Validates intrinsics/ffi/melds
+Source ─► PreLex ─► Lex ─► Parse ─► Parsed ─► Resolve ─► Resolved ─► TypeCheck
+                                           │            │               │
+                                        AST plugins  AST snapshot    AST snapshot
+
+──► Typed ─► Normalize ─► Normalized ─► Verify ─► Verified ─► AllocAnalyze
+      │          │              │           │           │
+   AST        AST            AST         AST         AST
+   snapshot                                     snapshot
+
+──► Allocated ─► Provenance ─► Provenanced ─► Codegen ─► Generated ─► Optimize
+      │              │                │                      │
+   AST            AST              AST                   Ir$ plugins
+   snapshot                      snapshot                    snapshot
+
+──► Optimized ─► Link ─► Linked
+      │                     │
+    Ir$                  Bin$ plugins
+   snapshot
+
+Every stage is a plugin hook point.  Plugins use the AST Navigation DSL
+(Tag$, Named$, First$, Insert$, etc.) for tree stages and text operations
+(Find$, ReplaceWith$, etc.) for text/IR stages.
 
 
-                         PLUGIN PATH (--enable-plugin <name>)
-Source ─► Lex ─► Parse ─► Resolve ─► serialize ─► [PLUGIN CHAIN] ─► deserialize ─► [NORMALIZE] ─► Codegen
-                                                                                        │
-                                                                                   Same normalizer
-                                                                                   Same annotations
-                                                                                   Same stripping
+                         PLUGIN ARCHITECTURE (2026-07-21)
+Each stage maps to a $(StageName) block in .bv source or plugins/{stage}/.bv
+files. Plugins operate on the LIVE data (no serialize/deserialize):
+
+  $(Parsed) @ highest {
+      Tag$("import").First$().Before$()
+          .Insert$(Import$("std/types/bootstrap.bv"));
+  };
 
 
                          BEAST DEBUG PATH (--emit-beast)
-Source ─► ... ─► Resolve ─► serialize ─► [PLUGIN CHAIN] ─► deserialize ─► [NORMALIZE] ─► Codegen
-                                                                                        │
-                                                                                   Writes .beast.after
-                                                                                   after normalization
+Source ─► ... ─► Parsed ─► Resolved ─► Typed ─► ... ─► Provenanced
+                    │            │          │                │
+               .beast.parse  .beast.resolve .beast.types  .beast.prov
+
+--emit-beast writes .beast files at each AST stage for programmer
+visualization.  Plugins never read .beast — they operate on the live AST.
 
 
                           BACKEND DISPATCH (--backend selects)
-Source → Parse → Resolve → NORMALIZE (reads configs, annotates AST) → Codegen
-                               │                                          │
-                          Reads backend configs                       Reads annotations
-                          Walks AST once                              Never reads configs
-                          Attaches llvm_type/bit_width/js_type         Never matches on primitive
-                          to every type reference                     Just emits annotated AST
+Source → Parse → Resolve → NORMALIZE → Codegen → Generated → Optimize → Binary
+                               │                      │           │
+                          Reads backend configs    Ir$ plugins  Ir$ plugins
+                          Walks AST once           (text ops)   (text ops)
+                          Attaches annotations
 
                      OPTIONAL PRE-CODEGEN ANALYSES
                          ┌─────────────────────┐
@@ -205,6 +231,18 @@ A backend can start with just `bytes` and be fully correct. It then opts into `p
 | `beast/sexpr.rs` | S-expression tokenizer, parser, pretty-printer |
 | `beast/serialize.rs` | Walk `Vec<TopLevel>` + `TypeUniverse` → `.beast` text |
 | `beast/deserialize.rs` | `.beast` text → `Vec<TopLevel>` + `TypeUniverse` |
+| `beast/pattern.rs` | Pattern compiler for `.beast` query syntax (retained for `Pattern$`) |
+| `beast/layout.rs` | Layout DSL parser for metadata annotations |
+
+### AST Navigation Macros (`src/macros/`)
+
+| Module | Purpose |
+|--------|---------|
+| `macros/selection.rs` | `Selection`, `Selector` trait, traversal (children/descendants/parent/etc.) |
+| `macros/pattern_live.rs` | Live AST pattern compiler — matches `.beast` patterns on `Vec<TopLevel>` directly |
+| `macros/actions.rs` | `Position`, mutation ops (insert/delete/replace/wrap/rename/set) |
+| `macros/text_ops.rs` | `TextSelection`, text operations for Source$/Ir$ (find/replace/insert/delete) |
+| `macros/flow.rs` | `ForEach$`, `Let$`, `If$` evaluation |
 
 ### Analysis (`src/analysis/`)
 
@@ -224,9 +262,9 @@ A backend can start with just `bytes` and be fully correct. It then opts into `p
 
 | Module | Purpose |
 |--------|---------|
-| `plugin/mod.rs` | `Plugin` trait, `PluginManager`, `PluginHook` |
-| `plugin/loader.rs` | Native `.so`/`.dylib` loading |
-| `plugin/runner.rs` | External plugin chain (stdin/stdout BEAST) |
+| `plugin/mod.rs` | `Plugin` trait, `PluginManager`, per-stage dispatch |
+| `plugin/loader.rs` | System plugin discovery from `plugins/{stage}/`, inline `$(Stage)` block extraction |
+| `plugin/intrinsics.rs` | `$` intrinsic dispatch — navigation chains, AST constructors, diagnostics |
 
 ### Normalizer (`src/backend/normalizer.rs`)
 
@@ -300,7 +338,8 @@ the convergent txn loops through SROA + loop unrolling.
 |------|---------|
 | `src/config.rs` | `TypeConfig`, `OpConfig`, `derive_llvm_type()` |
 | `src/target.rs` | `TargetConfig`, `BackendKind` resolution |
-| `src/compile.rs` | Compilation pipeline with backend dispatch |
-| `src/main.rs` | CLI entry point with `--backend`, `--plugin`, `--emit-beast` |
+| `src/compile.rs` | Compilation pipeline with 11-stage dispatch, `BeastStage` snapshots |
+| `src/macros/` | AST navigation DSL: `selection.rs`, `pattern_live.rs`, `actions.rs`, `text_ops.rs`, `flow.rs` |
+| `src/main.rs` | CLI entry point with `--backend`, `--plugin`, `--emit-beast [stage]` |
 | `src/lib.rs` | Crate root, module declarations |
 | `docs/architecture/backend-type-dispatch.md` | Type dispatch design (mandatory reading) |

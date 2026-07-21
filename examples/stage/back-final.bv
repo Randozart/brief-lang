@@ -1,11 +1,14 @@
-$(Back) {
-    // Back stage: final validation before writing to disk
-    EmitWarning$("Back stage: final check passed");
+// 2026-07-21: Updated from $(Back)/$(Front) to $(Optimized)/$(Parsed).
+
+$(Optimized) {
+    // Optimized stage: final validation before writing to disk
+    EmitWarning$("Optimized stage: final check passed");
 };
 
-$(Front) {
-    // Multiple stage blocks in one file
-    InsertLiteralImport$("std/types.bv");
+$(Parsed) {
+    // Insert stdlib import before first user import
+    Tag$("import").First$().Before$()
+        .Insert$(Import$("std/types.bv"));
 };
 
 defn main() -> Int {

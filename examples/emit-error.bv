@@ -1,12 +1,12 @@
 // ── EmitError$ Example ────────────────────────────────────────────────
 //
-// 2026-07-15: Demos compile-time error emission via $(Front) stage block.
-// The EmitError$ intrinsic aborts compilation with a custom message.
+// 2026-07-21: Updated from $(Front) to $(Parsed).
+// EmitError$ still aborts compilation with a custom message.
 //
 // Check: brief-compiler check examples/emit-error.bv
 //   (will emit error: "This program requires --feature-x flag")
 
-$(Front) {
+$(Parsed) {
     EmitError$("This program requires --feature-x flag");
 };
 

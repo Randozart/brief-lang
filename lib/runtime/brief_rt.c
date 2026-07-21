@@ -160,7 +160,8 @@ int64_t __print_float(float f) {
     return 0;
 }
 
-int64_t __print_char(int64_t c) {
+// 2026-07-21: always_inline + LTO enables inlining into main() hot loop.
+__attribute__((always_inline)) int64_t __print_char(int64_t c) {
     if (c == 10) {
         puts("");
     } else {

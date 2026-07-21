@@ -1,0 +1,9 @@
+// ── Hardware Prelude — CIRCT / Cell Targets ──────────────────────────────
+// 2026-07-21: Rewritten with direct AST navigation DSL.
+// Inserts hardware stdlib import before the first user import.
+// Used by .cbv files; provides Cell, Wire, Register, Bit.
+
+$(Parsed @ highest) {
+    Tag$("import").First$().Before$()
+        .Insert$(Import$("std/hardware.bv"));
+};

@@ -1,20 +1,23 @@
 // ── Plugin System — Stage-Based Architecture ────────────────────────────
 //
-// 2026-07-15: Phase 2 — Rewrite Plugin trait and PluginManager with
-// per-stage registration and dispatch. The four stages mirror the
-// pipeline: Front (after parse), Mid (after typecheck), Post (after
-// codegen), Back (final validation). Each plugin declares which stages
-// it runs at via stages(). Plugins are sorted by priority (lower = earlier)
-// within each stage.
+// 2026-07-21: Expanded from 4 to 11 granular stages. Each stage maps to a
+// compiler pass: PreLex, Parsed, Resolved, Typed, Normalized, Verified,
+// Allocated, Provenanced, Generated, Optimized, Linked. Each plugin declares
+// which stages it runs at via stages(). Plugins are sorted by priority
+// (lower = earlier) within each stage.
 //
-// Pipeline position:
-//   parse → Front(on_ast) → import resolution → typecheck
-//   → Mid(on_ast) → normalizer → codegen → Post(on_ir)
-//   → Back(on_ir) → write output
+// Stage dispatch pipeline:
+//   PreLex(source) → Parsed(ast) → Resolved(ast) → Typed(ast)
+//   → Normalized(ast) → Verified(ast) → Allocated(ast) → Provenanced(ast)
+//   → Generated(ir) → Optimized(ir) → Linked(bin)
 //
-// System plugins ship in plugins/{front,mid,post,back}/ directories.
+// System plugins ship in plugins/{parsed,resolved,typed,...}/ directories.
 // User inline plugins are $(Stage) blocks parsed from source files.
 // Per-extension plugin selection via config/targets.toml [ext].plugins.
+//
+// 2026-07-21: Old Collect$/MatchIR$/InsertLiteralImport$/InsertRegistryImport$
+// intrinsics removed. Replaced by direct AST navigation DSL (Tag$, Named$,
+// ForEach$, Insert$, Delete$, Set$, etc.) operating on the live AST.
 //
 // 2026-07-15: Removed old PluginHook/PluginAction types. The new trait
 // exposes stage-specific methods that return Result<(), String>.

@@ -94,7 +94,7 @@ fn expect_string_arg(args: &[Expr], idx: usize, intrinsic: &str) -> Result<Strin
 /// filesystem-based imports.
 ///
 /// 2026-07-15: Phase 4 — Replaces the hardcoded prelude injection in
-/// import_resolver.rs. Used by plugins/front/prelude.bv.
+/// import_resolver.rs. Used by plugins/parsed/prelude.bv.
 fn intrinsic_insert_literal_import(
     args: &[Expr],
     program: &mut Vec<TopLevel>,

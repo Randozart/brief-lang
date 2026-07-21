@@ -325,7 +325,11 @@ pub struct StageBlock {
     pub span: Option<Span>,
 }
 
-/// The four pipeline stages at which compile-time plugins can run.
+/// Pipeline stages at which compile-time plugins can run.
+/// 2026-07-21: Will be expanded to granular stages (PreLex, Parsed, Resolved,
+/// Typed, Normalized, Verified, Allocated, Provenanced, Generated, Optimized,
+/// Linked) as part of the granular pipeline implementation.
+/// Old Front/Mid/Post/Back variants will be replaced.
 /// 2026-07-15: Phase 1b — Plugin architecture.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum StageKind {

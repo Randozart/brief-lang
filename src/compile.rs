@@ -25,6 +25,10 @@ use brief_compiler::type_universe::TypeUniverse;
 pub use brief_compiler::backend::llvm::TrgUnresolvedAction;
 
 /// Pipeline stage at which to emit a BEAST snapshot.
+/// 2026-07-21: Will be expanded to granular stages (Parse, Resolve, TypeCheck,
+/// Normalize, Verify, Alloc, Provenance, Codegen, Optimize) as part of the
+/// granular pipeline implementation (see plan 2026-07-21-granular-pipeline-and-ast-navigation.md).
+/// Old Ast/Mid/Post variants will be replaced.
 /// 2026-07-15: Phase 7 — Used by --emit-beast for metaprogramming introspection.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum BeastStage {
@@ -501,10 +505,11 @@ fn compile_ll_to_binary(ll_path: &str, binary_path: &str, extra_objects: &[PathB
     let mut cmd = Command::new("clang");
     let rt_path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("lib/runtime/brief_rt.c");
     let rt_str = rt_path.to_string_lossy().to_string();
+    // 2026-07-21: Use -flto so clang can inline __print_char (~5-8 cycles/iter).
     if shared {
-        cmd.args(["-O3", "-shared", "-fPIC", ll_path, &rt_str]);
+        cmd.args(["-O3", "-flto", "-shared", "-fPIC", ll_path, &rt_str]);
     } else {
-        cmd.args(["-O3", "-march=native", "-ffast-math", ll_path, &rt_str]);
+        cmd.args(["-O3", "-flto", "-march=native", "-ffast-math", ll_path, &rt_str]);
     }
     for obj in extra_objects {
         cmd.arg(obj.as_os_str());

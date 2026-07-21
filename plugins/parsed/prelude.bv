@@ -1,0 +1,24 @@
+// ── Standard Prelude — LLVM/Webstack/GPU Targets ─────────────────────────
+// 2026-07-21: Rewritten with direct AST navigation DSL.
+// Inserts all stdlib imports before the first user import in the file.
+// Runs at $(Parsed) with highest priority so imports are available
+// before type checking.
+
+$(Parsed @ highest) {
+    Let$anchor = Tag$("import").First$();
+    $anchor.Before$().Insert$(
+        Import$("std/types/bootstrap.bv"),
+        Import$("std/os/fs.bv"),
+        Import$("std/os/net.bv"),
+        Import$("std/os/signal.bv"),
+        Import$("std/os/ipc.bv"),
+        Import$("std/os/thread.bv"),
+        Import$("std/os/user.bv"),
+        Import$("std/os/mem.bv"),
+        Import$("std/os/atomic.bv"),
+        Import$("std/core/ptr.bv"),
+        Import$("std/core/string_builder.bv"),
+        Import$("std/env.bv"),
+        Import$("std/io.bv")
+    );
+};
