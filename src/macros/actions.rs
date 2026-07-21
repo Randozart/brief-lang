@@ -62,57 +62,72 @@ pub fn insert_items(
 ) -> Result<(), String> {
     match pos {
         Position::Before(node) | Position::After(node) | Position::Replace(node) => {
-            let idx = match node {
-                NodeRef::TopLevel(i) => *i,
-                _ => return Err("insert_at_position: only TopLevel nodes supported".into()),
-            };
-            match pos {
-                Position::Before(_) => {
-                    for (offset, item) in new_items.into_iter().enumerate() {
-                        items.insert(idx + offset, item);
-                    }
-                }
-                Position::After(_) => {
-                    for (offset, item) in new_items.into_iter().enumerate() {
-                        items.insert(idx + 1 + offset, item);
-                    }
-                }
-                Position::Replace(_) => {
-                    items.remove(idx);
-                    for (offset, item) in new_items.into_iter().enumerate() {
-                        items.insert(idx + offset, item);
-                    }
-                }
-                _ => unreachable!(),
-            }
-            Ok(())
+            insert_at_toplevel(items, pos, node, new_items)
         }
         Position::Inside(node) | Position::AppendTo(node) => {
-            let target = items.get_mut(match node { NodeRef::TopLevel(i) => *i, _ => return Ok(()) });
-            let Some(target) = target else { return Ok(()); };
-            let Some(body) = get_body_mut(target) else { return Ok(()); };
-            let stmts = ast_nodes_to_stmts(&new_items);
-            match pos {
-                Position::Inside(_) => {
-                    for (offset, stmt) in stmts.into_iter().enumerate() {
-                        body.insert(offset, stmt);
-                    }
-                }
-                Position::AppendTo(_) => body.extend(stmts),
-                _ => unreachable!(),
-            }
-            Ok(())
+            insert_into_body(items, pos, node, new_items)
         }
     }
 }
 
+fn insert_at_toplevel(
+    items: &mut Vec<TopLevel>,
+    pos: &Position,
+    node: &NodeRef,
+    new_items: Vec<TopLevel>,
+) -> Result<(), String> {
+    let NodeRef::TopLevel(idx) = node else {
+        return Err("insert: only TopLevel nodes supported".into());
+    };
+    let idx = *idx;
+    match pos {
+        Position::Before(_) => {
+            for (offset, item) in new_items.into_iter().enumerate() {
+                items.insert(idx + offset, item);
+            }
+        }
+        Position::After(_) => {
+            for (offset, item) in new_items.into_iter().enumerate() {
+                items.insert(idx + 1 + offset, item);
+            }
+        }
+        Position::Replace(_) => {
+            items.remove(idx);
+            for (offset, item) in new_items.into_iter().enumerate() {
+                items.insert(idx + offset, item);
+            }
+        }
+        _ => unreachable!(),
+    }
+    Ok(())
+}
+
+fn insert_into_body(
+    items: &mut Vec<TopLevel>,
+    pos: &Position,
+    node: &NodeRef,
+    new_items: Vec<TopLevel>,
+) -> Result<(), String> {
+    let NodeRef::TopLevel(idx) = node else { return Ok(()) };
+    let Some(target) = items.get_mut(*idx) else { return Ok(()) };
+    let Some(body) = get_body_mut(target) else { return Ok(()) };
+    let stmts = ast_nodes_to_stmts(&new_items);
+    match pos {
+        Position::Inside(_) => {
+            for (offset, stmt) in stmts.into_iter().enumerate() {
+                body.insert(offset, stmt);
+            }
+        }
+        Position::AppendTo(_) => body.extend(stmts),
+        _ => unreachable!(),
+    }
+    Ok(())
+}
+
 /// Delete all nodes in a selection from the AST.
 pub fn delete_selection(items: &mut Vec<TopLevel>, sel: &Selection) -> Result<u32, String> {
-    // Collect indices in reverse to preserve positions during removal
-    let mut indices: Vec<usize> = sel.nodes.iter()
-        .filter_map(|n| match n { NodeRef::TopLevel(i) => Some(*i), _ => None })
-        .collect();
-    indices.sort_unstable_by(|a, b| b.cmp(a)); // reverse
+    let mut indices: Vec<usize> = collect_toplevel_indices(sel);
+    indices.sort_unstable_by(|a, b| b.cmp(a));
     let count = indices.len() as u32;
     for i in indices {
         if i < items.len() {
@@ -120,6 +135,16 @@ pub fn delete_selection(items: &mut Vec<TopLevel>, sel: &Selection) -> Result<u3
         }
     }
     Ok(count)
+}
+
+fn collect_toplevel_indices(sel: &Selection) -> Vec<usize> {
+    let mut indices = Vec::new();
+    for node in &sel.nodes {
+        if let NodeRef::TopLevel(i) = node {
+            indices.push(*i);
+        }
+    }
+    indices
 }
 
 /// Replace selected nodes with a constructed node.

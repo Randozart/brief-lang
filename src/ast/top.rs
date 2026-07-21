@@ -332,7 +332,7 @@ pub struct StageBlock {
 ///   Parsed–Provenanced — AST (implicit, tree operations)
 ///   Generated–Optimized — Ir$ (text operations)
 ///   Linked        — Bin$ (binary path operations)
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum StageKind {
     /// Raw source text before lexing. Default: Source$.
     PreLex,

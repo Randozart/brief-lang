@@ -188,20 +188,12 @@ impl Selection {
     pub fn ancestors(&self, items: &[TopLevel], tag_filter: Option<&str>) -> Selection {
         let mut result = Vec::new();
         for node in &self.nodes {
-            let mut current = node.clone();
-            loop {
-                let parent = match node_parent(&current) {
-                    Some(p) => p,
-                    None => break,
-                };
-                if let Some(tag) = tag_filter {
-                    if node_tag(&parent, items) == Some(tag) {
-                        result.push(parent.clone());
-                    }
-                } else {
-                    result.push(parent.clone());
+            let ancestors = collect_ancestors(node, items);
+            for parent in ancestors {
+                let matches = tag_filter.map_or(true, |t| node_tag(&parent, items) == Some(t));
+                if matches {
+                    result.push(parent);
                 }
-                current = parent;
             }
         }
         Selection { nodes: result }
@@ -210,16 +202,11 @@ impl Selection {
     /// Nearest ancestor matching the tag filter.
     pub fn closest(&self, items: &[TopLevel], tag: &str) -> Selection {
         for node in &self.nodes {
-            let mut current = node.clone();
-            loop {
-                let parent = match node_parent(&current) {
-                    Some(p) => p,
-                    None => break,
-                };
+            let ancestors = collect_ancestors(node, items);
+            for parent in ancestors {
                 if node_tag(&parent, items) == Some(tag) {
                     return Selection::single(parent);
                 }
-                current = parent;
             }
         }
         Selection::empty()
@@ -247,15 +234,10 @@ impl Selection {
                 (0..idx).rev().collect()
             };
             for i in range {
-                if let Some(tag) = tag_filter {
-                    if node_tag(&siblings[i], items) != Some(tag) {
-                        continue;
-                    }
-                }
+                let tag_matches = tag_filter.map_or(true, |t| node_tag(&siblings[i], items) == Some(t));
+                if !tag_matches { continue; }
                 result.push(siblings[i].clone());
-                if tag_filter.is_some() {
-                    break; // first match only when filtering
-                }
+                if tag_filter.is_some() { break; }
             }
         }
         Selection { nodes: result }
@@ -533,6 +515,18 @@ fn resolve_stmt<'a>(path: &[StmtStep], idx: &usize, items: &'a [TopLevel]) -> Op
     // For now, simplified: just walk the path from top-level bodies
     // More sophisticated resolution will be added as needed
     None
+}
+
+/// Collect all ancestor nodes of a given node, from parent up to root.
+fn collect_ancestors(node: &NodeRef, _items: &[TopLevel]) -> Vec<NodeRef> {
+    let mut result = Vec::new();
+    let mut current = node.clone();
+    loop {
+        let Some(parent) = node_parent(&current) else { break };
+        result.push(parent.clone());
+        current = parent;
+    }
+    result
 }
 
 /// Get the children of a node as NodeRefs.

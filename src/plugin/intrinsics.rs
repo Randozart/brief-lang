@@ -21,6 +21,7 @@
 
 use crate::ast::{Expr, Statement, TopLevel};
 use crate::macros;
+use crate::plugin::PluginManager;
 use crate::type_universe::TypeUniverse;
 
 /// Dispatch a `$` intrinsic call.

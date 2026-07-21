@@ -72,17 +72,24 @@ pub fn collect_matches_recursive(pattern: &Pattern, items: &[TopLevel]) -> Vec<L
         if let Some(bindings) = match_top_level(pattern, item, i) {
             results.push(LiveMatch { bindings, matched_node: node.clone() });
         }
-        // Recurse into bodies for statement-level matches
-        if let Some(body) = get_toplevel_body(item) {
-            for (j, stmt) in body.iter().enumerate() {
-                let stmt_node = NodeRef::Stmt(vec![], j);
-                if let Some(bindings) = match_stmt(pattern, stmt) {
-                    results.push(LiveMatch { bindings, matched_node: stmt_node });
-                }
-            }
-        }
+        collect_stmt_matches_in_body(pattern, item, i, &mut results);
     }
     results
+}
+
+fn collect_stmt_matches_in_body(
+    pattern: &Pattern,
+    item: &TopLevel,
+    item_idx: usize,
+    results: &mut Vec<LiveMatch>,
+) {
+    let Some(body) = get_toplevel_body(item) else { return };
+    for (j, stmt) in body.iter().enumerate() {
+        let stmt_node = NodeRef::Stmt(vec![], j);
+        if let Some(bindings) = match_stmt(pattern, stmt) {
+            results.push(LiveMatch { bindings, matched_node: stmt_node });
+        }
+    }
 }
 
 /// Match a pattern against a statement.
@@ -153,40 +160,14 @@ fn match_toplevel_children(
     item: &TopLevel,
     bindings: &mut LiveBindings,
 ) -> Result<(), ()> {
-    // Extract children based on TopLevel variant
-    let mut child_idx = 0;
-    match item {
-        TopLevel::Definition(d) => {
-            // Children: name, contract, params, ret, body
-            let fields: Vec<&str> = vec![&d.name];
-            let mut field_idx = 0;
-            while child_idx < children.len() {
-                let pat = &children[child_idx];
-                if field_idx < fields.len() {
-                    match_field_pattern(pat, fields[field_idx], bindings)?;
-                    field_idx += 1;
-                    child_idx += 1;
-                } else {
-                    // Remaining children match body statements
-                    break;
-                }
-            }
-        }
-        TopLevel::Transaction(t) => {
-            let fields: Vec<&str> = vec![&t.name];
-            let mut field_idx = 0;
-            while child_idx < children.len() {
-                let pat = &children[child_idx];
-                if field_idx < fields.len() {
-                    match_field_pattern(pat, fields[field_idx], bindings)?;
-                    field_idx += 1;
-                    child_idx += 1;
-                } else {
-                    break;
-                }
-            }
-        }
-        _ => {}
+    let fields: Vec<&str> = match item {
+        TopLevel::Definition(d) => vec![&d.name],
+        TopLevel::Transaction(t) => vec![&t.name],
+        _ => return Ok(()),
+    };
+    for (i, child) in children.iter().enumerate() {
+        if i >= fields.len() { break; }
+        match_field_pattern(child, fields[i], bindings)?;
     }
     Ok(())
 }

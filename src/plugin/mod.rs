@@ -293,6 +293,40 @@ impl PluginManager {
     pub fn is_empty(&self) -> bool {
         self.all.is_empty()
     }
+
+    /// Return the names of all registered plugins (regardless of filtering).
+    pub fn list_names(&self) -> Vec<String> {
+        self.all.iter().map(|e| e.plugin.name().to_string()).collect()
+    }
+
+    /// Add a plugin name to the disabled list at runtime.
+    /// Used by Stage$.Remove$ for forward-only plugin removal.
+    pub fn disable_plugin(&mut self, name: &str) {
+        if !self.disabled.contains(&name.to_string()) {
+            self.disabled.push(name.to_string());
+        }
+    }
+
+    /// Register a plugin during a stage (forward-only).
+    /// Returns an error if the plugin's stage ≤ the current stage.
+    pub fn register_during_stage(
+        &mut self,
+        plugin: Box<dyn Plugin>,
+        priority: u32,
+        current_stage: StageKind,
+    ) -> Result<(), String> {
+        let plugin_stages = plugin.stages();
+        for s in &plugin_stages {
+            if *s <= current_stage {
+                return Err(format!(
+                    "cannot register plugin at stage {:?} from stage {:?} — forward-only",
+                    s, current_stage
+                ));
+            }
+        }
+        self.all.push(PluginEntry { plugin, priority });
+        Ok(())
+    }
 }
 
 impl Default for PluginManager {
