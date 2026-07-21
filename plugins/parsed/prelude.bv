@@ -5,8 +5,8 @@
 // before type checking.
 
 $(Parsed @ highest) {
-    Let$anchor = Tag$("import").First$();
-    $anchor.Before$().Insert$(
+    let anchor = Tag$("import").First$();
+    anchor.Before$().Insert$(
         Import$("std/types/bootstrap.bv"),
         Import$("std/os/fs.bv"),
         Import$("std/os/net.bv"),

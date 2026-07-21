@@ -3045,12 +3045,31 @@ impl LlvmBackend {
             out.push_str(&self.fun.pending_metadata);
         }
         writeln!(out).ok();
+        // 2026-07-21: Add fast-math attributes to FP-intensive groups (#0, #3, #4, #5, #9).
+        // These seven attributes tell LLVM's backend it can convert fdiv to vrcpps + Newton
+        // refinement. Without them, ARC (Approximate Reciprocal Calculator) pass refuses to
+        // replace divisions with reciprocal multiplies, leaving 60+ scalar vdivss in the hot loop.
+        // Clang emits these for -ffast-math; the Brief IR has "fast" on individual ops but
+        // lacking function-level attributes prevents backend optimization.
+        let fast_math_attrs: &[&str] = &[
+            r#"    "approx-func-fp-math"="true""#,
+            r#"    "denormal-fp-math"="preserve-sign,preserve-sign""#,
+            r#"    "no-infs-fp-math"="true""#,
+            r#"    "no-nans-fp-math"="true""#,
+            r#"    "no-signed-zeros-fp-math"="true""#,
+            r#"    "no-trapping-math"="true""#,
+            r#"    "unsafe-fp-math"="true""#,
+        ];
         writeln!(out, "attributes #0 = {{").ok();
         writeln!(out, "    mustprogress nofree norecurse nosync nounwind memory(readwrite)").ok();
+        for attr in fast_math_attrs { writeln!(out, "{}", attr).ok(); }
         writeln!(out, "}}").ok();
         writeln!(out, "attributes #1 = {{ nocallback nofree nosync nounwind willreturn memory(readwrite) }}").ok();
         writeln!(out, "attributes #2 = {{ mustprogress nofree norecurse nosync nounwind memory(readwrite) }}").ok();
-        writeln!(out, "attributes #3 = {{ nofree norecurse nosync nounwind memory(readwrite) }}").ok();
+        writeln!(out, "attributes #3 = {{").ok();
+        writeln!(out, "    nofree norecurse nosync nounwind memory(readwrite)").ok();
+        for attr in fast_math_attrs { writeln!(out, "{}", attr).ok(); }
+        writeln!(out, "}}").ok();
         // SLP-safe attribute variants: #4 = #0 + disable-slp, #5 = #3 + disable-slp.
         // Dual attributes (disable-slp-vectorize + no-vectorize-slp) ensure LLVM
         // compatibility across versions 15–22+. Emitted only when needed.
@@ -3058,10 +3077,12 @@ impl LlvmBackend {
             writeln!(out, "attributes #4 = {{").ok();
             writeln!(out, "    mustprogress nofree norecurse nosync nounwind memory(readwrite)").ok();
             writeln!(out, "    \"disable-slp-vectorize\"=\"true\" \"no-vectorize-slp\"=\"true\"").ok();
+            for attr in fast_math_attrs { writeln!(out, "{}", attr).ok(); }
             writeln!(out, "}}").ok();
             writeln!(out, "attributes #5 = {{").ok();
             writeln!(out, "    nofree norecurse nosync nounwind memory(readwrite)").ok();
             writeln!(out, "    \"disable-slp-vectorize\"=\"true\" \"no-vectorize-slp\"=\"true\"").ok();
+            for attr in fast_math_attrs { writeln!(out, "{}", attr).ok(); }
             writeln!(out, "}}").ok();
         }
         writeln!(out, "attributes #6 = {{ nounwind }}").ok();
@@ -3097,6 +3118,7 @@ impl LlvmBackend {
         // during LTO merging (llvm-link renumbers but keeps #9).
         writeln!(out, "attributes #9 = {{").ok();
         writeln!(out, "    nofree norecurse nosync nounwind memory(readwrite)").ok();
+        for attr in fast_math_attrs { writeln!(out, "{}", attr).ok(); }
         writeln!(out, "}}").ok();
         // 2026-07-04: #10 = argmem:read + willreturn for @pre_* functions.
         // Precondition functions only read state through %state and never

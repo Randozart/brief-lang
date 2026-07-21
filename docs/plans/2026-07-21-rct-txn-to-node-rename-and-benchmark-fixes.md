@@ -1255,4 +1255,81 @@ from increased PLT entries or dynamic linking overhead. Could also be real: the
 6-phi cap affects fannkuch similarly, and if bit_clear was rewritten to use a node
 with more state fields than before, the phi cap may have regressed it.
 ```
+
+---
+
+## Stage 9: Current Benchmark Results (2026-07-21, End of Session)
+
+All times at `BOUND=50000000`, single run, nanosecond-precision fork+exec timer.
+
+| Benchmark | Brief | C | Ratio | Winner | Change |
+|-----------|-------|---|-------|--------|--------|
+| ring_buffer | 0.0617s | 0.0461s | 1.33x | C | Now tests real buffer ops (was 1.72x) |
+| float_math | 0.0769s | 0.0709s | 1.08x | ~tie | |
+| **float_math_nonzero** | **0.1603s** | **0.1689s** | **0.94x** | **Brief** | ✓ Fixed |
+| **sparse_dispatch** | **0.0600s** | **0.0641s** | **0.93x** | **Brief** | ✓ |
+| **print_loop** | **0.0588s** | **0.0633s** | **0.93x** | **Brief** | ✓ Fixed |
+| nbody_newton | 12.0403s | 8.8564s | 1.35x | C | Missing fast-math attributes |
+| **nbody_sqrt** | **2.6511s** | **3.1134s** | **0.85x** | **Brief** | ✓ |
+| **nbody_sqrt_idio** | **2.5850s** | **3.7576s** | **0.68x** | **Brief** | ✓ |
+| **fasta** | **0.2163s** | **0.2204s** | **0.98x** | **~tie** | ↑ 1.23x via LTO |
+| **fannkuch_redux** | **0.0697s** | **0.0749s** | **0.93x** | **Brief** | ↑ 1.31x via adaptive cap |
+| mandelbrot | 0.6713s | 0.6729s | 0.99x | ~tie | |
+| kalman_filter_runtime | 0.1819s | 0.1846s | 0.98x | ~tie | |
+| knucleotide | 0.1990s | 0.1958s | 1.01x | ~tie | |
+| cancel_math | 0.0617s | 0.0593s | 1.03x | ~tie | |
+| bit_clear | ~0.0007s | ~0.0007s | ~1.00x | noise | 63 iter, startup-dominated |
+| **queue_drain** | **0.0618s** | **0.0655s** | **0.94x** | **Brief** | ✓ Fixed |
+| queue_drain_sym | 0.0635s | 0.0628s | 1.01x | ~tie | |
+
+**Brief wins: 7 | Parity: 8 | C wins: 2** (ring_buffer 1.33x, nbody_newton 1.35x)
+
+---
+
+## Stage 10: Fix Remaining Two Behind Benchmarks
+
+### P5: nbody_newton — Add Fast-Math Attributes (HIGH IMPACT)
+
+**Root cause:** The emitted LLVM IR uses `fdiv fast` on individual float operations,
+but the **function attribute groups lack the seven fast-math attributes** that LLVM
+needs to convert `fdiv` to `vrcpps` + Newton refinement.
+
+Clang emits these attributes for `-ffast-math`:
+```
+"approx-func-fp-math"="true"
+"denormal-fp-math"="preserve-sign,preserve-sign"
+"no-infs-fp-math"="true"
+"no-nans-fp-math"="true"
+"no-signed-zeros-fp-math"="true"
+"no-trapping-math"="true"
+"unsafe-fp-math"="true"
+```
+
+Without them, LLVM's backend rejects reciprocal conversion even though individual
+`fast` flags permit it. Verified by manually adding these seven attributes to the
+`.ll` file — scalar `divss` in the hot loop drops from **60 to 0**.
+
+**Fix:** Add the seven attributes to all function attribute groups used by
+floating-point-intensive functions in `src/backend/llvm/mod.rs` (groups #0, #3,
+#4, #5, #8, #9).
+
+**Expected impact:** nbody_newton 1.35x → ~1.0x (hot loop divisions become vrcpps).
+
+### P6: ring_buffer — 32-Byte Loop Alignment (HIGH IMPACT)
+
+**Root cause:** The `mul %r15` instruction at address `0x2b7f` in the hot loop
+crosses a 32-byte boundary. Intel CPUs cannot cache cross-boundary instructions
+in the DSB (uop cache), forcing MITE (legacy decoder pipeline) fallback each
+iteration. This costs ~1-2 cycles in a ~3-4 cycle loop — directly explaining
+the 1.33x ratio.
+
+**Fix:** Add alignment padding before the `.cm_header` loop start to shift the
+loop body so no instruction crosses a 32-byte boundary. This is done by inserting
+NOP padding (`callbr` or `align 32` directive) before the loop header.
+
+**Secondary fix:** Change `extract_root_via_provenance` in `transition_graph.rs`
+to return `None` for `Expr::Index` LHS — `data[idx] = val` is a pointer write,
+not a field write, and should not add `data` to the write set. This eliminates
+redundant phis for pointer-type fields.
+```
 ```
