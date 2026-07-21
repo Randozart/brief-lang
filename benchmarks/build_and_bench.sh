@@ -197,16 +197,24 @@ if [ ! -f "$TIMER_BIN" ]; then
 #include <stdlib.h>
 #include <time.h>
 #include <sys/wait.h>
+#include <sys/resource.h>
 #include <unistd.h>
 int main(int argc, char **argv) {
     if (argc < 2) { fprintf(stderr, "usage: %s <cmd...>\n", argv[0]); return 1; }
-    struct timespec start, end;
-    clock_gettime(CLOCK_MONOTONIC, &start);
+    // 2026-07-21: Measure child CPU time (not wall clock) to exclude
+    // fork+exec startup noise. Uses wait4() to get per-child rusage.
+    // Combined with warmup run to preheat cache + dynamic linker.
+    int ws, status; struct rusage wu, mu;
+    // Warmup — fork+exec once, discard timing
+    pid_t wup = fork();
+    if (wup == 0) { freopen("/dev/null", "w", stdout); execvp(argv[1], &argv[1]); _exit(127); }
+    wait4(wup, &ws, 0, &wu);
+    // Measurement — fork+exec again, capture child CPU time
     pid_t pid = fork();
     if (pid == 0) { freopen("/dev/null", "w", stdout); execvp(argv[1], &argv[1]); _exit(127); }
-    int status; waitpid(pid, &status, 0);
-    clock_gettime(CLOCK_MONOTONIC, &end);
-    double elapsed = (end.tv_sec - start.tv_sec) + (end.tv_nsec - start.tv_nsec) / 1e9;
+    wait4(pid, &status, 0, &mu);
+    // Report measurement child's user CPU time (excludes warmup, fork, wait)
+    double elapsed = mu.ru_utime.tv_sec + mu.ru_utime.tv_usec / 1e6;
     printf("%.6f\n", elapsed); fflush(stdout);
     return WIFEXITED(status) ? WEXITSTATUS(status) : 1;
 }
