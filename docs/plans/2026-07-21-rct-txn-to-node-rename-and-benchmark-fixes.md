@@ -1600,3 +1600,123 @@ After all Fixes 1–3 from the session:
 | **4** | **SLP isomorphism pass — Analysis Phase** — new slp_isomorphism.rs. Walks txn bodies, segments let/assign statements, compares for structural isomorphism via alpha-renaming, records groups of 2+ isomorphic lanes | 320 lines | `slp_isomorphism.rs` (new) | nbody (foundation) | Enables Phase 2 |
 | **5** | **SLP isomorphism pass — Codegen Phase** — emit <N x float> vector ops for detected groups. Vector loads, arithmetic, extractelement/shuffle for scalar results | 200 lines | `emit_vector.rs` (new) | nbody | 1.36x → ~1.0x |
 ```
+
+---
+
+## Stage 13: SLP Vector Codegen (Phase 2) — Full Implementation Plan
+
+### Motivation
+
+The SLP analysis pass (Phase 1, commit `6fb88032`) detects **143 isomorphic groups**
+with **473 total lanes** in nbody_newton. However, the codegen currently emits scalar
+operations for each lane individually, leaving the 150 scalar `fdiv` unvectorized.
+LLVM's backend converts scalar `fdiv` to `vdivss` (~10-14 cycles) but converts
+vector `<N x float> fdiv` to `vrcpps` + Newton refinement (~1 cycle throughput).
+This is the primary mechanism behind C's 1.35x advantage.
+
+### The Algorithm
+
+When `emit_countable_body` encounters a statement at `body[i]` that is the start
+of an SLP group (detected by matching `group.base_index == i`), it emits vector
+operations for the ENTIRE group instead of emitting each statement separately.
+
+The core function `emit_vector_expr` walks the template RHS expression tree
+recursively, using `lane_mappings` to resolve per-lane identifiers:
+
+```
+emit_vector_expr(template_expr, lane_exprs, lane_mappings, width):
+    match template_expr:
+        BinaryOp(kind, t_lhs, t_rhs):
+            lhs_vec = emit_vector_expr(t_lhs, lanes.lhs, lane_mappings, width)
+            rhs_vec = emit_vector_expr(t_rhs, lanes.rhs, lane_mappings, width)
+            return emit_vector_binary_op(kind, lhs_vec, rhs_vec, width)
+
+        Identifier(name):
+            if name maps to same variable across all lanes:
+                broadcast(scalar_reg, width)   # insertelement + shufflevector
+            else:
+                insertelement_chain(per_lane_regs, width)  # build vector
+
+        Float(n) | Decimal(n):
+            broadcast(scalar_literal(n), width)
+
+        _ (Call, Field, Index, Cast, etc.):
+            scalar_fallback(lane_exprs, width)  # per-lane scalar + build vector
+```
+
+### LLVM IR Patterns
+
+**Broadcast** (same identifier/literal across all lanes):
+```llvm
+%v0 = insertelement <5 x float> undef, float %val, i32 0
+%v1 = shufflevector <5 x float> %v0, <5 x float> undef, <5 x i32> zeroinitializer
+```
+
+**Insertelement chain** (different per lane):
+```llvm
+%v1 = insertelement <5 x float> %v0, float %val1, i32 1
+%v2 = insertelement <5 x float> %v1, float %val2, i32 2
+; ... continues for all N lanes
+```
+
+**Vector operation**:
+```llvm
+%vresult = fdiv <5 x float> %lhs_vec, %rhs_vec
+```
+
+**Extract individual results**:
+```llvm
+%res0 = extractelement <5 x float> %vresult, i32 0
+%res1 = extractelement <5 x float> %vresult, i32 1
+; ... one per lane
+```
+
+### Profitability Heuristic
+
+| Pattern | Width | Depth | Scalar Ops | Vector Ops | Decision |
+|---------|-------|-------|------------|------------|----------|
+| Distance sub (bx0-bx1, by0-by1, bz0-bz1) | 3 | 1 | 3 | ~8 | **Skip** (net negative) |
+| Newton iteration (5 steps) | 5 | 3 | 15 | ~13 | **Vectorize** (~13% savings) |
+| Kinetic energy | 5 | 4 | 20 | ~16 | **Vectorize** (~20% savings) |
+
+**Guard condition:** Only vectorize groups where `width >= 4` OR `width >= 3` with
+tree depth >= 2.
+
+### Module Structure
+
+**New file:** `src/backend/llvm/vector_codegen.rs` (~380 lines)
+
+| Function | Lines | Purpose |
+|----------|-------|---------|
+| `emit_slp_group` | 60 | Entry: extract template, call emit_vector_expr, extract results, register in last_val_temps |
+| `emit_vector_expr` | 120 | Recursive tree walker matching on Expr variants |
+| `emit_vector_binary_op` | 70 | Match BinaryOpKind, emit `<N x T> fadd/fsub/fmul/fdiv` |
+| `emit_vector_unary_op` | 25 | Neg/Not/BitNot vector versions |
+| `emit_insertelement_chain` | 20 | Build vector from N scalar regs |
+| `emit_broadcast` | 12 | insertelement + shufflevector splat |
+| `emit_scalar_fallback` | 30 | Per-lane scalar + build vector |
+| `emit_extractelement` | 10 | Extract one scalar from vector |
+| Helpers | 15 | `all_lanes_same`, `vector_type_str`, `tree_depth` |
+| Tests | 120 | Unit tests |
+
+### Integration
+
+**Hook in `emit_countable_body`** (`counter.rs`):
+```rust
+while i < body.len() {
+    if let Some(group) = self.fun.slp_groups.iter().find(|g| g.base_index == i) {
+        if group.width >= 4 || (group.width >= 3 && tree_depth(&body[i]) >= 2) {
+            self.emit_slp_group(out, body, group, write_set)?;
+            i += group.width;
+            continue;
+        }
+    }
+    // ... existing per-statement emission ...
+    i += 1;
+}
+```
+
+### Expected Impact
+
+nbody_newton: 150 scalar `fdiv` → ~65 vector `fdiv` → enables `vrcpps` backend
+conversion → expected ratio improvement from 1.35x toward parity.

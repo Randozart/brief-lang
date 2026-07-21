@@ -11,6 +11,7 @@ pub mod hazard;
 pub mod helpers;
 pub mod intrinsics;
 pub mod loop_engine;
+pub mod vector_codegen;
 pub mod normalizer;
 pub mod optimizer;
 pub mod reorder;
