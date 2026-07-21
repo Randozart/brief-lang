@@ -6,19 +6,39 @@
 
 $(Parsed @ highest) {
     let anchor = Tag$("import").First$();
-    anchor.Before$().Insert$(
-        Import$("std/types/bootstrap.bv"),
-        Import$("std/os/fs.bv"),
-        Import$("std/os/net.bv"),
-        Import$("std/os/signal.bv"),
-        Import$("std/os/ipc.bv"),
-        Import$("std/os/thread.bv"),
-        Import$("std/os/user.bv"),
-        Import$("std/os/mem.bv"),
-        Import$("std/os/atomic.bv"),
-        Import$("std/core/ptr.bv"),
-        Import$("std/core/string_builder.bv"),
-        Import$("std/env.bv"),
-        Import$("std/io.bv")
-    );
+    when anchor.Count$() > 0 {
+        anchor.Before$().Insert$(
+            Import$("std/types/bootstrap.bv"),
+            Import$("std/os/fs.bv"),
+            Import$("std/os/net.bv"),
+            Import$("std/os/signal.bv"),
+            Import$("std/os/ipc.bv"),
+            Import$("std/os/thread.bv"),
+            Import$("std/os/user.bv"),
+            Import$("std/os/mem.bv"),
+            Import$("std/os/atomic.bv"),
+            Import$("std/core/ptr.bv"),
+            Import$("std/core/string_builder.bv"),
+            Import$("std/env.bv"),
+            Import$("std/io.bv")
+        );
+    };
+    // 2026-07-21: No imports — insert before the first node.
+    when anchor.Count$() == 0 {
+        Tag$("txn").First$().Before$().Insert$(
+            Import$("std/types/bootstrap.bv"),
+            Import$("std/os/fs.bv"),
+            Import$("std/os/net.bv"),
+            Import$("std/os/signal.bv"),
+            Import$("std/os/ipc.bv"),
+            Import$("std/os/thread.bv"),
+            Import$("std/os/user.bv"),
+            Import$("std/os/mem.bv"),
+            Import$("std/os/atomic.bv"),
+            Import$("std/core/ptr.bv"),
+            Import$("std/core/string_builder.bv"),
+            Import$("std/env.bv"),
+            Import$("std/io.bv")
+        );
+    };
 };

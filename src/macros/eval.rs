@@ -85,6 +85,9 @@ pub fn eval_nav_chain(
                 Err(format!("undefined compile-time variable '{}'", name))
             }
         }
+        Expr::Decimal(n) => Ok(NavValue::Int(*n)),
+        Expr::Float(n) => Ok(NavValue::Int(*n as i64)),
+        Expr::Bool(b) => Ok(NavValue::Bool(*b)),
         other => Err(format!(
             "expected a $ navigation call, got {:?}", other
         )),
@@ -92,6 +95,16 @@ pub fn eval_nav_chain(
 }
 
 // ── Statement Evaluation ───────────────────────────────────────────────
+
+/// Extract an i64 value from a NavValue for comparison operators.
+fn nav_to_i64(val: &NavValue) -> i64 {
+    match val {
+        NavValue::Count(n) => *n as i64,
+        NavValue::Int(n) => *n,
+        NavValue::Bool(b) => if *b { 1 } else { 0 },
+        _ => 0,
+    }
+}
 
 fn evaluate_stage_stmt(
     stmt: &Statement,
@@ -133,6 +146,48 @@ fn evaluate_stage_stmt(
                 }
             }
             scope.remove(item);
+            Ok(())
+        }
+        // 2026-07-21: Fix A — evaluate when guards in stage blocks.
+        // Without this, the prelude plugin's `when anchor.Count$() > 0 { ... }`
+        // is silently skipped, never inserting stdlib imports.
+        Statement::Guarded(guard, body) => {
+            // Handle BinaryOp comparisons (Count$() > 0, etc.) which
+            // eval_nav_chain doesn't support directly.
+            let result = match guard {
+                Expr::BinaryOp(op, left, right) => {
+                    let l = eval_nav_chain(left, program, universe, stage, scope, pm)?;
+                    let r = eval_nav_chain(right, program, universe, stage, scope, pm)?;
+                    // Extract integer values from both sides for comparison
+                    let lv = nav_to_i64(&l);
+                    let rv = nav_to_i64(&r);
+                    let cmp = match op {
+                        crate::ast::BinaryOpKind::Eq => lv == rv,
+                        crate::ast::BinaryOpKind::Neq => lv != rv,
+                        crate::ast::BinaryOpKind::Gt => lv > rv,
+                        crate::ast::BinaryOpKind::Lt => lv < rv,
+                        crate::ast::BinaryOpKind::Ge => lv >= rv,
+                        crate::ast::BinaryOpKind::Le => lv <= rv,
+                        _ => return Err(format!("unsupported operator in when guard: {:?}", op)),
+                    };
+                    NavValue::Bool(cmp)
+                }
+                _ => eval_nav_chain(guard, program, universe, stage, scope, pm)?,
+            };
+            let is_truthy = match &result {
+                NavValue::Selection(sel) => !sel.nodes.is_empty(),
+                NavValue::Count(n) => *n > 0,
+                NavValue::Bool(b) => *b,
+                NavValue::Int(n) => *n != 0,
+                NavValue::Str(s) => !s.is_empty(),
+                NavValue::Void => false,
+                _ => true,
+            };
+            if is_truthy {
+                for s in body {
+                    evaluate_stage_stmt(s, program, universe, stage, scope, pm)?;
+                }
+            }
             Ok(())
         }
         _ => Ok(()),
