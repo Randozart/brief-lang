@@ -21,7 +21,7 @@ impl Plugin for PrintPlugin {
     }
 
     fn stages(&self) -> Vec<StageKind> {
-        vec![StageKind::Front, StageKind::Mid]
+        vec![StageKind::Parsed, StageKind::Typed]
     }
 
     fn on_ast(

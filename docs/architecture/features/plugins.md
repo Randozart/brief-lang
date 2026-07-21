@@ -22,8 +22,8 @@ $(Parsed) @ highest {
 
 The block body can contain:
 - Navigation chains (`Tag$("import").First$().Before$().Insert$(...)`)
-- Flow control (`let`, `if`, `foreach`, `match`)
-- Full Brief code (`defn`, `let`, `if`, `match`, `for`) evaluated at compile time
+- Flow control (`let`, `when`, `foreach`, `match`)
+- Full Brief code (`defn`, `let`, `when`, `match`, `for`) evaluated at compile time
 - Plugin injection (`Stage$.Insert$`, `Stage$.Remove$`, `Stage$.List$`)
 - Diagnostics (`EmitInfo$`, `EmitWarning$`, `EmitError$`)
 
@@ -86,7 +86,7 @@ Navigation operations target one of four data surfaces:
 | Target | Type | Operation style | Valid stages |
 |--------|------|----------------|--------------|
 | `Source$` | Source text | Text ops: `Find$`, `ReplaceWith$`, `Prepend$`, `Append$`, `Text$()`, `Path$()` | All (read-only after PreLex) |
-| AST (implicit) | `Vec<TopLevel>` | Tree ops: `Tag$`, `Named$`, `ForEach$`, `Insert$`, `Delete$` | Parsed – Provenanced |
+| AST (implicit) | `Vec<TopLevel>` | Tree ops: `Tag$`, `Named$`, `foreach`, `Insert$`, `Delete$` | Parsed – Provenanced |
 | `Ir$` | IR text | Text ops: `Find$`, `ReplaceWith$`, `InsertBefore$`, `Text$()` | Generated, Optimized |
 | `Bin$` | Binary path | External: `Run$("command {{path}}")`, `Path$()`, `Size$()`, `ReadBytes$()` | Linked |
 | `Stage$` | Plugin registry | `Insert$(block)`, `Insert$(path)`, `Remove$(name)`, `List$()` | All (forward-only) |
@@ -191,14 +191,15 @@ $(Generated) {
 
 ### Flow Control
 
+Inside `$(Stage)` blocks, standard Brief syntax (`let`, `when`, `foreach`, `match`)
+is evaluated at compile time. Navigation selections are first-class values.
+
 | Construct | Description |
 |-----------|-------------|
-| `Let$name = expr;` | Bind selection/position/value |
-| `ForEach$(sel) { body }` | Iterate, `$` = current element |
-| `ForEach$(sel as $name) { body }` | Iterate with named binding |
-| `If$(condition) { body }` | Conditional execution |
-
-Within `ForEach$`, `$` refers to the current element (unless using `as $name`).
+| `let name = expr;` | Bind selection/position/value |
+| `foreach(item in sel) { body }` | Iterate over selection, binds `item` |
+| `when cond { body };` | Conditional execution — no parens needed |
+| `match expr { arms }` | Pattern matching on values |
 All navigation intrinsics are available on `$`.
 
 ---
@@ -305,8 +306,8 @@ brief build file.bv --emit-beast all
 
 ```brief
 $(Parsed) @ highest {
-    Let$anchor = Tag$("import").First$();
-    $anchor.Before$().Insert$(
+    let anchor = Tag$("import").First$();
+    anchor.Before$().Insert$(
         Import$("std/types/bootstrap.bv"),
         Import$("std/os/fs.bv"),
         Import$("std/os/net.bv"),
@@ -341,7 +342,7 @@ $(Typed) @ highest {
 $(Typed) {
     let has_entry = Tag$("contract").WithAttr$("entry", true).Count$();
     let has_trg = Tag$("trigger").Count$();
-    if(has_entry == 0 && has_trg == 0) {
+    when has_entry == 0 && has_trg == 0 {
         EmitError$("no entry point: add [#] to defn main or trg declaration");
     };
 };
@@ -385,7 +386,7 @@ $(Linked) {
 $(Parsed) {
     // Only register a typed validator if unsafe code is present
     let unsafe = Tag$("call").Named$("Unsafe#").Count$();
-    if(unsafe > 0) {
+    when unsafe > 0 {
         Stage$.Insert$(Typed) {
             foreach(call in Tag$("call").Named$("Unsafe#")) {
                 EmitWarning$("unsafe call: " + call.Names$().First$());
@@ -401,10 +402,10 @@ $(Parsed) {
 $(Parsed) {
     let count = Tag$("import").Count$();
     EmitInfo$("file has " + count + " imports");
-    if(count == 0) {
+    when count == 0 {
         EmitWarning$("no imports — program may be incomplete");
     };
-    if(count > 50) {
+    when count > 50 {
         EmitError$("too many imports (" + count + "): consider consolidating");
     };
 };
@@ -417,7 +418,7 @@ $(Typed) {
     defn count_pattern(sel: Selection, tag: String) -> Int {
         let total = 0;
         foreach(item in sel) {
-            if(item.Tag$(tag).Count$() > 0) {
+            when item.Tag$(tag).Count$() > 0 {
                 total = total + 1;
             };
         };
@@ -467,7 +468,7 @@ The following table maps every removed intrinsic to its replacement:
 | `InsertLiteralImport$("path")` | `Tag$("import").First$().Before$().Insert$(Import$("path"))` |
 | `InsertRegistryImport$("name")` | `Tag$("import").First$().Before$().Insert$(Import$("name"))` |
 | `Collect$("pattern")` | `Tag$(...).Count$()` or `Pattern$("...").Count$()` |
-| `MatchIR$("pat", "rep")` | `Select$(Pattern$("pat")).ReplaceWith$(Pattern$("rep"))` |
+| `MatchIR$("pat", "rep")` | Pattern matching is handled by `foreach(match in Pattern$("pat")) { match.ReplaceWith$(...) }` |
 | `CheckReactive$()` | `If$(Tag$("txn").WithAttr$("reactive", true).Count$() > 0) { ... }` |
 | `$(Front)` for source | `$(PreLex)` |
 | `$(Front)` for AST | `$(Parsed)` |

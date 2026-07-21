@@ -326,17 +326,50 @@ pub struct StageBlock {
 }
 
 /// Pipeline stages at which compile-time plugins can run.
-/// 2026-07-21: Will be expanded to granular stages (PreLex, Parsed, Resolved,
-/// Typed, Normalized, Verified, Allocated, Provenanced, Generated, Optimized,
-/// Linked) as part of the granular pipeline implementation.
-/// Old Front/Mid/Post/Back variants will be replaced.
-/// 2026-07-15: Phase 1b — Plugin architecture.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+/// 2026-07-21: Expanded from 4 to 11 granular stages.
+/// Each stage maps to one compiler pass and has a default data target:
+///   PreLex        — Source$ (source text, mutable)
+///   Parsed–Provenanced — AST (implicit, tree operations)
+///   Generated–Optimized — Ir$ (text operations)
+///   Linked        — Bin$ (binary path operations)
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum StageKind {
-    Front,
-    Mid,
-    Post,
-    Back,
+    /// Raw source text before lexing. Default: Source$.
+    PreLex,
+    /// Freshly parsed AST, imports not resolved. Default: AST.
+    Parsed,
+    /// All imports resolved and merged. Default: AST.
+    Resolved,
+    /// Type checking complete. Full TypeUniverse. Default: AST.
+    Typed,
+    /// Backend normalization applied. Default: AST.
+    Normalized,
+    /// Protocol round-trip verification done. Default: AST.
+    Verified,
+    /// Allocation strategies assigned. Default: AST.
+    Allocated,
+    /// Pointer provenance validated. Default: AST.
+    Provenanced,
+    /// Backend IR generated (.ll, .mlir, .ts). Default: Ir$.
+    Generated,
+    /// Backend optimizations applied. Default: Ir$.
+    Optimized,
+    /// Final binary linked. Default: Bin$.
+    Linked,
+}
+
+impl StageKind {
+    /// True if this stage operates on AST data (tree operations).
+    pub fn is_ast_stage(&self) -> bool {
+        matches!(self, StageKind::Parsed | StageKind::Resolved | StageKind::Typed
+            | StageKind::Normalized | StageKind::Verified | StageKind::Allocated
+            | StageKind::Provenanced)
+    }
+
+    /// True if this stage operates on IR text.
+    pub fn is_ir_stage(&self) -> bool {
+        matches!(self, StageKind::Generated | StageKind::Optimized)
+    }
 }
 
 #[derive(Debug, Clone)]

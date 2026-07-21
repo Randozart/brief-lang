@@ -31,7 +31,7 @@ but removed from the plugin data path.
 5. **Complete macro capability.**  A `PrintLn!()` call should be expandable entirely within
    a `$(Stage)` block using the DSL — no Rust plugin needed.
 6. **Full Brief evaluation at compile time.**  Inside `$(Stage)` blocks, any valid Brief
-   `defn`/`let`/`if`/`for`/`match` code is evaluated at compile time, with the navigation
+   `defn`/`let`/`when`/`for`/`match` code is evaluated at compile time, with the navigation
    DSL and the four targets (`Source$`, AST, `Ir$`, `Bin$`) available as built-in bindings.
    The existing interpreter is extended to handle these as compile-time value types.
 7. **Plugins can create plugins.**  A `$(Stage)` block can register new plugins for later
@@ -378,7 +378,7 @@ These turn a selection into a value:
 Examples:
 ```brief
 let count = Tag$("import").Count$();
-if(count == 0) { EmitWarning$("no imports!"); };
+when count == 0 { EmitWarning$("no imports!"); };
 ```
 
 ### 4.6 Positions (where to act)
@@ -582,21 +582,15 @@ Takes a `$(StageName)` block literal as its argument:
 $(Parsed) {
     // Only register the validator if the file contains unsafe code
     let has_unsafe = Tag$("call").Named$("Unsafe#").Count$();
-    if(has_unsafe > 0) {
+    when has_unsafe > 0 {
         Stage$.Insert$(Typed) {
-            foreach(Tag$("call").Named$("Unsafe#")) {
-                EmitWarning$("unsafe call: " + $.Names$().First$());
+            foreach(call in Tag$("call").Named$("Unsafe#")) {
+                EmitWarning$("unsafe call: " + call.Names$().First$());
             };
         };
     };
 };
 ```
-
-The injected block is parsed in the same context as the calling plugin.  Its
-`$(Stage)` determines when it runs (must be > the current stage).  The
-injected plugin gets default priority **500** if no `@ priority` is specified.
-Attempting `Stage$.Insert$(Parsed)` from inside `$(Parsed)` produces a warning
-and is ignored — no self-modification.
 
 ### 7.3 Stage$.Insert$ — File Path
 
@@ -605,7 +599,7 @@ Loads a `.bv` file, extracts its `$(Stage)` blocks, and registers them:
 ```brief
 $(Parsed) {
     // Load a target-specific validation plugin
-    if(Source$.Find$("// TARGET: riscv").Count$() > 0) {
+    when Source$.Find$("// TARGET: riscv").Count$() > 0 {
         Stage$.Insert$("plugins/generated/riscv-validate.bv");
     };
 };
@@ -633,8 +627,8 @@ Inspect the current plugin roster:
 
 ```brief
 $(Parsed) {
-    foreach(Stage$.List$()) {
-        EmitInfo$("active plugin: " + $);
+    foreach(name in Stage$.List$()) {
+        EmitInfo$("active plugin: " + name);
     };
 };
 ```
@@ -646,7 +640,7 @@ $(Parsed) {
 The DSL is not a separate engine — it *is* the interpreter, extended with
 compile-time types (`CTSelection`, `CTPosition`, `CTTextSelection`, `CTTarget`)
 and registration of all navigation intrinsics as callable built-in functions.
-Inside `$(Stage)` blocks, standard Brief syntax (`let`, `if`, `foreach`,
+Inside `$(Stage)` blocks, standard Brief syntax (`let`, `when`, `foreach`,
 `match`, `for`) is evaluated at compile time by the interpreter.
 
 Navigation selections are first-class values of type `CTSelection`.  All
@@ -699,14 +693,14 @@ special form in the interpreter, not a function call.
 default budget will halt with a diagnostic (see §11).  This prevents
 accidental compile-time hangs.  The budget is shared across all compile-time
 operations in the stage: `defn` recursion depth, `foreach` loop iterations,
-navigation chain evaluations, and `match`/`if` branching all count.
+navigation chain evaluations, and `match`/`when` branching all count.
 
-### 8.3 Conditional (`if`)
+### 8.3 Conditional (`when`)
 
-Standard Brief `if`:
+Standard Brief `when`:
 
 ```brief
-if(Tag$("defn").Named$("main").Count$() == 0) {
+when Tag$("defn").Named$("main").Count$() == 0 {
     EmitWarning$("no main entry point — program may not start");
 };
 ```
@@ -724,7 +718,7 @@ one of:
 - A navigation chain (select → traverse → position → act)
 - A `let` binding
 - A `foreach` loop
-- An `if`/`match` conditional
+- A `when`/`match` conditional
 - A `defn` declaration (compile-time function definition)
 - A standalone intrinsic call (`EmitInfo$`, `EmitWarning$`, `EmitError$`)
 
@@ -742,7 +736,7 @@ $(Parsed) {
     
     // Statement 3: read + conditional
     let count = Tag$("import").Count$();
-    if(count == 0) {
+    when count == 0 {
         EmitWarning$("no imports in file");
     };
 };
@@ -784,11 +778,11 @@ Any valid Brief syntax is evaluated at compile time:
 
 ```brief
 $(Parsed) {
-    // Full Brief: defn, let, if, for, match
+    // Full Brief: defn, let, when, for, match
     defn count_unsafe_calls(items: Selection) -> Int {
         let total = 0;
         foreach(item in items) {
-            if(item.Count$() > 0) {
+            when item.Count$() > 0 {
                 total = total + 1;
             };
         };
@@ -823,7 +817,7 @@ $(Typed) {
         defn check_metadata(item: Selection) -> Bool {
             term item.WithKey$("debug").Count$() > 0;
         };
-        if(check_metadata(defn)) {
+        when check_metadata(defn) {
             EmitInfo$("debug metadata on: " + defn.Names$().First$());
         };
     };
@@ -842,10 +836,10 @@ $(Typed) {
 $(Parsed) {
 let count = Tag$("import").Count$();
     EmitInfo$("file has " + count + " imports");
-    if(count == 0) {
+    when count == 0 {
         EmitWarning$("no imports — program may be incomplete");
     };
-    if(count > 50) {
+    when count > 50 {
         EmitError$("too many imports (" + count + "): consider consolidating");
     };
 };
@@ -878,7 +872,7 @@ Not all Brief constructs are available at compile time:
 |-----------|---------------------------|-------|
 | `let` | Yes | Type inference supported |
 | `defn` | Yes | Recursion allowed, must terminate |
-| `if`/`match` | Yes | Standard branching |
+| `when`/`match` | Yes | Standard branching — `when cond { body }` (no parens) |
 | `for`/`foreach` | Yes | Must have compile-time-bounded iteration |
 | `txn` / `node` | No | No reactive execution at compile time |
 | `import` | No | Handled by AST navigation (`Insert$`) |
@@ -1039,7 +1033,7 @@ $(Typed) @ highest {
 $(Typed) {
     let has_entry = Tag$("contract").WithAttr$("entry", true).Count$();
     let has_trg = Tag$("trigger").Count$();
-    if(has_entry == 0 && has_trg == 0) {
+    when has_entry == 0 && has_trg == 0 {
         EmitError$("no entry point: add [#] to defn main or trg declaration");
     };
 };
@@ -1053,7 +1047,7 @@ $(Typed) {
 $(Verified) {
     foreach(Tag$("trigger")) {
         let has_target = $.Descendants$(Tag$("ident")).First$().IsEmpty$();
-        if(has_target) {
+        when has_target {
             EmitWarning$("trigger with no target instance: " + $.Names$().First$());
         };
     };
@@ -1218,7 +1212,7 @@ scope.  Full highlighting for:
 |-------------|---------|-------|
 | Structural tags | `defn`, `txn`, `universe`, `typedef`, `contract`, `state`, `trigger`, `constant` | `entity.name.type.beast` |
 | Expression tags | `call`, `ident`, `binop`, `unop`, `field`, `index`, `cast`, `deref`, `addrof` | `support.function.beast` |
-| Statement tags | `assign`, `let`, `term`, `term!`, `return`, `guarded`, `if`, `block`, `foreach` | `keyword.control.beast` |
+| Statement tags | `assign`, `let`, `term`, `term!`, `return`, `guarded`, `block`, `foreach` | `keyword.control.beast` |
 | Attribute tags | `metadata`, `entry`, `pre`, `post`, `bytes`, `alignment`, `properties`, `params`, `body` | `entity.other.attribute-name.beast` |
 | Strings | `"...\"` | `string.quoted.double.beast` |
 | Numbers | `42`, `3.14` | `constant.numeric.beast` |
@@ -1440,16 +1434,16 @@ File: `src/parser/definitions.rs`
 
 1. Add parsing for new stage names in `$(StageName)` blocks.
 2. Reject old names with clear diagnostic (see §2.3).
-3. Standard `let`/`if`/`foreach`/`match` inside `$(Stage)` blocks is already
+3. Standard `let`/`when`/`foreach`/`match` inside `$(Stage)` blocks is already
    handled by the existing parser — no special parsing needed.
 4. `foreach(item in list) { body }` is already standard Brief syntax.
    The interpreter handles it as a special form with lazy body evaluation.
-5. Parse `if(cond) { ... }`.
+5. Parse `when cond { ... }`.
 6. Parse navigation chains as expression statements.
 7. Parse AST constructor calls (`Import$`, `Defn$`, `Call$`, etc.).
 8. Parse `Stage$.Insert$(stage_block)` and `Stage$.Insert$(path)`.
 9. Parse `Stage$.Remove$(name)` and `Stage$.List$()`.
-10. Allow `defn`/`let`/`if`/`match`/`for` inside `$(Stage)` blocks as
+10. Allow `defn`/`let`/`when`/`match`/`for` inside `$(Stage)` blocks as
     compile-time evaluation (Level C).
 
 Add a new AST node type for the navigation chain:
@@ -1480,7 +1474,7 @@ Files: `src/interpreter/`, `src/macros/`
    `--optimize-budget`).
 8. Add compile-time `defn` evaluation: parse `defn`, register in interpreter scope,
    call from subsequent statements.
-9. Gate: only `let`/`defn`/`if`/`match`/`for` are available; `txn`/`trg`/`frgn`/`Malloc#`
+9. Gate: only `let`/`defn`/`when`/`match`/`for` are available; `txn`/`trg`/`frgn`/`Malloc#`
    produce compile-time errors.
 
 **DRY rule:** Navigation intrinsics are registered in the interpreter's existing
@@ -1634,8 +1628,8 @@ Every `fn`, `struct`, and non-trivial match arm must have a comment:
 | `InsertLiteralImport$("path")` | `Tag$("import").First$().Before$().Insert$(Import$("path"))` |
 | `InsertRegistryImport$("name")` | `Tag$("import").First$().Before$().Insert$(Import$("name"))` |
 | `Collect$("(call PrintInt# ?*)")` | `Tag$("call").Named$("PrintInt#").Count$()` |
-| `MatchIR$("(add (int 0) ?x)", "(?x)")` | `Select$(Pattern$("(add (int 0) ?x)")).ReplaceWith$(Pattern$("?x"))` |
-| `CheckReactive$()` | `if(Tag$("txn").WithAttr$("reactive", true).Count$() > 0) { ... }` |
+| `MatchIR$("(add (int 0) ?x)", "(?x)")` | `Pattern$("(add (int 0) ?x)").ReplaceWith$(Pattern$("?x"))` |
+| `CheckReactive$()` | `when Tag$("txn").WithAttr$("reactive", true).Count$() > 0 { ... }` |
 
 ### 15.3 `--emit-beast` Changes
 

@@ -100,10 +100,17 @@ impl Plugin for StageBlockPlugin {
 ///   etc.
 /// See docs/plans/2026-07-21-granular-pipeline-and-ast-navigation.md.
 const STAGE_DIRS: &[(&str, StageKind)] = &[
-    ("front", StageKind::Front),
-    ("mid", StageKind::Mid),
-    ("post", StageKind::Post),
-    ("back", StageKind::Back),
+    ("prelex", StageKind::PreLex),
+    ("parsed", StageKind::Parsed),
+    ("resolved", StageKind::Resolved),
+    ("typed", StageKind::Typed),
+    ("normalized", StageKind::Normalized),
+    ("verified", StageKind::Verified),
+    ("allocated", StageKind::Allocated),
+    ("provenanced", StageKind::Provenanced),
+    ("generated", StageKind::Generated),
+    ("optimized", StageKind::Optimized),
+    ("linked", StageKind::Linked),
 ];
 
 /// Discover system plugins from the compiler's plugins/ directory.
@@ -240,7 +247,7 @@ impl Plugin for ValidationPlugin {
     }
 
     fn stages(&self) -> Vec<StageKind> {
-        vec![StageKind::Front, StageKind::Mid, StageKind::Post, StageKind::Back]
+        vec![StageKind::Parsed, StageKind::Typed, StageKind::Generated, StageKind::Optimized]
     }
 }
 
@@ -260,21 +267,21 @@ mod tests {
     #[test]
     fn test_stage_block_plugin_creation() {
         let block = StageBlock {
-            stage: StageKind::Front,
+            stage: StageKind::Parsed,
             priority: 100,
             body: vec![],
             span: None,
         };
         let plugin = StageBlockPlugin::new("test:block".to_string(), block);
         assert_eq!(plugin.name(), "test:block");
-        assert!(plugin.stages().contains(&StageKind::Front));
+        assert!(plugin.stages().contains(&StageKind::Parsed));
     }
 
     #[test]
     fn test_stage_block_plugin_on_ast_ok() {
         let block = StageBlock {
-            stage: StageKind::Mid,
-            priority: 50,
+            stage: StageKind::Parsed,
+            priority: 100,
             body: vec![],
             span: None,
         };
@@ -287,7 +294,7 @@ mod tests {
     #[test]
     fn test_stage_block_plugin_on_ir_ok() {
         let block = StageBlock {
-            stage: StageKind::Post,
+            stage: StageKind::Generated,
             priority: 0,
             body: vec![],
             span: None,
@@ -309,7 +316,7 @@ mod tests {
     fn test_extract_inline_stage_blocks_removes_from_ast() {
         use crate::ast::Statement;
         let block = StageBlock {
-            stage: StageKind::Front,
+            stage: StageKind::Parsed,
             priority: 100,
             body: vec![],
             span: None,
@@ -335,7 +342,7 @@ mod tests {
         let prelude = StageBlockPlugin::new(
             "prelude".to_string(),
             StageBlock {
-                stage: StageKind::Front,
+                stage: StageKind::Parsed,
                 priority: 0,
                 body: vec![],
                 span: None,
@@ -360,7 +367,7 @@ mod tests {
         let prelude_hw = StageBlockPlugin::new(
             "prelude-hw".to_string(),
             StageBlock {
-                stage: StageKind::Front,
+                stage: StageKind::Parsed,
                 priority: 0,
                 body: vec![],
                 span: None,
@@ -383,7 +390,7 @@ mod tests {
         let p = StageBlockPlugin::new(
             "prelude".to_string(),
             StageBlock {
-                stage: StageKind::Front,
+                stage: StageKind::Parsed,
                 priority: 0,
                 body: vec![],
                 span: None,

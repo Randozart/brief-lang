@@ -125,20 +125,23 @@ fn parse_build_args(args: &[String]) -> Result<compile::BuildOptions, String> {
                 .map_err(|_| format!("invalid --optimize-budget value: '{}'", val))?;
             i += 2;
         } else if arg == "--emit-beast" {
-            // --emit-beast with optional stage arg: "ast", "mid", "post"
+            // --emit-beast with optional stage arg
             // If no arg or "all", emit all stages.
             let next = args.get(i + 1);
             let stage_str = next.filter(|s| !s.starts_with('-')).map(|s| s.as_str());
+            let all_stages = vec![
+                BeastStage::Parse, BeastStage::Resolve, BeastStage::TypeCheck,
+                BeastStage::Normalize, BeastStage::Verify, BeastStage::Alloc,
+                BeastStage::Provenance, BeastStage::Codegen, BeastStage::Optimize,
+            ];
             match stage_str {
-                Some("ast") => emit_beast.push(BeastStage::Ast),
-                Some("mid") => emit_beast.push(BeastStage::Mid),
-                Some("post") => emit_beast.push(BeastStage::Post),
                 Some("all") | None => {
-                    emit_beast.push(BeastStage::Ast);
-                    emit_beast.push(BeastStage::Mid);
-                    emit_beast.push(BeastStage::Post);
+                    for s in all_stages { emit_beast.push(s); }
                 }
-                Some(other) => return Err(format!("unknown BEAST stage '{}'. Use: ast, mid, post, all", other)),
+                Some(s) => {
+                    let stage: BeastStage = s.parse().map_err(|e: String| e)?;
+                    emit_beast.push(stage);
+                }
             }
             i += if stage_str.is_some() { 2 } else { 1 };
         } else if arg == "--backend" {

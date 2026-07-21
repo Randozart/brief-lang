@@ -55,7 +55,7 @@ Tag$("import") .First$() .Before$() .Insert$(Import$("std/x.bv"))
 
 ### Flow Control
 
-Inside `$(Stage)` blocks, standard Brief syntax (`let`, `if`, `foreach`, `match`)
+Inside `$(Stage)` blocks, standard Brief syntax (`let`, `when`, `foreach`, `match`)
 is evaluated at compile time. Navigation selections are first-class values.
 
 ```brief
@@ -67,8 +67,8 @@ foreach(imp in imports) {
     imp.After$().Insert$(Import$("std/debug.bv"));
 };
 
-// Conditional
-if(imports.Count$() == 0) {
+// Conditional — no parens needed
+when imports.Count$() == 0 {
     EmitWarning$("no imports found");
 };
 ```
@@ -132,7 +132,7 @@ $(Parsed) {
     defn count_tagged(sel: Selection, tag: String) -> Int {
         let total = 0;
         foreach(item in sel) {
-            if(item.Tag$(tag).Count$() > 0) {
+            when item.Tag$(tag).Count$() > 0 {
                 total = total + 1;
             };
         };
@@ -145,7 +145,7 @@ $(Parsed) {
 ```
 
 Note: `txn`/`node`/`trg`/`frgn`/`Malloc#` are not available at compile time.
-Only `let`/`defn`/`if`/`match`/`for` and the navigation DSL.
+Only `let`/`defn`/`when`/`match`/`for` and the navigation DSL.
 
 ## Diagnostics
 
@@ -161,7 +161,7 @@ A plugin can register new plugins for later stages:
 
 ```brief
 $(Parsed) {
-    if(Tag$("call").Named$("Unsafe#").Count$() > 0) {
+    when Tag$("call").Named$("Unsafe#").Count$() > 0 {
         Stage$.Insert$(Typed) {
             foreach(call in Tag$("call").Named$("Unsafe#")) {
                 EmitWarning$("unsafe: " + call.Names$().First$());

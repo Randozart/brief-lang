@@ -35,28 +35,24 @@ use std::path::Path;
 /// A single compiler plugin.
 ///
 /// Each plugin declares which pipeline stages it participates in via
-/// `stages()`. The corresponding `on_source`/`on_ast`/`on_ir` method
-/// is called for each stage in the plugin's list. Default
+/// `stages()`. The corresponding `on_source`/`on_ast`/`on_ir`/`on_bin`
+/// method is called for each stage in the plugin's list. Default
 /// implementations do nothing — override only the stages you need.
 pub trait Plugin: std::fmt::Debug {
-    /// Human-readable unique plugin name (e.g. "prelude", "inline-mid-block").
+    /// Human-readable unique plugin name (e.g. "prelude", "inline-block").
     fn name(&self) -> &str;
 
     /// Which pipeline stages this plugin runs at.
     fn stages(&self) -> Vec<StageKind>;
 
-    /// Transform source text before lexing. Runs at Front stage only.
-    /// 2026-07-15: Phase 2 — stub for future use (e.g., preprocessor plugins).
+    /// Transform source text before lexing. Runs at PreLex stage only.
     fn on_source(&self, _source: &mut String) -> Result<(), String> {
         Ok(())
     }
 
     /// Transform the AST at the given stage.
-    /// The `program` and `universe` are the current compilation state and are
-    /// usable for inspection or modification. Not all stages make sense for
-    /// every plugin — the typical pattern is Front(on_ast) to insert imports
-    /// or desugar before typechecking, and Mid(on_ast) to verify or optimize
-    /// after typechecking.
+    /// The `program` and `universe` are the current compilation state.
+    /// Called for every stage where `stage.is_ast_stage()` is true.
     fn on_ast(
         &self,
         _program: &mut Vec<TopLevel>,
@@ -65,10 +61,15 @@ pub trait Plugin: std::fmt::Debug {
         Ok(())
     }
 
-    /// Transform the final IR text after codegen.
-    /// Runs at Post and Back stages. Plugins at this stage can inspect,
-    /// validate, or modify the emitted IR before it is written to disk.
+    /// Transform the IR text after codegen.
+    /// Called for every stage where `stage.is_ir_stage()` is true.
     fn on_ir(&self, _ir: &mut String) -> Result<(), String> {
+        Ok(())
+    }
+
+    /// Transform the binary after linking. Runs at Linked stage only.
+    /// The callback receives the path to the compiled binary.
+    fn on_bin(&self, _bin_path: &std::path::Path) -> Result<(), String> {
         Ok(())
     }
 }
@@ -197,70 +198,49 @@ impl PluginManager {
         self.enabled_only = allowed;
     }
 
-    /// Run all active plugins' `on_source` at the Front stage.
-    /// 2026-07-15: Phase 2 — Front stage, before lexing.
-    pub fn run_front_source(&self, source: &mut String) -> Result<(), String> {
+    /// Run all active plugins' `on_source` at the given stage.
+    /// Only PreLex matches — source is only available before lexing.
+    pub fn run_source(&self, stage: StageKind, source: &mut String) -> Result<(), String> {
         for entry in self.active_plugins(None) {
-            let plugin = &entry.plugin;
-            if plugin.stages().contains(&StageKind::Front) {
-                plugin.on_source(source)?;
+            if entry.plugin.stages().contains(&stage) {
+                entry.plugin.on_source(source)?;
             }
         }
         Ok(())
     }
 
-    /// Run all active plugins' `on_ast` at the Front stage.
-    /// 2026-07-15: Phase 2 — Front stage, after parsing.
-    pub fn run_front_ast(
+    /// Run all active plugins' `on_ast` at the given stage.
+    /// Valid for all AST stages (Parsed through Provenanced).
+    pub fn run_ast(
         &self,
+        stage: StageKind,
         program: &mut Vec<TopLevel>,
         universe: &mut TypeUniverse,
     ) -> Result<(), String> {
         for entry in self.active_plugins(None) {
-            let plugin = &entry.plugin;
-            if plugin.stages().contains(&StageKind::Front) {
-                plugin.on_ast(program, universe)?;
+            if entry.plugin.stages().contains(&stage) {
+                entry.plugin.on_ast(program, universe)?;
             }
         }
         Ok(())
     }
 
-    /// Run all active plugins' `on_ast` at the Mid stage.
-    /// 2026-07-15: Phase 2 — Mid stage, after type checking.
-    pub fn run_mid_ast(
-        &self,
-        program: &mut Vec<TopLevel>,
-        universe: &mut TypeUniverse,
-    ) -> Result<(), String> {
+    /// Run all active plugins' `on_ir` at the given stage.
+    /// Valid for Generated and Optimized.
+    pub fn run_ir(&self, stage: StageKind, ir: &mut String) -> Result<(), String> {
         for entry in self.active_plugins(None) {
-            let plugin = &entry.plugin;
-            if plugin.stages().contains(&StageKind::Mid) {
-                eprintln!("run_mid_ast: active plugin '{}'", plugin.name());
-                plugin.on_ast(program, universe)?;
+            if entry.plugin.stages().contains(&stage) {
+                entry.plugin.on_ir(ir)?;
             }
         }
         Ok(())
     }
 
-    /// Run all active plugins' `on_ir` at the Post stage.
-    /// 2026-07-15: Phase 2 — Post stage, after codegen.
-    pub fn run_post_ir(&self, ir: &mut String) -> Result<(), String> {
+    /// Run all active plugins' `on_bin` at the Linked stage.
+    pub fn run_bin(&self, bin_path: &std::path::Path) -> Result<(), String> {
         for entry in self.active_plugins(None) {
-            let plugin = &entry.plugin;
-            if plugin.stages().contains(&StageKind::Post) {
-                plugin.on_ir(ir)?;
-            }
-        }
-        Ok(())
-    }
-
-    /// Run all active plugins' `on_ir` at the Back stage (final validation).
-    /// 2026-07-15: Phase 2 — Back stage, after all other passes.
-    pub fn run_back_ir(&self, ir: &mut String) -> Result<(), String> {
-        for entry in self.active_plugins(None) {
-            let plugin = &entry.plugin;
-            if plugin.stages().contains(&StageKind::Back) {
-                plugin.on_ir(ir)?;
+            if entry.plugin.stages().contains(&StageKind::Linked) {
+                entry.plugin.on_bin(bin_path)?;
             }
         }
         Ok(())
@@ -357,54 +337,53 @@ mod tests {
     #[test]
     fn test_register_plugin() {
         let mut mgr = PluginManager::new();
-        let p = TestPlugin::new("test:noop", vec![StageKind::Front]);
+        let p = TestPlugin::new("test:noop", vec![StageKind::Parsed]);
         mgr.register(Box::new(p));
         assert_eq!(mgr.len(), 1);
     }
 
     #[test]
-    fn test_front_ast_continues() {
+    fn test_parsed_ast_continues() {
         let mut mgr = PluginManager::new();
-        mgr.register(Box::new(TestPlugin::new("test:front", vec![StageKind::Front])));
+        mgr.register(Box::new(TestPlugin::new("test:parsed", vec![StageKind::Parsed])));
         let (mut program, mut universe) = empty_state();
-        assert!(mgr.run_front_ast(&mut program, &mut universe).is_ok());
+        assert!(mgr.run_ast(StageKind::Parsed, &mut program, &mut universe).is_ok());
     }
 
     #[test]
-    fn test_mid_ast_continues() {
+    fn test_typed_ast_continues() {
         let mut mgr = PluginManager::new();
-        mgr.register(Box::new(TestPlugin::new("test:mid", vec![StageKind::Mid])));
+        mgr.register(Box::new(TestPlugin::new("test:typed", vec![StageKind::Typed])));
         let (mut program, mut universe) = empty_state();
-        assert!(mgr.run_mid_ast(&mut program, &mut universe).is_ok());
+        assert!(mgr.run_ast(StageKind::Typed, &mut program, &mut universe).is_ok());
     }
 
     #[test]
-    fn test_post_ir_continues() {
+    fn test_generated_ir_continues() {
         let mut mgr = PluginManager::new();
-        mgr.register(Box::new(TestPlugin::new("test:post", vec![StageKind::Post])));
+        mgr.register(Box::new(TestPlugin::new("test:generated", vec![StageKind::Generated])));
         let mut ir = String::new();
-        assert!(mgr.run_post_ir(&mut ir).is_ok());
+        assert!(mgr.run_ir(StageKind::Generated, &mut ir).is_ok());
     }
 
     #[test]
-    fn test_back_ir_continues() {
+    fn test_optimized_ir_continues() {
         let mut mgr = PluginManager::new();
-        mgr.register(Box::new(TestPlugin::new("test:back", vec![StageKind::Back])));
+        mgr.register(Box::new(TestPlugin::new("test:optimized", vec![StageKind::Optimized])));
         let mut ir = String::new();
-        assert!(mgr.run_back_ir(&mut ir).is_ok());
+        assert!(mgr.run_ir(StageKind::Optimized, &mut ir).is_ok());
     }
 
     #[test]
     fn test_enabled_only_filter() {
         let mut mgr = PluginManager::new();
-        mgr.register(Box::new(TestPlugin::new("plugin:a", vec![StageKind::Front])));
-        mgr.register(Box::new(TestPlugin::new("plugin:b", vec![StageKind::Front])));
+        mgr.register(Box::new(TestPlugin::new("plugin:a", vec![StageKind::Parsed])));
+        mgr.register(Box::new(TestPlugin::new("plugin:b", vec![StageKind::Parsed])));
         mgr = mgr.with_enabled_only(vec!["plugin:a".to_string()]);
 
         let (mut program, mut universe) = empty_state();
-        assert!(mgr.run_front_ast(&mut program, &mut universe).is_ok());
+        assert!(mgr.run_ast(StageKind::Parsed, &mut program, &mut universe).is_ok());
 
-        // Check that only plugin:a ran by inspecting enabled_names
         let names = mgr.enabled_names(None);
         assert_eq!(names.len(), 1);
         assert_eq!(names[0], "plugin:a");
@@ -413,8 +392,8 @@ mod tests {
     #[test]
     fn test_disabled_skips_plugin() {
         let mut mgr = PluginManager::new();
-        mgr.register(Box::new(TestPlugin::new("plugin:a", vec![StageKind::Front])));
-        mgr.register(Box::new(TestPlugin::new("plugin:b", vec![StageKind::Front])));
+        mgr.register(Box::new(TestPlugin::new("plugin:a", vec![StageKind::Parsed])));
+        mgr.register(Box::new(TestPlugin::new("plugin:b", vec![StageKind::Parsed])));
         mgr = mgr.with_disabled(vec!["plugin:b".to_string()]);
 
         let names = mgr.enabled_names(None);
@@ -424,14 +403,12 @@ mod tests {
 
     #[test]
     fn test_plugin_not_called_for_wrong_stage() {
-        // A Mid-only plugin should not run at Front stage.
         let mut mgr = PluginManager::new();
-        mgr.register(Box::new(TestPlugin::new("test:midonly", vec![StageKind::Mid])));
+        mgr.register(Box::new(TestPlugin::new("test:typedonly", vec![StageKind::Typed])));
         let (mut program, mut universe) = empty_state();
-        assert!(mgr.run_front_ast(&mut program, &mut universe).is_ok());
-        // Mid-stage should still work
+        assert!(mgr.run_ast(StageKind::Parsed, &mut program, &mut universe).is_ok());
         let (mut program2, mut universe2) = empty_state();
-        assert!(mgr.run_mid_ast(&mut program2, &mut universe2).is_ok());
+        assert!(mgr.run_ast(StageKind::Typed, &mut program2, &mut universe2).is_ok());
     }
 
     #[test]
@@ -439,24 +416,21 @@ mod tests {
         let mut mgr = PluginManager::new();
         mgr.register(Box::new(TestPlugin::new(
             "test:dual",
-            vec![StageKind::Front, StageKind::Post],
+            vec![StageKind::Parsed, StageKind::Generated],
         )));
         let (mut program, mut universe) = empty_state();
-        assert!(mgr.run_front_ast(&mut program, &mut universe).is_ok());
+        assert!(mgr.run_ast(StageKind::Parsed, &mut program, &mut universe).is_ok());
         let mut ir = String::new();
-        assert!(mgr.run_post_ir(&mut ir).is_ok());
+        assert!(mgr.run_ir(StageKind::Generated, &mut ir).is_ok());
     }
 
     #[test]
     fn test_filter_for_extension() {
         let mut mgr = PluginManager::new();
-        mgr.register(Box::new(TestPlugin::new("prelude", vec![StageKind::Front])));
-        mgr.register(Box::new(TestPlugin::new("some-other", vec![StageKind::Front])));
+        mgr.register(Box::new(TestPlugin::new("prelude", vec![StageKind::Parsed])));
+        mgr.register(Box::new(TestPlugin::new("some-other", vec![StageKind::Parsed])));
         let config = TargetConfig::load();
         mgr.filter_for_extension(".bv", &config);
-        // .bv has plugins = ["predule"] in the config…
-        // Actually the test config might not have it. Let's just test that
-        // it doesn't crash and returns a subset.
         let names = mgr.enabled_names(None);
         assert_eq!(names.len(), 1);
         assert_eq!(names[0], "prelude");

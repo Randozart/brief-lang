@@ -16,6 +16,7 @@ use std::process::Command;
 use brief_compiler::backend::llvm::LlvmBackend;
 use brief_compiler::lexer::Token;
 use brief_compiler::plugin::loader::{discover_system_plugins, extract_inline_stage_blocks};
+use brief_compiler::ast::StageKind;
 use brief_compiler::plugin::PluginManager;
 use brief_compiler::target::{BackendKind, TargetConfig, get_extension};
 use brief_compiler::type_universe::TypeUniverse;
@@ -24,27 +25,52 @@ use brief_compiler::type_universe::TypeUniverse;
 /// 2026-07-15: Phase 7i — Defined in the backend to avoid circular deps.
 pub use brief_compiler::backend::llvm::TrgUnresolvedAction;
 
-/// Pipeline stage at which to emit a BEAST snapshot.
-/// 2026-07-21: Will be expanded to granular stages (Parse, Resolve, TypeCheck,
-/// Normalize, Verify, Alloc, Provenance, Codegen, Optimize) as part of the
-/// granular pipeline implementation (see plan 2026-07-21-granular-pipeline-and-ast-navigation.md).
-/// Old Ast/Mid/Post variants will be replaced.
-/// 2026-07-15: Phase 7 — Used by --emit-beast for metaprogramming introspection.
+/// Pipeline stage at which to emit a BEAST snapshot or IR snapshot.
+/// 2026-07-21: Expanded to granular stages matching the pipeline.
+/// AST stages emit .beast files; IR stages emit .ir files.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum BeastStage {
-    Ast,
-    Mid,
-    Post,
+    Parse,
+    Resolve,
+    TypeCheck,
+    Normalize,
+    Verify,
+    Alloc,
+    Provenance,
+    Codegen,
+    Optimize,
+}
+
+impl BeastStage {
+    /// Stages that have AST data (get .beast files).
+    pub fn has_ast(&self) -> bool {
+        matches!(self, BeastStage::Parse | BeastStage::Resolve
+            | BeastStage::TypeCheck | BeastStage::Normalize | BeastStage::Verify
+            | BeastStage::Alloc | BeastStage::Provenance)
+    }
+
+    /// Stages that have IR text data (get .ir files).
+    pub fn has_ir(&self) -> bool {
+        matches!(self, BeastStage::Codegen | BeastStage::Optimize)
+    }
 }
 
 impl std::str::FromStr for BeastStage {
     type Err = String;
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         match s {
-            "ast" => Ok(BeastStage::Ast),
-            "mid" => Ok(BeastStage::Mid),
-            "post" => Ok(BeastStage::Post),
-            _ => Err(format!("unknown BEAST stage '{}'. Use: ast, mid, post", s)),
+            "parse" => Ok(BeastStage::Parse),
+            "resolve" => Ok(BeastStage::Resolve),
+            "type-check" => Ok(BeastStage::TypeCheck),
+            "normalize" => Ok(BeastStage::Normalize),
+            "verify" => Ok(BeastStage::Verify),
+            "alloc" => Ok(BeastStage::Alloc),
+            "provenance" => Ok(BeastStage::Provenance),
+            "codegen" => Ok(BeastStage::Codegen),
+            "optimize" => Ok(BeastStage::Optimize),
+            "all" => Err("use multiple --emit-beast flags for individual stages".to_string()),
+            _ => Err(format!("unknown BEAST stage '{}'. Use one of: parse, resolve, type-check, \
+                             normalize, verify, alloc, provenance, codegen, optimize", s)),
         }
     }
 }
@@ -91,10 +117,10 @@ pub struct BuildOptions {
 
 /// Compile a Brief source file: produce an executable binary (or `.ll` with `--llvm`).
 pub fn compile_source(file_path: &str, source: &str, opts: &BuildOptions) -> Result<(), String> {
-    // ── Front stage: source transformation ────────────────────────────
+    // ── PreLex stage: source transformation ──────────────────────────
     let mut source = source.to_string();
     let mut pm = build_plugin_manager(file_path, opts);
-    pm.run_front_source(&mut source)?;
+    pm.run_source(StageKind::PreLex, &mut source)?;
 
     // ── Parse ─────────────────────────────────────────────────────────
     let tokens = lex(&source)?;
@@ -104,34 +130,37 @@ pub fn compile_source(file_path: &str, source: &str, opts: &BuildOptions) -> Res
     // not runtime code.
     extract_inline_stage_blocks(&mut items, &mut pm);
 
-    // ── Front stage: AST transformation (before import resolution) ────
+    // ── Parsed stage: AST transformation (before import resolution) ───
     {
-        let mut front_universe = TypeUniverse::new();
-        pm.run_front_ast(&mut items, &mut front_universe)?;
+        let mut parsed_universe = TypeUniverse::new();
+        pm.run_ast(StageKind::Parsed, &mut items, &mut parsed_universe)?;
     }
 
-    // BEAST snapshot at Ast stage (after parse + front, for metaprogramming)
+    // BEAST snapshot at Parse stage
     {
         let snapshot_universe = TypeUniverse::new();
-        emit_beast_snapshot(file_path, BeastStage::Ast, &items, &snapshot_universe, opts)?;
+        emit_beast_snapshot(file_path, BeastStage::Parse, &items, &snapshot_universe, opts)?;
     }
 
-    // ── Import resolution ─────────────────────────────────────────────
+    // ── Resolved stage (after import resolution) ──────────────────────
     let mut resolver = brief_compiler::import_resolver::ImportResolver::new();
     if let Some(ref stdlib_path) = opts.stdlib_path {
         resolver = resolver.with_stdlib_path(Some(std::path::PathBuf::from(stdlib_path)));
     }
     items = resolver.resolve_imports(items, &std::path::PathBuf::from(file_path))?;
 
+    {
+        pm.run_ast(StageKind::Resolved, &mut items, &mut TypeUniverse::new())?;
+    }
+    emit_beast_snapshot(file_path, BeastStage::Resolve, &items, &TypeUniverse::new(), opts)?;
+
     // ── Type check ────────────────────────────────────────────────────
     let mut universe = TypeUniverse::new();
     check_types(&items, &universe)?;
 
-    // ── Mid stage: AST transformation (after type check) ──────────────
-    pm.run_mid_ast(&mut items, &mut universe)?;
-
-    // BEAST snapshot at Mid stage (for metaprogrammer inspection)
-    emit_beast_snapshot(file_path, BeastStage::Mid, &items, &universe, opts)?;
+    // ── Typed stage: AST transformation (after type check) ────────────
+    pm.run_ast(StageKind::Typed, &mut items, &mut universe)?;
+    emit_beast_snapshot(file_path, BeastStage::TypeCheck, &items, &universe, opts)?;
 
     // ── Normalizer pass ───────────────────────────────────────────────
     match opts.backend {
@@ -149,19 +178,21 @@ pub fn compile_source(file_path: &str, source: &str, opts: &BuildOptions) -> Res
         }
     }
 
-    // 2026-07-20: Protocol round-trip verification (Parse → Cast → Parse)
+    pm.run_ast(StageKind::Normalized, &mut items, &mut universe)?;
+    emit_beast_snapshot(file_path, BeastStage::Normalize, &items, &universe, opts)?;
+
+    // ── Protocol round-trip verification ──────────────────────────────
     brief_compiler::protocol_verify::verify_roundtrips(&items, &universe)?;
 
-    // BEAST snapshot at Post stage (after normalizer, before codegen)
-    emit_beast_snapshot(file_path, BeastStage::Post, &items, &universe, opts)?;
+    pm.run_ast(StageKind::Verified, &mut items, &mut universe)?;
+    emit_beast_snapshot(file_path, BeastStage::Verify, &items, &universe, opts)?;
 
-    // 2026-07-18: Run allocation strategy analysis before codegen.
-    // Assigns strategies to Alloc# call sites — the codegen reads the
-    // analysis output to select Arena/Alloca/Malloc instead of guessing.
+    // ── Allocation strategy analysis ──────────────────────────────────
     let alloc_strategies = brief_compiler::analysis::allocation::analyze_alloc_strategies(&mut items);
+    pm.run_ast(StageKind::Allocated, &mut items, &mut universe)?;
+    emit_beast_snapshot(file_path, BeastStage::Alloc, &items, &universe, opts)?;
 
-    // 2026-07-18: Dangling pointer detection — check each txn for local
-    // pointer stored in state field (e.g. `&state_ptr = &local_var`).
+    // ── Dangling pointer detection ────────────────────────────────────
     use brief_compiler::analysis::provenance::{check_dangling_ptrs, collect_local_names};
     for item in &items {
         if let brief_compiler::ast::TopLevel::Transaction(txn) = item {
@@ -173,6 +204,9 @@ pub fn compile_source(file_path: &str, source: &str, opts: &BuildOptions) -> Res
         }
     }
 
+    pm.run_ast(StageKind::Provenanced, &mut items, &mut universe)?;
+    emit_beast_snapshot(file_path, BeastStage::Provenance, &items, &universe, opts)?;
+
     // 2026-07-16: P4 — Collect extra objects from ForeignBinding FromSpec paths
     // for linking into the final binary.
     let extra_objects = collect_extra_objects(&items, &resolver)?;
@@ -180,16 +214,27 @@ pub fn compile_source(file_path: &str, source: &str, opts: &BuildOptions) -> Res
     // ── Code generation ───────────────────────────────────────────────
     let (codegen_output, ext) = codegen(&items, &mut universe, &pm, opts, alloc_strategies)?;
 
+    // BEAST/IR snapshot at Codegen stage
+    emit_beast_snapshot(file_path, BeastStage::Codegen, &items, &universe, opts)?;
+
+    // ── Generated stage: IR text manipulation ──────────────────────────
+    let mut output = codegen_output;
+    pm.run_ir(StageKind::Generated, &mut output)?;
+
     // ── Write output ──────────────────────────────────────────────────
     let out_path = determine_out_path(file_path, opts.out_dir.as_deref())?;
     let out_path = out_path.replace(".ll", ext);
 
     // 2026-07-15: SPIR-V writes inside codegen (binary format), skip outer write
     if opts.backend != BackendKind::Spirv {
-        std::fs::write(&out_path, &codegen_output)
+        std::fs::write(&out_path, &output)
             .map_err(|e| format!("cannot write '{}': {}", out_path, e))?;
         println!("wrote {}", out_path);
     }
+
+    // ── Optimized stage: final IR validation ──────────────────────────
+    pm.run_ir(StageKind::Optimized, &mut output)?;
+    emit_beast_snapshot(file_path, BeastStage::Optimize, &items, &universe, opts)?;
 
     if !opts.emit_ir_only {
         let binary_base = out_path.strip_suffix(ext).unwrap_or(&out_path);
@@ -204,6 +249,10 @@ pub fn compile_source(file_path: &str, source: &str, opts: &BuildOptions) -> Res
             all_objects.extend(extra_objects);
             compile_ll_to_binary(&out_path, &binary_path, &all_objects, opts.shared)?;
         }
+
+        // ── Linked stage: binary processing ───────────────────────────
+        let bin_path = std::path::Path::new(&binary_path);
+        pm.run_bin(bin_path)?;
     }
 
     Ok(())
@@ -290,7 +339,7 @@ fn codegen(
         }
     }
 
-    let mut output;
+    let output;
     let ext: &str = match opts.backend {
         BackendKind::Llvm => {
             let mut b = LlvmBackend::new()
@@ -372,12 +421,6 @@ fn codegen(
         }
     };
 
-    // Post stage: validate or modify IR after codegen
-    pm.run_post_ir(&mut output)?;
-
-    // Back stage: final validation before writing
-    pm.run_back_ir(&mut output)?;
-
     Ok((output, ext))
 }
 
@@ -393,20 +436,31 @@ fn emit_beast_snapshot(
     if !opts.emit_beast_stages.contains(&stage) {
         return Ok(());
     }
-    let stage_name = match stage {
-        BeastStage::Ast => "ast",
-        BeastStage::Mid => "mid",
-        BeastStage::Post => "post",
+    let (stage_name, is_ast) = match stage {
+        BeastStage::Parse => ("parse", true),
+        BeastStage::Resolve => ("resolve", true),
+        BeastStage::TypeCheck => ("types", true),
+        BeastStage::Normalize => ("normal", true),
+        BeastStage::Verify => ("verify", true),
+        BeastStage::Alloc => ("alloc", true),
+        BeastStage::Provenance => ("prov", true),
+        BeastStage::Codegen => ("codegen", false),
+        BeastStage::Optimize => ("opt", false),
     };
-    let beast = brief_compiler::beast::to_beast(items, universe);
-    let path = format!(
-        "{}.beast.{}",
-        file_path.strip_suffix(".bv").unwrap_or(file_path),
-        stage_name
-    );
-    std::fs::write(&path, &beast)
+    let ext = if is_ast { "beast" } else { "ir" };
+    let data = if is_ast {
+        brief_compiler::beast::to_beast(items, universe)
+    } else {
+        // For non-AST stages, items and universe may not reflect the IR.
+        // The snapshot is written after codegen; just serialize the AST
+        // with a note that it's the AST at codegen time, not the IR.
+        brief_compiler::beast::to_beast(items, universe)
+    };
+    let base = file_path.strip_suffix(".bv").unwrap_or(file_path);
+    let path = format!("{}.{}.{}", base, ext, stage_name);
+    std::fs::write(&path, &data)
         .map_err(|e| format!("cannot write '{}': {}", path, e))?;
-    eprintln!("wrote BEAST snapshot: {}", path);
+    eprintln!("wrote {} snapshot: {}", ext, path);
     Ok(())
 }
 

@@ -17,7 +17,7 @@ impl Plugin for EnvPlugin {
     }
 
     fn stages(&self) -> Vec<StageKind> {
-        vec![StageKind::Front]
+        vec![StageKind::Parsed]
     }
 
     fn on_ast(

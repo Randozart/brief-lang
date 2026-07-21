@@ -457,21 +457,45 @@ impl<'a> Parser<'a> {
 
     /// Parse: $(Stage @ priority) { body }
     /// 2026-07-15: Compile-time metaprogramming block.
-    /// Stage is one of: Front, Mid, Post, Back.
+    /// Stage is one of: PreLex, Parsed, Resolved, Typed, Normalized, Verified,
+    /// Allocated, Provenanced, Generated, Optimized, Linked.
     /// Priority is optional, defaults to 500 (normal).
+    /// Old names (Front, Mid, Post, Back) produce a clear migration error.
     fn parse_stage_block(&mut self) -> Result<StageBlock, SyntaxError> {
         self.pos += 1; // consume $
+        let old_stages = &["Front", "Mid", "Post", "Back"];
         self.expect(Token::LParen)?;
         let stage_str = self.expect_identifier()?;
+        if old_stages.contains(&stage_str.as_str()) {
+            let hint = match stage_str.as_str() {
+                "Front" => "Use $(PreLex) for source-text plugins or $(Parsed) for AST plugins",
+                "Mid" => "Use $(Typed) for post-typecheck plugins",
+                "Post" => "Use $(Generated) for post-codegen IR plugins",
+                "Back" => "Use $(Optimized) for post-optimization plugins",
+                _ => unreachable!(),
+            };
+            return Err(SyntaxError::InvalidExpression {
+                reason: format!("stage '{}' was removed in the 2026-07-21 pipeline redesign. {}", stage_str, hint),
+                span: crate::errors::Span::dummy(),
+            });
+        }
         let stage = match stage_str.as_str() {
-            "Front" => StageKind::Front,
-            "Mid" => StageKind::Mid,
-            "Post" => StageKind::Post,
-            "Back" => StageKind::Back,
+            "PreLex" => StageKind::PreLex,
+            "Parsed" => StageKind::Parsed,
+            "Resolved" => StageKind::Resolved,
+            "Typed" => StageKind::Typed,
+            "Normalized" => StageKind::Normalized,
+            "Verified" => StageKind::Verified,
+            "Allocated" => StageKind::Allocated,
+            "Provenanced" => StageKind::Provenanced,
+            "Generated" => StageKind::Generated,
+            "Optimized" => StageKind::Optimized,
+            "Linked" => StageKind::Linked,
             _ => {
                 return Err(SyntaxError::InvalidExpression {
                     reason: format!(
-                        "unknown stage '{}'. Expected one of: Front, Mid, Post, Back",
+                        "unknown stage '{}'. Expected one of: PreLex, Parsed, Resolved, Typed, \
+                         Normalized, Verified, Allocated, Provenanced, Generated, Optimized, Linked",
                         stage_str
                     ),
                     span: crate::errors::Span::dummy(),

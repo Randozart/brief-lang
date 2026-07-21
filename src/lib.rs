@@ -73,6 +73,7 @@ pub mod symbolic;
 pub mod target_spec;
 pub mod typechecker;
 pub mod view_compiler;
+pub mod macros;
 pub mod watch;
 pub mod wrapper;
 
