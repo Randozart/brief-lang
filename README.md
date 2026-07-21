@@ -5,7 +5,7 @@
 
 ## Brief Doesn't Break
 
-**Status:** v0.16.0 — Strong Bits Thesis, Intrinsic Reduction, Three Canonical Backends
+**Status:** v0.17.0 — SLP Vectorization, Cross-Pair Merge, Prelude Plugin System
 
 Brief is a declarative, contract-enforced logic language designed for building verifiable state machines. It treats program execution as a series of verified state transitions rather than sequential instructions. The file extension selects the compilation target. Each one optimizes the same contract-proven logic for a different material:
 
@@ -506,17 +506,27 @@ The Brief compiler can now:
 - ~75,000 lines of documentation
 - 1,403 passing tests
 
-**Key v0.16.0 additions:**
-- Strong Bits Thesis: `Bits(u64)` is the only primitive — all types resolve through the TypeUniverse
-- NormalizeTypes pass: resolves `Custom("Int")` → `Applied("Int", [Width(64)])` → `Bits(64)` automatically
-- `:>` metadata projections: `Width`, `Endian`, `Codec`, `Ops` for compile-time type queries
-- String is now a struct `{ptr, len, codec}` with full universe-defined layout
-- Prelude auto-import: 20 `std/os/` modules (networking, filesystem, threading, atomics, etc.) replace 127 compiler intrinsics
-- 127 dead Intrinsic variants removed from compiler — all standard library features are user-defined `inop` declarations
-- 20 `std/types/bootstrap.bv` operator declarations enable universe-driven codegen dispatch
-- brief_rt.c ABI bridge: 53 `brief_*` wrappers convert between Brief i64 ABI and native libc types
+**Key v0.17.0 additions:**
+- `.bvir` → `.beast` rename (Brief Expressive AST — `.beast` extension)
+- `rct txn` → `node` rename (reactive state machines)
+- **SLP vectorization analysis**: Auto-detects isomorphic operation patterns across float fields (143 groups, 473 lanes in nbody)
+- **Cross-pair merge**: Groups independent lanes across body pairs, enabling vector `fdiv` → `vrcpps` conversion
+- **Native float types in `%State`**: Float fields stored as `float`/`double` instead of `i64`, eliminating trunc+bitcast overhead
+- **Prelude plugin system**: Compile-time meta-programming for auto-importing stdlib modules
+- **LTO inlining**: `-flto` in build pipeline enables cross-module inlining of runtime wrappers (fasta 1.23x → parity)
+- **Direct while-loop dispatch**: Simple single-node programs use a C-style while-loop instead of per-field phi dispatch
+- **Adaptive phi cap**: Per-field phi limit scales dynamically with write-set size
 
-**See:** [docs/milestones/SELF_HOSTING_COMPLETE.md](docs/milestones/SELF_HOSTING_COMPLETE.md) for the full story.
+**Performance improvements (v0.16 → v0.17):**
+| Benchmark | v0.16 | v0.17 | Winner |
+|-----------|-------|-------|--------|
+| nbody_newton | 1.35x | **1.05x** | **~tie** |
+| fannkuch_redux | 1.31x | **0.95x** | **Brief** |
+| fasta | 1.23x | **1.10x** | ~tie |
+| ring_buffer | 1.45x | **1.10x** | ~tie |
+| float_math_nonzero | 2.21x | **0.94x** | **Brief** |
+
+**See:** [docs/plans/2026-07-21-rct-txn-to-node-rename-and-benchmark-fixes.md](docs/plans/2026-07-21-rct-txn-to-node-rename-and-benchmark-fixes.md) for the comprehensive plan and current benchmark results.
 
 ## Project Structure
 
@@ -702,5 +712,5 @@ Apache 2.0 with explicit runtime exception
 
 ---
 
-*Last updated: 2026-07-09*  
-*Version: Brief v0.16.0*
+*Last updated: 2026-07-21*  
+*Version: Brief v0.17.0*
