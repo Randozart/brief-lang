@@ -366,8 +366,7 @@ impl LlvmBackend {
 
         // 2026-07-17: Per-field phi nodes — one per written field.
         // 2026-07-21: Skip phi when the field IS the counter variable
-        // (duplicate of the counter phi). Register counter phi as the
-        // field's phi instead.
+        // (duplicate of the counter phi). Use native LLVM type for float fields.
         self.fun.phi_field_regs.clear();
         self.fun.backedge_field_regs.clear();
         for fname in &sorted_fields {
@@ -384,8 +383,12 @@ impl LlvmBackend {
                 .cloned().unwrap_or_else(|| format!("%be_{}", fname));
             let init_f = phi_field_init.get(fname.as_str())
                 .cloned().unwrap_or_else(|| "0".to_string());
-            writeln!(out, "  {} = phi i64 [ {}, %entry ], [ {}, %.cm_latch ]",
-                phi_f, init_f, be_f).ok();
+            // 2026-07-21: Use native LLVM type for float fields.
+            let phi_ty = self.ctx.field_types.get(
+                *self.ctx.field_index_map.get(fname.as_str()).unwrap_or(&0)
+            ).cloned().unwrap_or_else(|| "i64".to_string());
+            writeln!(out, "  {} = phi {} [ {}, %entry ], [ {}, %.cm_latch ]",
+                phi_f, phi_ty, init_f, be_f).ok();
             self.fun.phi_field_regs.insert((*fname).clone(), phi_f);
             self.fun.backedge_field_regs.insert((*fname).clone(), be_f);
         }
@@ -440,6 +443,8 @@ impl LlvmBackend {
         // the `add i64 0, %val` copy in both cases.
         // 2026-07-21: Skip the counter variable — its backedge is already the
         // latch increment (next). Creating another identity would redefine next.
+        // For float fields, the backedge value is already the native float type
+        // (skip adapt_to_i64), so the identity would be a type mismatch.
         for fname in sorted_fields.iter().filter(|f| {
             counter_var.map_or(true, |cv| f.as_str() != cv)
         }) {
@@ -449,7 +454,15 @@ impl LlvmBackend {
                         self.fun.phi_field_regs.get(fname.as_str())
                             .cloned().unwrap_or_else(|| "0".to_string())
                     });
-                writeln!(out, "  {} = add i64 0, {}", be_f, val).ok();
+                // Check if this field is a float type — skip i64 identity
+                let field_ty = self.ctx.field_index_map.get(fname.as_str())
+                    .and_then(|idx| self.ctx.field_types.get(*idx))
+                    .cloned().unwrap_or_else(|| "i64".to_string());
+                if field_ty == "float" || field_ty == "double" {
+                    writeln!(out, "  {} = add {} 0, {}", be_f, field_ty, val).ok();
+                } else {
+                    writeln!(out, "  {} = add i64 0, {}", be_f, val).ok();
+                }
             }
         }
 
@@ -580,15 +593,22 @@ impl LlvmBackend {
                 }
                 Statement::Assign(lhs, expr) => {
                     let lhs_name = Self::assign_target_name(lhs);
-                    let val = self.emit_expr(out, expr, "  ");
-                    if let Some(ref n) = lhs_name {
-                        if write_set.contains(n) {
-                            // 2026-07-17: Box the value to i64 for the phi backedge.
-                            // Phi registers track all fields as i64 (the %State
-                            // representation). Float/double values must be boxed.
-                            let boxed = self.adapt_to_i64(out, "  ", &val);
-                            self.fun.pending_phi_backedge.insert(n.clone(), boxed);
-                        }
+                     let val = self.emit_expr(out, expr, "  ");
+                     if let Some(ref n) = lhs_name {
+                         if write_set.contains(n) {
+                             // 2026-07-21: Float fields use native type in backend —
+                             // skip adapt_to_i64 and store the float value directly.
+                             // Non-float fields still box to i64 for phi compatibility.
+                             let field_ty = self.ctx.field_index_map.get(n)
+                                 .and_then(|idx| self.ctx.field_types.get(*idx))
+                                 .cloned().unwrap_or_else(|| "i64".to_string());
+                             if field_ty == "float" || field_ty == "double" {
+                                 self.fun.pending_phi_backedge.insert(n.clone(), val.name.clone());
+                             } else {
+                                 let boxed = self.adapt_to_i64(out, "  ", &val);
+                                 self.fun.pending_phi_backedge.insert(n.clone(), boxed);
+                             }
+                         }
                         // 2026-07-17: When post-loop hoisted prints need final values,
                         // emit state stores for ALL fields, not just phi-tracked ones.
                         // Without this, fields outside the capped write_set (max 6)

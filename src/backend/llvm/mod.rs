@@ -909,13 +909,19 @@ impl LlvmBackend {
                 return;
             }
         }
-        // 2026-07-20: ALL state fields are stored as i64 in %State, regardless
-        // of their Brief type. The loop engine phi nodes assume i64 — changing
-        // to native float types requires coordinated changes to phi emission,
-        // backedge identity, and adapt_to_i64. TODO for a future native float
-        // optimization pass.
+        // 2026-07-21: Float/float64 fields use native LLVM types in %State.
+        // This eliminates trunc+bitcast overhead (7 insns per access) and lets
+        // LLVM's SROA promote float phis to SSA registers directly. The phi
+        // emission and backedge paths have been updated to handle float types.
         // Ptr<T> stays as i64 — existing codegen loads it and uses inttoptr.
-        self.ctx.field_types.push("i64".to_string());
+        let llvm_ty = if *ty == Type::float64() {
+            "double"
+        } else if *ty == Type::float() {
+            "float"
+        } else {
+            "i64"
+        };
+        self.ctx.field_types.push(llvm_ty.to_string());
         self.ctx.field_brief_types.push(ty.clone());
     }
 

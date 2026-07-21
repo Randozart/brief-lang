@@ -144,27 +144,37 @@ impl LlvmBackend {
                         .and_then(|idx| self.ctx.field_brief_types.get(*idx).cloned())
                         .unwrap_or(Type::int());
                     if brief_ty == Type::float64() {
-                        let dbl = self.fun.gen_reg();
-                        writeln!(
-                            out,
-                            "{}{} = bitcast i64 {} to double",
-                            indent, dbl, phi_reg_str
-                        )
-                        .ok();
-                        self.fun.reg_float_cache.insert(phi_reg_str, dbl.clone());
-                        TypedRegister {
-                            name: dbl,
-                            ty: Type::float64(),
+                        // 2026-07-21: With native float types, phi is already double.
+                        // Check field_types to determine if conversion is needed.
+                        let is_native = self.ctx.field_index_map.get(name)
+                            .and_then(|idx| self.ctx.field_types.get(*idx))
+                            .map_or(false, |t| t == "double");
+                        if is_native {
+                            let dbl_reg = phi_reg_str.clone();
+                            self.fun.reg_float_cache.insert(phi_reg_str, dbl_reg.clone());
+                            TypedRegister { name: dbl_reg, ty: Type::float64() }
+                        } else {
+                            let dbl = self.fun.gen_reg();
+                            writeln!(out, "{}{} = bitcast i64 {} to double", indent, dbl, phi_reg_str).ok();
+                            self.fun.reg_float_cache.insert(phi_reg_str, dbl.clone());
+                            TypedRegister { name: dbl, ty: Type::float64() }
                         }
                     } else if brief_ty == Type::float() {
-                        let tr = self.fun.gen_reg();
-                        let fl = self.fun.gen_reg();
-                        writeln!(out, "{}{} = trunc i64 {} to i32", indent, tr, phi_reg_str).ok();
-                        writeln!(out, "{}{} = bitcast i32 {} to float", indent, fl, tr).ok();
-                        self.fun.reg_float_cache.insert(phi_reg_str, fl.clone());
-                        TypedRegister {
-                            name: fl,
-                            ty: Type::float(),
+                        // 2026-07-21: With native float types, phi is already float.
+                        let is_native = self.ctx.field_index_map.get(name)
+                            .and_then(|idx| self.ctx.field_types.get(*idx))
+                            .map_or(false, |t| t == "float");
+                        if is_native {
+                            let fl_reg = phi_reg_str.clone();
+                            self.fun.reg_float_cache.insert(phi_reg_str, fl_reg.clone());
+                            TypedRegister { name: fl_reg, ty: Type::float() }
+                        } else {
+                            let tr = self.fun.gen_reg();
+                            let fl = self.fun.gen_reg();
+                            writeln!(out, "{}{} = trunc i64 {} to i32", indent, tr, phi_reg_str).ok();
+                            writeln!(out, "{}{} = bitcast i32 {} to float", indent, fl, tr).ok();
+                            self.fun.reg_float_cache.insert(phi_reg_str, fl.clone());
+                            TypedRegister { name: fl, ty: Type::float() }
                         }
                     } else {
                         TypedRegister {
@@ -180,7 +190,15 @@ impl LlvmBackend {
                     // fields, trunc+bitcast i64 → float so downstream arithmetic gets
                     // correct types (matches the phi path at lines 100-104).
                     let (loaded, brief_ty) = self.emit_state_load_i64_by_idx(out, indent, idx);
-                    if brief_ty == Type::float64() {
+                    // 2026-07-21: With native float types, the load already returns
+                    // float/double. Check field_types[idx] to skip the conversion.
+                    let field_llvm_ty = self.ctx.field_types.get(idx)
+                        .cloned().unwrap_or_else(|| "i64".to_string());
+                    if brief_ty == Type::float64() && field_llvm_ty == "double" {
+                        TypedRegister { name: loaded, ty: Type::float64() }
+                    } else if brief_ty == Type::float() && field_llvm_ty == "float" {
+                        TypedRegister { name: loaded, ty: Type::float() }
+                    } else if brief_ty == Type::float64() {
                         let dbl = self.fun.gen_reg();
                         writeln!(out, "{}{} = bitcast i64 {} to double", indent, dbl, loaded).ok();
                         TypedRegister {
