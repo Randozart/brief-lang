@@ -444,6 +444,8 @@ pub struct FunctionContext {
     // emission for insertelement chaining.  Maps vector phi register name
     // → the most recent insertelement result register.
     pub vector_phi_current: HashMap<String, String>,
+    /// 2026-07-21: SLP isomorphism groups detected in the current txn body.
+    pub slp_groups: Vec<crate::analysis::slp_isomorphism::SlpIsomorphicGroup>,
 
     // Chimera tracking
 
@@ -532,6 +534,7 @@ impl FunctionContext {
             rotation_fields: HashSet::new(),
             vector_phi_groups: HashMap::new(),
             vector_phi_current: HashMap::new(),
+            slp_groups: Vec::new(),
             chimera_map: HashMap::new(),
             expr_dedup_cache: HashMap::new(),
             alloc_strategies: HashMap::new(),

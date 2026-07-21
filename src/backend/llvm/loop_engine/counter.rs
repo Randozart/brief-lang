@@ -575,6 +575,12 @@ impl LlvmBackend {
         }
     }
 
+    // 2026-07-21: SLP vector codegen (Phase 2) is not yet implemented.
+    // The analysis pass (Phase 1) detects 143 isomorphic groups in nbody,
+    // but emitting actual <4 x float> vector arithmetic requires building a
+    // vector operation tree from the lane RHS expressions — a larger effort
+    // that will be added in a future commit.
+
     /// Emit the body of a countable loop. Converts each Statement to the
     /// appropriate SSA load + op + store sequence.
     fn emit_countable_body(
@@ -584,7 +590,9 @@ impl LlvmBackend {
         write_set: &HashSet<String>,
         hoisted: &mut Vec<Vec<Statement>>,
     ) {
-        for stmt in body {
+        let mut i = 0;
+        while i < body.len() {
+            let stmt = &body[i];
             match stmt {
                 Statement::Let { name, expr: Some(e), .. } => {
                     let reg = self.emit_expr(out, e, "  ");
@@ -713,6 +721,7 @@ impl LlvmBackend {
                 }
                 _ => {}
             }
+            i += 1;
         }
     }
 

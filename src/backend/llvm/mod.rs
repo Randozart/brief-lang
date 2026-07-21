@@ -2230,10 +2230,12 @@ impl LlvmBackend {
             if txn.is_reactive {
                 let result = crate::analysis::slp_isomorphism::analyze_body(&txn.body);
                 if result.has_slp_opportunities {
+                    let total_lanes: usize = result.groups.iter().map(|g| g.width).sum();
                     self.warnings.push(format!(
                         "info: txn '{}' has {} SLP isomorphism group(s) ({} total lanes)",
-                        name, result.groups.len(),
-                        result.groups.iter().map(|g| g.width).sum::<usize>()));
+                        name, result.groups.len(), total_lanes));
+                    // Store groups on FunctionContext for codegen
+                    self.fun.slp_groups = result.groups;
                 }
             }
         }
