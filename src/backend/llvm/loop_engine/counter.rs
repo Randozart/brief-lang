@@ -225,6 +225,66 @@ impl LlvmBackend {
     }
 
     // ═══════════════════════════════════════════════════════════════
+    // Strategy 2.5: Direct While Loop (no phi nodes)
+    // ═══════════════════════════════════════════════════════════════
+
+    /// Emit a simple while-loop for single-node programs. No phi nodes —
+    /// every state field goes through GEP+load+store each iteration.
+    /// Uses emit_countable_body for body emission with needs_state_stores
+    /// forced on. Best for programs with FFI calls in the body where
+    /// phi overhead doesn't pay off (no SROA benefit with opaque calls).
+    pub(crate) fn emit_while_main(
+        &mut self,
+        out: &mut String,
+        txn_name: &str,
+        counter_idx: usize,
+        total_idx: Option<usize>,
+        total_const_name: Option<&str>,
+        body: &[Statement],
+    ) {
+        writeln!(out, "define i32 @main() local_unnamed_addr {} {{", self.slp_attr("main", "#0")).ok();
+        writeln!(out, "entry:").ok();
+        writeln!(out, "  %state = alloca %State, align 8").ok();
+        self.emit_inline_init_stores(out, "%state");
+        let c0 = self.fun.txn_counter;
+        let bound_reg = self.fun.next_reg_with_prefix("whb");
+        self.emit_countable_load_bound(out, &bound_reg, total_idx, total_const_name, c0);
+        writeln!(out, "  br label %.wloop").ok();
+        writeln!(out, ".wloop:").ok();
+        let (counter_val, _) = self.emit_state_load_i64_by_idx(out, "  ", counter_idx);
+        let done = self.fun.next_reg_with_prefix("whd");
+        writeln!(out, "  {} = icmp slt i64 {}, {}", done, counter_val, bound_reg).ok();
+        writeln!(out, "  br i1 {}, label %.wbody, label %.wend", done).ok();
+        writeln!(out, ".wbody:").ok();
+        // Force all field writes to %State (no phi nodes to hold values)
+        let prev = self.fun.needs_state_stores_in_body;
+        self.fun.needs_state_stores_in_body = true;
+        let write_set: HashSet<String> = HashSet::new();
+        let mut hoisted = Vec::new();
+        self.emit_countable_body(out, body, &write_set, &mut hoisted);
+        self.fun.needs_state_stores_in_body = prev;
+        let next = self.fun.next_reg_with_prefix("whn");
+        writeln!(out, "  {} = add nuw nsw i64 {}, 1", next, counter_val).ok();
+        self.emit_state_store_i64_by_idx(out, "  ", counter_idx, &next);
+        emit_loop_metadata(out, "  ", ".wloop",
+            &mut self.fun.metadata_counter, &mut self.fun.pending_metadata);
+        writeln!(out, "  br label %.wloop").ok();
+        writeln!(out, ".wend:").ok();
+        // Hoisted post-loop prints (swan song)
+        self.fun.reg_float_cache.clear();
+        self.fun.last_val_temps.clear();
+        self.fun.last_val_types.clear();
+        let hoist = self.fun.pending_post_hoist.clone();
+        if !hoist.is_empty() {
+            self.load_last_val_temps(out);
+            self.emit_hoisted_post_loop_prints(out, &hoist);
+        }
+        writeln!(out, "  ret i32 0").ok();
+        writeln!(out, "}}").ok();
+        writeln!(out).ok();
+    }
+
+    // ═══════════════════════════════════════════════════════════════
     // Strategy 3: Hybrid Countable Loop (EmitHybridCounterPhi)
     // ═══════════════════════════════════════════════════════════════
 
@@ -315,7 +375,7 @@ impl LlvmBackend {
             if let Some(cv) = counter_var {
                 if fname.as_str() == cv {
                     self.fun.phi_field_regs.insert((*fname).clone(), counter_name.clone());
-                    self.fun.backedge_field_regs.insert((*fname).clone(), format!("%{}", next));
+                    self.fun.backedge_field_regs.insert((*fname).clone(), next.clone());
                     continue;
                 }
             }
@@ -378,7 +438,11 @@ impl LlvmBackend {
         // 2026-07-17: Per-field backedges. Modified fields use the written value;
         // unwritten fields use identity (phi self-ref). LLVM peephole eliminates
         // the `add i64 0, %val` copy in both cases.
-        for fname in &sorted_fields {
+        // 2026-07-21: Skip the counter variable — its backedge is already the
+        // latch increment (next). Creating another identity would redefine next.
+        for fname in sorted_fields.iter().filter(|f| {
+            counter_var.map_or(true, |cv| f.as_str() != cv)
+        }) {
             if let Some(be_f) = self.fun.backedge_field_regs.get(fname.as_str()) {
                 let val = self.fun.pending_phi_backedge.get(fname.as_str())
                     .cloned().unwrap_or_else(|| {

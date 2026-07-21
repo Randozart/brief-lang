@@ -2531,9 +2531,9 @@ impl LlvmBackend {
                                 }
                                 writeln!(out, "  ret i32 0").ok();
                                 writeln!(out, "}}").ok();
-                                true
-                        } else {
-                            // Adaptive dispatch: EmitInlineSsa (inline SSA) vs EmitPerFieldPhi (per-field phi).
+                                 true
+                         } else {
+                             // Adaptive dispatch: EmitInlineSsa (inline SSA) vs EmitPerFieldPhi (per-field phi).
                             // 2026-07-05: EmitInlineSsa is selected for dense-write, small-field
                             // bodies — the single %State phi + insertvalue chain lets
                             // LLVM optimize the entire state as one SSA unit.  Guards are
@@ -2552,7 +2552,17 @@ impl LlvmBackend {
                             let has_body_ffi = raw_body.iter().any(|s| {
                                 crate::analysis::transition_graph::statement_contains_ffi(s)
                             });
-                            if write_density >= 0.5 && total_fields < 8 && !has_body_ffi {
+                            if has_body_ffi && total_fields < 16 {
+                                // 2026-07-21: Direct while-loop for bodies with FFI calls.
+                                // No phi nodes — every field via GEP+load+store. Avoids both
+                                // the EmitInlineSsa FFI bug (globalopt eliminates prints) and
+                                // the per-field phi overhead (3-4 extra insns per iteration).
+                                self.fun.pending_post_hoist = post_hoist;
+                                self.warnings.push(format!("info: txn '{}' dispatched via direct while-loop", &node.name));
+                                self.emit_while_main(&mut out, &node.name, counter_idx,
+                                    total_idx, total_const_name, &body_stmts);
+                                true
+                            } else if write_density >= 0.5 && total_fields < 8 && !has_body_ffi {
                                 // EmitInlineSsa: inline SSA with insertvalue chain.
                                 // Best for dense writes (knucleotide: 4 fields all written,
                                 // mandelbrot: 5 fields all written).
@@ -2621,7 +2631,14 @@ impl LlvmBackend {
                             let has_body_ffi = raw_body.iter().any(|s| {
                                 crate::analysis::transition_graph::statement_contains_ffi(s)
                             });
-                            if write_density >= 0.5 && total_fields < 8 && !has_body_ffi {
+                            if has_body_ffi && total_fields < 16 {
+                                // 2026-07-21: Direct while-loop for bodies with FFI calls.
+                                self.fun.pending_post_hoist = post_hoist;
+                                self.warnings.push(format!("info: txn '{}' dispatched via direct while-loop", &node.name));
+                                self.emit_while_main(&mut out, &node.name, counter_idx,
+                                    total_idx, total_const_name, &body_stmts);
+                                true
+                            } else if write_density >= 0.5 && total_fields < 8 && !has_body_ffi {
                                 self.fun.pending_post_hoist = post_hoist;
                                 self.warnings.push(format!("info: txn '{}' dispatched via inline SSA (EmitInlineSsa, {}/{} fields written)", &node.name, write_count, total_fields));
                                 self.emit_folded_main(&mut out, &node.name, counter_idx, total_idx, total_const_name, false, Some(&body_stmts));
