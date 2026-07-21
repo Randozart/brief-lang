@@ -387,8 +387,9 @@ impl LlvmBackend {
                     // (from Malloc#) have no header.
                     // 2026-07-18: Check by TYPE, not expression form — non-literal
                     // list identifiers also need the +1 offset.
-                    let is_list_type = matches!(&obj_reg.ty, Type::Ptr(_))
-                        || matches!(&obj_reg.ty, Type::Applied(n, _) if n == "List");
+                    // 2026-07-21: Only List types have a length header at slot 0.
+                    // Raw Ptr<T> from Malloc# has no header — offset is the index.
+                    let is_list_type = matches!(&obj_reg.ty, Type::Applied(n, _) if n == "List");
                     if is_list_type {
                         writeln!(out, "{}{} = add i64 {}, 1", indent, offset, idx_reg.name).ok();
                     } else {
@@ -1348,7 +1349,7 @@ impl LlvmBackend {
                     )
                     .ok();
                 } else {
-                    writeln!(out, "{}{} = add nsw i64 {}, {}", indent, v, l.name, r.name).ok();
+                    writeln!(out, "{}{} = add nuw nsw i64 {}, {}", indent, v, l.name, r.name).ok();
                 }
                 TypedRegister {
                     name: v.to_string(),

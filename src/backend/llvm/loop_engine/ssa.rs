@@ -201,7 +201,7 @@ impl LlvmBackend {
         writeln!(out, "  br label %.mr_latch").ok();
         writeln!(out, ".mr_latch:").ok();
         let next = self.fun.next_reg_with_prefix("mrn");
-        writeln!(out, "  {} = add i64 {}, 1", next, c_val).ok();
+        writeln!(out, "  {} = add nuw nsw i64 {}, 1", next, c_val).ok();
         writeln!(out, "  store i64 {}, ptr {}, align 8", next, c_gep).ok();
         writeln!(out, "  br label %.mr_loop").ok();
         writeln!(out, ".mr_end:").ok();
@@ -472,7 +472,7 @@ impl LlvmBackend {
             writeln!(out, "  call void @txn_{}(ptr %state)", name).ok();
         }
         let next = self.fun.next_reg_with_prefix("fmn");
-        writeln!(out, "  {} = add i64 {}, 1", next, c_val).ok();
+        writeln!(out, "  {} = add nuw nsw i64 {}, 1", next, c_val).ok();
         writeln!(out, "  store i64 {}, ptr {}, align 8", next, c_gep).ok();
         writeln!(out, "  br label %.fm_loop").ok();
         writeln!(out, ".fm_end:").ok();

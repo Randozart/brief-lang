@@ -117,9 +117,9 @@ impl LlvmBackend {
         writeln!(out, "  br label %{}.latch", label_prefix).ok();
         writeln!(out, "{}.latch:", label_prefix).ok();
         if is_decreasing {
-            writeln!(out, "  {} = add i64 {}, -1", next, counter_name).ok();
+            writeln!(out, "  {} = sub nuw nsw i64 {}, 1", next, counter_name).ok();
         } else {
-            writeln!(out, "  {} = add i64 {}, 1", next, counter_name).ok();
+            writeln!(out, "  {} = add nuw nsw i64 {}, 1", next, counter_name).ok();
         }
         writeln!(out, "  br label %{}.header", label_prefix).ok();
         writeln!(out, "{}:", exit_label).ok();
@@ -198,7 +198,7 @@ impl LlvmBackend {
         self.emit_countable_body(out, body, &write_set, &mut hoisted);
         self.fun.needs_state_stores_in_body = prev;
         let next = self.fun.next_reg_with_prefix("fmn");
-        writeln!(out, "  {} = add i64 {}, 1", next, counter_val).ok();
+        writeln!(out, "  {} = add nuw nsw i64 {}, 1", next, counter_val).ok();
         self.emit_state_store_i64_by_idx(out, "  ", counter_idx, &next);
         writeln!(out, "  br label %.fm_loop").ok();
         writeln!(out, ".fm_end:").ok();
@@ -356,9 +356,9 @@ impl LlvmBackend {
         writeln!(out, "  br label %.cm_latch").ok();
         writeln!(out, ".cm_latch:").ok();
         if is_decreasing {
-            writeln!(out, "  {} = add i64 {}, -1", next, counter_name).ok();
+            writeln!(out, "  {} = sub nuw nsw i64 {}, 1", next, counter_name).ok();
         } else {
-            writeln!(out, "  {} = add i64 {}, 1", next, counter_name).ok();
+            writeln!(out, "  {} = add nuw nsw i64 {}, 1", next, counter_name).ok();
         }
 
         // 2026-07-17: Per-field backedges. Modified fields use the written value;
@@ -436,7 +436,7 @@ impl LlvmBackend {
         self.emit_countable_body(out, body, write_set, &mut hoisted);
         self.emit_hoisted_post_loop_prints(out, &hoisted);
         let next = self.fun.next_reg_with_prefix("cmmn");
-        writeln!(out, "  {} = add i64 {}, 1", next, counter_val).ok();
+        writeln!(out, "  {} = add nuw nsw i64 {}, 1", next, counter_val).ok();
         writeln!(out, "  store i64 {}, ptr {}, align 8", next, counter_gep).ok();
         writeln!(out, "  br label %.cmm_loop").ok();
         writeln!(out, ".cmm_end:").ok();
@@ -537,6 +537,35 @@ impl LlvmBackend {
                         }
                         self.fun.last_val_temps.insert(n.clone(), val.name.clone());
                         self.fun.last_val_types.insert(n.clone(), val.ty.clone());
+                    }
+                    // 2026-07-21: Handle pointer-indexed stores (data[idx] = val)
+                    // and deref stores (*ptr = val) inside convergence loops.
+                    // Without this, emit_countable_body silently drops these
+                    // assignments (assign_target_name returns None for non-Ident).
+                    match lhs {
+                        Expr::Index(obj, idx) => {
+                            let obj_reg = self.emit_expr(out, obj, "  ");
+                            if matches!(obj_reg.ty, Type::Ptr(_)) {
+                                let idx_reg = self.emit_expr(out, idx, "  ");
+                                let ptr = self.fun.gen_reg();
+                                writeln!(out, "  {} = inttoptr i64 {} to ptr", ptr, obj_reg.name).ok();
+                                let gep = self.fun.gen_reg();
+                                let offset = self.fun.gen_reg();
+                                // Only List/tuple literals have a length header at slot 0.
+                                if matches!(obj.as_ref(), Expr::List(_) | Expr::Tuple(_)) {
+                                    writeln!(out, "  {} = add i64 {}, 1", offset, idx_reg.name).ok();
+                                } else {
+                                    writeln!(out, "  {} = add i64 {}, 0", offset, idx_reg.name).ok();
+                                }
+                                writeln!(out, "  {} = getelementptr i64, ptr {}, i64 {}", gep, ptr, offset).ok();
+                                writeln!(out, "  store i64 {}, ptr {}", val.name, gep).ok();
+                            }
+                        }
+                        Expr::Deref(inner) => {
+                            let ptr_reg = self.emit_expr(out, inner, "  ");
+                            writeln!(out, "  store i64 {}, ptr {}", val.name, ptr_reg.name).ok();
+                        }
+                        _ => {}
                     }
                 }
                 Statement::Term(Some(e)) | Statement::TermBang(Some(e)) => {

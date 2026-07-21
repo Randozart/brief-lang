@@ -22,9 +22,14 @@ int main(void) {
         ops++;
         if (ops % 5000000 == 0) {
             long filled = tail - head;
-            printf("%ld\n", filled);
+            // 2026-07-21: Print buffer-derived value to prevent LLVM DCE of stores.
+            long buf_val = data[tail % cap];
+            printf("%ld\n", filled + buf_val);
         }
     }
+
+    long chk = data[0] + data[512];
+    printf("%ld\n", chk);
 
     free(data);
     return 0;

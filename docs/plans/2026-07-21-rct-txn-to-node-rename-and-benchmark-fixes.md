@@ -1160,3 +1160,99 @@ grep 'get_env_int' benchmarks/fasta.ll
 # Check that %state is no longer an argument
 ```
 ```
+
+---
+
+## Stage 7: Comprehensive Benchmark Investigation Results (2026-07-21)
+
+All root causes identified through detailed LLVM IR analysis, disassembly comparison,
+and instruction-level uop accounting.
+
+### Current Benchmark Table (After Fix A)
+
+All times at `BOUND=50000000`, single run, nanosecond-precision fork+exec timer.
+
+| Benchmark | Brief | C | Ratio | Winner | Status |
+|-----------|-------|---|-------|--------|--------|
+| ring_buffer | 0.0549s | 0.0318s | 1.72x | C | **Missing `nuw` flag** |
+| float_math | 0.0712s | 0.0752s | 0.94x | Brief | ✓ |
+| float_math_nonzero | 0.1624s | 0.1687s | 0.96x | Brief | ✓ Fixed Stage 2 |
+| **sparse_dispatch** | **0.0517s** | **0.0781s** | **0.66x** | **Brief** | ✓ Fixed Stage 5 |
+| **print_loop** | **0.0597s** | **0.0571s** | **1.04x** | **~tie** | ✓ Fixed Stage 5 |
+| nbody_newton | 11.3802s | 8.3289s | 1.36x | C | LLVM `vdivss` vs `vrcpps` |
+| nbody_sqrt | 2.4571s | 2.7958s | 0.87x | Brief | ✓ |
+| nbody_sqrt_idio | 2.5028s | 3.6368s | 0.68x | Brief | ✓ |
+| fasta | 0.2622s | 0.2121s | 1.23x | C | **No LTO → extra call layer** |
+| fannkuch_redux | 0.0770s | 0.0588s | 1.31x | C | **6-phi cap → register pressure** |
+| mandelbrot | 0.6687s | 0.6626s | 1.00x | ~tie | ✓ |
+| kalman_filter_runtime | 0.1862s | 0.1747s | 1.06x | ~tie | ✓ |
+| knucleotide | 0.1904s | 0.1938s | 0.98x | ~tie | ✓ |
+| cancel_math | 0.0654s | 0.0630s | 1.03x | ~tie | ✓ |
+| bit_clear | 0.0011s | 0.0008s | 1.34x | C | **Measurement noise** (1µs work, 640µs startup) |
+| queue_drain | 0.0597s | 0.0616s | 0.96x | Brief | ✓ Fixed Stage 2 |
+| queue_drain_sym | 0.0648s | 0.0606s | 1.06x | ~tie | ✓ Improved Stage 5 |
+| queue_drain_idio | 0.0645s | — | — | — | No C reference |
+
+---
+
+## Stage 8: Remaining Fixes (Priority Order)
+
+### P0: Add `nuw`/`nsw` flags to LLVM IR `add` (ring_buffer)
+
+**Root cause:** The LLVM IR emits `add nsw i64` (signed-only) for counter increments.
+Without `nuw` (no-unsigned-wrap), LLVM cannot narrow i64 → i32 for the modulo
+operation. This forces a 64-bit `srem` → 128-bit `mul %r14` (3-5 µops) instead of
+32-bit `urem` → `imul $magic` (1 µop).
+
+**Fix:** Add `nuw nsw` to all `add`/`sub`/`mul` instructions for bounded loop counters
+and induction variables where the compiler can prove no overflow (counter < total,
+where both are non-negative and total is a known bound).
+
+**Target:** `src/backend/llvm/emit_expr.rs` — the expression emitter that generates
+`add`/`sub` IR. All binary ops that are known-bounded should get both flags.
+
+### P1: Enable `-flto` in benchmark build (fasta)
+
+**Root cause:** `__print_char` wrapper adds an extra function call layer per iteration
+(call/ret pair + stack frame). C calls `fputc@plt` directly, Brief calls
+`__print_char` → `putc@plt`. The wrapper costs ~5-8 cycles/iteration at 50M iter:
+~50-80ms overhead at 3GHz (matches actual 52ms delta).
+
+The wrapper itself is optimized by clang -O3 (the `c==10` branch becomes just
+`putc(c, stdout)`), but the outer call/ret pair cannot be eliminated without LTO.
+
+**Fix:** Add `-flto` to the clang invocation in `benchmarks/build_and_bench.sh` so
+that LTO inlines `__print_char` into `main()`.
+
+### P2: Increase phi cap from 6 to adaptive (fannkuch_redux)
+
+**Root cause:** The 6-phi cap forces 10 of 16 written fields through
+GEP+load+store, increasing register pressure. At the binary level, this costs
+~3 extra instructions per iteration (17.75 vs 14.75 = 20% more).
+
+**Fix:** Change the capped_set limit from a hard-coded `6` to an adaptive value
+based on field count and register pressure. For benchmarks with 10-16 write fields,
+a cap of 12-16 would eliminate the penalty.
+
+### P3: ring_buffer benchmark liveness (use `Print#`)
+
+**Root cause:** Both binaries DCE the ring buffer stores — the buffer is allocated
+but never read by any observable effect. The benchmark measures modulo arithmetic,
+not ring buffer operations.
+
+**Fix:** Add a `Print#(data[...])` or similar observable read at the end of the
+benchmark to prevent DCE of the buffer stores. The `Print#` intrinsic (or
+`!Print` / `!PrintLn`) establishes liveness without `frgn`.
+
+### P4: bit_clear investigation
+
+**Root cause:** 63 iterations (~1µs computation) buried in 640µs process startup.
+The ratio is not statistically significant (p>0.05, 15-run test). Disassembly is
+identical.
+
+**Note:** The user reports it was faster before — may be a startup noise regression
+from increased PLT entries or dynamic linking overhead. Could also be real: the
+6-phi cap affects fannkuch similarly, and if bit_clear was rewritten to use a node
+with more state fields than before, the phi cap may have regressed it.
+```
+```
