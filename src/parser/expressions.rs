@@ -243,7 +243,24 @@ impl<'a> Parser<'a> {
             } else if self.eat(&Token::Dot) {
                 // Field access: a.f
                 let name = self.expect_identifier()?;
-                expr = Expr::Field(Box::new(expr), name);
+                // 2026-07-21: Navigation chain call: a.first$(args).
+                // When the field name ends with $ and is followed by (,
+                // convert to Call("first$", [a, ...args]) so the navigation
+                // engine can evaluate it as a chain step.
+                if name.ends_with('$') && self.check(&Token::LParen) {
+                    self.expect(Token::LParen)?;
+                    let mut args = vec![expr];
+                    if !self.check(&Token::RParen) {
+                        loop {
+                            args.push(self.parse_expression()?);
+                            if !self.eat(&Token::Comma) { break; }
+                        }
+                    }
+                    self.expect(Token::RParen)?;
+                    expr = Expr::Call(name, args, None);
+                } else {
+                    expr = Expr::Field(Box::new(expr), name);
+                }
             } else if self.eat(&Token::LBracket) {
                 // Index: a[b]
                 let index = self.parse_expression()?;

@@ -14,6 +14,7 @@
 use super::intrinsics;
 use super::{Plugin, PluginManager};
 use crate::ast::{StageBlock, StageKind, TopLevel};
+use crate::macros;
 use crate::parser::Parser;
 use crate::target::TargetConfig;
 use crate::type_universe::TypeUniverse;
@@ -48,20 +49,15 @@ impl StageBlockPlugin {
         }
     }
 
-    /// Evaluate the block's body statements.
-    /// Iterates each statement and dispatches $ intrinsic calls via
-    /// intrinsics::evaluate_statement().
-    /// 2026-07-15: Phase 3 — Full $ intrinsic dispatch for on_ast.
-    /// on_ir evaluation is a no-op for now (body contains AST intrinsics).
+    /// Evaluate the block's body statements using the new navigation engine.
+    /// 2026-07-21: Replaced intrinsics::evaluate_statement with
+    /// macros::eval::evaluate_stage_block for full navigation DSL support.
     fn evaluate_body(
         &self,
         program: &mut Vec<TopLevel>,
         universe: &mut TypeUniverse,
     ) -> Result<(), String> {
-        for stmt in &self.body {
-            intrinsics::evaluate_statement(stmt, program, universe)?;
-        }
-        Ok(())
+        macros::eval::evaluate_stage_block(&self.body, program, universe, self.stage)
     }
 }
 

@@ -496,4 +496,44 @@ mod tests {
         let pos = Position::after(&sel);
         assert!(pos.is_none());
     }
+
+    // ── Validation tests ───────────────────────────────────────────────
+
+    #[test]
+    fn test_validate_nodes_for_stage_accepts_typed_at_parsed() {
+        let nodes = vec![];
+        assert!(validate_nodes_for_stage(&nodes, StageKind::Parsed).is_ok());
+    }
+
+    #[test]
+    fn test_validate_nodes_for_stage_rejects_untyped_after_typed() {
+        let nodes = vec![
+            TopLevel::Statement(Box::new(Statement::Let {
+                name: "x".into(),
+                ty: None,
+                expr: Some(Expr::Decimal(42)),
+                modifiers: vec![],
+            })),
+        ];
+        let result = validate_nodes_for_stage(&nodes, StageKind::Normalized);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("untyped let binding"));
+    }
+
+    #[test]
+    fn test_validate_structural_toplevel_rejects_term() {
+        let items = vec![];
+        let node = TopLevel::Statement(Box::new(Statement::Term(Some(Expr::Decimal(0)))));
+        let result = validate_structural_toplevel(&items, &node);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("cannot insert"));
+    }
+
+    #[test]
+    fn test_validate_structural_toplevel_accepts_import() {
+        let items = vec![];
+        let node = TopLevel::Import(Import::literal("std/io.bv", vec![]));
+        let result = validate_structural_toplevel(&items, &node);
+        assert!(result.is_ok());
+    }
 }
