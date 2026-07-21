@@ -2223,6 +2223,21 @@ impl LlvmBackend {
         // group (#4/#5) for hazardous functions, and the attributes section emits #4/#5.
         self.estimate_slp_hazard(&txns);
 
+        // 2026-07-21: Run SLP isomorphism analysis — detects structurally identical
+        // operation sequences across different float fields (nbody's dx01=by0-by1,
+        // dy01=by0-by1 pattern) for potential vectorization in a future phase.
+        for (name, txn) in &txns {
+            if txn.is_reactive {
+                let result = crate::analysis::slp_isomorphism::analyze_body(&txn.body);
+                if result.has_slp_opportunities {
+                    self.warnings.push(format!(
+                        "info: txn '{}' has {} SLP isomorphism group(s) ({} total lanes)",
+                        name, result.groups.len(),
+                        result.groups.iter().map(|g| g.width).sum::<usize>()));
+                }
+            }
+        }
+
         let mut range_meta: Vec<String> = Vec::new();
 
         // Definitions
