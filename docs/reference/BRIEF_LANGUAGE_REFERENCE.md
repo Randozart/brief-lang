@@ -43,7 +43,7 @@
 | `let` | - | State variable declaration |
 | `const` | `constant` | Constant declaration |
 | `txn` | `transact`, `transaction` | Transaction |
-| `rct` | - | Reactive transaction |
+| `node` | - | Reactive transaction |
 | `async` | - | Async modifier |
 | `term` | - | Termination statement |
 | `escape` | - | Escape/return statement |

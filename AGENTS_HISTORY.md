@@ -263,7 +263,7 @@ brief-compiler selfhost <file.bv>
 - **Step 1**: Auto-select `Parallel` dispatch when all reactive txns are conflict-free (no `#pragma dispatch(parallel)` needed)
 - **Step 2**: `@ link` triggers default to wake (no `#wake` needed)
 - **Step 3**: Wake+enum mutual exclusion lifted — enum dispatch enters hybrid wake mode with `@__rt_wait()` loop
-- **Step 4**: `suggest_async_promotion()` lint — A001 warning for conflict-free `rct` txns that could be async
+- **Step 4**: `suggest_async_promotion()` lint — A001 warning for conflict-free `node` txns that could be async
 - **Step 5**: Thread pool auto-inference + concurrent async dispatch (Path 5)
 
 ### Implemented (2026-06-02 optimization sprint)

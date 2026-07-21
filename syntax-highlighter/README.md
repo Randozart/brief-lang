@@ -35,7 +35,7 @@ code --install-extension brief-language-0.1.0.vsix
 | Element | Color | Style |
 |---------|-------|-------|
 | `txn` | Purple | Bold |
-| `rct` | Yellow | Bold |
+| `node` | Yellow | Bold |
 | `term`/`escape` | Gold | Bold |
 | `defn`/`let`/`sig` | Blue | Normal |
 | Types | Cyan | Normal |

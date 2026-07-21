@@ -346,6 +346,6 @@ the convergent txn loops through SROA + loop unrolling.
 | `src/target.rs` | `TargetConfig`, `BackendKind` resolution |
 | `src/compile.rs` | Compilation pipeline with 11-stage dispatch, `BeastStage` snapshots |
 | `src/macros/` | AST navigation DSL: `selection.rs`, `pattern_live.rs`, `actions.rs`, `text_ops.rs`, `flow.rs` |
-| `src/main.rs` | CLI entry point with `--backend`, `--plugin`, `--emit-beast [stage]` |
+| `src/main.rs` | CLI entry point with `--backend`, `--emit-beast [stage]` |
 | `src/lib.rs` | Crate root, module declarations |
 | `docs/architecture/backend-type-dispatch.md` | Type dispatch design (mandatory reading) |

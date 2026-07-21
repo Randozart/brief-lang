@@ -2,9 +2,9 @@
 
 Reactive transactions fire **automatically** when their precondition becomes true. The compiler proves they can terminate, then optimizes them to loop until termination.
 
-## 1. The `rct` Keyword
+## 1. The `node` Keyword
 
-Add `rct` to make a transaction reactive:
+Add `node` to make a transaction reactive:
 
 ```brief
 // Passive transaction (must be called explicitly)
@@ -211,7 +211,7 @@ node read_sensor @100Hz [true][logged == true] {
 1. The `@Hz` annotation attaches a speed requirement to the transaction
 2. Multiple files with different `@Hz` speeds are coordinated by the `ReactorScheduler` — the global tick runs at max(`@Hz`) and slower files are intelligently skipped
 3. Polling transactions still use the same reactive pipeline (precondition check, term verification, equilibrium loop) — `@Hz` only adds a time-based gate
-4. Pure library files with no `rct` blocks consume zero overhead
+4. Pure library files with no `node` blocks consume zero overhead
 
 **When to use polling:**
 - Hardware polling (ADC, GPIO, I2C)

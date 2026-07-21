@@ -304,7 +304,7 @@ Brief has many **full forms** and **abbreviated forms**. The abbreviated ones ar
 | Abbrev | Full | Meaning |
 |-------|------|--------|
 | `txn` | `transaction` | State-changing operation |
-| `rct` | `reactive` | Auto-fires when precondition met |
+| `node` | `reactive` | Auto-fires when precondition met |
 | `defn` | `definition` | Function |
 | `frgn` | `foreign` | FFI call (returns Result) |
 | `frgn!` | `foreign!` | FFI fire-and-forget |
@@ -329,7 +329,7 @@ txn deposit(amount) [amount > 0][balance == @balance + amount] {
 };
 ```
 
-### `rct` - Reactive
+### `node` - Reactive
 
 This **fires automatically** when its precondition becomes true. No caller needed.
 
@@ -541,7 +541,7 @@ When you see **question mark** `?` → think **timeout/watchdog**
 
 When you see **`txn`** → think **state change (atomic)**
 
-When you see **`rct`** → think **auto-fire on condition (inherent loop)**
+When you see **`node`** → think **auto-fire on condition (inherent loop)**
 
 When you see **`defn`** → think **pure calculation**
 

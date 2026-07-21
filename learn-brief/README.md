@@ -35,7 +35,7 @@
    - Common patterns
 
 4. **[03-reactive.md](03-reactive.md)** - Reactive Transactions
-   - The `rct` keyword
+   - The `node` keyword
    - Termination verification
    - Reactive chains
    - Async reactive transactions

@@ -41,7 +41,7 @@ AsyncAwait { body: Box<Statement>, lhs: Option<String>, modifiers: Vec<Hashtag> 
 In `parse_statement()`, `Token::Async` disambiguates:
 
 1. `async` + `await` → `parse_async_await()` (delegates)
-2. `async` + `rct`/`txn` → error (these are top-level only)
+2. `async` + `node`/`txn` → error (these are top-level only)
 3. `async` + anything else → `Statement::Async { body: parse_statement(), .. }`
 4. `Token::Await` alone → `Statement::Await { expr: parse_expression(), .. }`
 

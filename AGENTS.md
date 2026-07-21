@@ -996,6 +996,26 @@ CPU), that's the correctness baseline. Backends that need more (barriers,
 pipeline stalls) must add `SyncBlock` handling in their codegen — not a
 new intrinsic.
 
+## Documentation Maintenance
+
+These documents must be actively maintained to reflect current syntax and behavior.
+Always update them in the same commit as corresponding code changes:
+
+| Category | Files | Update Requirement |
+|----------|-------|-------------------|
+| **Tutorial** | `learn-brief/` | Must reflect current language syntax |
+| **Specification** | `spec/SPEC.md` | Ground truth — update on any syntax/semantic change |
+| **Architecture** | `docs/architecture/` | Update when dispatch decisions or codegen strategy changes |
+| **Tooling** | `syntax-highlighter/README.md` | New keywords/reserved tokens |
+| **Bug Tracker** | `BUGS.md` | Log every bug and its fix |
+| **Agent History** | `AGENTS_HISTORY.md` | Major session milestones |
+
+The following are **timestamped historical records** and should NOT be retroactively edited:
+`docs/plans/*.md`, `.opencode/plans/*.md`, `docs/milestones/*.md`, `benchmarks/results/*.md`.
+Outdated claims in these documents are preserved as historical evidence of what was
+known at the time. Reference the plan document (`docs/plans/2026-07-21-rct-txn-to-node-rename-and-benchmark-fixes.md`)
+for current benchmark results and architecture decisions.
+
 ## Key References
 
 | Resource | Location |

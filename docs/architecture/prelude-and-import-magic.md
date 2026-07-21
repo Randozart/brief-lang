@@ -24,7 +24,7 @@ Three-tier system:
 | Tier | Mechanism | What it provides | Control |
 |------|-----------|------------------|---------|
 | Built-in | Compiler-injected | `Option<T>`, `Some`, `None`, `Result<T,E>`, `Ok`, `Err` | Always present. Required for FFI error handling. |
-| Auto-core | Compiler scans `{BRIEF_STDLIB_PATH}/std/core/` | All "safe" modules (pure `defn`/`enum`, no `frgn`/`link`/`trg`) | `--no-std` disables |
+| Auto-core | Compiler scans `{BRIEF_STDLIB_PATH}/std/core/` | All "safe" modules (pure `defn`/`enum`, no `frgn`/`link`/`trg`) | \`--disable-plugin prelude\` disables |
 | `import#` | Compiler-relative path resolution | Anything in `BRIEF_STDLIB_PATH` | Explicit opt-in per module/glob |
 
 ## Directory Structure
@@ -98,7 +98,7 @@ directory and generating individual import nodes for each `.bv` file.
 ## Hardcoded Option + Result
 
 Two enum types are always available in the compiler's built-in namespace,
-even under `--no-std`:
+even under `--disable-plugin prelude`:
 
 - `Option<T>` with variants `Some(T)` and `None`
 - `Result<T, E>` with variants `Ok(T)` and `Err(E)`
@@ -111,7 +111,7 @@ the compiler guarantees their availability without imports.
 
 ## Auto-Import of `core/`
 
-By default (without `--no-std`), the compiler:
+By default (without `--disable-plugin prelude`), the compiler:
 
 1. Locates `{BRIEF_STDLIB_PATH}` (from `--stdlib-path`, `BRIEF_STDLIB_PATH`
    env var, or executable-relative default)
@@ -141,7 +141,7 @@ the `<~` Annotation Arrow syntax.
 
 The compiler auto-injects `import# "std/types/bootstrap.bv"` for every `.bv`
 file, ensuring all built-in types are available without explicit imports.
-This happens alongside the `core/` auto-import and is also gated by `--no-std`.
+This happens alongside the `core/` auto-import and is also gated by `--disable-plugin prelude`.
 
 Previously these types were hardcoded as Rust `Vec<ResolvedType>` literals in
 `init_primitives()`. Now they are single-source-of-truth `.bv` declarations.

@@ -184,7 +184,7 @@ exit_condition ::= "#!exit" expression
 
 definition ::= ("defn" | "def" | "definition") identifier type_params? parameters? "->" output_types contract body derivation?
 
-transaction ::= ("async")? "rct"? "txn" identifier type_params? parameters? contract body derivation?
+transaction ::= ("async")? "node"? "txn" identifier type_params? parameters? contract body derivation?
 
 body ::= "{" statement* "}" ";" | ";"
 
@@ -665,7 +665,7 @@ async node fetch_data [needs_update][data != @data] {
 ```
 
 **Transaction modifiers:**
-- `rct` - Reactive: fires automatically when precondition becomes true
+- `node` - Reactive: fires automatically when precondition becomes true
 - `async` - Can run concurrently; compiler verifies mutual exclusion
 - Both can be combined: `async node`
 
@@ -797,7 +797,7 @@ txn increment() [true][counter == @counter + 1] {
 - `@var` - Prior state value in contracts
 
 **Transaction modifiers:**
-- `rct` - Reactive: fires automatically when precondition becomes true
+- `node` - Reactive: fires automatically when precondition becomes true
 - `async` - Can run concurrently; compiler verifies mutual exclusion
 - Both can be combined: `async node`
 
@@ -2361,7 +2361,7 @@ PASS 1: Type-Universe Pass
   - FREEZE: type universe immutable
 
 PASS 2: Executable Pass
-  - Parse defn/txn/rct
+  - Parse defn/txn/node
   - Resolve let x: Type against frozen universe
   - Validate :> projections against metadata
   - Synthesize bracket/arrow from AllowIndex/AllowArrow

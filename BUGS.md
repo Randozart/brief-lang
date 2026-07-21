@@ -832,7 +832,7 @@ The callable `txn` is invoked via `Expr::Call` just like a `defn`. The interpret
 
 Concrete changes:
 1. AST: Add `output_type: Option<OutputType>` and `outputs: Vec<Type>` to `Transaction`
-2. Parser: Parse optional `-> ReturnType` after contract for regular `txn`s (not `rct`)
+2. Parser: Parse optional `-> ReturnType` after contract for regular `txn`s (not `node`)
 3. Interpreter: Register `txn` in `callable_txns` during init; dispatch from `Expr::Call`; convergence loop execution
 4. Backends: Add stubs for callable txn dispatch returning 0
 5. Stdlib: Convert ~71 broken defns in `lib/std/` to txns

@@ -1,5 +1,8 @@
 # Benchmark Results — Post Phase 3 (String Migration + Factory Methods)
 
+> **Note:** Superseded by baseline at commit `be6583bc` (2026-07-21, post-SLP anchor).
+> All benchmarks improved — see the comprehensive plan document for current results.
+
 **Commit:** `8a827db1bb600d64740daab52b4613ab7f5cedae`
 **Date:** 2026-07-11
 **Build:** `cargo build --release`

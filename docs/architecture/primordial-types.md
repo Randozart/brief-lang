@@ -18,7 +18,7 @@
 > ```
 >
 > The primordial seed table still exists as a convenience — it pre-populates
-> the universe with well-known type names so `--no-stdlib` works. But the
+> the universe with well-known type names so `--disable-plugin prelude` works. But the
 > semantic identity of a type is now determined by its op signatures, not
 > by `primitive`/`ctd`/`alu` metadata.
 >
