@@ -55,17 +55,20 @@ Tag$("import") .First$() .Before$() .Insert$(Import$("std/x.bv"))
 
 ### Flow Control
 
+Inside `$(Stage)` blocks, standard Brief syntax (`let`, `if`, `foreach`, `match`)
+is evaluated at compile time. Navigation selections are first-class values.
+
 ```brief
 // Bind a selection to a variable
-Let$imports = Tag$("import");
+let imports = Tag$("import");
 
 // Iterate over matches
-ForEach$(Tag$("import")) {
-    $.After$().Insert$(Import$("std/debug.bv"));
+foreach(imp in imports) {
+    imp.After$().Insert$(Import$("std/debug.bv"));
 };
 
 // Conditional
-If$(Tag$("import").Count$() == 0) {
+if(imports.Count$() == 0) {
     EmitWarning$("no imports found");
 };
 ```
@@ -102,12 +105,13 @@ Each stage has a default data target:
 
 | Stage | Default target | What you can do |
 |-------|---------------|-----------------|
-| `$(PreLex)` | `Source$` (text) | `Find$`, `Prepend$`, `ReplaceWith$` |
+| `$(PreLex)` | `Source$` (text) | `Find$`, `Prepend$`, `ReplaceWith$`, `Text$()` |
 | `$(Parsed)` through `$(Provenanced)` | AST (tree) | `Tag$`, `Named$`, `Insert$`, `Delete$`, `Set$` |
-| `$(Generated)` through `$(Optimized)` | `Ir$` (text) | `Find$`, `InsertBefore$`, `ReplaceWith$` |
-| `$(Linked)` | `Bin$` (binary) | `Run$("command {{path}}")` |
+| `$(Generated)` through `$(Optimized)` | `Ir$` (text) | `Find$`, `InsertBefore$`, `ReplaceWith$`, `Text$()` |
+| `$(Linked)` | `Bin$` (binary) | `Run$("command {{path}}")`, `Path$()`, `ReadBytes$()`, `Size$()` |
+| All stages | `Stage$` (registry) | `Insert$(block)`, `Insert$(file)`, `Remove$(name)`, `List$()` |
 
-You can always override by prefixing `Source$.`, `Ir$.`, or `Bin$.`:
+You can always override by prefixing `Source$.`, `Ir$.`, `Bin$.`, or `Stage$.`:
 
 ```brief
 $(Typed) {
@@ -117,6 +121,58 @@ $(Typed) {
     let lines = Source$.Find$("#define").Count$();
 };
 ```
+
+## Full Brief at Compile Time
+
+Inside `$(Stage)` blocks, you can write arbitrary Brief code and it runs at
+compile time:
+
+```brief
+$(Parsed) {
+    defn count_tagged(sel: Selection, tag: String) -> Int {
+        let total = 0;
+        foreach(item in sel) {
+            if(item.Tag$(tag).Count$() > 0) {
+                total = total + 1;
+            };
+        };
+        term total;
+    };
+
+    let defns = Tag$("defn");
+    EmitInfo$("defns with calls: " + count_tagged(defns, "call"));
+};
+```
+
+Note: `txn`/`node`/`trg`/`frgn`/`Malloc#` are not available at compile time.
+Only `let`/`defn`/`if`/`match`/`for` and the navigation DSL.
+
+## Diagnostics
+
+```brief
+EmitInfo$("informational message");     // prints to stdout
+EmitWarning$("suspicious pattern");     // prints to stderr
+EmitError$("fatal problem");            // aborts compilation
+```
+
+## Plugins Creating Plugins
+
+A plugin can register new plugins for later stages:
+
+```brief
+$(Parsed) {
+    if(Tag$("call").Named$("Unsafe#").Count$() > 0) {
+        Stage$.Insert$(Typed) {
+            foreach(call in Tag$("call").Named$("Unsafe#")) {
+                EmitWarning$("unsafe: " + call.Names$().First$());
+            };
+        };
+    };
+};
+```
+
+Forward-only: a `$(Parsed)` plugin cannot register for `$(Parsed)` or earlier.
+Only stages > the current one.
 
 ## What's Next
 

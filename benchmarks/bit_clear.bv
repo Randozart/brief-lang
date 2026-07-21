@@ -5,9 +5,9 @@
 // so the ranking function `popcount(reg) → 0` converges in at most
 // 63 iterations (for a 63-bit positive integer).
 //
-// Unlike other benchmarks, this is inherently bounded by the integer
-// width — it runs exactly popcount(initial_reg) = 63 iterations for
-// i64::MAX. No BOUND env var needed.
+// Inherently bounded by integer width (63 iterations max for i64::MAX).
+// Timing is noise-floor dominated with fork+exec harness, but correctness
+// is meaningful.
 //
 // Build:
 //   ./target/release/brief-compiler build --llvm benchmarks/bit_clear.bv \

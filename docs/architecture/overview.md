@@ -13,6 +13,9 @@
 > See `docs/plans/2026-07-21-granular-pipeline-and-ast-navigation.md`.
 > The old `Collect$`/`MatchIR$` serialize-deserialize intrinsics are removed.
 > Plugins now navigate the live AST via `Tag$`, `Named$`, `ForEach$`, etc.
+> Full Brief code (`defn`/`let`/`if`/`match`) is evaluated at compile time inside
+> `$(Stage)` blocks (Level C). Plugins can inject other plugins via `Stage$.Insert$`.
+> Diagnostics via `EmitInfo$`/`EmitWarning$`/`EmitError$`.
 
 ## Pipeline
 
@@ -242,7 +245,10 @@ A backend can start with just `bytes` and be fully correct. It then opts into `p
 | `macros/pattern_live.rs` | Live AST pattern compiler — matches `.beast` patterns on `Vec<TopLevel>` directly |
 | `macros/actions.rs` | `Position`, mutation ops (insert/delete/replace/wrap/rename/set) |
 | `macros/text_ops.rs` | `TextSelection`, text operations for Source$/Ir$ (find/replace/insert/delete) |
-| `macros/flow.rs` | `ForEach$`, `Let$`, `If$` evaluation |
+| `macros/flow.rs` | `foreach`/`if`/`match` evaluation as interpreter special forms |
+| `macros/stage_target.rs` | `Stage$.Insert$`, `Stage$.Remove$`, `Stage$.List$` |
+| `macros/compile_time.rs` | Compile-time `defn`/`let` evaluation via interpreter |
+| `macros/diagnostics.rs` | `EmitInfo$`, `EmitWarning$`, `EmitError$` |
 
 ### Analysis (`src/analysis/`)
 

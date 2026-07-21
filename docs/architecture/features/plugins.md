@@ -20,9 +20,19 @@ $(Parsed) @ highest {
 };
 ```
 
-The block body is a sequence of navigation chain statements.  These are
-evaluated at compile time by the AST navigation engine and operate directly
-on the in-memory AST.
+The block body can contain:
+- Navigation chains (`Tag$("import").First$().Before$().Insert$(...)`)
+- Flow control (`let`, `if`, `foreach`, `match`)
+- Full Brief code (`defn`, `let`, `if`, `match`, `for`) evaluated at compile time
+- Plugin injection (`Stage$.Insert$`, `Stage$.Remove$`, `Stage$.List$`)
+- Diagnostics (`EmitInfo$`, `EmitWarning$`, `EmitError$`)
+
+These are not separate DSL constructs — they are the standard Brief interpreter
+extended with compile-time types (`CTSelection`, `CTPosition`, `CTTarget`)
+and navigation intrinsics as built-in methods on selections.
+
+All of these are evaluated at compile time by the interpreter (extended with
+compile-time value types like `CTSelection`, `CTPosition`, `CTTarget`).
 
 ### Three-Link Chain
 
@@ -75,10 +85,11 @@ Navigation operations target one of four data surfaces:
 
 | Target | Type | Operation style | Valid stages |
 |--------|------|----------------|--------------|
-| `Source$` | Source text | Text ops: `Find$`, `ReplaceWith$`, `Prepend$`, `Append$` | All (read-only after PreLex) |
+| `Source$` | Source text | Text ops: `Find$`, `ReplaceWith$`, `Prepend$`, `Append$`, `Text$()`, `Path$()` | All (read-only after PreLex) |
 | AST (implicit) | `Vec<TopLevel>` | Tree ops: `Tag$`, `Named$`, `ForEach$`, `Insert$`, `Delete$` | Parsed – Provenanced |
-| `Ir$` | IR text | Text ops: `Find$`, `ReplaceWith$`, `InsertBefore$` | Generated, Optimized |
-| `Bin$` | Binary path | External: `Run$("command {{path}}")` | Linked |
+| `Ir$` | IR text | Text ops: `Find$`, `ReplaceWith$`, `InsertBefore$`, `Text$()` | Generated, Optimized |
+| `Bin$` | Binary path | External: `Run$("command {{path}}")`, `Path$()`, `Size$()`, `ReadBytes$()` | Linked |
+| `Stage$` | Plugin registry | `Insert$(block)`, `Insert$(path)`, `Remove$(name)`, `List$()` | All (forward-only) |
 
 The default target at each stage is shown in the table above.  You can always
 override by prefixing with `Source$.`, `Ir$.`, or `Bin$.`:
@@ -328,9 +339,9 @@ $(Typed) @ highest {
 
 ```brief
 $(Typed) {
-    Let$has_entry = Tag$("contract").WithAttr$("entry", true).Count$();
-    Let$has_trg = Tag$("trigger").Count$();
-    If$($has_entry == 0 && $has_trg == 0) {
+    let has_entry = Tag$("contract").WithAttr$("entry", true).Count$();
+    let has_trg = Tag$("trigger").Count$();
+    if(has_entry == 0 && has_trg == 0) {
         EmitError$("no entry point: add [#] to defn main or trg declaration");
     };
 };
@@ -340,11 +351,11 @@ $(Typed) {
 
 ```brief
 $(Parsed) {
-    ForEach$(Tag$("plugin_intercept").Named$("PrintLn") as $intercept) {
-        Let$args = $intercept.Children$();
-        $intercept.ReplaceWith$(Block$(
+    foreach(intercept in Tag$("plugin_intercept").Named$("PrintLn")) {
+        let args = intercept.Children$();
+        intercept.ReplaceWith$(Block$(
             Call$("PrintString#", Expr$("\n")),
-            Call$("PrintInt#", $args.Nth$(0))
+            Call$("PrintInt#", args.Nth$(0))
         ));
     };
 };
@@ -365,6 +376,57 @@ $(Generated) {
 ```brief
 $(Linked) {
     Bin$.Run$("strip --strip-unnecessary {{path}}");
+};
+```
+
+### Conditional plugin injection
+
+```brief
+$(Parsed) {
+    // Only register a typed validator if unsafe code is present
+    let unsafe = Tag$("call").Named$("Unsafe#").Count$();
+    if(unsafe > 0) {
+        Stage$.Insert$(Typed) {
+            foreach(call in Tag$("call").Named$("Unsafe#")) {
+                EmitWarning$("unsafe call: " + call.Names$().First$());
+            };
+        };
+    };
+};
+```
+
+### Diagnostics
+
+```brief
+$(Parsed) {
+    let count = Tag$("import").Count$();
+    EmitInfo$("file has " + count + " imports");
+    if(count == 0) {
+        EmitWarning$("no imports — program may be incomplete");
+    };
+    if(count > 50) {
+        EmitError$("too many imports (" + count + "): consider consolidating");
+    };
+};
+```
+
+### Full Brief evaluation at compile time
+
+```brief
+$(Typed) {
+    defn count_pattern(sel: Selection, tag: String) -> Int {
+        let total = 0;
+        foreach(item in sel) {
+            if(item.Tag$(tag).Count$() > 0) {
+                total = total + 1;
+            };
+        };
+        term total;
+    };
+
+    let all_defns = Tag$("defn");
+    let with_calls = count_pattern(all_defns, "call");
+    EmitInfo$("defns containing calls: " + with_calls);
 };
 ```
 
