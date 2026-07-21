@@ -337,9 +337,12 @@ impl LlvmBackend {
             }
         }
 
-        // 2026-07-17: Determine store gating — Path A (stores suppressed) vs
-        // Path B (stores emitted for post-loop hoisted prints).
-        self.fun.needs_state_stores_in_body = !self.fun.pending_post_hoist.is_empty();
+        // 2026-07-17: Path B (stores in body) for post-loop hoisted prints.
+        // 2026-07-21: Also enabled by dispatch when phi-capped fields need stores
+        // (float_math_nonzero p22 fix). Use OR to preserve pre-existing value.
+        if !self.fun.pending_post_hoist.is_empty() {
+            self.fun.needs_state_stores_in_body = true;
+        }
 
         // 2026-07-17: pending_post_hoist (set by hoist_terminating_guard) is
         // emitted AFTER the loop closes, not inside the body. The hoisted

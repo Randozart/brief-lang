@@ -2578,6 +2578,13 @@ impl LlvmBackend {
                                     if capped_set.len() >= 6 { break; }
                                     capped_set.insert(f.clone());
                                 }
+                                // 2026-07-21: Force state stores when capped_set excludes write
+                                // fields. Without this, non-phi fields' values are computed in the
+                                // body but never stored back to %State — they are lost at the end
+                                // of each iteration (float_math_nonzero p22 bug).
+                                if node.write_set.iter().any(|f| !capped_set.contains(f)) {
+                                    self.fun.needs_state_stores_in_body = true;
+                                }
                                 self.fun.pending_post_hoist = post_hoist;
                                 let num_fields = capped_set.len().max(2);
                                 self.warnings.push(format!("info: txn '{}' dispatched via per-field phi loop (EmitPerFieldPhi, {} fields)", &node.name, num_fields));
@@ -2627,6 +2634,11 @@ impl LlvmBackend {
                                 for f in &node.write_set {
                                     if capped_set.len() >= 6 { break; }
                                     capped_set.insert(f.clone());
+                                }
+                                // 2026-07-21: Force state stores when capped_set excludes write
+                                // fields (same as pure-path above).
+                                if node.write_set.iter().any(|f| !capped_set.contains(f)) {
+                                    self.fun.needs_state_stores_in_body = true;
                                 }
                                 self.fun.pending_post_hoist = post_hoist;
                                 let num_fields = capped_set.len().max(2);
