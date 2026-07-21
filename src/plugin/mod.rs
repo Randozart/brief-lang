@@ -72,6 +72,12 @@ pub trait Plugin: std::fmt::Debug {
     fn on_bin(&self, _bin_path: &std::path::Path) -> Result<(), String> {
         Ok(())
     }
+
+    /// 2026-07-21: Downcast support for StageBlockPlugin to access
+    /// Stage$ plugin injection. Default impl returns None.
+    fn as_any(&self) -> Option<&dyn std::any::Any> {
+        None
+    }
 }
 
 /// An internal entry storing a registered plugin together with its priority.
@@ -211,13 +217,25 @@ impl PluginManager {
 
     /// Run all active plugins' `on_ast` at the given stage.
     /// Valid for all AST stages (Parsed through Provenanced).
+    /// 2026-07-21: Sets pm_ptr on StageBlockPlugin for Stage$ ops.
+    /// Safety: The raw pointer to self is safe because:
+    ///   1. This runs single-threaded (no concurrent access).
+    ///   2. active_plugins() takes a snapshot of indices before iterating.
+    ///   3. register_during_stage pushes to Vec — existing refs remain valid.
+    ///   4. The caller holds &mut PluginManager in compile.rs.
     pub fn run_ast(
         &self,
         stage: StageKind,
         program: &mut Vec<TopLevel>,
         universe: &mut TypeUniverse,
     ) -> Result<(), String> {
+        let self_ptr = self as *const PluginManager as usize;
         for entry in self.active_plugins(None) {
+            if let Some(sbp) = entry.plugin.as_any()
+                .and_then(|a| a.downcast_ref::<crate::plugin::loader::StageBlockPlugin>())
+            {
+                sbp.set_pm_ptr(self_ptr);
+            }
             if entry.plugin.stages().contains(&stage) {
                 entry.plugin.on_ast(program, universe)?;
             }

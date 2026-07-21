@@ -11,8 +11,7 @@
 // retained but will be replaced by the stage-based architecture in
 // Phase 5.
 
-use super::intrinsics;
-use super::{Plugin, PluginManager};
+use super::{Plugin, PluginManager, PluginEntry};
 use crate::ast::{StageBlock, StageKind, TopLevel};
 use crate::macros;
 use crate::parser::Parser;
@@ -37,6 +36,10 @@ pub struct StageBlockPlugin {
     stage: StageKind,
     priority: u32,
     body: Vec<crate::ast::Statement>,
+    /// 2026-07-21: Raw pointer to PluginManager for Stage$.Insert$/List$/Remove$.
+    /// Set before evaluate_body is called. Safe because PluginManager outlives
+    /// the plugin evaluation and we only borrow mutably in the eval chain.
+    pm_ptr: std::cell::Cell<usize>,
 }
 
 impl StageBlockPlugin {
@@ -46,7 +49,20 @@ impl StageBlockPlugin {
             stage: block.stage,
             priority: block.priority,
             body: block.body,
+            pm_ptr: std::cell::Cell::new(0),
         }
+    }
+
+    /// Set the raw PluginManager pointer for Stage$ operations.
+    pub fn set_pm_ptr(&self, ptr: usize) {
+        self.pm_ptr.set(ptr);
+    }
+
+    /// Retrieve the PluginManager as &mut, if set.
+    fn get_pm(&self) -> Option<&mut PluginManager> {
+        let ptr = self.pm_ptr.get();
+        if ptr == 0 { return None; }
+        Some(unsafe { &mut *(ptr as *mut PluginManager) })
     }
 
     /// Evaluate the block's body statements using the new navigation engine.
@@ -57,7 +73,10 @@ impl StageBlockPlugin {
         program: &mut Vec<TopLevel>,
         universe: &mut TypeUniverse,
     ) -> Result<(), String> {
-        macros::eval::evaluate_stage_block(&self.body, program, universe, self.stage)
+        let mut pm = self.get_pm();
+        macros::eval::evaluate_stage_block(
+            &self.body, program, universe, self.stage, &mut pm,
+        )
     }
 }
 
@@ -79,9 +98,11 @@ impl Plugin for StageBlockPlugin {
     }
 
     fn on_ir(&self, _ir: &mut String) -> Result<(), String> {
-        // $(Stage) blocks primarily manipulate AST; IR manipulation is
-        // reserved for future use (Phase 6 may add IR-level $ intrinsics).
         Ok(())
+    }
+
+    fn as_any(&self) -> Option<&dyn std::any::Any> {
+        Some(self)
     }
 }
 
