@@ -2,6 +2,8 @@
 // 2026-07-21: Selection engine and navigation DSL for compile-time AST
 // manipulation inside $(Stage) blocks.
 
+pub mod pattern_live;
 pub mod selection;
 
+pub use pattern_live::*;
 pub use selection::*;
