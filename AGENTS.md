@@ -187,7 +187,7 @@ This prevents "I'll fix it later" from fossilizing into architecture.
     --release` + `bash benchmarks/build_and_bench.sh --runtime` run.
 
 11b. **PERSISTENT BASELINE WORKTREE**: A permanent git worktree at
-    `../brief-compiler-baseline` holds the Phase 3 anchor commit (`8a827db`)
+    `../brief-compiler-baseline` holds the post-SLP baseline commit (`be6583bc`)
     for regression detection. Always compare against this baseline before
     committing performance-sensitive changes:
 
@@ -434,7 +434,7 @@ and the warning comment at `src/backend/llvm/context.rs:223`.
   Ad-hoc timing produces false hangs and imprecise numbers.
 - **Compare against baseline**: `bash benchmarks/compare_baseline.sh <name>` —
   compiles and times a benchmark on both the main worktree and the permanent
-  baseline worktree at `../brief-compiler-baseline` (Phase 3 anchor `8a827db`).
+  baseline worktree at `../brief-compiler-baseline` (post-SLP anchor `be6583bc`).
 
 ## Anti-Patterns (NEVER DO)
 
