@@ -2561,11 +2561,18 @@ impl LlvmBackend {
                             } else {
                                 // EmitPerFieldPhi: per-field phi loop with Path A + dead-field
                                 // elimination + commit block.
-                                // 2026-07-10: Cap write_set to avoid register spilling.
-                                // Too many phi registers (>=8) causes LLVM to spill to
-                                // stack, which is slower than GEP+load+store for the
-                                // non-tracked fields. Priority: counter, bound, vec groups.
-                                let mut capped_set: HashSet<String> = HashSet::new();
+                                 // 2026-07-10: Cap write_set to avoid register spilling.
+                                 // Too many phi registers (>=8) causes LLVM to spill to
+                                 // stack, which is slower than GEP+load+store for the
+                                 // non-tracked fields. Priority: counter, bound, vec groups.
+                                 // 2026-07-21: Adaptive cap — scale with write_set to reduce
+                                 // GEP+load+store for medium fields (fannkuch_redux 1.31x).
+                                 let phi_cap = if node.write_set.len() > 10 {
+                                    10
+                                 } else {
+                                    node.write_set.len().max(6)
+                                 };
+                                 let mut capped_set: HashSet<String> = HashSet::new();
                                 capped_set.insert(bp.var.clone());
                                 if let Some(ref tv) = total_idx {
                                     if let Some(name) = self.ctx.field_index_map.iter()
@@ -2574,27 +2581,27 @@ impl LlvmBackend {
                                         capped_set.insert(name);
                                     }
                                 }
-                                for f in &node.write_set {
-                                    if capped_set.len() >= 6 { break; }
-                                    capped_set.insert(f.clone());
-                                }
-                                // 2026-07-21: Force state stores when capped_set excludes write
-                                // fields. Without this, non-phi fields' values are computed in the
-                                // body but never stored back to %State — they are lost at the end
-                                // of each iteration (float_math_nonzero p22 bug).
-                                if node.write_set.iter().any(|f| !capped_set.contains(f)) {
-                                    self.fun.needs_state_stores_in_body = true;
-                                }
-                                self.fun.pending_post_hoist = post_hoist;
-                                let num_fields = capped_set.len().max(2);
-                                self.warnings.push(format!("info: txn '{}' dispatched via per-field phi loop (EmitPerFieldPhi, {} fields)", &node.name, num_fields));
-                                let is_decreasing = bp.direction == crate::analysis::transition_graph::ConvergeDirection::Decreasing;
-                                self.emit_countable_main(&mut out, &node.name, counter_idx, total_idx, total_const_name, &body_stmts, &capped_set, is_decreasing);
-                                true
-                            }
-                            }
-                        } else {
-                            // Adaptive dispatch for non-pure bodies: EmitInlineSsa vs EmitPerFieldPhi.
+                                 for f in &node.write_set {
+                                     if capped_set.len() >= phi_cap { break; }
+                                     capped_set.insert(f.clone());
+                                 }
+                                 // 2026-07-21: Force state stores when capped_set excludes write
+                                 // fields. Without this, non-phi fields' values are computed in the
+                                 // body but never stored back to %State — they are lost at the end
+                                 // of each iteration (float_math_nonzero p22 bug).
+                                 if node.write_set.iter().any(|f| !capped_set.contains(f)) {
+                                     self.fun.needs_state_stores_in_body = true;
+                                 }
+                                 self.fun.pending_post_hoist = post_hoist;
+                                 let num_fields = capped_set.len().max(2);
+                                 self.warnings.push(format!("info: txn '{}' dispatched via per-field phi loop (EmitPerFieldPhi, {} fields)", &node.name, num_fields));
+                                 let is_decreasing = bp.direction == crate::analysis::transition_graph::ConvergeDirection::Decreasing;
+                                 self.emit_countable_main(&mut out, &node.name, counter_idx, total_idx, total_const_name, &body_stmts, &capped_set, is_decreasing);
+                                 true
+                             }
+                             }
+                         } else {
+                             // Adaptive dispatch for non-pure bodies: EmitInlineSsa vs EmitPerFieldPhi.
                             // 2026-07-05: Same criteria as pure path — dense writes,
                             // small fields favors EmitInlineSsa insertvalue chain.  The SSA mode
                             // guard handler (emit_stmt.rs:983-992) handles guards with
@@ -2621,37 +2628,42 @@ impl LlvmBackend {
                                 self.warnings.push(format!("info: txn '{}' dispatched via memory counter loop (EmitMemoryCounter, {}/{} fields written)", &node.name, write_count, total_fields));
                                 self.emit_folded_memory_main(&mut out, &node.name, counter_idx, total_idx, total_const_name, &body_stmts);
                                 true
-                            } else {
-                                let mut capped_set: HashSet<String> = HashSet::new();
-                                capped_set.insert(bp.var.clone());
-                                if let Some(ref tv) = total_idx {
+                             } else {
+                                 let phi_cap = if node.write_set.len() > 10 {
+                                    10
+                                 } else {
+                                    node.write_set.len().max(6)
+                                 };
+                                 let mut capped_set: HashSet<String> = HashSet::new();
+                                 capped_set.insert(bp.var.clone());
+                                 if let Some(ref tv) = total_idx {
                                     if let Some(name) = self.ctx.field_index_map.iter()
                                         .find(|&(_, v)| *v == *tv).map(|(k, _)| k.clone())
                                     {
                                         capped_set.insert(name);
                                     }
                                 }
-                                for f in &node.write_set {
-                                    if capped_set.len() >= 6 { break; }
-                                    capped_set.insert(f.clone());
-                                }
-                                // 2026-07-21: Force state stores when capped_set excludes write
-                                // fields (same as pure-path above).
-                                if node.write_set.iter().any(|f| !capped_set.contains(f)) {
-                                    self.fun.needs_state_stores_in_body = true;
-                                }
-                                self.fun.pending_post_hoist = post_hoist;
-                                let num_fields = capped_set.len().max(2);
-                                self.warnings.push(format!("info: txn '{}' dispatched via per-field phi loop (EmitPerFieldPhi, {} fields)", &node.name, num_fields));
-                                let is_decreasing = bp.direction == crate::analysis::transition_graph::ConvergeDirection::Decreasing;
-                                self.emit_countable_main(&mut out, &node.name, counter_idx, total_idx, total_const_name, &body_stmts, &capped_set, is_decreasing);
-                                true
-                            }
-                        }
-                    } else { false }
-                } else { false }
-            } else { false }
-        } else { false };
+                                 for f in &node.write_set {
+                                     if capped_set.len() >= phi_cap { break; }
+                                     capped_set.insert(f.clone());
+                                 }
+                                 // 2026-07-21: Force state stores when capped_set excludes write
+                                 // fields (same as pure-path above).
+                                 if node.write_set.iter().any(|f| !capped_set.contains(f)) {
+                                     self.fun.needs_state_stores_in_body = true;
+                                 }
+                                 self.fun.pending_post_hoist = post_hoist;
+                                 let num_fields = capped_set.len().max(2);
+                                 self.warnings.push(format!("info: txn '{}' dispatched via per-field phi loop (EmitPerFieldPhi, {} fields)", &node.name, num_fields));
+                                 let is_decreasing = bp.direction == crate::analysis::transition_graph::ConvergeDirection::Decreasing;
+                                 self.emit_countable_main(&mut out, &node.name, counter_idx, total_idx, total_const_name, &body_stmts, &capped_set, is_decreasing);
+                                 true
+                             }
+                         }
+                     } else { false }
+                 } else { false }
+             } else { false }
+         } else { false };
 
         // Emit the trg step() function if the program has trigger declarations.
         // The step() function recomputes dependent variables in topological order
