@@ -106,6 +106,11 @@ benchmarks/*.ll
 # Generated copy of brief_rt.c
 benchmarks/brief_rt.c
 # Compiled binary executables
+benchmarks/bit_clear
+benchmarks/cancel_math
+benchmarks/queue_drain
+benchmarks/queue_drain_sym
+benchmarks/queue_drain_idio
 benchmarks/async_counters
 benchmarks/async_counters_c
 benchmarks/iir_filter
@@ -125,6 +130,10 @@ benchmarks/ring_buffer_runtime
 benchmarks/ring_buffer_runtime_c
 benchmarks/kalman_filter_runtime
 benchmarks/kalman_filter_runtime_c
+# Root-level C reference executables (created during benchmarking)
+/float_math_c_O0
+/float_math_nonzero_c_ref
+
 # Root-level generated C files
 /iir_filter.c
 /float_math.c
