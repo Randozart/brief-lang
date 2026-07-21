@@ -62,8 +62,8 @@ Brief's compiler successfully validates its core value proposition: **compile-ti
 ### 1. Catches Concurrency Bugs at Compile Time
 ```brief
 # This FAILS at compile time (ownership conflict):
-rct async txn writer_a [true] { &x = 1; term; };
-rct async txn writer_b [true] { &x = 2; term; };
+async node writer_a [true] { &x = 1; term; };
+async node writer_b [true] { &x = 2; term; };
 ```
 Error message clearly explains the conflict and suggests fix.
 
@@ -79,8 +79,8 @@ txn increment [counter < 10] [counter == @counter + 1] {
 ### 3. Enforces Lock-Free Safety
 ```brief
 # Safe - preconditions are mutually exclusive:
-rct async txn reader [state == 0] { ... };
-rct async txn writer [state == 1] { &state = 0; ... };
+async node reader [state == 0] { ... };
+async node writer [state == 1] { &state = 0; ... };
 ```
 
 ### 4. Handles Complex Workflows

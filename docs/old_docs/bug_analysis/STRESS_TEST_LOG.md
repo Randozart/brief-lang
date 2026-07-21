@@ -45,7 +45,7 @@ Phase 4 ownership verification correctly detects conflicting write access in asy
 
 **Example that correctly fails:**
 ```brief
-rct async txn reserve_inventory [payment_processed == true && inventory_reserved == false]
+async node reserve_inventory [payment_processed == true && inventory_reserved == false]
   [inventory_reserved == true]
 {
   &inventory_reserved = true;
@@ -53,7 +53,7 @@ rct async txn reserve_inventory [payment_processed == true && inventory_reserved
   term;
 };
 
-rct async txn prepare_shipment [inventory_reserved == true && shipment_ready == false]
+async node prepare_shipment [inventory_reserved == true && shipment_ready == false]
   [shipment_ready == true]
 {
   &shipment_ready = true;
@@ -213,7 +213,7 @@ error[P008]: contract verification failed
 ## Next Tests to Run
 
 - [ ] Reactive transactions (`node`)
-- [ ] Async transactions (`rct async txn`)
+- [ ] Async transactions (`async node`)
 - [ ] Multi-output functions (`term a, b, c;`)
 - [ ] Higher-order functions with sig types (Phase 7)
 - [ ] Union types and exhaustive unification

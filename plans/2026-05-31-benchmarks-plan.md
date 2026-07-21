@@ -37,7 +37,7 @@ Add 3 new benchmarks to validate every optimization path against C equivalents, 
 **Targets:** Thread pool dispatch, auto-async categorization, dual-barrier synchronization
 
 **Program structure:**
-- Two `rct async txn` with disjoint writes to `a: Int` and `b: Int`
+- Two `async node` with disjoint writes to `a: Int` and `b: Int`
 - Bounded convergence: `[a < N][a == N]` and `[b < N][b == N]`
 - Both fire concurrently via thread pool
 - Init/report transactions for timing

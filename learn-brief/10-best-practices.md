@@ -350,13 +350,13 @@ node good_increment() [counter < 100][counter == @counter + 1] {
 
 ```brief
 // ❌ BAD - potential race condition
-rct async txn bad_transfer() [balance >= 100][balance == @balance - 100] {
+async node bad_transfer() [balance >= 100][balance == @balance - 100] {
     &balance = balance - 100;
     term;
 };
 
 // ✅ GOOD - compiler verifies mutual exclusion
-rct async txn good_transfer() 
+async node good_transfer() 
     [balance >= 100 && !transfer_in_progress]
     [balance == @balance - 100]
 {

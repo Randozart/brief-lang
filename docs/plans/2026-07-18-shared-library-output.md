@@ -274,7 +274,7 @@ checks in `mod.rs:2253-2274`) and the natural convergence exit infrastructure
 named `run_reactive`. If multiple reactive sections exist, each gets a separate
 name based on the first txn's name (e.g., `run_reactive_process`).
 
-**Async/parallel reactive** — `rct async txn` with thread pool workers is
+**Async/parallel reactive** — `async node` with thread pool workers is
 supported, provided the same halting proof holds per worker. The barrier
 synchronization (`__barrier_release__` / `__barrier_wait__`) happens inside
 the `run_reactive` call — the host is blocked until convergence.

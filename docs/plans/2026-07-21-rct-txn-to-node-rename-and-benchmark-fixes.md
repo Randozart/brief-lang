@@ -47,7 +47,7 @@ parameters and a return value. A `defn` is pure (no state access).
    `#[token("rct")]` → `#[token("node")]`).
 2. Update display impl: `Token::Rct => write!(f, "rct")` →
    `Token::Node => write!(f, "node")` (line 532).
-3. The `async` modifier needs handling. Currently `rct async txn`
+3. The `async` modifier needs handling. Currently `async node`
    parses `rct` keyword then checks for `async`. After rename:
    `node async NAME [pre][post] { ... }`. The lexer already has
    `#[token("async")]  Async,` — no lexer change needed for async.
@@ -257,7 +257,7 @@ Every Rust doc comment or inline comment referencing `rct txn`:
 |------|---------|--------|
 | `src/parser/definitions.rs` | 279-293 | Doc comments + error messages |
 | `src/backend/llvm/mod.rs` | 458 | Doc comment |
-| `src/backend/llvm/optimizer.rs` | 289 | Comment: `rct async txn` → `node async` |
+| `src/backend/llvm/optimizer.rs` | 289 | Comment: `async node` → `node async` |
 | `src/backend/llvm/loop_engine/ssa.rs` | 9-10 | Doc comments on SSA paths |
 | `src/plugin/intrinsics.rs` | 231, 256 | Doc comments |
 
@@ -265,7 +265,7 @@ Command:
 ```bash
 find src -name '*.rs' -exec sed -i \
   -e 's/rct txn/node/g' \
-  -e 's/rct async txn/node async/g' \
+  -e 's/async node/node async/g' \
   -e 's/rct/node/g' \
   {} +
 ```
@@ -275,7 +275,7 @@ identifiers. Review with `git diff` afterward. Better to use more
 specific patterns:
 ```bash
 sed -i 's/\brct txn\b/node/g'
-sed -i 's/\brct async txn\b/node async/g'
+sed -i 's/\basync node\b/node async/g'
 ```
 
 ### 1.11 Stdlib `.bv` Files
@@ -323,7 +323,7 @@ Replace `rct txn` → `node` in all 27 example files:
 
 ```bash
 find examples -name '*.bv' -exec sed -i 's/rct txn/node/g' {} +
-find examples -name '*.bv' -exec sed -i 's/rct async txn/node async/g' {} +
+find examples -name '*.bv' -exec sed -i 's/async node/node async/g' {} +
 ```
 
 **Note:** `examples/complex_workflow.bv` has 5+ node declarations.
@@ -336,7 +336,7 @@ Replace `rct txn` → `node` in all 22+ test fixture files:
 
 ```bash
 find tests -name '*.bv' -exec sed -i 's/rct txn/node/g' {} +
-find tests -name '*.bv' -exec sed -i 's/rct async txn/node async/g' {} +
+find tests -name '*.bv' -exec sed -i 's/async node/node async/g' {} +
 ```
 
 **Note:** `tests/fixtures/event_model.bv` has multiple nodes (lines
@@ -349,13 +349,13 @@ Replace `rct txn` → `node` in all 31+ benchmark files:
 
 ```bash
 find benchmarks -name '*.bv' -exec sed -i 's/rct txn/node/g' {} +
-find benchmarks -name '*.bv' -exec sed -i 's/rct async txn/node async/g' {} +
+find benchmarks -name '*.bv' -exec sed -i 's/async node/node async/g' {} +
 ```
 
 **Special case: async modifier**
 ```
 // Before:
-rct async txn fetch [pre][post] { ... }
+async node fetch [pre][post] { ... }
 
 // After:
 node async fetch [pre][post] { ... }
@@ -370,24 +370,24 @@ edge cases.
 # Architecture docs
 find docs -name '*.md' -exec sed -i \
   -e 's/rct txn/node/g' \
-  -e 's/rct async txn/node async/g' \
+  -e 's/async node/node async/g' \
   {} +
 
 # Spec docs
 find spec -name '*.md' -exec sed -i \
   -e 's/rct txn/node/g' \
-  -e 's/rct async txn/node async/g' \
+  -e 's/async node/node async/g' \
   {} +
 
 # Learn-brief docs
 find learn-brief -name '*.md' -exec sed -i \
   -e 's/rct txn/node/g' \
-  -e 's/rct async txn/node async/g' \
+  -e 's/async node/node async/g' \
   {} +
 
 # Root docs
 sed -i 's/rct txn/node/g' AGENTS.md AGENTS_HISTORY.md AGENTS_HISTORY_2.md BUGS.md README.md
-sed -i 's/rct async txn/node async/g' AGENTS.md AGENTS_HISTORY.md AGENTS_HISTORY_2.md BUGS.md README.md
+sed -i 's/async node/node async/g' AGENTS.md AGENTS_HISTORY.md AGENTS_HISTORY_2.md BUGS.md README.md
 ```
 
 **Edge cases to review manually after bulk replace:**
@@ -404,7 +404,7 @@ sed -i 's/rct async txn/node async/g' AGENTS.md AGENTS_HISTORY.md AGENTS_HISTORY
 The substring `circt` contains `rct` but is NOT related to the
 `rct txn` keyword. **Do NOT use `sed -i 's/rct/node/g'`** without
 word boundaries. Use `sed -i 's/\brct\b/node/g'` or better, use
-separate targeted patterns for `rct txn`, `rct async txn`, and `rct`
+separate targeted patterns for `rct txn`, `async node`, and `rct`
 as a standalone word.
 
 The `docs/architecture/txn-semantics.md` file is already updated — it
@@ -450,7 +450,7 @@ find src -name '*.rs' -exec sed -i \
 # ── .bv files ──
 find lib benchmarks tests examples -name '*.bv' -exec sed -i \
   -e 's/rct txn/node/g' \
-  -e 's/rct async txn/node async/g' \
+  -e 's/async node/node async/g' \
   {} +
 find lib/compiler -name '*.bv' -exec sed -i \
   -e 's/KeywordRct/KeywordNode/g' \
@@ -460,12 +460,12 @@ find lib/compiler -name '*.bv' -exec sed -i \
 # ── Markdown files ──
 find docs spec learn-brief -name '*.md' -exec sed -i \
   -e 's/\brct txn\b/node/g' \
-  -e 's/\brct async txn\b/node async/g' \
+  -e 's/\basync node\b/node async/g' \
   -e 's/\brct\b/node/g' \
   {} +
 sed -i \
   -e 's/\brct txn\b/node/g' \
-  -e 's/\brct async txn\b/node async/g' \
+  -e 's/\basync node\b/node async/g' \
   AGENTS.md AGENTS_HISTORY.md AGENTS_HISTORY_2.md BUGS.md README.md
 
 # ── Lexer token ──
@@ -772,7 +772,7 @@ sed -i 's/#\[token("rct")\]/#[token("node")]/' src/lexer.rs
 # ── .bv files ──
 find lib benchmarks tests examples -name '*.bv' -exec sed -i \
   -e 's/rct txn/node/g' \
-  -e 's/rct async txn/node async/g' \
+  -e 's/async node/node async/g' \
   {} +
 find lib/compiler -name '*.bv' -exec sed -i \
   -e 's/KeywordRct/KeywordNode/g' \
@@ -782,12 +782,12 @@ find lib/compiler -name '*.bv' -exec sed -i \
 # ── Markdown files ──
 find docs spec learn-brief -name '*.md' -exec sed -i \
   -e 's/\brct txn\b/node/g' \
-  -e 's/\brct async txn\b/node async/g' \
+  -e 's/\basync node\b/node async/g' \
   -e 's/\brct\b/node/g' \
   {} +
 sed -i \
   -e 's/\brct txn\b/node/g' \
-  -e 's/\brct async txn\b/node async/g' \
+  -e 's/\basync node\b/node async/g' \
   AGENTS.md AGENTS_HISTORY.md AGENTS_HISTORY_2.md BUGS.md README.md
 
 # ── Build and test ──

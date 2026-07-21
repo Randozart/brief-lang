@@ -22,7 +22,7 @@
 | `emit_async_body` | ✅ Emits functions | Functions are emitted but never called |
 | `__thread_pool_init__` | ❌ **No-op** | C runtime body is empty |
 | `__barrier_release__/__wait__` | ❌ **No-op** | Stub only |
-| Parser `rct async txn` | ❌ Not consumed | Keyword token exists, parser skips it |
+| Parser `async node` | ❌ Not consumed | Keyword token exists, parser skips it |
 | `is_async` → optimizer | ❌ Disconnected | Flag ignored in analysis |
 | True parallel benchmarks | ❌ Non-functional | Dead metadata only |
 
@@ -84,7 +84,7 @@ Remove the +1 list-header offset from `Expr::Index` Ptr read path.
 ### Phase 3: Fix Malloc# Return Type (`intrinsics.rs`)
 Change return type from `Type::int()` to `Type::ptr(Type::int())`.
 
-### Phase 4: Fix Parser for `rct async txn` (`definitions.rs`)
+### Phase 4: Fix Parser for `async node` (`definitions.rs`)
 Add `eat(&Token::Async)` before consuming `txn` token.
 
 ### Phase 5: Wire `is_async` to Optimizer (`optimizer.rs`)

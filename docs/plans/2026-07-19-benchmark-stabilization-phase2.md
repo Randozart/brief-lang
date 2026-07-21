@@ -86,7 +86,7 @@ self.emit_hoisted_post_loop_prints(out, &hoist);
 
 ### 4. async_counters_idio — MISMATCH (pre-existing)
 
-**Root cause:** Async dispatch (`rct async txn`) has a pre-existing bug where the async body functions don't properly synchronize output. Not caused by any recent changes.
+**Root cause:** Async dispatch (`async node`) has a pre-existing bug where the async body functions don't properly synchronize output. Not caused by any recent changes.
 
 **Action:** Defer to future async dispatch fix. Remove from correctness gate.
 

@@ -355,8 +355,8 @@ txn fail [true][count == 1] {
 };
 
 # ✓ Async mutual exclusion (v7.0)
-rct async txn write_a [ready][data == "A"] { &data = "A"; term; };
-rct async txn write_b [!ready][data == "B"] { &data = "B"; term; };
+async node write_a [ready][data == "A"] { &data = "A"; term; };
+async node write_b [!ready][data == "B"] { &data = "B"; term; };
 # Different preconditions, no conflict
 ```
 

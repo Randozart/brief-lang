@@ -655,7 +655,7 @@ node auto_save [dirty && !saving][!dirty] {
 };
 
 // Async reactive transaction (can run concurrently with verified safety)
-rct async txn fetch_data [needs_update][data != @data] {
+async node fetch_data [needs_update][data != @data] {
     let result = http_get(url);
     [result.is_ok()] {
         data = result.value;
@@ -667,7 +667,7 @@ rct async txn fetch_data [needs_update][data != @data] {
 **Transaction modifiers:**
 - `rct` - Reactive: fires automatically when precondition becomes true
 - `async` - Can run concurrently; compiler verifies mutual exclusion
-- Both can be combined: `rct async txn`
+- Both can be combined: `async node`
 
 **Contract semantics:**
 - `[pre]` - Precondition: when the transaction is allowed to fire
@@ -799,7 +799,7 @@ txn increment() [true][counter == @counter + 1] {
 **Transaction modifiers:**
 - `rct` - Reactive: fires automatically when precondition becomes true
 - `async` - Can run concurrently; compiler verifies mutual exclusion
-- Both can be combined: `rct async txn`
+- Both can be combined: `async node`
 
 **Contract semantics:**
 - `[pre]` - Precondition: when the transaction is allowed to fire
@@ -3368,10 +3368,10 @@ error[P001]: postcondition not satisfied
 error[P002]: ownership conflict in reactive cascade
   --> src/main.bv:20:1
    |
-20 | rct async txn reader() [!writing][reading == true] { ... }
+20 | async node reader() [!writing][reading == true] { ... }
    | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
    | conflicts with:
-25 | rct async txn writer() [!reading][writing == true] { ... }
+25 | async node writer() [!reading][writing == true] { ... }
    | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
    |
    = note: both transactions can fire simultaneously

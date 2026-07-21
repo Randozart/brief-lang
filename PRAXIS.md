@@ -434,9 +434,9 @@ struct Entity_Optimized {
 When transactions are proven independent, schedule in parallel:
 
 ```brief
-rct async txn physics() [...] { ... }
-rct async txn ai() [...] { ... }
-rct async txn render() [...] { ... }
+async node physics() [...] { ... }
+async node ai() [...] { ... }
+async node render() [...] { ... }
 
 // Compiler proves: no shared writes
 // Generates:

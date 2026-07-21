@@ -105,12 +105,12 @@ let data: Int = 0;
 let processed_data: Int = -1;
 let processed: Bool = false;
 
-rct async txn fetch_data [needs_update][data != @data] {
+async node fetch_data [needs_update][data != @data] {
     &data = data + 1;
     term;
 };
 
-rct async txn process_data [data != processed_data][processed == true] {
+async node process_data [data != processed_data][processed == true] {
     &processed_data = data;
     &processed = true;
     term;

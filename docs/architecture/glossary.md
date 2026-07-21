@@ -40,7 +40,7 @@
 | **fire_due_async_txns** | Reactor method that fires transactions whose `@Hz` interval has elapsed. Checks `is_async && reactor_speed.is_some()`, compares `last_fired[idx]` elapsed against `1000/hz` ms. Only fires in continuous mode. |
 | **run_reactor_continuous** | Event-driven loop that interleaves responsive convergence (Reactor::run) with polled async firing (fire_due_async_txns). Sleeps 1ms between cycles. Used when any transaction has `is_async = true` or `reactor_speed` is set. |
 | **Responsive transaction** | `node` — fires immediately when its preconditions become dirty. No tick, no timer. Existing convergence loop behavior. |
-| **Polled transaction** | `rct async txn @NHz` — fires at N Hz regardless of dirty state. The `@Hz` annotates a timer-backed trigger. Pre/post conditions still enforced. |
+| **Polled transaction** | `async node @NHz` — fires at N Hz regardless of dirty state. The `@Hz` annotates a timer-backed trigger. Pre/post conditions still enforced. |
 | **Event-driven trigger** | `trg name: Type @ link <ffi_fn>` — FFI-backed trigger. When the linked FFI function returns a non-void value, the trigger variable is marked dirty and convergence runs. |
 | **`pvt`** | Struct-private visibility keyword. Fields marked `pvt` are accessible only from within the struct's own transactions and definitions. Enforcement stubbed (needs `current_struct` tracking). |
 | **`sed`** | File-private visibility keyword. Top-level `sed` items cannot be imported from other files. Struct fields marked `sed` trigger a `TypeMismatch` error when accessed from a different file. |

@@ -183,7 +183,7 @@ import { map, filter as f } from collections;  # Multiple with aliases
 Brief programs have no `main()` function. They execute using a **Blackboard Architecture**:
 
 1. **The Blackboard**: `let` and `const` variables act as the global truth state.
-2. **The Reactor Loop**: The engine continuously evaluates the `[pre]` conditions of all `rct` blocks (`node` and `rct async txn`).
+2. **The Reactor Loop**: The engine continuously evaluates the `[pre]` conditions of all `rct` blocks (`node` and `async node`).
    - The reactor is event-driven, not a polling loop:
      - The blackboard tracks which variables each rct precondition references (its dependency set)
      - When an &variable mutation occurs (via assignment, term, or return binding), the reactor marks only the preconditions that reference that variable as dirty
@@ -395,7 +395,7 @@ Asynchronous reactive transactions run concurrently but enforce compiler-verifie
 
 **Syntax:**
 ```acr
-rct async txn fetch_data [~/data_loaded][data_loaded] {
+async node fetch_data [~/data_loaded][data_loaded] {
   let result = network_request();
   Data(d) = result; &data = d; &data_loaded = true; term;
 };
@@ -468,13 +468,13 @@ The compiler enforces strict borrow rules for `rct async` transactions:
 **Example: Valid Async Transactions:**
 ```acr
 # These can run concurrently because they don't conflict
-rct async txn reader1 [~read1][read1] {
+async node reader1 [~read1][read1] {
   let val = data;  # Read only
   &read1 = true;
   term;
 };
 
-rct async txn reader2 [~read2][read2] {
+async node reader2 [~read2][read2] {
   let val = data;  # Read only
   &read2 = true;
   term;
@@ -484,13 +484,13 @@ rct async txn reader2 [~read2][read2] {
 **Example: Invalid Async Transactions (Compiler Error):**
 ```acr
 # These cannot run concurrently - conflicting write claims
-rct async txn writer1 [~write1][write1] {
+async node writer1 [~write1][write1] {
   &data = "first";  # Write claim
   &write1 = true;
   term;
 };
 
-rct async txn writer2 [~write2][write2] {
+async node writer2 [~write2][write2] {
   &data = "second";  # Conflicting write claim
   &write2 = true;
   term;
@@ -574,13 +574,13 @@ txn initialize [~/loaded] {
 
 ### 10.2 Reactive Transaction Example
 ```acr
-rct async txn process_event [event_ready][event_processed] {
+async node process_event [event_ready][event_processed] {
   let event = get_event();
   &event_processed = true;
   term;
 };
 
-rct async txn log_event [event_processed][logged] {
+async node log_event [event_processed][logged] {
   log("Event processed");
   &logged = true;
   term;
@@ -596,7 +596,7 @@ node increment [true][global_counter > 0] {
   term;
 };
 
-rct async txn read_counter [global_counter > 0][read_complete] {
+async node read_counter [global_counter > 0][read_complete] {
   let local_copy = global_counter;  # Read higher-scope var
   &read_complete = true;
   term;

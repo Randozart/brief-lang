@@ -282,11 +282,11 @@ let a: Int = 0;
 let b: Int = 0;
 const N: Int = 25000000;
 
-rct async txn inc_a [io_pending && a < N][a == N] {
+async node inc_a [io_pending && a < N][a == N] {
     &a = a + 1;
 };
 
-rct async txn inc_b [io_pending && b < N][b == N] {
+async node inc_b [io_pending && b < N][b == N] {
     &b = b + 1;
 };
 ```

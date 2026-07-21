@@ -317,7 +317,7 @@ async txn name [precondition] [postcondition] {
 ### Reactive Async Transaction
 
 ```brief
-rct async txn name [precondition] [postcondition] {
+async node name [precondition] [postcondition] {
     term;
 };
 ```

@@ -283,7 +283,7 @@ let buffer_size: Int = 10;
 let produced: Int = 0;
 let consumed: Int = 0;
 
-rct async txn produce() 
+async node produce() 
     [buffer :> Size < buffer_size && produced < 100]
     [produced == @produced + 1 && buffer :> Size == @buffer :> Size + 1]
 {
@@ -292,7 +292,7 @@ rct async txn produce()
     term;
 };
 
-rct async txn consume() 
+async node consume() 
     [buffer :> Size > 0]
     [consumed == @consumed + 1 && buffer :> Size == @buffer :> Size - 1]
 {

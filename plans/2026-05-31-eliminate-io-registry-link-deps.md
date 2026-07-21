@@ -206,11 +206,11 @@ let a: Int = 0;
 let b: Int = 0;
 const N: Int = 25000000;
 
-rct async txn inc_a [a < N][a == N] {
+async node inc_a [a < N][a == N] {
     &a = a + 1;
 };
 
-rct async txn inc_b [b < N][b == N] {
+async node inc_b [b < N][b == N] {
     &b = b + 1;
 };
 ```

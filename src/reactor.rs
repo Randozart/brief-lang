@@ -393,7 +393,7 @@ pub fn run_reactor(
 }
 
 /// Run reactor in continuous mode: event-driven loop that handles both
-/// responsive node (convergence) and polled rct async txn @Hz (timer).
+/// responsive node (convergence) and polled async node @Hz (timer).
 ///
 /// This is used when any transaction has `is_async = true` or
 /// `reactor_speed` is set. Exits on RuntimeError.

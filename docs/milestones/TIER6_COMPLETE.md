@@ -296,16 +296,16 @@ defn check_mutual_exclusion(txn1: Transaction, txn2: Transaction) -> ConflictRes
 
 **Example:**
 ```brief
-rct async txn reader() [!writing][reading = true] { ... }
-rct async txn writer() [!reading][writing = true] { ... }
+async node reader() [!writing][reading = true] { ... }
+async node writer() [!reading][writing = true] { ... }
 
 // Check:
 // - reader writes: reading
 // - writer writes: writing
 // - No common writes → no conflict
 
-rct async txn bad1() [true][x = @x + 1] { ... }
-rct async txn bad2() [true][x = @x * 2] { ... }
+async node bad1() [true][x = @x + 1] { ... }
+async node bad2() [true][x = @x * 2] { ... }
 
 // Check:
 // - bad1 writes: x
@@ -336,8 +336,8 @@ defn detect_deadlock(txns: List<Transaction>) -> DeadlockResult
 
 **Example:**
 ```brief
-rct async txn A() [!y_done][x_done = true] { ... }  // Reads y_done, writes x_done
-rct async txn B() [!x_done][y_done = true] { ... }  // Reads x_done, writes y_done
+async node A() [!y_done][x_done = true] { ... }  // Reads y_done, writes x_done
+async node B() [!x_done][y_done = true] { ... }  // Reads x_done, writes y_done
 
 // Dependency graph:
 // A depends on B (A reads y_done, B writes y_done)
@@ -404,8 +404,8 @@ let result = verify_contract(increment);
 ### Check Mutual Exclusion
 
 ```brief
-rct async txn reader() [!writing][reading = true] { ... }
-rct async txn writer() [!reading][writing = true] { ... }
+async node reader() [!writing][reading = true] { ... }
+async node writer() [!reading][writing = true] { ... }
 
 let conflict = check_mutual_exclusion(reader, writer);
 
