@@ -153,7 +153,7 @@ pub(crate) fn template_for_op(op_name: &str, llvm_ty: &str, bytes: u64) -> Optio
         ("Neg", true) => Some(format!("%v = fneg fast {} %a", float_llvm)),
         ("Abs", true) => Some(format!("%v = call {} @llvm.fabs.{}({} %a)", float_llvm, float_llvm, float_llvm)),
 
-        ("Add", false) => Some(format!("%v = add nuw nsw {} %a, %b", int_llvm)),
+        ("Add", false) => Some(format!("%v = add nsw {} %a, %b", int_llvm)),
         ("Sub", false) => Some(format!("%v = sub nsw {} %a, %b", int_llvm)),
         ("Mul", false) => Some(format!("%v = mul nsw {} %a, %b", int_llvm)),
         ("Div", false) => Some(format!("%v = sdiv {} %a, %b", int_llvm)),

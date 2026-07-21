@@ -121,7 +121,8 @@ impl LlvmBackend {
         } else {
             writeln!(out, "  {} = add nuw nsw i64 {}, 1", next, counter_name).ok();
         }
-        writeln!(out, "  br label %{}.header", label_prefix).ok();
+        emit_loop_metadata(out, "  ", &format!("{}.header", label_prefix),
+            &mut self.fun.metadata_counter, &mut self.fun.pending_metadata);
         writeln!(out, "{}:", exit_label).ok();
         self.emit_state_store_i64_by_idx(out, "  ", counter_idx, &counter_name);
     }
@@ -200,7 +201,8 @@ impl LlvmBackend {
         let next = self.fun.next_reg_with_prefix("fmn");
         writeln!(out, "  {} = add nuw nsw i64 {}, 1", next, counter_val).ok();
         self.emit_state_store_i64_by_idx(out, "  ", counter_idx, &next);
-        writeln!(out, "  br label %.fm_loop").ok();
+        emit_loop_metadata(out, "  ", ".fm_loop",
+            &mut self.fun.metadata_counter, &mut self.fun.pending_metadata);
         writeln!(out, ".fm_end:").ok();
         // 2026-07-19: Clear reg_float_cache before hoisted prints — prevents
         // reuse of non-dominating float registers from inside the loop body.
@@ -375,7 +377,8 @@ impl LlvmBackend {
             }
         }
 
-        writeln!(out, "  br label %.cm_header").ok();
+        emit_loop_metadata(out, "  ", ".cm_header",
+            &mut self.fun.metadata_counter, &mut self.fun.pending_metadata);
         writeln!(out, "{}:", exit_label).ok();
         // 2026-07-17: Emit hoisted post-loop prints (swan song) AFTER the loop
         // closes, so they read the final accumulator values from %State. The

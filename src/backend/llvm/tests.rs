@@ -291,7 +291,7 @@ fn test_no_range_lower_bound_defaults_to_i64_min() {
 }
 
 #[test]
-fn test_binop_nuw_nsw_for_add() {
+fn test_binop_no_nuw_nsw() {
     let mut backend = LlvmBackend::new();
     let program = vec![
         TopLevel::StateDecl(StateDecl {
@@ -333,8 +333,8 @@ fn test_binop_nuw_nsw_for_add() {
         }),
     ];
     let output = backend.generate(&program, None);
-    assert!(output.contains("nuw nsw"),
-        "add on bounded variables should emit nuw nsw for better LLVM optimization (more info than !range alone)");
+    assert!(!output.contains("nuw nsw"),
+        "add on bounded variables should NOT emit nuw nsw (LLVM infers from !range; nuw nsw causes urem→128bit mul)");
 }
 
 #[test]

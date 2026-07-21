@@ -1296,13 +1296,15 @@ fn extract_write_set(body: &[Statement], state_fields: &HashSet<String>) -> Hash
 }
 
 /// 2026-07-18: Walk the provenance chain of an expression to find the root
-/// variable name. Handles Identifier, Field(base, _), and Index(base, _)
-/// by recursively walking to the base until an Identifier is found.
+/// variable name. Handles Identifier and Field(base, _) by recursively
+/// walking to the base until an Identifier is found.
+/// 2026-07-21: Removed Index(base, _) arm. Pointer writes (data[idx] = val)
+/// change the memory AT the pointer, not the pointer field itself. Including
+/// Index in write_set creates redundant identity phi nodes for ptr fields.
 fn extract_root_via_provenance(expr: &Expr) -> Option<String> {
     match expr {
         Expr::Identifier(n) => Some(n.clone()),
         Expr::Field(base, _) => extract_root_via_provenance(base),
-        Expr::Index(base, _) => extract_root_via_provenance(base),
         _ => None,
     }
 }

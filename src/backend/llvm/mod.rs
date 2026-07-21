@@ -573,6 +573,13 @@ pub(super) fn emit_loop_metadata_nodes(
     md_entries.push(format!("!{}", vd_md));
     md_count += 1;
 
+    // 2026-07-21: Loop alignment — prevents DSB/MITE penalty from instructions
+    // crossing 32-byte fetch window boundaries (ring_buffer mul instruction).
+    let align_md = start + md_count;
+    writeln!(pending_metadata, "!{0} = !{{!\"llvm.loop.align\", i32 32}}", align_md).ok();
+    md_entries.push(format!("!{}", align_md));
+    md_count += 1;
+
     let entries = md_entries.join(", ");
     writeln!(pending_metadata, "!{0} = !{{!{0}, {1}}}", start, entries).ok();
     *metadata_counter += md_count;
