@@ -2601,13 +2601,13 @@ impl LlvmBackend {
                                  self.fun.pending_post_hoist = post_hoist;
                                  let num_fields = capped_set.len().max(2);
                                  self.warnings.push(format!("info: txn '{}' dispatched via per-field phi loop (EmitPerFieldPhi, {} fields)", &node.name, num_fields));
-                                 let is_decreasing = bp.direction == crate::analysis::transition_graph::ConvergeDirection::Decreasing;
-                                 self.emit_countable_main(&mut out, &node.name, counter_idx, total_idx, total_const_name, &body_stmts, &capped_set, is_decreasing);
-                                 true
-                             }
-                             }
-                         } else {
-                             // Adaptive dispatch for non-pure bodies: EmitInlineSsa vs EmitPerFieldPhi.
+                                  let is_decreasing = bp.direction == crate::analysis::transition_graph::ConvergeDirection::Decreasing;
+                                  self.emit_countable_main(&mut out, &node.name, counter_idx, total_idx, total_const_name, &body_stmts, &capped_set, is_decreasing, Some(&bp.var));
+                                  true
+                              }
+                              }
+                          } else {
+                              // Adaptive dispatch for non-pure bodies: EmitInlineSsa vs EmitPerFieldPhi.
                             // 2026-07-05: Same criteria as pure path — dense writes,
                             // small fields favors EmitInlineSsa insertvalue chain.  The SSA mode
                             // guard handler (emit_stmt.rs:983-992) handles guards with
@@ -2662,12 +2662,12 @@ impl LlvmBackend {
                                  let num_fields = capped_set.len().max(2);
                                  self.warnings.push(format!("info: txn '{}' dispatched via per-field phi loop (EmitPerFieldPhi, {} fields)", &node.name, num_fields));
                                  let is_decreasing = bp.direction == crate::analysis::transition_graph::ConvergeDirection::Decreasing;
-                                 self.emit_countable_main(&mut out, &node.name, counter_idx, total_idx, total_const_name, &body_stmts, &capped_set, is_decreasing);
-                                 true
-                             }
-                         }
-                     } else { false }
-                 } else { false }
+                                  self.emit_countable_main(&mut out, &node.name, counter_idx, total_idx, total_const_name, &body_stmts, &capped_set, is_decreasing, Some(&bp.var));
+                                  true
+                              }
+                          }
+                      } else { false }
+                  } else { false }
              } else { false }
          } else { false };
 

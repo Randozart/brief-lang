@@ -1557,3 +1557,46 @@ Fixes A and B are quick wins with low risk. C builds the infrastructure D needs.
 D is the full SLP vectorizer — it can be designed and implemented incrementally
 after A, B, and C are merged.
 ```
+
+---
+
+## Stage 12: Current Benchmark Results + Remaining Fix Implementation Plan
+
+### Current Benchmark Results (2026-07-21, End of Session)
+
+After all Fixes 1–3 from the session:
+
+| Benchmark | Brief | C | Ratio | Winner | Note |
+|-----------|-------|---|-------|--------|------|
+| **ring_buffer** | **0.058s** | **0.047s** | **1.15x** | C | `mul` eliminated; phi overhead remains |
+| float_math | 0.077s | 0.074s | 1.04x | ~tie | |
+| float_math_nonzero | 0.160s | 0.169s | 0.94x | Brief | ✓ |
+| **sparse_dispatch** | **0.058s** | **0.060s** | **0.96x** | Brief | ✓ |
+| **print_loop** | **0.057s** | **0.059s** | **0.96x** | Brief | ✓ |
+| **nbody_newton** | **11.39s** | **8.36s** | **1.36x** | C | SLP unblocked; scalar fdiv remains |
+| nbody_sqrt | 2.44s | 2.81s | 0.86x | Brief | ✓ |
+| nbody_sqrt_idio | 2.49s | 3.66s | 0.67x | Brief | ✓ |
+| **fasta** | **0.214s** | **0.218s** | **0.98x** | **~tie** | LTO inlining fixed |
+| **fannkuch_redux** | **0.063s** | **0.064s** | **0.98x** | **~tie** | Adaptive phi cap fixed |
+| mandelbrot | 0.669s | 0.659s | 1.01x | ~tie | |
+| kalman_filter_runtime | 0.181s | 0.180s | 1.01x | ~tie | |
+| knucleotide | 0.186s | 0.190s | 0.97x | ~tie | |
+| cancel_math | 0.061s | 0.058s | 1.05x | ~tie | |
+| bit_clear | ~0.001s | ~0.001s | ~1.00x | noise | 63 iter, startup-dominated |
+| **queue_drain** | **0.062s** | **0.066s** | **0.94x** | Brief | ✓ |
+| queue_drain_sym | 0.064s | 0.061s | 1.06x | ~tie | |
+
+**Brief/Parity: 16 of 18. Behind: 2** — ring_buffer (1.15x), nbody_newton (1.36x)
+
+---
+
+### Remaining Fixes — Implementation Order
+
+| # | Fix | Effort | Files | Target | Expected Impact |
+|---|-----|--------|-------|--------|-----------------|
+| **1** | **Redundant phi elimination** — skip phi for fields that duplicate the counter variable (ops = cmc, two phis for one counter) | 5 lines | `counter.rs` | ring_buffer | ~0.05x |
+| **2** | **Direct while-loop dispatch** — new emit_while_main() for simple single-node programs. No phi nodes, pure GEP+load+store. Dispatch condition: single txn + bounded + has FFI in body | 70 lines | `counter.rs`, `mod.rs` | ring_buffer | 1.15x → ~1.0x |
+| **3** | **Native float in %State** — push_field_type stores float as float/double, not i64. Coordinated changes: push_field_type, phi type, backedge identity, ensure_typed_value, adapt_to_i64 path | 40 lines | `mod.rs`, `counter.rs`, `emit_expr.rs`, `helpers.rs` | nbody + all float benchmarks | ~13% off nbody runtime |
+| **4** | **SLP isomorphism pass — Analysis Phase** — new slp_isomorphism.rs. Walks txn bodies, segments let/assign statements, compares for structural isomorphism via alpha-renaming, records groups of 2+ isomorphic lanes | 320 lines | `slp_isomorphism.rs` (new) | nbody (foundation) | Enables Phase 2 |
+| **5** | **SLP isomorphism pass — Codegen Phase** — emit <N x float> vector ops for detected groups. Vector loads, arithmetic, extractelement/shuffle for scalar results | 200 lines | `emit_vector.rs` (new) | nbody | 1.36x → ~1.0x |
+```

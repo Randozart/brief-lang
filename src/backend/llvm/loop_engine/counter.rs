@@ -254,6 +254,7 @@ impl LlvmBackend {
         body: &[Statement],
         write_set: &HashSet<String>,
         is_decreasing: bool,
+        counter_var: Option<&str>,
     ) {
         writeln!(out, "define i32 @main() local_unnamed_addr {} {{", self.slp_attr("main", "#0")).ok();
         writeln!(out, "entry:").ok();
@@ -304,9 +305,20 @@ impl LlvmBackend {
         }
 
         // 2026-07-17: Per-field phi nodes — one per written field.
+        // 2026-07-21: Skip phi when the field IS the counter variable
+        // (duplicate of the counter phi). Register counter phi as the
+        // field's phi instead.
         self.fun.phi_field_regs.clear();
         self.fun.backedge_field_regs.clear();
         for fname in &sorted_fields {
+            // Check if this field duplicates the counter variable
+            if let Some(cv) = counter_var {
+                if fname.as_str() == cv {
+                    self.fun.phi_field_regs.insert((*fname).clone(), counter_name.clone());
+                    self.fun.backedge_field_regs.insert((*fname).clone(), format!("%{}", next));
+                    continue;
+                }
+            }
             let phi_f = self.fun.next_reg_with_prefix("ppf");
             let be_f = be_field_regs.get(fname.as_str())
                 .cloned().unwrap_or_else(|| format!("%be_{}", fname));
