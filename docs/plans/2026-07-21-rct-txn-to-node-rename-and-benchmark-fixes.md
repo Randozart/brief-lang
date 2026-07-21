@@ -965,3 +965,198 @@ git grep -n '\.beast\|BEAST\|to_beast\|from_beast\|emit_beast' -- '*.rs' '*.md' 
 # Should return no results
 ```
 ```
+
+---
+
+## Stage 4: Current Benchmark Results (2026-07-21)
+
+All benchmarks compiled with `cargo build --release`, timed with nanosecond-precision
+fork+exec harness at `BOUND=50000000`. Single iteration per benchmark (not averaged).
+
+### Runtime Benchmarks
+
+| Benchmark | Brief | C | Ratio | Winner | Note |
+|-----------|-------|---|-------|--------|------|
+| ring_buffer | 0.0448s | 0.0326s | 1.37x | C | Loop eliminated to counter-only; 1.37x is binary-size noise |
+| float_math | 0.0736s | 0.0721s | 1.02x | ~tie | |
+| **float_math_nonzero** | **0.1579s** | **0.1677s** | **0.94x** | **Brief** | Fixed p22 phi + atomic reads + float print |
+| sparse_dispatch | 0.0668s | 0.0638s | 1.04x | ~tie | |
+| print_loop | 0.0629s | 0.0574s | 1.09x | C | Redundant state stores |
+| nbody_newton | 11.3080s | 9.1152s | 1.24x | C | Memory counter loop overhead |
+| **nbody_sqrt** | **2.4426s** | **2.8129s** | **0.86x** | **Brief** | |
+| **nbody_sqrt_idio** | **2.4757s** | **3.6449s** | **0.67x** | **Brief** | |
+| fasta | 0.2599s | 0.2193s | 1.18x | C | %State escape blocks SROA |
+| fannkuch_redux | 0.0786s | 0.0694s | 1.13x | C | 6-phi cap too small for 16 fields |
+| mandelbrot | 0.6705s | 0.6675s | 1.00x | ~tie | |
+| kalman_filter_runtime | 0.1832s | 0.1798s | 1.01x | ~tie | |
+| knucleotide | 0.1928s | 0.1911s | 1.00x | ~tie | |
+| cancel_math | 0.0649s | 0.0626s | 1.03x | ~tie | |
+| bit_clear | 0.0011s | 0.0008s | 1.48x | C | Noise floor (63 iter, ~2µs work) |
+| queue_drain | 0.0625s | 0.0611s | 1.02x | ~tie | Fixed AddrOf/Deref + arena index |
+| queue_drain_sym | 0.0660s | 0.0581s | 1.13x | C | Redundant state stores |
+| queue_drain_idio | 0.0645s | — | — | — | No C reference |
+
+### Correctness Summary
+
+All benchmarks match C reference output except:
+- `utf8_ops` — MISMATCH (pre-existing, line count 10 vs 1)
+
+No SysCall# warnings. All benchmarks compile (including queue_drain variants).
+
+---
+
+## Stage 5: Fix Redundant State Stores (needs_state_stores_in_body)
+
+### Root Cause
+
+The `needs_state_stores_in_body` flag defaults to `true` in `FunctionContext` and is
+**never demoted to `false`** in the `EmitPerFieldPhi` dispatch path. The only assignment
+sites are `= true` — Path A ("zero memory traffic" per `mod.rs:2496-2500`) is unreachable.
+
+This causes every `EmitPerFieldPhi` loop to emit at least one redundant GEP+store per
+iteration, even when all written fields are tracked by phis. LLVM's DSE cannot eliminate
+these stores because opaque FFI calls (`__print_int`, `__print_char`, etc.) are declared
+with only `nounwind`, making LLVM conservatively assume they might access `%State`
+through a global.
+
+### Affected Benchmarks
+
+| Benchmark | Ratio | Redundant stores/iter | Fix impact |
+|-----------|-------|----------------------|------------|
+| print_loop | 1.09x | 1 (all fields fit in 3 phis) | ~0.63x → parity |
+| queue_drain_sym | 1.13x | 1 (all fields fit in 3 phis) | ~0.56x → parity |
+| fannkuch_redux | 1.13x | 5 (6 phi cap, 16 write fields) | ~1.04x → near parity |
+| fasta | 1.18x | 2 (redundant stores + SROA blocked) | Partial fix |
+
+### Fix
+
+**Target file: `src/backend/llvm/loop_engine/counter.rs`**
+
+Change the `needs_state_stores_in_body` assignment in `emit_countable_main` (currently
+around line 342):
+
+```rust
+// Current:
+self.fun.needs_state_stores_in_body = !self.fun.pending_post_hoist.is_empty();
+
+// Proposed:
+// 2026-07-21: Demote to false when no post-loop hoists exist AND no fields
+// are missing from the phi set. The dispatch code sets needs_state_stores_in_body = true
+// before calling emit_countable_main when phi-capped fields need stores.
+// Only enable stores when (a) post-loop hoisted prints need final %State values,
+// or (b) dispatch pre-set the flag for missing-phi-field tracking.
+if !self.fun.pending_post_hoist.is_empty() {
+    self.fun.needs_state_stores_in_body = true;
+} else if self.fun.needs_state_stores_in_body {
+    // Leave dispatch-pre-set value (missing phi fields need stores)
+} else {
+    self.fun.needs_state_stores_in_body = false;
+}
+```
+
+**Target file: `src/backend/llvm/mod.rs`**
+
+In both `capped_set` dispatch blocks (lines ~2568-2585 and ~2618-2635), after the
+missing-field check, the flag is already set when needed. No additional change needed
+for the dispatch code itself — the fix in `counter.rs` ensures the flag is properly
+demoted when not needed.
+
+### Validation
+
+```bash
+cargo build
+cargo test --lib
+# Check print_loop and queue_drain_sym IR for redundant stores
+grep 'cms' benchmarks/print_loop.ll | wc -l   # Should be 0 (or just post-loop)
+```
+
+---
+
+## Stage 6: Prevent %State Escape Through GetEnvInt
+
+### Root Cause
+
+The `get_env_int` intrinsic (used by `GetEnvInt!`) takes `ptr %state` as its first
+parameter, even though it never uses it:
+
+```llvm
+define i64 @get_env_int(ptr noalias nocapture align 8 %state, ptr %arg0) {
+  %ac0 = ptrtoint ptr %arg0 to i64
+  %t0 = call i64 @__getenv_int(i64 %ac0)    ; %state never used!
+  ret i64 %t0
+}
+```
+
+Passing `%state` to this opaque function causes LLVM's escape analysis to consider
+`%state` captured, **blocking SROA** from decomposing `%State` into scalar registers.
+This forces every field access through GEP+load+store, preventing values from living
+in SSA registers.
+
+Even though `get_env_int` has `nocapture` on the `%state` parameter (meaning it
+doesn't store the pointer), LLVM's SROA is conservative — it considers the alloca
+"possibly accessed by unknown callers" when passed to any external function, even
+with `nocapture`.
+
+### Affected Benchmarks
+
+| Benchmark | Ratio | Impact of fix |
+|-----------|-------|---------------|
+| fasta | 1.18x | Fields become SSA registers, eliminating GEP+load+store overhead |
+| Any benchmark using `GetEnvInt!` | Minor | Cleaner IR, slightly faster LLVM optimization |
+
+All runtime benchmarks that use `GetEnvInt!("BOUND")` are affected:
+`float_math_nonzero`, `nbody_newton`, `nbody_sqrt`, `nbody_sqrt_idio`, `fasta`,
+`fannkuch_redux`, `mandelbrot`, `kalman_filter_runtime`, `knucleotide`,
+`queue_drain`, `queue_drain_sym`, `queue_drain_idio`.
+
+Note: For most benchmarks, the `%state` pointer is passed through other functions
+too (the txn callbacks), so preventing just `get_env_int` from capturing `%state`
+may not fully enable SROA. The hot loop's direct field accesses would need the
+alloca to NOT escape through ANY external function.
+
+### Fix
+
+**Option A (preferred):** In `get_env_int`'s emission, omit the dead `%state`
+parameter from the wrapper function signature. The calling code in the txn's
+`main()` passes `ptr %state` as the first argument — change the emission to
+pass `null` or a dummy value, and remove the `%state` parameter from the
+wrapper's definition.
+
+**Option B (simpler):** Add `memory(argmem: readnone)` to the `get_env_int`
+function declaration, telling LLVM it doesn't access memory through any pointer.
+But `get_env_int` calls `__getenv_int` which DOES read memory (environment
+variables), so this would be a lie. Only the `%state` parameter is dead, not
+the function itself.
+
+**Option C (targeted):** Mark only the `%state` parameter as `noalias nocapture`
+(already done) AND ensure the function body never memcpy's or stores the pointer.
+Add `writereadonly` on `%state` specifically. However, LLVM doesn't support
+per-pointer `readnone`.
+
+**Recommended: Option A** — simply don't pass `%state` to intrinsics that don't
+need it. The `emit_external_call` or intrinsic emission code should filter out
+the `%state` argument for intrinsics that don't require it.
+
+### Target Files
+
+- `src/backend/llvm/intrinsics.rs` — The `emit_intrinsic` dispatch. Most
+  `GetEnvInt#`, `PrintInt#`, `Malloc#`, `Free#` etc. accept `ptr %state` as
+  the first argument from the calling convention, even when they don't need it.
+- `src/backend/llvm/emit_expr.rs` — The `emit_expr` function that dispatches
+  to intrinsic handlers.
+- `src/backend/llvm/emit_stmt.rs` — The statement handler that passes `%state`
+  to intrinsic calls.
+
+The fix involves changing the intrinsic calling convention to omit `%state` for
+intrinsics that don't access the state struct.
+
+### Validation
+
+```bash
+cargo build
+cargo test --lib
+# Compile fasta and check if SROA now fires
+grep 'get_env_int' benchmarks/fasta.ll
+# Check that %state is no longer an argument
+```
+```

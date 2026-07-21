@@ -519,7 +519,10 @@ impl FunctionContext {
             pending_post_hoist: Vec::new(),
             pending_cleanup: Vec::new(),
             pending_phi_native_backedge: HashMap::new(),
-            needs_state_stores_in_body: true,
+            // 2026-07-21: Default false enables Path A (zero memory traffic).
+            // Set to true by dispatch when phi-capped fields need %State stores,
+            // or by emit_countable_main when post-loop hoisted prints exist.
+            needs_state_stores_in_body: false,
             parallel_safe_body: true,
             counter_field_name: None,
             parallel_safe_exempt_fields: HashSet::new(),
