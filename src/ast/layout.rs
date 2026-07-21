@@ -1,6 +1,6 @@
 // ── Layout Pattern AST ──────────────────────────────────────────────────
 // 2026-07-14: AST types for the Layout DSL. Parsed from raw layout text
-// by src/bvir/layout.rs, stored in ResolvedType.properties["layout"].
+// by src/beast/layout.rs, stored in ResolvedType.properties["layout"].
 
 /// Endianness of a layout pattern.
 #[derive(Debug, Clone, Copy, PartialEq)]

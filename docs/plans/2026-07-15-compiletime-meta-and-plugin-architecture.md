@@ -105,7 +105,7 @@ are registered for a stage, it produces its input unchanged.
 
 **Use cases:**
 - Final AST-level transformations before the backend sees it
-- `.bvir` pattern matching and rewriting (`MatchIR$`)
+- `.beast` pattern matching and rewriting (`MatchIR$`)
 - Lowering intrinsics to backend-specific patterns
 - Structural assertions and validation
 
@@ -399,11 +399,11 @@ sugar removal.
 ```
 MatchIR$(pattern: String, replacement: String)
 ```
-Pattern-match and rewrite AST nodes using the `.bvir` S-expression pattern
+Pattern-match and rewrite AST nodes using the `.beast` S-expression pattern
 language. The pattern is parsed into an AST matcher; the replacement is
-parsed as the new sub-AST. Both use the `.bvir` format documented in
-`src/bvir/sexpr.rs`.
-Replaces: the entire external BVIR plugin chain.
+parsed as the new sub-AST. Both use the `.beast` format documented in
+`src/beast/sexpr.rs`.
+Replaces: the entire external BEAST plugin chain.
 
 ```
 CollectAnnotated$(tag: String) -> Vec<&TopLevel>
@@ -430,7 +430,7 @@ Replaces: `eprintln!` / `return Err(...)` in compiler internals.
 ```
 LowerIntrinsic$(name: String, pattern: String)
 ```
-Replaces all calls to intrinsic `name` with the given `.bvir` lowering
+Replaces all calls to intrinsic `name` with the given `.beast` lowering
 pattern. For example, lowering `PrintInt#` to a backend-specific call.
 Replaces: intrinsic lowering in individual backends.
 
@@ -537,9 +537,9 @@ if !condition { EmitError$(message); }
 ```
 
 ```
-IncludeBVIR$(file_path: String)
+IncludeBEAST$(file_path: String)
 ```
-Loads `.bvir` pattern/replacement rules from an external file and registers
+Loads `.beast` pattern/replacement rules from an external file and registers
 them as `MatchIR$` rules at the current stage.
 Replaces: external plugin files without needing a subprocess.
 
@@ -949,7 +949,7 @@ can be removed entirely and `TriggerDeclaration` can use `Expr` directly.
 |----------|-------|----------|-------------|
 | `import_resolver.rs` | 146-215 | Prelude auto-injection | `plugins/front/prelude.bv` |
 | `import_resolver.rs` | 85-129 | Stdlib root search | `ReadConfig$` + registry |
-| `compile.rs` | 41-64 | BVIR external plugin chain | `$(Post)` + `IncludeBVIR$` |
+| `compile.rs` | 41-64 | BEAST external plugin chain | `$(Post)` + `IncludeBEAST$` |
 | `compile.rs` | 91-97 | Empty `AfterCodegen` hook | `$(Back)` blocks |
 | `llvm/normalizer.rs` | 15-55 | Auto-annotation pass | `SetTypeProperty$` in `$(Mid)` |
 
@@ -1330,7 +1330,7 @@ pub fn compile_source(file_path, source, opts) -> Result<(), String> {
 | 3c | Implement `$(Post)` intrinsics (`MatchIR$`, `AssertStructure$`, etc.) | New `src/intrinsics/post.rs` | Each intrinsic operates on stripped AST correctly |
 | 3d | Implement `$(Back)` intrinsics (`PatchIR$`, `TargetTriple$`, etc.) | New `src/intrinsics/back.rs` | Each intrinsic modifies IR text correctly |
 | 3e | Implement cross-stage intrinsics (`ReadConfig$`, `GetEnv$`, etc.) | New `src/intrinsics/common.rs` | Config/env reads work at compile time |
-| 3f | Implement `IncludeBVIR$` | `src/intrinsics/post.rs` | External `.bvir` files load and apply |
+| 3f | Implement `IncludeBEAST$` | `src/intrinsics/post.rs` | External `.beast` files load and apply |
 
 ### Phase 4: Prelude Migration
 
@@ -1363,13 +1363,13 @@ pub fn compile_source(file_path, source, opts) -> Result<(), String> {
 | 5p | Post-stage plugin: inject runtime validation guard | `plugins/post/validate-trg.bv` | Warning emitted for missing entities |
 | 5q | CLI flags: `--warn-unresolved-trg`, `--error-unresolved-trg` | `src/main.rs` | Flags control runtime behavior |
 
-### Phase 6: `.bvir` Pattern Compiler
+### Phase 6: `.beast` Pattern Compiler
 
 | Step | Task | Files | Tests needed |
 |------|------|-------|-------------|
-| 6a | Extend S-expression parser for pattern variables (`?x`) | `src/bvir/sexpr.rs` | `?x` matches any sub-AST |
-| 6b | Build pattern-match compiler (Sexpr → match tree) | New `src/bvir/pattern.rs` | Pattern matches correctly |
-| 6c | Build replacement compiler (Sexpr → AST builder) | New `src/bvir/replace.rs` | Replacement constructs correct AST |
+| 6a | Extend S-expression parser for pattern variables (`?x`) | `src/beast/sexpr.rs` | `?x` matches any sub-AST |
+| 6b | Build pattern-match compiler (Sexpr → match tree) | New `src/beast/pattern.rs` | Pattern matches correctly |
+| 6c | Build replacement compiler (Sexpr → AST builder) | New `src/beast/replace.rs` | Replacement constructs correct AST |
 | 6d | Wire `MatchIR$` to use pattern compiler | `src/intrinsics/post.rs` | `MatchIR$("pattern", "replacement")` works end-to-end |
 
 ### Phase 7: Migration & Cleanup
@@ -1380,7 +1380,7 @@ pub fn compile_source(file_path, source, opts) -> Result<(), String> {
 | 7b | Create new example files for `$(Stage)` syntax | `examples/stage/*.bv` | Examples compile and run |
 | 7c | Update architecture docs | `docs/architecture/*.md` | Docs reflect new architecture |
 | 7d | Remove `--no-stdlib`, replace with `--disable-plugin prelude` | `src/main.rs` | CLI works correctly |
-| 7e | Remove `--emit-bvir` / `--plugin` flags if superseded | `src/main.rs` | Flags removed or deprecated |
+| 7e | Remove `--emit-beast` / `--plugin` flags if superseded | `src/main.rs` | Flags removed or deprecated |
 
 ---
 
@@ -1402,8 +1402,8 @@ pub fn compile_source(file_path, source, opts) -> Result<(), String> {
 | `src/intrinsics/mid.rs` | `$(Mid)` intrinsics |
 | `src/intrinsics/post.rs` | `$(Post)` intrinsics |
 | `src/intrinsics/back.rs` | `$(Back)` intrinsics |
-| `src/bvir/pattern.rs` | Pattern-match compiler for `MatchIR$` |
-| `src/bvir/replace.rs` | Replacement AST builder for `MatchIR$` |
+| `src/beast/pattern.rs` | Pattern-match compiler for `MatchIR$` |
+| `src/beast/replace.rs` | Replacement AST builder for `MatchIR$` |
 | `docs/examples/stage/front-example.bv` | `$(Front)` usage example |
 | `docs/examples/stage/mid-example.bv` | `$(Mid)` usage example |
 | `docs/examples/stage/post-example.bv` | `$(Post)` usage example |
@@ -1422,7 +1422,7 @@ pub fn compile_source(file_path, source, opts) -> Result<(), String> {
 | `src/compile.rs` | Full pipeline: plugin stages Front/Mid/Post/Back |
 | `src/plugin/mod.rs` | New `Plugin` trait with stage methods, new `PluginManager` |
 | `src/plugin/loader.rs` | System plugin discovery, `StageBlockPlugin` |
-| `src/plugin/runner.rs` | Remove or refactor BVIR subprocess chain |
+| `src/plugin/runner.rs` | Remove or refactor BEAST subprocess chain |
 | `src/interpreter/intrinsics.rs` | Add `AddressOf#` |
 | `src/backend/llvm/mod.rs` | Remove `emit_header` target triple/data layout (now in `$(Back)`) |
 | `src/backend/llvm/normalizer.rs` | Remove auto-annotation (now in `$(Mid)` via `SetTypeProperty$`) |

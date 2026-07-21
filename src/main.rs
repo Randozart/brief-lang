@@ -10,7 +10,7 @@ use std::env;
 use std::path::Path;
 
 use brief_compiler::target::{BackendKind, TargetConfig, get_extension};
-use compile::BvirStage;
+use compile::BeastStage;
 
 fn main() {
     let args: Vec<String> = env::args().collect();
@@ -57,7 +57,7 @@ fn print_usage(program: &str) {
     eprintln!("  {} build <file.bv> --config-dir <d>  Set config directory", name);
     eprintln!("  {} build <file.bv> --out <dir>      Set output directory", name);
     eprintln!("  {} build <file.bv> --backend <name> Select backend: llvm, circt, webstack, gpu", name);
-    eprintln!("  {} build <file.bv> --emit-bvir [ast|mid|post|all]  Emit BVIR snapshots (default: all)", name);
+    eprintln!("  {} build <file.bv> --emit-beast [ast|mid|post|all]  Emit BEAST snapshots (default: all)", name);
     eprintln!("  {} build <file.bv> --no-std          Disable prelude (equivalent to --disable-plugin prelude)", name);
     eprintln!("  {} build <file.bv> --stdlib-path <p>   Set stdlib search path", name);
     eprintln!("  {} build <file.bv> --disable-plugin <name>  Disable a system plugin by name", name);
@@ -82,7 +82,7 @@ fn print_usage(program: &str) {
 ///   --optimize-budget <N>   simulation budget (default 256)
 ///   --gpu-offload           enable GPU offload
 ///   --backend <name>        select backend (llvm, circt, webstack, gpu)
-///   --emit-bvir [stage]     emit BVIR snapshots (ast, mid, post, all; default all)
+///   --emit-beast [stage]     emit BEAST snapshots (ast, mid, post, all; default all)
 fn parse_build_args(args: &[String]) -> Result<compile::BuildOptions, String> {
     let mut file_path: Option<String> = None;
     let mut emit_ir_only = false;
@@ -91,7 +91,7 @@ fn parse_build_args(args: &[String]) -> Result<compile::BuildOptions, String> {
     let mut optimize_budget = 256u64;
     let mut gpu_offload = false;
     let mut shared = false;
-    let mut emit_bvir: Vec<BvirStage> = Vec::new();
+    let mut emit_beast: Vec<BeastStage> = Vec::new();
     let mut backend_override: Option<String> = None;
     let mut no_stdlib = false;
     let mut stdlib_path: Option<String> = None;
@@ -124,21 +124,21 @@ fn parse_build_args(args: &[String]) -> Result<compile::BuildOptions, String> {
             optimize_budget = val.parse()
                 .map_err(|_| format!("invalid --optimize-budget value: '{}'", val))?;
             i += 2;
-        } else if arg == "--emit-bvir" {
-            // --emit-bvir with optional stage arg: "ast", "mid", "post"
+        } else if arg == "--emit-beast" {
+            // --emit-beast with optional stage arg: "ast", "mid", "post"
             // If no arg or "all", emit all stages.
             let next = args.get(i + 1);
             let stage_str = next.filter(|s| !s.starts_with('-')).map(|s| s.as_str());
             match stage_str {
-                Some("ast") => emit_bvir.push(BvirStage::Ast),
-                Some("mid") => emit_bvir.push(BvirStage::Mid),
-                Some("post") => emit_bvir.push(BvirStage::Post),
+                Some("ast") => emit_beast.push(BeastStage::Ast),
+                Some("mid") => emit_beast.push(BeastStage::Mid),
+                Some("post") => emit_beast.push(BeastStage::Post),
                 Some("all") | None => {
-                    emit_bvir.push(BvirStage::Ast);
-                    emit_bvir.push(BvirStage::Mid);
-                    emit_bvir.push(BvirStage::Post);
+                    emit_beast.push(BeastStage::Ast);
+                    emit_beast.push(BeastStage::Mid);
+                    emit_beast.push(BeastStage::Post);
                 }
-                Some(other) => return Err(format!("unknown BVIR stage '{}'. Use: ast, mid, post, all", other)),
+                Some(other) => return Err(format!("unknown BEAST stage '{}'. Use: ast, mid, post, all", other)),
             }
             i += if stage_str.is_some() { 2 } else { 1 };
         } else if arg == "--backend" {
@@ -198,7 +198,7 @@ fn parse_build_args(args: &[String]) -> Result<compile::BuildOptions, String> {
         out_dir,
         optimize_budget,
         gpu_offload,
-        emit_bvir_stages: emit_bvir,
+        emit_beast_stages: emit_beast,
         backend,
         no_stdlib,
         stdlib_path,

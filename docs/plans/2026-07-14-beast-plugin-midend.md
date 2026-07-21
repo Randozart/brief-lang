@@ -1,4 +1,4 @@
-# BVIR: Brief Virtual IR — Plugin Mid-End Architecture
+# BEAST: Brief Virtual IR — Plugin Mid-End Architecture
 
 ## Design Summary
 
@@ -10,18 +10,18 @@ Source → Parse → Resolve → Analyze → Backend → .ll
 
 
                        PLUGIN PATH (--plugin flags present)
-Source → Parse → Resolve → to_bvir() → [PLUGIN CHAIN] → from_bvir() → Analyze → Backend → .ll
+Source → Parse → Resolve → to_beast() → [PLUGIN CHAIN] → from_beast() → Analyze → Backend → .ll
                             │              │
-                       program.bvir    pipe stdin→stdout
+                       program.beast    pipe stdin→stdout
                             │              │
                             └── diff ──────┘
 ```
 
 The fast path is what runs during normal compilation. No serialization. Zero cost.
 
-The plugin path activates only when `--plugin` is passed. The frontend serializes to `.bvir` text S-expressions. Each plugin reads from stdin and writes to stdout — the compiler chains them with pipes. The backend deserializes the final output and proceeds as normal.
+The plugin path activates only when `--plugin` is passed. The frontend serializes to `.beast` text S-expressions. Each plugin reads from stdin and writes to stdout — the compiler chains them with pipes. The backend deserializes the final output and proceeds as normal.
 
-## BVIR Format (S-Expressions)
+## BEAST Format (S-Expressions)
 
 Every node is `(tag child1 child2 ...)`. Atoms are strings `"..."`, integers `42`, or booleans `true`/`false`.
 
@@ -92,8 +92,8 @@ Every node is `(tag child1 child2 ...)`. Atoms are strings `"..."`, integers `42
 Every plugin is an executable that follows this protocol:
 
 ```
-stdin:   receives .bvir text (the IR before this plugin)
-stdout:  writes .bvir text (the IR after this plugin)
+stdin:   receives .beast text (the IR before this plugin)
+stdout:  writes .beast text (the IR after this plugin)
 exit 0:  success — compilation continues with plugin's output
 exit !0: abort — stderr is the error message
 ```
@@ -121,7 +121,7 @@ sys.stdout.write(modified_ir)
 ```
 type body:      bytes <~ 8; primitive <~ Int;
 func body:      rest_route <~ "/api/users";
-inline:         (metadata (rest_route "/api/users"))  ; in .bvir
+inline:         (metadata (rest_route "/api/users"))  ; in .beast
 ```
 
 Plugins read metadata uniformly by walking the tree. The frontend never matches on metadata keys — that's the plugin's job.
@@ -134,13 +134,13 @@ compile_source(file_path, source, opts):
   2. Parse → items: Vec<TopLevel>
   3. Resolve → universe: TypeUniverse
   4. If plugins are loaded:
-     a. Serialize items + universe → bvir_text: String
+     a. Serialize items + universe → beast_text: String
      b. For each plugin:
         - Spawn plugin process
-        - Feed bvir_text to stdin
-        - Read modified bvir_text from stdout
+        - Feed beast_text to stdin
+        - Read modified beast_text from stdout
         - If exit code != 0: abort with stderr message
-     c. Deserialize bvir_text → items, universe
+     c. Deserialize beast_text → items, universe
   5. Analyze → analysis: AnalysisResults
   6. Codegen → llvm_ir: String
   7. Write .ll file
@@ -151,14 +151,14 @@ compile_source(file_path, source, opts):
 
 | File | Purpose | Lines |
 |------|---------|-------|
-| `src/bvir/mod.rs` | Module root, re-exports, `to_bvir()` / `from_bvir()` | ~40 |
-| `src/bvir/sexpr.rs` | S-expression tokenizer + parser | ~200 |
-| `src/bvir/serialize.rs` | Walk AST + TypeUniverse, emit S-expressions | ~350 |
-| `src/bvir/deserialize.rs` | Read S-expressions, produce AST + TypeUniverse | ~450 |
+| `src/beast/mod.rs` | Module root, re-exports, `to_beast()` / `from_beast()` | ~40 |
+| `src/beast/sexpr.rs` | S-expression tokenizer + parser | ~200 |
+| `src/beast/serialize.rs` | Walk AST + TypeUniverse, emit S-expressions | ~350 |
+| `src/beast/deserialize.rs` | Read S-expressions, produce AST + TypeUniverse | ~450 |
 | `src/plugin/runner.rs` | Spawn plugin processes, chain stdin→stdout | ~80 |
-| `src/lib.rs` | Add `pub mod bvir;` | 1 |
+| `src/lib.rs` | Add `pub mod beast;` | 1 |
 | `src/compile.rs` | Wire plugin path above | ~40 |
-| `src/main.rs` | Add `--emit-bvir` and `--plugin` flags | ~30 |
+| `src/main.rs` | Add `--emit-beast` and `--plugin` flags | ~30 |
 
 ## Coding Standards (Every Function)
 
@@ -169,10 +169,10 @@ compile_source(file_path, source, opts):
 
 ## Implementation Order
 
-1. `src/bvir/sexpr.rs` — S-expression parser (foundation)
-2. `src/bvir/serialize.rs` — walk AST → text
-3. `src/bvir/deserialize.rs` — text → AST
-4. `src/bvir/mod.rs` — module root
+1. `src/beast/sexpr.rs` — S-expression parser (foundation)
+2. `src/beast/serialize.rs` — walk AST → text
+3. `src/beast/deserialize.rs` — text → AST
+4. `src/beast/mod.rs` — module root
 5. `src/lib.rs` — register module
 6. `src/plugin/runner.rs` — plugin process chain
 7. `src/compile.rs` — wire fast path vs plugin path

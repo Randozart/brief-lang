@@ -35,10 +35,10 @@ with the name `<name>` (the file stem, no prefix/suffix). This lets
 
 ## Metaprogramming with Collect$ and MatchIR$
 
-**2026-07-15**: Phase 6. Two `$` intrinsics provide BVIR-level pattern
+**2026-07-15**: Phase 6. Two `$` intrinsics provide BEAST-level pattern
 matching for compile-time metaprogramming:
 
-- `Collect$(pattern)` — serialize the current program AST to BVIR, match
+- `Collect$(pattern)` — serialize the current program AST to BEAST, match
   the pattern against all sub-trees, log the match count and first few
   matches. Useful for inspecting what the compiler sees.
 - `MatchIR$(pattern, replacement)` — serialize, apply pattern-match
@@ -47,7 +47,7 @@ matching for compile-time metaprogramming:
 
 ### Pattern syntax
 
-The BVIR pattern language uses S-expressions with `?` variables:
+The BEAST pattern language uses S-expressions with `?` variables:
 
 | Pattern | Meaning |
 |---------|---------|
@@ -63,7 +63,7 @@ The BVIR pattern language uses S-expressions with `?` variables:
 
 ```brief
 $(Mid) {
-    // --emit-bvir mid to see what BVIR looks like at this stage
+    // --emit-beast mid to see what BEAST looks like at this stage
     Collect$("(call PrintInt# ?*)");
 };
 ```
@@ -77,20 +77,20 @@ $(Mid) {
 };
 ```
 
-## Visualing BVIR with --emit-bvir
+## Visualing BEAST with --emit-beast
 
-The `--emit-bvir` flag writes BVIR snapshots at pipeline stages so
+The `--emit-beast` flag writes BEAST snapshots at pipeline stages so
 metaprogrammers can inspect the AST format when writing `Collect$` and
 `MatchIR$` patterns:
 
 ```bash
-brief-compiler build program.bv --emit-bvir ast    # after parse + front plugins
-brief-compiler build program.bv --emit-bvir mid    # after typecheck + mid plugins
-brief-compiler build program.bv --emit-bvir post   # after normalizer, before codegen
-brief-compiler build program.bv --emit-bvir        # all three stages
+brief-compiler build program.bv --emit-beast ast    # after parse + front plugins
+brief-compiler build program.bv --emit-beast mid    # after typecheck + mid plugins
+brief-compiler build program.bv --emit-beast post   # after normalizer, before codegen
+brief-compiler build program.bv --emit-beast        # all three stages
 ```
 
-Each stage writes `<file>.bvir.{ast,mid,post}`. Use these files to
+Each stage writes `<file>.beast.{ast,mid,post}`. Use these files to
 understand what patterns match your AST.
 
 ## --no-std is now --disable-plugin prelude
@@ -191,7 +191,7 @@ txn handle_input [has_device][has_device] {
    warns on unresolved targets
 
 Phase 5 implemented `AddressOf#`, the `*` deref expression
-(`Expr::Deref`), and the two-phase safety model. Phase 6 added the BVIR
+(`Expr::Deref`), and the two-phase safety model. Phase 6 added the BEAST
 pattern compiler for `Collect$`/`MatchIR$`.
 
 ## Mid-Stage Plugins (Auto-Entry + Entry Check)

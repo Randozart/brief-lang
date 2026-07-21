@@ -3691,6 +3691,23 @@ impl LlvmBackend {
             }
         }
 
+        // 2026-07-21: Update stale arena/ringbuf indices after field elimination.
+        // The rebuild above may have shifted field indices; re-read them from
+        // the new field_index_map to prevent out-of-bounds GEPs.
+        self.arena_ptr_idx = self.ctx.field_index_map.get("__arena_ptr").copied();
+        self.arena_end_idx = self.ctx.field_index_map.get("__arena_end").copied();
+        self.arena_base_idx = self.ctx.field_index_map.get("__arena_base").copied();
+        for (_base, rbf) in &mut self.ctx.ringbuf_inline {
+            rbf.data_idx = self.ctx.field_index_map
+                .get(&format!("{}_data", _base)).copied().unwrap_or(rbf.data_idx);
+            rbf.head_idx = self.ctx.field_index_map
+                .get(&format!("{}_head", _base)).copied().unwrap_or(rbf.head_idx);
+            rbf.tail_idx = self.ctx.field_index_map
+                .get(&format!("{}_tail", _base)).copied().unwrap_or(rbf.tail_idx);
+            rbf.mask_idx = self.ctx.field_index_map
+                .get(&format!("{}_mask", _base)).copied().unwrap_or(rbf.mask_idx);
+        }
+
         // Phase 2: Append cache slots — one per (field, projection_target) pair.
         for (name, mode) in &self.ctx.field_modes {
             if let crate::analysis::FieldMode::LazyCached { cache_index: _ } = mode {

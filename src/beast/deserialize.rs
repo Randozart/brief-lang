@@ -1,5 +1,5 @@
-// ── BVIR Deserializer ───────────────────────────────────────────────────
-// 2026-07-14: Read .bvir S-expression text → Vec<TopLevel> + TypeUniverse.
+// ── BEAST Deserializer ───────────────────────────────────────────────────
+// 2026-07-14: Read .beast S-expression text → Vec<TopLevel> + TypeUniverse.
 // Every function is max 2 levels. Extract helpers.
 
 use std::collections::HashMap;
@@ -7,8 +7,8 @@ use crate::ast::*;
 use crate::type_universe::{ResolvedType, TypeUniverse};
 use super::sexpr::{Atom, SExpr};
 
-/// Deserialize BVIR text back into a compiled program.
-pub fn from_bvir(text: &str) -> Result<(Vec<TopLevel>, TypeUniverse), String> {
+/// Deserialize BEAST text back into a compiled program.
+pub fn from_beast(text: &str) -> Result<(Vec<TopLevel>, TypeUniverse), String> {
     let tokens = super::sexpr::tokenize(text)?;
     let expr = super::sexpr::parse(&tokens)?;
     let list = match expr {

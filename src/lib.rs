@@ -29,7 +29,7 @@ pub mod ast;
 pub mod analysis;
 pub mod archive;
 pub mod backend;
-pub mod bvir;
+pub mod beast;
 pub mod config;
 pub mod config_resolver;
 pub mod target;

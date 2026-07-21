@@ -27,10 +27,10 @@ Source ─► Lex ─► Parse ─► Resolve ─► serialize ─► [PLUGIN CH
                                                                                    Same stripping
 
 
-                         BVIR DEBUG PATH (--emit-bvir)
+                         BEAST DEBUG PATH (--emit-beast)
 Source ─► ... ─► Resolve ─► serialize ─► [PLUGIN CHAIN] ─► deserialize ─► [NORMALIZE] ─► Codegen
                                                                                         │
-                                                                                   Writes .bvir.after
+                                                                                   Writes .beast.after
                                                                                    after normalization
 
 
@@ -198,13 +198,13 @@ A backend can start with just `bytes` and be fully correct. It then opts into `p
 | `lexer.rs` | Logos-based tokenizer |
 | `parser/` | Recursive descent parser → `Vec<TopLevel>` |
 
-### Mid-End — BVIR (`src/bvir/`)
+### Mid-End — BEAST (`src/beast/`)
 
 | Module | Purpose |
 |--------|---------|
-| `bvir/sexpr.rs` | S-expression tokenizer, parser, pretty-printer |
-| `bvir/serialize.rs` | Walk `Vec<TopLevel>` + `TypeUniverse` → `.bvir` text |
-| `bvir/deserialize.rs` | `.bvir` text → `Vec<TopLevel>` + `TypeUniverse` |
+| `beast/sexpr.rs` | S-expression tokenizer, parser, pretty-printer |
+| `beast/serialize.rs` | Walk `Vec<TopLevel>` + `TypeUniverse` → `.beast` text |
+| `beast/deserialize.rs` | `.beast` text → `Vec<TopLevel>` + `TypeUniverse` |
 
 ### Analysis (`src/analysis/`)
 
@@ -226,7 +226,7 @@ A backend can start with just `bytes` and be fully correct. It then opts into `p
 |--------|---------|
 | `plugin/mod.rs` | `Plugin` trait, `PluginManager`, `PluginHook` |
 | `plugin/loader.rs` | Native `.so`/`.dylib` loading |
-| `plugin/runner.rs` | External plugin chain (stdin/stdout BVIR) |
+| `plugin/runner.rs` | External plugin chain (stdin/stdout BEAST) |
 
 ### Normalizer (`src/backend/normalizer.rs`)
 
@@ -301,6 +301,6 @@ the convergent txn loops through SROA + loop unrolling.
 | `src/config.rs` | `TypeConfig`, `OpConfig`, `derive_llvm_type()` |
 | `src/target.rs` | `TargetConfig`, `BackendKind` resolution |
 | `src/compile.rs` | Compilation pipeline with backend dispatch |
-| `src/main.rs` | CLI entry point with `--backend`, `--plugin`, `--emit-bvir` |
+| `src/main.rs` | CLI entry point with `--backend`, `--plugin`, `--emit-beast` |
 | `src/lib.rs` | Crate root, module declarations |
 | `docs/architecture/backend-type-dispatch.md` | Type dispatch design (mandatory reading) |

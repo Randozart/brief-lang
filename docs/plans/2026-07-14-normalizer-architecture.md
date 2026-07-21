@@ -152,7 +152,7 @@ backend = "llvm"
 normalizer = "/usr/lib/brief/my-normalizer"
 ```
 
-External normalizers use the same stdin/stdout BVIR contract as plugins.
+External normalizers use the same stdin/stdout BEAST contract as plugins.
 
 ## Backend Normalizer: LLVM
 

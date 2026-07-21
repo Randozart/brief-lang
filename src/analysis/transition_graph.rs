@@ -1043,6 +1043,12 @@ fn collect_state_identifiers(expr: &Expr, state_fields: &HashSet<String>, out: &
         Expr::Field(obj, _) => {
             collect_state_identifiers(obj, state_fields, out);
         }
+        // 2026-07-21: Handle &state_field and *state_field so arrow ops
+        // (e.g. <- &queue, &queue <- count) don't hide state references
+        // from field-liveness analysis (fixes queue_drain build failure).
+        Expr::AddrOf(inner) | Expr::Deref(inner) => {
+            collect_state_identifiers(inner, state_fields, out);
+        }
         Expr::Cast(inner, _) => {
             collect_state_identifiers(inner, state_fields, out);
         }

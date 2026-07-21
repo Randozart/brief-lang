@@ -226,7 +226,7 @@ fn register_typedefs(items: &[TopLevel], universe: &mut TypeUniverse) {
         };
         if let Some(PropertyValue::String(layout_str)) = rt.properties.get("layout") {
             let cleaned = layout_str.strip_prefix('<').unwrap_or(layout_str);
-            if let Ok(pat) = crate::bvir::layout::parse_layout_pattern(cleaned) {
+            if let Ok(pat) = crate::beast::layout::parse_layout_pattern(cleaned) {
                 attach_layout_fields(&mut rt, &pat);
             }
         }
@@ -270,7 +270,7 @@ use std::collections::HashSet;
 /// 2026-07-16: Compute total bits from a layout pattern string.
 fn compute_layout_total_bits(s: &str) -> Option<u64> {
     let cleaned = s.strip_prefix('<').unwrap_or(s);
-    let pat = crate::bvir::layout::parse_layout_pattern(cleaned).ok()?;
+    let pat = crate::beast::layout::parse_layout_pattern(cleaned).ok()?;
     match &pat {
         crate::ast::layout::LayoutPattern::Slice(fields) => {
             Some(fields.iter().map(|f| f.bits as u64).sum())

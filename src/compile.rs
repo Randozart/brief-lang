@@ -3,7 +3,7 @@
 // Pipeline: lex -> parse -> typecheck -> codegen -> output.
 // 2026-07-14: Wire real LlvmBackend instead of stub codegen.
 //             Add binary compilation via clang. Add --out / --optimize-budget flags.
-// 2026-07-14: Plugin path — serialize to BVIR, run external plugins, deserialize.
+// 2026-07-14: Plugin path — serialize to BEAST, run external plugins, deserialize.
 // 2026-07-15: Phase 2 — Wire per-stage plugin dispatch into pipeline.
 //             Front: on_ast after parse, Mid: on_ast after typecheck,
 //             Post/Back: on_ir after codegen. Per-extension plugin selection
@@ -24,23 +24,23 @@ use brief_compiler::type_universe::TypeUniverse;
 /// 2026-07-15: Phase 7i — Defined in the backend to avoid circular deps.
 pub use brief_compiler::backend::llvm::TrgUnresolvedAction;
 
-/// Pipeline stage at which to emit a BVIR snapshot.
-/// 2026-07-15: Phase 7 — Used by --emit-bvir for metaprogramming introspection.
+/// Pipeline stage at which to emit a BEAST snapshot.
+/// 2026-07-15: Phase 7 — Used by --emit-beast for metaprogramming introspection.
 #[derive(Debug, Clone, Copy, PartialEq)]
-pub enum BvirStage {
+pub enum BeastStage {
     Ast,
     Mid,
     Post,
 }
 
-impl std::str::FromStr for BvirStage {
+impl std::str::FromStr for BeastStage {
     type Err = String;
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         match s {
-            "ast" => Ok(BvirStage::Ast),
-            "mid" => Ok(BvirStage::Mid),
-            "post" => Ok(BvirStage::Post),
-            _ => Err(format!("unknown BVIR stage '{}'. Use: ast, mid, post", s)),
+            "ast" => Ok(BeastStage::Ast),
+            "mid" => Ok(BeastStage::Mid),
+            "post" => Ok(BeastStage::Post),
+            _ => Err(format!("unknown BEAST stage '{}'. Use: ast, mid, post", s)),
         }
     }
 }
@@ -53,8 +53,8 @@ pub struct BuildOptions {
     pub out_dir: Option<String>,
     pub optimize_budget: u64,
     pub gpu_offload: bool,
-    /// BVIR snapshot stages to emit (--emit-bvir). Empty = no emission.
-    pub emit_bvir_stages: Vec<BvirStage>,
+    /// BEAST snapshot stages to emit (--emit-beast). Empty = no emission.
+    pub emit_beast_stages: Vec<BeastStage>,
     /// Selected backend (resolved from extension + --backend flag).
     pub backend: BackendKind,
     /// Disable automatic stdlib import (for bare-metal/no-OS targets).
@@ -106,10 +106,10 @@ pub fn compile_source(file_path: &str, source: &str, opts: &BuildOptions) -> Res
         pm.run_front_ast(&mut items, &mut front_universe)?;
     }
 
-    // BVIR snapshot at Ast stage (after parse + front, for metaprogramming)
+    // BEAST snapshot at Ast stage (after parse + front, for metaprogramming)
     {
         let snapshot_universe = TypeUniverse::new();
-        emit_bvir_snapshot(file_path, BvirStage::Ast, &items, &snapshot_universe, opts)?;
+        emit_beast_snapshot(file_path, BeastStage::Ast, &items, &snapshot_universe, opts)?;
     }
 
     // ── Import resolution ─────────────────────────────────────────────
@@ -126,8 +126,8 @@ pub fn compile_source(file_path: &str, source: &str, opts: &BuildOptions) -> Res
     // ── Mid stage: AST transformation (after type check) ──────────────
     pm.run_mid_ast(&mut items, &mut universe)?;
 
-    // BVIR snapshot at Mid stage (for metaprogrammer inspection)
-    emit_bvir_snapshot(file_path, BvirStage::Mid, &items, &universe, opts)?;
+    // BEAST snapshot at Mid stage (for metaprogrammer inspection)
+    emit_beast_snapshot(file_path, BeastStage::Mid, &items, &universe, opts)?;
 
     // ── Normalizer pass ───────────────────────────────────────────────
     match opts.backend {
@@ -148,8 +148,8 @@ pub fn compile_source(file_path: &str, source: &str, opts: &BuildOptions) -> Res
     // 2026-07-20: Protocol round-trip verification (Parse → Cast → Parse)
     brief_compiler::protocol_verify::verify_roundtrips(&items, &universe)?;
 
-    // BVIR snapshot at Post stage (after normalizer, before codegen)
-    emit_bvir_snapshot(file_path, BvirStage::Post, &items, &universe, opts)?;
+    // BEAST snapshot at Post stage (after normalizer, before codegen)
+    emit_beast_snapshot(file_path, BeastStage::Post, &items, &universe, opts)?;
 
     // 2026-07-18: Run allocation strategy analysis before codegen.
     // Assigns strategies to Alloc# call sites — the codegen reads the
@@ -214,7 +214,7 @@ pub fn check_source(file_path: &str, source: &str) -> Result<(), String> {
         out_dir: None,
         optimize_budget: 0,
         gpu_offload: false,
-        emit_bvir_stages: vec![],
+        emit_beast_stages: vec![],
         backend: BackendKind::Llvm,
         no_stdlib: false,
         stdlib_path: None,
@@ -377,32 +377,32 @@ fn codegen(
     Ok((output, ext))
 }
 
-/// Write a BVIR snapshot at the given pipeline stage, if --emit-bvir includes it.
+/// Write a BEAST snapshot at the given pipeline stage, if --emit-beast includes it.
 /// 2026-07-15: Phase 7 — Metaprogrammer introspection tool.
-fn emit_bvir_snapshot(
+fn emit_beast_snapshot(
     file_path: &str,
-    stage: BvirStage,
+    stage: BeastStage,
     items: &[brief_compiler::ast::TopLevel],
     universe: &TypeUniverse,
     opts: &BuildOptions,
 ) -> Result<(), String> {
-    if !opts.emit_bvir_stages.contains(&stage) {
+    if !opts.emit_beast_stages.contains(&stage) {
         return Ok(());
     }
     let stage_name = match stage {
-        BvirStage::Ast => "ast",
-        BvirStage::Mid => "mid",
-        BvirStage::Post => "post",
+        BeastStage::Ast => "ast",
+        BeastStage::Mid => "mid",
+        BeastStage::Post => "post",
     };
-    let bvir = brief_compiler::bvir::to_bvir(items, universe);
+    let beast = brief_compiler::beast::to_beast(items, universe);
     let path = format!(
-        "{}.bvir.{}",
+        "{}.beast.{}",
         file_path.strip_suffix(".bv").unwrap_or(file_path),
         stage_name
     );
-    std::fs::write(&path, &bvir)
+    std::fs::write(&path, &beast)
         .map_err(|e| format!("cannot write '{}': {}", path, e))?;
-    eprintln!("wrote BVIR snapshot: {}", path);
+    eprintln!("wrote BEAST snapshot: {}", path);
     Ok(())
 }
 

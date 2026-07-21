@@ -156,7 +156,7 @@ for rt in universe.types.values_mut() {
     // Keep layout parsing (unchanged from existing code)
     if let Some(PropertyValue::String(layout_str)) = rt.properties.get("layout") {
         let cleaned = layout_str.strip_prefix('<').unwrap_or(layout_str);
-        if let Ok(pat) = crate::bvir::layout::parse_layout_pattern(cleaned) {
+        if let Ok(pat) = crate::beast::layout::parse_layout_pattern(cleaned) {
             attach_layout_fields(rt, &pat);
         }
     }

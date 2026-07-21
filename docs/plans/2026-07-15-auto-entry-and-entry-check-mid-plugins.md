@@ -9,7 +9,7 @@
 1. [Summary](#1-summary)
 2. [Scope](#2-scope)
 3. [Documentation Strategy](#3-documentation-strategy)
-4. [Phase A: Fix BVIR Contract Round-Trip](#4-phase-a-fix-bvir-contract-round-trip)
+4. [Phase A: Fix BEAST Contract Round-Trip](#4-phase-a-fix-beast-contract-round-trip)
 5. [Phase B: plugins/mid/auto-main.bv](#5-phase-b-pluginsmidauto-mainbv)
 6. [Phase C: plugins/mid/entry-check.bv](#6-phase-c-pluginsminentr-checkbv)
 7. [Phase D: CheckReactive$ Intrinsic](#7-phase-d-checkreactive-intrinsic)
@@ -34,7 +34,7 @@ in the plugin system. This plan introduces three Mid-stage plugins:
 
 All three are **enabled by default**.
 
-**Prerequisite:** The BVIR serialize/deserialize round-trip drops
+**Prerequisite:** The BEAST serialize/deserialize round-trip drops
 `Contract.is_entry` — this must be fixed first so `MatchIR$` can add
 the entry marker.
 
@@ -44,12 +44,12 @@ the entry marker.
 
 **Included:**
 
-- BVIR: serialize `(entry)` when `Contract.is_entry`, deserialize `(entry)` → set `is_entry = true`
+- BEAST: serialize `(entry)` when `Contract.is_entry`, deserialize `(entry)` → set `is_entry = true`
 - New file: `plugins/mid/auto-main.bv`
 - New file: `plugins/mid/entry-check.bv`
 - New intrinsic: `CheckReactive$` in `src/plugin/intrinsics.rs`
 - Registration: both plugins added to built-in list in `src/plugin/loader.rs`
-- Tests: BVIR round-trip, plugin behavior, intrinsic behavior
+- Tests: BEAST round-trip, plugin behavior, intrinsic behavior
 - Docs: `docs/architecture/features/plugins.md`
 
 **Not included:**
@@ -62,8 +62,8 @@ the entry marker.
 
 ### 3.1 Rationale comments to add
 
-- `src/bvir/serialize.rs` at contract emission: `// 2026-07-15: (entry) preserves is_entry through BVIR round-trip`
-- `src/bvir/deserialize.rs` at contract parsing: `// 2026-07-15: Restore is_entry from (entry) marker`
+- `src/beast/serialize.rs` at contract emission: `// 2026-07-15: (entry) preserves is_entry through BEAST round-trip`
+- `src/beast/deserialize.rs` at contract parsing: `// 2026-07-15: Restore is_entry from (entry) marker`
 - `src/plugin/intrinsics.rs` at `CheckReactive$`: `// 2026-07-15: Phase 8 — verifies node has live field bindings`
 - `src/plugin/loader.rs` at registration: `// 2026-07-15: auto-main plugin (Mid)`
 
@@ -73,9 +73,9 @@ the entry marker.
 
 ---
 
-## 4. Phase A: Fix BVIR Contract Round-Trip
+## 4. Phase A: Fix BEAST Contract Round-Trip
 
-### 4.1 Serialization (`src/bvir/serialize.rs`)
+### 4.1 Serialization (`src/beast/serialize.rs`)
 
 Current contract serialization:
 ```
@@ -90,7 +90,7 @@ New: emit `(entry)` when `is_entry` is true:
 `(entry)` must come first so the deserializer can set the flag before
 parsing pre/post conditions.
 
-### 4.2 Deserialization (`src/bvir/deserialize.rs`)
+### 4.2 Deserialization (`src/beast/deserialize.rs`)
 
 Add handler for tag `"entry"`: set `is_entry = true`, skip value (no
 operand needed — it's a flag).
@@ -103,7 +103,7 @@ No change needed.
 ### 4.4 Test
 
 Round-trip test: construct a `Contract` with `is_entry = true`, serialize
-to BVIR string, parse back, verify `is_entry` is `true`.
+to BEAST string, parse back, verify `is_entry` is `true`.
 
 ---
 
@@ -255,7 +255,7 @@ then `entry-check` (sees the newly-added `[#]`), then `check-reactive`
 
 | # | Test | What it verifies |
 |---|------|-----------------|
-| 1 | `test_bvir_contract_entry_roundtrip` | `is_entry` survives serialize/deserialize |
+| 1 | `test_beast_contract_entry_roundtrip` | `is_entry` survives serialize/deserialize |
 | 2 | `test_auto_main_adds_entry_to_defn` | `defn main` → `is_entry = true` |
 | 3 | `test_auto_main_adds_entry_to_txn` | `txn main` → `is_entry = true` |
 | 4 | `test_auto_main_skips_if_no_main` | No `main` → no change |

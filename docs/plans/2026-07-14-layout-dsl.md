@@ -98,7 +98,7 @@ pub struct LayoutField {
 
 ### Phase C — Layout DSL Parser
 
-Create `src/bvir/layout.rs`. A recursive descent parser that takes the raw pattern string and produces `LayoutPattern`:
+Create `src/beast/layout.rs`. A recursive descent parser that takes the raw pattern string and produces `LayoutPattern`:
 
 ```
 layout     ::= endian? pattern
@@ -154,7 +154,7 @@ Extend meld parsing to recognize `layout {` and parse field mappings using the `
 |------|-------|---------|
 | `src/parser/definitions.rs` | A | `layout <~ <...>` in type body parsing |
 | `src/ast/layout.rs` | B | `LayoutPattern` enum, `LayoutField`, `Endianness` |
-| `src/bvir/layout.rs` | C | DSL → LayoutPattern recursive descent parser |
+| `src/beast/layout.rs` | C | DSL → LayoutPattern recursive descent parser |
 | `src/parser/definitions.rs` | D | `layout { sign <:> sign; }` in meld parsing |
 
 ## Execution Order

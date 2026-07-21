@@ -20,7 +20,7 @@
 // add compile-time expression evaluation for full metaprogramming.
 
 use crate::ast::{Expr, Import, Statement, TopLevel};
-use crate::bvir;
+use crate::beast;
 use crate::type_universe::TypeUniverse;
 
 /// Result of evaluating a single $ intrinsic call.
@@ -144,23 +144,23 @@ fn intrinsic_emit_error(args: &[Expr]) -> Result<(), String> {
 
 /// `Collect$(pattern)` — Collect AST nodes matching a pattern.
 ///
-/// 2026-07-15: Phase 6 — Serializes the program AST to BVIR, then matches
+/// 2026-07-15: Phase 6 — Serializes the program AST to BEAST, then matches
 /// the pattern against all sub-expressions. Logs match count and first match.
 /// Future: return collected nodes as a compile-time value.
 fn intrinsic_collect(args: &[Expr], program: &[TopLevel]) -> Result<(), String> {
     let pattern_str = expect_string_arg(args, 0, "Collect$")?;
-    let pattern = bvir::pattern::parse_pattern(&pattern_str)
+    let pattern = beast::pattern::parse_pattern(&pattern_str)
         .map_err(|e| format!("Collect$: invalid pattern '{}': {}", pattern_str, e))?;
 
-    // Serialize program to BVIR for pattern matching
+    // Serialize program to BEAST for pattern matching
     let universe = TypeUniverse::new();
-    let bvir_text = bvir::serialize::to_bvir(program, &universe);
-    let tokens = bvir::sexpr::tokenize(&bvir_text)
+    let beast_text = beast::serialize::to_beast(program, &universe);
+    let tokens = beast::sexpr::tokenize(&beast_text)
         .map_err(|e| format!("Collect$: tokenize error: {}", e))?;
-    let root = bvir::sexpr::parse(&tokens)
+    let root = beast::sexpr::parse(&tokens)
         .map_err(|e| format!("Collect$: parse error: {}", e))?;
 
-    let matches = bvir::pattern::collect_matches(&pattern, &root);
+    let matches = beast::pattern::collect_matches(&pattern, &root);
     let count = matches.len();
 
     if count == 0 {
@@ -168,7 +168,7 @@ fn intrinsic_collect(args: &[Expr], program: &[TopLevel]) -> Result<(), String> 
     } else {
         eprintln!("Collect$: found {} match(es) for pattern '{}'", count, pattern_str);
         for (i, m) in matches.iter().enumerate().take(3) {
-            let s = bvir::sexpr::to_string(m);
+            let s = beast::sexpr::to_string(m);
             let truncated = if s.len() > 80 { format!("{}...", &s[..77]) } else { s };
             eprintln!("  match[{}]: {}", i, truncated);
         }
@@ -178,7 +178,7 @@ fn intrinsic_collect(args: &[Expr], program: &[TopLevel]) -> Result<(), String> 
 
 /// `MatchIR$(pattern, replacement)` — Match and rewrite IR patterns.
 ///
-/// 2026-07-15: Phase 6 — Serializes the program AST to BVIR, applies the
+/// 2026-07-15: Phase 6 — Serializes the program AST to BEAST, applies the
 /// pattern-match replacement, then deserializes back into the AST.
 /// The program is modified in place. Returns error if pattern matches nothing.
 fn intrinsic_match_ir(
@@ -189,20 +189,20 @@ fn intrinsic_match_ir(
     let pattern_str = expect_string_arg(args, 0, "MatchIR$")?;
     let replacement_str = expect_string_arg(args, 1, "MatchIR$")?;
 
-    let pattern = bvir::pattern::parse_pattern(&pattern_str)
+    let pattern = beast::pattern::parse_pattern(&pattern_str)
         .map_err(|e| format!("MatchIR$: invalid pattern '{}': {}", pattern_str, e))?;
-    let replacement = bvir::pattern::parse_pattern(&replacement_str)
+    let replacement = beast::pattern::parse_pattern(&replacement_str)
         .map_err(|e| format!("MatchIR$: invalid replacement '{}': {}", replacement_str, e))?;
 
-    // Serialize program + universe to BVIR
-    let bvir_text = bvir::serialize::to_bvir(program, universe);
-    let tokens = bvir::sexpr::tokenize(&bvir_text)
+    // Serialize program + universe to BEAST
+    let beast_text = beast::serialize::to_beast(program, universe);
+    let tokens = beast::sexpr::tokenize(&beast_text)
         .map_err(|e| format!("MatchIR$: tokenize error: {}", e))?;
-    let root = bvir::sexpr::parse(&tokens)
+    let root = beast::sexpr::parse(&tokens)
         .map_err(|e| format!("MatchIR$: parse error: {}", e))?;
 
     // Apply replacement
-    let (new_root, count) = bvir::pattern::replace_all(&pattern, &replacement, &root);
+    let (new_root, count) = beast::pattern::replace_all(&pattern, &replacement, &root);
 
     if count == 0 {
         return Err(format!(
@@ -212,8 +212,8 @@ fn intrinsic_match_ir(
     }
 
     // Deserialize back into AST
-    let new_bvir = bvir::sexpr::to_string(&new_root);
-    let (new_items, new_universe) = bvir::deserialize::from_bvir(&new_bvir)
+    let new_beast = beast::sexpr::to_string(&new_root);
+    let (new_items, new_universe) = beast::deserialize::from_beast(&new_beast)
         .map_err(|e| format!("MatchIR$: deserialize error after replacement: {}", e))?;
 
     *program = new_items;

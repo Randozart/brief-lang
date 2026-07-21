@@ -164,8 +164,8 @@ occurrence must be updated:
 | `src/plugin/intrinsics.rs:260` | `txn.is_reactive` | `txn.is_node` |
 | `src/fuzz_checker/mod.rs:59` | `txn.is_reactive` | `txn.is_node` |
 | `src/fuzzing/ast_generator.rs:77-80` | `is_reactive` | `is_node` |
-| `src/bvir/serialize.rs:65` | `t.is_reactive` | `t.is_node` |
-| `src/bvir/deserialize.rs:222-240` | `is_reactive` | `is_node` |
+| `src/beast/serialize.rs:65` | `t.is_reactive` | `t.is_node` |
+| `src/beast/deserialize.rs:222-240` | `is_reactive` | `is_node` |
 | `src/lsp.rs:808` | `t.is_reactive` | `t.is_node` |
 
 **Rust test files** — all `is_reactive: true` → `is_node: true`,
@@ -196,15 +196,15 @@ find src -name '*.rs' -exec sed -i \
   {} +
 ```
 
-### 1.6 BVIR Serialization
+### 1.6 BEAST Serialization
 
-**File: `src/bvir/serialize.rs`** (line 65):
+**File: `src/beast/serialize.rs`** (line 65):
 ```
 // Before: if t.is_reactive { children.push(atom(":reactive")); }
 // After:  if t.is_node { children.push(atom(":node")); }
 ```
 
-**File: `src/bvir/deserialize.rs`** (lines 222-240):
+**File: `src/beast/deserialize.rs`** (lines 222-240):
 ```
 // Before:
 ":reactive" => { is_reactive = true; i += 1; }
@@ -730,7 +730,7 @@ Stage 1 (rename)
   ├── 1.3 Parser
   ├── 1.4 AST
   ├── 1.5 Field rename (~60 sites)
-  ├── 1.6 BVIR
+  ├── 1.6 BEAST
   ├── 1.7 Annotator
   ├── 1.8 LSP
   ├── 1.9 Plugin
@@ -799,4 +799,169 @@ git grep -n -i '\brct\b' -- '*.rs' '*.bv' '*.md' \
   | grep -v 'circt' \
   | grep -v 'archived' \
   | grep -v 'old_docs'
+```
+
+---
+
+## Stage 3: Rename `.beast` → `.beast` (Brief Expressive AST)
+
+The BEAST intermediate representation is renamed to BEAST — Brief Expressive
+AST. File extension `.beast`, CLI flag `--emit-beast`, module path
+`src/beast/`.
+
+### 3.1 Overview
+
+```
+beast → beast    # Extension
+Bvir → Beast    # PascalCase (enum, type names)
+beast → beast    # snake_case (function names, field names, module)
+--emit-beast → --emit-beast   # CLI flag
+```
+
+### 3.2 Module directory rename
+
+```bash
+mv src/beast src/beast
+sed -i 's/pub mod beast/pub mod beast/' src/lib.rs
+```
+
+### 3.3 Rust source changes
+
+**File: `src/lib.rs`** (line 32):
+```
+pub mod beast;  →  pub mod beast;
+```
+
+**File: `src/main.rs`:**
+
+| Line(s) | Change |
+|---------|--------|
+| 60 | `--emit-beast` → `--emit-beast` (help text) |
+| 85 | `--emit-beast [stage]` → `--emit-beast [stage]` (doc comment) |
+| 94 | `emit_beast: Vec<BeastStage>` → `emit_beast: Vec<BeastStage>` |
+| 127-139 | `--emit-beast` → `--emit-beast`, `BeastStage::*` → `BeastStage::*` |
+| 201 | `emit_beast_stages: emit_beast` → `emit_beast_stages: emit_beast` |
+
+**File: `src/compile.rs`:**
+
+| Line(s) | Change |
+|---------|--------|
+| 28 | Comment: `--emit-beast` → `--emit-beast` |
+| 56-57 | `pub emit_beast_stages: Vec<BeastStage>` → `pub emit_beast_stages: Vec<BeastStage>` |
+| 112,130,152 | `emit_beast_snapshot` → `emit_beast_snapshot` |
+| 217 | `emit_beast_stages: vec![]` → `emit_beast_stages: vec![]` |
+| 380 | Doc comment: `--emit-beast` → `--emit-beast` |
+| 382 | `fn emit_beast_snapshot` → `fn emit_beast_snapshot` |
+| 389 | `opts.emit_beast_stages` → `opts.emit_beast_stages` |
+| 397 | `brief_compiler::beast::to_beast` → `brief_compiler::beast::to_beast` |
+| 399 | `{}.beast.{}` → `{}.beast.{}` (file extension in output path) |
+
+**File: `src/beast/mod.rs`** (formerly `src/beast/mod.rs`):
+
+| Line(s) | Change |
+|---------|--------|
+| 3 | Comment: `.beast` → `.beast` |
+| 11 | `pub use serialize::to_beast` → `pub use serialize::to_beast` |
+| 12 | `pub use deserialize::from_beast` → `pub use deserialize::from_beast` |
+
+**File: `src/beast/serialize.rs`** (formerly `src/beast/serialize.rs`):
+
+| Line(s) | Change |
+|---------|--------|
+| 2 | Comment: `.beast` → `.beast` |
+| 11 | `pub fn to_beast` → `pub fn to_beast` |
+| 282-292 | `crate::beast::from_beast` → `crate::beast::from_beast`, `to_beast` → `to_beast` |
+| 293,339-340 | Same function/trait renames |
+| 355-357 | `crate::beast::sexpr` → `crate::beast::sexpr` |
+
+**File: `src/beast/deserialize.rs`** (formerly `src/beast/deserialize.rs`):
+
+| Line(s) | Change |
+|---------|--------|
+| 2 | Comment: `.beast` → `.beast` |
+| 11 | `pub fn from_beast` → `pub fn from_beast` |
+
+**File: `src/beast/sexpr.rs`** (formerly `src/beast/sexpr.rs`):
+
+| Line(s) | Change |
+|---------|--------|
+| 2 | Comment: `.beast` → `.beast` |
+
+**File: `src/beast/pattern.rs`** (formerly `src/beast/pattern.rs`):
+
+| Line(s) | Change |
+|---------|--------|
+| 586,655 | `crate::beast::sexpr` → `crate::beast::sexpr` |
+
+**Files referencing `crate::beast::` or `beast::`**:
+
+| File | Change |
+|------|--------|
+| `src/plugin/intrinsics.rs:23` | `use crate::beast` → `use crate::beast` |
+| `src/plugin/intrinsics.rs:152,157-163` | `beast::` → `beast::` (14 occurrences) |
+| `src/backend/llvm/normalizer.rs:229,273` | `crate::beast::layout` → `crate::beast::layout` |
+| `src/ast/layout.rs:3` | Comment: `src/beast/layout.rs` → `src/beast/layout.rs` |
+
+### 3.4 Documentation
+
+| File | Change |
+|------|--------|
+| `docs/plans/2026-07-15-compiletime-meta-and-plugin-architecture.md` | `.beast` → `.beast`, `BEAST` → `BEAST` (~15 refs) |
+| `docs/plans/2026-07-14-beast-plugin-midend.md` | Rename file to `...beast-plugin-midend.md` + all `.beast` → `.beast` |
+| `docs/plans/2026-07-19-extensible-number-types.md` | `beast::layout` → `beast::layout` |
+
+### 3.5 Self-hosting compiler references
+
+If the self-hosting compiler (`lib/compiler/`) mentions `.beast` or `beast`,
+update those references as well (search first — likely none, since the
+`.beast` format is a Rust-side serialization detail).
+
+### 3.6 Suggested commands
+
+```bash
+# Rename module directory
+mv src/beast src/beast
+
+# Rust source (mechanical replacements)
+find src -name '*.rs' -not -path '*/beast/*' -exec sed -i \
+  -e 's/\bbvir\b/beast/g' \
+  -e 's/\bBvir\b/Beast/g' \
+  -e 's/\bto_beast\b/to_beast/g' \
+  -e 's/\bfrom_beast\b/from_beast/g' \
+  -e 's/\bemit_beast\b/emit_beast/g' \
+  -e 's/--emit-beast/--emit-beast/g' \
+  {} +
+
+# The beast module itself (already moved, avoids self-rename)
+find src/beast -name '*.rs' -exec sed -i \
+  -e 's/\bbvir\b/beast/g' \
+  -e 's/\bBvir\b/Beast/g' \
+  -e 's/\bto_beast\b/to_beast/g' \
+  -e 's/\bfrom_beast\b/from_beast/g' \
+  {} +
+
+# Docs
+find docs -name '*.md' -exec sed -i \
+  -e 's/\.beast/.beast/g' \
+  -e 's/\bBEAST\b/BEAST/g' \
+  -e 's/\bbvir\b/beast/g' \
+  {} +
+
+# Root docs
+sed -i \
+  -e 's/\.beast/.beast/g' \
+  -e 's/\bBEAST\b/BEAST/g' \
+  -e 's/\bbvir\b/beast/g' \
+  AGENTS.md AGENTS_HISTORY.md AGENTS_HISTORY_2.md BUGS.md README.md
+```
+
+### 3.7 Validation
+
+```bash
+cargo build
+cargo test --lib
+git grep -n '\.beast\|BEAST\|to_beast\|from_beast\|emit_beast' -- '*.rs' '*.md' \
+  | grep -v archived | grep -v old_docs
+# Should return no results
+```
 ```

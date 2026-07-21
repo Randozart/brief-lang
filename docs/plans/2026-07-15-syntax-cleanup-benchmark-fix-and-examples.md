@@ -220,11 +220,11 @@ node blink [true][true] {
 ### 8.3 `examples/stage/collect-match.bv`
 
 Demonstrates `Collect$` + `MatchIR$` in a `$(Back)` stage block with a
-simple BVIR pattern.
+simple BEAST pattern.
 
 ```brief
-// 2026-07-15: Demos Collect$/MatchIR$ BVIR pattern matching in stage blocks
-// Check: brief-compiler check --emit-bvir collect-match.bv
+// 2026-07-15: Demos Collect$/MatchIR$ BEAST pattern matching in stage blocks
+// Check: brief-compiler check --emit-beast collect-match.bv
 
 $(Back) {
     let patterns = Collect$();

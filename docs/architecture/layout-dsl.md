@@ -284,7 +284,7 @@ The normalizer is the first stage that needs to understand the layout. It:
 
 **a) Parses the DSL string into `LayoutPattern` AST**
 
-The layout parser (`src/bvir/layout.rs`) takes the raw string and produces the typed AST:
+The layout parser (`src/beast/layout.rs`) takes the raw string and produces the typed AST:
 
 ```rust
 LayoutPattern::Slice(vec![
@@ -430,7 +430,7 @@ range       ::= integer ".." integer
 | File | Purpose |
 |------|---------|
 | `src/ast/layout.rs` | `LayoutPattern` enum, `LayoutField` struct, endianness |
-| `src/bvir/layout.rs` | Recursive descent DSL → LayoutPattern parser |
+| `src/beast/layout.rs` | Recursive descent DSL → LayoutPattern parser |
 | `src/parser/definitions.rs` | `layout <~` and `layout { ... }` in meld parsing |
 | `src/backend/normalizer.rs` | Bit-shuffling synthesis, DFA validation |
 | `config/ctd-llvm-mappings.toml` | (renamed from llvm-primitives.toml; section headers: [ctd.*]) |

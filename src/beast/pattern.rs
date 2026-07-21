@@ -1,4 +1,4 @@
-// ── BVIR Pattern Compiler ──────────────────────────────────────────────
+// ── BEAST Pattern Compiler ──────────────────────────────────────────────
 //
 // 2026-07-15: Phase 6 — S-expression pattern matching for Collect$ and
 // MatchIR$ intrinsics. Pattern variables use ? prefix: ?x matches any single
@@ -11,7 +11,7 @@
 use std::collections::HashMap;
 
 /// A compiled pattern that can be matched against S-expressions.
-/// 2026-07-15: Built from a BVIR S-expression string with ? variable support.
+/// 2026-07-15: Built from a BEAST S-expression string with ? variable support.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Pattern {
     /// Exact atom value match: 42, "hello", true
@@ -37,7 +37,7 @@ pub type MatchResult = Option<HashMap<String, Vec<SExpr>>>;
 use super::sexpr::{Atom, SExpr};
 
 /// 2026-07-15: Parse a pattern string into a compiled Pattern tree.
-/// The pattern syntax is a superset of BVIR S-expressions with ? variables:
+/// The pattern syntax is a superset of BEAST S-expressions with ? variables:
 ///   ?x      — match any single subtree, bind to x
 ///   ?*      — wildcard (match any single, no binding)
 ///   ??*     — rest wildcard (match remaining children, no binding)
@@ -261,7 +261,7 @@ fn match_recursive(
                 if actual_tag != expected_tag { return Err(()); }
             }
             // Match children starting from index 1 (skip tag position).
-            // In BVIR every list has a tag at position 0, so even with a
+            // In BEAST every list has a tag at position 0, so even with a
             // wildcard tag (*) we must skip the actual tag in the target.
             match_children_recursive_list(children, list, 1, bindings)
         }
@@ -583,7 +583,7 @@ mod tests {
         let (result, count) = replace_all(&pat, &repl, &expr);
         assert_eq!(count, 1);
         // Result should have the matched ident replaced: (list (reuse x))
-        let result_str = crate::bvir::sexpr::to_string(&result);
+        let result_str = crate::beast::sexpr::to_string(&result);
         assert!(result_str.contains("x"));
         assert!(result_str.contains("reuse"));
     }
@@ -652,7 +652,7 @@ mod tests {
         ]);
         let bindings = match_pattern(&pat, &expr).unwrap();
         let result = build_replacement(&repl, &bindings);
-        let result_str = crate::bvir::sexpr::to_string(&result);
+        let result_str = crate::beast::sexpr::to_string(&result);
         assert!(result_str.contains("call"));
         assert!(result_str.contains("x"));
     }

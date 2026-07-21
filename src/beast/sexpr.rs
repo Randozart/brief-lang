@@ -1,5 +1,5 @@
 // ── S-Expression Parser ─────────────────────────────────────────────────
-// 2026-07-14: Tokenizer + recursive descent for (.bvir) format.
+// 2026-07-14: Tokenizer + recursive descent for (.beast) format.
 // Every node is (tag child1 child2 ...).
 // Max 2 nesting levels. Extract helpers.
 

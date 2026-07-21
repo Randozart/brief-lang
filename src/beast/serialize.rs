@@ -1,5 +1,5 @@
-// ── BVIR Serializer ─────────────────────────────────────────────────────
-// 2026-07-14: Walk Vec<TopLevel> + TypeUniverse → .bvir S-expression text.
+// ── BEAST Serializer ─────────────────────────────────────────────────────
+// 2026-07-14: Walk Vec<TopLevel> + TypeUniverse → .beast S-expression text.
 // Every function is max 2 levels. Extract helpers for deeper logic.
 
 use std::fmt::Write;
@@ -7,8 +7,8 @@ use crate::ast::*;
 use crate::type_universe::{ResolvedType, TypeUniverse};
 use super::sexpr::{to_string, Atom, SExpr};
 
-/// Serialize a compiled program to BVIR S-expression text.
-pub fn to_bvir(items: &[TopLevel], universe: &TypeUniverse) -> String {
+/// Serialize a compiled program to BEAST S-expression text.
+pub fn to_beast(items: &[TopLevel], universe: &TypeUniverse) -> String {
     let mut exprs: Vec<SExpr> = Vec::new();
     for rt in universe.types.values() {
         exprs.push(emit_universe(rt));
@@ -48,7 +48,7 @@ fn emit_toplevel(item: &TopLevel) -> SExpr {
 fn emit_definition(d: &Definition) -> SExpr {
     let mut children: Vec<SExpr> = vec![atom("defn"), atom(&d.name), emit_params(&d.parameters)];
     children.push(emit_outputs(&d.outputs));
-    // 2026-07-15: Serialize contract (including is_entry) for BVIR round-trip
+    // 2026-07-15: Serialize contract (including is_entry) for BEAST round-trip
     children.push(emit_contract(&d.contract));
     for (k, v) in &d.metadata {
         children.push(list(&[atom("metadata"), atom(k), pv_to_sexpr(v)]));
@@ -77,7 +77,7 @@ fn emit_transaction(t: &Transaction) -> SExpr {
 }
 
 fn emit_contract(c: &Contract) -> SExpr {
-    // 2026-07-15: (entry) preserves is_entry through BVIR round-trip
+    // 2026-07-15: (entry) preserves is_entry through BEAST round-trip
     let mut children = vec![atom("contract")];
     if c.is_entry {
         children.push(atom("entry"));
@@ -279,7 +279,7 @@ fn list(items: &[SExpr]) -> SExpr {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::bvir::from_bvir;
+    use crate::beast::from_beast;
 
     #[test]
     fn test_roundtrip_simple() {
@@ -289,8 +289,8 @@ mod tests {
             }),
         ];
         let universe = TypeUniverse::new();
-        let ir = to_bvir(&items, &universe);
-        let (restored, _) = from_bvir(&ir).unwrap();
+        let ir = to_beast(&items, &universe);
+        let (restored, _) = from_beast(&ir).unwrap();
         assert_eq!(items.len(), restored.len());
         match (&items[0], &restored[0]) {
             (TopLevel::StateDecl(a), TopLevel::StateDecl(b)) => {
@@ -311,7 +311,7 @@ mod tests {
 
     #[test]
     fn test_contract_entry_roundtrip() {
-        // 2026-07-15: Verify is_entry survives BVIR serialize/deserialize
+        // 2026-07-15: Verify is_entry survives BEAST serialize/deserialize
         let entry_contract = Contract {
             pre_condition: Expr::Bool(true),
             post_condition: Expr::Bool(true),
@@ -336,8 +336,8 @@ mod tests {
             }),
         ];
         let universe = TypeUniverse::new();
-        let ir = to_bvir(&items, &universe);
-        let (restored, _) = from_bvir(&ir).unwrap();
+        let ir = to_beast(&items, &universe);
+        let (restored, _) = from_beast(&ir).unwrap();
         assert_eq!(items.len(), restored.len());
         match &restored[0] {
             TopLevel::Definition(d) => {
@@ -352,9 +352,9 @@ mod tests {
         let expr = Expr::Deref(Box::new(Expr::Identifier("x".into())));
         let sexpr = emit_expr(&expr);
         let s = to_string(&sexpr);
-        let tokens = crate::bvir::sexpr::tokenize(&s).unwrap();
-        let parsed = crate::bvir::sexpr::parse(&tokens).unwrap();
-        let restored = crate::bvir::deserialize::parse_expr(&parsed).unwrap();
+        let tokens = crate::beast::sexpr::tokenize(&s).unwrap();
+        let parsed = crate::beast::sexpr::parse(&tokens).unwrap();
+        let restored = crate::beast::deserialize::parse_expr(&parsed).unwrap();
         assert_eq!(expr, restored);
     }
 }

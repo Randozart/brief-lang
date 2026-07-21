@@ -1,10 +1,10 @@
-// ── Collect$/MatchIR$ BVIR Pattern Example ────────────────────────────
+// ── Collect$/MatchIR$ BEAST Pattern Example ────────────────────────────
 //
-// 2026-07-15: Demos BVIR pattern matching in a $(Back) stage block.
+// 2026-07-15: Demos BEAST pattern matching in a $(Back) stage block.
 // Collect$ gathers all AST nodes matching a pattern (read-only, logs count).
 // MatchIR$ rewrites matched nodes with a replacement pattern.
 //
-// Build: brief-compiler build examples/stage/collect-match.bv --emit-bvir
+// Build: brief-compiler build examples/stage/collect-match.bv --emit-beast
 
 $(Back) {
     // Collect all defn declarations and log them

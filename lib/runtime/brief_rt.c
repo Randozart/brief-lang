@@ -165,7 +165,6 @@ int64_t __print_char(int64_t c) {
         puts("");
     } else {
         putchar((int)c);
-        fflush(stdout);
     }
     return 0;
 }
