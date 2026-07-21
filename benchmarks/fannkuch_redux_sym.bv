@@ -30,7 +30,7 @@ const IM: Int = 139968;
 const IA: Int = 3877;
 const IC: Int = 29573;
 
-rct txn fan [count < N][count == N] {
+node fan [count < N][count == N] {
     let ns: Int = (seed * IA + IC) % IM;
 
     seed = p0;

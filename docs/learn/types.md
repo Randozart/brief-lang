@@ -298,7 +298,7 @@ These produce the same LLVM IR: `getelementptr` + `store`.
 variable into a state field:
 
 ```brief
-rct txn example [true][true] {
+node example [true][true] {
     let tmp: Int = compute();
     &state_field = &tmp;  // warning: pointer to local may dangle
     term;

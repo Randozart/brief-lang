@@ -21,7 +21,7 @@ let acc: Int = 0;
 const R1: Int = 200;
 const R2: Int = 199;
 
-rct txn step [count < N][count == N] {
+node step [count < N][count == N] {
     acc = acc + count;
     count = (count + R1) - R2;
 

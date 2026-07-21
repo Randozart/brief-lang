@@ -163,7 +163,7 @@ error[P008]: contract verification failed
    - Prior-state operator (@) for tracking relative changes
 
 2. **Reactive Execution**
-   - Reactive transactions (rct txn) compile correctly
+   - Reactive transactions (node) compile correctly
    - Guard-based preconditions work reliably
    - Equilibrium-based termination logic is sound
 
@@ -212,7 +212,7 @@ error[P008]: contract verification failed
 
 ## Next Tests to Run
 
-- [ ] Reactive transactions (`rct txn`)
+- [ ] Reactive transactions (`node`)
 - [ ] Async transactions (`rct async txn`)
 - [ ] Multi-output functions (`term a, b, c;`)
 - [ ] Higher-order functions with sig types (Phase 7)

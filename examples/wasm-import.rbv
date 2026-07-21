@@ -29,7 +29,7 @@ state count: Int = 0;
 
 b-text: "Computed: {result}";
 
-rct txn tick [count > 0][tick_count == @tick_count + 1] {
+node tick [count > 0][tick_count == @tick_count + 1] {
     result = wasmPhysics.simulate(data :> Ptr, count);
     term;
 };

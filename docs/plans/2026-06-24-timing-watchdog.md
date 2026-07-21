@@ -42,7 +42,7 @@ let result = query() within 50 ms (2) ~? cache_lookup();
 ### Watchdog bracket form — `?[cycles <= N retry M] ~? fallback`
 
 ```brief
-rct txn process [x < N][x == N] ?[cycles <= 1000 retry 3] ~? log_timeout() {
+node process [x < N][x == N] ?[cycles <= 1000 retry 3] ~? log_timeout() {
     &x = x + 1; term;
 };
 ```

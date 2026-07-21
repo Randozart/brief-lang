@@ -24,8 +24,8 @@ Extend the existing integration test infrastructure to cover the wake-trigger co
 #!dispatch(parallel)
 #io sigint;
 #io sigterm;
-rct txn handle_sigint [sigint] { term; };
-rct txn handle_sigterm [sigterm] { term; };
+node handle_sigint [sigint] { term; };
+node handle_sigterm [sigterm] { term; };
 ```
 
 This creates two wake triggers (`__sigint_flag`, `__sigterm_flag`) and two reactive transactions.

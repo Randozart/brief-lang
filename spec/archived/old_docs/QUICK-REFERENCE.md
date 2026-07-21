@@ -31,7 +31,7 @@ const MAX: Int = 100;
 txn name(params) [pre][post] { body };
 
 // Reactive transaction
-rct txn name [pre][post] { body };
+node name [pre][post] { body };
 
 // Function
 defn name(params) -> Type [pre][post] { body };
@@ -124,7 +124,7 @@ txn increment [count < 100][count == @count + 1] {
 ```brief
 let done: Bool = false;
 
-rct txn process [!done][done] {
+node process [!done][done] {
   # Do work
   &done = true;
   term;
@@ -136,7 +136,7 @@ rct txn process [!done][done] {
 ```brief
 let state: Int = 0;
 
-rct txn step [state == 0][state == 1] {
+node step [state == 0][state == 1] {
   &state = 1;
   term;
 };
@@ -204,7 +204,7 @@ txn process [true][true] {
 ```brief
 reactor @10Hz;                    # File-level default
 
-rct txn fast [cond][post] { } @60Hz;  # Per-txn override
+node fast [cond][post] { } @60Hz;  # Per-txn override
 ```
 
 ## Native Stdlib

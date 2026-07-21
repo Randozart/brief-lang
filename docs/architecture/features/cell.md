@@ -13,11 +13,11 @@ cell! timer(duration: Int) -> elapsed: Int, done: Bool {
     elapsed: Int = 0;
     done: Bool = false;
 
-    rct txn tick [elapsed < duration] {
+    node tick [elapsed < duration] {
         &elapsed = elapsed + 1;
     };
 
-    rct txn finish [elapsed >= duration && !done] {
+    node finish [elapsed >= duration && !done] {
         &done = true;
         term!;
     };
@@ -40,7 +40,7 @@ The keyword tells the programmer: *you are designing an autonomous, self-regulat
 
 ## The Membrane: Operational Closure at Compile Time
 
-A `cell`'s `rct txn` **cannot** see the parent's `%State`. They react only to:
+A `cell`'s `node` **cannot** see the parent's `%State`. They react only to:
 - The cell's own private state fields
 - The cell's own input arguments
 - The cell's own `trg` variables (internal triggers)
@@ -160,7 +160,7 @@ Cells embody every core Brief principle:
 - **Contract-First**: the output port types and `->` interface are the cell's contract with the world
 - **No Magic**: all cell behavior is implemented in Brief, not in hardcoded Rust
 - **Self-Documenting Failure**: a mistyped `trg` is a compile error, not a runtime segfault
-- **Reactive Transactions**: the cell body is a set of `rct txn` blocks — the same primitive as the top-level program
+- **Reactive Transactions**: the cell body is a set of `node` blocks — the same primitive as the top-level program
 - **Composition over Inheritance**: cells compose via triggers, not class hierarchies
 
 ---
@@ -186,7 +186,7 @@ pub struct CellDef {
     pub parameters: Vec<(String, Type)>,   // input arguments
     pub output_type: Option<OutputType>,   // -> name: Type, name: Type | etc.
     pub fields: Vec<StructField>,          // private state variables
-    pub transactions: Vec<Transaction>,    // rct txn / txn inside cell
+    pub transactions: Vec<Transaction>,    // node / txn inside cell
     pub definitions: Vec<Definition>,      // helper defns inside cell
     pub internal_triggers: Vec<TriggerDeclaration>,  // trg inside cell
     pub span: Option<Span>,

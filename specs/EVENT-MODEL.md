@@ -14,33 +14,33 @@ five existing language primitives. Nothing is known to the compiler by name:
 |-----------|------|-------------|
 | `trg name: Type @ link sym` | Declare a volatile global — the runtime writes to it | Zero — the backend just emits `@sym = external global` for whatever name it sees |
 | `trg name: Type @ 0x...` | Declare an MMIO location — hardware writes to it | Zero |
-| `rct txn [pre] { ... term; }` | "Sleep until precondition is true" — the event handler | Zero |
+| `node [pre] { ... term; }` | "Sleep until precondition is true" — the event handler | Zero |
 | `frgn name(args) -> Ret from "lib"` | FFI boundary to the outside world | Zero — the backend just emits `declare` + `call` |
 | `defn name(args) -> Ret { ... term val; }` | Pure accessor on cached state | Zero |
 
 The operating principle: **`@ link` is the universal doorbell.** The runtime (or
 hardware) writes to a known global address. The `trg` declaration is a volatile
-window onto that address. The `rct txn` gates on it. That is the entire event
+window onto that address. The `node` gates on it. That is the entire event
 model. Everything else is library code.
 
 ### How "Sleep" Works Without Magic
 
 There is no `__wait_for_event` intrinsic. The equilibrium path in the LLVM IR
 just does `ret void`. The user (or stdlib) provides sleep as an explicit
-`frgn` + `rct txn [true]` pattern:
+`frgn` + `node [true]` pattern:
 
 ```brief
 // User code:
 frgn __wait_for_event() -> Void from "libruntime";
 // ^ A regular FFI declaration. The linker resolves it.
 
-rct txn my_work [some_trigger] { ... term; };
+node my_work [some_trigger] { ... term; };
 
 // Last in dispatch order — only fires when nothing else is true:
-rct txn sleep [true] { __wait_for_event(); term; };
+node sleep [true] { __wait_for_event(); term; };
 ```
 
-Because `rct txn` uses **fall-through dispatch** (all preconditions evaluated
+Because `node` uses **fall-through dispatch** (all preconditions evaluated
 sequentially in one tick), and `sleep` is declared last, it fires only when
 no earlier transaction's precondition was true. Each transaction's side
 effects are visible to the precondition evaluation of the next transaction
@@ -61,7 +61,7 @@ The reactor tick never changes. It is always:
 ```
 reactor_tick():
   1. Sample phase: load volatile from every @ link / @ address trigger
-  2. Evaluate phase: check each rct txn's precondition using sampled values
+  2. Evaluate phase: check each node's precondition using sampled values
   3. Execute phase: fire the first true-precondition transaction
   4. If none fired: ret void (tick loop continues, re-evaluates next tick)
 ```
@@ -69,11 +69,11 @@ reactor_tick():
 Step 4 is a simple `ret void`. The tick loop (`main` → `tick:` → `call
 @reactor_tick()` → `br %tick`) handles the repetition. If the user wants to
 block the thread between ticks, they declare a `frgn __wait_for_event()` and
-write a `rct txn [true] { __wait_for_event(); term; }` as their last
+write a `node [true] { __wait_for_event(); term; }` as their last
 transaction. This pattern is provided by `lib/std/io.bv`.
 
 There is no compiler-generated `__wait_for_event()` call. The backend emits
-only what the user's `frgn` declarations and `rct txn` bodies tell it to.
+only what the user's `frgn` declarations and `node` bodies tell it to.
 
 ## 3. `@ link` Semantics
 
@@ -152,7 +152,7 @@ let __io_ready: Bool = false;
 // Fires whenever the runtime signals an event.
 // Guaranteed first in dispatch order because no other txn gates on __io_pending
 // (the pump clears __io_pending and sets __io_ready for consumers).
-rct txn __io_pump [__io_pending] {
+node __io_pump [__io_pending] {
     &__io_buffer = __raw_poll();
     &__io_ready = true;
     term;
@@ -200,14 +200,14 @@ import system from "std/system.bv";
 let jumping: Bool = false;
 let moving: Bool = false;
 
-rct txn handle_input [io.__io_ready] {
+node handle_input [io.__io_ready] {
     [io.key_pressed("Space")] { &jumping = true; };
     [io.key_pressed("W")]    { &moving = true; };
     &io.__io_ready = false;    // consume the event
     term;
 };
 
-rct txn physics [true] {
+node physics [true] {
     [jumping] { &velocity = -10; &jumping = false; };
     [moving]  { &x = x + 1; };
     term;
@@ -225,8 +225,8 @@ Independent reactive transactions can gate on independent triggers:
 trg mouse_click: Bool @ link __mouse_click;
 trg timer_tick: Bool @ link __timer_100hz;
 
-rct txn handle_mouse [mouse_click] { ... term; };
-rct txn handle_timer [timer_tick]  { ... term; };
+node handle_mouse [mouse_click] { ... term; };
+node handle_timer [timer_tick]  { ... term; };
 ```
 
 Both preconditions are evaluated each tick using sampled values. The dispatch
@@ -276,9 +276,9 @@ script handle platform differences.
 
 If the user does not import `std/io.bv`, they must either:
 
-1. **Use MMIO triggers directly** (`trg btn: Bool @ 0x40001000` with `rct txn`)
+1. **Use MMIO triggers directly** (`trg btn: Bool @ 0x40001000` with `node`)
 2. **Write their own FFI poll** (`frgn my_poll() -> ... from "lib"`) inside a
-   custom `rct txn [true]` — polling busy-loop
+   custom `node [true]` — polling busy-loop
 3. **Define custom `@ link` symbols** and provide a linker script that maps
    them
 
@@ -299,7 +299,7 @@ The correct pattern is:
 
 ```brief
 // Instead of:
-rct txn bad [true] {
+node bad [true] {
     phase1();
     trg! wait: Bool = ready;  // yield here — never implemented
     phase2();
@@ -308,18 +308,18 @@ rct txn bad [true] {
 
 // Use:
 trg ready: Bool @ link __something;  // or @ 0x...
-rct txn phase1 [ready] {
+node phase1 [ready] {
     phase1();
     term;
 };
-rct txn phase2 [phase1_done] {       // gate on state set by phase1
+node phase2 [phase1_done] {       // gate on state set by phase1
     phase2();
     term;
 };
 ```
 
 The parser still accepts `trg!` (backward compatibility), but the LLVM backend
-emits it as a no-op comment. New code should use the top-level `trg` + `rct txn` pattern.
+emits it as a no-op comment. New code should use the top-level `trg` + `node` pattern.
 
 ## 9. Implementation Plan
 

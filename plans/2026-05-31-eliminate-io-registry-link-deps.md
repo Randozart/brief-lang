@@ -155,17 +155,17 @@ let stdin_buffer: List<String> = [];
 let shutting_down: Bool = false;
 let tick_count: Int = 0;
 
-rct txn read_stdin_line [sigint == false && stdin_ready == true] {
+node read_stdin_line [sigint == false && stdin_ready == true] {
     &stdin_buffer = stdin_buffer + [stdin_line];
     term;
 };
 
-rct txn handle_sigint [sigint == true] {
+node handle_sigint [sigint == true] {
     &shutting_down = true;
     term;
 };
 
-rct txn count_ticks [clock_tick_1hz > 0] {
+node count_ticks [clock_tick_1hz > 0] {
     &tick_count = tick_count + 1;
     term;
 };
@@ -193,7 +193,7 @@ import io_pending from "std/brief_rt.bv";
 let ops: Int = 0;
 const N: Int = 50000000;
 
-rct txn work [io_pending][ops == N] {
+node work [io_pending][ops == N] {
     &ops = ops + 1;
 };
 ```

@@ -53,7 +53,7 @@ sqrt, fabs, ceil, floor, ctpop, ctlz, cttz, abs, bitreverse, pop, size, bytes, c
 
 ### Motivation
 
-Top-level statements (e.g., `println#("hello")`) should be allowed at the global scope. They desugar to a single implicit `rct txn __init` that fires once at program start. This provides:
+Top-level statements (e.g., `println#("hello")`) should be allowed at the global scope. They desugar to a single implicit `node __init` that fires once at program start. This provides:
 
 1. **Low-friction scripting**: write statements directly without wrapping in a `main` txn
 2. **Atomic booting**: the entire startup is a transaction — `escape` aborts cleanly with zero partial state
@@ -81,7 +81,7 @@ The compiler collects all `TopLevel::Statement` nodes in program order and synth
 ```brief
 let __booted_N: Bool = false;
 
-rct txn __init [!__booted_N][__booted_N] {
+node __init [!__booted_N][__booted_N] {
     // all top-level statements in order
     &__booted_N = true;
     term;

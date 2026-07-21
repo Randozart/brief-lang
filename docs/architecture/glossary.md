@@ -22,7 +22,7 @@
 | **ReactorTick** | Codegen strategy that emits a `@reactor_tick` function for programs with async triggers or MMIO. |
 | **compute_peak_live_floats** | Liveness-interval analysis for SLP hazard. Counts float temps whose def/last-use intervals overlap, not all float temps. |
 | **loop_exit_label** | `Option<String>` on `LlvmBackend` (set to `"done"` in direct SSA loops). `term!` inside reactive loops emits `br %label` instead of `ret`, enabling LLVM loop unrolling. |
-| **synthesize_init_txn** | `Program` method that collects all `TopLevel::Statement` items (top-level executable statements) and wraps them in a synthesized `rct txn __init [!__booted_N][__booted_N]` that fires once at startup. Called after import resolution in `run_llvm_compile`, `run_check`, and `run_rbv`. The `!__booted_N` / `booted = 1` pattern avoids counter-loop folding paths (correct for a one-shot init). Subject to normal precomputation: pure const scripts may be precomputed; FFI calls emit a runtime loop. |
+| **synthesize_init_txn** | `Program` method that collects all `TopLevel::Statement` items (top-level executable statements) and wraps them in a synthesized `node __init [!__booted_N][__booted_N]` that fires once at startup. Called after import resolution in `run_llvm_compile`, `run_check`, and `run_rbv`. The `!__booted_N` / `booted = 1` pattern avoids counter-loop folding paths (correct for a one-shot init). Subject to normal precomputation: pure const scripts may be precomputed; FFI calls emit a runtime loop. |
 | **decompose_atomic_to_chars** | Converts Int/Float/Bool/Char to `Vec<char>` of their visual representation for Universal Bracket operations. |
 | **reconstruct_from_chars** | Parses filtered `Vec<char>` back to the original atomic type. |
 | **eval_mask_condition** | Evaluates a `BracketOp::Mask` expression against an item. Handles `Value::Bool`, `Value::Regex`, and `Value::String`. |
@@ -30,7 +30,7 @@
 | **BracketOp::Mask** | Bracket operation that filters elements by evaluating a predicate. `_` is bound as the current element. Now supports Bool, Regex, and String (compiled to DFA on the fly). |
 | **BracketOp::Coord** | Bracket operation for coordinate indexing into a value. On atomic types with a string expression, desugars to a regex filter. |
 | **BracketOp::Stride** | Bracket operation that takes every Nth element. |
-| **Prior-state semantics** | In `rct txn` bodies, all reads see the state as it was at the BEGINNING of the tick. Chained `field = ...` does NOT accumulate within a tick. |
+| **Prior-state semantics** | In `node` bodies, all reads see the state as it was at the BEGINNING of the tick. Chained `field = ...` does NOT accumulate within a tick. |
 | **Equality Saturation** | 5-pass fixpoint rewrite engine with 9 rules (add-zero, mul-one, sub-self, etc.) that runs before codegen. |
 | **SLP hazard** | Analysis that estimates register pressure from SLP vectorization candidates and disables SLP when spills would occur. |
 | **Precomputation budget** | `--optimize-budget` flag (default 256). Programs with all-const inputs are fully precomputed up to this budget. `--prod` sets budget to `u64::MAX`. |
@@ -39,7 +39,7 @@
 | **Reactor** | Event-driven execution engine for reactive transactions. Maintains `transactions` list, `dirty_preconditions` set, `dependency_map`, `triggers` map, and `last_fired` timestamps. |
 | **fire_due_async_txns** | Reactor method that fires transactions whose `@Hz` interval has elapsed. Checks `is_async && reactor_speed.is_some()`, compares `last_fired[idx]` elapsed against `1000/hz` ms. Only fires in continuous mode. |
 | **run_reactor_continuous** | Event-driven loop that interleaves responsive convergence (Reactor::run) with polled async firing (fire_due_async_txns). Sleeps 1ms between cycles. Used when any transaction has `is_async = true` or `reactor_speed` is set. |
-| **Responsive transaction** | `rct txn` — fires immediately when its preconditions become dirty. No tick, no timer. Existing convergence loop behavior. |
+| **Responsive transaction** | `node` — fires immediately when its preconditions become dirty. No tick, no timer. Existing convergence loop behavior. |
 | **Polled transaction** | `rct async txn @NHz` — fires at N Hz regardless of dirty state. The `@Hz` annotates a timer-backed trigger. Pre/post conditions still enforced. |
 | **Event-driven trigger** | `trg name: Type @ link <ffi_fn>` — FFI-backed trigger. When the linked FFI function returns a non-void value, the trigger variable is marked dirty and convergence runs. |
 | **`pvt`** | Struct-private visibility keyword. Fields marked `pvt` are accessible only from within the struct's own transactions and definitions. Enforcement stubbed (needs `current_struct` tracking). |

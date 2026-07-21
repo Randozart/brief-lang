@@ -166,7 +166,7 @@ Total: ~110 lines.
 
 ### Current State
 
-The CIRCT backend emits `hw.instance` for `Expr::CellCall` and registers cell fields as `seq.firreg` registers. What's missing is full synthesis of the cell's transaction bodies — the `rct txn` blocks inside the cell definition should emit `comb.and`/`comb.add`/etc. logic rather than being opaque placeholders.
+The CIRCT backend emits `hw.instance` for `Expr::CellCall` and registers cell fields as `seq.firreg` registers. What's missing is full synthesis of the cell's transaction bodies — the `node` blocks inside the cell definition should emit `comb.and`/`comb.add`/etc. logic rather than being opaque placeholders.
 
 ### Remaining Work
 

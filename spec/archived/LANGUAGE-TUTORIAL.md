@@ -132,14 +132,14 @@ txn validate(x: Int)
 let count: Int = 0;
 let done: Bool = false;
 
-rct txn increment [count < 10 && !done]
+node increment [count < 10 && !done]
     [count == @count + 1]
 {
     count = count + 1;
     term;
 };
 
-rct txn finish [count >= 10 && !done]
+node finish [count >= 10 && !done]
     [done == true]
 {
     done = true;
@@ -147,7 +147,7 @@ rct txn finish [count >= 10 && !done]
 };
 ```
 
-`rct txn` (reactive transaction) automatically runs whenever its precondition becomes true.
+`node` (reactive transaction) automatically runs whenever its precondition becomes true.
 
 **How it works:**
 1. You change `count` from 9 to 10
@@ -164,17 +164,17 @@ This is Brief's superpower - describe state transitions, compiler handles the re
 ```brief
 let state: Int = 0;
 
-rct txn step_1 [state == 0][state == 1] {
+node step_1 [state == 0][state == 1] {
     state = 1;
     term;
 };
 
-rct txn step_2 [state == 1][state == 2] {
+node step_2 [state == 1][state == 2] {
     state = 2;
     term;
 };
 
-rct txn reset [state == 2][state == 0] {
+node reset [state == 2][state == 0] {
     state = 0;
     term;
 };
@@ -460,7 +460,7 @@ txn transfer_to_bob(amount: Int)
     term;
 };
 
-rct txn alert_low_balance [alice_balance < 100][alice_balance == @alice_balance] {
+node alert_low_balance [alice_balance < 100][alice_balance == @alice_balance] {
     // Send alert
     term;
 };
@@ -489,7 +489,7 @@ txn initialize [~initialized][initialized] {
     term;
 };
 
-rct txn use_value [initialized][initialized] {
+node use_value [initialized][initialized] {
     term;
 };
 ```
@@ -499,17 +499,17 @@ rct txn use_value [initialized][initialized] {
 ```brief
 let state: Int = 0;  // 0=idle, 1=processing, 2=done
 
-rct txn process [state == 0][state == 1] {
+node process [state == 0][state == 1] {
     state = 1;
     term;
 };
 
-rct txn complete [state == 1][state == 2] {
+node complete [state == 1][state == 2] {
     state = 2;
     term;
 };
 
-rct txn reset [state == 2][state == 0] {
+node reset [state == 2][state == 0] {
     state = 0;
     term;
 };
@@ -564,7 +564,7 @@ When you use `~/condition`, the variable is automatically declared:
 ```brief
 // No need to write: let ready: Bool = false;
 // Brief infers it from the contract
-rct txn start [~/ready] {
+node start [~/ready] {
     ready = true;
     term;
 };
@@ -755,7 +755,7 @@ count = count + 1;     // Wrong - & required
 ```brief
 // Reactive transaction - fires automatically when preconditions are met
 // Return values are meaningless (no caller to receive them)
-rct txn process [ready][done] {
+node process [ready][done] {
     done = true;
     term;
 };
@@ -883,7 +883,7 @@ rstruct ShoppingCart {
         term;
     };
     
-    rct txn apply_discount() [items > 10 && total > 100.0][total < @total] {
+    node apply_discount() [items > 10 && total > 100.0][total < @total] {
         let discount: Float = total * 0.1;
         total = total - discount;
         term;
@@ -951,7 +951,7 @@ let timer_reload: Int = 1000000;  // 1 second at 1MHz
 // Hardware triggers
 trg timer_interrupt: Int @ 0x40001004;
 
-rct txn handle_timer() [timer_value == 0][led_state != @led_state] {
+node handle_timer() [timer_value == 0][led_state != @led_state] {
     // Toggle LED
     [led_state == false] {
         led_state = true;
@@ -1291,27 +1291,27 @@ enum State {
 
 let state: State = State::Idle;
 
-rct txn start() [state == State::Idle][state == State::Running] {
+node start() [state == State::Idle][state == State::Running] {
     state = State::Running;
     term;
 };
 
-rct txn pause() [state == State::Running][state == State::Paused] {
+node pause() [state == State::Running][state == State::Paused] {
     state = State::Paused;
     term;
 };
 
-rct txn resume() [state == State::Paused][state == State::Running] {
+node resume() [state == State::Paused][state == State::Running] {
     state = State::Running;
     term;
 };
 
-rct txn finish() [state == State::Running][state == State::Done] {
+node finish() [state == State::Running][state == State::Done] {
     state = State::Done;
     term;
 };
 
-rct txn reset() [state == State::Done][state == State::Idle] {
+node reset() [state == State::Done][state == State::Idle] {
     state = State::Idle;
     term;
 };
@@ -1324,14 +1324,14 @@ const POOL_SIZE: Int = 10;
 let available: Int = POOL_SIZE;
 let in_use: List<Int> = [];
 
-rct txn acquire() [available > 0][available == @available - 1] {
+node acquire() [available > 0][available == @available - 1] {
     let id = find_free_id();
     available = available - 1;
     in_use = in_use + [id];
     term;
 };
 
-rct txn release(id: Int) [in_use.contains(id)][available == @available + 1] {
+node release(id: Int) [in_use.contains(id)][available == @available + 1] {
     let idx = in_use.find(id);
     in_use = in_use.remove(idx);
     available = available + 1;
@@ -1378,7 +1378,7 @@ txn set_value(value: Int) [true][subject_value == value] {
 let attempts: Int = 0;
 const MAX_ATTEMPTS: Int = 5;
 
-rct txn try_operation() [attempts < MAX_ATTEMPTS][true] {
+node try_operation() [attempts < MAX_ATTEMPTS][true] {
     let result = external_call();
     [result.is_ok()] {
         attempts = 0;  // Reset on success
@@ -1409,7 +1409,7 @@ increment — it fires once on acceptance:
 let tx_log: List<String> = [];
 state committed: Int = 0;
 
-rct txn transfer(amount: Int) [balance >= amount][balance == @balance - amount] {
+node transfer(amount: Int) [balance >= amount][balance == @balance - amount] {
     balance = balance - amount;
     term -> committed = committed + 1;
 };
@@ -1418,11 +1418,11 @@ rct txn transfer(amount: Int) [balance >= amount][balance == @balance - amount] 
 **Program exit** — `term!` terminates the program with a centralized exit block:
 
 ```brief
-rct txn shutdown() [cmd == "exit"][true] {
+node shutdown() [cmd == "exit"][true] {
     term!;  // Exit program
 };
 
-rct txn fail() [error][true] {
+node fail() [error][true] {
     term! -> io.log("fatal: " + error);  // Log before exit
 };
 ```
@@ -1438,7 +1438,7 @@ eventually, enabling termination proofs for external-trigger loops:
 
 ```brief
 #assume_event(data_ready)
-rct txn process() [data_ready][processed == @processed + 1] {
+node process() [data_ready][processed == @processed + 1] {
     processed = processed + 1;
     term;
 };
@@ -1453,7 +1453,7 @@ true at runtime. The action specifies what happens on mismatch:
 
 ```brief
 #assume_shape(packet :> PaymentTxn, escape)
-rct txn process_payment() [packet.active][processed == @processed + 1] {
+node process_payment() [packet.active][processed == @processed + 1] {
     processed = processed + 1;
     term;
 };
@@ -1481,7 +1481,7 @@ txn debug_example(x: Int) [x > 0][result > 0 && result < 1000] {
 ### 2. Logging Transactions
 
 ```brief
-rct txn log_state() [true][true] {
+node log_state() [true][true] {
     io.println("Counter: " + String(counter));
     io.println("Active: " + String(active));
     term;
@@ -1518,7 +1518,7 @@ defn safe_div(a: Int, b: Int) -> Int {
 
 ```brief
 // Bad: Polling
-rct txn check_sensor() [true][true] {
+node check_sensor() [true][true] {
     let value = read_sensor();
     [value > threshold] {
         handle_event();
@@ -1527,7 +1527,7 @@ rct txn check_sensor() [true][true] {
 };
 
 // Good: Event-driven
-rct txn handle_event() [sensor_value > threshold][handled] {
+node handle_event() [sensor_value > threshold][handled] {
     process_event();
     handled = true;
     term;

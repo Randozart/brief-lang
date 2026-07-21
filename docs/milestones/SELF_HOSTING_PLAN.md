@@ -1479,12 +1479,12 @@ ALIAS ir: UInt[32] @0x4;   // Instruction Register
 REGISTER @ROM: Vector[UInt[32], 4096] @0x1000;
 
 // cpu_core.bv - CPU logic
-rct txn fetch [true] {
+node fetch [true] {
     ir = @ROM[pc / 4];
 }
 
 // ADD instruction: opcode is the guard
-rct txn inst_add [ir[31..24] == 0x01] {
+node inst_add [ir[31..24] == 0x01] {
     let dest = ir[23..20];
     let srca = ir[19..16];
     let srcb = ir[15..12];
@@ -1493,7 +1493,7 @@ rct txn inst_add [ir[31..24] == 0x01] {
 }
 
 // JUMP IF ZERO
-rct txn inst_jz [ir[31..24] == 0x05 && @REG_FILE[ir[23..20]] == 0] {
+node inst_jz [ir[31..24] == 0x05 && @REG_FILE[ir[23..20]] == 0] {
     pc = ir[19..0];
 }
 ```

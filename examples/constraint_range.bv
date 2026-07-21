@@ -3,12 +3,12 @@
 
 let score: Int = 0;
 
-rct txn process_score {
+node process_score {
   let valid: Int <: [0..100] = score;
   term Print#(valid);
 };
 
-rct txn increment [score < 100][score == @score + 1] {
+node increment [score < 100][score == @score + 1] {
   score = score + 1;
   term;
 };

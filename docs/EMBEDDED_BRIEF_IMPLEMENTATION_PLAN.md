@@ -31,7 +31,7 @@ Implement the features for Embedded Brief 2.2, unifying logic across Core (.bv),
 - [ ] **Memory Mapping:** Load and parse memory TOML, perform address/reserved-range validation.
 - [ ] **Vector Codegen:** Map vector operations to hardware wide-buses/SIMD.
 - [ ] **Timeout Logic:** Map `within` to hardware watchdog timers/interrupts.
-- [ ] **Reactor Gen:** Map `rct txn` to static jumps for hardware interrupts.
+- [ ] **Reactor Gen:** Map `node` to static jumps for hardware interrupts.
 
 ### Phase 4: Rendered Backend (`src/wasm_gen.rs`)
 - [ ] **TypedArrays:** Map `Int[N]` to `Int32Array` or `Float32Array`.

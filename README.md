@@ -52,7 +52,7 @@ The contract logic often just requires you to declare either the precondition or
 
 ### Execution is inferred, not prescribed.
 
-Programs are declared through a combination of variables, definitions and transactions. The entire program runs on a non-polling reactor loop. It indexes which variable changes lead to which `rct txn` preconditions to be fulfilled, and fires them automatically when it's their time to act. Because these paths are laid out predictably, the compiler has great leeway in folding these paths. If X through A, B and C will always lead to Y with side-effect Z, the compiler will simply draw a short route from X to YZ.
+Programs are declared through a combination of variables, definitions and transactions. The entire program runs on a non-polling reactor loop. It indexes which variable changes lead to which `node` preconditions to be fulfilled, and fires them automatically when it's their time to act. Because these paths are laid out predictably, the compiler has great leeway in folding these paths. If X through A, B and C will always lead to Y with side-effect Z, the compiler will simply draw a short route from X to YZ.
 
 ### No magic, but I had to compromise somewhere.
 
@@ -216,7 +216,7 @@ The compiler **verifies** that your code satisfies these contracts.
 Transactions fire automatically when preconditions are met:
 
 ```brief
-rct txn auto_save() [dirty && !saving][!dirty] {
+node auto_save() [dirty && !saving][!dirty] {
     save_to_disk();
     &dirty = false;
     term;
@@ -423,13 +423,13 @@ let items: Int = 0;
 let total: Float = 0.0;
 let discount_applied: Bool = false;
 
-rct txn add_item(price: Float) [true][items == @items + 1] {
+node add_item(price: Float) [true][items == @items + 1] {
     &items = items + 1;
     &total = total + price;
     term;
 };
 
-rct txn apply_discount() 
+node apply_discount() 
     [items > 10 && total > 100.0 && !discount_applied]
     [total < @total && discount_applied == true]
 {

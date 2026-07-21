@@ -12,7 +12,7 @@
 
 ## 1. Introduction
 
-Brief 3.0 is a **general-purpose systems programming language** built on a unified cognitive grammar. The computational primitive is the **reactive transaction** (`rct txn`). Brief compiles to multiple targets — native assembly (x86_64, AArch64), LLVM IR, C, SystemVerilog — from a single source.
+Brief 3.0 is a **general-purpose systems programming language** built on a unified cognitive grammar. The computational primitive is the **reactive transaction** (`node`). Brief compiles to multiple targets — native assembly (x86_64, AArch64), LLVM IR, C, SystemVerilog — from a single source.
 
 ### 1.1 Core Philosophy
 
@@ -24,7 +24,7 @@ Brief 3.0 is a **general-purpose systems programming language** built on a unifi
 
 - **State (`let`)**: Mutable variables representing physical registers or memory.
 - **Transactions (`txn`)**: Atomic state-changing operations with contracts.
-- **Reactive Transactions (`rct txn`)**: Auto-firing transactions that loop until their postcondition is satisfied.
+- **Reactive Transactions (`node`)**: Auto-firing transactions that loop until their postcondition is satisfied.
 - **Contracts (`[pre][post]`)**: Formal compile-time verification targets.
 - **System Calls (`syscall!`)**: Direct kernel-level transitions to the operating system.
 - **Foreign Functions (`frgn`)**: FFI calls to external libraries.
@@ -121,7 +121,7 @@ input :> Match("^[a-z]+$") → compiled DFA table
 #### `@` — Universal Anchoring
 Four distinct dimensions:
 - **Spatial (Addresses)**: `let led: Bool @ 0x40020000;`
-- **Temporal (Frequency)**: `rct txn simulate @ 100Hz;`
+- **Temporal (Frequency)**: `node simulate @ 100Hz;`
 - **Dimensional (Position)**: `tensor[@12: 0..16]`
 - **Chronological (History)**: `@balance` (prior tick value)
 
@@ -227,10 +227,10 @@ txn withdraw(amount: Int)
 
 ### 4.2 Reactive Transactions as Inherent Loops
 
-`rct txn` auto-fires when its precondition is true and loops until its postcondition is satisfied:
+`node` auto-fires when its precondition is true and loops until its postcondition is satisfied:
 
 ```brief
-rct txn fill_buffer()
+node fill_buffer()
     [buffer :> Size < 100]
     [buffer :> Size == 100]
 {
@@ -353,7 +353,7 @@ schema SyscallMap {
 
 ### 7.3 Reactor → Synchronous Logic
 
-All `rct txn` blocks synthesize to a global `always_ff @(posedge clk)` block. The `&` operator maps to Non-Blocking Assignments (`<=`).
+All `node` blocks synthesize to a global `always_ff @(posedge clk)` block. The `&` operator maps to Non-Blocking Assignments (`<=`).
 
 ### 7.4 Geometric SIMD
 

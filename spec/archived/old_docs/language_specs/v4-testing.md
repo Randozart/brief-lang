@@ -78,7 +78,7 @@ Example output:
 // PATHS_TO: main
 // CALLERS: (none)
 // [ENTRY_POINT]
-rct txn main [true][done == true] {
+node main [true][done == true] {
   init();
   setup();
   term;
@@ -127,7 +127,7 @@ Create a `.bv` file with Brief code:
 // Example: sample_test.bv
 let counter: Int = 0;
 
-rct txn increment [counter < 10][counter == @counter + 1] {
+node increment [counter < 10][counter == @counter + 1] {
   &counter = counter + 1;
   term;
 };

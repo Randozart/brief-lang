@@ -257,7 +257,7 @@ async txn fetch_data [url != ""][data == result] {
 ### Combined Modifiers
 
 ```brief
-async rct txn live_update [data != @data][displayed == data] {
+async node live_update [data != @data][displayed == data] {
   &displayed = data;
   term;
 };

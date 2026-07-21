@@ -302,6 +302,14 @@ impl LlvmBackend {
         if matches!(ty, Type::Ptr(_)) {
             return "ptr".to_string();
         }
+        // 2026-07-18: Utf8View always uses {i64, i64} (fat pointer), regardless of SSO.
+        // Must be checked BEFORE the general struct_types check because Utf8View is
+        // also registered as a struct type but should be passed by value, not by pointer.
+        if let Type::Custom(name) = ty {
+            if name == "Utf8View" {
+                return "{ i64, i64 }".to_string();
+            }
+        }
         // 2026-07-10: Phase 1 — check for user-defined struct types first.
         // Struct types are passed by pointer at the FFI boundary, so return
         // "ptr" (LLVM opaque pointer). The named struct type is declared in
@@ -309,15 +317,6 @@ impl LlvmBackend {
         if let Type::Custom(name) = ty {
             if self.ctx.struct_types.contains_key(name) {
                 return "ptr".to_string();
-            }
-        }
-        // 2026-07-18: SSO String override — return {i64, i64} struct instead of ptr.
-        // This must be checked after struct_types (which returns ptr for FFI) but
-        // before the universe query (which returns "ptr" for String via ctd_to_llvm).
-        // 2026-07-18: Utf8View always uses {i64, i64} (fat pointer), regardless of SSO.
-        if let Type::Custom(name) = ty {
-            if name == "Utf8View" {
-                return "{ i64, i64 }".to_string();
             }
         }
         // 2026-07-18: SVO List — return multi-slot struct type for vector-like types.
@@ -1625,7 +1624,9 @@ impl LlvmBackend {
             }
         }
 
-        // 2026-07-18: Set fn_ret_ty so term codegen extends narrow types to match.
+        // 2026-07-20: Set fn_ret_ty so term codegen stores with the correct type
+        // (Bool → i8, Int → i64, etc.) instead of whatever the previous function left.
+        self.fun.fn_ret_ty = ret_llvm.clone();
         self.fun.callable_txn_result = Some("%result".to_string());
         self.fun.callable_txn_post_label = Some("post".to_string());
         self.fun.in_callable_txn = true;

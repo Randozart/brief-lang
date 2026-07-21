@@ -361,7 +361,7 @@ Every use case for indirect calls has a better Brief-native mechanism:
 
 | C pattern | Brief equivalent | Guarantees |
 |---|---|---|
-| `dispatch_table[i](arg)` | `rct txn` with contract convergence | Contract-proven, optimizable |
+| `dispatch_table[i](arg)` | `node` with contract convergence | Contract-proven, optimizable |
 | `sort(&cmp_fn, list)` | Generics + `:>` type dispatch | Static dispatch, inlinable |
 | `signal(SIGINT, &handler)` | `frgn signal(sig: Int, handler: Int)` + `handler :> Address` | Address at boundary, contracts intact |
 

@@ -57,7 +57,7 @@ graph TD
     C2 --> C3[3. Find unique __booted_N name]
     C3 --> C4[4. Create StateDecl __booted_N: Int = 0]
     C4 --> C5[5. Synthesize body: stmts + booted = 1 + term]
-    C5 --> C6[6. Create rct txn __init]
+    C5 --> C6[6. Create node __init]
     C6 --> C7[7. Prepend state decl, append __init]
 ```
 

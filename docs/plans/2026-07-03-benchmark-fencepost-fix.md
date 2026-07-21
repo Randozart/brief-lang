@@ -25,7 +25,7 @@ This causes two issues:
 - `benchmarks/nbody_sqrt_idio.bv`
 
 Move `[count % 5000000 == 0] { ... }` to **before** `&count = count + 1`
-in the rct txn body.
+in the node body.
 
 C references already check pre-increment and need no change.
 

@@ -29,7 +29,7 @@ The compiler currently has routing gaps:
 - **No `CompilationTarget::Embedded` or `Circuit`** — typechecker can't do target-specific checks
 - **9 dead backends** consume ~10,000 lines with zero maintenance
 - **CIRCT backend is 239 lines** — only handles trigger ports, no transaction body emission
-- **No `async`/`await` keywords** at statement level — only `async rct txn` at top level
+- **No `async`/`await` keywords** at statement level — only `async node` at top level
 - **LLVM backend has no "embedded mode"** — no restricted validation, no ISR support, no freestanding linkage
 
 ## Design Decisions
@@ -249,7 +249,7 @@ Add new token:
 Await,
 ```
 
-Place after existing `Token::Async` (which already exists for `async rct txn`).
+Place after existing `Token::Async` (which already exists for `async node`).
 
 ### 2.2 — New Statement Variants in AST
 
@@ -298,7 +298,7 @@ Token::Await => {
 
 **File**: `src/parser.rs`
 
-Disambiguate from `async rct txn`:
+Disambiguate from `async node`:
 - `Token::Async` followed by `Token::Rct` or `Token::Txn` → top-level async txn (existing behavior)
 - `Token::Async` followed by anything else → `Statement::Async`
 - `Token::Async` followed by `Token::Await` → `Statement::AsyncAwait` (handled by 2.6)
@@ -313,7 +313,7 @@ Token::Async => {
     }
     // Check if followed by rct/txn -> top-level async txn
     if let Some(Ok(Token::Rct)) | Some(Ok(Token::Txn)) = self.current_token() {
-        return Err(SyntaxError::new("'async' at statement level must be followed by a statement or block; use 'async rct txn' at top level"));
+        return Err(SyntaxError::new("'async' at statement level must be followed by a statement or block; use 'async node' at top level"));
     }
     // Otherwise: async stmt or async { body }
     let body = Box::new(self.parse_statement()?);
@@ -656,7 +656,7 @@ Map `Expr` variants to CIRCT `comb` dialect ops:
 
 ### 4.3 — Transaction body → FSM with `cf` dialect
 
-Each `rct txn` body becomes a finite state machine using `scf.while` or `cf` branch blocks:
+Each `node` body becomes a finite state machine using `scf.while` or `cf` branch blocks:
 ```mlir
 // FSM for a transaction with precondition [done < N] and postcondition [done == N]
 %running = hw.wire : i1
@@ -821,7 +821,7 @@ Additional Circuit-specific type checks:
 | `test_circt_empty_program` | Empty .cbv → MLIR with `hw.module @top` and clock/reset ports |
 | `test_circt_state_register` | State variable → `seq.firreg` declaration |
 | `test_circt_combinational_add` | `let x = a + b` → `comb.add %a, %b` |
-| `test_circt_txn_fsm` | `rct txn [x < N][x == N] { ... }` → FSM pattern with `scf.while` |
+| `test_circt_txn_fsm` | `node [x < N][x == N] { ... }` → FSM pattern with `scf.while` |
 | `test_circt_precondition_guard` | `[x < N]` → `comb.icmp ult` |
 | `test_circt_trg_input_port` | `trg btn: Bool @ 0x8000` → input port `btn` |
 | `test_circt_await_stall` | `await compute(x)` → FSM stall pattern |

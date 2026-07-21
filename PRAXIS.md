@@ -59,8 +59,8 @@ In Brief: **all transactions exist simultaneously**. The "reactor loop" is just 
 **Implication for Optimization:**
 ```brief
 // These are NOT sequential checks
-rct txn door_open() [player_at_door && has_key][door.state == OPEN] { ... }
-rct txn door_locked() [player_at_door && !has_key][door.state == LOCKED] { ... }
+node door_open() [player_at_door && has_key][door.state == OPEN] { ... }
+node door_locked() [player_at_door && !has_key][door.state == LOCKED] { ... }
 
 // Compiler can generate:
 // - Parallel evaluation (SIMD)
@@ -85,8 +85,8 @@ if (x) {
 
 Brief:
 ```brief
-rct txn do_A [x][A_done == true] { ... }
-rct txn do_B [!x][B_done == true] { ... }
+node do_A [x][A_done == true] { ... }
+node do_B [!x][B_done == true] { ... }
 ```
 
 **Hardware Reality:** This is a **multiplexer**. Both paths exist; the signal flows through the one that is true.
@@ -109,7 +109,7 @@ while (x < 10) {
 
 Brief:
 ```brief
-rct txn count_up [x < 10][x == @x + 1] {
+node count_up [x < 10][x == @x + 1] {
     &x = x + 1;
     term;
 };
@@ -151,7 +151,7 @@ The SMT solver asks: *"Where does this vector end?"*
 
 ```brief
 let count = 0;
-rct txn count_up [count < 10][count == @count + 1] {
+node count_up [count < 10][count == @count + 1] {
     &count = count + 1;
     term;
 };
@@ -179,7 +179,7 @@ Brief: **addresses are part of the type system**. The compiler knows exactly whi
 
 #### A. Predictive Fetching
 ```brief
-rct txn process_sensor() [buffer_ready && threshold > 100][processed == true] {
+node process_sensor() [buffer_ready && threshold > 100][processed == true] {
     let data = sensor_buffer[0];
     ...
 }
@@ -260,7 +260,7 @@ The SMT solver doesn't "check" your code. It simulates the physics of your logic
 **Counterexample = Physics Violation:**
 ```brief
 // ❌ REJECTED by compiler
-rct txn bad_transfer() [balance >= 100][balance == @balance - 100] {
+node bad_transfer() [balance >= 100][balance == @balance - 100] {
     [balance < 50] {
         &balance = balance + 10;  // Violates postcondition!
     };
@@ -301,12 +301,12 @@ sub [balance], 100  ; No check needed - proven safe
 When two transactions always fire together, fuse them:
 
 ```brief
-rct txn A [x > 0][x == @x - 1] { &x = x - 1; term; }
-rct txn B [y < 100][y == @y + 1] { &y = y + 1; term; }
+node A [x > 0][x == @x - 1] { &x = x - 1; term; }
+node B [y < 100][y == @y + 1] { &y = y + 1; term; }
 
 ; Compiler proves: A and B always fire together
 ; Generates fused transaction:
-rct txn A_B [x > 0 && y < 100][x == @x - 1 && y == @y + 1] {
+node A_B [x > 0 && y < 100][x == @x - 1 && y == @y + 1] {
     &x = x - 1;
     &y = y + 1;
     term;
@@ -322,9 +322,9 @@ rct txn A_B [x > 0 && y < 100][x == @x - 1 && y == @y + 1] {
 In hardware, this is called **Logic Depth**.
 
 ```brief
-rct txn setup() [init][ready == true] { ... }
-rct txn compute() [ready][result == func(data)] { ... }
-rct txn output() [result][complete == true] { ... }
+node setup() [init][ready == true] { ... }
+node compute() [ready][result == func(data)] { ... }
+node output() [result][complete == true] { ... }
 ```
 
 **Traditional (3 clock cycles):**
@@ -353,7 +353,7 @@ On FPGA: the difference between a state machine and a **combinatorial datapath**
 When guards are expensive, pre-compute:
 
 ```brief
-rct txn complex_check() [expensive_calc(x) && y > 0][...] { ... }
+node complex_check() [expensive_calc(x) && y > 0][...] { ... }
 ```
 
 **Compiler generates:**
@@ -361,12 +361,12 @@ rct txn complex_check() [expensive_calc(x) && y > 0][...] { ... }
 // Cached guard result
 let guard_cache: Bool = false;
 
-rct txn update_cache() [x != @x || y != @y][guard_cache == expensive_calc(x) && y > 0] {
+node update_cache() [x != @x || y != @y][guard_cache == expensive_calc(x) && y > 0] {
     &guard_cache = expensive_calc(x) && y > 0;
     term;
 }
 
-rct txn complex_check() [guard_cache][...] { ... }
+node complex_check() [guard_cache][...] { ... }
 ```
 
 **Benefit:** Expensive calculation done once, reused until inputs change.
@@ -378,15 +378,15 @@ rct txn complex_check() [guard_cache][...] { ... }
 Group reactive transactions that modify same state:
 
 ```brief
-rct txn increment_a() [cond_a][a == @a + 1] { &a = a + 1; term; }
-rct txn increment_b() [cond_b][b == @b + 1] { &b = b + 1; term; }
-rct txn update_sum() [a != @a || b != @b][sum == a + b] { &sum = a + b; term; }
+node increment_a() [cond_a][a == @a + 1] { &a = a + 1; term; }
+node increment_b() [cond_b][b == @b + 1] { &b = b + 1; term; }
+node update_sum() [a != @a || b != @b][sum == a + b] { &sum = a + b; term; }
 ```
 
 **Compiler generates:**
 ```brief
 // Batched update - only fires once after both increments
-rct txn update_sum_batched() 
+node update_sum_batched() 
     [(a != @a || b != @b) && !update_pending]
     [sum == a + b && update_pending == true]
 {
@@ -485,7 +485,7 @@ Brief: The compiler analyzes the **Shape** of the world (BSP tree) and the **Vec
 struct Ray { origin: Vec3, direction: Vec3 }
 struct BSPNode { left: Box, right: Box, wall: Wall }
 
-rct txn cast_ray() [valid_ray][collision_point == solve_bsp(ray, bsp)]
+node cast_ray() [valid_ray][collision_point == solve_bsp(ray, bsp)]
 ```
 
 **The result:** Zero iterations. The distance to the wall is a **proven constant**.

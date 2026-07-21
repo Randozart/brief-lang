@@ -450,11 +450,11 @@ trg sensor: Bool @0;
 let x: Int = 0;
 let y: Int = 0;
 
-rct txn step_a [count < total][count == total] {
+node step_a [count < total][count == total] {
     &x = sensor;              // x depends on trigger value!
     &count = count + 1;
 };
-rct txn step_b [count < total][count == total] {
+node step_b [count < total][count == total] {
     &y = x + 1;               // depends on x from step_a
 };
 ```

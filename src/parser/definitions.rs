@@ -1,7 +1,7 @@
 // ── Definition/Transaction/Cell Parser ─────────────────────────────────
 // 2026-07-12: Phase 1.2 — Parse top-level declarations.
 // Flat code: each function is max 2 levels.
-// Handles: defn, txn, rct txn, cell, export, import, meld, trg.
+// Handles: defn, txn, node, cell, export, import, meld, trg.
 // Also handles [#] entry contracts, derivation blocks :=, implicit entry wrapping.
 
 use super::helpers::Parser;
@@ -24,7 +24,7 @@ impl<'a> Parser<'a> {
             Some(Token::Txn) => self
                 .parse_transaction(false, false)
                 .map(TopLevel::Transaction),
-            Some(Token::Rct) => self.parse_reactive_transaction().map(TopLevel::Transaction),
+            Some(Token::Node) => self.parse_node().map(TopLevel::Transaction),
             Some(Token::Cell) => self.parse_cell().map(TopLevel::Cell),
             Some(Token::Import) => self.parse_import().map(TopLevel::Import),
             Some(Token::Meld) => self.parse_meld().map(TopLevel::Meld),
@@ -276,30 +276,17 @@ impl<'a> Parser<'a> {
         })
     }
 
-    /// Parse: rct [async] txn name [pre][post] { body }
-    fn parse_reactive_transaction(&mut self) -> Result<Transaction, SyntaxError> {
-        self.pos += 1; // consume 'rct'
-        // 2026-07-17: Optional 'async' keyword between rct and txn.
-        // rct async txn signals that the compiler should dispatch this
+    /// Parse: node [async] name [pre][post] { body }
+    /// A node is a reactive state machine — no parameters, no return value.
+    /// It fires automatically when its precondition is true.
+    fn parse_node(&mut self) -> Result<Transaction, SyntaxError> {
+        self.pos += 1; // consume 'node'
+        // 2026-07-21: Optional 'async' modifier after node keyword.
+        // node async signals that the compiler should dispatch this
         // transaction in parallel when write sets are disjoint.
         let is_async = self.eat(&Token::Async);
-        // 2026-07-14: 'txn' is a keyword token (Token::Txn), not an identifier.
-        // Use eat() instead of expect_identifier() to match the keyword token.
-        if !self.eat(&Token::Txn) {
-            let found = match self.peek() {
-                Some(t) => format!("{}", t),
-                None => "EOF".to_string(),
-            };
-            return self.error_at_current(&format!("expected 'txn' after 'rct', found '{}'", found));
-        }
         let name = self.expect_identifier()?;
-        let parameters = if self.eat(&Token::LParen) {
-            let p = self.parse_parameter_list()?;
-            self.expect(Token::RParen)?;
-            p
-        } else {
-            Vec::new()
-        };
+        // node has no parameters and no return value (purely reactive)
         let contract = self.parse_contract()?;
         let body = self.parse_block()?;
         let derivation = self.parse_derivation_block()?;
@@ -308,7 +295,7 @@ impl<'a> Parser<'a> {
             is_reactive: true,
             is_async,
             type_params: vec![],
-            parameters,
+            parameters: vec![],
             output_type: None,
             outputs: Vec::new(),
             contract,
@@ -330,7 +317,7 @@ impl<'a> Parser<'a> {
         let mut definitions = Vec::new();
         while !self.check(&Token::RBrace) && !self.is_at_end() {
             // Parse txn inside cell
-            if self.check_identifier("txn") || self.check_identifier("rct") {
+            if self.check_identifier("txn") || self.check_identifier("node") {
                 // handled in full implementation
             }
             self.parse_toplevel_inside_cell(&mut transactions, &mut definitions)?;

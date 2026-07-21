@@ -1,5 +1,5 @@
 // Top-level __init: executable statements at global scope
-// The compiler wraps these in rct txn __init [!__booted][__booted]
+// The compiler wraps these in node __init [!__booted][__booted]
 // which fires once on program start, then exits.
 
 frgn #out __print_int(val: Int) -> Bool;

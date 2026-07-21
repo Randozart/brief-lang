@@ -298,7 +298,7 @@ referent is declared:
 | Declaration | `&name` produces | Rationale |
 |-------------|-----------------|-----------|
 | `state { x: Int }` | `Ptr<Int>` | State fields are mutable — writes are expected |
-| `rct txn { &x = ... }` | `Ptr<Int>` | Same — txn body mutation targets |
+| `node { &x = ... }` | `Ptr<Int>` | Same — txn body mutation targets |
 | `let x = 5` | `Ptr<const Int>` | Let bindings are single-assignment — write-through is meaningless |
 | `defn f(p: Ptr<Int>)` | `Ptr<Int>` | Parameter declared mutable |
 | `defn f(p: Ptr<const Int>)` | `Ptr<const Int>` | Parameter declared read-only |
@@ -329,7 +329,7 @@ rather than explicit annotations.
 ```brief
 state { saved: Ptr<Int> };
 
-rct txn example {
+node example {
     [true][true] {
         let temp = 5;
         &saved = &temp;      // ⚠️ DANGER: &temp points to a local
@@ -451,7 +451,7 @@ with a direct field write in the other transaction:
 
 ```brief
 // Txn A                                     // Txn B
-rct txn write_via_ptr {                       rct txn write_direct {
+node write_via_ptr {                       node write_direct {
     [true][true] {                               [true][true] {
         let p = &counter;                            &counter = compute();
         *p = compute();

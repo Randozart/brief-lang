@@ -8,7 +8,7 @@ let total_withdrawals: Int = 0;
 let locked: Bool = false;
 
 // Withdrawal with overdraft protection
-rct txn withdraw [locked == false && account_balance >= 50 && total_withdrawals < 10]
+node withdraw [locked == false && account_balance >= 50 && total_withdrawals < 10]
   [account_balance == @account_balance - 50 && total_withdrawals == @total_withdrawals + 1]
 {
   locked = true;
@@ -19,7 +19,7 @@ rct txn withdraw [locked == false && account_balance >= 50 && total_withdrawals 
 };
 
 // Deposit transaction
-rct txn deposit [locked == false]
+node deposit [locked == false]
   [account_balance == @account_balance + 100]
 {
   locked = true;
@@ -29,7 +29,7 @@ rct txn deposit [locked == false]
 };
 
 // Reset daily counter (for testing)
-rct txn reset_counter [total_withdrawals > 0]
+node reset_counter [total_withdrawals > 0]
   [total_withdrawals == 0]
 {
   total_withdrawals = 0;

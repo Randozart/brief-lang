@@ -46,7 +46,7 @@ let uart_config_done: Bool = false;
 let uart_init_done: Bool = false;
 let result: Int = 0;
 
-rct txn configure_uart [step < 3][step == 3] {
+node configure_uart [step < 3][step == 3] {
     [step == 0] {
         // Step 0: configure baud rate registers
         let ok: Bool = write_uart(UART_IBRD, 26);

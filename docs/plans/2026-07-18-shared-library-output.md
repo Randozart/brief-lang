@@ -101,25 +101,25 @@ let args = vec![
 
 ---
 
-**Reactive collections** — `export rct txn` exports the entire reactive
+**Reactive collections** — `export node` exports the entire reactive
 transaction set as a single `run_reactive` entry point. The host calls this
 to run all reactive transactions to convergence:
 
 ```brief
-export rct txn process [x < TOTAL][x == TOTAL] {
+export node process [x < TOTAL][x == TOTAL] {
     x = x + 1;
     term;
 };
 ```
 This compiles to a `run_reactive()` function that blocks until all exported
-reactive txns have converged. Multiple `export rct txn` declarations form
+reactive txns have converged. Multiple `export node` declarations form
 a single convergence loop together (same scheduling as the standard reactor).
 
 ### L2: Export annotation
 
 **Files:** `src/ast/top.rs`, `src/parser/definitions.rs`, `src/backend/llvm/mod.rs`
 
-**Parser:** Accept optional `export` keyword before `defn` or `rct txn`:
+**Parser:** Accept optional `export` keyword before `defn` or `node`:
 ```rust
 // src/parser/definitions.rs
 fn parse_definition(&mut self) -> Result<TopLevel, SyntaxError> {

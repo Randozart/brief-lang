@@ -22,7 +22,7 @@ let count: Int = 0;
 import "std/core/ring_buffer.bv";
 let queue: RingBuffer<Int> = [0];
 
-rct txn work [count < N][count == N] {
+node work [count < N][count == N] {
     <- &queue;
     &queue <- count;
 count = count + 1;

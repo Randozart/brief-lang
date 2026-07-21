@@ -249,7 +249,7 @@ const FLAGS: UInt = 0xFF;
 ## Top-Level Statements (Scripting Mode)
 
 Executable statements written at global scope are automatically wrapped in a
-synthesized `rct txn __init` that fires once at startup.
+synthesized `node __init` that fires once at startup.
 
 ```brief
 let message: String = "Hello, Brief!";
@@ -261,7 +261,7 @@ The compiler generates a one-shot transaction equivalent to:
 ```brief
 let message: String = "Hello, Brief!";
 let __booted_0: Int = 0;
-rct txn __init [!__booted_0][__booted_0] {
+node __init [!__booted_0][__booted_0] {
     println(message);
     __booted_0 = 1;
     term;
@@ -300,7 +300,7 @@ txn name [precondition] [postcondition] {
 ### Reactive Transaction (RCT)
 
 ```brief
-rct txn name [precondition] [postcondition] {
+node name [precondition] [postcondition] {
     variable = value;
     term;
 };
@@ -339,7 +339,7 @@ txn identity [x: Int] [result == x];
 ### With Reactor Speed
 
 ```brief
-rct txn blink @60Hz [true] [led == !led] {
+node blink @60Hz [true] [led == !led] {
     term;
 };
 ```
@@ -347,7 +347,7 @@ rct txn blink @60Hz [true] [led == !led] {
 ### Transaction Method (dot syntax)
 
 ```brief
-rct txn counter.increment [count < max] [count == @count + 1] {
+node counter.increment [count < max] [count == @count + 1] {
     count = count + 1;
     term;
 };
@@ -385,7 +385,7 @@ The watchdog is checked at `term`.
 Expands to: `[~identifier][identifier]`
 
 ```brief
-rct txn toggle [~/ready][ready] {
+node toggle [~/ready][ready] {
     ready = !ready;
     term;
 };
@@ -394,20 +394,20 @@ rct txn toggle [~/ready][ready] {
 ### Examples
 
 ```brief
-rct txn increment [counter < 10]
+node increment [counter < 10]
   [counter == @counter + 1]
 {
     counter = counter + 1;
     term;
 };
 
-rct txn guarded [x > 0][y == x * 2]
+node guarded [x > 0][y == x * 2]
 {
     &y = x * 2;
     term;
 };
 
-rct txn with_watchdog [ready == true][done == true][?timeout] {
+node with_watchdog [ready == true][done == true][?timeout] {
     done = true;
     term;
 };

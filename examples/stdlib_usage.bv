@@ -19,7 +19,7 @@ defn demo_bits(n: Int) [n != 0][term == absolute(n)] -> Int {
   term absolute(n);
 };
 
-rct txn initialize_system
+node initialize_system
   [initialized == false]
   [initialized == true && counter == @counter]
 {
@@ -27,7 +27,7 @@ rct txn initialize_system
   term;
 };
 
-rct txn process_value [initialized == true][counter == @counter + 1] {
+node process_value [initialized == true][counter == @counter + 1] {
   let clamped: Int = clamp(x, -50, 50);
   let a: Int = absolute(x);
   let m: Int = min(y, 20);

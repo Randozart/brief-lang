@@ -64,7 +64,7 @@ src/
 │  trg! button_press: Bool;           │
 │  trg! sensor_input: Int;            │
 │                                     │
-│  rct txn ui_loop [true] {          │
+│  node ui_loop [true] {          │
 │      // reads trg! signals          │
 │      // cyclic (polling)  ✗        │
 │  }                                  │

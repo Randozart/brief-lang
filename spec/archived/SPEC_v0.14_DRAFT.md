@@ -22,7 +22,7 @@ alka_line  ::= [^;]+ ";"
 
 ### 10.2 Placement
 
-`alka` blocks may appear inside any body block — `rct txn`, `defn`, struct methods. They are not valid at top-level (use `.alka` files for standalone Alka recipes) and are not expressions (Drops are fire-and-forget, not values).
+`alka` blocks may appear inside any body block — `node`, `defn`, struct methods. They are not valid at top-level (use `.alka` files for standalone Alka recipes) and are not expressions (Drops are fire-and-forget, not values).
 
 ### 10.3 Target Behavior
 
@@ -38,7 +38,7 @@ When targeting C, a build flag (`--emit-alka-ffi`) can change the emitted code f
 
 ```brief
 // Safe coordination Drop — signal completion to orchestrator
-rct txn push_expert [src != 0][state == RESIDENT] {
+node push_expert [src != 0][state == RESIDENT] {
     ce_dma(src, dst, size);
     alka {
         FENCE GPU_MAIN.METAPAGE == 1;
@@ -47,7 +47,7 @@ rct txn push_expert [src != 0][state == RESIDENT] {
 };
 
 // Dangerous hardware pulse — ring the GPU doorbell
-rct txn ring_doorbell [gpput_valid == true] {
+node ring_doorbell [gpput_valid == true] {
     alka! {
         PULSE DOORBELL @ 0x90;
     };
@@ -77,7 +77,7 @@ Scoped tags (`#[target]tag`) restrict the modifier to a specific target backend.
 The `#on_exit { ... };` block pragma registers a cleanup handler within the enclosing body. When the body exits (normally via `term` or via early exit), the cleanup executes. Multiple `#on_exit` blocks stack in LIFO order.
 
 ```brief
-rct txn claim_gpu {
+node claim_gpu {
     &CLAIMED = true;
     #on_exit {
         &CLAIMED = false;
@@ -121,14 +121,14 @@ Hashtags may appear in the following positions (and only these — `#` on standa
 
 4. **After `}`** closing a block-based definition
    ```brief
-   rct txn push [pre][post] {
+   node push [pre][post] {
        // ...
    } #vessel;
    ```
 
 5. **Before a variant body** (applies to that body only)
    ```brief
-   rct txn push
+   node push
        [use_ce] #!direct_ce { build_pushbuffer(); }
        [use_cpu]             { memcpy(); }
        [post data_ready];
@@ -167,14 +167,14 @@ multi   ::= variant+ ";"
 
 ### 12.2 Transactions and Definitions — Runtime Dispatch
 
-For `rct txn` and `defn`, the `[pre]` conditions are evaluated **at runtime** in declaration order. The first matching precondition executes its body.
+For `node` and `defn`, the `[pre]` conditions are evaluated **at runtime** in declaration order. The first matching precondition executes its body.
 
 - A shared `[post]` is declared on the first body and must be provably satisfied by all bodies
 - A body without `[pre]` is the catch-all (must be last)
 - Strict mode requires exhaustive coverage — the proof engine must verify all possible states are handled
 
 ```brief
-rct txn transfer_expert
+node transfer_expert
     [loc == SSD] [post ready] {
         dma_from_ssd(expert);
     }
@@ -278,7 +278,7 @@ The compiler emits a pointer dereference to `userd_ptr` rather than an immediate
 In `.sbv`/`.sebv`, the expression must be provably non-null before the mapped variable is accessed:
 
 ```brief
-rct txn use_userd [userd_ptr != 0] {
+node use_userd [userd_ptr != 0] {
     let USERD @ userd_ptr #volatile : { ... };
     &USERD.DOORBELL = token #!sfence;
 };

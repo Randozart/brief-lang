@@ -29,8 +29,8 @@ in the plugin system. This plan introduces three Mid-stage plugins:
 | Plugin | Stage | What it does |
 |--------|-------|-------------|
 | `auto-main` | Mid | Finds `defn main` or `txn main` and sets `Contract.is_entry = true` |
-| `entry-check` | Mid | Verifies at least one entry mechanism exists (`[#]`, `rct txn`, or `trg`) |
-| `check-reactive` | Mid | Verifies each `rct txn` has at least one live field binding it consumes |
+| `entry-check` | Mid | Verifies at least one entry mechanism exists (`[#]`, `node`, or `trg`) |
+| `check-reactive` | Mid | Verifies each `node` has at least one live field binding it consumes |
 
 All three are **enabled by default**.
 
@@ -64,7 +64,7 @@ the entry marker.
 
 - `src/bvir/serialize.rs` at contract emission: `// 2026-07-15: (entry) preserves is_entry through BVIR round-trip`
 - `src/bvir/deserialize.rs` at contract parsing: `// 2026-07-15: Restore is_entry from (entry) marker`
-- `src/plugin/intrinsics.rs` at `CheckReactive$`: `// 2026-07-15: Phase 8 — verifies rct txn has live field bindings`
+- `src/plugin/intrinsics.rs` at `CheckReactive$`: `// 2026-07-15: Phase 8 — verifies node has live field bindings`
 - `src/plugin/loader.rs` at registration: `// 2026-07-15: auto-main plugin (Mid)`
 
 ### 3.2 Architecture docs to update
@@ -140,13 +140,13 @@ Uses `Collect$` to count entry mechanisms, emits error if zero.
 ```brief
 $(Mid) {
     let has_entry: Int = Collect$("(contract (entry) ??rest)");
-    let has_rct: Int = Collect$("(rct txn ?name ?contract ?params [?pre] [?post] ?body)");
+    let has_rct: Int = Collect$("(node ?name ?contract ?params [?pre] [?post] ?body)");
     let has_trg: Int = Collect$("(trg ?name ?type @ ?binding)");
 
     [has_entry == 0 && has_rct == 0 && has_trg == 0] {
         EmitError$(
             "no entry point: add [#] to defn/txn main, "
-            "use rct txn, or declare a trg"
+            "use node, or declare a trg"
         );
     };
 };
@@ -181,7 +181,7 @@ fn intrinsic_check_reactive(args: &[Expr], program: &[TopLevel]) -> Result<(), S
         })
         .collect();
 
-    // For each rct txn, check it reads at least one live field
+    // For each node, check it reads at least one live field
     let mut live_rct_count = 0u32;
     for item in program {
         if let TopLevel::Transaction(txn) = item {
@@ -210,9 +210,9 @@ to appear in a string literal, which is rare.
 
 ### 7.3 Tests
 
-- `test_check_reactive_rejects_dead`: rct txn with no fields → error
-- `test_check_reactive_accepts_live`: rct txn reading a let-binding → ok
-- `test_check_reactive_accepts_entry`: rct txn with `is_entry` → ok
+- `test_check_reactive_rejects_dead`: node with no fields → error
+- `test_check_reactive_accepts_live`: node reading a let-binding → ok
+- `test_check_reactive_accepts_entry`: node with `is_entry` → ok
 
 ---
 
@@ -261,7 +261,7 @@ then `entry-check` (sees the newly-added `[#]`), then `check-reactive`
 | 4 | `test_auto_main_skips_if_no_main` | No `main` → no change |
 | 5 | `test_entry_check_rejects_empty` | No entry → error |
 | 6 | `test_entry_check_accepts_entry` | `[#]` → passes |
-| 7 | `test_entry_check_accepts_rct` | `rct txn` → passes |
+| 7 | `test_entry_check_accepts_rct` | `node` → passes |
 | 8 | `test_entry_check_accepts_trg` | `trg` → passes |
 | 9 | `test_check_reactive_rejects_dead` | rct with no live field → error |
 | 10 | `test_check_reactive_accepts_live` | rct with live field → ok |

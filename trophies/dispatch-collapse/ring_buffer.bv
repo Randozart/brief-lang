@@ -21,7 +21,7 @@ frgn __print_int(n: Int) -> Bool ;
 let ops: Int = 0;
 let N: Int = get_env_int("BOUND");
 
-rct txn work [ops < N][ops == N] {
+node work [ops < N][ops == N] {
     &ops = ops + 1;
     [ops % 5000000 == 0] {
         __print_int(ops);

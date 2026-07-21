@@ -111,7 +111,7 @@ trg dma_src: UInt @ 0x80040000 /0..31;
 trg dma_dst: UInt @ 0x80040004 /0..31;
 trg dma_len: UInt @ 0x80040008 /0..15;
 
-rct txn setup_dma [true] {
+node setup_dma [true] {
     &dma_src = get_weight_addr(current_idx);
     &dma_dst = FPGA_BRAM_BASE;
     &dma_len = 524288;
@@ -131,12 +131,12 @@ Inference: Read weights from either bank
 
 **Existing Solution:** Transaction preconditions + address arithmetic:
 ```brief
-rct txn read_weight [idx < PART_A_SIZE] {
+node read_weight [idx < PART_A_SIZE] {
     &phys_addr = 0x0 + idx;
     term;
 };
 
-rct txn read_weight_b [idx >= PART_A_SIZE] {
+node read_weight_b [idx >= PART_A_SIZE] {
     &phys_addr = 0x800000000 + (idx - PART_A_SIZE);
     term;
 };
@@ -159,7 +159,7 @@ for (offset = 0; offset < model_size; offset += CHUNK_SIZE) {
 
 **Existing Solution:** Transactions ARE the iteration mechanism (proof-friendly loops):
 ```brief
-rct txn stream_next [pending > 0] [stream_state == streaming] {
+node stream_next [pending > 0] [stream_state == streaming] {
     &offset = (stream_state == idle) ? 0 : offset + CHUNK_SIZE;
     &fpga_addr = offset;
     &ddr_addr = get_weight_addr(offset);
@@ -214,7 +214,7 @@ void layer_complete_isr(void) {
 ```brief
 trg layer_complete_irq: Bool @ 0x40000010;
 
-rct txn handle_irq [layer_complete_irq] [layer_complete_irq == false] {
+node handle_irq [layer_complete_irq] [layer_complete_irq == false] {
     &pending_layers = pending_layers - 1;
     term;
 };
@@ -513,7 +513,7 @@ let name: Type @ address [/bit-range] = init;
 
 ### Transactions (Implicit Loops)
 ```brief
-rct txn name [pre][post][?watchdog] {
+node name [pre][post][?watchdog] {
     // body - executes when precondition is true
 }
 ```

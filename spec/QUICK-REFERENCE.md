@@ -9,7 +9,7 @@
 state <name>: <type> = <expr>?
 
 // Transaction
-rct txn <name>(<params>) [pre][post] {
+node <name>(<params>) [pre][post] {
     // body
 }
 

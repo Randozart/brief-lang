@@ -2,7 +2,7 @@
 
 let x: Int = 0;
 
-rct txn tick [x < 100][x == 100] {
+node tick [x < 100][x == 100] {
     let a: Int = 1;
     let b: Int = 2;
     let c: Int = a + b;

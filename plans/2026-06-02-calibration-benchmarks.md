@@ -20,7 +20,7 @@ We need calibration benchmarks that isolate and measure each optimization indepe
 
 **Purpose:** Measure the i64 boxing tax elimination for float-heavy SSA loops.
 
-**Design:** 12 float state fields, ~60 float operations per tick (matrix multiply), 50M iterations via runtime variable `BOUND`. Single `rct txn step [x0 == x0]` to ensure SSA mode (non-pure body prevents pure-counter elimination).
+**Design:** 12 float state fields, ~60 float operations per tick (matrix multiply), 50M iterations via runtime variable `BOUND`. Single `node step [x0 == x0]` to ensure SSA mode (non-pure body prevents pure-counter elimination).
 
 ```brief
 import "link/brief_rt.o"
@@ -61,7 +61,7 @@ const Q22: Float = 0.1
 
 let total: Int = __get_env_int("BOUND");
 
-rct txn step [x0 == x0] {
+node step [x0 == x0] {
     &x0 = A00 * x0 + A01 * x1 + A02 * x2;
     &x1 = A10 * x0 + A11 * x1 + A12 * x2;
     &x2 = A20 * x0 + A21 * x1 + A22 * x2;
@@ -97,14 +97,14 @@ import "link/brief_rt.o"
 
 let count: Int = 0
 
-rct txn case_ping  [io_pending == 101] { &count = count + 1; }
-rct txn case_ack   [io_pending == 204] { &count = count + 1; }
-rct txn case_err   [io_pending == 404] { &count = count + 1; }
-rct txn case_debug [io_pending == 808] { &count = count + 1; }
-rct txn case_data  [io_pending == 1616] { &count = count + 1; }
-rct txn case_ctrl  [io_pending == 3232] { &count = count + 1; }
-rct txn case_sync  [io_pending == 6464] { &count = count + 1; }
-rct txn case_stat  [io_pending == 128] { &count = count + 1; }
+node case_ping  [io_pending == 101] { &count = count + 1; }
+node case_ack   [io_pending == 204] { &count = count + 1; }
+node case_err   [io_pending == 404] { &count = count + 1; }
+node case_debug [io_pending == 808] { &count = count + 1; }
+node case_data  [io_pending == 1616] { &count = count + 1; }
+node case_ctrl  [io_pending == 3232] { &count = count + 1; }
+node case_sync  [io_pending == 6464] { &count = count + 1; }
+node case_stat  [io_pending == 128] { &count = count + 1; }
 ```
 
 **C reference:** Same dispatch via computed goto, same algorithm.
@@ -143,7 +143,7 @@ let acc: Int = 0;
 
 #!exit count == total;
 
-rct txn step [count < total] {
+node step [count < total] {
     &acc = acc + C00 + C01 + C02 + C03 + C04
           + C05 + C06 + C07 + C08 + C09
           + C10 + C11 + C12 + C13 + C14

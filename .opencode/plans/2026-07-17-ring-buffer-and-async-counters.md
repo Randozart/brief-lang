@@ -58,13 +58,13 @@ let a: Int = 0;
 let b: Int = 0;
 let report: Int = 0;
 
-rct txn inc_a [a < N][a == N] {
+node inc_a [a < N][a == N] {
     a = a + 1;
     [a % 10000000 == 0] { PrintInt#(a); };
     term;
 };
 
-rct txn inc_b [b < N][b == N] {
+node inc_b [b < N][b == N] {
     b = b + 1;
     [b % 10000000 == 0] { PrintInt#(b); };
     term;

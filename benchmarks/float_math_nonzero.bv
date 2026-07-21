@@ -22,7 +22,7 @@ const Q00: Float = 0.1;
 const Q11: Float = 0.1;
 const Q22: Float = 0.1;
 
-rct txn tick [
+node tick [
     count < total
 ][count == total] {
     x0 = A00 * x0 + A01 * x1 + A02 * x2;

@@ -16,7 +16,7 @@ Separate what Brief can do natively from what requires FFI to Rust. Build a stdl
 **Example**: A counter that automatically increments while conditions hold
 ```brief
 let count: Int = 0;
-rct txn increment [count < 100] [count == @count + 1] {
+node increment [count < 100] [count == @count + 1] {
   &count = count + 1;
   term;
 };

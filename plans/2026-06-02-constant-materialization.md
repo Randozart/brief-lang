@@ -220,7 +220,7 @@ fn to_float_reg(&mut self, out: &mut String, reg: &str, indent: &str) -> String 
 
 ## Solution Part C: `llvm.assume` for Branchless Preconditions
 
-For `rct txn work [count < bound] { &count = count + 1; }`, the precondition emits:
+For `node work [count < bound] { &count = count + 1; }`, the precondition emits:
 
 ```llvm
 %cond = icmp slt i64 %count, %bound

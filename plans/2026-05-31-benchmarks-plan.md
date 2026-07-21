@@ -15,8 +15,8 @@ Add 3 new benchmarks to validate every optimization path against C equivalents, 
 - `trg cmd: Bool @ link __cmd` — selects push (0) vs pop (1)
 - State: `head: Int`, `tail: Int`, `count: Int`
 - Constants: `CAP: Int = 1024`, `N: Int = 50_000_000`
-- `rct txn push [cmd == 0][count == @count + 1]` — bounded convergence push loop
-- `rct txn pop [cmd == 1 && count > 0][count == @count - 1]` — bounded convergence pop loop
+- `node push [cmd == 0][count == @count + 1]` — bounded convergence push loop
+- `node pop [cmd == 1 && count > 0][count == @count - 1]` — bounded convergence pop loop
 - Init txn: captures `t0` via monotonic clock
 - Report txn: prints elapsed ns after N operations
 
@@ -59,7 +59,7 @@ Add 3 new benchmarks to validate every optimization path against C equivalents, 
 **Targets:** Compile-time complete evaluation, zero-instruction hot path
 
 **Program structure:**
-- Single `rct txn sum [count < 1000][count == 1000]` computing `result = result + count`
+- Single `node sum [count < 1000][count == 1000]` computing `result = result + count`
 - State space: {count: 0..1000, result: 0..499500} ≤ budget (256)
 - Compiler evaluates all 1000 steps at compile time
 

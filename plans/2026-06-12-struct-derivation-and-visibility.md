@@ -148,7 +148,7 @@ This uses the existing `TypeError::TypeMismatch` infrastructure and the type's
 sed defn helper() -> Int { ... }         // not importable
 sed let BOUND: Int = 100;                // not importable
 sed txn increment(...) -> Int { ... }    // not importable
-sed rct txn on_tick [...] { ... }        // triggers only in this file
+sed node on_tick [...] { ... }        // triggers only in this file
 sed trg internal_event;                  // fires only in this file
 sed struct Buffer { ... };               // type name unexported
 

@@ -173,7 +173,7 @@ defn keyword_to_string(tok: Token) -> String {
     uni tok(KeywordLet) = "let";
     uni tok(KeywordConst) = "const";
     uni tok(KeywordTxn) = "txn";
-    uni tok(KeywordRct) = "rct";
+    uni tok(KeywordNode) = "node";
     uni tok(KeywordAsync) = "async";
     uni tok(KeywordTerm) = "term";
     uni tok(KeywordEscape) = "escape";

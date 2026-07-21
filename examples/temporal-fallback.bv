@@ -31,7 +31,7 @@ let result = a() within 10 cyc (3) ~? b() within 5 cyc (2) ~? 0;
 let result = query_db() within 100 ms (3) ~? cache_lookup();
 
 // ── Watchdog bracket form ──
-rct txn process [x > 0][x == 0] ?[cycles <= 1000 retry 3] ~? log_timeout() {
+node process [x > 0][x == 0] ?[cycles <= 1000 retry 3] ~? log_timeout() {
     x = x - 1;
     term;
 };

@@ -10,7 +10,7 @@ only use synchronous transactions. For programs like nbody_sqrt and
 float_math, this was 5-15% of total execution time.
 
 **How**: The dispatch analysis determines at compile time whether a program
-uses any async triggers (FFI signals, MMIO mappings, `rct txn` with reactor
+uses any async triggers (FFI signals, MMIO mappings, `node` with reactor
 speed). If not, the codegen emits a `while` loop directly around the
 transaction bodys' combined state transitions, using phi nodes for field
 state instead of a function call into the reactor. The `emit_dispatch_type()`

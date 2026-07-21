@@ -43,7 +43,7 @@ printf "hello\x03" | timeout 3 ./officina
 
 ### B1: Architecture
 
-**One macro pattern, one syntax**: `$!name { overrides? }` before a `rct txn` = decorator. The macro receives the following declaration's AST parts (name, guard, body) as implicit arguments and emits augmented top-level items.
+**One macro pattern, one syntax**: `$!name { overrides? }` before a `node` = decorator. The macro receives the following declaration's AST parts (name, guard, body) as implicit arguments and emits augmented top-level items.
 
 ### B2: AST changes (`src/ast.rs`)
 
@@ -52,7 +52,7 @@ printf "hello\x03" | timeout 3 ./officina
 | `Value::TopLevels(Vec<TopLevel>)` | New Value variant — macro return type for top-level items |
 | `Expr::QuoteTopBlock { items: Vec<TopLevel> }` | `quote_top { }` syntax inside macro bodies — produces top-level items |
 | Named block args on MacroCall | `on_char: (ch) { ... }` in trailing `{ }` parsed as `HashMap<String, (Vec<String>, Block)>` |
-| `TopLevel::DecoratedMacro` | Parser wires `$!name { overrides }` + following `rct txn` into one AST node: `DecoratedMacro(MacroCall, Box<TopLevel>)` |
+| `TopLevel::DecoratedMacro` | Parser wires `$!name { overrides }` + following `node` into one AST node: `DecoratedMacro(MacroCall, Box<TopLevel>)` |
 
 ### B3: Parser changes (`src/parser.rs`)
 
@@ -68,7 +68,7 @@ printf "hello\x03" | timeout 3 ./officina
 
 | Change | Detail |
 |--------|--------|
-| `TopLevel::DecoratedMacro` expansion | Extract `rct txn`'s name, guard, body as AST; pass them as implicit args to the macro call; call macro expansion; splice returned `Vec<TopLevel>` into program |
+| `TopLevel::DecoratedMacro` expansion | Extract `node`'s name, guard, body as AST; pass them as implicit args to the macro call; call macro expansion; splice returned `Vec<TopLevel>` into program |
 | `Value::TopLevels` handling | If macro returns `Value::TopLevels(items)`, splice items directly (not wrapped in `TopLevel::Statement`) |
 | `QuoteTopBlock` execution | Inside interpreter, `QuoteTopBlock` evaluates to `Value::TopLevels` |
 
@@ -83,7 +83,7 @@ macro keyboard_input(body, guard, name) {
     let trg_name = gensym#();
     term quote_top {
         trg @trg_name: Char @stdin#;
-        rct txn @name [@guard && @trg_name != '\0']] {
+        node @name [@guard && @trg_name != '\0']] {
             let __ch = @trg_name;
             [__ch == '\n'] { @on_enter; &@trg_name = '\0'; term; };
             [__ch == '\x7f'] { @on_backspace; &@trg_name = '\0'; term; };
@@ -112,7 +112,7 @@ Defaults for each handler are defined inside the macro as fallback blocks:
 ```brief
 // With defaults only — works as-is:
 $!keyboard_input
-rct txn process_input [needs_redraw]] {
+node process_input [needs_redraw]] {
     &needs_redraw = true;
     term;
 };
@@ -122,7 +122,7 @@ $!keyboard_input {
     on_char: (ch) { &current_input = &current_input + (String)ch; },
     on_ctrl_c: () { tty_raw_mode#(false); term! -> exit#(0); },
 }
-rct txn process_input [needs_redraw]] {
+node process_input [needs_redraw]] {
     &needs_redraw = true;
     term;
 };
@@ -167,7 +167,7 @@ printf "hello\x03" | timeout 3 ./officina                 # one "hello", no repe
 
 ### Vision
 
-Currently, a struct's `rct txn` is promoted once at compile time — all instances share one reactor-slot. The vision for independent reactivity per instance:
+Currently, a struct's `node` is promoted once at compile time — all instances share one reactor-slot. The vision for independent reactivity per instance:
 
 ```brief
 struct Enemy {
@@ -175,7 +175,7 @@ struct Enemy {
     position: Vec2,
     state: AIState,
 
-    rct txn ai_tick [__ticker > 0]] {
+    node ai_tick [__ticker > 0]] {
         // reads/writes this instance's fields
         [state == Idle] { &state = Patrol; };
         [state == Patrol] { patrol(); };

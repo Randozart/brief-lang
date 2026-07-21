@@ -16,7 +16,7 @@ let result_eq = eq_fn(42, 42);  // true
 let result_lt = lt_fn(3, 5);    // true
 
 // Function pointer in state field (for dynamic dispatch)
-rct txn comparator [done < 2][done == 2] {
+node comparator [done < 2][done == 2] {
     [done == 0] {
         let cmp = cmp_int :> Ptr;
         let r = cmp(2, 2);

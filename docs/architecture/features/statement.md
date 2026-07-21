@@ -102,7 +102,7 @@ has a special `Expr::TupleDestructure` branch that:
 **Status:** Implemented (interpreter, LLVM backend with SIMD hint, parser; other backends stubs)
 
 `foreach` is a statement-level bounded loop. It iterates over a `List<T>`,
-binding `item: T` in each iteration. Unlike `rct txn` loops, `foreach`
+binding `item: T` in each iteration. Unlike `node` loops, `foreach`
 does NOT require a convergence contract — termination is structural (the
 list is finite).
 
@@ -112,7 +112,7 @@ list is finite).
 foreach (item in list) { body };
 ```
 
-Only valid inside `defn`/`txn`/`rct txn` bodies. Top-level `foreach`
+Only valid inside `defn`/`txn`/`node` bodies. Top-level `foreach`
 produces a parse error.
 
 ### Desugaring

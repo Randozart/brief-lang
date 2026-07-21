@@ -33,7 +33,7 @@ A `cell` (component) is an **intentionally isolated Brief-in-Brief state space**
 
 ### Cybernetic Isolation Principle
 
-A `cell`'s `rct txn` **cannot** see the parent's `%State`. They react only to:
+A `cell`'s `node` **cannot** see the parent's `%State`. They react only to:
 - The cell's own private state fields
 - The cell's own input arguments
 - The cell's own `trg` variables (internal triggers)
@@ -70,16 +70,16 @@ cell name(args) -> name: Type [| name: Type]*     // Union — exactly one port 
 
 **`cell` (auto-terminating):**
 1. Sync call `let r = c(args)` — allocates instance state, sets inputs, runs reactor loop
-2. Reactor loop: all `rct txn` fire while preconditions are true
+2. Reactor loop: all `node` fire while preconditions are true
 3. On each tick: `term` = normal contribution; `term!` = stop immediately
-4. Stasis = no `rct txn` can fire (all preconditions false) → stop
+4. Stasis = no `node` can fire (all preconditions false) → stop
 5. On stop: return value of the designated output port (first named output in `-> Type: name`)
 6. Instance state is deallocated
 
 **`cell!` (persistent):**
 1. Only `async` instantiation: `let c = async cell!(args)` or `trg @ cell!(args).port`
 2. Starts independent reactor loop in background
-3. Continuously updates output ports via `rct txn`
+3. Continuously updates output ports via `node`
 4. `term!` inside → component stops and is collected
 5. Parent exit → component stops and is collected
 6. Output ports are readable by parent ONLY through `trg` bindings
@@ -166,11 +166,11 @@ cell! timer(duration: Int) -> elapsed: Int, done: Bool {
     elapsed: Int = 0;
     done: Bool = false;
 
-    rct txn tick [elapsed < duration] {
+    node tick [elapsed < duration] {
         &elapsed = elapsed + 1;
     };
 
-    rct txn finish [elapsed >= duration && !done] {
+    node finish [elapsed >= duration && !done] {
         &done = true;
         term!;        // Stop component
     };
@@ -181,12 +181,12 @@ cell safe_div(a: Int, b: Int) -> result: Int | error: String {
     result: Int = 0;
     error: String = "";
 
-    rct txn ok [b != 0] {
+    node ok [b != 0] {
         &result = a / b;
         term!;
     };
 
-    rct txn err [b == 0] {
+    node err [b == 0] {
         &error = "division by zero";
         term!;
     };
@@ -242,7 +242,7 @@ StateDecl { name: "timer$<uid>.done", ty: Bool, expr: Some(Bool(false)), ... }
 // Output ports are state slots with trigger-binding annotation
 
 // 2. Transition definitions
-// Each rct txn / txn / defn inside the cell body is rewritten with prefixed
+// Each node / txn / defn inside the cell body is rewritten with prefixed
 // state references:
 
 Definition {
@@ -304,7 +304,7 @@ let __timer_uid_alloc = CellInstance {
     // 3. Run convergence loop
     loop {
         let fired = false;
-        // For each rct txn in definition order:
+        // For each node in definition order:
         if /* tick precondition rewritten with prefixed vars */ {
             // Execute body with rewritten identifiers
             &timer$<uid>.elapsed = timer$<uid>.elapsed + 1;
@@ -377,7 +377,7 @@ Phase 1 implements:
 - Sync invocation for `cell` (blocks reactor, runs to completion, returns)
 - Async instantiation for `cell!` (separate runtime, independent loop)
 - Output port declaration via `-> name: Type [, | name: Type]`
-- Internal `rct txn`, `txn`, `defn`, `trg` inside cell body
+- Internal `node`, `txn`, `defn`, `trg` inside cell body
 - `term` and `term!` semantics inside cell
 - Trigger binding to output ports (`trg @ instance.port`)
 - No direct reads of cell variables (compile error)
@@ -441,7 +441,7 @@ pub struct CellDef {
     pub parameters: Vec<(String, Type)>,    // input arguments
     pub output_type: Option<OutputType>,    // -> name: Type, ...
     pub fields: Vec<StructField>,           // private state fields
-    pub transactions: Vec<Transaction>,     // rct txn / txn inside cell
+    pub transactions: Vec<Transaction>,     // node / txn inside cell
     pub definitions: Vec<Definition>,       // defn inside cell
     pub internal_triggers: Vec<TriggerDeclaration>,  // trg inside cell
     pub span: Option<Span>,
@@ -803,7 +803,7 @@ TopLevel::Cell(cell) => {
 **New method `emit_cell_transition()`:**
 
 fn emit_cell_transition(&mut self, out: &mut String, cell: &CellDef, uid: usize) {
-    // For each rct txn in the component, emit an LLVM function that:
+    // For each node in the component, emit an LLVM function that:
     // - Takes a pointer to the component's sub-state region
     // - Takes input arguments
     // - Returns void (reactive txn) or the output value (non-reactive txn)
@@ -833,7 +833,7 @@ store i64 %arg0, ptr %cell_base + 1
 br label %cell_loop
 
 cell_loop:
-  ; For each rct txn in the cell body:
+  ; For each node in the cell body:
   ; 1. Check precondition
   ; 2. Execute body with prefixed state references
   ; 3. Check postcondition
@@ -957,7 +957,7 @@ fn rewrite_identifiers(expr: &Expr, cell_name: &str, uid: usize) -> Expr {
 | Parse outputs | `cell sensor() -> temp: Float, ready: Bool {}` | Tuple output with two named slots |
 | Parse union outputs | `cell div() -> val: Int \| err: String {}` | Union output |
 | Parse body fields | `cell c() { x: Int = 0; }` | One field |
-| Parse body txn | `cell c() { rct txn t [true] { term; }; }` | One reactive transaction |
+| Parse body txn | `cell c() { node t [true] { term; }; }` | One reactive transaction |
 | Parse internal trg | `cell! c() { trg k @ stdin; }` | One internal trigger |
 | Reject sync cell! | `let r = cell!(){}; r()` | Compile error |
 
@@ -965,10 +965,10 @@ fn rewrite_identifiers(expr: &Expr, cell_name: &str, uid: usize) -> Expr {
 
 | Test | Description |
 |------|-------------|
-| Basic sync cell | `cell add(a: Int) -> r: Int { r: Int = a; rct txn go [true] { &r = r + 1; term!; }; }; let a = add(5);` → `a == 6` |
-| Cell convergence | `cell count(n: Int) -> c: Int { c: Int = 0; rct txn inc [c < n] { &c = c + 1; }; }; let r = count(5);` → `r == 5` |
-| Cell with term! early exit | `cell early() -> v: Int { v: Int = 0; rct txn exit [true] { &v = 99; term!; }; }; let r = early();` → `r == 99` |
-| Cell! persistent lifecycle | `cell! timer(d: Int) -> e: Int { e: Int = 0; rct txn t [e < d] { &e = e + 1; }; }; let t = async timer(3);` → instance runs, e increments to 3 |
+| Basic sync cell | `cell add(a: Int) -> r: Int { r: Int = a; node go [true] { &r = r + 1; term!; }; }; let a = add(5);` → `a == 6` |
+| Cell convergence | `cell count(n: Int) -> c: Int { c: Int = 0; node inc [c < n] { &c = c + 1; }; }; let r = count(5);` → `r == 5` |
+| Cell with term! early exit | `cell early() -> v: Int { v: Int = 0; node exit [true] { &v = 99; term!; }; }; let r = early();` → `r == 99` |
+| Cell! persistent lifecycle | `cell! timer(d: Int) -> e: Int { e: Int = 0; node t [e < d] { &e = e + 1; }; }; let t = async timer(3);` → instance runs, e increments to 3 |
 | Cell privacy | Accessing cell field from outside → error |
 | Union output match | `cell div(a: Int, b: Int) -> v: Int \| e: String { ... }; let r = div(10, 2); match r { ... }` |
 | Internal trigger isolation | `cell! reader() { trg k @ stdin; };` internal trg doesn't affect parent |
@@ -990,7 +990,7 @@ fn rewrite_identifiers(expr: &Expr, cell_name: &str, uid: usize) -> Expr {
 |------|---------------|
 | Direct read | `t.port` outside `trg` → compile error |
 | Sync call cell! | `let r = cell!(...)` → compile error |
-| External state access in cell | Cell `rct txn` referencing parent field → compile error |
+| External state access in cell | Cell `node` referencing parent field → compile error |
 | Unknown output port | `trg @ t.nonexistent` → error |
 | Type mismatch on output | `trg X: Int @ t.str_port` → type error |
 
@@ -1039,20 +1039,20 @@ The `rewrite_identifiers` function must NOT rewrite:
 
 ### 9.2 Stasis Detection in Sync Calls
 
-The convergence loop must detect when NO `rct txn` fires in a full pass. This is the "nothing can fire" condition. Implementation:
+The convergence loop must detect when NO `node` fires in a full pass. This is the "nothing can fire" condition. Implementation:
 - Track `any_fired: bool` per iteration
 - If `any_fired == false` after iterating all transactions → stasis → exit loop
 
 ### 9.3 Postcondition Check in Sync Calls
 
-Each `rct txn` inside the cell still checks its postcondition. If the postcondition fails:
+Each `node` inside the cell still checks its postcondition. If the postcondition fails:
 - In a `cell` sync call: rollback that transaction's state changes, continue loop
 - In a `cell!` async: same behavior (it's a reactor loop)
 
 ### 9.4 `term!` Propagation
 
 Inside a cell:
-- `term!` inside a `rct txn` → stop the convergence loop, return to parent
+- `term!` inside a `node` → stop the convergence loop, return to parent
 - `term!` inside a nested `txn` or `defn` → same behavior (stop the cell)
 - `term!` MUST NOT terminate the parent program when inside a cell
 - `term!` outside a cell → unchanged behavior (program exit)
@@ -1117,7 +1117,7 @@ If `Console` has zero or multiple output ports, it's a compile-time error — th
 
 ### 10.1 The Problem
 
-The `officina-cli` project at `~/Desktop/Projects/officina-cli` requires complex TTY interaction: reading raw keystrokes from `stdin#`, stripping escape sequences, handling backspace/delete, buffering input, and surfacing clean strings to the application layer. Currently this requires manually wiring `trg` to `stdin@`, writing input-cleaning `rct txn`s, and managing buffer state — a significant amount of boilerplate in every program that needs console input.
+The `officina-cli` project at `~/Desktop/Projects/officina-cli` requires complex TTY interaction: reading raw keystrokes from `stdin#`, stripping escape sequences, handling backspace/delete, buffering input, and surfacing clean strings to the application layer. Currently this requires manually wiring `trg` to `stdin@`, writing input-cleaning `node`s, and managing buffer state — a significant amount of boilerplate in every program that needs console input.
 
 ### 10.2 The Solution: `std/system_comp.bv`
 
@@ -1132,7 +1132,7 @@ cell! Console -> buffer: String {
     buffer: String = "";
     saved: Char = '\0';
 
-    rct txn accumulate [raw != saved] {
+    node accumulate [raw != saved] {
         &saved = raw;
 
         // Handle special keys:
@@ -1157,9 +1157,9 @@ cell! Console -> buffer: String {
     };
 
     // Internal helper: clear buffer after parent consumes it
-    rct txn consume [buffer != ""] {
+    node consume [buffer != ""] {
         // The trigger binding in the parent reads buffer.
-        // After the parent's rct txn fires (which reads buffer),
+        // After the parent's node fires (which reads buffer),
         // we reset.
         // This works because the cell's reactor runs its own convergence
         // independently of the parent's.
@@ -1177,7 +1177,7 @@ import { Console } from "std/system_comp";
 trg consoleBuffer: String @ Console!;
 
 // Reactive transaction: fires when Console updates its buffer
-rct txn displayOutput [consoleBuffer != "" && consoleBuffer != savedBuffer]
+node displayOutput [consoleBuffer != "" && consoleBuffer != savedBuffer]
     [savedBuffer == @consoleBuffer]
 {
     &savedBuffer = consoleBuffer;
@@ -1193,7 +1193,7 @@ rct txn displayOutput [consoleBuffer != "" && consoleBuffer != savedBuffer]
 | Output port binding | `-> buffer: String` becomes the trigger source |
 | `trg @ CellName!` shorthand | `trg consoleBuffer: String @ Console!;` — one line |
 | Isolation | Internal `trg raw @ stdin` doesn't leak to parent |
-| Reactive consumption | Parent's `rct txn` fires when consoleBuffer changes |
+| Reactive consumption | Parent's `node` fires when consoleBuffer changes |
 | Convergence | Console's internal `accumulate` + `consume` converge independently |
 | No direct reads | Parent only sees `consoleBuffer` through the trigger |
 

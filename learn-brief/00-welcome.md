@@ -34,7 +34,7 @@ The **Anchor** (`@`) is the universal symbol for spatial/temporal location — p
 Transactions fire automatically when their preconditions are met:
 
 ```brief
-rct txn auto_save() [dirty && !saving][!dirty] {
+node auto_save() [dirty && !saving][!dirty] {
     save_to_disk();
     &dirty = false;
     term;
@@ -76,7 +76,7 @@ println(message);     // scripting — no transaction wrapper needed
 ```
 
 Brief lets you write statements directly at global scope. The compiler
-automatically wraps them in a synthesized `rct txn __init` that fires
+automatically wraps them in a synthesized `node __init` that fires
 once on start. No boilerplate needed.
 
 Run it:

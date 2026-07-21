@@ -5,7 +5,7 @@
 
 ## Motivation
 
-Three calibration benchmarks (`float_math.bv`, `const_heavy.bv`, `sparse_dispatch.bv`) have syntax errors that prevent compilation: missing `};` after `rct txn` blocks, missing `;` on `let` declarations, missing `[postcondition]` contracts. Additionally, the parser error for a missing `;` after `rct txn { body }` is cryptic: `expected Semicolon, found end of file at 0:0`.
+Three calibration benchmarks (`float_math.bv`, `const_heavy.bv`, `sparse_dispatch.bv`) have syntax errors that prevent compilation: missing `};` after `node` blocks, missing `;` on `let` declarations, missing `[postcondition]` contracts. Additionally, the parser error for a missing `;` after `node { body }` is cryptic: `expected Semicolon, found end of file at 0:0`.
 
 Worse: a compiler gap in `is_trigger_gated()` at `src/backend/llvm.rs:139` prevents the enum dispatch optimizer from recognizing preconditions with `Eq(trigger, literal)` patterns (e.g., `t == 101`). This means any dispatch benchmark using `trigger == value` syntax never enters the enum dispatch path — a critical optimization gap that defeats Brief's declarative advantage.
 
@@ -16,7 +16,7 @@ Worse: a compiler gap in `is_trigger_gated()` at `src/backend/llvm.rs:139` preve
 Replace generic `self.expect(Token::Semicolon)?;` with a custom match providing a clear, actionable error message. Capture the `}` span at line 2634 so the error shows the correct source location even at EOF.
 
 **Before:** `expected Semicolon, found end of file at 0:0`  
-**After:** `expected ';' after rct txn block — all rct txn declarations must end with '};', at 55:1`
+**After:** `expected ';' after node block — all node declarations must end with '};', at 55:1`
 
 ### Task 2 — Fix `benchmarks/float_math.bv`
 
@@ -58,14 +58,14 @@ import "link/brief_rt.o";
 let count: Int = 0;
 let total: Int = __get_env_int("BOUND");
 
-rct txn ping [io_pending && count % 8 == 0][count == total] { &count = count + 1; };
-rct txn ack  [io_pending && count % 8 == 1][count == total] { &count = count + 1; };
-rct txn err  [io_pending && count % 8 == 2][count == total] { &count = count + 1; };
-rct txn debug[io_pending && count % 8 == 3][count == total] { &count = count + 1; };
-rct txn data [io_pending && count % 8 == 4][count == total] { &count = count + 1; };
-rct txn ctrl [io_pending && count % 8 == 5][count == total] { &count = count + 1; };
-rct txn sync [io_pending && count % 8 == 6][count == total] { &count = count + 1; };
-rct txn stat [io_pending && count % 8 == 7][count == total] { &count = count + 1; };
+node ping [io_pending && count % 8 == 0][count == total] { &count = count + 1; };
+node ack  [io_pending && count % 8 == 1][count == total] { &count = count + 1; };
+node err  [io_pending && count % 8 == 2][count == total] { &count = count + 1; };
+node debug[io_pending && count % 8 == 3][count == total] { &count = count + 1; };
+node data [io_pending && count % 8 == 4][count == total] { &count = count + 1; };
+node ctrl [io_pending && count % 8 == 5][count == total] { &count = count + 1; };
+node sync [io_pending && count % 8 == 6][count == total] { &count = count + 1; };
+node stat [io_pending && count % 8 == 7][count == total] { &count = count + 1; };
 ```
 
 Exercises: 8 precondition evaluations per tick, exactly 1 fires via `(count % 8) == N`, cyclic dispatch. `io_pending` is the Bool trigger (region analyzer size=2). Enum dispatch activates. The C equivalent is a straightforward `switch (count % 8)`.

@@ -54,8 +54,8 @@ pub enum Token {
     #[token("txn")]
     Txn,
 
-    #[token("rct")]
-    Rct,
+    #[token("node")]
+    Node,
 
     #[token("async")]
     Async,
@@ -529,7 +529,7 @@ impl std::fmt::Display for Token {
             Token::Let => write!(f, "let"),
             Token::Const => write!(f, "const"),
             Token::Txn => write!(f, "txn"),
-            Token::Rct => write!(f, "rct"),
+            Token::Node => write!(f, "node"),
             Token::Async => write!(f, "async"),
             Token::Await => write!(f, "await"),
             Token::Term => write!(f, "term"),

@@ -295,11 +295,11 @@ trg clock_100hz: Int @ link __timer_100hz;
 
 ```
 // Old (deprecated — ugly):
-rct txn work [io_pending && count < N][count == N] { ... };
+node work [io_pending && count < N][count == N] { ... };
 
 // New (idiomatic — uses trg):
 trg io_ready: Bool @ link __io_pending;
-rct txn work [io_ready && count < N][count == N] { ... };
+node work [io_ready && count < N][count == N] { ... };
 ```
 
 ### All triggers are just FFI links
@@ -417,7 +417,7 @@ Brief's optimizer eliminates code that produces no observable effect. This is co
 | `let` destructuring | Call site | `let x: T = fn()` — implicit sig |
 | `#!out(x)` field annotation | Field | `#!out(result)` |
 | `#!exit` condition | Exit check | `#!exit count == N` |
-| `trg` trigger | Guard | `rct txn [trg_name] { ... }` |
+| `trg` trigger | Guard | `node [trg_name] { ... }` |
 
 ### 10.3 OUT Library — No Magic
 
@@ -432,7 +432,7 @@ The `OUT__*` functions are `sig #out` signatures over raw FFI. Nothing magical:
 If the compiler eliminates your code, it means: "I can prove this produces no observable output." The fix is NOT hacks (`x == x`, `io_pending`). The fix IS:
 - Use `sig #out` on output calls
 - Use the OUT library (`OUT__print_int`, `OUT__println`)
-- Make output actually observable via `trg` + `rct txn`
+- Make output actually observable via `trg` + `node`
 
 ### 10.5 Debugging Elimination
 
@@ -518,7 +518,7 @@ let count: Int = 0;
 let N: Int = __get_env_int("BOUND");
 let seed: Int = 42;
 
-rct txn fasta [io_pending && count < N][count == N] {
+node fasta [io_pending && count < N][count == N] {
     &seed = seed * 3877 + 29573 % 139968;
     __putchar(seed % 26 + 97);
     &count = count + 1;
@@ -538,7 +538,7 @@ let count: Int = 0;
 let N: Int = __get_env_int("BOUND");
 let seed: Int = 42;
 
-rct txn fasta [count < N][count == N] {
+node fasta [count < N][count == N] {
     &seed = seed * 3877 + 29573 % 139968;
     OUT__putchar(seed % 26 + 97);
     &count = count + 1;

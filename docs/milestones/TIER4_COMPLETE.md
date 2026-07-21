@@ -189,7 +189,7 @@ defn parse_top_level(state: ParserState) -> Result<(TopLevel, ParserState), Stri
 - `let` declarations
 - `const` declarations
 - `txn` transactions
-- `rct txn` reactive transactions
+- `node` reactive transactions
 - `defn` functions
 - `sig` signatures
 - `struct` definitions

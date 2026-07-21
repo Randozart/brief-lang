@@ -11,8 +11,8 @@
 
 | Fixture | Description | Status |
 |---------|-------------|--------|
-| `tests/fixtures/counter.bv` | Single `Int` field, one `rct txn` with `[counter < 10]` contract | ✅ PASS |
-| `tests/fixtures/multifield.bv` | `Int` + `Bool`, two `rct txn` with disjoint field access | ✅ PASS |
+| `tests/fixtures/counter.bv` | Single `Int` field, one `node` with `[counter < 10]` contract | ✅ PASS |
+| `tests/fixtures/multifield.bv` | `Int` + `Bool`, two `node` with disjoint field access | ✅ PASS |
 | `tests/fixtures/minimal.bv` | Single `Int`, no transactions | ✅ PASS |
 
 ## 2. Validation Checks

@@ -8,7 +8,7 @@ frgn __print_int(n: Int) -> Bool ;
 let N: Int = __get_env_int("BOUND");    // NOTE: harness uses BOUND env var
 
 // State: element index
-rct txn saxpy_loop
+node saxpy_loop
     [i < N]
     [i == N]
 {

@@ -108,7 +108,7 @@ degradation means the first time you notice is when clang fails to link.
 
 ---
 
-## 3. fasta LCG Broken — rct txn Atomic Write Semantics
+## 3. fasta LCG Broken — node Atomic Write Semantics
 
 **Symptom**: All output characters are `q` (ASCII 113). The LCG seed stays
 at 42 for all iterations.
@@ -117,7 +117,7 @@ at 42 for all iterations.
 
 ### Root Cause
 
-`rct txn` atomically batches all state writes until `term;`. Inside a
+`node` atomically batches all state writes until `term;`. Inside a
 single tick, the three `&seed = ...` statements each read the PRE-TICK
 value of seed (42), compute their result, and defer the write. At `term;`,
 the writes commit in sequence — the last write wins:
@@ -133,7 +133,7 @@ The seed is 42 forever. All iterations produce `42 % 26 + 97 = 113 = 'q'`.
 ### Design Error
 
 The benchmark author expected sequential in-tick execution of
-`&field = expr(changes to field)`. But `rct txn` semantics are:
+`&field = expr(changes to field)`. But `node` semantics are:
 - All reads see pre-tick state (consistent snapshot)
 - Writes commit at transaction boundary
 - Within a transaction, later `&field = ...` destinations overwrite earlier
@@ -145,13 +145,13 @@ doesn't exist.
 
 ### Fix Must Address
 
-1. Restructure the LCG as a single expression within the rct txn so
+1. Restructure the LCG as a single expression within the node so
    writes are not chained: `&seed = (seed * IA + IC) % IM;`
 2. Add a convergence output: `[count == N] { term! -> __putchar(seed % 26 + 97); };`
    so the program produces exactly one output byte per run — symmetric with
    C's `putchar` on the final value.
 3. Verify the output matches C reference for BOUND=5.
-4. Document the rct txn atomic-write constraint in the benchmark header:
+4. Document the node atomic-write constraint in the benchmark header:
    `&field = expr1; &field = expr2;` is NOT sequential — all read pre-tick
    state, last deferred write wins.
 
@@ -200,11 +200,11 @@ emits a loop with no exit condition and no observable side effects.
 ### Why `term! -> print(...)` is the right fix
 
 Rather than relying on `#!exit` (which has its own codegen path gaps), the
-correct fix is to restructure `precompute_sum.bv` as a single `rct txn`
+correct fix is to restructure `precompute_sum.bv` as a single `node`
 with the convergence output embedded in the body:
 
 ```brief
-rct txn compute [count < total][count == total] {
+node compute [count < total][count == total] {
     &acc_a = acc_a + count;
     &acc_b = acc_b + count;
     &count = count + 1;

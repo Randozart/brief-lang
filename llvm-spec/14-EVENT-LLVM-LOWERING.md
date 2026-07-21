@@ -118,8 +118,8 @@ reference these pre-sampled registers, not emit new loads.
 
 ## 4. Pump Transaction Compilation
 
-The pump transaction (`rct txn __io_pump [__io_pending] { ... term; }`) is
-compiled as a normal `rct txn`. No special treatment.
+The pump transaction (`node __io_pump [__io_pending] { ... term; }`) is
+compiled as a normal `node`. No special treatment.
 
 ### Dispatch Order
 
@@ -151,14 +151,14 @@ no-op dispatch chain — it simply does:
     ret void
 ```
 
-The user (or stdlib) provides sleep as a regular `frgn` + `rct txn [true]`:
+The user (or stdlib) provides sleep as a regular `frgn` + `node [true]`:
 
 ```brief
 // In std/io.bv:
 frgn __wait_for_event() -> Void from "libruntime";
 
-rct txn __io_pump [__io_pending] { &buf = __raw_poll(); &ready = true; term; };
-rct txn __io_sleep [true]        { __wait_for_event(); term; };
+node __io_pump [__io_pending] { &buf = __raw_poll(); &ready = true; term; };
+node __io_sleep [true]        { __wait_for_event(); term; };
 ```
 
 Because `__io_sleep` is declared last, it fires only when no other precondition
@@ -185,7 +185,7 @@ The `Statement::LocalTrigger` is emitted as a comment:
 
 ```rust
 Statement::LocalTrigger { name, .. } => {
-    writeln!(out, "{}; trg! {} — use top-level trg + rct txn instead", indent, name).ok();
+    writeln!(out, "{}; trg! {} — use top-level trg + node instead", indent, name).ok();
 }
 ```
 
@@ -282,7 +282,7 @@ ret void
 
 ## 10. Fused Transaction Interaction with Pump
 
-Fused transactions must never include the pump. The pump is a `rct txn` with
+Fused transactions must never include the pump. The pump is a `node` with
 precondition `[__io_pending]`, and fusing it with a downstream consumer would
 break the buffer-caching guarantee (the pump's result would be consumed in the
 same tick, but the downstream consumer expects the buffer to be stable).

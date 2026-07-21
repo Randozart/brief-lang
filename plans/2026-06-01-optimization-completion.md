@@ -110,7 +110,7 @@ The IIR filter at `benchmarks/iir_filter.bv` is the canonical folded-path test. 
 
 | # | Task | Files | Verification |
 |---|------|-------|-------------|
-| C.1 | **Construct IIR filter AST in test** — mirror the `benchmarks/iir_filter.bv` program: 7 `const` declarations, 5+ `state` declarations, one `rct txn` with convergence contract `[count < total][count == total]`, shift-register body of 5 assignments. | `src/backend/llvm.rs` | Test compiles |
+| C.1 | **Construct IIR filter AST in test** — mirror the `benchmarks/iir_filter.bv` program: 7 `const` declarations, 5+ `state` declarations, one `node` with convergence contract `[count < total][count == total]`, shift-register body of 5 assignments. | `src/backend/llvm.rs` | Test compiles |
 | C.2 | **Assert folded path, not enum path** — verify output contains `while` loop pattern (folded main), `icmp slt` with counter comparison, and does NOT contain `switch i8`. | `src/backend/llvm.rs` | Test passes |
 | C.3 | **Assert structure matches benchmark IR** — verify `@b0`, `@b1`, etc. constant globals, `%State` type with correct field count, `@init_state` with volatile stores. | `src/backend/llvm.rs` | Test passes |
 

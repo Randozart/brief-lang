@@ -12,7 +12,7 @@
 let N: Int = GetEnvInt!("BOUND");
 let count: Int = 0;
 
-rct txn work [count < N][count == N] {
+node work [count < N][count == N] {
     count = count + 1;
 
     [count % 5000000 == 0] {

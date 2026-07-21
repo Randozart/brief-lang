@@ -54,7 +54,7 @@ let vy4: Float32 = 0.00162824170038242295f32 * dpy;
 let vz4: Float32 = -0.0000951592254519715870f32 * dpy;
 const m4: Float32 = 0.0000515138902046611451f32 * solar_mass;
 
-rct txn simulate [
+node simulate [
     count < bound
 ][count == bound] {
     let dx01: Float32 = bx0 - bx1;

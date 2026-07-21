@@ -246,7 +246,7 @@ defn double(n: Int) -> Int [true][result == n * 2] {
 
 **Decision:** Note flexibility in spec.
 
-**Behavior:** Parser accepts both `rct async txn` and `async rct txn`.
+**Behavior:** Parser accepts both `rct async txn` and `async node`.
 
 **Documentation:** "Transaction modifiers may appear in any order."
 

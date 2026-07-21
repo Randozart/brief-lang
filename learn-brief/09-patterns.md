@@ -10,7 +10,7 @@ Use enums and reactive transactions for state machines:
 enum OrderState { Pending, Paid, Shipped, Delivered, Cancelled }
 let state: OrderState = OrderState::Pending;
 
-rct txn mark_paid() 
+node mark_paid() 
     [state == OrderState::Pending]
     [state == OrderState::Paid]
 {
@@ -18,7 +18,7 @@ rct txn mark_paid()
     term;
 };
 
-rct txn mark_shipped() 
+node mark_shipped() 
     [state == OrderState::Paid]
     [state == OrderState::Shipped]
 {
@@ -26,7 +26,7 @@ rct txn mark_shipped()
     term;
 };
 
-rct txn mark_delivered() 
+node mark_delivered() 
     [state == OrderState::Shipped]
     [state == OrderState::Delivered]
 {
@@ -34,7 +34,7 @@ rct txn mark_delivered()
     term;
 };
 
-rct txn cancel() 
+node cancel() 
     [state == OrderState::Pending || state == OrderState::Paid]
     [state == OrderState::Cancelled]
 {
@@ -57,7 +57,7 @@ let observers: List<String> = [];
 let subject_value: Int = 0;
 let notified_value: Int = -1;
 
-rct txn notify_observers() 
+node notify_observers() 
     [subject_value != notified_value]
     [notified_value == @subject_value]
 {
@@ -267,7 +267,7 @@ let circuit_state: CircuitState = CircuitState::Closed;
 let failure_count: Int = 0;
 let last_failure_time: Int = 0;
 
-rct txn trip_circuit() 
+node trip_circuit() 
     [failure_count >= 5 && circuit_state == CircuitState::Closed]
     [circuit_state == CircuitState::Open]
 {
@@ -276,7 +276,7 @@ rct txn trip_circuit()
     term;
 };
 
-rct txn reset_circuit() 
+node reset_circuit() 
     [circuit_state == CircuitState::HalfOpen && success_count >= 3]
     [circuit_state == CircuitState::Closed && failure_count == 0]
 {
@@ -285,7 +285,7 @@ rct txn reset_circuit()
     term;
 };
 
-rct txn test_circuit() 
+node test_circuit() 
     [circuit_state == CircuitState::Open && current_time() - last_failure_time > 60000]
     [circuit_state == CircuitState::HalfOpen]
 {
@@ -316,7 +316,7 @@ defn call_external_service() -> Result<String, String> {
 let attempts: Int = 0;
 let last_attempt_time: Int = 0;
 
-rct txn retry_operation() 
+node retry_operation() 
     [!operation_success && attempts < 5]
     [attempts == @attempts + 1]
 {
@@ -341,7 +341,7 @@ rct txn retry_operation()
 let request_count: Int = 0;
 let window_start: Int = 0;
 
-rct txn reset_window() 
+node reset_window() 
     [current_time() - window_start >= 60000]  // 1 minute
     [request_count == 0 && window_start == current_time()]
 {
@@ -441,7 +441,7 @@ txn send_confirmation() [inventory_updated][sent == true] { ... }
 
 ```brief
 // ❌ BAD - manual polling
-rct txn check_email() [true][true] {
+node check_email() [true][true] {
     [has_new_email()] {
         process_email();
     };
@@ -449,7 +449,7 @@ rct txn check_email() [true][true] {
 };
 
 // ✅ GOOD - reactive
-rct txn process_new_email() [has_new_email()][email_processed == true] {
+node process_new_email() [has_new_email()][email_processed == true] {
     process_email();
     term;
 };

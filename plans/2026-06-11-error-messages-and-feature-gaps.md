@@ -156,7 +156,7 @@ is structural, not proven by contract).
 foreach (item in list) { body };
 ```
 
-- **Statement**, not expression — only valid inside `defn`/`txn`/`rct txn` bodies
+- **Statement**, not expression — only valid inside `defn`/`txn`/`node` bodies
 - Iterates a `List<T>`, binds `item: T` in each iteration (lexical scope)
 - **No contracts** — termination is structural (list is finite), no `[i < N][i == N]` needed
 - Body can use `[guard] { action }` for conditional logic
@@ -197,7 +197,7 @@ Statement::Foreach { item, list, body } => {
 - Other backends: Same pattern, or desugar to a synthetic convergent txn
 
 **Validation**:
-- Only valid inside `defn`/`txn`/`rct txn` bodies (not at top level)
+- Only valid inside `defn`/`txn`/`node` bodies (not at top level)
 - Error if `list` is not a `List<T>` type
 
 ### Future: `async foreach`

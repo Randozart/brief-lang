@@ -21,7 +21,7 @@ let count: Int = 0;
 let acc_a: Int = 0;
 let acc_b: Int = 0;
 
-rct txn compute [count < total][count == total] {
+node compute [count < total][count == total] {
     acc_a = acc_a + count;
     acc_b = acc_b + count;
     count = count + 1;

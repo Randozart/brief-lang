@@ -634,7 +634,7 @@ pub use display::*;
 **What it must contain:**
 - `TopLevel` enum:
   - `Definition(Definition)` — `defn` or `export defn`
-  - `Transaction(Transaction)` — `txn` or `rct txn`
+  - `Transaction(Transaction)` — `txn` or `node`
   - `Cell(CellDef)` — `cell` declaration
   - `Import(Import)` — import statement
   - `Export(Export)` — `export defn` wrapper
@@ -929,7 +929,7 @@ impl Parser<'_> {
   - Handles derivation block `:= { ... }` after body
 - `parse_transaction(&mut self) -> Result<Transaction, SyntaxError>`
   - `txn name<T>(params) [pre][post] { body }`
-  - `rct txn name [pre][post] { body }`
+  - `node name [pre][post] { body }`
   - Handles `is_entry: true` for `[#]` contract
 - `parse_cell(&mut self) -> Result<CellDef, SyntaxError>`
   - `cell name<T>(params) -> RetType { fields txn ... }`

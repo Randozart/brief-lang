@@ -168,7 +168,7 @@ Step 17  view_compiler  950 LOC  12 tests  ~1.5 hr
 | Test | What It Verifies |
 |------|------------------|
 | `test_build_from_program_empty` | Empty program → zero transactions |
-| `test_build_from_program_with_reactive_txn` | One `rct txn` registered in reactor |
+| `test_build_from_program_with_reactive_txn` | One `node` registered in reactor |
 | `test_build_from_program_skips_non_reactive` | Regular `txn`/`defn` skipped |
 | `test_dependency_map_populated` | Dependencies from txn inserted in `dependency_map` |
 | `test_mark_dirty_propagates` | Variable update marks dependent txn dirty |
@@ -262,7 +262,7 @@ Each constructs a `Program`, calls `LLVMBackend::generate()`, asserts IR string 
 | `test_check_state_decl_initial_value` | `let x: Int = 5;` passes |
 | `test_check_state_decl_uninitialized_warning` | `let x: Int;` → warning (no error) |
 | `test_check_signature_registration` | `sig foo(x: Int) -> Int` registers in signatures |
-| `test_check_transaction_basic` | `rct txn [x > 0][x == 0] { ... }` passes |
+| `test_check_transaction_basic` | `node [x > 0][x == 0] { ... }` passes |
 | `test_check_transaction_invalid_precondition` | Precondition type not Bool → error |
 | `test_check_transaction_invalid_postcondition` | Postcondition type not Bool → error |
 | `test_check_frgn_binding_basic` | `frgn foo(x: Int) -> Int from "test";` passes |

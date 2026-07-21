@@ -14,7 +14,7 @@ const IC: Int = 29573;
 const MASK: Int = 63;
 
 // ── Transaction ──────────────────────────────────────────────────────
-rct txn kn [count < N][count == N] {
+node kn [count < N][count == N] {
     let nseed: Int = (seed * IA + IC) % IM;
     let nhash: Int = ((hash << 2) | (nseed & 3)) & MASK;
     let nchksum: Int = chksum + nhash % 13;

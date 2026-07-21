@@ -381,7 +381,7 @@ fn is_reserved_keyword(s: &str) -> bool {
             | "true" | "false" | "Int" | "UInt" | "Float"
             | "Bool" | "String" | "void" | "Data" | "Char"
             | "frgn" | "import" | "from" | "as" | "struct"
-            | "enum" | "trg" | "trigger" | "rct" | "async"
+            | "enum" | "trg" | "trigger" | "node" | "async"
             | "match" | "uni" | "unification" | "unify"
             | "resource" | "rsrc" | "registry" | "reg"
             | "render" | "rstruct" | "stage" | "on"

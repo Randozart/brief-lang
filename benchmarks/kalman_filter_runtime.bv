@@ -48,7 +48,7 @@ const q20: Float = 0.0;
 const q21: Float = 0.0;
 const q22: Float = 0.001;
 
-rct txn propagate [
+node propagate [
     bound > 0 && count < bound
 ][count == bound] {
     // State propagation: x_new = A * x

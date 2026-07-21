@@ -252,7 +252,7 @@ edge cases where the happy path needs adjustment, but they are not the primary t
 [inference]
 scalar = "register"         # Inferred happiest path for let x: Int
 large_vector = "global"     # Inferred for vectors > 1KB
-transaction = "kernel"      # Inferred for rct txn
+transaction = "kernel"      # Inferred for node
 trigger = "interrupt"       # Inferred for trg
 ```
 
@@ -342,7 +342,7 @@ for framework wrapping, use `[inference]` for happy path, check `[codegen.valida
 
 #### 4.5.1 CUDA Backend (src/backend/cuda.rs)
 - Basis: C++ (`nvcc`)
-- Maps `rct txn` → `__global__ void kernel()`
+- Maps `node` → `__global__ void kernel()`
 - Maps `Vector<T,N>` → `__device__ T*` (happy path) or `__shared__ T[N]` (override)
 - Maps `parameters` → Kernel arguments / constant memory
 
@@ -372,7 +372,7 @@ Override: `#[cuda.shared] let x: Vector<Int, 64>` → `__shared__ int x[64]`
 
 #### 4.5.2 WebGPU/WGSL Backend (src/backend/wgsl.rs)
 - Basis: WGSL compute shaders
-- Maps `rct txn` → `@compute @workgroup_size(64) fn main()`
+- Maps `node` → `@compute @workgroup_size(64) fn main()`
 - Maps `Vector<T,N>` → `var<storage, read_write> x: array<T, N>`
 
 ```toml
@@ -401,7 +401,7 @@ Override: `#[wgsl.uniform] let uniforms: Vector<Float, 16>` → `var<uniform> un
 #### 4.5.3 TypeScript + React Backend (src/backend/react.rs)
 - Basis: TypeScript (.tsx)
 - Maps `let x: T` → `const [x, setX] = useState<T>(init)`
-- Maps `rct txn` → `const handleTxn = useCallback(...)`
+- Maps `node` → `const handleTxn = useCallback(...)`
 - Auto-generates `useEffect` dependencies from precondition analysis
 
 ```toml
@@ -431,7 +431,7 @@ Override: `#[react.ref] let input: String` → `const inputRef = useRef<string>(
 #### 4.5.4 eBPF Backend (src/backend/ebpf.rs)
 - Basis: Restricted C (LLVM BPF backend)
 - Maps `Vector<T,N>` → BPF map definitions (`struct { ... } x SEC(".maps")`)
-- Maps `rct txn` → `SEC("kprobe/...") int handle_event(...)`
+- Maps `node` → `SEC("kprobe/...") int handle_event(...)`
 - Enforces verifier constraints (unrolled loops, bounded memory)
 
 ```toml
@@ -510,7 +510,7 @@ exit_txn = "exit"
 
 Happy Path: `let x: Vector<Int, 262144>` → `__device__ int* x` (global memory, inferred from size)
 Override: `#[cuda.shared] let x: Vector<Int, 64>` → `__shared__ int x[64]`
-Override: `#[cuda.threads(16, 16)] rct txn compute [...] {...}` → Kernel launch config
+Override: `#[cuda.threads(16, 16)] node compute [...] {...}` → Kernel launch config
 
 ### 8.4 WebGPU/WGSL Target (Browser Parallelism)
 
@@ -541,7 +541,7 @@ workgroup_size = "64"
 
 Happy Path: `let world_map: Vector<UInt, 4096>` → `var<storage, read_write> world_map: array<u32, 4096>`
 Override: `#[wgsl.uniform] let uniforms: Vector<Float, 16>` → `var<uniform> uniforms: Uniforms`
-Override: `#[wgsl.workgroup_size(8, 8, 1)] rct txn cast_rays [...] {...}` → Compute shader dispatch
+Override: `#[wgsl.workgroup_size(8, 8, 1)] node cast_rays [...] {...}` → Compute shader dispatch
 
 ### 8.5 TypeScript + React Target (Living UI)
 
@@ -577,7 +577,7 @@ exit_txn = "exit"
 ```
 
 Happy Path: `let count: Int = 0` → `const [count, setCount] = useState<number>(0);`
-Happy Path: `rct txn update [count > 0][...]` → `const handleUpdate = useCallback(() => { if (count > 0) {...} }, [count]);`
+Happy Path: `node update [count > 0][...]` → `const handleUpdate = useCallback(() => { if (count > 0) {...} }, [count]);`
 Override: `#[react.ref] let input: String` → `const inputRef = useRef<string>("");`
 Override: `#[react.memo] txn expensive [...] {...}` → Wrapped in `React.memo`
 
@@ -634,7 +634,7 @@ exit_txn = "exit"
 
 Happy Path: `let packet_counts: Vector<UInt, 1024>` → BPF map definition with `BPF_MAP_TYPE_ARRAY`
 Override: `#[ebpf.map("hash")] let flow_table: Vector<UInt, 256>` → `BPF_MAP_TYPE_HASH`
-Override: `#[ebpf.section("kprobe/do_sys_open")] rct txn monitor [...] {...}` → eBPF hook point
+Override: `#[ebpf.section("kprobe/do_sys_open")] node monitor [...] {...}` → eBPF hook point
 
 ### 8.7 Python Target (Universal Orchestrator)
 
@@ -670,8 +670,8 @@ exit_txn = "exit"
 ```
 
 Happy Path: `let weights: Vector<Int, 262144>` → `self.weights: np.ndarray = np.zeros(262144, dtype=np.int32)`
-Happy Path: `rct txn sort [true][...]` → `def sort(self): ...` with contract validation
-Override: `#[python.jit] rct txn heavy_math [...] {...}` → `@numba.jit def heavy_math(self):`
+Happy Path: `node sort [true][...]` → `def sort(self): ...` with contract validation
+Override: `#[python.jit] node heavy_math [...] {...}` → `@numba.jit def heavy_math(self):`
 Override: `#[python.fastapi] txn api_endpoint [...] {...}` → `@app.post("/txn") def api_endpoint():`
 
 ### 8.8 Swift/Kotlin Target (Mobile Native)
@@ -707,7 +707,7 @@ exit_txn = "exit"
 ```
 
 Happy Path: `let gps_location: LatLong` → `@Published var gpsLocation: LatLong` (SwiftUI)
-Happy Path: `rct txn update_ui [state_changed][...]` → `func updateUI() async {...}` in ViewModel
+Happy Path: `node update_ui [state_changed][...]` → `func updateUI() async {...}` in ViewModel
 Override: `#[mobile.local_storage] let settings: Config` → Persisted to `UserDefaults`
 Override: `#[mobile.main_thread] txn ui_update [...] {...}` → Dispatched to main thread
 
@@ -740,7 +740,7 @@ let packet_counts: Vector<UInt, 1024>;
 let cache: Vector<Int, 64>;
 
 #[cuda.threads(16, 16)]
-rct txn compute [true][...] { ... }
+node compute [true][...] { ... }
 ```
 
 ### 8.5.4 For WebGPU:
@@ -749,13 +749,13 @@ rct txn compute [true][...] { ... }
 let uniforms: Vector<Float, 16>;
 
 #[wgsl.workgroup_size(8, 8, 1)]
-rct txn cast_rays [player_moving][...] { ... }
+node cast_rays [player_moving][...] { ... }
 ```
 
 ### 8.5.5 For Python:
 ```brief
 #[python.jit]
-rct txn heavy_math [true][...] { ... }
+node heavy_math [true][...] { ... }
 
 #[python.fastapi]
 txn api_endpoint [true][...] { ... }
@@ -767,7 +767,7 @@ txn api_endpoint [true][...] { ... }
 let gps_location: LatLong;
 
 #[mobile.main_thread]
-rct txn update_ui [state_changed][...] { ... }
+node update_ui [state_changed][...] { ... }
 ```
 
 ---
@@ -804,7 +804,7 @@ rct txn update_ui [state_changed][...] { ... }
 ### Phase 7: CUDA Backend
 - Create `src/backend/cuda.rs`
 - Parse `[inference]` for memory hierarchy (register → shared → global)
-- Generate `__global__` kernels from `rct txn`
+- Generate `__global__` kernels from `node`
 
 ### Phase 8: WebGPU/WGSL Backend
 - Create `src/backend/wgsl.rs`

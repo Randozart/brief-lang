@@ -52,14 +52,14 @@ trigger button: Bool;   // full word
 TRIGGER button: Bool;   // uppercase full word
 ```
 
-## Event Model: `rct txn` + `@ link`
+## Event Model: `node` + `@ link`
 
-The event-driven dispatch uses `rct txn` (reactive transaction) with trigger-based preconditions:
+The event-driven dispatch uses `node` (reactive transaction) with trigger-based preconditions:
 
 ```brief
 import io from "std/io.bv";
 
-rct txn handle_input [io.io_ready] {
+node handle_input [io.io_ready] {
     let c = io.get_char();
     io.consume();
     term;
@@ -83,7 +83,7 @@ Blocking sleep is a library pattern, not a compiler intrinsic:
 ```brief
 // lib/std/io.bv
 frgn __wait_for_event() -> Void from "libruntime";
-rct txn __io_sleep [true] {
+node __io_sleep [true] {
     __wait_for_event();
     term;
 };
@@ -93,7 +93,7 @@ Because `[true]` is always the last precondition evaluated (it's declared last),
 
 ## Local Triggers (`trg!`) — DEPRECATED
 
-> **Deprecation notice**: `trg!` inside transaction bodies is deprecated. Use `@ link` triggers + `rct txn` instead. The compiler emits a deprecation warning at parse time.
+> **Deprecation notice**: `trg!` inside transaction bodies is deprecated. Use `@ link` triggers + `node` instead. The compiler emits a deprecation warning at parse time.
 
 Local triggers were declared **inside transaction bodies** and represented mid-flight async waits. They required the `!` suffix as a psychological speedbump — warning "async rollback risk here".
 
@@ -109,7 +109,7 @@ txn fetch_user[user_requested] {
 
 // NEW pattern — use @ link triggers:
 trg db_response: Bool @ link __db_response;
-rct txn handle_db_response [db_response] {
+node handle_db_response [db_response] {
     // ... handle response
     term;
 };
@@ -122,7 +122,7 @@ The `!` suffix follows a tradition in language design:
 - **Rust**: `unsafe {}` warns "pointer math ahead"
 - **Brief**: `trg!` warned "async rollback risk here"
 
-The modern event model (`@ link` + `rct txn`) eliminates rollback risk by keeping triggers at the top level, making the entire reactive loop stateless with respect to event arrival.
+The modern event model (`@ link` + `node`) eliminates rollback risk by keeping triggers at the top level, making the entire reactive loop stateless with respect to event arrival.
 
 ## Volatile Semantics
 
@@ -159,7 +159,7 @@ When escape conditions depend on unpredictable events (FFI responses, future tri
 trg button: Bool;
 let counter: Int = 0;
 
-rct txn handle_button[button == true] {
+node handle_button[button == true] {
     // Pre-evaluation: if button is false, skip entirely
     // No FFI calls, no side effects
     
@@ -199,7 +199,7 @@ import io from "std/io.bv";
 
 let counter: Int = 0;
 
-rct txn count_input [io.io_ready] {
+node count_input [io.io_ready] {
     let key = io.get_char();
     [key == " "] {
         &counter = counter + 1;

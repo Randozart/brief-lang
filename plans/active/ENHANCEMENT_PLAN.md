@@ -90,7 +90,7 @@ pub struct State {
 
 **Problem:** Transaction in `.ebv`:
 ```brief
-rct txn load_weights [cpu_write_en && control == 1][...] {
+node load_weights [cpu_write_en && control == 1][...] {
 ```
 has precondition `control == 1`, but code set `write_en` without setting `control` first.
 

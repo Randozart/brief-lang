@@ -41,7 +41,7 @@ The final fallback must be proven to execute in 0 cycles:
 ## Integration with Watchdogs
 
 ```
-rct txn process [pre][post] ?![cycles <= 1000 retry 3] ~? log_timeout() {
+node process [pre][post] ?![cycles <= 1000 retry 3] ~? log_timeout() {
     ...
 };
 ```

@@ -262,7 +262,7 @@ import { io_pending } from "std/brief_rt.bv";
 let ops: Int = 0;
 const N: Int = 50000000;
 
-rct txn work [io_pending && ops < N][ops == N] {
+node work [io_pending && ops < N][ops == N] {
     &ops = ops + 1;
 };
 ```

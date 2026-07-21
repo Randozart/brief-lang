@@ -7,7 +7,7 @@
 
 LLVM optimization remarks (`-pass-remarks-missed=loop-vectorize`) on fannkuch_redux.ll reveal two blockers:
 
-1. **"could not determine number of loop iterations"** — The `rct txn` convergence loop uses manual phi-node merge patterns that don't match LLVM's canonical loop form. LLVM can't analyze the trip count, so it refuses to unroll or vectorize.
+1. **"could not determine number of loop iterations"** — The `node` convergence loop uses manual phi-node merge patterns that don't match LLVM's canonical loop form. LLVM can't analyze the trip count, so it refuses to unroll or vectorize.
 
 2. **"value that could not be identified as reduction is used outside the loop"** — The `[count == N] { term! -> print_int#(nchecksum) }` guard causes loop-carried values (checksum, max_flips) to be "used outside the loop" (by the print inside the guard), so LLVM can't identify them as reductions.
 

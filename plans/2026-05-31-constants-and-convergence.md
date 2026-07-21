@@ -11,7 +11,7 @@
 |------|---------|
 | **Contract-first** | Contracts (`[pre][post]`) are the source of truth — never weaken them |
 | **Compile-time only** | Contracts are consumed by the typechecker and proof engine at compile time. **Zero** runtime contract evaluation is emitted in LLVM IR |
-| **Reactive convergence** | For `rct txn [pre][post]`: "keep firing until post holds, prove you can get there." The proof engine verifies bounded convergence statically |
+| **Reactive convergence** | For `node [pre][post]`: "keep firing until post holds, prove you can get there." The proof engine verifies bounded convergence statically |
 | **Per-tick = watchdog** | `?[cond]` / `?![cond]` provides tick-level invariants orthogonal to convergence |
 | **More efficiency** | Contracts exist to make code *more* efficient — the analysis extracts loop bounds and constant values that LLVM exploits for unrolling, vectorization, and constant-folding |
 
@@ -65,7 +65,7 @@ Coefficients, input, and total declared with `let` (mutable state) instead of `c
 ### Changes
 - `const` for: `b0`, `b1`, `b2`, `a1`, `a2`, `input`, `total`
 - `let` for: `x1`, `x2`, `y1`, `y2`, `count`
-- Contract: `rct txn process [count < total][count == total]`
+- Contract: `node process [count < total][count == total]`
 - Postcondition is convergence contract — never emitted in LLVM IR
 
 ---

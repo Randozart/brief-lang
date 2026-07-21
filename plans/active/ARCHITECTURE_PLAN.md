@@ -223,7 +223,7 @@ if let Some(Ok(Token::Identifier(name))) = self.current_token() {
 ```
 
 #### 3.2 Per-Transaction Reactor
-Update the parser to accept `rct txn ... @10;` (optional "Hz" suffix):
+Update the parser to accept `node ... @10;` (optional "Hz" suffix):
 
 ```rust
 // In parser.rs, around line 1090

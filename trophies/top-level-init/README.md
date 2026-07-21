@@ -1,7 +1,7 @@
 ## Top-Level __init: Scripting with Atomic Boot Safety
 
 **What**: Allowed executable statements directly at global scope, which the
-compiler automatically wraps in a synthesized `rct txn __init` transaction
+compiler automatically wraps in a synthesized `node __init` transaction
 at compile time.
 
 **Why it matters**: Eliminates boilerplate for simple scripts while retaining
@@ -17,7 +17,7 @@ collects all `TopLevel::Statement` items, creates a collision-avoiding
 `__booted_N` state flag, and synthesizes:
 ```
 let __booted_N: Bool = false;
-rct txn __init [!__booted_N][__booted_N] {
+node __init [!__booted_N][__booted_N] {
     // all top-level statements in order
     &__booted_N = true;
     term;

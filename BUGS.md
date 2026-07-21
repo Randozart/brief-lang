@@ -304,7 +304,7 @@ Since `std.result` is imported, `Ok` IS in state, so path 1 always applies. But 
 
 ## 2026-05-30 — `expand_implicit_terms_txn` injects `term true;` into void-returning transactions
 
-**Issue**: `rct txn handle_sigint [sigint] { term; };` produced `ret i64 1` in a `define void` function, causing LLVM verification to fail with "value doesn't match function result type 'void'". The `wake_triggers.bv` fixture exposed this.
+**Issue**: `node handle_sigint [sigint] { term; };` produced `ret i64 1` in a `define void` function, causing LLVM verification to fail with "value doesn't match function result type 'void'". The `wake_triggers.bv` fixture exposed this.
 
 **Root Cause**: `desugarer.rs:expand_implicit_terms_txn` unconditionally converted `term;` → `term true;` for all transactions with `Bool` postconditions, mirroring the defn path. But transaction functions are `define void` — they cannot return an `i64`. The `emit_stmt` handler correctly emitted `ret i64 <val>` when `values.first()` was `Some`, never reaching the `ret void` path.
 
@@ -402,7 +402,7 @@ Since `std.result` is imported, `Ok` IS in state, so path 1 always applies. But 
 
 ## 2026-06-01 — Solo reactive txn auto-promoted to async, injects unnecessary thread pool + barrier
 
-**Issue**: `ring_buffer.bv` with a single `rct txn work` (no `async` keyword) generated `@async_body_work`, `@llvm.thread_pool`, thread pool init, and barrier calls in the main loop — all for one transaction that does sequential work.
+**Issue**: `ring_buffer.bv` with a single `node work` (no `async` keyword) generated `@async_body_work`, `@llvm.thread_pool`, thread pool init, and barrier calls in the main loop — all for one transaction that does sequential work.
 
 **Root Cause**: `src/backend/llvm.rs:388`: the async eligibility check requires ALL non-enum reactive txns to be pairwise conflict-free. For a single txn, the pairwise loop (`for i..for j>i`) never executes, leaving `is_async_eligible = [true]` via vacuous truth. Solo txns are trivially "conflict-free with all others" because there are no others.
 
@@ -556,7 +556,7 @@ Three code paths in `emit_folded_loop` (phi mode, SSA mode, call mode) all emitt
 
 ## 2026-06-04 — Universal loop hangs with decreasing counter contract
 
-**Issue**: Programs with `rct txn ... [count > 0][count == 0]` (decreasing counter) hang. Switching to `[count < N][count == N]` (increasing counter) works.
+**Issue**: Programs with `node ... [count > 0][count == 0]` (decreasing counter) hang. Switching to `[count < N][count == N]` (increasing counter) works.
 
 **Root Cause**: The universal loop in `emit_folded_multi_main` emits `count < N - stride` for the unrolled body4 path, computed as `adj = add i64 N, <negated_stride>`. This comparison `icmp slt count, adj` only makes sense when count increases. A decreasing counter like `count > 0` has an INVERTED direction — count starts high and decreases, so `count > 0` should become `count > stride` not `count < bound - stride`.
 
@@ -565,7 +565,7 @@ Three code paths in `emit_folded_loop` (phi mode, SSA mode, call mode) all emitt
 
 ## 2026-06-04 — Decreasing counter contracts hang or fall to O(N)
 
-**Issue**: Programs with `rct txn [count > 0][count == 0]` either hung (universal loop path) or ran O(N) tick-per-iteration (fallback path). Only `[count < N][count == N]` was fast.
+**Issue**: Programs with `node [count > 0][count == 0]` either hung (universal loop path) or ran O(N) tick-per-iteration (fallback path). Only `[count < N][count == N]` was fast.
 
 **Root cause**: Three separate gaps:
 1. `extract_bounded_pre` only matched `Expr::Lt`/`Expr::Le` (increasing). `Expr::Gt`/`Expr::Ge` (decreasing) fell through to `None`.
@@ -794,7 +794,7 @@ If a terminating statement fired inside the guarded body, leave `self.terminated
 
 **Issue**: Every `defn` in the standard library and compiler that uses `[guard] { ... &i = i + 1; }` for iteration only processes the first element. The guarded statement fires once, then falls through — there is no loop.
 
-**Root Cause**: `Statement::Guarded` evaluates its condition once and executes the body zero or one times (src/interpreter.rs:842-861). The `defn` body executes as a straight-line sequence — no implicit transaction wrapping, no reactor loop. The pattern `let i = 0; [i < list :> Size] { ... &i = i + 1; }` was cargo-culted from `rct txn` bodies where the outer reactor loop provides convergence. But `defn` has no such loop.
+**Root Cause**: `Statement::Guarded` evaluates its condition once and executes the body zero or one times (src/interpreter.rs:842-861). The `defn` body executes as a straight-line sequence — no implicit transaction wrapping, no reactor loop. The pattern `let i = 0; [i < list :> Size] { ... &i = i + 1; }` was cargo-culted from `node` bodies where the outer reactor loop provides convergence. But `defn` has no such loop.
 
 Affected files and approximate counts:
 - `lib/std/iterator.bv`: 14 defns
@@ -849,7 +849,7 @@ Concrete changes:
 
 ## 2026-06-09 — Proof engine guard path three-bug cascade
 
-**Symptoms**: Benchmarks with a `[guard] { __print_*(...); };` inside an `rct txn` fail P008 contract verification with 14+ identical-looking `guard` constraints in the path state.
+**Symptoms**: Benchmarks with a `[guard] { __print_*(...); };` inside an `node` fail P008 contract verification with 14+ identical-looking `guard` constraints in the path state.
 
 **Root Cause**: Three interacting bugs in `enumerate_paths_recursive` and `is_truthy`:
 
@@ -896,17 +896,17 @@ After the above fixes, these benchmarks still fail P008 — all are convergence 
 
 ---
 
-## 2026-06-09 — fasta LCG broken in rct txn (all output chars same)
+## 2026-06-09 — fasta LCG broken in node (all output chars same)
 
 **Issue**: `benchmarks/fasta.bv` outputs `qqqqq` instead of `xqjqf` (C reference). All iterations produce the same character `q` (ASCII 113), meaning the LCG seed never changes.
 
-**Root Cause**: `rct txn` atomically batches all state writes until `term;`. Inside a single tick, `&seed = seed * IA` reads the original seed (42), then `&seed = seed + IC` ALSO reads the original seed (42), and `&seed = seed % IM` also reads 42. The three writes commit at `term;` — the last one wins: `seed = 42 % 139968 = 42`. Seed stays 42 forever.
+**Root Cause**: `node` atomically batches all state writes until `term;`. Inside a single tick, `&seed = seed * IA` reads the original seed (42), then `&seed = seed + IC` ALSO reads the original seed (42), and `&seed = seed % IM` also reads 42. The three writes commit at `term;` — the last one wins: `seed = 42 % 139968 = 42`. Seed stays 42 forever.
 
-The LLVM backend treats reactive writes as deferred (all reads see pre-tick state), consistent with the reactive semantics. But `fasta.bv` was written assuming sequential in-tick execution, which is incorrect for `rct txn`.
+The LLVM backend treats reactive writes as deferred (all reads see pre-tick state), consistent with the reactive semantics. But `fasta.bv` was written assuming sequential in-tick execution, which is incorrect for `node`.
 
-**Fix**: Convert to callable `txn` (not `rct txn`) so writes take effect immediately within the body iteration. Or restructure as a single assignment: `&seed = (seed * IA + IC) % IM;`.
+**Fix**: Convert to callable `txn` (not `node`) so writes take effect immediately within the body iteration. Or restructure as a single assignment: `&seed = (seed * IA + IC) % IM;`.
 
-**Lesson**: `rct txn` has deferred write semantics — all state reads within a tick see pre-tick values. Sequential `&field = ...` chains like `&seed = seed * IA; &seed = seed + IC; &seed = seed % IM;` do NOT accumulate — each reads the same original seed. Use callable `txn` for sequential state mutations within a single body iteration.
+**Lesson**: `node` has deferred write semantics — all state reads within a tick see pre-tick values. Sequential `&field = ...` chains like `&seed = seed * IA; &seed = seed + IC; &seed = seed % IM;` do NOT accumulate — each reads the same original seed. Use callable `txn` for sequential state mutations within a single body iteration.
 
 ---
 
@@ -942,7 +942,7 @@ The LLVM backend treats reactive writes as deferred (all reads see pre-tick stat
 
 **Issue**: `benchmarks/precompute_sum` binary never exits (timeout at BOUND=5). LLVM IR shows an infinite tick loop: `br label %tick` → `reactor_tick` → `br label %tick`. No observable side effect exists to prevent LLVM from eliminating the loop, but the loop remains because the `.o` linking path uses `cc -O2` (not `-O3`) and may not run the full SROA/mem2reg pipeline.
 
-**Root Cause**: `const total: Int = 500` with budget=256. 500 > 256, so the compiler can't fully precompute. The `rct txn` body is pure (no FFI, no IO), so the reactor loop has no observable effect. At `-O3`, LLVM should eliminate the loop entirely, but the linking path (`cc -O2` on `.o` file) may not be aggressive enough.
+**Root Cause**: `const total: Int = 500` with budget=256. 500 > 256, so the compiler can't fully precompute. The `node` body is pure (no FFI, no IO), so the reactor loop has no observable effect. At `-O3`, LLVM should eliminate the loop entirely, but the linking path (`cc -O2` on `.o` file) may not be aggressive enough.
 
 **Fix**: Either (a) increase budget to >= 500, (b) decrease total to <= 256, or (c) add an FFI output to make the loop observable. The benchmark's purpose is to test compile-time precomputation — it should use `total <= 256` so the budget covers it, or use `--optimize-budget 2048`.
 
@@ -1205,7 +1205,7 @@ both stdout captures are empty — C's `fprintf(stderr)` is discarded by `2>/dev
    the harness captures it correctly.
 
 **Lesson**: Benchmark correctness verification must capture stdout AND stderr,
-or agree on an output channel. Guard conditions in `rct txn` bodies always read
+or agree on an output channel. Guard conditions in `node` bodies always read
 pre-tick state — `[count == N]` is NEVER true at body start for `[count < N][count == N]`
 contracts. Use local `let` variables to compute values outside prior-state scope.
 
@@ -1251,7 +1251,7 @@ swallowing defeats the purpose of contract verification.
 ## 2026-06-11 — Convergence proof gated to reactive txns only
 
 **Issue**: `check_convergence()` in `proof_engine.rs:1570` was only applied to
-reactive `rct txn`, not callable `txn`. The documented iteration pattern
+reactive `node`, not callable `txn`. The documented iteration pattern
 `txn f(items, acc, i) [i < items:>Size][i == items:>Size]` could not be
 statically proven.
 
@@ -2161,9 +2161,9 @@ references it, so the next statement's code lands inside the end label.
 
 **Files**: `src/backend/llvm/emit_stmt.rs`
 
-## 2026-07-18 — rct txn main loop never exits (test impact)
+## 2026-07-18 — node main loop never exits (test impact)
 
-**Issue**: A test using `rct txn run [true][term == 0] { term 0; };` compiles but
+**Issue**: A test using `node run [true][term == 0] { term 0; };` compiles but
 the resulting binary hangs forever.
 
 **Root Cause**: The runtime's `ss_main_loop` (generated by the LLVM backend) runs
@@ -2177,7 +2177,7 @@ benchmark harness (`/tmp/brief_bench_timer`) which enforces a timeout. No fix
 needed — this is architectural, not a bug.
 
 **Lesson**: For one-shot tests, use `defn` with `SysCall#(Exit, ...)` or integrate
-with the benchmark harness. `rct txn` is fundamentally designed for perpetual
+with the benchmark harness. `node` is fundamentally designed for perpetual
 reactive systems.
 
 ## 2026-07-18 — `txn` return type not parsed

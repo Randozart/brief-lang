@@ -171,7 +171,7 @@ mod tests {
         let source = r#"
             let x: UInt = 0;
             
-            rct txn idle [x >= 0]] {
+            node idle [x >= 0]] {
                 term;
             };
         "#;

@@ -7,7 +7,7 @@
 ## Purpose
 
 Allow executable statements directly at global scope, which the compiler
-automatically wraps in a synthesized `rct txn __init` transaction at
+automatically wraps in a synthesized `node __init` transaction at
 compile time. Eliminates boilerplate for simple scripts while retaining
 Brief's transactional safety guarantees.
 
@@ -15,7 +15,7 @@ Brief's transactional safety guarantees.
 
 ```brief
 // Conventional: boilerplate wrapper
-rct txn main [true][true] {
+node main [true][true] {
     println#("hello");
 };
 
@@ -44,7 +44,7 @@ execution. A declaration after a `Statement` is a compile error:
 // Synthesized (fannkuch_redux_0.bv was the test case):
 let __booted_0: Int = 0;
 
-rct txn __init [!__booted_0][__booted_0] {
+node __init [!__booted_0][__booted_0] {
     // all top-level statements in order
     &__booted_0 = 1;
     term;
@@ -93,7 +93,7 @@ top-level statements work in `.rbv`/`.srbv` files as well.
 
 ### Optimizer Treatment
 
-The synthesized `__init` transaction is treated like any other `rct txn` by
+The synthesized `__init` transaction is treated like any other `node` by
 the optimizer. Key details:
 
 - The `!__booted_N` precondition and `&__booted_N = 1` body do **not** match

@@ -646,7 +646,7 @@ txn increment(amount: Int) [amount > 0][counter == @counter + amount] {
 };
 
 // Reactive transaction (fires automatically when precondition met)
-rct txn auto_save [dirty && !saving][!dirty] {
+node auto_save [dirty && !saving][!dirty] {
     saving = true;
     save_to_disk();
     dirty = false;
@@ -2528,7 +2528,7 @@ engine to prove termination for reactive transactions with wake triggers:
 
 ```brief
 #assume_event(stdin_ready)
-rct txn [count < total][count == total] {
+node [count < total][count == total] {
     count = count + 1;
     term;
 }
@@ -2550,7 +2550,7 @@ generates a runtime guard check and splits execution into fast/slow paths:
 
 ```brief
 #assume_shape(packet :> PaymentTxn, escape)
-rct txn [*][*] {
+node [*][*] {
     &processed = processed + 1;
     term;
 }
@@ -3237,7 +3237,7 @@ reset = "RESETn"
 | Feature | Status | Notes |
 |---------|--------|-------|
 | **Core Language** | | |
-| Transactions (`txn`, `rct txn`) | ✅ Complete | |
+| Transactions (`txn`, `node`) | ✅ Complete | |
 | Async transactions | ✅ Complete | With mutual exclusion checking |
 | Definitions (`defn`) | ✅ Complete | With contracts |
 | Guards | ✅ Complete | Guard-based control flow |

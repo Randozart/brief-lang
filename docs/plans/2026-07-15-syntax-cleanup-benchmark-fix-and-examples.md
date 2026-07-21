@@ -210,7 +210,7 @@ import gpio from "target"
 
 let addr: Int = AddressOf#(gpio);
 
-rct txn blink [true][true] {
+node blink [true][true] {
     @ *addr -> gpio_set(1);  // dynamic trigger via pointer deref
     @ *addr -> gpio_set(0);
     term;

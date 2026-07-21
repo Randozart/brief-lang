@@ -89,7 +89,7 @@ defn fifo_read(fifo: Ptr<Byte>, count: Int) -> String
 {
     let buf: String = "";
     let i: Int = 0;
-    rct txn loop [i < count][i == count] {
+    node loop [i < count][i == count] {
         [i < count] {
             let c: Byte = volatile_load#(fifo);
             buf = buf + (c as Char);

@@ -18,7 +18,7 @@ txn create_order [order_id == 0]
   term;
 };
 
-rct txn process_payment [order_id > 0 && payment_processed == false]
+node process_payment [order_id > 0 && payment_processed == false]
   [payment_processed == true]
 {
   payment_processed = true;
@@ -26,7 +26,7 @@ rct txn process_payment [order_id > 0 && payment_processed == false]
   term;
 };
 
-rct txn reserve_inventory [payment_processed == true && inventory_reserved == false]
+node reserve_inventory [payment_processed == true && inventory_reserved == false]
   [inventory_reserved == true]
 {
   inventory_reserved = true;
@@ -34,7 +34,7 @@ rct txn reserve_inventory [payment_processed == true && inventory_reserved == fa
   term;
 };
 
-rct txn prepare_shipment [inventory_reserved == true && shipment_ready == false]
+node prepare_shipment [inventory_reserved == true && shipment_ready == false]
   [shipment_ready == true]
 {
   shipment_ready = true;
@@ -42,7 +42,7 @@ rct txn prepare_shipment [inventory_reserved == true && shipment_ready == false]
   term;
 };
 
-rct txn deliver_order [shipment_ready == true && delivery_complete == false]
+node deliver_order [shipment_ready == true && delivery_complete == false]
   [delivery_complete == true && total_orders == @total_orders + 1]
 {
   delivery_complete = true;
@@ -51,7 +51,7 @@ rct txn deliver_order [shipment_ready == true && delivery_complete == false]
   term;
 };
 
-rct txn reset_for_next_order [delivery_complete == true]
+node reset_for_next_order [delivery_complete == true]
   [order_id == 0 && payment_processed == false && inventory_reserved == false && shipment_ready == false && delivery_complete == false]
 {
   order_id = 0;

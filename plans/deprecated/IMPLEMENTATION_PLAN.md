@@ -184,7 +184,7 @@ if !self.reactive_txns.is_empty() {
 ```brief
 rstruct Counter {
     let count: Int = 5;
-    rct txn tick [count > 0][count == @count - 1] {
+    node tick [count > 0][count == @count - 1] {
         &count = count - 1;
         term;
     };

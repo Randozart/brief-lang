@@ -6,7 +6,7 @@ sig fetch: () -> Int;
 let res: Int = 0;
 let fetched: Bool = false;
 
-rct txn fetch_data [fetched == false][fetched == true] {
+node fetch_data [fetched == false][fetched == true] {
     res = fetch() within 10 cycles;
     [res > 0] {
         term true;

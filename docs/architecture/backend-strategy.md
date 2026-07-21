@@ -172,7 +172,7 @@ hw.module @top(in %clock: i1, in %reset: i1, in %sensor: i64)
 
 ### FSM State Machine
 
-Each `rct txn` body becomes a finite state machine:
+Each `node` body becomes a finite state machine:
 
 | State | Value | Meaning |
 |-------|-------|---------|

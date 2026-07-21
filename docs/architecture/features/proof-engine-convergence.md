@@ -124,7 +124,7 @@ where `R1` and `R2` are compile-time constants.
 **File**: `src/proof_engine.rs:1570`  
 **Date**: 2026-06-11  
 **Root cause**: The structural convergence proof (`check_convergence`) was
-gated behind `txn.is_reactive`, limiting it to `rct txn` only. Callable
+gated behind `txn.is_reactive`, limiting it to `node` only. Callable
 `txn` fell through to symbolic execution, which cannot verify
 projection-based bounds like `i == items:>Size`.
 

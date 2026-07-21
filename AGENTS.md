@@ -546,7 +546,7 @@ term! -> __print_int(result);   // swan song runs before ret — structurally li
 ```brief
 let N: Int = GetEnvInt#("BOUND");   // runtime-determined
 
-rct txn compute [done < N][done == N] {
+node compute [done < N][done == N] {
     [done == N - 1] {
         term! -> PrintInt#(result);
     };
@@ -631,7 +631,7 @@ frequency counting), extract it into `lib/std/`.
 executes the body zero or one times. A `defn` body is straight-line with no
 implicit transaction wrapping.
 
-The correct pattern is a **callable `txn`** (not `rct txn`). A regular `txn`
+The correct pattern is a **callable `txn`** (not `node`). A regular `txn`
 takes parameters and returns values like `defn`, but its body executes in a
 convergence loop: precondition → body → postcondition → repeat if precondition
 still holds.
@@ -654,7 +654,7 @@ defn iter_map<T, U>(list: List<T>, f: T -> U) -> List<U> {
 |-----------|-----------|-------------|
 | `defn` | Pure function, straight-line | Stateless computations, wrappers |
 | `txn params [pre][post] -> Ret` | Callable convergent loop | Iteration, accumulation, recursion |
-| `rct txn [pre][post]` | Reactive, reactor-driven | State machines, event-driven |
+| `node [pre][post]` | Reactive, reactor-driven | State machines, event-driven |
 | `[guard] { body }` | One-shot conditional | If/else inside a `txn` body |
 
 ## Key Backend Rules

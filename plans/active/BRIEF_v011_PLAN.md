@@ -101,7 +101,7 @@ Reference files (do not modify):
 4. If multiple async txns can fire → OK (run concurrently), check for conflicts
 5. First firing txn is the entry point
 
-**Example:** `kernel.ebv:72-75` has `rct txn idle [kernel_state >= 0]` - this is TRUE at init (kernel_state=0), so it's the entry if no other txn also has TRUE precondition
+**Example:** `kernel.ebv:72-75` has `node idle [kernel_state >= 0]` - this is TRUE at init (kernel_state=0), so it's the entry if no other txn also has TRUE precondition
 
 ### 2.6 Cross-Reference Address Validation
 
@@ -219,7 +219,7 @@ Brief-native syntax. Each word must be clear, predictable, inferrable. No magic.
 
 **Example:**
 ```
-rct txn game_tick [frame_ready == true][?]![frame_processed] {
+node game_tick [frame_ready == true][?]![frame_processed] {
     &frame_processed = true;
     term;
 }

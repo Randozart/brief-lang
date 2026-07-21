@@ -22,7 +22,7 @@ const SCALE: Int = 100;
 const THRESH: Int = 40000;
 
 // ── Transaction ──────────────────────────────────────────────────────
-rct txn mb [count < N][count == N] {
+node mb [count < N][count == N] {
     let ns1: Int = (seed * IA + IC) % IM;
     let ncr: Int = ns1 % 200 - 100;
     let ns2: Int = (ns1 * IA + IC) % IM;

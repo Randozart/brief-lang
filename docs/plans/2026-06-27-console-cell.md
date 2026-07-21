@@ -24,7 +24,7 @@ This expands to:
 ```brief
 trg inp: String @ Console!;
 
-rct txn __ci_inp [inp != ""]] {
+node __ci_inp [inp != ""]] {
     submit(inp);
     &inp = "";
     term;
@@ -47,14 +47,14 @@ cell! Console -> line: String {
     trg raw: Char @ stdin#;
 
     // Enter → emit buffer as complete line, increment sequence counter
-    rct txn emit [raw != '\0' && raw == '\n']] {
+    node emit [raw != '\0' && raw == '\n']] {
         &line = buffer;
         &buffer = "";
         term;
     };
 
     // Backspace → trim last char
-    rct txn backspace [raw != '\0' && raw == '\x7f']] {
+    node backspace [raw != '\0' && raw == '\x7f']] {
         &prev_key = raw;
         [buffer :> Size > 0] {
             &buffer = buffer :> Slice(0, buffer :> Size - 1);
@@ -63,7 +63,7 @@ cell! Console -> line: String {
     };
 
     // Printable → accumulate
-    rct txn type [raw != '\0' && raw >= ' ' && raw != '\n' && raw != '\x7f']] {
+    node type [raw != '\0' && raw >= ' ' && raw != '\n' && raw != '\x7f']] {
         &prev_key = raw;
         &buffer = buffer + (String)raw;
         term;
@@ -89,7 +89,7 @@ Key properties:
   ```brief
   trg inp_id: Int @ Console.line_id;
 
-  rct txn handle [inp_id != last_id]] {
+  node handle [inp_id != last_id]] {
       // inp_id has changed → new line available
       process_line(inp_line);
       &last_id = inp_id;
@@ -101,7 +101,7 @@ Key properties:
 
 ### 2. `$!console_input` Macro
 
-A `$!macro` that generates top-level items (trg binding + rct txn handler).
+A `$!macro` that generates top-level items (trg binding + node handler).
 
 **Macro definition** (placed in `lib/std/console.bv`):
 
@@ -110,7 +110,7 @@ macro console_input(line_var: String, body: Block) -> Block {
     quote {
         trg @line_var: String @ Console!;
 
-        rct txn __ci_@line_var [@line_var != ""]] {
+        node __ci_@line_var [@line_var != ""]] {
             @body
             &@line_var = "";
             term;
@@ -124,7 +124,7 @@ macro console_input(line_var: String, body: Block) -> Block {
 | Risk | Failure mode | Fallback |
 |------|-------------|----------|
 | `$!macro` can't be called at top level | Macro call only valid inside functions | Document the explicit pattern |
-| `rct txn` inside `quote` doesn't parse as `Statement` | Macro can't generate handler | Split: macro only generates `trg` binding |
+| `node` inside `quote` doesn't parse as `Statement` | Macro can't generate handler | Split: macro only generates `trg` binding |
 | `trg @ Console!` shorthand fails in `Statement::TrgBinding` | Shorthand only works at top level | Macro generates `let __inst = cell Console; trg @ __inst.line;` |
 | `@"$!Console"` string interpolation for cell name fails | Can't generate cell name in quote | Use explicit cell reference |
 
@@ -137,7 +137,7 @@ The `$!console_input` macro must handle the case where the user enters the same 
 ```brief
 trg @line_var: String @ Console!;
 
-rct txn __ci_@line_var [@line_var != ""]] {
+node __ci_@line_var [@line_var != ""]] {
     @body
     &@line_var = "";
     term;
@@ -152,7 +152,7 @@ With `line: String` as the sole output, the parent's trigger fires when the cell
 trg inp_id: Int @ Console.line_id;
 let last_inp_id: Int = -1;
 
-rct txn handle [inp_id != last_inp_id]] {
+node handle [inp_id != last_inp_id]] {
     // The line is available via the other trg:
     // trg inp_line: String @ Console.line;
     process_line(inp_line);
@@ -199,7 +199,7 @@ A top-level Brief program has this flow each tick:
 
 ```
 1. Evaluate all trg sources (stdin#, timer#, mmio) → write to state
-2. For each rct txn: check precondition → execute body → check postcondition
+2. For each node: check precondition → execute body → check postcondition
 3. Repeat until stasis
 4. Sync output ports
 ```
@@ -360,7 +360,7 @@ goal of trying out the Console cell.
 |------|--------|------------|
 | Internal `trg` not evaluated during cell ticks | Cell can't self-poll stdin | Add eval loop in `tick_persistent_cells` |
 | `$!macro` can't generate top-level items | Macro approach fails | Fall back to documented 5-line pattern |
-| `rct txn` inside `quote` doesn't parse as statement | Handler can't be macro-generated | Split: macro generates trg only, user writes handler |
+| `node` inside `quote` doesn't parse as statement | Handler can't be macro-generated | Split: macro generates trg only, user writes handler |
 | Duplicate-input loss despite line_id counter | Incorrect behavior | Ensure output comparison uses the latest cell output, not cached |
 
 ---

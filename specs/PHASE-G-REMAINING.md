@@ -186,7 +186,7 @@ defn consume() -> Bool {
 ### 3f. Documentation: `trg` tutorial
 
 `learn-brief/11-triggers.md` should be updated to reflect the final event
-model: `@ link` bindings, `rct txn [trg]` pattern, no `trg!` inside bodies,
+model: `@ link` bindings, `node [trg]` pattern, no `trg!` inside bodies,
 `runtime/brief_rt.c` linking.
 
 ---

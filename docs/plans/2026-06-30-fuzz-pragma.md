@@ -502,6 +502,6 @@ Exit 0 if all cases pass, 1 if any fail.
    should the fuzz case be an error or a warning? Proposal: warning-level error
    that does not block compilation.
 
-3. **Reactive txns**: `rct txn` has no callable interface (no params, no return).
+3. **Reactive txns**: `node` has no callable interface (no params, no return).
    Fuzz on reactive txns should be a compile error ("cannot fuzz reactive
    transaction") unless we add a way to simulate a tick cycle.

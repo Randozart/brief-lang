@@ -9,7 +9,7 @@ Reorder transaction body statements to maximize instruction-level parallelism (I
 A transaction body like:
 
 ```brief
-rct txn compute [ready][done] {
+node compute [ready][done] {
     &x = a + b;      // independent
     &y = c + d;      // independent — can fire in parallel with x
     &z = x * y;      // dependent on x AND y — must wait

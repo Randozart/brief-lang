@@ -14,7 +14,7 @@ txn increment [counter < 100][counter == @counter + 1] {
 };
 
 // Reactive transaction (fires automatically)
-rct txn auto_increment [counter < 100][counter == @counter + 1] {
+node auto_increment [counter < 100][counter == @counter + 1] {
     &counter = counter + 1;
     term;
 };
@@ -32,14 +32,14 @@ The compiler **proves** reactive transactions can terminate:
 
 ```brief
 // ✅ VERIFIES - provably terminates
-rct txn increment() [counter < 100][counter == @counter + 1] {
+node increment() [counter < 100][counter == @counter + 1] {
     &counter = counter + 1;
     term;
 };
 // Compiler proves: counter increases by 1 each iteration, will reach 100
 
 // ❌ REJECTED - cannot prove termination
-rct txn bad_increment() [counter < 100][counter == @counter + 1] {
+node bad_increment() [counter < 100][counter == @counter + 1] {
     [counter < 50] {
         &counter = counter + 1;
     };
@@ -54,7 +54,7 @@ rct txn bad_increment() [counter < 100][counter == @counter + 1] {
 Once termination is proven, the compiler optimizes:
 
 ```brief
-rct txn fill_buffer() [buffer :> Size < 100][buffer :> Size == 100] {
+node fill_buffer() [buffer :> Size < 100][buffer :> Size == 100] {
     &buffer = buffer.append(read_item());
     term;
 };
@@ -77,12 +77,12 @@ Reactive transactions can trigger each other:
 let count: Int = 0;
 let done: Bool = false;
 
-rct txn increment [count < 10 && !done][count == @count + 1] {
+node increment [count < 10 && !done][count == @count + 1] {
     &count = count + 1;
     term;
 };
 
-rct txn finish [count >= 10 && !done][done == true] {
+node finish [count >= 10 && !done][done == true] {
     &done = true;
     term;
 };
@@ -126,7 +126,7 @@ rct async txn process_data [data != processed_data][processed == true] {
 
 ### Event Handler
 ```brief
-rct txn on_button_click() [button_clicked][handled == true] {
+node on_button_click() [button_clicked][handled == true] {
     do_something();
     &button_clicked = false;
     &handled = true;
@@ -139,17 +139,17 @@ rct txn on_button_click() [button_clicked][handled == true] {
 enum State { Idle, Running, Done }
 let state: State = State::Idle;
 
-rct txn start [state == State::Idle][state == State::Running] {
+node start [state == State::Idle][state == State::Running] {
     &state = State::Running;
     term;
 };
 
-rct txn finish [state == State::Running][state == State::Done] {
+node finish [state == State::Running][state == State::Done] {
     &state = State::Done;
     term;
 };
 
-rct txn reset [state == State::Done][state == State::Idle] {
+node reset [state == State::Done][state == State::Idle] {
     &state = State::Idle;
     term;
 };
@@ -160,7 +160,7 @@ rct txn reset [state == State::Done][state == State::Idle] {
 let observers: List<String> = [];
 let subject_value: Int = 0;
 
-rct txn notify_observers() [subject_value != @notified_value][true] {
+node notify_observers() [subject_value != @notified_value][true] {
     let i: Int = 0;
     [i < observers :> Size] {
         notify(observers[i], subject_value);
@@ -176,7 +176,7 @@ rct txn notify_observers() [subject_value != @notified_value][true] {
 let last_trigger: Int = 0;
 let debounce_time: Int = 100;  // ms
 
-rct txn debounced_action() 
+node debounced_action() 
     [current_time() - last_trigger > debounce_time]
     [last_trigger == current_time()]
 {
@@ -194,13 +194,13 @@ Sometimes you need a **fixed tick rate** instead — e.g., sensor polling, anima
 
 ```brief
 // Reactive (default): fires when precondition changes
-rct txn on_signal [signal][handled == true] {
+node on_signal [signal][handled == true] {
     &handled = true;
     term;
 };
 
 // Polling: fires every 10ms regardless of precondition state
-rct txn read_sensor @100Hz [true][logged == true] {
+node read_sensor @100Hz [true][logged == true] {
     &value = read_adc();
     &logged = true;
     term;
@@ -224,15 +224,15 @@ rct txn read_sensor @100Hz [true][logged == true] {
 | Mode | Syntax | Fires when | Use case |
 |------|--------|-----------|----------|
 | Passive | `txn` | Explicit call only | API, callbacks |
-| Reactive | `rct txn` | Precondition becomes true | State machines, event handlers |
-| Polling | `rct txn @Hz` | Precondition true + tick interval met | Sensors, timers, animation |
+| Reactive | `node` | Precondition becomes true | State machines, event handlers |
+| Polling | `node @Hz` | Precondition true + tick interval met | Sensors, timers, animation |
 
 ## 8. Debugging Reactive Code
 
 Add logging transactions:
 
 ```brief
-rct txn log_state() [true][true] {
+node log_state() [true][true] {
     println("Counter: " + String(counter));
     println("Active: " + String(active));
     term;
@@ -242,7 +242,7 @@ rct txn log_state() [true][true] {
 Or use explicit state checks:
 
 ```brief
-rct txn check_invariants() [true][true] {
+node check_invariants() [true][true] {
     [counter >= 0] {
         // Invariant holds
     };
@@ -261,19 +261,19 @@ let items: Int = 0;
 let total: Float = 0.0;
 let discount_applied: Bool = false;
 
-rct txn add_item(price: Float) [true][items == @items + 1] {
+node add_item(price: Float) [true][items == @items + 1] {
     &items = items + 1;
     &total = total + price;
     term;
 };
 
-rct txn remove_item(price: Float) [items > 0][items == @items - 1] {
+node remove_item(price: Float) [items > 0][items == @items - 1] {
     &items = items - 1;
     &total = total - price;
     term;
 };
 
-rct txn apply_bulk_discount() 
+node apply_bulk_discount() 
     [items > 10 && total > 100.0 && !discount_applied]
     [total < @total && discount_applied == true]
 {
@@ -283,7 +283,7 @@ rct txn apply_bulk_discount()
     term;
 };
 
-rct txn clear_cart() [items > 0][items == 0 && total == 0.0] {
+node clear_cart() [items > 0][items == 0 && total == 0.0] {
     &items = 0;
     &total = 0.0;
     &discount_applied = false;

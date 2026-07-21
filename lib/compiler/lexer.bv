@@ -145,7 +145,7 @@ defn read_identifier(state: LexerState) -> (Token, LexerState) {
     [text == "let"] { term (KeywordLet, state); };
     [text == "const"] { term (KeywordConst, state); };
     [text == "txn"] { term (KeywordTxn, state); };
-    [text == "rct"] { term (KeywordRct, state); };
+        [text == "node"] { term (KeywordNode, state); };
     [text == "async"] { term (KeywordAsync, state); };
     [text == "term"] { term (KeywordTerm, state); };
     [text == "escape"] { term (KeywordEscape, state); };

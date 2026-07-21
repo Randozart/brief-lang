@@ -103,7 +103,7 @@ end:
 
 **Brief:**
 ```brief
-rct txn increment [counter < 10] [...]
+node increment [counter < 10] [...]
 ```
 
 **Expected LLVM:** The precondition expression `counter < 10` emits `icmp slt` + `zext` to produce an `i64` from the `i1` comparison. The `zext` is needed because Brief's expression system uses `i64` for Bool values (1 = true, 0 = false).

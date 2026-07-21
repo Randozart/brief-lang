@@ -217,7 +217,7 @@ Once a meld-backed chimera exists, the compiler must decide how to lay out its p
 | Path | When selected | Physical layout | When to use |
 |------|---------------|-----------------|-------------|
 | **Short Path** (default) | No loop appears, or only one lens is active | Backing type's canonical layout. The other lens derives on demand. | Most code — single-lens usage, infrequent access |
-| **Hot Dual** | Both lenses active in a loop nest (projection-usage evidence) | Backing type + cache slots + valid flag for deferred projections | `rct txn` loops, tight iteration |
+| **Hot Dual** | Both lenses active in a loop nest (projection-usage evidence) | Backing type + cache slots + valid flag for deferred projections | `node` loops, tight iteration |
 | **Unpack at Transfer** | Value crosses a struct store or FFI boundary | Canonical layout of the target type | Function returns, FFI calls, struct field writes |
 
 ### Short Path — Concrete LLVM
@@ -242,7 +242,7 @@ LLVM codegen for cs[0]:
 ### Hot Dual — Concrete LLVM
 
 ```
-Source:  rct txn loop [i < cs :> Size][i == cs :> Size] {
+Source:  node loop [i < cs :> Size][i == cs :> Size] {
              process(cs[0]);
              &i = i + 1;
          };

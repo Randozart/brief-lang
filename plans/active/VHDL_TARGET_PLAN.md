@@ -41,7 +41,7 @@ Add VHDL as a second transpile target for Embedded Brief (.ebv), alongside exist
 | Brief Construct | VHDL Output |
 |----------------|-------------|
 | `state` | Signal declaration |
-| `rct txn` | Clocked process |
+| `node` | Clocked process |
 | `txn` (non-reactive) | Combinatorial process |
 | `[guard]` | If/elsif in process |
 | `check` | PSL assertion |
@@ -104,11 +104,11 @@ Add VHDL as a second transpile target for Embedded Brief (.ebv), alongside exist
 led_on: Bool = false
 ALIAS led: Bool @0xFF5E0000
 
-rct txn init [true][led_on] {
+node init [true][led_on] {
     led_on = true
 }
 
-rct txn toggle [led_on][!led_on] {
+node toggle [led_on][!led_on] {
     led_on = !led_on
 }
 ```

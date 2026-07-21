@@ -227,7 +227,7 @@ let N: Int = __get_env_int("BOUND");   // runtime-determined — prevents precom
 let done: Int = 0;
 let result: Int = 0;
 
-rct txn compute [done < N][done == N] {
+node compute [done < N][done == N] {
     [done == N - 1] {
         &result = XXH64(addr, len, 0);
         term! -> __print_int(result);   // program exit, swan song runs before ret
@@ -355,7 +355,7 @@ If the compiler precomputes your benchmark, **increase the budget or make the bo
 
 ## Language Architecture
 
-Brief is a **general-purpose programming language**. The computational primitive is the **reactive transaction** (`rct txn`):
+Brief is a **general-purpose programming language**. The computational primitive is the **reactive transaction** (`node`):
 - **Precondition** (guard): `[x > 0 && y < N]`
 - **Postcondition** (contract): `[x == N]`
 - **Body**: `{ &x = x + 1; &y = y * 2; }`
@@ -644,7 +644,7 @@ See `docs/plans/2026-06-15-trinity-work-items.md` for the full plan. Summary:
 
 `Statement::Guarded` is a **one-shot conditional** — it evaluates the guard once and executes the body zero or one times. It does NOT loop. A `defn` body executes as a straight-line sequence with no implicit transaction wrapping.
 
-The correct pattern for iteration in Brief is a **callable `txn`** (not `rct txn`). A regular `txn` takes parameters and returns values like a `defn`, but its body executes in a convergence loop: evaluate precondition → execute body → check postcondition → repeat if precondition still holds. The precondition becoming false is the convergence signal.
+The correct pattern for iteration in Brief is a **callable `txn`** (not `node`). A regular `txn` takes parameters and returns values like a `defn`, but its body executes in a convergence loop: evaluate precondition → execute body → check postcondition → repeat if precondition still holds. The precondition becoming false is the convergence signal.
 
 ```brief
 // CORRECT — convergence loop via txn + [pre][post]:
@@ -665,10 +665,10 @@ defn iter_map<T, U>(list: List<T>, f: T -> U) -> List<U> {
 |-----------|-----------|-------------|
 | `defn` | Pure function, straight-line | Stateless computations, wrappers |
 | `txn params [pre][post] -> Ret { body }` | Callable convergent loop | Iteration, accumulation, recursion |
-| `rct txn [pre][post] { body }` | Reactive, reactor-driven | State machines, event-driven |
+| `node [pre][post] { body }` | Reactive, reactor-driven | State machines, event-driven |
 | `[guard] { body }` | One-shot conditional | If/else, conditional execution inside a `txn` body |
 
-Evolution: The old pattern `[guard] { &i = i + 1; }` inside `defn` bodies was cargo-culted from `rct txn` internals, where the outer reactor loop provides convergence. But `defn` has no such loop — the guarded statement fires once and falls through. ~130 defns in `lib/` were silently broken. All have been migrated to callable `txn`s.
+Evolution: The old pattern `[guard] { &i = i + 1; }` inside `defn` bodies was cargo-culted from `node` internals, where the outer reactor loop provides convergence. But `defn` has no such loop — the guarded statement fires once and falls through. ~130 defns in `lib/` were silently broken. All have been migrated to callable `txn`s.
 
 ## Testing Mandate
 

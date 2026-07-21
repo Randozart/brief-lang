@@ -286,7 +286,7 @@ impl LlvmBackend {
                 async_txn_names.insert(ac.name.clone());
             }
         }
-        // 2026-07-17: Include user-flagged async txns (rct async txn) even
+        // 2026-07-21: Include user-flagged async nodes (node async) even
         // if conflict analysis fails. The user explicitly asserts safety.
         for txn in &async_candidates {
             if txn.is_async {

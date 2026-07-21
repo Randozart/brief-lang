@@ -62,7 +62,7 @@ An `.rbv` file contains three sections:
     term;
   };
 
-  rct txn auto_greet [count == 5][message == "You hit 5!"] {
+  node auto_greet [count == 5][message == "You hit 5!"] {
     &message = "You hit 5!";
     term;
   };
@@ -97,7 +97,7 @@ The `<script type="brief">` block accepts standard Brief syntax:
 - `sig` signature declarations
 - `defn` function definitions
 - `txn` transactions
-- `rct txn` reactive transactions
+- `node` reactive transactions
 - `struct` struct definitions
 
 ### 3.2 State as Signals
@@ -130,7 +130,7 @@ let names: List<String> = ["Alice", "Bob", "Charlie"];
 Transactions marked with `rct` self-fire when their preconditions are satisfied:
 
 ```brief
-rct txn update_display [count > 10][true] {
+node update_display [count > 10][true] {
   // This fires whenever count > 10
   term;
 };
@@ -560,7 +560,7 @@ briefc watch src/ --out dist/
     term;
   };
 
-  rct txn show_error [error != null][true] {
+  node show_error [error != null][true] {
     term;
   };
 </script>

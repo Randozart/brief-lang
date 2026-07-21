@@ -31,7 +31,7 @@ The handler block (between `#[` and `]`) executes on fuel exhaustion after rolli
 
 | Strategy | What it checks | Scope | Status |
 |----------|---------------|-------|--------|
-| **Bounded counter** | Transition graph finds `[i < N][i == N]` convergence | `rct txn` bodies | ✅ Exists |
+| **Bounded counter** | Transition graph finds `[i < N][i == N]` convergence | `node` bodies | ✅ Exists |
 | **Structural recursion** | Recursive call on strictly smaller sub-term (`n-1`, `list.tail()`) | `defn` recursion | ✅ New (2026-06-15) |
 | **Fuel budget injection** | `--optimize-budget` iteration cap becomes the fuel limit | Fallback when all else fails | ✅ New (2026-06-15) |
 

@@ -11,7 +11,7 @@ $(Mid) {
     let has_trg: Int = Collect$("(trigger ?name ?type @ ?binding)");
 
     [has_entry == 0 && has_trg == 0] {
-        // CheckReactive$ verifies at least one rct txn has live bindings
+        // CheckReactive$ verifies at least one node has live bindings
         CheckReactive$();
     };
 };

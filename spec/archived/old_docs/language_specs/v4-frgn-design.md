@@ -14,7 +14,7 @@ Brief is a declarative language. Users write pure Brief code. Host/native functi
 ```brief
 import { println } from std.io;
 
-rct txn greet [~/done] {
+node greet [~/done] {
   term println("Hello, World!");
 }
 ```

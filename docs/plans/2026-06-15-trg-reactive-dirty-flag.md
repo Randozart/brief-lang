@@ -188,7 +188,7 @@ event_loop:
 #### 3d. Keep existing dispatch as fallback
 
 The old snapshot-then-dispatch reactor (`dispatch.rs`) remains for programs
-with NO `trg` declarations — where classic `rct txn` convergence is the
+with NO `trg` declarations — where classic `node` convergence is the
 only active pattern.
 
 ### Phase 4 — CIRCT Backend: Hardware via HW + Comb + Seq
@@ -207,7 +207,7 @@ the LLVM backend's `.ll` text emission.
 | `let sum = a + b` | Comb | `%sum = comb.add %a, %b : i64` |
 | `let flag = x > 0` | Comb | `%flag = comb.icmp gt %x, %c0_i64 : i64` |
 | `let sel = cond ? a : b` | Comb | `%sel = comb.mux %cond, %a, %b : i64` |
-| `rct txn [pre][post] { body }` | Comb + Seq | Guard → `comb.icmp`, state → `seq.compreg` |
+| `node [pre][post] { body }` | Comb + Seq | Guard → `comb.icmp`, state → `seq.compreg` |
 | `let state: Int = 0` | Seq | `%reg = seq.compreg %clk, %d` |
 
 #### 4b. Module structure
@@ -238,7 +238,7 @@ needed in hardware. The compiler verifies the dependency graph is acyclic
 
 #### 4c. Clocked state
 
-For state variables (`let` with initializer and `rct txn` updates):
+For state variables (`let` with initializer and `node` updates):
 
 ```mlir
   // let counter: Int = 0;

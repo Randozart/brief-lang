@@ -20,14 +20,14 @@ txn deposit [balance < 1000]
   term;
 };
 
-rct txn emergency_refill [balance < 20]
+node emergency_refill [balance < 20]
   [balance == 100]
 {
   balance = 100;
   term;
 };
 
-rct txn check_funds [balance > 0]
+node check_funds [balance > 0]
   [fund_available == true]
 {
   fund_available = true;

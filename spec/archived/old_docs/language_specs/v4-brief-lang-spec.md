@@ -183,7 +183,7 @@ import { map, filter as f } from collections;  # Multiple with aliases
 Brief programs have no `main()` function. They execute using a **Blackboard Architecture**:
 
 1. **The Blackboard**: `let` and `const` variables act as the global truth state.
-2. **The Reactor Loop**: The engine continuously evaluates the `[pre]` conditions of all `rct` blocks (`rct txn` and `rct async txn`).
+2. **The Reactor Loop**: The engine continuously evaluates the `[pre]` conditions of all `rct` blocks (`node` and `rct async txn`).
    - The reactor is event-driven, not a polling loop:
      - The blackboard tracks which variables each rct precondition references (its dependency set)
      - When an &variable mutation occurs (via assignment, term, or return binding), the reactor marks only the preconditions that reference that variable as dirty
@@ -346,7 +346,7 @@ When a `term` contains a function call expression without an explicit signature,
 ```brief
 import { print } from std.io;
 
-rct txn hello [~/done] {
+node hello [~/done] {
   term print("Hello, World!");
 }
 ```
@@ -357,7 +357,7 @@ let done: Bool = false;
 
 sig print: String -> true;  # Auto-generated
 
-rct txn hello [~done][done] {
+node hello [~done][done] {
   &done = true;
   term;
 }
@@ -368,7 +368,7 @@ The `term expression;` form implicitly:
 2. Adds `&done = true;` before `term;`
 3. The `done` variable is auto-declared at top level with `let done: Bool = false;`
 
-**Only works for `rct txn` with `[~done][done]` pattern.**
+**Only works for `node` with `[~done][done]` pattern.**
 
 ---
 
@@ -384,7 +384,7 @@ rct_transaction ::= "rct" ("async")? "txn" identifier contract "{" body "}" ";"
 
 **Example:**
 ```acr
-rct txn process_order [order_ready][order_processed] {
+node process_order [order_ready][order_processed] {
   &order_processed = true;
   term;
 };
@@ -591,7 +591,7 @@ rct async txn log_event [event_processed][logged] {
 ```acr
 let global_counter: Int = 0;
 
-rct txn increment [true][global_counter > 0] {
+node increment [true][global_counter > 0] {
   &global_counter = global_counter + 1;
   term;
 };
@@ -625,7 +625,7 @@ sig validate_input: String -> true;
 ```brief
 import { print } from std.io;
 
-rct txn hello [~/done] {
+node hello [~/done] {
   term print("Hello, World!");
 }
 ```
@@ -635,7 +635,7 @@ Desugars to:
 let done: Bool = false;
 sig print: String -> true;
 
-rct txn hello [~done][done] {
+node hello [~done][done] {
   &done = true;
   term;
 }
@@ -795,7 +795,7 @@ txn process_order [order_ready] {
 - Multiple `term` statements act as priority-ordered guards
 
 ### 12.5 Total-Path Checking
-The compiler proves every `rct txn` has an accepting path — at least one `term` expression on every control flow through the body that evaluates to truthy. If no guaranteed commit path exists, the transaction is rejected.
+The compiler proves every `node` has an accepting path — at least one `term` expression on every control flow through the body that evaluates to truthy. If no guaranteed commit path exists, the transaction is rejected.
 
 **Proof Requirements:**
 1. All branches must lead to a `term` statement
@@ -804,7 +804,7 @@ The compiler proves every `rct txn` has an accepting path — at least one `term
 
 **Example (Valid):**
 ```acr
-rct txn handle_result [result_ready] {
+node handle_result [result_ready] {
   let res = get_result();
   term res.success;      # Path 1: Success commits
   term !res.success;     # Path 2: Failure also commits (truthy)
@@ -813,12 +813,12 @@ rct txn handle_result [result_ready] {
 
 **Example (Invalid - Rejected):**
 ```acr
-rct txn incomplete [true] {
+node incomplete [true] {
   let data = fetch();
   [data != null] term data;  # Only commits if data is not null
   # Missing: what happens if data IS null? No accepting path.
 };
-# Compiler Error: "No guaranteed accepting path in rct txn 'incomplete'"
+# Compiler Error: "No guaranteed accepting path in node 'incomplete'"
 ```
 
 ---

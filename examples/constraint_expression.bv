@@ -3,14 +3,14 @@
 
 let value: Int = 42;
 
-rct txn check_constraint {
+node check_constraint {
   let positive: Int <: [_ > 0] = value;
   let even: Int <: [_ % 2 == 0] = value;
   let in_range: Int <: [_ > 0 && _ < 100] = value;
   term Print#(even);
 };
 
-rct txn update [value > 0][value == @value - 1] {
+node update [value > 0][value == @value - 1] {
   value = value - 1;
   term;
 };

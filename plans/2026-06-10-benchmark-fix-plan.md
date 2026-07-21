@@ -7,11 +7,11 @@
 ### P0 — Fix output asymmetry (verify Brief semantics are the reference)
 
 **Problem**: 2 benchmarks (cancel_math, queue_drain) guard on `count % 5M == 0`.
-Brief's `rct txn` checks the guard against pre-tick state. C checks after
+Brief's `node` checks the guard against pre-tick state. C checks after
 increment. This produces different first-print timing.
 
 **Fix**: The C reference should mirror Brief's semantics. Move the guard
-BEFORE the increment in C. Brief's rct txn semantics are the reference
+BEFORE the increment in C. Brief's node semantics are the reference
 implementation — C benchmarks should match them.
 
 Files: `benchmarks/cancel_math_c.c`, `benchmarks/queue_drain_c.c`
@@ -28,7 +28,7 @@ from stale `.o` files before the fix.
 ### P1 — Investigate mandelbrot hang
 
 **Problem**: `mandelbrot.bv` times out at BOUND=5. Likely the same structural
-issue as the `test_mod.bv` hang: `term!` inside a guard in `rct txn` emits
+issue as the `test_mod.bv` hang: `term!` inside a guard in `node` emits
 `ret` which exits `reactor_tick`, but `main` loops and re-calls it. State
 never commits, infinite re-entry.
 
@@ -82,7 +82,7 @@ After each fix:
 
 - Fixing the `term!` in guard structural issue (`reactor_tick` exit vs
   program exit). This is a compiler bug that affects all programs using
-  `term!` inside a guard in `rct txn`. Documented in BUGS.md (2026-06-07).
+  `term!` inside a guard in `node`. Documented in BUGS.md (2026-06-07).
   Fix deferred — the benchmark fix is to not use `term!` in guards.
 
 - Adding new benchmarks (spectral-norm, binary-trees). Deferred to next

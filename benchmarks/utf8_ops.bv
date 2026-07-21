@@ -20,7 +20,7 @@ const SEED: Int = GetEnvInt!("SEED");
 let ops: Int = 0;
 let checksum: Int = 0;
 
-rct txn work [ops < TOTAL][ops == TOTAL] {
+node work [ops < TOTAL][ops == TOTAL] {
     let a: Int = Alloc#(8) as Int;
     let b: Int = Alloc#(8) as Int;
     // Store runtime-varying data — cannot fold

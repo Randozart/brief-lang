@@ -5,7 +5,7 @@ let alice_balance: Int = 1000;
 let bob_balance: Int = 500;
 let transfer_in_progress: Bool = false;
 
-rct txn transfer [transfer_in_progress == false && alice_balance >= 10]
+node transfer [transfer_in_progress == false && alice_balance >= 10]
   [alice_balance == @alice_balance - 10 && bob_balance == @bob_balance + 10 && transfer_in_progress == false]
 {
   transfer_in_progress = true;

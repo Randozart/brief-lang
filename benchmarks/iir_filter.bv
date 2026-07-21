@@ -46,7 +46,7 @@ let count: Int = 0;
 // bounded convergence; the LLVM backend emits:
 //   while (count < 50000000) { process_body(); }
 // with zero runtime contract evaluation.
-rct txn process [count < total][count == total] {
+node process [count < total][count == total] {
     // Feedforward path: b0*input + b1*x1 + b2*x2
     let f0: Float = b0 * input;
     let f1: Float = b1 * x1;

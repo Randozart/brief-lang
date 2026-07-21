@@ -67,13 +67,13 @@ txn process() {
 
 ```brief
 // ❌ BAD - fires too frequently
-rct txn log_everything() [true][true] {
+node log_everything() [true][true] {
     println("State changed");
     term;
 };
 
 // ✅ GOOD - fires only when needed
-rct txn log_important_changes() 
+node log_important_changes() 
     [critical_value > threshold]
     [logged == true]
 {
@@ -200,7 +200,7 @@ defn test_reactive_chain() -> Bool {
 ### 1. Add Logging Transactions
 
 ```brief
-rct txn log_state() [true][true] {
+node log_state() [true][true] {
     println("Counter: " + String(counter));
     println("Balance: " + String(balance));
     println("Active: " + String(active));
@@ -211,7 +211,7 @@ rct txn log_state() [true][true] {
 ### 2. Use Invariants
 
 ```brief
-rct txn check_invariants() [true][true] {
+node check_invariants() [true][true] {
     [counter >= 0] {
         // Invariant holds
     };
@@ -333,14 +333,14 @@ defn sanitize_html(input: String) -> String {
 
 ```brief
 // ❌ BAD - infinite loop
-rct txn bad_increment() [true][counter == @counter + 1] {
+node bad_increment() [true][counter == @counter + 1] {
     &counter = counter + 1;
     term;
 };
 // Compiler will reject: cannot prove termination
 
 // ✅ GOOD - bounded loop
-rct txn good_increment() [counter < 100][counter == @counter + 1] {
+node good_increment() [counter < 100][counter == @counter + 1] {
     &counter = counter + 1;
     term;
 };

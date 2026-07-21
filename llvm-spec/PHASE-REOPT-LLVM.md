@@ -518,7 +518,7 @@ One file, C preprocessor handles platform detection. See `runtime/brief_rt.c`.
 
 ## 9. Event Model Integration
 
-The event model (`@ link` as universal doorbell, `rct txn` as event handler) is
+The event model (`@ link` as universal doorbell, `node` as event handler) is
 documented in two companion documents:
 
 - **`specs/EVENT-MODEL.md`** — Core language event architecture
@@ -549,7 +549,7 @@ at the end of the chain actually returns.
 
 The `trg!` statement (`Statement::LocalTrigger`) is emitted as a no-op comment.
 It is excluded from the LLVM backend's event model. New code should use
-top-level `trg` + `rct txn`.
+top-level `trg` + `node`.
 
 ### Bug Inventory Update
 

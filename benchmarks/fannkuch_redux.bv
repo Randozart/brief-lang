@@ -27,7 +27,7 @@ const IA: Int = 3877;
 const IC: Int = 29573;
 
 // ── Transaction ──────────────────────────────────────────────────────
-rct txn fan [count < N][count == N] {
+node fan [count < N][count == N] {
     let ns: Int = (seed * IA + IC) % IM;
     let saved: Int = p0;
     let nchecksum: Int = checksum + saved % 13;

@@ -25,7 +25,7 @@ let accum: Int = 0;
 let raw_ptr: Int = 42;
 let raw_len: Int = 16;
 
-rct txn run [accum < 1000][accum == 1000] {
+node run [accum < 1000][accum == 1000] {
     let buf: CBuffer = CBuffer { ptr: raw_ptr, len: raw_len };
     let rs: RSBuffer = buf as RSBuffer;
     let ok: Int = consume_buffer(rs.data, rs.size);

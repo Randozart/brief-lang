@@ -23,7 +23,7 @@ let head: Int = 0;
 let tail: Int = 0;
 let ops: Int = 0;
 
-rct txn enqueue [ops < TOTAL][ops == TOTAL] {
+node enqueue [ops < TOTAL][ops == TOTAL] {
     data[tail % CAP] = ops;
     tail = tail + 1;
     ops = ops + 1;

@@ -48,7 +48,7 @@ Change `generate()` to return `Vec<(String, String)>` — `(filename, source)` p
 - `top.vhd` — entity + structural architecture, instantiates components
 - `axi_lite_slave.vhd` — AXI4-Lite slave (if interface = "axi4-lite" in HW config)
 - `ram_<name>.vhd` — RAM inference per `bank` declaration
-- `fsm.vhd` — state machine from `rct txn` transactions
+- `fsm.vhd` — state machine from `node` transactions
 - `stage_<name>.vhd` — pipeline stage per `stage` declaration
 - `txn_<name>.vhd` — synchronous process per reactive transaction
 - `clk_div.vhd` — clock divider from `TargetConfig.clock_hz`
@@ -111,7 +111,7 @@ Generate `fsm.vhd` with:
 - `signal current_state, next_state : state_type;`
 - Clocked process: `if rst = '1' then ... elsif rising_edge(clk) then current_state <= next_state;`
 - Combinatorial process: `case current_state is ... end case;`
-- Each `rct txn` becomes a transition guard and action
+- Each `node` becomes a transition guard and action
 
 ### Step 8: Pipeline stages with generate loops
 
@@ -134,7 +134,7 @@ Generate a separate testbench `.vhd` that:
 
 ### Step 10: PSL assertion generation
 
-For each contract `[pre][post]` on a `rct txn`:
+For each contract `[pre][post]` on a `node`:
 
 ```vhdl
 -- psl default clock is rising_edge(clk);

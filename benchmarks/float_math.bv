@@ -34,7 +34,7 @@ const Q10: Float = 0.0;
 const Q20: Float = 0.0;
 const Q21: Float = 0.0;
 
-rct txn tick [
+node tick [
     count < total
 ][count == total] {
     x0 = A00 * x0 + A01 * x1 + A02 * x2;

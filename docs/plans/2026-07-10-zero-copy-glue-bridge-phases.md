@@ -379,11 +379,11 @@ export("compute_factorial") txn fact_loop(n: Int, acc: Int, i: Int) [i <= n][i >
     term next;
 };
 
-// ── NOT valid: export rct txn (reactive txns are state-internal) ──
-//   rct txn tick [x < 100][x == 100] { ... };
+// ── NOT valid: export node (reactive txns are state-internal) ──
+//   node tick [x < 100][x == 100] { ... };
 // Reactive txns have no well-defined single-entry, single-exit calling
 // convention. They react to state changes and may never terminate.
-// The compiler MUST reject `export rct txn` with a clear error.
+// The compiler MUST reject `export node` with a clear error.
 
 // ── NOT valid: export on non-defn/txn items ────────────────
 //   export struct Foo { ... };
@@ -420,7 +420,7 @@ export defn process(buf: CBuffer) -> Int;
 | `src/parser.rs` | `test_parse_export_defn_override` | `export("my_name") defn add(...)` — `export_name = Some("my_name")` |
 | `src/parser.rs` | `test_parse_export_txn` | `export txn accum(...) [pre][post] -> Ret { ... }` parses as txn with export flag |
 | `src/parser.rs` | `test_parse_export_txn_override` | `export("loop") txn iter(...) [pre][post] -> Ret { ... }` |
-| `src/parser.rs` | `test_parse_export_rct_txn_rejected` | `export rct txn tick ...` produces clear error |
+| `src/parser.rs` | `test_parse_export_rct_txn_rejected` | `export node tick ...` produces clear error |
 | `src/parser.rs` | `test_parse_export_struct_rejected` | `export struct Foo ...` produces clear error |
 | `src/parser.rs` | `test_parse_export_const_rejected` | `export const N ...` produces clear error |
 | `src/parser.rs` | `test_parse_hash_export_still_works` | `#export defn add(...)` still parses (backward compat) |

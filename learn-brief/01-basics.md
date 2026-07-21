@@ -69,7 +69,7 @@ txn increment [counter < 100][counter == @counter + 1] {
 
 Instead of wrapping every program in a `txn`, you can write statements directly at
 global scope. The compiler automatically wraps them in a synthesized
-`rct txn __init` that fires once on start:
+`node __init` that fires once on start:
 
 ```brief
 let message: String = "Hello, Brief!";
@@ -80,7 +80,7 @@ This is equivalent to:
 
 ```brief
 let message: String = "Hello, Brief!";
-rct txn __init [!__booted][__booted] {
+node __init [!__booted][__booted] {
     println(message);
     &__booted = 1;
     term;
@@ -101,7 +101,7 @@ always emit runtime code.
 
 **When to use scripting vs explicit transactions:**
 - **Scripting**: quick scripts, one-shot initialization, simple programs
-- **Explicit `txn`/`rct txn`**: programs with loops, state machines, reactive chains,
+- **Explicit `txn`/`node`**: programs with loops, state machines, reactive chains,
   or multiple independent operations that need their own contracts
 
 ## 5. Calling Transactions
@@ -123,7 +123,7 @@ let result: Int = 0;
 Or they can be **reactive** (fire automatically when precondition is met):
 
 ```brief
-rct txn auto_increment [counter < 10][counter == @counter + 1] {
+node auto_increment [counter < 10][counter == @counter + 1] {
     &counter = counter + 1;
     term;
 };

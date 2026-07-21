@@ -316,7 +316,7 @@ from bounded-counter txns (those with `bounded_pre` + `increments` analysis).
 When all bounded counters reach their bounds, the exit condition is met.
 
 **Halting guarantee:** The halting proof is established at compile time.
-Every `rct txn` is checked for `bounded_pre` + `increments` via the
+Every `node` is checked for `bounded_pre` + `increments` via the
 transition graph analysis. If any txn lacks a provably bounded
 precondition, the exit condition is not set, and the program must rely
 on the one-shot convergence check (which triggers when no txn runs for

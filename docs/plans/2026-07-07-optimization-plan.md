@@ -78,12 +78,12 @@ if write_density >= 0.5 && total_fields < 8 && !has_body_ffi {
 
 cancel_math has 2 fields, 100% write density, no body FFI — it SHOULD get
 A005a.  But it gets A005c.  This means the check is not reached for
-`rct txn` + `#!exit` pattern (reactive convergent txns may skip the A005a
+`node` + `#!exit` pattern (reactive convergent txns may skip the A005a
 path).
 
 **Fix**: Diagnose why cancel_math misses A005a dispatch.  Check the dispatch
-flow for `rct txn step [count < N][count == N]` pattern.  The A005a check is
-inside `emit_countable_main` — if `rct txn` goes through a different dispatch
+flow for `node step [count < N][count == N]` pattern.  The A005a check is
+inside `emit_countable_main` — if `node` goes through a different dispatch
 path (like the reactive loop), the check is never reached.  If so, widen the
 A005a check to cover reactive txns that are also countable.
 
@@ -91,7 +91,7 @@ print_loop (0.93x) already BEATS C but is close; A005a could improve it
 further.  print_loop has body FFI (`print_int#`) which blocks A005a.
 
 **Implementation**:
-1. Trace the dispatch path for `rct txn step` with `#!exit`
+1. Trace the dispatch path for `node step` with `#!exit`
 2. If it bypasses the A005a check, add A005a for reactive countable txns
 3. Ensure the insertvalue chain works with the convergent loop pattern
 

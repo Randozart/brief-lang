@@ -455,7 +455,7 @@ fn collect_strings_expr(expr: &Expr, seen: &mut std::collections::HashSet<String
 /// - FFI declare+call with C ABI (transparent, no compiler magic)
 /// - Transition fusing, trigger sampling by MMIO/linked address
 /// - Precondition extraction → internal `i1` functions, dispatch chain
-/// - User-provided `frgn __wait_for_event` + `rct txn [true]` for sleep
+/// - User-provided `frgn __wait_for_event` + `node [true]` for sleep
 /// - `@ link` triggers → `external global` + `load volatile`
 ///
 /// Design philosophy: the backend is a single monolithic pass (not a pipeline

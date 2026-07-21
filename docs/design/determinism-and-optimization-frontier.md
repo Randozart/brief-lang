@@ -50,7 +50,7 @@ Given:
 trg temp: Float;          // 0.0 <= temp <= 100.0 (from contract)
 let scaled: Float = 0.0;
 
-rct txn scale [on temp] {
+node scale [on temp] {
     &scaled = temp * 2.5;
 };
 ```
@@ -78,7 +78,7 @@ A `trg` declaration says "this value may change at any tick." But "any tick" is 
 // firmware.ebv — runs on a microcontroller
 trg status: U8 @ 0x4000_1000;
 
-rct txn poll [status & 1] {
+node poll [status & 1] {
     // firmware handles the event
 };
 ```
@@ -111,12 +111,12 @@ let lights: Bool = false;
 let log: Float = 0.0;
 
 // Region A — depends only on `button`
-rct txn toggle [on button] [lights != button] {
+node toggle [on button] [lights != button] {
     &lights = button;
 };
 
 // Region B — depends only on `sensor`
-rct txn record [on sensor] [log != sensor] {
+node record [on sensor] [log != sensor] {
     &log = sensor;
 };
 ```

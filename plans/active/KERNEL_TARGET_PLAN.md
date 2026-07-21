@@ -237,7 +237,7 @@ let gpu_bar_mapped: Bool = false;
 let dma_complete: Bool = false;
 
 // Auto → module_init (first firing txn)
-rct txn [gpu_bar_mapped == false]
+node [gpu_bar_mapped == false]
   [gpu_bar_mapped == true]
 {
     &gpu_bar_mapped = true;
@@ -245,7 +245,7 @@ rct txn [gpu_bar_mapped == false]
 };
 
 // Reactor handles continuously
-rct txn dma_transfer [gpu_bar_mapped && !dma_complete]
+node dma_transfer [gpu_bar_mapped && !dma_complete]
   [dma_complete == true]
 {
     &dma_complete = true;

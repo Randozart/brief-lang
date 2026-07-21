@@ -6,7 +6,7 @@ frgn #out __print_float(val: Float) -> Bool;
 let count: Int = 0;
 let bound: Int = __get_env_int("BOUND");
 
-rct txn compute [count < bound][count == bound] {
+node compute [count < bound][count == bound] {
     let x: Float = 3.0;
     let y: Float = 4.0;
     let dsq: Float = x * x + y * y;

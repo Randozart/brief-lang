@@ -40,7 +40,7 @@ trg smoothed: Int @ filter(raw).out @10kHz;
 Supported units:
 - `@NHz` — N ticks/second (e.g. `@1kHz` = 1000 ticks/s, `@10MHz` = 10M ticks/s)
 - `@1Hz` — once per second (minimum for reactor-based tick)
-- Default (no annotation): tick every main loop iteration (same as `rct txn`)
+- Default (no annotation): tick every main loop iteration (same as `node`)
 
 The `@Hz` annotation is **informational** in the interpreter (all cells tick every iteration) and **binding** in the LLVM backend (determines whether the cell function is inlined or called periodically).
 

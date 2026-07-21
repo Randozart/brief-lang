@@ -126,7 +126,7 @@ Brief is a **general-purpose programming language**. The interpreter proves this
 
 ### How Brief Works (Correct Model)
 
-Brief's computational primitive is the **reactive transaction** (`rct txn`). A transaction has:
+Brief's computational primitive is the **reactive transaction** (`node`). A transaction has:
 - A **precondition** (guard): `[x > 0 && y < N]`
 - A **postcondition** (contract): `[x == N]`
 - A **body**: `{ &x = x + 1; &y = y * 2; }`
@@ -980,7 +980,7 @@ writing is allowed.
 
 The keyboard debacle taught us that `trg @stdin#` + guard + clearing is boilerplate
 every terminal program needs. The long-term solution is a `$!keyboard_input` decorator
-macro that sits before a `rct txn` and automatically:
+macro that sits before a `node` and automatically:
 - Gensyms a trigger variable (`__kb_N: Char @stdin#;`)
 - Appends `&& __kb_N != '\0'` to the guard
 - Injects default handlers for `\n` (enter), `\x7f` (backspace), `\x03` (ctrl+c), and regular chars
@@ -1133,7 +1133,7 @@ See `docs/architecture/features/pipe.md` for full documentation.
 
 ### Language Architecture
 
-Brief is a **general-purpose programming language**. The computational primitive is the **reactive transaction** (`rct txn`):
+Brief is a **general-purpose programming language**. The computational primitive is the **reactive transaction** (`node`):
 - **Precondition** (guard): `[x > 0 && y < N]`
 - **Postcondition** (contract): `[x == N]`
 - **Body**: `{ &x = x + 1; &y = y * 2; }`

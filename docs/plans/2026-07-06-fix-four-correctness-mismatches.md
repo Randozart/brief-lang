@@ -33,7 +33,7 @@ let next_reg = reg & (reg - 1);
 &reg = next_reg;
 ```
 
-Why: `rct txn` defers `&reg = ...` writes to `term;`. The guard `[reg % 100000 == 0]` reads from the pre-tick `reg` cache (`ssa_old_int_regs`). No pre-tick value of `reg` (0x7FFF... → 0x4000...) is divisible by 100000. A `let` binding is evaluated immediately, so `next_reg` holds the post-update value.
+Why: `node` defers `&reg = ...` writes to `term;`. The guard `[reg % 100000 == 0]` reads from the pre-tick `reg` cache (`ssa_old_int_regs`). No pre-tick value of `reg` (0x7FFF... → 0x4000...) is divisible by 100000. A `let` binding is evaluated immediately, so `next_reg` holds the post-update value.
 
 ### `src/backend/llvm/loop_engine.rs` — `is_output_call()` (fasta fix)
 

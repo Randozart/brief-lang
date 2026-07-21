@@ -67,7 +67,7 @@ txn transfer(to_account: Int, amount: Int)
     term;
 };
 
-rct txn apply_interest() 
+node apply_interest() 
     [balance > 10000]
     [balance == @balance + (@balance * 5 / 100)]
 {
@@ -118,7 +118,7 @@ rstruct ShoppingCart {
         term;
     };
     
-    rct txn apply_bulk_discount() 
+    node apply_bulk_discount() 
         [items > 10 && total > 100.0 && !discount_applied]
         [total < @total && discount_applied == true]
     {
@@ -241,7 +241,7 @@ enum LightState { Red, Yellow, Green }
 let state: LightState = LightState::Red;
 let timer: Int = 0;
 
-rct txn change_to_green() 
+node change_to_green() 
     [state == LightState::Red && timer >= 60]
     [state == LightState::Green]
 {
@@ -250,7 +250,7 @@ rct txn change_to_green()
     term;
 };
 
-rct txn change_to_yellow() 
+node change_to_yellow() 
     [state == LightState::Green && timer >= 30]
     [state == LightState::Yellow]
 {
@@ -259,7 +259,7 @@ rct txn change_to_yellow()
     term;
 };
 
-rct txn change_to_red() 
+node change_to_red() 
     [state == LightState::Yellow && timer >= 5]
     [state == LightState::Red]
 {
@@ -268,7 +268,7 @@ rct txn change_to_red()
     term;
 };
 
-rct txn increment_timer() [true][timer == @timer + 1] {
+node increment_timer() [true][timer == @timer + 1] {
     &timer = timer + 1;
     term;
 };
@@ -355,7 +355,7 @@ let state: MachineState = MachineState::Idle;
 let credit: Int = 0;
 let selected_item: String = "";
 
-rct txn insert_coin(amount: Int) 
+node insert_coin(amount: Int) 
     [state == MachineState::Idle || state == MachineState::Selection]
     [credit == @credit + amount]
 {
@@ -364,7 +364,7 @@ rct txn insert_coin(amount: Int)
     term;
 };
 
-rct txn select_item(item: String, price: Int) 
+node select_item(item: String, price: Int) 
     [state == MachineState::Selection && credit >= price]
     [selected_item == item]
 {
@@ -373,7 +373,7 @@ rct txn select_item(item: String, price: Int)
     term;
 };
 
-rct txn dispense_item() 
+node dispense_item() 
     [state == MachineState::Payment]
     [state == MachineState::Idle && credit == @credit - price && selected_item == ""]
 {
@@ -384,7 +384,7 @@ rct txn dispense_item()
     term;
 };
 
-rct txn refund() 
+node refund() 
     [state == MachineState::Selection && credit > 0]
     [state == MachineState::Idle && credit == 0]
 {
@@ -405,14 +405,14 @@ rstruct Dashboard {
     alerts: List<String> = [],
     last_updated: Int = 0;
     
-    rct txn update_sensor_data() [true][last_updated == current_time()] {
+    node update_sensor_data() [true][last_updated == current_time()] {
         &temperature = read_temperature();
         &humidity = read_humidity();
         &last_updated = current_time();
         term;
     };
     
-    rct txn check_temperature_alert() 
+    node check_temperature_alert() 
         [temperature > 30.0 || temperature < 10.0]
         [alerts.contains("Temperature warning")]
     {
@@ -420,7 +420,7 @@ rstruct Dashboard {
         term;
     };
     
-    rct txn check_humidity_alert() 
+    node check_humidity_alert() 
         [humidity > 80.0 || humidity < 20.0]
         [alerts.contains("Humidity warning")]
     {
@@ -428,7 +428,7 @@ rstruct Dashboard {
         term;
     };
     
-    rct txn clear_old_alerts() [alerts :> Size > 10][alerts :> Size <= 10] {
+    node clear_old_alerts() [alerts :> Size > 10][alerts :> Size <= 10] {
         &alerts = alerts.drop(1);
         term;
     };

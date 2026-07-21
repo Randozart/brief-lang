@@ -6,8 +6,8 @@
 //
 // Strategies:
 //   a) SSA canonical loop (single txn, simple bound)
-//   b) SSA with precondition check (rct txn with pre/post)
-//   c) SSA no precondition (rct txn with [true][post])
+//   b) SSA with precondition check (node with pre/post)
+//   c) SSA no precondition (node with [true][post])
 //   d) Modulo-rotated dispatch (K ≤ 8 reactive txns)
 //   e) Modulo-switch dispatch (K > 8 reactive txns)
 //   f) Folded multi-txn (enum-key dispatch for folded transactions)

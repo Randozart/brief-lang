@@ -115,14 +115,14 @@ Make float/accumulator fields live so dead-field elimination retains them:
 
 **`benchmarks/iir_filter_runtime.bv`:**
 ```
-rct txn process [bound > 0 && count < bound
+node process [bound > 0 && count < bound
   && x1 == x1 && x2 == x2 && y1 == y1 && y2 == y2][count == bound]
 ```
 
 **`benchmarks/precompute_sum_runtime.bv`:**
 ```
-rct txn step_a [bound > 0 && count < bound && acc_a >= 0][count == bound]
-rct txn step_b [bound > 0 && count < bound && acc_b >= 0][count == bound]
+node step_a [bound > 0 && count < bound && acc_a >= 0][count == bound]
+node step_b [bound > 0 && count < bound && acc_b >= 0][count == bound]
 ```
 
 ## Expected Outcome (BOUND=50000000)

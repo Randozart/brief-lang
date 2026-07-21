@@ -29,7 +29,7 @@ brief cobol contract.brv --out ./cobol_output
 let balance: Int = 1000;
 let transfer_in_progress: Bool = false;
 
-rct txn transfer [transfer_in_progress == false && balance >= 100]
+node transfer [transfer_in_progress == false && balance >= 100]
   [balance == @balance - 100]
 {
   &transfer_in_progress = true;

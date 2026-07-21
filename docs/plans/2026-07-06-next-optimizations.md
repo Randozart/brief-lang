@@ -102,9 +102,9 @@ If all K bodies are effect-equivalent, collapse to a single body with `count += 
 if write_density >= 0.5 && total_fields < 8 && !has_body_ffi {
 ```
 But it dispatches as A005c. This means the A005a check at line 2265 is either:
-- Not reached for `rct txn` + `#!exit` pattern (the dispatch skips the A005a check for reactive txns)
+- Not reached for `node` + `#!exit` pattern (the dispatch skips the A005a check for reactive txns)
 - Or the write_density calculation sees different fields
-- Or the `rct txn` body goes through a different dispatch path entirely
+- Or the `node` body goes through a different dispatch path entirely
 
 **Fix**: Diagnose why cancel_math misses A005a dispatch and fix it. This would give cancel_math (and any similar 2-field no-FFI txn) the A005a insertvalue-chain path, eliminating phi overhead.
 

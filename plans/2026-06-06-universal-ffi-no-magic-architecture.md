@@ -940,7 +940,7 @@ For each transaction T with `?[@trg]` or `?![@trg]`:
 |------|----------------------|----------------|
 | **10.3.1** | Resolve `trg` against all `frgn trg` declarations in the program | `"@trg is not a declared frgn trg"` |
 | **10.3.2** | Find all transactions with `trg` in their guard (`[trg]` or `[trg && ...]` condition) | `"No handler for trigger @trg"` |
-| **10.3.3** | Collect all variables written by the handler chain — walk the transition graph from each handler through all reachable `rct txn` and `defn` calls, collecting every `&var = expr` assignment | — |
+| **10.3.3** | Collect all variables written by the handler chain — walk the transition graph from each handler through all reachable `node` and `defn` calls, collecting every `&var = expr` assignment | — |
 | **10.3.4** | Compute intersection with T's precondition variables (all identifiers appearing in `pre_condition`) | `"Handler chain for @trg doesn't write to any variable in T's precondition"` |
 | **10.3.5** | For each intersecting variable, evaluate: does the handler's write pattern **falsify** T's precondition? (e.g., if T says `[ready == true]`, does the handler set `ready = false`?) | `"@trg handler writes to ready but doesn't falsify [ready == true]"` |
 | **10.3.6** | Verify the handler chain does NOT restore the precondition before its own `term` (i.e., the kill is permanent — the loop won't restart) | `"@trg handler chain restores T's precondition — loop would restart"` |
@@ -1127,7 +1127,7 @@ Three forms, one concept: **"these operations must start and finish at the same 
 
 | Form | Syntax | Use case |
 |------|--------|----------|
-| **Prefix modifier** | `sync(domainA) rct txn Name [pre][post] { body }` | Reactive lockstep — all txns in `domainA` fire and commit simultaneously |
+| **Prefix modifier** | `sync(domainA) node Name [pre][post] { body }` | Reactive lockstep — all txns in `domainA` fire and commit simultaneously |
 | **Prefix on callable** | `sync(domainB) txn Name [pre][post] -> Ret { body }` | Same lockstep guarantee when called as a group |
 | **Prefix on defn** | `sync(domainC) defn Name(args) -> Ret { body }` | Declares a defn as participating in a domain (affects its behavior when called from a sync block) |
 | **Block statement** | `sync { stmt1; stmt2; ... };` | Fork-join barrier — all statements run in parallel, barrier at end |
@@ -1146,7 +1146,7 @@ Three forms, one concept: **"these operations must start and finish at the same 
 |------|---------|--------|
 | 11.1 | `lexer.rs` | Add `Token::Sync` keyword |
 | 11.2 | `ast.rs` | Add `Statement::SyncBlock { body: Vec<Statement> }` |
-| 11.3 | `parser.rs` | Parse `sync(id...)` prefix on txn/rct txn/defn → store as `modifiers: Vec<Hashtag>` entry (`Hashtag { name: "sync", args: [...] }`). Parse `sync { body }` as `Statement::SyncBlock`. Error on `let` inside sync block. Error on nested sync blocks. |
+| 11.3 | `parser.rs` | Parse `sync(id...)` prefix on txn/node/defn → store as `modifiers: Vec<Hashtag>` entry (`Hashtag { name: "sync", args: [...] }`). Parse `sync { body }` as `Statement::SyncBlock`. Error on `let` inside sync block. Error on nested sync blocks. |
 | 11.4 | `interpreter.rs` | Execute `SyncBlock` (fallback serial). In reactor loop, extract sync groups from `modifiers`; enforce entry/exit barriers. |
 | 11.5 | `analysis/transition_graph.rs` | Group transitions by sync domain extracted from `modifiers`; precondition = AND of all members |
 | 11.6 | All backends | Add stub match arm for `Statement::SyncBlock` |

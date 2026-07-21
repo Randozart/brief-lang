@@ -116,7 +116,7 @@ STATE inventory: Vector[String] = []
 STATE turn_count: UInt[16] = 0
 STATE message: String = ""
 
-rct txn look [true][message == current_desc] {
+node look [true][message == current_desc] {
     message = @rooms[current_room].desc
     
     // List visible items
@@ -133,7 +133,7 @@ rct txn look [true][message == current_desc] {
     }
 }
 
-rct txn go(direction) [
+node go(direction) [
     @rooms[current_room].exits.contains(direction)
 ][
     current_room == @rooms[current_room].exits.get(direction)
@@ -142,7 +142,7 @@ rct txn go(direction) [
     message = @rooms[current_room].desc
 }
 
-rct txn go(direction) [
+node go(direction) [
     !@rooms[current_room].exits.contains(direction)
 ][
     message == "You can't go that way."
@@ -150,7 +150,7 @@ rct txn go(direction) [
     message = "You can't go that way."
 }
 
-rct txn take(item) [
+node take(item) [
     @items[item].location == current_room
 ][
     inventory.contains(item)
@@ -160,7 +160,7 @@ rct txn take(item) [
     message = "You take the " + @items[item].name + "."
 }
 
-rct txn take(item) [
+node take(item) [
     @items[item].location != current_room
 ][
     message == "You don't see that here."
@@ -168,7 +168,7 @@ rct txn take(item) [
     message = "You don't see that here."
 }
 
-rct txn inventory [
+node inventory [
     true
 ][
     message == inventory_msg
@@ -264,7 +264,7 @@ RULE reward_rat_king [
 ### 5.2 Conditional Descriptions
 
 ```brief
-rct txn look [true][message == enhanced_desc] {
+node look [true][message == enhanced_desc] {
     // Base description
     message = @rooms[current_room].desc
     

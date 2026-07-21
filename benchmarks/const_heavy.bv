@@ -14,7 +14,7 @@ let total: Int = GetEnvInt!("BOUND");
 let count: Int = 0;
 let acc: Int = 0;
 
-rct txn tick [count < total][count == total] {
+node tick [count < total][count == total] {
     acc = acc + count / 100 + C00 + C01 + C02 + C03 + C04
           + C05 + C06 + C07 + C08 + C09
           + C10 + C11 + C12 + C13 + C14

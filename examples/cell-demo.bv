@@ -7,7 +7,7 @@ let boot_done: Bool = false;
 cell adder(a: Int, b: Int) -> sum: Int {
     done: Bool = false;
     sum: Int = 0;
-    rct txn compute [!done]] {
+    node compute [!done]] {
         sum = a + b;
         done = true;
         term;
@@ -15,7 +15,7 @@ cell adder(a: Int, b: Int) -> sum: Int {
 };
 
 // Script: call the cell, print result, exit
-rct txn boot [!boot_done]] {
+node boot [!boot_done]] {
     let result = cell adder(40, 2);
     Print#(result);
     PutChar#(10);

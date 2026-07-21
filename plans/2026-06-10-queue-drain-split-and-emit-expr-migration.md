@@ -17,7 +17,7 @@ Straight-line counter loop matching C's algorithm:
 frgn __print_int(n: Int) -> Bool ;
 let N: Int = __get_env_int("BOUND");
 let count: Int = 0;
-rct txn work [count < N][count == N] {
+node work [count < N][count == N] {
     &count = count + 1;
     [count % 5000000 == 0] {
         __print_int(count);

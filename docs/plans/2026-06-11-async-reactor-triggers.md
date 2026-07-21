@@ -25,7 +25,7 @@ The interpreter ignores all of them:
 
 | Mode | Trigger | When it fires | Semantics |
 |------|---------|---------------|-----------|
-| **Responsive** (`rct txn`) | Dirty state | Immediately when a dependency changes. Runs convergence loop to quiescence. | Existing behavior, unchanged. |
+| **Responsive** (`node`) | Dirty state | Immediately when a dependency changes. Runs convergence loop to quiescence. | Existing behavior, unchanged. |
 | **Polled** (`rct async txn @NHz`) | Timer | At N Hz regardless of dirty state. | Sugared timer-backed trigger. Same contract enforcement as responsive. |
 | **Event-driven** (`trg @ link <ffi_fn>`) | FFI callback | When the linked FFI function returns non-void. | FFI callback marks trigger variable dirty → convergence runs. |
 

@@ -98,7 +98,7 @@ if name == "is_some" && args.len() == 1 {
 
 Instead of writing the full parser and typechecker before seeing results, write a **Turtle compiler** — a minimal Brief compiler that handles only:
 
-1. `rct txn [pre]{body}` reactive transactions
+1. `node [pre]{body}` reactive transactions
 2. Integer arithmetic (`+`, `-`, `*`, `/`, `<`, `==`)
 3. State declarations (`let x: Int`)
 4. Constants (`const BOUND = 50000000`)
@@ -117,7 +117,7 @@ struct CompilerState {
     state: ParserState,
 }
 
-rct txn next_char [pos < len(source)][true] {
+node next_char [pos < len(source)][true] {
     &ch = source[pos];
     &pos = pos + 1;
     &state = dispatch(state, ch);

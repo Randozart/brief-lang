@@ -227,7 +227,7 @@ impl<'a> Parser<'a> {
             Token::Sig => "sig".into(), Token::Export => "export".into(),
             Token::Defn => "defn".into(), Token::Let => "let".into(),
             Token::Const => "const".into(), Token::Txn => "txn".into(),
-            Token::Rct => "rct".into(), Token::Async => "async".into(),
+            Token::Node => "node".into(), Token::Async => "async".into(),
             Token::Await => "await".into(), Token::Term => "term".into(),
             Token::TermBang => "term!".into(), Token::Escape => "escape".into(),
             Token::Uni => "uni".into(), Token::Is => "is".into(),

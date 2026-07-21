@@ -33,11 +33,11 @@ This document explores adding VHDL as a second transpile target for Embedded Bri
 // config.ebv - Brief embedded code
 led_on: Bool = false
 
-rct txn init [true][led_on] {
+node init [true][led_on] {
     led_on = true
 }
 
-rct txn toggle [led_on][!led_on] {
+node toggle [led_on][!led_on] {
     led_on = !led_on
 }
 ```
@@ -94,7 +94,7 @@ end architecture rtl;
 
 ```brief
 // Brief
-rct txn set_led(value) [true][led == value] {
+node set_led(value) [true][led == value] {
     led = value
 }
 ```
@@ -111,7 +111,7 @@ end process;
 
 ```brief
 // Brief - reactive
-rct txn toggle [led_on][!led_on] {
+node toggle [led_on][!led_on] {
     led_on = !led_on
 }
 ```
@@ -136,7 +136,7 @@ end process;
 
 ```brief
 // Brief with contract
-rct txn increment [counter < 1000][counter == @counter + 1] {
+node increment [counter < 1000][counter == @counter + 1] {
     counter = @counter + 1
 }
 ```
@@ -179,11 +179,11 @@ end architecture rtl;
 ALIAS led: Bool
 ALIAS button: Bool
 
-rct txn led_on [button && !led][led] {
+node led_on [button && !led][led] {
     led = true
 }
 
-rct txn led_off [led][!led] {
+node led_off [led][!led] {
     led = false
 }
 ```

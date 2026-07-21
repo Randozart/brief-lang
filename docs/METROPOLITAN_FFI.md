@@ -321,7 +321,7 @@ Total: O(n) first call, O(1) subsequent (no marshalling)
 ```brief
 let trading_channel = create_metropolitan_channel("trading", "c")?;
 
-rct txn process_market_data() [new_data_available][processed == true] {
+node process_market_data() [new_data_available][processed == true] {
     let data = metropolitan_receive(trading_channel, 1)?;  // 1ms timeout
     let decision = analyze(data);
     metropolitan_send(trading_channel, decision)?;
@@ -347,7 +347,7 @@ defn classify(image: Data) -> Result<String, String> {
 ```brief
 let dsp_channel = create_metropolitan_channel("dsp", "rust")?;
 
-rct txn process_audio() [audio_buffer_full][processed == true] {
+node process_audio() [audio_buffer_full][processed == true] {
     let audio = read_audio_buffer();
     metropolitan_send(dsp_channel, audio)?;
     let processed = metropolitan_receive(dsp_channel, 10)?;

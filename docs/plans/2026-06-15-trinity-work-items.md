@@ -169,7 +169,7 @@ The handler is:
 
 | Strategy | What it checks | Scope |
 |----------|---------------|-------|
-| **Bounded counter** (exists) | Transition graph: `[i < N][i == N]` with proven convergence | `rct txn` bodies |
+| **Bounded counter** (exists) | Transition graph: `[i < N][i == N]` with proven convergence | `node` bodies |
 | **Structural recursion** (new) | Recursive call on strictly smaller sub-term (list tail, tree child, `n-1`) | `defn` recursion |
 | **SMT ranking function** (new) | Encode loop body as transition relation, ask Z3 for a decreasing measure | Any loop/recursion |
 | **Fuel budget injection** (exists) | `--optimize-budget` iteration cap becomes the fuel limit | Fallback when all else fails |
@@ -266,7 +266,7 @@ Deferred until we know which strategies actually fire in practice.
 A transaction body like:
 
 ```brief
-rct txn compute [ready][done] {
+node compute [ready][done] {
     &x = a + b;
     &y = c + d;
     &z = x * y;

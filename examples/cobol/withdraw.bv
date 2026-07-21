@@ -4,7 +4,7 @@
 let balance: Int = 1000;
 let locked: Bool = false;
 
-rct txn withdraw [locked == false && balance >= 100]
+node withdraw [locked == false && balance >= 100]
   [balance == @balance - 100]
 {
   locked = true;

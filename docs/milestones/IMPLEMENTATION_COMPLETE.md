@@ -54,7 +54,7 @@ txn withdraw(amount: Int)
 
 Fire automatically, loop until termination (proven by compiler):
 ```brief
-rct txn auto_increment() [counter < 100][counter == @counter + 1] {
+node auto_increment() [counter < 100][counter == @counter + 1] {
     &counter = counter + 1;
     term;
 };

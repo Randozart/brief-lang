@@ -352,7 +352,7 @@ impl fmt::Display for TopLevel {
                 write!(f, "}};")
             }
             TopLevel::Transaction(txn) => {
-                let prefix = if txn.is_reactive { "rct txn" } else { "txn" };
+                let prefix = if txn.is_reactive { "node" } else { "txn" };
                 write!(f, "{} {}", prefix, txn.name)?;
                 if !txn.parameters.is_empty() {
                     write!(f, "(")?;

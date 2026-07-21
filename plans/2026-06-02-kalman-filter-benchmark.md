@@ -18,7 +18,7 @@ register promotion with 12 float fields.
 ### `benchmarks/kalman_filter_runtime.bv`
 - State: 3 floats (x₀, x₁, x₂) + 9 floats (P₀₀…P₂₂) + `count: Int` + `bound: Int` = 14 state fields
 - Constants: 9 floats A matrix + 9 floats Q matrix (outside schedule, LLVM constant-folded)
-- One `rct txn propagate [precondition tautologies][postcondition]` — body contains full propagation
+- One `node propagate [precondition tautologies][postcondition]` — body contains full propagation
 - `#!exit count == bound;`
 
 ### `benchmarks/kalman_filter_runtime_c.c`

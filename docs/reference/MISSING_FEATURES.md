@@ -29,7 +29,7 @@ Current Brief can describe hardware state machines (.ebv) and has FFI support fo
 ## Current State
 
 ### Already Supported
-- Transactions (`rct txn`)
+- Transactions (`node`)
 - FFI for external function calls (`frgn`, `syscall`)
 - Resource declarations (`rsrc Socket`)
 - Standard library: `std/io`, `std/http`, `std/json`

@@ -228,7 +228,7 @@ fn intrinsic_match_ir(
 /// `CheckReactive$()` — Verify reactive transactions have live field bindings.
 ///
 /// 2026-07-15: Phase 8 — Walks the program AST to find let-bindings with
-/// initial values (live fields) and checks that each rct txn reads at least
+/// initial values (live fields) and checks that each node reads at least
 /// one. Returns Err if zero reactive transactions have live bindings and
 /// zero have [#] entry markers.
 ///
@@ -253,7 +253,7 @@ fn intrinsic_check_reactive(args: &[Expr], program: &[TopLevel]) -> Result<(), S
         })
         .collect();
 
-    // For each rct txn, check it reads at least one live field or has [#]
+    // For each node, check it reads at least one live field or has [#]
     let mut live_rct_count = 0u32;
     for item in program {
         if let TopLevel::Transaction(txn) = item {

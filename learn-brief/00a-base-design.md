@@ -287,7 +287,7 @@ This ensures no system-level side-effect can ever be silently ignored. The compi
 `;` is a hard stop. Every statement must end in `;`, including blocks denoted by `{}` (transaction bodies, struct definitions, pragmas):
 
 ```brief
-rct txn t [x < 10] [x == 10] {
+node t [x < 10] [x == 10] {
     &x = x + 1;
     term;
 };
@@ -334,7 +334,7 @@ txn deposit(amount) [amount > 0][balance == @balance + amount] {
 This **fires automatically** when its precondition becomes true. No caller needed.
 
 ```brief
-rct txn auto_save() [dirty && !saving][!dirty] {
+node auto_save() [dirty && !saving][!dirty] {
     save_to_disk();
     &dirty = false;
     term;
@@ -429,10 +429,10 @@ And `escape` means "Rollback everything - pretend this never happened." Not "bre
 
 ### Why Reactive Transactions Are Inherent Loops
 
-`rct txn` can self-verify when to end:
+`node` can self-verify when to end:
 
 ```brief
-rct txn fill_buffer() [buffer :> Size < 100][buffer :> Size == 100] {
+node fill_buffer() [buffer :> Size < 100][buffer :> Size == 100] {
     &buffer = buffer + [new_item];
     term;
 };
@@ -440,7 +440,7 @@ rct txn fill_buffer() [buffer :> Size < 100][buffer :> Size == 100] {
 
 This transaction will fire automatically when the buffer has fewer than 100 items. It keeps adding until the buffer has exactly 100. The **postcondition itself verifies termination** - the compiler proves the loop will end.
 
-That's why `rct txn` is different from a `while` loop: the reactor pattern includes its own exit condition in the contract.
+That's why `node` is different from a `while` loop: the reactor pattern includes its own exit condition in the contract.
 
 ---
 

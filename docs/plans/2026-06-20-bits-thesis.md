@@ -1678,7 +1678,7 @@ Estimated: 1 day
 | Arrow operator | Stay | `<-` still works as before |
 | Bracket syntax | Stay | Extended to tuples, no existing behavior changes |
 | Pre/post contracts | Stay | `[pre][post]` unchanged |
-| Reactive transactions | Stay | `rct txn` unchanged |
+| Reactive transactions | Stay | `node` unchanged |
 | Proof engine (`?#`) | Stay | Unchanged |
 | Macro system (`$`, `$!`) | Stay | Unchanged |
 

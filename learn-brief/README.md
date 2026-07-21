@@ -134,7 +134,7 @@ txn increment [counter < 100][counter == @counter + 1] {
 };
 
 // Reactive transaction
-rct txn auto_reset [counter >= 100][counter == 0] {
+node auto_reset [counter >= 100][counter == 0] {
     &counter = 0;
     term;
 };

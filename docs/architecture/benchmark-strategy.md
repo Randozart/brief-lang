@@ -38,7 +38,7 @@ Every benchmark belongs to exactly one category:
 
 | Category | Tag | What it measures | Criteria |
 |----------|-----|------------------|----------|
-| **Runtime** | `--runtime` | Throughput of compiled code | FFI call in the hot loop body. LLVM cannot eliminate the loop. |
+| **Runtime** | `--runtime` | Throughput of compiled code | FFI call or observable intrinsic in the hot loop body. LLVM cannot eliminate the loop. |
 | **Optimizer** | `--optimizer` | Compile-time folding power | All `const` inputs + no FFI in the hot loop. LLVM may eliminate the loop. Both Brief and C must produce identical outputs. |
 
 A benchmark cannot be both. If it has no observable side effects in its hot

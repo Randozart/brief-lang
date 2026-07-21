@@ -88,7 +88,7 @@ Write 15 new parser/backend tests covering all Phase 0-2 changes.
 
 | # | Test | Input | Expected |
 |---|------|-------|----------|
-| T1 | `#!dispatch(parallel)` at file top | `#!dispatch(parallel)\ntrg x: Bool @ link __x;\nrct txn t [x] { term; };` | Parses, `dispatch_mode == Parallel` |
+| T1 | `#!dispatch(parallel)` at file top | `#!dispatch(parallel)\ntrg x: Bool @ link __x;\nnode t [x] { term; };` | Parses, `dispatch_mode == Parallel` |
 | T2 | `#wake` modifier | `trg x: Bool @ link __x #wake;` | `is_wake = true` |
 | T3 | `#io sigint;` implicit | `#io sigint;` | Creates `trg sigint: Bool @ link __sigint_flag` with `is_wake = true` |
 | T4 | `#io sigint -> trg mysig: Bool;` explicit | `#io sigint -> trg mysig: Bool;` | Name=`mysig`, type=`Bool`, symbol=`__sigint_flag` |

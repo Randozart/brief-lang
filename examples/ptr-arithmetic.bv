@@ -61,7 +61,7 @@ defn demo_mmio(addr: Ptr<Int>) -> Int
 let write_ok: Bool = false;
 let read_val: Int = 0;
 
-rct txn run [tick < 1][tick == 1] {
+node run [tick < 1][tick == 1] {
     [tick == 0] {
         let result: Int = 0;
 

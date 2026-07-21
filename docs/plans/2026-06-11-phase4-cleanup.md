@@ -99,10 +99,10 @@ Simply delete the file. No replacement needed — all intrinsics now available v
 ## 6. Prior-State Semantics Audit + Documentation
 
 **Files:**
-- All `benchmarks/*.bv` — audit `rct txn` blocks for chained `&field = ...` assignments
+- All `benchmarks/*.bv` — audit `node` blocks for chained `&field = ...` assignments
 - `docs/architecture/glossary.md` — add "Reactive Transaction Semantics" section
 
-**Audit criteria:** `rct txn` has deferred-write semantics: all state reads within a tick
+**Audit criteria:** `node` has deferred-write semantics: all state reads within a tick
 see pre-tick values. This is correct for reactive/reactive transactions. Sequential
 `&field = x; &field = y; &field = z;` chains do NOT accumulate — each reads the same
 original pre-tick value. The correct pattern is a single combined expression:
@@ -110,11 +110,11 @@ original pre-tick value. The correct pattern is a single combined expression:
 
 **Benchmarks to audit:**
 - `fasta.bv` — already fixed
-- `nbody_newton.bv` — check rct txn body
-- `nbody_newton_sym.bv` — check rct txn body
-- `nbody_sqrt.bv` — check rct txn body
-- `fannkuch_redux.bv` — check rct txn body
-- `fannkuch_redux_sym.bv` — check rct txn body
-- `knucleotide.bv` — check rct txn body
-- `float_math_nonzero.bv` — check rct txn body
-- `kalman.bv` — check rct txn body
+- `nbody_newton.bv` — check node body
+- `nbody_newton_sym.bv` — check node body
+- `nbody_sqrt.bv` — check node body
+- `fannkuch_redux.bv` — check node body
+- `fannkuch_redux_sym.bv` — check node body
+- `knucleotide.bv` — check node body
+- `float_math_nonzero.bv` — check node body
+- `kalman.bv` — check node body

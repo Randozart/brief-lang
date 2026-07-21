@@ -54,7 +54,7 @@ Tests that `simplify_body` reduces `x + (R+1) - R` → `x + 1`.
 ```
 #!exit count == N && acc >= 0;
 const R: Int = 100;
-rct txn step [count < N][count == N] {
+node step [count < N][count == N] {
     &acc = acc + count;
     &count = count + (R + 1 - R);
     [count % 5000000 == 0] { __print_int(acc); };
@@ -68,7 +68,7 @@ Tests `detect_popcount_decay` on `reg & (reg - 1)` pattern.
 Limited to popcount(initial_reg) iterations (63 for i64::MAX).
 ```
 const initial_reg: Int = 0x7FFFFFFFFFFFFFFF;
-rct txn clear [reg != 0][reg == 0] {
+node clear [reg != 0][reg == 0] {
     &reg = reg & (reg - 1);
     [reg % 1000000 == 0] { __print_int(reg); };
     term;
@@ -81,8 +81,8 @@ Tests `detect_collection_drain` on `x <- &queue` with `:> Size` precondition.
 Two-phase: fill then drain via concurrent transactions.
 ```
 #!exit push_count == N && queue :> Size == 0;
-rct txn fill [push_count < N][push_count == N] { &queue <- push_count; &push_count = push_count + 1; term; };
-rct txn drain [queue :> Size > 0][queue :> Size == 0] { let x: Int <- &queue; term; };
+node fill [push_count < N][push_count == N] { &queue <- push_count; &push_count = push_count + 1; term; };
+node drain [queue :> Size > 0][queue :> Size == 0] { let x: Int <- &queue; term; };
 ```
 C reference: push/pop loop, N iterations.
 
@@ -92,7 +92,7 @@ Tests that `detect_increments` handles `(x + R1) - R2` where R1 - R2 = 1.
 #!exit count == N && acc >= 0;
 const R1: Int = 200;
 const R2: Int = 199;
-rct txn step [count < N][count == N] {
+node step [count < N][count == N] {
     &acc = acc + count;
     &count = (count + R1) - R2;
     [count % 5000000 == 0] { __print_int(acc); };

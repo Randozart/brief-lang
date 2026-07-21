@@ -60,7 +60,7 @@ intrinsics are detected.
 
 ```brief
 // Pure GPU kernel — zero frgn
-rct txn increment
+node increment
     [i < N]
     [i == N]
 {

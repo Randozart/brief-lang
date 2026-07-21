@@ -32,14 +32,14 @@ export defn add(a: Int, b: Int) -> Int {
     term a + b;
 };
 
-export rct txn process [x < TOTAL][x == TOTAL] {
+export node process [x < TOTAL][x == TOTAL] {
     x = x + 1;
     term;
 };
 ```
 
 - `export defn` — C-callable function wrapper. Takes `ptr %state` as first arg.
-- `export rct txn` — Reactive convergence entry point. Runs all exported
+- `export node` — Reactive convergence entry point. Runs all exported
   reactive txns to convergence, then returns to the host.
 
 ## C ABI
@@ -84,7 +84,7 @@ int main() {
 
 ## Reactive Entry Points
 
-`export rct txn` compiles to a `run_reactive()` function that runs all
+`export node` compiles to a `run_reactive()` function that runs all
 exported reactive transactions to convergence. The halting proof is
 established at compile time via the transition graph analysis
 (`bounded_pre` + `increments` checks). If any reactive txn lacks a
