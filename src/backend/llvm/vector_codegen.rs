@@ -26,6 +26,45 @@ fn vector_type_str(element_type: &Type, width: usize) -> String {
     format!("<{} x {}>", width, el)
 }
 
+/// Convert a scalar register to a different LLVM type if needed.
+/// Returns the register name (converted or original).
+fn convert_scalar_type(
+    backend: &mut LlvmBackend,
+    out: &mut String,
+    reg_name: &str,
+    reg_ty: &Type,
+    target_llvm_ty: &str,
+    indent: &str,
+) -> String {
+    let src_llvm = backend.llvm_type(reg_ty);
+    if src_llvm == target_llvm_ty {
+        return reg_name.to_string();
+    }
+    // i64 → float: trunc to i32, bitcast to float
+    if src_llvm == "i64" && target_llvm_ty == "float" {
+        let tr = backend.fun.next_reg_with_prefix("cvt");
+        let fl = backend.fun.next_reg_with_prefix("cvf");
+        writeln!(out, "{}{} = trunc i64 {} to i32", indent, tr, reg_name).ok();
+        writeln!(out, "{}{} = bitcast i32 {} to float", indent, fl, tr).ok();
+        return fl;
+    }
+    // i64 → double: bitcast i64 to double
+    if src_llvm == "i64" && target_llvm_ty == "double" {
+        let dbl = backend.fun.next_reg_with_prefix("cvd");
+        writeln!(out, "{}{} = bitcast i64 {} to double", indent, dbl, reg_name).ok();
+        return dbl;
+    }
+    // float → i64: bitcast float to i32, zext to i64
+    if src_llvm == "float" && target_llvm_ty == "i64" {
+        let b32 = backend.fun.next_reg_with_prefix("cvi");
+        let z64 = backend.fun.next_reg_with_prefix("cvZ");
+        writeln!(out, "{}{} = bitcast float {} to i32", indent, b32, reg_name).ok();
+        writeln!(out, "{}{} = zext i32 {} to i64", indent, z64, b32).ok();
+        return z64;
+    }
+    reg_name.to_string()
+}
+
 /// Mask type for shufflevector — always <width x i32>.
 fn mask_type_str(width: usize) -> String {
     format!("<{} x i32>", width)
@@ -127,45 +166,39 @@ fn emit_vector_expr(
 
         // ── Identifier ────────────────────────────────────────
         (Expr::Identifier(name), _) => {
+            let vty = vec_ty_str();
+            let el_llvm_ty = vty.split(' ').last()
+                .map(|s| s.trim_end_matches('>').trim())
+                .unwrap_or("float").to_string();
             if is_same_across_lanes(name, lane_mappings) {
                 // All lanes reference the same variable — broadcast
                 let scalar = backend.emit_expr(out, template_expr, indent);
+                let conv = convert_scalar_type(backend, out, &scalar.name, &scalar.ty, &el_llvm_ty, indent);
                 let v = backend.fun.next_reg_with_prefix("sbc");
                 writeln!(out, "{}{} = insertelement {} undef, {} {}, i32 0",
-                    indent, v, vec_ty_str(), backend.llvm_type(&scalar.ty), scalar.name).ok();
+                    indent, v, vty, el_llvm_ty, conv).ok();
                 let shuf = backend.fun.next_reg_with_prefix("sbs");
                 let mty = mask_type_str(width);
-            let mty = mask_type_str(width);
-            writeln!(out, "{}{} = shufflevector {} {}, {} undef, {} zeroinitializer",
-                indent, shuf, vec_ty_str(), v, vec_ty_str(), mty).ok();
-            Ok(TypedRegister { name: shuf, ty: scalar.ty })
+                writeln!(out, "{}{} = shufflevector {} {}, {} undef, {} zeroinitializer",
+                    indent, shuf, vty, v, vty, mty).ok();
+                Ok(TypedRegister { name: shuf, ty: scalar.ty })
             } else {
                 // Different per lane — insertelement chain
-                let vty = vec_ty_str();
                 let mut vec_name = String::new();
                 for i in 0..width {
                     let lane_name = lane_mappings[i].get(name).cloned().unwrap_or_else(|| name.to_string());
                     let lane_expr = Expr::Identifier(lane_name);
                     let scalar = backend.emit_expr(out, &lane_expr, indent);
-                    // Convert scalar to vector element type if needed
-                    let conv = if backend.llvm_type(&scalar.ty) == "i64" && vty.contains("float") {
-                        let tr = backend.fun.next_reg_with_prefix("svc");
-                        let fl = backend.fun.next_reg_with_prefix("svc");
-                        writeln!(out, "{}{} = trunc i64 {} to i32", indent, tr, scalar.name).ok();
-                        writeln!(out, "{}{} = bitcast i32 {} to float", indent, fl, tr).ok();
-                        fl
-                    } else {
-                        scalar.name.clone()
-                    };
+                    let conv = convert_scalar_type(backend, out, &scalar.name, &scalar.ty, &el_llvm_ty, indent);
                     if i == 0 {
                         let v0 = backend.fun.next_reg_with_prefix("sie");
                         writeln!(out, "{}{} = insertelement {} undef, {} {}, i32 0",
-                            indent, v0, vty, backend.llvm_type(&scalar.ty), conv).ok();
+                            indent, v0, vty, el_llvm_ty, conv).ok();
                         vec_name = v0;
                     } else {
                         let vn = backend.fun.next_reg_with_prefix("sie");
                         writeln!(out, "{}{} = insertelement {} {}, {} {}, i32 {}",
-                            indent, vn, vty, vec_name, backend.llvm_type(&scalar.ty), conv, i).ok();
+                            indent, vn, vty, vec_name, el_llvm_ty, conv, i).ok();
                         vec_name = vn;
                     }
                 }
@@ -246,18 +279,11 @@ fn emit_extract_and_register(
         backend.fun.last_val_temps.insert(lhs_name.clone(), ex.clone());
         backend.fun.last_val_types.insert(lhs_name.clone(), scalar_type.clone());
 
-        // Handle write_set (phi backedge) and state stores
-        let stmt = body.get(group.base_index + i);
-        let target = stmt.and_then(|s| match s {
-            crate::ast::Statement::Let { name, .. } => Some(name.clone()),
-            crate::ast::Statement::Assign(lhs, _) => {
-                if let Expr::Identifier(n) = &*lhs { Some(n.clone()) } else { None }
-            }
-            _ => None,
-        });
-
-        if let Some(ref target_name) = target {
-            if write_set.contains(target_name) {
+        // Handle write_set (phi backedge) and state stores.
+        // The target name is always group.lhs_names[i] — works for both
+        // contiguous and cross-pair merged groups.
+        let target_name = &group.lhs_names[i];
+        if write_set.contains(target_name) {
                 let field_ty = backend.ctx.field_index_map.get(target_name)
                     .and_then(|idx| backend.ctx.field_types.get(*idx))
                     .cloned().unwrap_or_else(|| "i64".to_string());
@@ -280,7 +306,6 @@ fn emit_extract_and_register(
                     writeln!(out, "{}{} = store {} {}, ptr {}, align 8",
                         indent, "", field_ty, ex, gep).ok();
                 }
-            }
         }
     }
 }
@@ -348,17 +373,11 @@ pub fn emit_slp_group(
         _ => return Err("SLP group template is not Let or Assign".to_string()),
     };
 
-    let mut lane_exprs: Vec<&Expr> = Vec::new();
-    for i in 0..group.width {
-        let stmt = body.get(group.base_index + i)
-            .ok_or_else(|| format!("SLP group lane {} out of bounds", i))?;
-        let expr = match stmt {
-            Statement::Let { expr: Some(e), .. } => &*e,
-            Statement::Assign(_, e) => &*e,
-            _ => return Err(format!("SLP group lane {} is not Let or Assign", i)),
-        };
-        lane_exprs.push(expr);
-    }
+    // 2026-07-21: All lanes use the template expression. lane_mappings[i]
+    // provides per-lane variable name substitutions. This works for both
+    // contiguous and cross-pair merged groups — the template is always the
+    // first statement of the group, and lane_mappings encode the differences.
+    let lane_exprs: Vec<&Expr> = (0..group.width).map(|_| template_expr).collect();
 
     let vec_result = emit_vector_expr(
         backend, out, template_expr, &lane_exprs,

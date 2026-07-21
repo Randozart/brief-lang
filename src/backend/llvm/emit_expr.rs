@@ -288,7 +288,29 @@ impl LlvmBackend {
                 } else {
                     let l = self.emit_expr(out, lhs, indent);
                     let r = self.emit_expr(out, rhs, indent);
-                    self.emit_binary_op(out, v, kind, &l, &r, indent)
+                    // 2026-07-21: Convert operands to matching types if they differ
+                    // (e.g., i64 constant in float operation). Native float types in
+                    // %State expose this — previously all values were i64.
+                    if l.ty != r.ty && (l.ty == Type::float() || r.ty == Type::float()) {
+                        let (conv_l, conv_r) = if l.ty == Type::float() && r.ty == Type::int() {
+                            let conv = self.fun.gen_reg();
+                            writeln!(out, "{}{} = trunc i64 {} to i32", indent, conv, r.name).ok();
+                            let fl = self.fun.gen_reg();
+                            writeln!(out, "{}{} = bitcast i32 {} to float", indent, fl, conv).ok();
+                            (l.clone(), TypedRegister { name: fl, ty: Type::float() })
+                        } else if l.ty == Type::int() && r.ty == Type::float() {
+                            let conv = self.fun.gen_reg();
+                            writeln!(out, "{}{} = trunc i64 {} to i32", indent, conv, l.name).ok();
+                            let fl = self.fun.gen_reg();
+                            writeln!(out, "{}{} = bitcast i32 {} to float", indent, fl, conv).ok();
+                            (TypedRegister { name: fl, ty: Type::float() }, r.clone())
+                        } else {
+                            (l.clone(), r.clone())
+                        };
+                        self.emit_binary_op(out, v, kind, &conv_l, &conv_r, indent)
+                    } else {
+                        self.emit_binary_op(out, v, kind, &l, &r, indent)
+                    }
                 }
             }
 

@@ -592,17 +592,33 @@ impl LlvmBackend {
     ) {
         let mut i = 0;
         while i < body.len() {
-            // 2026-07-21: Check for SLP isomorphism group at this position.
-            // If found and profitable (width >= 4 or deep tree), emit vector
-            // operations for the entire group and skip all its lanes.
-            // 2026-07-21: SLP vector codegen (Phase 2) is deferred.
-            // The analysis finds 143 groups in nbody but most are either
-            // too narrow (width 3 < threshold) or have sequential lane
-            // dependencies (Newton iterations). The codegen module is
-            // complete but needs a cross-pair grouping strategy to find
-            // truly independent, wide enough lanes. Re-enable by calling
-            // vector_codegen::emit_slp_group() here when the grouping
-            // strategy is refined.
+            // 2026-07-21: SLP vectorization — check for cross-pair merged groups.
+            // Only skip lanes if emit_slp_group succeeds (returns Ok); if it
+            // fails (sequential dependencies, type mismatches), fall back to
+            // scalar emission for the template statement.
+            let match_group = self.fun.slp_groups.iter()
+                .find(|g| g.base_index == i).cloned();
+            if let Some(ref group) = match_group {
+                let should_vec = group.width >= 4
+                    || (group.width >= 3
+                        && body.get(i).map_or(false, |s| {
+                            let expr = match s {
+                                Statement::Let { expr: Some(e), .. } => &*e,
+                                Statement::Assign(_, e) => &*e,
+                                _ => return false,
+                            };
+                            crate::backend::llvm::vector_codegen::tree_depth(expr) >= 2
+                        }));
+                if should_vec {
+                    let result = crate::backend::llvm::vector_codegen::emit_slp_group(
+                        self, out, body, group, write_set);
+                    if result.is_ok() {
+                        i = group.lane_positions.iter().max()
+                            .copied().unwrap_or(i + group.width) + 1;
+                        continue;
+                    }
+                }
+            }
             let stmt = &body[i];
             match stmt {
                 Statement::Let { name, expr: Some(e), .. } => {

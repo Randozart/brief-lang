@@ -14,6 +14,10 @@ pub struct SlpIsomorphicGroup {
     pub lane_mappings: Vec<HashMap<String, String>>,
     /// The LHS variable names for each lane.
     pub lhs_names: Vec<String>,
+    /// The body index for each lane. For contiguous groups this is
+    /// base_index..base_index+width. For merged groups it's concatenated
+    /// from source groups — lanes may come from non-contiguous positions.
+    pub lane_positions: Vec<usize>,
     /// The vector element type.
     pub element_type: Type,
 }
@@ -231,11 +235,234 @@ fn find_isomorphic_groups(
             width,
             lane_mappings: mappings,
             lhs_names,
+            lane_positions: (start_idx..start_idx + width).collect(),
             element_type: Type::int(), // will be refined later
         });
     }
 
     groups
+}
+
+/// Compute a template signature for an expression. The signature captures the
+/// structure (BinaryOp kinds, tree depth, literal values) but ignores variable
+/// names — two expressions with the same signature are isomorphic.
+fn expr_signature(expr: &Expr) -> Vec<u8> {
+    let mut sig = Vec::new();
+    expr_signature_inner(expr, &mut sig);
+    sig
+}
+
+fn expr_signature_inner(expr: &Expr, sig: &mut Vec<u8>) {
+    match expr {
+        Expr::BinaryOp(kind, l, r) => {
+            sig.push(1); // tag: BinaryOp
+            sig.push(match kind {
+                BinaryOpKind::Add => 1, BinaryOpKind::Sub => 2,
+                BinaryOpKind::Mul => 3, BinaryOpKind::Div => 4,
+                BinaryOpKind::Eq => 5, BinaryOpKind::Neq => 6,
+                BinaryOpKind::Lt => 7, BinaryOpKind::Gt => 8,
+                BinaryOpKind::Le => 9, BinaryOpKind::Ge => 10,
+                _ => 0,
+            });
+            expr_signature_inner(l, sig);
+            expr_signature_inner(r, sig);
+        }
+        Expr::UnaryOp(kind, e) => {
+            sig.push(2); // tag: UnaryOp
+            sig.push(match kind {
+                UnaryOpKind::Neg => 1, UnaryOpKind::Not => 2,
+                _ => 0,
+            });
+            expr_signature_inner(e, sig);
+        }
+        Expr::Identifier(_) => {
+            sig.push(3); // tag: any identifier (variable name ignored)
+        }
+        Expr::Decimal(n) => {
+            sig.push(4); // tag: decimal literal
+            for &b in &n.to_le_bytes() { sig.push(b); }
+        }
+        Expr::Float(f) => {
+            sig.push(5); // tag: float literal
+            let bits = f.to_bits();
+            for &b in &bits.to_le_bytes() { sig.push(b); }
+        }
+        Expr::Bool(b) => {
+            sig.push(6); // tag: bool literal
+            sig.push(if *b { 1 } else { 0 });
+        }
+        _ => {
+            sig.push(0); // tag: other/non-vectorizable
+        }
+    }
+}
+
+/// Get the template signature for a group's first statement.
+fn group_template_signature(body: &[Statement], group: &SlpIsomorphicGroup) -> Option<Vec<u8>> {
+    let stmt = body.get(group.base_index)?;
+    let expr = match stmt {
+        Statement::Let { expr: Some(e), .. } => &*e,
+        Statement::Assign(_, e) => &*e,
+        _ => return None,
+    };
+    Some(expr_signature(expr))
+}
+
+/// Build a map from let-binding variable name to its definition position in the body.
+fn build_def_sites(body: &[Statement]) -> HashMap<String, usize> {
+    let mut defs = HashMap::new();
+    for (i, stmt) in body.iter().enumerate() {
+        match stmt {
+            Statement::Let { name, .. } => { defs.insert(name.clone(), i); }
+            Statement::Assign(lhs, _) => {
+                if let Expr::Identifier(n) = &*lhs { defs.insert(n.clone(), i); }
+            }
+            _ => {}
+        }
+    }
+    defs
+}
+
+/// Collect all identifier names referenced by an expression.
+fn collect_expr_vars(expr: &Expr, out: &mut Vec<String>) {
+    match expr {
+        Expr::Identifier(n) => out.push(n.clone()),
+        Expr::BinaryOp(_, l, r) => { collect_expr_vars(l, out); collect_expr_vars(r, out); }
+        Expr::UnaryOp(_, e) => collect_expr_vars(e, out),
+        Expr::Field(obj, _) => collect_expr_vars(obj, out),
+        Expr::Cast(e, _) => collect_expr_vars(e, out),
+        _ => {}
+    }
+}
+
+/// Check that all variables referenced by a group's lanes are available
+/// at the template's body position. A variable is available if:
+///   a) It is NOT a let-binding (state field or constant) — always available
+///   b) It IS a let-binding defined at body index < template_base_index
+/// Returns false if any lane references a let-binding defined at or after
+/// the template position (the emitter won't have its value yet).
+fn all_deps_available(
+    body: &[Statement],
+    group: &SlpIsomorphicGroup,
+    template_base_index: usize,
+) -> bool {
+    let def_sites = build_def_sites(body);
+
+    for lane_idx in 0..group.width {
+        let stmt = match body.get(group.base_index + lane_idx) {
+            Some(s) => s,
+            None => return false,
+        };
+        let rhs = match stmt {
+            Statement::Let { expr: Some(e), .. } => &*e,
+            Statement::Assign(_, e) => &*e,
+            _ => continue,
+        };
+
+        let mut vars = Vec::new();
+        collect_expr_vars(rhs, &mut vars);
+        for var in &vars {
+            match def_sites.get(var) {
+                Some(&pos) if pos < template_base_index => continue,
+                Some(_) => return false, // defined at or after template — not available
+                None => continue, // state field or constant — always available
+            }
+        }
+    }
+    true
+}
+
+/// Merge groups with the same template signature into wider cross-pair groups.
+/// Groups must have the same width to be merged. The resulting group contains
+/// lanes from all merged groups, with composed lane mappings.
+fn merge_groups(body: &[Statement], groups: Vec<SlpIsomorphicGroup>) -> Vec<SlpIsomorphicGroup> {
+    if groups.len() < 2 {
+        return groups;
+    }
+
+    // Compute signatures for each group
+    let mut sig_buckets: HashMap<Vec<u8>, Vec<SlpIsomorphicGroup>> = HashMap::new();
+    for g in &groups {
+        if let Some(sig) = group_template_signature(body, g) {
+            sig_buckets.entry(sig).or_default().push(g.clone());
+        }
+    }
+
+    let mut merged = Vec::new();
+
+    for (_, bucket) in sig_buckets {
+        if bucket.len() < 2 {
+            merged.extend(bucket);
+            continue;
+        }
+
+        // Group by width within this signature bucket
+        let mut by_width: HashMap<usize, Vec<SlpIsomorphicGroup>> = HashMap::new();
+        for g in bucket {
+            by_width.entry(g.width).or_default().push(g);
+        }
+
+        for (_, same_width_groups) in by_width {
+            if same_width_groups.len() < 2 {
+                merged.extend(same_width_groups);
+                continue;
+            }
+
+            let mut sorted = same_width_groups;
+            sorted.sort_by_key(|g| g.base_index);
+            // 2026-07-21: Only merge groups where all lane dependencies are
+            // available at the template position. Checks that every variable
+            // referenced by a lane's RHS is either a state field (always available)
+            // or a let-binding defined before the template.
+            let template_base = sorted[0].base_index;
+            sorted.retain(|g| g.base_index == template_base || all_deps_available(body, g, template_base));
+            if sorted.len() < 2 {
+                merged.extend(sorted);
+                continue;
+            }
+            let template_group = sorted[0].clone();
+
+            let mut merged_lane_mappings = template_group.lane_mappings.clone();
+            let mut merged_lhs_names = template_group.lhs_names.clone();
+
+            for src in sorted.iter().skip(1) {
+                for lane_idx in 0..src.width {
+                    let src_lhs = &src.lhs_names[lane_idx];
+                    let src_mapping = &src.lane_mappings[lane_idx];
+                    let mut composed = HashMap::new();
+                    for (k, v) in src_mapping {
+                        composed.insert(k.clone(), v.clone());
+                    }
+                    if lane_idx < template_group.lhs_names.len() {
+                        let t_lhs = &template_group.lhs_names[lane_idx];
+                        if t_lhs != src_lhs {
+                            composed.insert(t_lhs.clone(), src_lhs.clone());
+                        }
+                    }
+                    merged_lane_mappings.push(composed);
+                    merged_lhs_names.push(src_lhs.clone());
+                }
+            }
+
+            let merged_width = template_group.width * sorted.len();
+            let mut merged_lane_positions = template_group.lane_positions.clone();
+            for src in sorted.iter().skip(1) {
+                for lane_idx in 0..src.width {
+                    merged_lane_positions.push(src.base_index + lane_idx);
+                }
+            }
+            merged.push(SlpIsomorphicGroup {
+                base_index: template_group.base_index,
+                width: merged_width,
+                lane_mappings: merged_lane_mappings,
+                lhs_names: merged_lhs_names,
+                lane_positions: merged_lane_positions,
+                element_type: template_group.element_type.clone(),
+            });
+        }
+    }
+
+    merged
 }
 
 /// Analyze a transaction body for SLP vectorization opportunities.
@@ -259,6 +486,16 @@ pub fn analyze_body(body: &[Statement]) -> SlpAnalysisResult {
                 i += 1;
             }
         }
+    }
+
+    // 2026-07-21: Cross-pair merge — groups with the same template signature
+    // across non-consecutive positions (e.g., all Newton-step-2 from pairs
+    // 01-10) are merged into wider groups with independent lanes.
+    if result.groups.len() >= 10 {
+        let pre = result.groups.len();
+        let old_groups = std::mem::take(&mut result.groups);
+        let merged = merge_groups(body, old_groups);
+        result.groups = merged;
     }
 
     result.has_slp_opportunities = !result.groups.is_empty();

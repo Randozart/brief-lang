@@ -1720,3 +1720,47 @@ while i < body.len() {
 
 nbody_newton: 150 scalar `fdiv` → ~65 vector `fdiv` → enables `vrcpps` backend
 conversion → expected ratio improvement from 1.35x toward parity.
+
+---
+
+## Stage 14: SLP Cross-Pair Merge — Dependency-Traced Grouping
+
+### Problem
+Cross-pair merging (Stage 13) combined groups with the same template signature
+but used a fragile 20-statement proximity heuristic. This failed because:
+1. Merged lanes reference let-bindings defined AFTER the template position
+2. `emit_slp_group` assumed contiguous `body[base_index + i]` lane expressions
+3. `i += group.width` skipped unrelated computations
+
+### 5-Phase Fix (~78 lines total)
+
+**Phase 1: `lane_positions` field.** Each lane gets its own body index.
+Filled in `find_isomorphic_groups` (contiguous case) and `merge_groups`
+(concatenation case).
+
+**Phase 2: Dependency validation.** `all_deps_available()` checks that
+every variable referenced by a lane's RHS is either:
+- A state field (not in `def_sites`) — always available
+- A let-binding defined BEFORE the template position — exists in `last_val_temps`
+Rejects merges where a lane references a let-binding defined at or after
+the template position.
+
+**Phase 3: Replace proximity heuristic.** In `merge_groups`, replace the
+20-statement check with `all_deps_available`.
+
+**Phase 4: Template-based lane reconstruction.** `emit_slp_group` no
+longer reads `body[base_index + i]`. All lanes use the template expression;
+`lane_mappings[i]` provides per-lane variable names. `emit_vector_expr`
+already uses `lane_mappings` — this just changes what expression is
+passed to it.
+
+**Phase 5: Fix extract/register and skip.** `emit_extract_and_register`
+uses `lhs_names[i]` instead of `body[base_index + i]`. Skip uses
+`lane_positions.max() + 1` instead of `group.width`.
+
+### Expected Results
+| Cross-pair candidate | Current (heuristic) | After (dependency) |
+|---|---|---|
+| dx01/dx02/dx03 (state fields only) | May or may not merge | **Merges** (all deps available) |
+| dist01a/dist02a (lets at different positions) | May wrongly merge | **Rejects** (dsq02 not available) |
+| epex01/epex02 (edist at pos < epex) | May wrongly merge | **Merges** (all deps available) |
