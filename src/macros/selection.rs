@@ -265,7 +265,7 @@ impl Selection {
 // ── Selector Trait ──────────────────────────────────────────────────────
 
 /// A criterion for selecting AST nodes.
-pub trait Selector {
+pub trait Selector: std::fmt::Debug {
     /// Apply this selector to the top-level items, returning matching nodes.
     fn apply(&self, items: &[TopLevel]) -> Result<Vec<NodeRef>, String>;
 }
@@ -274,6 +274,7 @@ pub trait Selector {
 
 /// Select by S-expression tag name (e.g. "defn", "txn", "call", "import").
 /// Tags map 1:1 to TopLevel/Statement/Expr variants in .beast serialization.
+#[derive(Debug)]
 pub struct TagSelector {
     pub tag: String,
 }
@@ -295,6 +296,7 @@ impl Selector for TagSelector {
 }
 
 /// Select by name field (e.g. "main", "PrintInt#").
+#[derive(Debug)]
 pub struct NamedSelector {
     pub name: String,
 }
@@ -314,6 +316,7 @@ impl Selector for NamedSelector {
 }
 
 /// Select nodes that have a metadata key.
+#[derive(Debug)]
 pub struct WithKeySelector {
     pub key: String,
 }
@@ -331,6 +334,7 @@ impl Selector for WithKeySelector {
 }
 
 /// Select nodes that have a metadata key=value pair.
+#[derive(Debug)]
 pub struct WithAttrSelector {
     pub key: String,
     pub val: String, // stored as string for comparison
@@ -349,6 +353,7 @@ impl Selector for WithAttrSelector {
 }
 
 /// Select all top-level nodes.
+#[derive(Debug)]
 pub struct AllSelector;
 
 impl Selector for AllSelector {
@@ -626,6 +631,7 @@ fn collect_stmt_matches(stmt: &Statement, _items: &[TopLevel], _tag: &str,
 // ──── Combinators ──────────────────────────────────────────────────────
 
 /// Intersection of two selectors.
+#[derive(Debug)]
 pub struct AndSelector {
     pub left: Box<dyn Selector>,
     pub right: Box<dyn Selector>,
@@ -640,6 +646,7 @@ impl Selector for AndSelector {
 }
 
 /// Union of two selectors.
+#[derive(Debug)]
 pub struct OrSelector {
     pub left: Box<dyn Selector>,
     pub right: Box<dyn Selector>,
@@ -659,6 +666,7 @@ impl Selector for OrSelector {
 }
 
 /// Complement of a selector (within the current selection context).
+#[derive(Debug)]
 pub struct NotSelector {
     pub inner: Box<dyn Selector>,
 }
