@@ -1751,9 +1751,6 @@ impl LlvmBackend {
                 }
             }
             crate::ast::BinaryOpKind::Concat => {
-                // 2026-07-19: Wire SSO concat — handle SSO inline (≤6 bytes)
-                // and heap paths via emit_inline_concat. Previously fell through
-                // to add i64, producing garbage for string ++.
                 self.emit_inline_concat(out, indent, l, r)
             }
             _ => {
