@@ -26,7 +26,7 @@
 
 use super::types::{Endian, FieldDescriptor, MemoryLayout};
 use super::FfiError;
-use crate::ast::{ForeignBinding, ForeignTarget, FromSpec, Type};
+use crate::ast::{Fallback, ForeignBinding, ForeignTarget, FromSpec, Type};
 use std::path::{Path, PathBuf};
 
 /// Parse a TOML binding file and extract all function bindings
@@ -221,6 +221,7 @@ fn parse_toml_bindings(content: &str) -> Result<Vec<ForeignBinding>, FfiError> {
 
         let binding = ForeignBinding {
             name,
+            as_name: None,
             from: FromSpec::Literal(std::path::PathBuf::from(&location)),
             target,
             wasm_impl,
@@ -235,6 +236,7 @@ fn parse_toml_bindings(content: &str) -> Result<Vec<ForeignBinding>, FfiError> {
             postcondition,
             buffer_mode,
             default_watchdog: None,
+            fallback: Fallback::None,
             span: None,
         };
 

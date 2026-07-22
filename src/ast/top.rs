@@ -551,10 +551,28 @@ impl Default for ForeignSignature {
     }
 }
 
+/// 2026-07-22: Fallback strategy when a frgn call's return violates its
+/// contract or the foreign function cannot be reached.
+/// The program must always produce a valid result — this is the safety net.
+#[derive(Debug, Clone)]
+pub enum Fallback {
+    /// Return a static expression (literal, constructor call, etc.)
+    Static(Expr),
+    /// Call a Brief function with the frgn's parameters
+    FnCall(String, Vec<Expr>),
+    /// Void-return frgn — just skip the call
+    Implicit,
+    /// No fallback declared (codegen uses zero-value of return type)
+    None,
+}
+
 /// Foreign function binding — a `frgn` declaration that wraps an external function.
 #[derive(Debug, Clone)]
 pub struct ForeignBinding {
     pub name: String,
+    /// 2026-07-22: The foreign symbol name when it differs from `name`.
+    /// `None` means the foreign symbol equals `name`.
+    pub as_name: Option<String>,
     pub from: FromSpec,
     pub target: ForeignTarget,
     pub inputs: Vec<(String, Type)>,
@@ -569,13 +587,25 @@ pub struct ForeignBinding {
     pub default_watchdog: Option<(u64, u64, u64, Box<Expr>)>,
     pub wasm_impl: Option<String>,
     pub wasm_setup: Option<String>,
+    /// 2026-07-22: Fallback strategy when the foreign call fails.
+    pub fallback: Fallback,
     pub span: Option<Span>,
 }
 
 impl ForeignBinding {
-    pub fn new(name: String, from: FromSpec, target: ForeignTarget) -> Self {
+    /// 2026-07-22: Extended with `as_name` and `fallback` for the
+    /// frgn/export/GLUE architecture. `as_name` renames the foreign symbol;
+    /// `fallback` declares what happens when the foreign call fails.
+    pub fn new(
+        name: String,
+        as_name: Option<String>,
+        from: FromSpec,
+        target: ForeignTarget,
+        fallback: Fallback,
+    ) -> Self {
         ForeignBinding {
             name,
+            as_name,
             from,
             target,
             inputs: Vec::new(),
@@ -590,6 +620,7 @@ impl ForeignBinding {
             default_watchdog: None,
             wasm_impl: None,
             wasm_setup: None,
+            fallback,
             span: None,
         }
     }

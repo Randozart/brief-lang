@@ -68,11 +68,20 @@ impl<'a> Parser<'a> {
     }
 
     /// 2026-07-16: P3 — Parse `frgn` declaration.
-    /// Syntax: frgn name(params) -> Ret from "path";
-    ///         frgn name(params) -> Ret from <name>;
-    ///         frgn name(params) -> Ret from "path" target "c";
+    /// Syntax: frgn name(params) -> Ret [as sym] from "path" [fallback <expr>];
+    ///         frgn name(params) -> Ret [as sym] from <name> [fallback <expr>];
+    ///         frgn name(params) -> Ret [as sym] from "path" target "c" [fallback <expr>];
+    /// 2026-07-22: Added `as <symbol>` and `fallback <expr>` clauses.
     fn parse_frgn_decl(&mut self) -> Result<ForeignBinding, SyntaxError> {
         let name = self.expect_identifier()?;
+
+        // 2026-07-22: Parse optional `as <foreign_symbol>` — symbol rename, NOT a protocol hint.
+        let as_name = if self.eat_identifier("as") {
+            Some(self.expect_identifier()?)
+        } else {
+            None
+        };
+
         self.expect(Token::LParen)?;
         let mut inputs = Vec::new();
         while !self.check(&Token::RParen) {
@@ -106,9 +115,44 @@ impl<'a> Parser<'a> {
                 }
             };
         }
+
+        // 2026-07-22: Parse optional `fallback <expr>` or `fallback <fn>(<args>)`.
+        let fallback = if self.eat_identifier("fallback") {
+            if self.check(&Token::Semicolon) {
+                // fallback; — implicit void, just skip the call
+                Fallback::Implicit
+            } else if self.peek().map_or(false, |t| matches!(t, Token::Identifier(_))) {
+                // Could be FnCall(name, args) or Static(ident)
+                // Peek ahead: if next after identifier is LParen, it's a function call
+                let saved = self.pos;
+                let ident = self.expect_identifier()?;
+                if self.eat(&Token::LParen) {
+                    let mut args = Vec::new();
+                    while !self.check(&Token::RParen) {
+                        args.push(self.parse_expression()?);
+                        if !self.eat(&Token::Comma) { break; }
+                    }
+                    self.expect(Token::RParen)?;
+                    Fallback::FnCall(ident, args)
+                } else {
+                    // Single identifier as a static expression
+                    // Reconstruct: we've consumed the identifier and need to reparse it as an expr
+                    self.pos = saved;
+                    let expr = self.parse_expression()?;
+                    Fallback::Static(expr)
+                }
+            } else {
+                let expr = self.parse_expression()?;
+                Fallback::Static(expr)
+            }
+        } else {
+            Fallback::None
+        };
+
         self.expect(Token::Semicolon)?;
         Ok(ForeignBinding {
             name,
+            as_name,
             from,
             target,
             inputs,
@@ -123,6 +167,7 @@ impl<'a> Parser<'a> {
             default_watchdog: None,
             wasm_impl: None,
             wasm_setup: None,
+            fallback,
             span: None,
         })
     }

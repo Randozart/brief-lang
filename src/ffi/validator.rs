@@ -78,7 +78,7 @@ pub fn is_valid_ffi_type(ty: &Type) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ast::FromSpec;
+    use crate::ast::{Fallback, FromSpec};
     use std::path::PathBuf;
 
     #[test]
@@ -95,6 +95,7 @@ mod tests {
 
         let binding = ForeignBinding {
             name: "read_file".to_string(),
+            as_name: None,
             from: FromSpec::Literal(PathBuf::from("std::fs::read_to_string")),
             target: crate::ast::ForeignTarget::Native,
             wasm_impl: None,
@@ -109,11 +110,13 @@ mod tests {
             postcondition: None,
             buffer_mode: None,
             default_watchdog: None,
+            fallback: Fallback::None,
             span: None,
         };
 
         let binding2 = ForeignBinding {
             name: "write_file".to_string(),
+            as_name: None,
             from: FromSpec::Literal(PathBuf::from("test")),
             target: crate::ast::ForeignTarget::Native,
             wasm_impl: None,
@@ -128,6 +131,7 @@ mod tests {
             postcondition: None,
             buffer_mode: None,
             default_watchdog: None,
+            fallback: Fallback::None,
             span: None,
         };
 
