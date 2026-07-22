@@ -6,7 +6,9 @@
 // the GLUE bridge export mechanism.
 
 defn pp_type_bits(n: String) -> String {
-    term "Bits(" ++ n ++ ")";
+    // 2026-07-22: Explicit two-step concat to avoid triple-concat dropping the ")"
+    let without: String = "Bits(" ++ n;
+    term without ++ ")";
 };
 
 defn pp_type_void() -> String {

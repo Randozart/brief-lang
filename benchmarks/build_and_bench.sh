@@ -79,6 +79,7 @@ TAG[mandelbrot]=runtime
 TAG[kalman_filter_runtime]=runtime
 TAG[knucleotide]=runtime
 TAG[cancel_math]=runtime
+TAG[bridge_glue]=runtime
 TAG[bit_clear]=runtime
 TAG[queue_drain]=runtime
 TAG[queue_drain_sym]=runtime
@@ -119,6 +120,7 @@ BENCHMARKS=(
     "queue_drain_sym"
     "queue_drain_idio"
     "interval_step"
+    "bridge_glue"
     # "gpu/saxpy"        # no .bv file exists
     # "meld-bridge"      # no .bv file exists
     # "meld-bridge-sym"  # no .bv file exists
@@ -367,6 +369,20 @@ bench_self_term() {
     echo ""
     echo "=== $name ==="
 
+    # 2026-07-22: Bridge benchmark uses Python harness, not compiled binary
+    if [ "$name" = "bridge_glue" ]; then
+        local py_bench="benchmarks/bridge/bench_glue_cross.py"
+        if [ -f "$py_bench" ] && [ -x "$(command -v python3)" ]; then
+            python3 "$py_bench"
+            check_correctness "$name"
+            record_result "$name" "done" "" "" "" "$LAST_CORRECTNESS"
+        else
+            echo "  SKIP — no Python harness"
+            record_result "$name" "SKIP" "" "" "" "SKIP"
+        fi
+        return
+    fi
+
     # Check for precomputed
     if is_precompute_ok "$name"; then
         local brief_text=0
@@ -482,7 +498,12 @@ for name in "${BENCHMARKS[@]}"; do
         continue  # skip build in correctness-only mode
     fi
     build_bench "$name"
-    build_c "$name"
+    if [ "$name" = "bridge_glue" ]; then
+        echo "  bridge_glue: building C + Brief .so files..."
+        make -C benchmarks/bridge PROJECT_ROOT="$PWD" BRIDGE_DIR="$PWD/target/bridge_bench" all 2>&1 | sed 's/^/    /'
+    else
+        build_c "$name"
+    fi
 done
 
 echo ""
