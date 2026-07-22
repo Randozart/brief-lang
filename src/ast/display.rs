@@ -1,8 +1,13 @@
 // ── Display Impls for AST Types ────────────────────────────────────────
 // 2026-07-12: Phase 0.2 — Format AST types as valid Brief source text.
+// 2026-07-22: Phase 8 — Round-trip tests verify Rust<->Brief pp parity.
 
 use crate::ast::*;
 use std::fmt;
+
+// ═══════════════════════════════════════════════════════════════════════
+// Display implementations
+// ═══════════════════════════════════════════════════════════════════════
 
 impl fmt::Display for Expr {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -501,5 +506,77 @@ impl fmt::Display for DerivationExample {
             write!(f, "{}", input)?;
         }
         write!(f, " -> {}", self.output)
+    }
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+// Round-trip tests (Rust Display vs Brief pretty-printer via GLUE bridge)
+// ═══════════════════════════════════════════════════════════════════════
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Snapshot test: verify Rust Display output for all Type variants.
+    #[test]
+    fn test_display_type_snapshots() {
+        assert_eq!(format!("{}", Type::Bits(42)), "Bits(42)");
+        assert_eq!(format!("{}", Type::Void), "void");
+        assert_eq!(format!("{}", Type::Custom("Int".into())), "Int");
+        assert_eq!(format!("{}", Type::HashWord("L".into())), "L");
+        assert_eq!(format!("{}", Type::HashWordVariant("String".into(), "utf8".into())), "String<utf8>");
+        assert_eq!(
+            format!("{}", Type::Generic("List".into(), vec![Type::Custom("Int".into())])),
+            "List<Int>"
+        );
+        assert_eq!(
+            format!("{}", Type::Applied("Result".into(), vec![Type::Custom("Int".into()), Type::Custom("Error".into())])),
+            "Result<Int, Error>"
+        );
+        assert_eq!(format!("{}", Type::Union(vec![Type::Custom("A".into()), Type::Custom("B".into())])), "A | B");
+        assert_eq!(format!("{}", Type::Tuple(vec![Type::Custom("Int".into()), Type::Custom("Bool".into())])), "(Int, Bool)");
+        assert_eq!(format!("{}", Type::TypeVar("T".into())), "T");
+        assert_eq!(format!("{}", Type::Ptr(Box::new(Type::Custom("Int".into())))), "Ptr<Int>");
+        assert_eq!(format!("{}", Type::PtrConst(Box::new(Type::Custom("Int".into())))), "Ptr<const Int>");
+        assert_eq!(
+            format!("{}", Type::Function(vec![Type::Custom("Int".into())], Box::new(Type::Custom("Bool".into())))),
+            "(Int) -> Bool"
+        );
+        assert_eq!(format!("{}", Type::Width(64)), "64");
+        assert_eq!(
+            format!("{}", Type::Vector(Box::new(Type::Custom("Float".into())), vec![Dimension::Anonymous(4)])),
+            "Float[4]"
+        );
+    }
+
+    /// Snapshot test: verify Rust Display output for BinaryOpKind.
+    #[test]
+    fn test_display_binop_snapshots() {
+        assert_eq!(format!("{}", BinaryOpKind::Add), "+");
+        assert_eq!(format!("{}", BinaryOpKind::Sub), "-");
+        assert_eq!(format!("{}", BinaryOpKind::Mul), "*");
+        assert_eq!(format!("{}", BinaryOpKind::Div), "/");
+        assert_eq!(format!("{}", BinaryOpKind::Eq), "==");
+        assert_eq!(format!("{}", BinaryOpKind::Neq), "!=");
+        assert_eq!(format!("{}", BinaryOpKind::Lt), "<");
+        assert_eq!(format!("{}", BinaryOpKind::Gt), ">");
+        assert_eq!(format!("{}", BinaryOpKind::Le), "<=");
+        assert_eq!(format!("{}", BinaryOpKind::Ge), ">=");
+        assert_eq!(format!("{}", BinaryOpKind::And), "&&");
+        assert_eq!(format!("{}", BinaryOpKind::Or), "||");
+        assert_eq!(format!("{}", BinaryOpKind::BitAnd), "&");
+        assert_eq!(format!("{}", BinaryOpKind::BitOr), "|");
+        assert_eq!(format!("{}", BinaryOpKind::BitXor), "^");
+        assert_eq!(format!("{}", BinaryOpKind::Shl), "<<");
+        assert_eq!(format!("{}", BinaryOpKind::Shr), ">>");
+        assert_eq!(format!("{}", BinaryOpKind::Concat), "++");
+    }
+
+    /// Snapshot test: verify Rust Display output for UnaryOpKind.
+    #[test]
+    fn test_display_unary_op_snapshots() {
+        assert_eq!(format!("{}", UnaryOpKind::Neg), "-");
+        assert_eq!(format!("{}", UnaryOpKind::Not), "!");
+        assert_eq!(format!("{}", UnaryOpKind::BitNot), "~");
     }
 }

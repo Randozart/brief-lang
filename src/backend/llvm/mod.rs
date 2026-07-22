@@ -1775,7 +1775,15 @@ impl LlvmBackend {
                         wasm_setup: fb.wasm_setup.clone(),
                         span: fb.span,
                     };
-                    self.ctx.frgn_map.insert(fb.foreign_name.clone(), sig);
+                    self.ctx.frgn_map.insert(fb.foreign_name.clone(), sig.clone());
+                    // 2026-07-22: Also index by Brief name so call resolution
+                    // (Expr::Call uses the Brief name, e.g. "frgn__getenv_brief")
+                    // finds the frgn entry. The declare loop emits only for the
+                    // foreign_name key to avoid duplicate declarations.
+                    let brief_name = fb.effective_brief_name();
+                    if brief_name != fb.foreign_name {
+                        self.ctx.frgn_map.insert(brief_name.to_string(), sig);
+                    }
                 }
                 TopLevel::Struct(s) => {
                     let fields: Vec<(String, Type)> = s.fields.iter()
@@ -1949,8 +1957,14 @@ impl LlvmBackend {
                 _ => None,
             })
             .collect();
+        // 2026-07-22: Deduplicate by foreign_name — frgn_map may have dual
+        // keys (foreign_name + effective_brief_name) but declares use only the
+        // C linker symbol name (sig.name = foreign_name).
+        let mut declared: std::collections::HashSet<&str> = std::collections::HashSet::new();
         for (name, sig) in &self.ctx.frgn_map {
             if trigger_linked_symbols.contains(name.as_str()) { continue; }
+            // Dedup: skip if we already emitted a declare for this foreign_name
+            if !declared.insert(&sig.name) { continue; }
             let ret_ty = match sig.result_type {
                 crate::ast::ResultType::VoidType | crate::ast::ResultType::TrueAssertion => "void",
                 crate::ast::ResultType::Projection(ref ts) => {
