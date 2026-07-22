@@ -392,6 +392,35 @@ fn emit_binop(builder: &mut LlvmBuilder, op: BinOp, lhs: Type, rhs: Type) -> Res
 
 This makes dependencies explicit, improves testability, and documents which data each function actually uses.
 
+### 8. GLUE Export Is TOML-Driven (Phase 8)
+
+The `brief export` command generates language wrappers entirely from
+`lib/glue.toml` templates. No Rust code knows about specific languages.
+Adding a language = adding a `[lang]` section with `type_map`, `c_type_map`,
+`conversions`, and `templates`. Config discovery uses `#[serde(flatten)]` —
+no named struct fields for languages.
+
+### 9. Export Uses the Full LLVM Backend (Phase 8)
+
+`brief export` calls `LlvmBackend::generate()` — the same code path as
+`brief build --llvm`. No `ret i64 0` stubs. The stub codegen in `library.rs`
+is deprecated for the export path but kept for `brief library` backward compat.
+
+### 10. String Format Is C-Compatible (Phase 8)
+
+The LLVM backend stores strings as `[i64 length][data\0]` — the same format
+as `brief_rt.c`. Global constants use `<{ i64, [N x i8] }>` with the handle
+pointing to the struct start. `emit_load_length` reads `handle[0]`.
+`brief_str_to_c` strips tag bits via `& ~3` before reading.
+
+### 11. Protocol Paths Are Computed via BFS (Phase 8)
+
+`resolve_single_frgn()` calls `compute_protocol_path()` which uses
+`find_cast_path()` BFS from `layout_optimizer.rs`. Falls back to
+`Cast(#Bits)` bitcast when no protocol path exists. `emit_protocol_chain()`
+in `src/glue/bridge.rs` emits real LLVM IR for Bitcast, MeldShuffle, and
+ProtocolTransform kinds.
+
 ### 7. HashMap Iteration Determinism
 
 Every HashMap iteration that produces LLVM IR instructions MUST be sorted by

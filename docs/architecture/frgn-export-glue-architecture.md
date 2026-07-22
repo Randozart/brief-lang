@@ -1,8 +1,9 @@
 # frgn / export / GLUE — Cross-Language FFI Architecture
 
 **Date:** 2026-07-22
-**Status:** Foundational
-**Applies to:** All backends, `src/glue/`, `src/compile.rs`, `src/ast/top.rs`, `src/parser/definitions.rs`, `lib/glue.toml`
+**Status:** Stable — Phase 8 complete
+**Applies to:** All backends, `src/glue/`, `src/compile.rs`, `src/ast/top.rs`,
+  `src/parser/definitions.rs`, `lib/glue.toml`, `lib/pp/`, `src/library.rs`
 
 ---
 
@@ -14,34 +15,47 @@ Brief's FFI architecture has three pillars:
 |--------|-----------|---------|
 | **`frgn`** | Host → Brief | Declare an external function so Brief can call it |
 | **`export`** | Brief → Host | Expose a Brief function so foreign code can call it |
-| **GLUE** | Broker | Negotiate protocol paths, meld data shapes, and generate bridge code when no direct path exists |
+| **GLUE** | Broker | Negotiate protocol paths, meld data, generate bridge code |
 
-The backend decides *how* to implement each frgn or export. A `.c` source gets
-compiled and LTO-inlined by LLVM. A `.py` source cannot be inlined by LLVM —
-GLUE mediates through protocol negotiation and zero-copy melds. The frontend
+The backend decides *how* to implement each frgn or export. `.c` sources get
+compiled and LTO-inlined by LLVM. `.py` sources cannot be inlined — GLUE
+mediates through protocol negotiation and zero-copy melds. The frontend
 resolves the dispatch path (inline vs bridge vs error) during the main
-compilation pass, before the backend runs. The backend merely executes the
-semantics of the chosen path.
+compilation pass, before the backend runs.
+
+**GLUE is an ABI generator, not an FFI.** It computes the cheapest transform
+chain between any two language representations at compile time, emits the
+transforms, and eliminates the boundary when the path is identity (at LTO).
+See `docs/architecture/glue-as-abi-generator.md` for the full conceptual
+framework.
 
 ---
 
-## 1. `frgn` — Foreign Function Declaration
+## 1. `frgn` — Foreign Function Import
 
 ### 1.1 Syntax
 
 ```brief
-frgn <foreign_symbol>(<params>) -> <ret> as <brief_name> from "<path>"
-    fallback <expr>;
-frgn <foreign_symbol>(<params>) -> <ret> as <brief_name> from <<registry_name>>
-    fallback <fn_name>(<args>);
-
-// Minimal (no `as` = brief_name same as foreign_symbol, `from` required)
-frgn log(msg: String) from "syslog.so" fallback; ;
+frgn <foreign_symbol>(<params>) [-> <ret>] [as <brief_name>] from <source> [fallback <expr>];
 ```
 
-// Full
-frgn __get_user(id: Int) -> User as get_user from "db.py"
-    fallback User { name: "unknown", id: 0 };
+`frgn` is an **import**. The first name after `frgn` is the **foreign/C
+symbol name**. The `as` clause gives the Brief-side name (what callsites use).
+`from` is **required** — every frgn must specify its provenance.
+
+Examples:
+```brief
+// C symbol is "__getenv_brief", Brief calls it "frgn__getenv_brief"
+frgn __getenv_brief(key: String) -> String as frgn__getenv_brief
+  from "lib/runtime/brief_rt.c" fallback "";
+
+// No as clause: foreign and Brief names are the same
+frgn brief_cstr_to_brief(ptr: Int) -> String as cstr_to_brief
+  from "lib/runtime/brief_rt.c" fallback "";
+
+// With compiler-resolved registry path:
+frgn XXH64(data: Int, len: Int, seed: Int) -> Int as frgn__xxh64
+  from <xxhash.c> fallback 0;
 ```
 
 ### 1.2 Grammar
@@ -50,81 +64,33 @@ frgn __get_user(id: Int) -> User as get_user from "db.py"
 frgn_decl ::= "frgn" identifier "(" [param_list] ")" ["->" type]
               ["as" identifier]
               "from" (string_literal | "<" identifier ">")
-              ["fallback" (expr | identifier "(" [arg_list] ")")]
+              ["fallback" (expr | identifier "(" [arg_list] ")" | ";")]
               ";"
-
-param_list ::= param ("," param)*
-param     ::= identifier ":" type
 ```
 
-### 1.3 Fields
+### 1.3 Naming Convention
 
-| Field | Required | Meaning |
-|-------|----------|---------|
-| `brief_name` | Yes | The name used in Brief code to call this function |
-| `params` | Yes | Parameter names and types |
-| `-> ret` | No | Return type. Omitted = void |
-| `as foreign_symbol` | No | Override the foreign symbol name. Without it, symbol = brief_name |
-| `from "path"` | **Yes** | Origin of the foreign function. Must always be present |
-| `from <name>` | Yes | Compiler-resolved registry path (e.g., `<xxhash.c>`) |
-| `fallback expr` | No | Static fallback value if the foreign call fails contract |
-| `fallback fn(args)` | No | Brief function to call as fallback |
-
-**`from` is mandatory.** There is no default. Every frgn must specify where
-the foreign function lives. This avoids ambiguity about symbol resolution,
-linking strategy, and dispatch path.
-
-### 1.4 `as` — Symbol Rename
-
-`as` is exclusively a symbol rename. It does NOT denote protocol, language,
-or any semantic property. The foreign symbol name is `as <ident>`; the Brief
-name is `brief_name`. This lets you write:
-
+Raw FFI declarations visible to Brief code use the `frgn__` prefix. When the
+C symbol differs, `as` provides the mapping:
 ```brief
-// C symbol is "func", Brief calls it "__func"
-frgn __func(x: Int) -> Int as func from "lib.so";
-
-defn func(x: Int) -> Int {
-    // Brief-native wrapper around the frgn
-    term __func(x) + 1;
-};
+frgn XXH64(data: Int, len: Int, seed: Int) -> Int as frgn__xxh64 from "lib/xxhash.c" fallback 0;
 ```
 
-Without `as`, the foreign symbol is assumed to equal the Brief name.
+The `frgn__` naming is a convention, not enforced by the compiler. It makes
+FFI boundaries visually distinct from pure Brief function calls.
 
-### 1.5 Fallback — Graceful Degradation
+### 1.4 Fallback
 
-Every frgn call must produce a valid result even when the foreign world is
-unreachable. The `fallback` clause declares what happens when the foreign
-call returns a value that violates the expected contract, or when the call
-cannot be completed.
+Every frgn must have a `fallback` clause (parser requires it). Three forms:
 
-**Three forms:**
+| Form | Example | Behavior |
+|------|---------|----------|
+| Static | `fallback 0` | Return zero-initialized value on failure |
+| Function | `fallback default_val()` | Call a Brief function as fallback |
+| Implicit | `fallback;` | Skip the call, return zero-value |
 
-| Form | Syntax | When it fires |
-|------|--------|---------------|
-| Static literal | `fallback <expr>` | Contract violation on return, or bridge failure |
-| Function call | `fallback <fn_name>(<args>)` | Same, but calls a Brief function |
-| Implicit | omitted | Zero-value for the return type (void frgn: skip the call) |
-
-**How it works at codegen:**
-
-```llvm
-%result = call @bridge_call(@func, %transformed_args...)
-%ok = call @verify_contract(%result, %expected_postcondition)
-br i1 %ok, label %merge, label %try_fallback
-
-try_fallback:
-  %fallback_result = call @fallback_fn_or_literal(...)
-  br label %merge
-
-merge:
-  %final = phi [%result, %continue], [%fallback_result, %try_fallback]
-```
-
-The contract verification checks the postcondition declared by the frgn's
-return type. If the foreign return violates `[result > 0]`, the fallback
-fires. This is the existing contract system — not a new mechanism.
+The fallback fires when the contract is violated (postcondition check on the
+return value) or when the foreign call cannot be completed.
 
 ---
 
@@ -132,177 +98,157 @@ fires. This is the existing contract system — not a new mechanism.
 
 ### 2.1 The Decision Tree
 
-Every backend has a baked-in (but TOML-exposed) table of which file extensions
-it can inline directly, which require a GLUE bridge, and which are unsupported.
-
 ```
 frgn x(args) -> Ret as sym from "path.ext"
                       │
                       ▼
-  ┌─ extensions_inlineable.contains("ext")? ────────┐
-  │ YES                                              │
-  │   → Emit direct call to @sym                    │
-  │   → Collect path for linking (compile if .c)     │
-  │   → (LLVM: .c compiled via clang, .so via dlsym) │
+  ┌─ Extension is inlineable? (.c, .rs, .so) ───────┐
+  │ YES → Emit direct call, compile & link source    │
   └──────────────────────────────────────────────────┘
   │
-  ┌─ extensions_bridge.contains("ext")? ─────────────┐
-  │ YES                                              │
-  │   → Find protocol mapping for params/ret types   │
-  │   → Generate CastTo/CastFrom transform chain     │
-  │   → Emit GLUE bridge call                        │
+  ┌─ Extension maps to a GLUE target? (.py, .js) ────┐
+  │ YES → Compute protocol path for each param        │
+  │     → Emit CastTo/CastFrom transform chain        │
+  │     → Emit bridge call + fallback                 │
   └──────────────────────────────────────────────────┘
   │
-  └─ NO ─────────────────────────────────────────────┐
-    → Compile error:                                  │
-      "Backend '{name}' cannot handle extension       │
-       '{ext}' for frgn '{brief_name}'."              │
-    └─────────────────────────────────────────────────┘
+  └─ NO → Compile error: unsupported extension
 ```
 
-### 2.2 Per-Backend Extension Maps
+### 2.2 Extension Resolution
 
-| Backend | Inline | Bridge | Unsupported |
-|---------|--------|--------|-------------|
-| **LLVM** | `.c`, `.cpp`, `.cc`, `.cxx`, `.m`, `.so`, `.dylib`, `.a`, `.o` | `.py`, `.pyc`, `.js`, `.ts`, `.mjs`, `.java` | Everything else |
-| **Webstack** | `.js`, `.ts`, `.mjs`, `.wasm` | `.c`, `.py`, `.rs`, `.java` | Everything else |
-| **CIRCT** | *(none)* | *(none)* | **All frgn** (hardware validator B5002) |
-| **SPIR-V** | `.spv`, `.ptx`, `.cubin` | `.c`, `.py` | Everything else |
-
-These maps are baked into each backend's `dispatch_frgn()` method, but also
-exposed via `config/targets.toml` for documentation and debugging:
-
-```toml
-[backend.llvm.frgn]
-inline = ["c", "cpp", "cc", "cxx", "m", "so", "dylib", "a", "o"]
-bridge = ["py", "pyc", "js", "ts", "mjs"]
-```
+The `extension_to_language` function was **removed** — it was dead code. The
+only lookup is `find_language_by_extension()` which iterates the loaded
+`glue_targets` map (from `lib/glue.toml`). Adding a new language = adding a
+section to the TOML — zero Rust changes.
 
 ### 2.3 The `ResolvedFrgn` Enum
 
-The dispatch decision is made during the main compilation pass (in
-`src/compile.rs`), **before the backend runs**. The backend receives a fully
-resolved dispatch instruction:
+Resolved during the main compilation pass (in `src/compile.rs`), before the
+backend runs:
 
 ```rust
 pub enum ResolvedFrgn {
-    /// Backend compiles and links the source, calls the symbol directly
-    Inline {
-        /// The LLVM symbol name (from `as` or brief_name)
-        symbol: String,
-        /// If true, compile source to .o before linking
-        compile_source: bool,
-    },
-    /// Route through GLUE bridge with protocol negotiation
+    /// Backend compiles source and calls the symbol directly
+    Inline { symbol: String, compile_source: bool },
+    /// Route through GLUE bridge with protocol paths
     Bridge {
-        /// Language identifier from lib/glue.toml
         language: String,
-        /// Protocol transform chain for each argument and return
-        /// (Brief type, foreign type, transform cost)
-        protocol_paths: Vec<ProtocolStep>,
-        /// Fallback strategy
+        param_paths: Vec<ProtocolStep>,     // one per parameter
+        return_path: Option<ProtocolStep>,  // one for return
         fallback: Fallback,
     },
-    /// Compile error — extension not supported by this backend
+    /// Compile error
     Unsupported(String),
 }
 ```
 
-### 2.4 Protocol Path Resolution
+### 2.4 Protocol Path Resolution (Phase 8)
 
-For each parameter and return type in a bridged frgn, the compiler finds the
-shortest path through the protocol graph using the existing `find_cast_path()`
-BFS in `src/type_universe/operators.rs`:
+For each parameter and return type in a bridged frgn, `resolve_single_frgn`
+now calls `compute_protocol_path()`, which uses the BFS in
+`find_cast_path()` (via TypeUniverse):
 
 ```
 Source = Brief String
-Target = PythonString
+Target = Foreign *mut u8
 
-BFS finds: [String, #String<utf8>, PythonString]
-  ├─ String.CastTo(#String<utf8>)     → identity (already UTF-8)
-  └─ PythonString.CastFrom(#String<utf8>) → utf8_to_ucs4 (actual work)
+BFS finds: [String, #Bits, *mut u8]
+  ├─ String → #Bits: Cast(#Bits) — identity (same byte width)
+  └─ #Bits → *mut u8: Bitcast — LLVM bitcast instruction
 
-Alternative: meld exists between String and PythonString?
-  → Yes: [String, PythonString] via meld → cost 0 if identity
+Cost: Bitcast = low (one instruction, inlined)
 ```
 
-The compiler picks the shortest path by cost:
-1. Meld identity = cost 0
-2. CastTo/CastFrom with identity ops = cost 0
-3. CastTo/CastFrom with real transforms = cost N (inlined, LLVM-optimized)
-4. Implicit Cast(#Bits) = last resort
+The BFS always has `#Bits` as a fallback (every type can Cast to `#Bits`).
+If no protocol path is available, the compiler emits a `bitcast` instruction
+as the last resort.
+
+The `ProtocolStep` types:
+
+```rust
+pub struct ProtocolStep {
+    pub source: Type,
+    pub target: Type,
+    pub kind: TransformKind,
+}
+
+pub enum TransformKind {
+    Identity,                 // No transform needed
+    Bitcast,                  // Raw bitcast — Cast(#Bits)
+    MeldShuffle,              // Field reordering
+    ProtocolTransform(String), // CastTo/CastFrom via category
+}
+```
 
 ---
 
-## 3. GLUE — The Zero-Copy FFI Broker
+## 3. GLUE — Bridge Generation
 
 ### 3.1 What GLUE Does
 
-GLUE mediates between a Brief program and a foreign language when the backend
-cannot inline the foreign code directly. It:
+GLUE mediates between Brief and a foreign language when the backend cannot
+inline the foreign code directly. It:
 
-1. **Negotiates protocol paths** — finds CastTo/CastFrom chains through shared
-   protocols (e.g., `#String<utf8>`) for each parameter and return type
-2. **Resolves melds** — finds structural identity between Brief types and
-   foreign types, enabling zero-copy passthrough
-3. **Generates bridge calls** — emits the transform chain, calls the foreign
-   function via the appropriate mechanism (dlopen, Python embedding, etc.),
-   and unwraps the result
-4. **Applies fallbacks** — wraps the call in contract verification with
-   fallback dispatch
+1. **Negotiates protocol paths** — BFS via `find_cast_path()`
+2. **Emits transforms** — `emit_protocol_chain()` in `src/glue/bridge.rs`
+3. **Generates bridge calls** — `emit_bridge_frgn_call()` with fallback
+4. **Applies fallbacks** — phi-node structure with contract verification
 
-### 3.2 Bridge Call Generation
+### 3.2 `emit_protocol_chain` Implementation (Phase 8)
 
-For `FrgnDispatch::Bridge { language: "python" }`, the backend emits:
+Located in `src/glue/bridge.rs`. Transforms a value through a chain of
+`ProtocolStep`s, emitting LLVM IR for each kind:
+
+| Kind | IR emitted |
+|------|-----------|
+| `Identity` | No instructions |
+| `Bitcast` | `%r = bitcast T1 %val to T2` |
+| `MeldShuffle` | `%r = bitcast T1 %val to T2` (fallback; full extractvalue/insertvalue deferred) |
+| `ProtocolTransform(cat)` | `%r = call T2 @_CastTo_#cat(T1 %val)` |
+
+The signature changed from the Phase 3 stub:
+
+```rust
+// Before (stub — returned value unchanged):
+emit_protocol_chain(value_reg, path, value_ty) -> Result<String, String>
+
+// After (emits real IR):
+emit_protocol_chain(out, value_reg, path, value_ty, gen_reg) -> Result<String, String>
+```
+
+### 3.3 The Bridge Call (Phase 8)
+
+`emit_bridge_frgn_call()` in `src/backend/llvm/emit_expr.rs` is fully wired:
 
 ```
 For each argument:
-  1. Find protocol path from Brief type → foreign type
-  2. Emit the CastTo/CastFrom transform chain (inlined)
-  3. If a meld exists and is identity → zero-cost passthrough
+  1. emit_expr(arg) — evaluate the expression
+  2. emit_protocol_chain(out, reg, path_for_arg, llvm_type, gen_reg)
+  3. Collect transformed args
 
-Call the foreign function:
-  1. Via the mechanism declared in lib/glue.toml for this language
-     (native_module, esm_module, jni_c_extension, etc.)
+Emit bridge call: call @bridge_{sym}(transformed_args...)
 
-For the return value:
-  1. Find protocol path from foreign type → expected Brief type
-  2. Emit the reverse Cast/CastFrom transform chain
+For return value:
+  1. emit_protocol_chain(out, v, return_path, ret_llvm, gen_reg)
 
-Wrap everything:
-  1. Contract verification on the return value
-  2. Fallback dispatch if contract is violated
+Wrap with fallback:
+  1. emit_fallback_llvm(out, final_reg, ret_type, ret_llvm, fallback, indent, gen_reg)
 ```
 
-### 3.3 Zero-Copy Conditions
+The fallback dispatch emits a phi-node structure:
 
-Zero-copy happens when meld identity eliminates the need for protocol transforms:
+```llvm
+%ok = icmp ne i64 %result, zeroinitializer
+br i1 %ok, label %use_result, label %use_fallback
 
+use_fallback:
+  %fb = i64 zeroinitializer
+  br label %merge
+
+merge:
+  %final = phi i64 [%result, %use_result], [%fb, %use_fallback]
 ```
-Case 1: Same layout, same protocol
-  PythonBytes { ptr, len } = CBuffer { ptr, len }
-  Both CastTo/CastFrom #String are identity
-  → Bridge is literally: call @process(%arg_data)
-  → No transform, no copy
-
-Case 2: Different layout, same protocol
-  PythonBytes { ptr, len, refcount } vs CBuffer { ptr, len }
-  Meld extracts ptr+len from the foreign struct
-  → Bridge performs struct reshape (meld shuffle)
-  → No encoding transform, only pointer arithmetic
-
-Case 3: Different protocol encoding
-  PythonString is UCS-4 internally
-  Brief String is UTF-8 internally
-  → Encode transform required via CastTo/CastFrom
-  → LLVM inlines it; cannot be eliminated (real work)
-```
-
-### 3.4 The GLUE Bridge Is Not a Process
-
-The bridge is **inline codegen**, not a separate runtime process. The compiler
-emits the transform chain (which LLVM optimizes), wraps the foreign call, and
-includes the fallback. No interpreter, no serialization, no IPC.
 
 ---
 
@@ -312,69 +258,91 @@ includes the fallback. No interpreter, no serialization, no IPC.
 
 ```brief
 export defn <name>(<params>) -> <ret> { <body> };
-export node <name> [<pre>][<post>] { <body> };
 ```
 
-### 4.2 The Export Mechanism is Configured Per Language
+`export` is a straight keyword before `defn`. It marks the function as
+externally visible, generating a `dso_local` symbol and producing a
+language-specific wrapper in the export output.
 
-The `lib/glue.toml` registry declares how each language wants to receive
-exported functions:
+### 4.2 The Export Pipeline (Phase 8)
+
+`brief export <bridge.bv> <language> --out <dir>`
+
+```
+1. Parse + typecheck bridge.bv (with import resolution)
+2. Extract bridge info (exports, frgns, melds)
+3. Find language target in lib/glue.toml (TOML-driven, no hardcoded lookup)
+4. Generate LLVM IR via FULL backend (LlvmBackend::generate)
+   → Real function bodies (no 'ret i64 0' stubs)
+5. Write bridge.ll
+6. Compile to .o via llc
+7. Generate language wrappers from TOML templates
+   → {{mustache}} substitution with {{exports}}, {{ffi_decls}}, etc.
+8. Write metadata (.dbvl)
+```
+
+**Key: Step 4 uses the full LLVM backend** (the same as `brief build --llvm`),
+not the stub generator from `library.rs`. The `library.rs` `generate_with_exports`
+function is no longer called by the export CLI.
+
+### 4.3 Template System
+
+Each language in `lib/glue.toml` provides templates with `{{mustache}}`
+substitution. No Rust code knows about specific languages.
+
+Template variables:
+
+| Variable | Source | Description |
+|----------|--------|-------------|
+| `{{bridge_name}}` | CLI arg | Name of the bridge |
+| `{{name}}` | Export | Function name |
+| `{{params}}` | `type_map` | Language-native parameter list (`n: String`) |
+| `{{ffi_params}}` | `c_type_map` | C ABI parameter list (`n: *mut u8`) |
+| `{{c_types}}` | `c_type_map` | C ABI types only (`*mut u8, i64`) |
+| `{{args}}` | Export | Argument names only (`n, s`) |
+| `{{args_abi}}` | `conversions.to_abi` | ABI-converted arguments (`n as i64, s`) |
+| `{{return}}` | `type_map` | Language-native return type |
+| `{{c_return}}` | `c_type_map` | C ABI return type |
+| `{{return_expr}}` | `conversions.from_abi` | Return value conversion |
+| `{{s_param}}` | Convention | State variable prefix (`_STATE, ` or `""`) |
+| `{{s_init}}` | Convention | State initialization code |
+| `{{exports}}` | Generated | Per-function wrappers (from `fn_template`) |
+| `{{ffi_decls}}` | Generated | FFI declarations (from `ffi_template`) |
+
+Per-language conversion expressions (`conversions`):
 
 ```toml
-[python]
-types_module = "glue/python/types.bv"
-extension = "py"
-bridge_kind = "native_module"    # Generate a Python .py module
-calling_convention = "c_abi"     # Use ctypes.CDLL on a .so
-
-[node]
-types_module = "glue/node/types.bv"
-extension = "mjs"
-bridge_kind = "esm_module"       # Generate an ES module
-calling_convention = "c_abi"     # Use Node FFI on a .so
-
-[rust]
-types_module = "glue/rust/types.bv"
-extension = "rs"
-bridge_kind = "extern_c_crate"   # Generate Cargo crate with extern "C"
-calling_convention = "lto"       # LLVM LTO — no C ABI boundary
+[rust.conversions.String]
+to_abi = "{name}.as_ptr() as i64"
+from_abi = "String::from_raw_parts({name} as *mut u8, len)"
 ```
 
-Generated output (what `brief export <bridge.bv> <lang> --out <dir>` produces):
+### 4.4 Generated Output
 
-| Language | Files produced |
-|----------|---------------|
-| Python | `<name>/__init__.py` (ctypes), `<name>/bridge.so` |
-| Node | `<name>/index.mjs` (FFI), `<name>/index.d.ts`, `<name>/bridge.so` |
-| Rust | `<name>/Cargo.toml`, `<name>/build.rs`, `<name>/src/lib.rs`, `<name>/src/ffi.rs`, `<name>/libbridge.a` |
+| Language | Files |
+|----------|-------|
+| Rust | `Cargo.toml`, `build.rs`, `src/lib.rs`, `src/ffi.rs`, `bridge.ll`, `bridge.o` |
+| Python | `__init__.py`, `bridge.ll`, `bridge.o` |
+| Node | `index.mjs`, `bridge.ll`, `bridge.o` |
 
-### 4.3 Calling Convention Decision
+The state parameter (`ptr %state`) is automatically added to all exported
+functions by the LLVM backend. The generated wrappers allocate a state buffer
+and initialize it via `init_state()`:
 
+```rust
+// Generated src/lib.rs
+static STATE: *mut c_void = std::ptr::null_mut();
+
+fn init_state() {
+    let buf = alloc_zeroed(...);
+    ffi::init_state(buf as *mut c_void);
+    STATE = buf;
+}
+
+pub fn brief_pp_type_bits(n: *mut u8) -> *mut u8 {
+    unsafe { ffi::brief_pp_type_bits(STATE, n) }
+}
 ```
-export defn add(a: Int, b: Int) -> Int { ... }
-                          │
-                          ▼
-  ┌─ Does config say "lto"? ───────────────────────┐
-  │ YES (Rust, C, Zig, Swift via LTO)              │
-  │   → Emit dso_local wrapper with C ABI          │
-  │   → Compile to .ll → .o → .a                  │
-  │   → Foreign linker resolves via LTO            │
-  └────────────────────────────────────────────────┘
-  │
-  ┌─ Does config say "c_abi"? ─────────────────────┐
-  │ YES (Python ctypes, Node FFI, Java JNI)        │
-  │   → Same dso_local wrapper with C ABI          │
-  │   → Compile to .so via clang -shared           │
-  │   → Generate wrapper module for the language   │
-  └────────────────────────────────────────────────┘
-```
-
-The LLVM backend always emits `dso_local` C-ABI wrappers for `export` functions.
-The difference is:
-- **LTO path**: Foreign build system links the `.a` directly, LLVM can inline
-  across the boundary
-- **C ABI path**: Foreign runtime loads a `.so` via FFI (dlopen), calls go
-  through the C ABI wrapper
 
 ---
 
@@ -382,218 +350,129 @@ The difference is:
 
 ### 5.1 `lib/glue.toml`
 
-Replaces the old `glue.dbvl` as the compiler's built-in registry. Shipped with
-the compiler, with project-level override capability matching `targets.toml`'s
-pattern.
+The GLUE registry is fully language-agnostic. Language entries are collected
+via `#[serde(flatten)] HashMap<String, LanguageEntry>` — no named fields in
+Rust code. Adding a language = adding a `[lang]` section to the TOML.
 
-```toml
-# lib/glue.toml
-[python]
-types_module = "glue/python/types.bv"
-extension = "py"
-bridge_kind = "native_module"
-calling_convention = "c_abi"
+Each language section declares:
 
-[python.c_type_map]
-Int = "int64_t"
-Float = "double"
-Bool = "bool"
-String = "cstring"
+| Field | Purpose |
+|-------|---------|
+| `types_module` | `.bv` file declaring foreign type representations |
+| `extension` | File extension used for extension→language lookup |
+| `bridge_kind` | How to bridge: `"native_module"`, `"esm_module"`, `"extern_c_crate"` |
+| `calling_convention` | ABI at the boundary: `"lto"` (LLVM link, zero-cost) or `"c_abi"` (FFI) |
+| `type_map` | Brief type → language-native wrapper type |
+| `c_type_map` | Brief type → C ABI type for FFI declarations |
+| `conversions` | Per-type `to_abi` / `from_abi` conversion expressions |
+| `templates` | Output file paths and content with `{{mustache}}` substitution |
 
-[node]
-types_module = "glue/node/types.bv"
-extension = "mjs"
-bridge_kind = "esm_module"
-calling_convention = "c_abi"
+### 5.2 Calling Convention: LTO vs C ABI
 
-[node.c_type_map]
-Int = "int64_t"
-Float = "double"
-Bool = "bool"
-String = "cstring"
+| Convention | Mechanism | Overhead | Best for |
+|-----------|-----------|----------|----------|
+| `"lto"` | LLVM links `.ll` + host `.ll` together, inlines boundary | Zero (after inlining) | Rust, C, Zig — any LLVM-compatible host |
+| `"c_abi"` | Host loads `.so` via FFI (dlopen), calls C wrapper | Per-call overhead (~6μs) | Python, Node, Java — any non-LLVM host |
 
-[rust]
-types_module = "glue/rust/types.bv"
-extension = "rs"
-bridge_kind = "extern_c_crate"
-calling_convention = "lto"
-```
-
-### 5.2 Per-Language Type Files (`lib/glue/<lang>/types.bv`)
-
-These declare foreign type representations in Brief's type universe. They are
-regular `.bv` files that define types, ops (CastTo/CastFrom), and melds for
-the foreign language's data model.
-
-```brief
-// lib/glue/python/types.bv
-// Python types declared in Brief's type universe
-
-type PyBytes <: Bits {
-    bytes <~ 8;
-    alignment <~ 8;
-};
-
-type PyString <: Bits {
-    bytes <~ 16;   // PyObject header + { ptr, len, refcount, hash }
-    alignment <~ 8;
-    // Python str is UCS-4 internally
-    op CastTo(#String<utf8>) = ucs4_to_utf8(#L);
-    op CastFrom(#String<utf8>) = utf8_to_ucs4(#L);
-    op Cast(#String<ascii>) = ucs4_to_ascii(#L);
-    op CastFrom(#String<ascii>) = ascii_to_ucs4(#L);
-};
-
-type PyInt <: Bits {
-    bytes <~ 8;
-    alignment <~ 8;
-    op CastTo(#Int) = pylong_to_i64(#L);
-    op CastFrom(#Int) = i64_to_pylong(#L);
-};
-
-// Melds to known types where structurally identical
-meld PyBytes -> CBuffer {
-    ptr -> ptr;
-    len -> len;
-};
-```
-
-These files are versioned alongside the compiler in `lib/glue/`. They are NOT
-loaded automatically — only when a frgn/export references them, or when GLUE
-resolves them from the registry.
+The LTO path generates a `.a` static library with `dso_local` symbols.
+The foreign build system links it directly; LLVM inlines across the boundary
+at LTO time. The C ABI path generates a `.so` shared library loaded via
+`libloading`/`ctypes`/`ffi-napi`.
 
 ---
 
 ## 6. Layout Optimization — "Become the Foreign"
 
-### 6.1 Principle
+**Status:** Phase 6 (foundation exists, not fully wired).
 
-When data crosses a language boundary, the most efficient path is the one
-that requires the least transformation. If Brief can adopt the foreign
-language's data layout for data that crosses the boundary, the protocol
-transform at the boundary may become identity — zero cost.
-
-### 6.2 How the Optimizer Works
-
-The optimizer (proposed pass, run after normalization, before codegen):
-
-```
-For every data value that crosses a frgn/export boundary:
-
-1. Compute the protocol path (CastTo → CastFrom)
-   → This tells us the transform cost
-
-2. Check if a meld exists between source and target
-   → If meld is identity (all fields match structurally):
-     cost = 0, zero-copy
-
-3. If no identity meld, consider:
-   "What if I stored this data in the target's layout instead?"
-   → Compute the reverse meld from Brief → Foreign layout
-   → Evaluate whether adopting the foreign layout eliminates
-     the protocol transform at the boundary
-   → If the net cost is lower (or zero), specialize the type
-```
-
-### 6.3 Example
-
-```brief
-// Brief String = { ptr: Int, len: Int }, UTF-8 encoding
-// PythonString = { ptr: Int, len: Int, rc: Int, hash: Int }, UCS-4 encoding
-
-// Protocol path: BriefString → #String<utf8> → PythonString
-// Cost: CastTo = identity, CastFrom = utf8_to_ucs4 (real work)
-//   OR (reverse): PythonString → #String<utf8> → BriefString
-//   Cost: CastTo = ucs4_to_utf8, CastFrom = identity (also real work)
-
-// Optimizer asks: "What if Brief used PythonString layout for boundary data?"
-// → Define BoundString with { ptr, len, rc, hash } layout
-// → Melds to PythonString with identity
-// → Brief internal operations on BoundString use CastTo(#String<utf8>) = ucs4_to_utf8
-//   or preserve UCS-4 internally
-// → The boundary transforms: identity (meld) instead of encode transform
-// → If LLVM can prove the UCS-4 storage is used locally, it may eliminate
-//   the ucs4_to_utf8 / utf8_to_ucs4 round trip entirely
-```
-
-### 6.4 What Makes This Possible Now
-
-The protocol + meld system already provides:
-
-1. **`CastTo(#Category)` / `CastFrom(#Category)`** — transforms through a shared protocol
-2. **`meld Source -> Target { fields }`** — structural mapping, identity or shuffle
-3. **`find_cast_path()` BFS** — shortest path through the protocol graph
-4. **`alwaysinline`** on op bindings — LLVM eliminates redundant transforms
-5. **Contract verification** — validates round-trip correctness
-
-The optimizer is a **new analysis pass** (not in codegen) that proposes layout
-specialization based on call-graph analysis. It reuses all existing
-infrastructure. See the plan document for implementation details.
+The protocol system provides the infrastructure for layout optimization.
+`find_cast_path()` BFS finds the shortest protocol path. If a meld exists
+between a Brief type and a foreign type with identity transform, the boundary
+cost is zero. The layout optimizer (proposed) would specialize data layouts
+at the boundary to eliminate protocol transforms entirely.
 
 ---
 
-## 7. Edge Cases
+## 7. String ABI (Phase 8)
 
-### 7.1 `frgn` with no `from`
+### 7.1 String Format: `[length][data]` (C-compatible)
 
-Rejected by the parser. `from` is mandatory. This avoids ambiguity about
-linking strategy, symbol resolution, and dispatch path.
+The LLVM backend stores strings in a C-compatible format:
 
-### 7.2 `frgn` calling a `#` intrinsic
-
-If a `frgn` name matches a compiler `#` intrinsic, the compiler should prefer
-the intrinsic. The `link.rs` module already cross-references against known
-intrinsics — this same logic applies at codegen time. When the Brief name
-matches an intrinsic (e.g., `Sqrt#`), emit `intrinsic_call#()` instead of a
-frgn call.
-
-### 7.3 Circular melds
-
-If `meld A -> B { ... }` and `meld B -> A { ... }` both exist, the compiler
-uses the shortest path and does not loop. The BFS in `find_cast_path()` tracks
-visited nodes.
-
-### 7.4 Type does not exist in foreign language
-
-If a Brief type has no corresponding foreign type and no protocol path exists,
-the bridge path fails with a clear error:
 ```
-error: no protocol path from 'CustomType' to 'python' target.
-  Required by frgn 'process' in bridge.bv.
-  Consider adding a meld or CastTo/CastFrom declaration.
+Offset 0: i64 length
+Offset 8: data bytes
+Offset 8+len: null terminator (for C compatibility)
 ```
 
-### 7.5 `export` with no language target
+This is the SAME format that `brief_rt.c` uses. The old format had a
+`{data_ptr, length, chars}` struct that was incompatible with the C runtime.
 
-If `brief export <bridge.bv> <language>` specifies a language not in
-`lib/glue.toml`, the compiler returns:
+### 7.2 Global String Constants
+
+Global string constants use the same format:
 ```
-error: unknown export target 'kotlin'. Add an entry to lib/glue.toml
-  or provide a project-level glue configuration.
+@str.N = private unnamed_addr constant <{ i64, [N x i8] }> <{ i64 len, [N x i8] c"...\00" }>
 ```
 
-### 7.6 Interpreter can't call frgn
+The handle points to the struct start. `handle[0]` = length, `handle+8` = chars.
+All functions that read strings (`emit_load_length`, `emit_copy_data`) access
+offset 0 for the length and offset 8 for the data.
 
-The interpreter's `dispatch_ffi()` remains a stub — it cannot load native
-libraries. This is correct: the interpreter is for compile-time evaluation,
-not runtime FFI. A frgn call during interpretation either:
-- Falls back to the declared `fallback` value
-- Returns an error if no fallback and the interpreter cannot resolve it
+### 7.3 Tag Bits
+
+Tags are stored in the bottom 2 bits of the string handle:
+- Bit 0: SSO inline (packed data)
+- Bit 1: Temporary concat result (safe to free when consumed)
+
+The `brief_str_to_c` function in `brief_rt.c` strips tag bits via `& ~3ULL`
+before reading the string data:
+
+```c
+char* brief_str_to_c(int64_t handle) {
+    int64_t ptr = handle & ~3ULL;  // strip SSO + temp flags
+    ...
+    int64_t len = *(int64_t*)(uintptr_t)ptr;
+    memcpy(c_str, (void*)(uintptr_t)(ptr + 8), (size_t)len);
+    ...
+}
+```
+
+### 7.4 Runtime Helpers
+
+Added as part of the round-trip test infrastructure:
+
+| Function | Purpose |
+|----------|---------|
+| `brief_cstr_to_brief(const char*)` | C string → Brief string handle (heap-allocated) |
+| `brief_str_to_c(int64_t handle)` | Brief string handle → C string (heap-allocated) |
+| `brief_free_brief_str(int64_t handle)` | Free a Brief string allocated by `brief_cstr_to_brief` |
 
 ---
 
-## 8. Relationship to Existing Systems
+## 8. Integration Tests
 
-| System | Role in frgn/export/GLUE |
-|--------|------------------------|
-| **Protocol system** (`#String<utf8>`) | The shared vocabulary for type negotiation. Links foreign types to Brief types through common protocols |
-| **CastTo/CastFrom** | Transforms between a concrete type and a protocol. `alwaysinline` lets LLVM eliminate redundant round-trips |
-| **Melds** | Structural type compatibility. Identity melds = zero-copy at boundaries |
-| **`find_cast_path()` BFS** | Finds the shortest protocol path from source to target |
-| **Contract system** (`[pre][post]`) | Fallback detection — if the foreign return violates the postcondition, the fallback fires |
-| **Operator defs** (`op Add(#Int)`) | Declares how types interact with protocols. Foreign types declare `op CastTo(#String)` to participate |
-| **`verify_roundtrips()`** | Validates that Cast/CastFrom chains are round-trip correct |
-| **`config/targets.toml`** | Backend capability hints — which protocols are supported |
+Located in `tests/pp_roundtrip_tests.rs` (gitignored by `tests/` entry).
+
+Tests the full pipeline end-to-end:
+1. `brief build pp-types.bv --llvm` → `.ll` with real function bodies
+2. `llc` → `.o`, `cc -shared` → `.so`
+3. `libloading::Library::new(&so_path)` → load the bridge
+4. `func(state, input)` → call via FFI
+5. `CStr::from_ptr(ptr).to_str()` → read the result
+
+**8 tests, all passing:**
+
+| Test | What it verifies |
+|------|------------------|
+| `test_bridge_compiles_to_valid_llvm_ir` | IR has expected exports, typed args |
+| `test_bridge_compiles_to_shared_library` | `.so` builds and has valid size |
+| `test_bridge_loads_and_resolves` | Symbols resolve at runtime |
+| `test_pp_void_via_ffi` | `brief_test_type_void()` returns `"void"` |
+| `test_cstr_roundtrip_via_ffi` | `"42"` → cstr_to_brief → str_to_c → `"42"` |
+| `test_custom_echo_via_ffi` | Pass-through string works |
+| `test_pp_bits_via_ffi` | `"42"` → pp_type_bits → `"Bits(42)"` |
+| `test_bits_static_via_ffi` | Static string return works |
 
 ---
 
@@ -602,29 +481,39 @@ not runtime FFI. A frgn call during interpretation either:
 ### 9.1 `brief export <bridge.bv> <language> --out <dir>`
 
 ```
-1. Parse + typecheck bridge.bv
-2. Extract ExportDecl items from TopLevel::Export
-3. Find language adapter in lib/glue.toml
-4. Generate LLVM IR wrappers via library mode codegen
-5. Compile to .ll → .o → .so/.a
-6. Generate native wrapper module (Python __init__.py, Rust crate, etc.)
-7. Write bridge-exports.dbvl metadata alongside the compiled module
+1. Read + parse bridge.bv (with import resolution)
+2. Extract bridge info
+3. Find language target in lib/glue.toml
+4. Generate LLVM IR via full backend (LlvmBackend::generate)
+5. Write bridge.ll
+6. Compile to .o via llc
+7. Generate language wrappers from TOML templates
+8. Write bridge-exports.dbvl metadata
 ```
 
-### 9.2 `brief link <library.so/a/o> [--out <dir>]`
+### 9.2 `brief library <file.bv>`
 
 ```
-1. Run nm --defined-only -g on the library
-2. Extract T (text) symbols
-3. Cross-reference against known # intrinsics
-4. Generate .bv file with frgn declarations (or intrinsic_call wrappers)
-5. Output .bv for the user to import
+1. Parse + typecheck
+2. Generate stub LLVM IR (placeholder bodies)
+3. Compile via llc
+4. Create .a archive via ar
 ```
 
-### 9.3 `.dbvl` as output format
+Note: `brief library` uses stub codegen (still in `library.rs`). For real
+function bodies, use `brief build --llvm`. The `brief export` command also
+uses the full backend.
 
-The `.dbvl` format is retained as an **output** format for `bridge-exports.dbvl`
-metadata. It is consumed by foreign build systems (build.rs, setup.py, etc.).
-The compiler's registry is TOML (`lib/glue.toml`), but the output metadata
-remains DBVL for machine consumption. The `dbvl_reader`/`dbvs_validator`
-modules remain for this purpose.
+---
+
+## 10. Key Architecture Decisions (Phase 8)
+
+| Decision | Rationale |
+|----------|-----------|
+| **TOML-driven templates** | Adding a language = adding a TOML section. No Rust code changes. Zero hardcoded generators. |
+| **Full backend for export** | Stub codegen (`ret i64 0`) was useless for actual FFI. Export now produces real bodies. |
+| **C-compatible string format** | `[length][data]` is the simplest format that works with both C and LLVM IR. No data_ptr prefix. |
+| `#[serde(flatten)]` for config | Dynamic language discovery — no `if let Some(python)` blocks. New languages from TOML only. |
+| **State parameter in wrappers** | The LLVM backend allocates state internally. The wrapper just passes a pointer. |
+| **Protocol path BFS** | `find_cast_path()` in `layout_optimizer.rs` — always falls back to `#Bits` (Cast). |
+| **`emit_protocol_chain` with `&mut String`** | The function needs to WRITE IR (not just return `&str`). Extended signature with `gen_reg`. |

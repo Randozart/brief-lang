@@ -1,7 +1,7 @@
 # Stress-Test the GLUE/FFI Pipeline via `brief export`
 
 **Date:** 2026-07-22
-**Status:** In implementation
+**Status:** Complete — all three gaps resolved
 **Applies to:** `src/glue/export.rs`, `lib/glue.toml`, `src/library.rs`
 
 ---

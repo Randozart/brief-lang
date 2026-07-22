@@ -1,28 +1,36 @@
 # lib/glue.toml — GLUE Adapter Registry
-# 2026-07-22: Replaces lib/glue.dbvl. Shipped with the compiler;
-# project-level override via --glue-config <path>.
+# 2026-07-22: Fully drives the `brief export` command.
+# Adding a language = adding a [lang] section here — zero Rust changes.
 #
 # Each section declares:
 #   types_module       — .bv file declaring foreign type representations
-#   extension          — native source file extension
-#   bridge_kind        — how to call into this language from compiled Brief
-#   calling_convention — ABI at the boundary ("lto" for LLVM link, "c_abi" for FFI)
-#   type_map           — Brief type → language-native wrapper type
+#   extension          — native source file extension (e.g., "py", "rs", "mjs")
+#   bridge_kind        — how to call into this language ("native_module", "extern_c_crate", "esm_module")
+#   calling_convention — "lto" (LLVM link, zero-cost) or "c_abi" (ctypes/FFI)
+#   type_map           — Brief type → language-native wrapper type (for safe wrappers)
 #   c_type_map         — Brief type → C ABI type for FFI declarations
-#   templates          — Output file paths and their content ({{mustache}} substitution)
+#   conversions        — per-type to_abi/from_abi expressions for type marshaling
+#   templates          — output file paths and their content with {{mustache}} substitution
 #
 # Template variables:
-#   {{bridge_name}}    — Name of the bridge
-#   {{exports}}        — Replaced with per-function safe wrapper code
-#   {{ffi_decls}}      — Replaced with per-function FFI declarations
+#   {{bridge_name}}    — Name of the bridge (from --out dir or file name)
 #   {{name}}           — Function name
 #   {{params}}         — Parameter list ("name: Type, ...") using type_map
-#   {{ffi_params}}     — FFI parameter list ("state, name: CType, ...") using c_type_map
+#   {{ffi_params}}     — FFI parameter list ("name: CType, ...") using c_type_map
+#   {{c_types}}        — C ABI type list only (for ctypes argtypes, etc.)
 #   {{args}}           — Argument names only ("name, ...")
+#   {{args_abi}}       — ABI-converted argument expressions from conversions.to_abi
 #   {{return}}         — Return type using type_map
 #   {{c_return}}       — Return type using c_type_map
-#   {{s_init}}         — State initialization code (if needed)
-#   {{s_param}}        — State parameter ("state: *mut c_void" for C ABI, "" for LTO)
+#   {{return_expr}}    — Return value conversion from conversions.from_abi
+#   {{s_param}}        — State variable prefix ("_STATE, " for C ABI, "" for LTO)
+#   {{s_init}}         — State initialization code
+#   {{exports}}        — Replaced with per-function safe wrapper code (from fn_template)
+#   {{ffi_decls}}      — Replaced with per-function FFI declarations (from ffi_template)
+#
+# Special template keys:
+#   "fn_template" — per-function safe wrapper (rendered for each export, joined into {{exports}})
+#   "ffi_template" — per-function FFI declaration (rendered for each export, joined into {{ffi_decls}})
 
 [python]
 types_module = "glue/python/types.bv"
