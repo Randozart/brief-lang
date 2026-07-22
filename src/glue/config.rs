@@ -46,12 +46,10 @@ pub struct GlueTarget {
 
 #[derive(serde::Deserialize)]
 struct GlueConfigFile {
-    #[serde(default)]
-    python: Option<LanguageEntry>,
-    #[serde(default)]
-    node: Option<LanguageEntry>,
-    #[serde(default)]
-    rust: Option<LanguageEntry>,
+    /// All top-level keys that aren't recognized as special config are
+    /// language targets. Adding a language = adding a [lang] section.
+    #[serde(flatten)]
+    languages: HashMap<String, LanguageEntry>,
 }
 
 #[derive(serde::Deserialize)]
@@ -111,45 +109,17 @@ pub fn load_glue_config(path: Option<&Path>) -> Result<HashMap<String, GlueTarge
 
     let mut targets: HashMap<String, GlueTarget> = HashMap::new();
 
-    if let Some(py) = parsed.python {
-        targets.insert("python".to_string(), GlueTarget {
-            language: "python".to_string(),
-            types_module: PathBuf::from(py.types_module),
-            extension: py.extension,
-            bridge_kind: py.bridge_kind,
-            calling_convention: py.calling_convention,
-            type_map: py.type_map,
-            c_type_map: py.c_type_map,
-            conversions: flatten_conversions(py.conversions),
-            templates: py.templates,
-        });
-    }
-
-    if let Some(node) = parsed.node {
-        targets.insert("node".to_string(), GlueTarget {
-            language: "node".to_string(),
-            types_module: PathBuf::from(node.types_module),
-            extension: node.extension,
-            bridge_kind: node.bridge_kind,
-            calling_convention: node.calling_convention,
-            type_map: node.type_map,
-            c_type_map: node.c_type_map,
-            conversions: flatten_conversions(node.conversions),
-            templates: node.templates,
-        });
-    }
-
-    if let Some(rust) = parsed.rust {
-        targets.insert("rust".to_string(), GlueTarget {
-            language: "rust".to_string(),
-            types_module: PathBuf::from(rust.types_module),
-            extension: rust.extension,
-            bridge_kind: rust.bridge_kind,
-            calling_convention: rust.calling_convention,
-            type_map: rust.type_map,
-            c_type_map: rust.c_type_map,
-            conversions: flatten_conversions(rust.conversions),
-            templates: rust.templates,
+    for (name, entry) in parsed.languages {
+        targets.insert(name.clone(), GlueTarget {
+            language: name,
+            types_module: PathBuf::from(entry.types_module),
+            extension: entry.extension,
+            bridge_kind: entry.bridge_kind,
+            calling_convention: entry.calling_convention,
+            type_map: entry.type_map,
+            c_type_map: entry.c_type_map,
+            conversions: flatten_conversions(entry.conversions),
+            templates: entry.templates,
         });
     }
 
@@ -181,34 +151,11 @@ pub fn find_language_by_extension<'a>(
     targets.values().find(|t| t.extension == ext)
 }
 
-/// Map a file extension to a language identifier.
-///
-/// 2026-07-22: Baked per-backend but exposed via TOML for debugging.
-/// Returns Some(language_name) if the extension is recognized for the
-/// given backend, None otherwise.
-pub fn extension_to_language(ext: &str, backend: &str) -> Option<&'static str> {
-    match backend {
-        "llvm" => match ext {
-            "py" | "pyc" => Some("python"),
-            "js" | "ts" | "mjs" => Some("node"),
-            "rs" => Some("rust"),
-            "c" | "cpp" | "cxx" => Some("c"),
-            _ => None,
-        },
-        "webstack" => match ext {
-            "c" => Some("c"),
-            "py" => Some("python"),
-            "rs" => Some("rust"),
-            _ => None,
-        },
-        "circt" => None,  // All frgn rejected by hardware validator
-        "spirv" => match ext {
-            "c" => Some("c"),
-            "py" => Some("python"),
-            _ => None,
-        },
-        _ => None,
-    }
+/// Map a file extension to a language identifier using the loaded targets.
+/// Returns Some(language_name) if the extension is recognized, None otherwise.
+pub fn extension_to_language<'a>(ext: &str, targets: &'a HashMap<String, GlueTarget>) -> Option<&'a str> {
+    let ext = ext.trim_start_matches('.');
+    targets.values().find(|t| t.extension == ext).map(|t| t.language.as_str())
 }
 
 #[cfg(test)]
@@ -216,23 +163,34 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_extension_to_language_llvm() {
-        assert_eq!(extension_to_language("py", "llvm"), Some("python"));
-        assert_eq!(extension_to_language("rs", "llvm"), Some("rust"));
-        assert_eq!(extension_to_language("js", "llvm"), Some("node"));
-        assert_eq!(extension_to_language("mjs", "llvm"), Some("node"));
-    }
-
-    #[test]
-    fn test_extension_to_language_circt() {
-        assert_eq!(extension_to_language("py", "circt"), None);
-        assert_eq!(extension_to_language("rs", "circt"), None);
-    }
-
-    #[test]
-    fn test_extension_to_language_unknown() {
-        assert_eq!(extension_to_language("kotlin", "llvm"), None);
-        assert_eq!(extension_to_language("swift", "llvm"), None);
+    fn test_extension_to_language_via_targets() {
+        let mut targets = HashMap::new();
+        targets.insert("python".to_string(), GlueTarget {
+            language: "python".to_string(),
+            types_module: PathBuf::from("glue/python/types.bv"),
+            extension: "py".to_string(),
+            bridge_kind: "native_module".to_string(),
+            calling_convention: "c_abi".to_string(),
+            type_map: HashMap::new(),
+            c_type_map: HashMap::new(),
+            conversions: HashMap::new(),
+            templates: HashMap::new(),
+        });
+        targets.insert("rust".to_string(), GlueTarget {
+            language: "rust".to_string(),
+            types_module: PathBuf::from("glue/rust/types.bv"),
+            extension: "rs".to_string(),
+            bridge_kind: "extern_c_crate".to_string(),
+            calling_convention: "lto".to_string(),
+            type_map: HashMap::new(),
+            c_type_map: HashMap::new(),
+            conversions: HashMap::new(),
+            templates: HashMap::new(),
+        });
+        assert_eq!(extension_to_language("py", &targets), Some("python"));
+        assert_eq!(extension_to_language("rs", &targets), Some("rust"));
+        assert_eq!(extension_to_language("js", &targets), None);
+        assert_eq!(extension_to_language("kotlin", &targets), None);
     }
 
     #[test]

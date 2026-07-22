@@ -184,40 +184,6 @@ pub fn compute_protocol_path(
     }])
 }
 
-/// Map a file extension to a language identifier for a given backend.
-///
-/// 2026-07-22: Baked per-backend but exposed via TOML for debugging.
-/// Returns Some(language_name) if the extension is recognized for the
-/// given backend, None otherwise.
-pub fn extension_to_language(ext: &str, backend: BackendKind) -> Option<&'static str> {
-    let ext = ext.trim_start_matches('.');
-    match backend {
-        BackendKind::Llvm => match ext {
-            "py" | "pyc" => Some("python"),
-            "js" | "ts" | "mjs" => Some("node"),
-            "rs" => Some("rust"),
-            "c" | "cpp" | "cxx" => Some("c"),
-            _ => None,
-        },
-        BackendKind::Webstack => match ext {
-            "c" => Some("c"),
-            "py" => Some("python"),
-            "rs" => Some("rust"),
-            _ => None,
-        },
-        BackendKind::Circt => None,
-        BackendKind::Gpu => match ext {
-            "c" => Some("c"),
-            _ => None,
-        },
-        BackendKind::Spirv => match ext {
-            "c" => Some("c"),
-            "py" => Some("python"),
-            _ => None,
-        },
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -364,19 +330,6 @@ mod tests {
             }
             other => panic!("Expected Inline, got {:?}", other),
         }
-    }
-
-    #[test]
-    fn test_extension_to_language_llvm() {
-        assert_eq!(extension_to_language("py", BackendKind::Llvm), Some("python"));
-        assert_eq!(extension_to_language("rs", BackendKind::Llvm), Some("rust"));
-        assert_eq!(extension_to_language("js", BackendKind::Llvm), Some("node"));
-    }
-
-    #[test]
-    fn test_extension_to_language_circt() {
-        assert_eq!(extension_to_language("py", BackendKind::Circt), None);
-        assert_eq!(extension_to_language("rs", BackendKind::Circt), None);
     }
 
     #[test]
