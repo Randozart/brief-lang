@@ -1274,9 +1274,11 @@ impl LlvmBackend {
             v.to_string()
         };
 
-        // 2026-07-22: Apply fallback wrapper.
-        let result_reg = crate::glue::bridge::emit_fallback_wrapper(
-            &final_reg, fallback,
+        // 2026-07-22: Apply fallback dispatch with full phi-node structure.
+        // Uses self.fun.gen_reg() as the register generator for unique labels/registers.
+        let result_reg = crate::glue::bridge::emit_fallback_llvm(
+            out, &final_reg, &ret_type, &ret_llvm, fallback, indent,
+            &mut || self.fun.gen_reg(),
         ).unwrap_or_else(|_| final_reg);
 
         TypedRegister {

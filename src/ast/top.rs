@@ -554,7 +554,7 @@ impl Default for ForeignSignature {
 /// 2026-07-22: Fallback strategy when a frgn call's return violates its
 /// contract or the foreign function cannot be reached.
 /// The program must always produce a valid result — this is the safety net.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum Fallback {
     /// Return a static expression (literal, constructor call, etc.)
     Static(Expr),
