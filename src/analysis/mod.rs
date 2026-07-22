@@ -22,6 +22,7 @@ pub mod transition_graph;
 pub mod watchdog;
 pub mod allocation;
 pub mod meld_validation;
+pub mod frgn_dispatch;
 pub mod slp_isomorphism;
 
 /// Determines how a state field behaves in the %State struct layout.

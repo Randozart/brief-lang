@@ -735,6 +735,12 @@ pub struct LlvmBackend {
     // multi-slot struct with inline storage for ≤N elements (N from
     // svo <~ metadata). Tag bit 0 distinguishes inline vs heap.
     pub feature_svo: bool,
+
+    // ── Frgn Dispatch Resolution ──────────────────────────────
+    // 2026-07-22: Pre-resolved frgn dispatch strategies computed
+    // during the main compilation pass. The backend uses these to
+    // decide whether to inline a foreign call or emit a bridge call.
+    pub(crate) resolved_frgns: Option<std::collections::HashMap<String, crate::analysis::frgn_dispatch::ResolvedFrgn>>,
 }
 
 #[derive(Debug, Clone)]
@@ -830,6 +836,7 @@ impl LlvmBackend {
             analysis_alloc_strategies: None,
             feature_sso_strings: false,
             feature_svo: false,
+            resolved_frgns: None,
         }
     }
 
@@ -1010,6 +1017,16 @@ impl LlvmBackend {
     /// is emitted; only exported wrappers and reactive convergence entry.
     pub fn with_shared_lib(mut self, v: bool) -> Self {
         self.ctx.is_shared_lib = v;
+        self
+    }
+
+    /// 2026-07-22: Provide pre-resolved frgn dispatch strategies.
+    /// The backend uses these to decide how to emit foreign calls.
+    pub fn with_resolved_frgns(
+        mut self,
+        map: std::collections::HashMap<String, crate::analysis::frgn_dispatch::ResolvedFrgn>,
+    ) -> Self {
+        self.resolved_frgns = Some(map);
         self
     }
 

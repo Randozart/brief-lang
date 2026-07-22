@@ -212,6 +212,7 @@ fn parse_build_args(args: &[String]) -> Result<compile::BuildOptions, String> {
         shared,
         feature_sso_strings: false,
         feature_svo: false,
+        glue_config: None,
         stack_threshold: 4096,
     })
 }

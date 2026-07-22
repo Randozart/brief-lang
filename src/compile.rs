@@ -108,6 +108,8 @@ pub struct BuildOptions {
     /// 2026-07-18: SVO (Small Vector Optimization) — inline storage for
     /// small List<T> elements (≤ N where N is from svo <~ N metadata).
     pub feature_svo: bool,
+    /// 2026-07-22: Override path for lib/glue.toml. None = use compiler-shipped default.
+    pub glue_config: Option<String>,
     /// 2026-07-18: Maximum size in bytes for stack allocation (alloca).
     /// Allocations exceeding this threshold fall back to heap (malloc).
     /// Used by the runtime fallback check in emit_dynamic_alloc.
@@ -211,8 +213,27 @@ pub fn compile_source(file_path: &str, source: &str, opts: &BuildOptions) -> Res
     // for linking into the final binary.
     let extra_objects = collect_extra_objects(&items, &resolver)?;
 
+    // ── Frgn dispatch resolution ──────────────────────────────────────
+    // 2026-07-22: Resolve each frgn declaration's dispatch strategy before
+    // codegen. The backend receives the resolved strategies and does not
+    // re-implement dispatch logic.
+    let glue_targets = brief_compiler::glue::config::load_glue_config(
+        opts.glue_config.as_deref().map(Path::new),
+    )?;
+    let mut resolved_frgns: std::collections::HashMap<
+        String, brief_compiler::analysis::frgn_dispatch::ResolvedFrgn,
+    > = std::collections::HashMap::new();
+    for item in &items {
+        let brief_compiler::ast::TopLevel::ForeignBinding(fb) = item else { continue; };
+        let ext = fb.from.extension().unwrap_or_default();
+        let dispatch = brief_compiler::analysis::frgn_dispatch::resolve_single_frgn(
+            fb, &ext, &glue_targets, opts.backend,
+        )?;
+        resolved_frgns.insert(fb.name.clone(), dispatch);
+    }
+
     // ── Code generation ───────────────────────────────────────────────
-    let (codegen_output, ext) = codegen(&items, &mut universe, &pm, opts, alloc_strategies)?;
+    let (codegen_output, ext) = codegen(&items, &mut universe, &pm, opts, alloc_strategies, resolved_frgns)?;
 
     // BEAST/IR snapshot at Codegen stage
     emit_beast_snapshot(file_path, BeastStage::Codegen, &items, &universe, opts)?;
@@ -278,6 +299,7 @@ pub fn check_source(file_path: &str, source: &str) -> Result<(), String> {
         shared: false,
         feature_sso_strings: false,
         feature_svo: false,
+        glue_config: None,
         stack_threshold: 4096,
     };
     let (_items, _universe) = parse_and_check(file_path, source, &default_opts)?;
@@ -328,6 +350,7 @@ fn codegen(
     pm: &PluginManager,
     opts: &BuildOptions,
     alloc_strategies: std::collections::HashMap<usize, brief_compiler::backend::llvm::AllocStrategy>,
+    resolved_frgns: std::collections::HashMap<String, brief_compiler::analysis::frgn_dispatch::ResolvedFrgn>,
 ) -> Result<(String, &'static str), String> {
     // 2026-07-20: Extract operator definitions from AST for backend dispatch.
     let mut operator_defs: std::collections::HashMap<String, Vec<brief_compiler::ast::top::OperatorDef>> = std::collections::HashMap::new();
@@ -351,6 +374,7 @@ fn codegen(
                 .with_optimize_budget(opts.optimize_budget)
                 .with_type_universe(universe.clone())
                 .with_operator_defs(operator_defs)
+                .with_resolved_frgns(resolved_frgns.clone())
                 .with_trg_unresolved_action(opts.trg_unresolved_action);
             if opts.gpu_offload {
                 b = b.with_gpu_offload(true);
@@ -390,6 +414,7 @@ fn codegen(
                 .with_stack_threshold(opts.stack_threshold)
                 .with_optimize_budget(opts.optimize_budget)
                 .with_type_universe(universe.clone())
+                .with_resolved_frgns(resolved_frgns)
                 .with_trg_unresolved_action(opts.trg_unresolved_action);
             if opts.gpu_offload {
                 b = b.with_gpu_offload(true);
