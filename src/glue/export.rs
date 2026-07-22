@@ -509,44 +509,53 @@ pub fn run_export_cli(file_path: &str, language: &str, out_dir: &str) -> Result<
         // Build per-function variables
         let mut fn_vars: HashMap<String, String> = HashMap::new();
         fn_vars.insert("name".to_string(), export.name.clone());
-        fn_vars.insert("return".to_string(), map_type(&export.return_type, &target.type_map));
-        fn_vars.insert("c_return".to_string(), map_type(&export.return_type, &target.c_type_map));
+        let (native_ret, c_ret) = resolve_protocol(&export.return_type, &target.protocols);
+        fn_vars.insert("return".to_string(), native_ret.clone());
+        fn_vars.insert("c_return".to_string(), c_ret.clone());
 
         // Build parameter lists
         let params: Vec<String> = export.params.iter()
-            .map(|(name, ty)| format!("{}: {}", name, map_type(ty, &target.type_map)))
+            .map(|(name, ty)| {
+                let (native, _) = resolve_protocol(ty, &target.protocols);
+                format!("{}: {}", name, native)
+            })
             .collect();
         let ffi_params: Vec<String> = export.params.iter()
-            .map(|(name, ty)| format!("{}: {}", name, map_type(ty, &target.c_type_map)))
+            .map(|(name, ty)| {
+                let (_, c_abi) = resolve_protocol(ty, &target.protocols);
+                format!("{}: {}", name, c_abi)
+            })
             .collect();
         let args: Vec<String> = export.params.iter()
             .map(|(name, _)| name.clone())
             .collect();
 
-        // Build ABI conversion expressions from target.conversions.
-        // to_abi: {{name}} → {{name}}_abi (e.g., "n" → "n.as_ptr() as i64")
-        // from_abi: return value → safe type (e.g., "result_abi" → "String::from_raw_parts(...)")
+        // Build ABI conversion expressions from target.protocols.
+        // to_abi: {{name}} → {{name}}_abi
+        // from_abi: return value → safe type
         let args_abi: Vec<String> = export.params.iter()
             .map(|(name, ty)| {
-                let expr = target.conversions
-                    .get(&format!("{}.to_abi", ty))
-                    .cloned()
-                    .unwrap_or_else(|| "{name}".to_string());
-                expr.replace("{name}", name)
-                    .replace("{}", name)
+                let (_, c_abi) = resolve_protocol(ty, &target.protocols);
+                match c_abi.as_str() {
+                    "i64" | "double" | "float" => format!("{}", name),
+                    _ if c_abi.contains("void_p") || c_abi == "ptr" => format!("{}", name),
+                    _ => format!("{} as {}", name, c_abi),
+                }
             })
             .collect();
-        let return_expr = target.conversions
-            .get(&format!("{}.from_abi", export.return_type))
-            .cloned()
-            .unwrap_or_else(|| "result_abi".to_string())
-            .replace("{name}", "result_abi")
-            .replace("{}", "result_abi");
+        let return_expr = match c_ret.as_str() {
+            "i64" | "double" | "float" => "result_abi".to_string(),
+            _ if c_ret.contains("void_p") || c_ret == "ptr" => "result_abi".to_string(),
+            _ => format!("result_abi as {}", native_ret),
+        };
 
         fn_vars.insert("params".to_string(), params.join(", "));
         fn_vars.insert("ffi_params".to_string(), ffi_params.join(", "));
         fn_vars.insert("c_types".to_string(), export.params.iter()
-            .map(|(_, ty)| map_type(ty, &target.c_type_map))
+            .map(|(_, ty)| {
+                let (_, c_abi) = resolve_protocol(ty, &target.protocols);
+                c_abi
+            })
             .collect::<Vec<_>>().join(", "));
         fn_vars.insert("args".to_string(), args.join(", "));
         fn_vars.insert("args_abi".to_string(), args_abi.join(", "));
@@ -587,7 +596,9 @@ pub fn run_export_cli(file_path: &str, language: &str, out_dir: &str) -> Result<
         types_module: target.types_module.to_string_lossy().to_string(),
         file_extension: target.extension.clone(),
         llvm_triple: "x86_64-unknown-linux-gnu".to_string(),
-        c_type_map: target.c_type_map.clone(),
+        c_type_map: target.protocols.iter()
+            .map(|(k, v)| (k.clone(), v.c_abi.clone()))
+            .collect(),
     };
     let mut dbvl_content = String::new();
     let exports_str = serialize_exports_tagged(&info.exports);
@@ -612,10 +623,20 @@ pub fn run_export_cli(file_path: &str, language: &str, out_dir: &str) -> Result<
     Ok(())
 }
 
-/// Map a Brief type to a language type using the given type_map.
-fn map_type(ty: &str, type_map: &HashMap<String, String>) -> String {
-    type_map.get(ty).cloned().unwrap_or_else(|| ty.to_string())
+/// Look up a Brief type's protocol mapping in a target's protocols map.
+/// Returns (native_type, c_abi_type) or falls back to the input type name.
+fn resolve_protocol(
+    brief_type_name: &str,
+    protocols: &HashMap<String, crate::glue::config::ProtocolEntry>,
+) -> (String, String) {
+    let protocol_key = format!("#{}", brief_type_name);
+    if let Some(entry) = protocols.get(&protocol_key) {
+        (entry.native.clone(), entry.c_abi.clone())
+    } else {
+        (brief_type_name.to_string(), brief_type_name.to_string())
+    }
 }
+
 
 /// Simple mustache-like template substitution.
 ///

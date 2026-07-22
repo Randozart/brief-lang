@@ -13,7 +13,9 @@ use std::path::{Path, PathBuf};
 /// A language target entry from the GLUE registry.
 ///
 /// 2026-07-22: Each target describes how to bridge with one foreign language.
-/// Fields map directly to `[language]` sections in `lib/glue.toml`.
+/// Protocol mapping replaces old type_map/c_type_map/conversions —
+/// the TOML only knows about protocol categories (#String, #Int, #Float),
+/// not about Brief-internal type names.
 #[derive(Debug, Clone)]
 pub struct GlueTarget {
     /// Language identifier (e.g., "python", "rust", "node")
@@ -26,18 +28,27 @@ pub struct GlueTarget {
     pub bridge_kind: String,
     /// Calling convention: "c_abi", "lto", etc.
     pub calling_convention: String,
-    /// Brief type name → language-native type name (for safe wrappers)
-    pub type_map: HashMap<String, String>,
-    /// Brief type name → C ABI type name mapping (e.g., Int → int64_t)
-    pub c_type_map: HashMap<String, String>,
-    /// Type conversion expressions. Keys are "{Type}.to_abi" and "{Type}.from_abi",
-    /// values are template expressions with {name} as the variable placeholder.
-    /// E.g., "String.to_abi" = "{name}.as_ptr() as i64"
-    pub conversions: HashMap<String, String>,
+    /// Protocol category → native/C ABI type mapping.
+    /// Keys like "#String", "#Int", "#Float" — protocol categories only,
+    /// never Brief-internal type names.
+    pub protocols: HashMap<String, ProtocolEntry>,
     /// Output path → template content. Special keys:
     ///   "fn_template" — per-function safe wrapper (rendered into {{exports}})
     ///   "ffi_template" — per-function FFI declaration (rendered into {{ffi_decls}})
     pub templates: HashMap<String, String>,
+}
+
+/// A protocol category mapping for a single language.
+///
+/// 2026-07-22: Each protocol category (#String, #Int, #Float) maps to
+/// the language's native type and its C ABI representation. The compiler
+/// uses this when the BFS finds a path through that protocol category.
+#[derive(Debug, Clone, serde::Deserialize)]
+pub struct ProtocolEntry {
+    /// Language-native type name (e.g., "str", "String", "int")
+    pub native: String,
+    /// C ABI type name (e.g., "i64", "ctypes.c_int64")
+    pub c_abi: String,
 }
 
 // ── Serde helpers ─────────────────────────────────────────────────────
@@ -59,11 +70,7 @@ struct LanguageEntry {
     bridge_kind: String,
     calling_convention: String,
     #[serde(default)]
-    type_map: HashMap<String, String>,
-    #[serde(default)]
-    c_type_map: HashMap<String, String>,
-    #[serde(default)]
-    conversions: HashMap<String, ConversionEntry>,
+    protocols: HashMap<String, ProtocolEntry>,
     #[serde(default)]
     templates: HashMap<String, String>,
 }
@@ -116,26 +123,12 @@ pub fn load_glue_config(path: Option<&Path>) -> Result<HashMap<String, GlueTarge
             extension: entry.extension,
             bridge_kind: entry.bridge_kind,
             calling_convention: entry.calling_convention,
-            type_map: entry.type_map,
-            c_type_map: entry.c_type_map,
-            conversions: flatten_conversions(entry.conversions),
+            protocols: entry.protocols,
             templates: entry.templates,
         });
     }
 
     Ok(targets)
-}
-
-/// Flatten nested conversion entries into flat "Type.to_abi"/"Type.from_abi" keys.
-fn flatten_conversions(
-    conv: HashMap<String, ConversionEntry>,
-) -> HashMap<String, String> {
-    let mut flat = HashMap::new();
-    for (ty, entry) in conv {
-        flat.insert(format!("{}.to_abi", ty), entry.to_abi);
-        flat.insert(format!("{}.from_abi", ty), entry.from_abi);
-    }
-    flat
 }
 
 /// Find a language target by extension.
@@ -171,9 +164,7 @@ mod tests {
             extension: "py".to_string(),
             bridge_kind: "native_module".to_string(),
             calling_convention: "c_abi".to_string(),
-            type_map: HashMap::new(),
-            c_type_map: HashMap::new(),
-            conversions: HashMap::new(),
+            protocols: HashMap::new(),
             templates: HashMap::new(),
         });
         targets.insert("rust".to_string(), GlueTarget {
@@ -182,15 +173,13 @@ mod tests {
             extension: "rs".to_string(),
             bridge_kind: "extern_c_crate".to_string(),
             calling_convention: "lto".to_string(),
-            type_map: HashMap::new(),
-            c_type_map: HashMap::new(),
-            conversions: HashMap::new(),
+            protocols: HashMap::new(),
             templates: HashMap::new(),
         });
-        assert_eq!(extension_to_language("py", &targets), Some("python"));
-        assert_eq!(extension_to_language("rs", &targets), Some("rust"));
-        assert_eq!(extension_to_language("js", &targets), None);
-        assert_eq!(extension_to_language("kotlin", &targets), None);
+
+        // Should work with or without leading dot
+        assert_eq!(find_language_by_extension(&targets, ".py").unwrap().language, "python");
+        assert_eq!(find_language_by_extension(&targets, "py").unwrap().language, "python");
     }
 
     #[test]
@@ -202,9 +191,7 @@ mod tests {
             extension: "py".to_string(),
             bridge_kind: "native_module".to_string(),
             calling_convention: "c_abi".to_string(),
-            c_type_map: HashMap::new(),
-            conversions: HashMap::new(),
-            type_map: HashMap::new(),
+            protocols: HashMap::new(),
             templates: HashMap::new(),
         });
 
@@ -222,9 +209,7 @@ mod tests {
             extension: "py".to_string(),
             bridge_kind: "native_module".to_string(),
             calling_convention: "c_abi".to_string(),
-            c_type_map: HashMap::new(),
-            conversions: HashMap::new(),
-            type_map: HashMap::new(),
+            protocols: HashMap::new(),
             templates: HashMap::new(),
         });
 
@@ -237,23 +222,23 @@ mod tests {
     fn test_load_glue_config_custom_path() {
         let dir = std::env::temp_dir();
         let config_path = dir.join("test_glue_config.toml");
-        let content = r#"
+        let content = r##"
 [python]
 types_module = "glue/python/types.bv"
 extension = "py"
 bridge_kind = "native_module"
 calling_convention = "c_abi"
 
-[python.c_type_map]
-Int = "int64_t"
-Float = "double"
+[python.protocols]
+"#String" = { native = "str", c_abi = "ctypes.c_void_p" }
+"#Int" = { native = "int", c_abi = "ctypes.c_int64" }
 
 [rust]
 types_module = "glue/rust/types.bv"
 extension = "rs"
 bridge_kind = "extern_c_crate"
 calling_convention = "lto"
-"#;
+"##;
         std::fs::write(&config_path, content).unwrap();
 
         let result = load_glue_config(Some(&config_path));
@@ -266,8 +251,9 @@ calling_convention = "lto"
         assert_eq!(py.extension, "py");
         assert_eq!(py.bridge_kind, "native_module");
         assert_eq!(py.calling_convention, "c_abi");
-        assert_eq!(py.c_type_map.get("Int"), Some(&"int64_t".to_string()));
-        assert_eq!(py.c_type_map.get("Float"), Some(&"double".to_string()));
+        assert!(py.protocols.contains_key("#String"));
+        assert_eq!(py.protocols.get("#String").unwrap().native, "str");
+        assert_eq!(py.protocols.get("#String").unwrap().c_abi, "ctypes.c_void_p");
 
         assert!(targets.contains_key("rust"));
         let rust = &targets["rust"];

@@ -120,15 +120,20 @@ pub fn resolve_single_frgn(
 
     // 2026-07-22: If a GLUE language target exists, this is a bridge call.
     if let Some(target) = language {
-        // 2026-07-22: Compute protocol transform for each parameter (one step each).
+        // 2026-07-22: Compute protocol transform for each parameter (one step each),
+        // using the target's protocol mapping to derive the foreign type.
         let param_paths: Vec<ProtocolStep> = fb.inputs.iter()
             .map(|(_, brief_type)| {
-                compute_protocol_path(brief_type, brief_type, universe)
+                let foreign_type = lookup_foreign_type(brief_type, &target.protocols, universe);
+                compute_protocol_path(brief_type, &foreign_type, universe)
                     .and_then(|steps| steps.into_iter().next().ok_or_else(|| "empty path".to_string()))
             })
             .collect::<Result<Vec<_>, _>>()?;
         let return_path: Option<ProtocolStep> = fb.success_output.first()
-            .and_then(|(_, ty)| compute_protocol_path(ty, ty, universe).ok()?.into_iter().next());
+            .and_then(|(_, ty)| {
+                let foreign_type = lookup_foreign_type(ty, &target.protocols, universe);
+                compute_protocol_path(ty, &foreign_type, universe).ok()?.into_iter().next()
+            });
         return Ok(ResolvedFrgn::Bridge {
             language: target.language.clone(),
             param_paths,
@@ -204,6 +209,44 @@ pub fn compute_protocol_path(
     }])
 }
 
+/// Look up the foreign protocol category for a Brief type, then map it
+/// to a foreign type via the target's protocol mapping.
+/// Falls back to the Brief type's universe key if no protocol exists.
+fn lookup_foreign_type(
+    brief_type: &crate::ast::Type,
+    protocols: &std::collections::HashMap<String, crate::glue::config::ProtocolEntry>,
+    universe: Option<&crate::type_universe::TypeUniverse>,
+) -> crate::ast::Type {
+    // Find the protocol category that this Brief type participates in
+    if let Some(u) = universe {
+        if let Some(key) = brief_type.universe_key() {
+            if let Some(rt) = u.get(key) {
+                // Look for a CastTo property that points to a protocol category
+                for prop_key in rt.properties.keys() {
+                    if let Some(cat) = prop_key.strip_prefix("Cast.#") {
+                        let protocol_key = format!("#{}", cat);
+                        if protocols.contains_key(&protocol_key) {
+                            return crate::ast::Type::HashWord(cat.to_string());
+                        }
+                    }
+                }
+            }
+        }
+    }
+    // Fallback: derive from the type's name
+    match brief_type {
+        crate::ast::Type::Custom(name) => {
+            let protocol_key = format!("#{}", name);
+            if protocols.contains_key(&protocol_key) {
+                crate::ast::Type::HashWord(name.clone())
+            } else {
+                brief_type.clone()
+            }
+        }
+        _ => brief_type.clone(),
+    }
+}
+
 /// Convert a Type to a string key for use with find_cast_path BFS.
 fn type_to_key(ty: &crate::ast::Type) -> String {
     match ty {
@@ -277,9 +320,7 @@ mod tests {
             extension: "py".to_string(),
             bridge_kind: "native_module".to_string(),
             calling_convention: "c_abi".to_string(),
-            type_map: HashMap::new(),
-            c_type_map: HashMap::new(),
-            conversions: HashMap::new(),
+            protocols: HashMap::new(),
             templates: HashMap::new(),
         });
         map.insert("rust".to_string(), GlueTarget {
@@ -288,9 +329,7 @@ mod tests {
             extension: "rs".to_string(),
             bridge_kind: "extern_c_crate".to_string(),
             calling_convention: "lto".to_string(),
-            type_map: HashMap::new(),
-            c_type_map: HashMap::new(),
-            conversions: HashMap::new(),
+            protocols: HashMap::new(),
             templates: HashMap::new(),
         });
         map

@@ -1,36 +1,18 @@
 # lib/glue.toml — GLUE Adapter Registry
-# 2026-07-22: Fully drives the `brief export` command.
-# Adding a language = adding a [lang] section here — zero Rust changes.
+# 2026-07-22: Protocol-driven language mappings. Each language declares how
+# protocol categories (#String, #Int, #Float) map to its native types and
+# C ABI types. The compiler derives wrapper types and conversions from these
+# protocol mappings — no type_map, c_type_map, or conversions sections needed.
 #
-# Each section declares:
-#   types_module       — .bv file declaring foreign type representations
-#   extension          — native source file extension (e.g., "py", "rs", "mjs")
-#   bridge_kind        — how to call into this language ("native_module", "extern_c_crate", "esm_module")
-#   calling_convention — "lto" (LLVM link, zero-cost) or "c_abi" (ctypes/FFI)
-#   type_map           — Brief type → language-native wrapper type (for safe wrappers)
-#   c_type_map         — Brief type → C ABI type for FFI declarations
-#   conversions        — per-type to_abi/from_abi expressions for type marshaling
-#   templates          — output file paths and their content with {{mustache}} substitution
+# Adding a language = adding a [lang] section. Zero Rust changes.
 #
 # Template variables:
-#   {{bridge_name}}    — Name of the bridge (from --out dir or file name)
-#   {{name}}           — Function name
-#   {{params}}         — Parameter list ("name: Type, ...") using type_map
-#   {{ffi_params}}     — FFI parameter list ("name: CType, ...") using c_type_map
-#   {{c_types}}        — C ABI type list only (for ctypes argtypes, etc.)
-#   {{args}}           — Argument names only ("name, ...")
-#   {{args_abi}}       — ABI-converted argument expressions from conversions.to_abi
-#   {{return}}         — Return type using type_map
-#   {{c_return}}       — Return type using c_type_map
-#   {{return_expr}}    — Return value conversion from conversions.from_abi
-#   {{s_param}}        — State variable prefix ("_STATE, " for C ABI, "" for LTO)
-#   {{s_init}}         — State initialization code
-#   {{exports}}        — Replaced with per-function safe wrapper code (from fn_template)
-#   {{ffi_decls}}      — Replaced with per-function FFI declarations (from ffi_template)
+#   {{bridge_name}}  {{name}}  {{params}}  {{ffi_params}}  {{c_types}}
+#   {{args}}         {{args_abi}}  {{return}}  {{c_return}}
+#   {{return_expr}}  {{s_param}}  {{s_init}}
+#   {{exports}}      {{ffi_decls}}
 #
-# Special template keys:
-#   "fn_template" — per-function safe wrapper (rendered for each export, joined into {{exports}})
-#   "ffi_template" — per-function FFI declaration (rendered for each export, joined into {{ffi_decls}})
+# Special template keys: "fn_template", "ffi_template"
 
 [python]
 types_module = "glue/python/types.bv"
@@ -38,19 +20,13 @@ extension = "py"
 bridge_kind = "native_module"
 calling_convention = "c_abi"
 
-[python.type_map]
-Int = "int"
-Float = "float"
-Bool = "bool"
-String = "str"
-Data = "bytes"
-
-[python.c_type_map]
-Int = "ctypes.c_int64"
-Float = "ctypes.c_double"
-Bool = "ctypes.c_bool"
-String = "ctypes.c_void_p"
-Data = "ctypes.c_void_p"
+[python.protocols]
+"#String" = { native = "str", c_abi = "ctypes.c_void_p" }
+"#Int" = { native = "int", c_abi = "ctypes.c_int64" }
+"#Float" = { native = "float", c_abi = "ctypes.c_double" }
+"#Bool" = { native = "bool", c_abi = "ctypes.c_bool" }
+"#Data" = { native = "bytes", c_abi = "ctypes.c_void_p" }
+"#Char" = { native = "str", c_abi = "ctypes.c_char" }
 
 [python.templates]
 "__init__.py" = """
@@ -79,45 +55,19 @@ _STATE = _init_state()
     return _lib.{{name}}({{s_param}}{{args_abi}})
 """
 
-[python.conversions.Int]
-to_abi = "{}"
-from_abi = "{}"
-
-[python.conversions.Float]
-to_abi = "{}"
-from_abi = "{}"
-
-[python.conversions.Bool]
-to_abi = "{}"
-from_abi = "{}"
-
-[python.conversions.String]
-to_abi = "{}"
-from_abi = "{}"
-
-[python.conversions.Data]
-to_abi = "{}"
-from_abi = "{}"
-
 [node]
 types_module = "glue/node/types.bv"
 extension = "mjs"
 bridge_kind = "esm_module"
 calling_convention = "c_abi"
 
-[node.type_map]
-Int = "bigint"
-Float = "number"
-Bool = "boolean"
-String = "string"
-Data = "Uint8Array"
-
-[node.c_type_map]
-Int = "i64"
-Float = "double"
-Bool = "bool"
-String = "cstring"
-Data = "cstring"
+[node.protocols]
+"#String" = { native = "string", c_abi = "cstring" }
+"#Int" = { native = "bigint", c_abi = "i64" }
+"#Float" = { native = "number", c_abi = "double" }
+"#Bool" = { native = "boolean", c_abi = "bool" }
+"#Data" = { native = "Uint8Array", c_abi = "cstring" }
+"#Char" = { native = "string", c_abi = "i32" }
 
 [node.templates]
 "index.mjs" = """
@@ -150,77 +100,19 @@ export function {{name}}({{params}}) {
 """
 "ffi_template" = """{{name}}: [{{c_return}}, [{{s_param}}{{c_types}}]],"""
 
-[node.conversions.Int]
-to_abi = "{}"
-from_abi = "{}"
-
-[node.conversions.Float]
-to_abi = "{}"
-from_abi = "{}"
-
-[node.conversions.Bool]
-to_abi = "{}"
-from_abi = "{}"
-
-[node.conversions.String]
-to_abi = "{}"
-from_abi = "{}"
-
-[node.conversions.Data]
-to_abi = "{}"
-from_abi = "{}"
-
 [rust]
 types_module = "glue/rust/types.bv"
 extension = "rs"
 bridge_kind = "extern_c_crate"
 calling_convention = "lto"
 
-# type_map: Rust-safe types used in generated pub fn wrappers.
-# c_type_map: LLVM ABI types matching lower_type() in src/backend/llvm/types.rs.
-# conversions.to_abi / from_abi: Template expressions for type marshaling.
-#   {{name}} = parameter name, {{name}}_abi = converted ABI value.
-#   {{result}} = FFI return value, {{return}} = converted safe value.
-
-[rust.type_map]
-Int = "i64"
-Float = "f64"
-Bool = "i32"
-String = "*mut u8"
-Data = "*mut u8"
-Char = "i32"
-
-[rust.c_type_map]
-Int = "i64"
-Float = "f64"
-Bool = "i32"
-String = "*mut u8"
-Data = "*mut u8"
-Char = "i32"
-
-[rust.conversions.Int]
-to_abi = "{}"
-from_abi = "{}"
-
-[rust.conversions.Float]
-to_abi = "{}"
-from_abi = "{}"
-
-[rust.conversions.Bool]
-to_abi = "{}"
-from_abi = "{}"
-
-[rust.conversions.String]
-to_abi = "{}"
-from_abi = "{}"
-
-[rust.conversions.Data]
-to_abi = "{}"
-from_abi = "{}"
-
-[rust.conversions.Char]
-to_abi = "{}"
-from_abi = "{}"
+[rust.protocols]
+"#String" = { native = "*mut u8", c_abi = "i64" }
+"#Int" = { native = "i64", c_abi = "i64" }
+"#Float" = { native = "f64", c_abi = "double" }
+"#Bool" = { native = "i32", c_abi = "i32" }
+"#Data" = { native = "*mut u8", c_abi = "i64" }
+"#Char" = { native = "i32", c_abi = "i32" }
 
 [rust.templates]
 "Cargo.toml" = """
@@ -269,7 +161,8 @@ fn init_state() {
 use std::ffi::c_void;
 
 extern "C" {
-{{ffi_decls}}
+    {{s_init}}
+    {{ffi_decls}}
 }
 """
 "fn_template" = """pub fn {{name}}({{params}}) -> {{return}} { unsafe {
