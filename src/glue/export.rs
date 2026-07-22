@@ -523,6 +523,9 @@ pub fn run_export_cli(file_path: &str, language: &str, out_dir: &str) -> Result<
 
         fn_vars.insert("params".to_string(), params.join(", "));
         fn_vars.insert("ffi_params".to_string(), ffi_params.join(", "));
+        fn_vars.insert("c_types".to_string(), export.params.iter()
+            .map(|(_, ty)| map_type(ty, &target.c_type_map))
+            .collect::<Vec<_>>().join(", "));
         fn_vars.insert("args".to_string(), args.join(", "));
         fn_vars.insert("args_abi".to_string(), args_abi.join(", "));
         fn_vars.insert("return_expr".to_string(), return_expr);

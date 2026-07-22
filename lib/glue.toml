@@ -53,19 +53,43 @@ import os
 _lib = ctypes.CDLL(os.path.join(os.path.dirname(__file__), "bridge.so"))
 
 def _init_state():
-    _lib.__brief_init_state.argtypes = []
-    _lib.__brief_init_state.restype = ctypes.c_void_p
-    return _lib.__brief_init_state()
+    _lib.init_state.argtypes = [ctypes.c_void_p]
+    _lib.init_state.restype = None
+    import ctypes
+    buf = ctypes.create_string_buffer(32)
+    state = ctypes.cast(ctypes.pointer(buf), ctypes.c_void_p)
+    _lib.init_state(state)
+    return state
 
 _STATE = _init_state()
 
 {{exports}}
 """
 "fn_template" = """def {{name}}({{params}}):
-    _lib.{{name}}.argtypes = [{{ffi_params}}]
+    _lib.{{name}}.argtypes = [{{c_types}}]
     _lib.{{name}}.restype = {{c_return}}
-    return _lib.{{name}}({{s_param}}{{args}})
+    return _lib.{{name}}({{s_param}}{{args_abi}})
 """
+
+[python.conversions.Int]
+to_abi = "{}"
+from_abi = "{}"
+
+[python.conversions.Float]
+to_abi = "{}"
+from_abi = "{}"
+
+[python.conversions.Bool]
+to_abi = "{}"
+from_abi = "{}"
+
+[python.conversions.String]
+to_abi = "{}"
+from_abi = "{}"
+
+[python.conversions.Data]
+to_abi = "{}"
+from_abi = "{}"
 
 [node]
 types_module = "glue/node/types.bv"
@@ -92,17 +116,51 @@ Data = "cstring"
 // GLUE bridge for {{bridge_name}} — auto-generated.
 import { createRequire } from 'module';
 const require = createRequire(import.meta.url);
-const lib = require('./bridge.so');
+const ffi = require('ffi-napi');
 
-let _state = lib.__brief_init_state();
+const lib = ffi.Library('./bridge.so', {
+    init_state: ['void', ['pointer']],
+    {{ffi_decls}}
+});
+
+let _state = null;
+
+function init_state() {
+    const buf = Buffer.alloc(32);
+    _state = buf;
+    lib.init_state(buf);
+}
+
+init_state();
 
 {{exports}}
 """
 "fn_template" = """
 export function {{name}}({{params}}) {
-    return lib.{{name}}({{s_param}}{{args}});
+    return lib.{{name}}({{s_param}}{{args_abi}});
 }
 """
+"ffi_template" = """{{name}}: [{{c_return}}, [{{s_param}}{{c_types}}]],"""
+
+[node.conversions.Int]
+to_abi = "{}"
+from_abi = "{}"
+
+[node.conversions.Float]
+to_abi = "{}"
+from_abi = "{}"
+
+[node.conversions.Bool]
+to_abi = "{}"
+from_abi = "{}"
+
+[node.conversions.String]
+to_abi = "{}"
+from_abi = "{}"
+
+[node.conversions.Data]
+to_abi = "{}"
+from_abi = "{}"
 
 [rust]
 types_module = "glue/rust/types.bv"
