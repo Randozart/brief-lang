@@ -1,7 +1,7 @@
 # Stdlib Frgn Cleanup — Comprehensive Plan
 
 **Date:** 2026-07-22
-**Status:** Pre-implementation
+**Status:** Committed (2026-07-22)
 **Depends on:** Phases 0-7 of `2026-07-22-frgn-export-glue-pipeline.md` (completed)
 
 ---
