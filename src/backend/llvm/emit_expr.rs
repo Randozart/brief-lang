@@ -1050,10 +1050,61 @@ impl LlvmBackend {
     /// 2026-07-16: P5 — Emit a foreign function call with optional auto-meld.
     /// Derives convention extension from sig.from, checks meld compatibility,
     /// and applies identity conversion (same bit layout, meld-verified type tag).
+    /// 2026-07-22: Extended to dispatch via pre-resolved ResolvedFrgn strategies.
+    /// The dispatch decision (Inline vs Bridge vs Unsupported) is made during
+    /// the main compilation pass, not inside the backend.
     fn emit_frgn_call(
         &mut self,
         out: &mut String,
         v: &str,
+        sig: &crate::ast::ForeignSignature,
+        args: &[Expr],
+        indent: &str,
+    ) -> TypedRegister {
+        // 2026-07-22: Look up the pre-resolved dispatch strategy.
+        // Clone the dispatch enum to avoid the borrow checker issue:
+        // we need to borrow self.resolved_frgns immutably and then call
+        // self.emit_* which borrows self mutably.
+        let dispatch = self.resolved_frgns.as_ref()
+            .and_then(|m| m.get(&sig.name))
+            .cloned();
+        match dispatch {
+            Some(crate::analysis::frgn_dispatch::ResolvedFrgn::Inline { symbol, .. }) => {
+                let sym = symbol.clone();
+                self.emit_direct_frgn_call(out, v, &sym, sig, args, indent)
+            }
+            Some(crate::analysis::frgn_dispatch::ResolvedFrgn::Bridge { language, param_paths, return_path, fallback }) => {
+                self.emit_bridge_frgn_call(out, v, sig, args, &language, &param_paths, &return_path, &fallback, indent)
+            }
+            Some(crate::analysis::frgn_dispatch::ResolvedFrgn::Unsupported(msg)) => {
+                // 2026-07-22: Return a zero-value for the return type.
+                // The error message is logged as a backend warning.
+                self.warnings.push(format!("frgn '{}' unsupported: {}", sig.name, msg));
+                let ret_type = sig.result_type.return_type().unwrap_or(Type::int());
+                if ret_type != Type::Void {
+                    let ret_llvm = self.llvm_type(&ret_type);
+                    writeln!(out, "{}  {} = {} zeroinitializer", indent, v, ret_llvm).ok();
+                    TypedRegister { name: v.to_string(), ty: ret_type }
+                } else {
+                    TypedRegister { name: v.to_string(), ty: Type::Void }
+                }
+            }
+            None => {
+                // 2026-07-22: Legacy path — no dispatch resolution available.
+                self.emit_direct_frgn_call(out, v, &sig.name, sig, args, indent)
+            }
+        }
+    }
+
+    /// 2026-07-22: Emit a direct foreign function call (Inline path).
+    /// Uses the `symbol` parameter (from `as_name` or brief_name) as the
+    /// callee, applies meld extension conversion to arguments, and emits
+    /// the LLVM `call` instruction.
+    fn emit_direct_frgn_call(
+        &mut self,
+        out: &mut String,
+        v: &str,
+        symbol: &str,
         sig: &crate::ast::ForeignSignature,
         args: &[Expr],
         indent: &str,
@@ -1134,7 +1185,7 @@ impl LlvmBackend {
                 "{}call {} @{}({})",
                 indent,
                 ret_llvm,
-                sig.name,
+                symbol,
                 arg_strs.join(", ")
             )
             .ok();
@@ -1145,11 +1196,11 @@ impl LlvmBackend {
         } else {
             writeln!(
                 out,
-                "{}{} = call {} @{}({})",
+                "{} {} = call {} @{}({})",
                 indent,
                 v,
                 ret_llvm,
-                sig.name,
+                symbol,
                 arg_strs.join(", ")
             )
             .ok();
@@ -1157,6 +1208,80 @@ impl LlvmBackend {
                 name: v.to_string(),
                 ty: ret_type,
             }
+        }
+    }
+
+    /// 2026-07-22: Emit a GLUE bridge foreign call (Bridge path).
+    /// Applies protocol transforms to arguments, calls the foreign function
+    /// through its bridge mechanism, transforms the return value, and
+    /// wraps with fallback dispatch.
+    fn emit_bridge_frgn_call(
+        &mut self,
+        out: &mut String,
+        v: &str,
+        sig: &crate::ast::ForeignSignature,
+        args: &[Expr],
+        _language: &str,
+        param_paths: &[crate::analysis::frgn_dispatch::ProtocolStep],
+        return_path: &Option<crate::analysis::frgn_dispatch::ProtocolStep>,
+        fallback: &crate::ast::top::Fallback,
+        indent: &str,
+    ) -> TypedRegister {
+        // 2026-07-22: Emit argument expressions and apply protocol transforms.
+        let mut transformed_args: Vec<TypedRegister> = Vec::new();
+        for (i, arg) in args.iter().enumerate() {
+            let reg = self.emit_expr(out, arg, indent);
+            let path_for_arg = param_paths.get(i).map(|p| std::slice::from_ref(p)).unwrap_or(&[]);
+            let result_reg = crate::glue::bridge::emit_protocol_chain(
+                &reg.name, path_for_arg, &self.llvm_type(&reg.ty),
+            ).unwrap_or_else(|_| reg.name.clone());
+            transformed_args.push(TypedRegister {
+                name: result_reg,
+                ty: reg.ty.clone(),
+            });
+        }
+
+        // 2026-07-22: Emit the foreign call through the bridge.
+        // For now, emit a direct call with a bridge_ prefix to distinguish.
+        let arg_strs: Vec<String> = transformed_args
+            .iter()
+            .map(|reg| format!("{} {}", self.llvm_type(&reg.ty), reg.name))
+            .collect();
+        let ret_type = sig.result_type.return_type().unwrap_or(Type::int());
+        let ret_llvm = self.llvm_type(&ret_type);
+        let bridge_name = format!("bridge_{}", sig.name);
+
+        if ret_type == Type::Void {
+            writeln!(
+                out,
+                "{}call {} @{}({})",
+                indent, ret_llvm, bridge_name, arg_strs.join(", ")
+            ).ok();
+        } else {
+            writeln!(
+                out,
+                "{} {} = call {} @{}({})",
+                indent, v, ret_llvm, bridge_name, arg_strs.join(", ")
+            ).ok();
+        }
+
+        // 2026-07-22: Transform return value back to Brief type.
+        let final_reg = if let Some(ret_path) = return_path {
+            crate::glue::bridge::emit_protocol_chain(
+                v, std::slice::from_ref(ret_path), &ret_llvm,
+            ).unwrap_or_else(|_| v.to_string())
+        } else {
+            v.to_string()
+        };
+
+        // 2026-07-22: Apply fallback wrapper.
+        let result_reg = crate::glue::bridge::emit_fallback_wrapper(
+            &final_reg, fallback,
+        ).unwrap_or_else(|_| final_reg);
+
+        TypedRegister {
+            name: result_reg,
+            ty: ret_type,
         }
     }
 
