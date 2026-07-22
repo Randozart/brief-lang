@@ -108,6 +108,9 @@ pub struct CompilerContext {
 
     // Optimization
     pub optimize_budget: u64,
+    /// 2026-07-22: Initial arena buffer size in bytes. Default 65536 (64KB).
+    /// Larger values reduce realloc calls; smaller values waste less memory.
+    pub arena_initial_size: u64,
     /// 2026-07-18: Max stack allocation size. Allocs above this → heap.
     pub stack_threshold: u64,
     pub optimize_report: bool,
@@ -211,6 +214,7 @@ impl CompilerContext {
             cell_trigger_bindings: Vec::new(),
             variant_disc: HashMap::new(),
             optimize_budget: 256,
+            arena_initial_size: 65536,
             stack_threshold: 4096,
             optimize_report: false,
             optimize_size: None,

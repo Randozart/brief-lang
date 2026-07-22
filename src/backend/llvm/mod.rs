@@ -1261,6 +1261,18 @@ impl LlvmBackend {
     pub(crate) fn emit_arena_alloc(&mut self, out: &mut String, indent: &str, size_reg: &str) -> String {
         // 2026-07-19: Bump-pointer arena allocation via %State fields.
         // Uses next_reg_with_prefix (no closures — avoids borrow conflicts).
+
+        // 2026-07-22: Low budget → direct malloc (simpler IR, faster compile).
+        // The --optimize-budget flag (default 256) controls simulation depth;
+        // below 128, skip the bump arena entirely and use heap allocation.
+        if self.ctx.optimize_budget < 128 {
+            let r = self.fun.next_reg_with_prefix("aam");
+            writeln!(out, "{}{} = call noalias ptr @malloc(i64 {})", indent, r, size_reg).ok();
+            let ri = self.fun.next_reg_with_prefix("aami");
+            writeln!(out, "{}{} = ptrtoint ptr {} to i64", indent, ri, r).ok();
+            return ri;
+        }
+
         let Some(aptr_idx) = self.arena_ptr_idx else {
             let r = self.fun.next_reg_with_prefix("aam");
             writeln!(out, "{}{} = call noalias ptr @malloc(i64 {})", indent, r, size_reg).ok();
@@ -1315,7 +1327,7 @@ impl LlvmBackend {
         let grow_sz = self.fun.next_reg_with_prefix("aags");
         writeln!(out, "{}{} = shl i64 {}, 1", indent, grow_sz, size_reg).ok();
         let min_sz = self.fun.next_reg_with_prefix("aams");
-        writeln!(out, "{}{} = add i64 {}, 65536", indent, min_sz, grow_sz).ok();
+        writeln!(out, "{}{} = add i64 {}, {}", indent, min_sz, grow_sz, self.ctx.arena_initial_size).ok();
         let new_base = self.fun.next_reg_with_prefix("aanb");
         writeln!(out, "{}{} = call ptr @realloc(ptr {}, i64 {})", indent, new_base, base, min_sz).ok();
         store_state_ptr!(aptr_idx, "aaps", &new_base);
@@ -1351,14 +1363,14 @@ impl LlvmBackend {
             writeln!(out, "{}store i64 0, ptr %arena_mutex, align 8", indent).ok();
         }
         let init = self.fun.next_reg_with_prefix("arinit");
-        writeln!(out, "{}{} = call ptr @malloc(i64 65536)", indent, init).ok();
+        writeln!(out, "{}{} = call ptr @malloc(i64 {})", indent, init, self.ctx.arena_initial_size).ok();
         let init_i64 = self.fun.next_reg_with_prefix("arii");
         writeln!(out, "{}{} = ptrtoint ptr {} to i64", indent, init_i64, init).ok();
         // Store arena_ptr, arena_base, arena_end
         self.emit_state_store_i64_by_idx(out, indent, aptr_idx, &init_i64);
         self.emit_state_store_i64_by_idx(out, indent, abase_idx, &init_i64);
         let init_end = self.fun.next_reg_with_prefix("arieu");
-        writeln!(out, "{}{} = getelementptr i8, ptr {}, i64 65536", indent, init_end, init).ok();
+        writeln!(out, "{}{} = getelementptr i8, ptr {}, i64 {}", indent, init_end, init, self.ctx.arena_initial_size).ok();
         let end_i64 = self.fun.next_reg_with_prefix("arie");
         writeln!(out, "{}{} = ptrtoint ptr {} to i64", indent, end_i64, init_end).ok();
         self.emit_state_store_i64_by_idx(out, indent, aend_idx, &end_i64);
