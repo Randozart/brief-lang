@@ -42,9 +42,9 @@ defn shm_ftruncate(fd: Int, length: Int) -> Result<Void, ShmError> {
     term Err(ShmOther("ftruncate failed"));
 };
 
-frgn __shm_list() -> Result<List<String>, ShmError>;
-frgn __shm_exists(name: String) -> Result<Bool, ShmError>;
-frgn __shm_size(name: String) -> Result<Int, ShmError>;
+frgn __shm_list() -> Result<List<String>, ShmError> as frgn__shm_list from "link/brief_rt.c" fallback [];
+frgn __shm_exists(name: String) -> Result<Bool, ShmError> as frgn__shm_exists from "link/brief_rt.c" fallback false;
+frgn __shm_size(name: String) -> Result<Int, ShmError> as frgn__shm_size from "link/brief_rt.c" fallback 0;
 
 // ===== NATIVE WRAPPERS =====
 
@@ -73,7 +73,7 @@ defn shm_close(name: String) -> Result<Void, ShmError> {
 }
 
 defn shm_exists(name: String) -> Bool {
-    let result = __shm_exists(name);
+    let result = frgn__shm_exists(name);
     [result.is_ok()] {
         term result.value;
     };
@@ -81,11 +81,11 @@ defn shm_exists(name: String) -> Bool {
 }
 
 defn shm_list() -> Result<List<String>, ShmError> {
-    term __shm_list();
+    term frgn__shm_list();
 }
 
 defn shm_get_size(name: String) -> Result<Int, ShmError> {
-    term __shm_size(name);
+    term frgn__shm_size(name);
 }
 
 // ===== METROPOLITAN HEADER CONSTANTS =====
@@ -137,12 +137,12 @@ defn mmap_anonymous_res(length: Int, prot: Int, flags: Int) -> Result<Int, MmapE
     term Err(MmapOther("mmap failed"));
 };
 
-frgn __msync(addr: Int, length: Int, flags: Int) -> Result<Void, MmapError>;
+frgn __msync(addr: Int, length: Int, flags: Int) -> Result<Void, MmapError> as frgn__msync from "link/brief_rt.c" fallback;
 
-frgn __mmap_write(addr: Int, offset: Int, data: List<Int>, length: Int) -> Result<Void, MmapError>;
-frgn __mmap_read(addr: Int, offset: Int, length: Int) -> Result<List<Int>, MmapError>;
-frgn __mmap_read_u32(addr: Int, offset: Int) -> Result<Int, MmapError>;
-frgn __mmap_write_u32(addr: Int, offset: Int, value: Int) -> Result<Void, MmapError>;
+frgn __mmap_write(addr: Int, offset: Int, data: List<Int>, length: Int) -> Result<Void, MmapError> as frgn__mmap_write from "link/brief_rt.c" fallback;
+frgn __mmap_read(addr: Int, offset: Int, length: Int) -> Result<List<Int>, MmapError> as frgn__mmap_read from "link/brief_rt.c" fallback [];
+frgn __mmap_read_u32(addr: Int, offset: Int) -> Result<Int, MmapError> as frgn__mmap_read_u32 from "link/brief_rt.c" fallback 0;
+frgn __mmap_write_u32(addr: Int, offset: Int, value: Int) -> Result<Void, MmapError> as frgn__mmap_write_u32 from "link/brief_rt.c" fallback;
 
 // PROT_READ | PROT_WRITE flags
 let PROT_READ_WRITE: Int = 0x03;
@@ -160,38 +160,38 @@ defn mmap_free(addr: Int, size: Int) -> Result<Void, MmapError> {
 
 defn mmap_write_bytes(addr: Int, offset: Int, data: List<Int>) -> Result<Void, MmapError> {
     let len = data :> Size;
-    term __mmap_write(addr, offset, data, len);
+    term frgn__mmap_write(addr, offset, data, len);
 }
 
 defn mmap_read_bytes(addr: Int, offset: Int, length: Int) -> Result<List<Int>, MmapError> {
-    term __mmap_read(addr, offset, length);
+    term frgn__mmap_read(addr, offset, length);
 }
 
 // ===== METROPOLITAN CHANNEL OPERATIONS =====
 
 // Write a u32 status word to the Metropolitan header
 defn metro_write_status(addr: Int, status: Int) -> Result<Void, MmapError> {
-    term __mmap_write_u32(addr, METRO_OFFSET_STATUS, status);
+    term frgn__mmap_write_u32(addr, METRO_OFFSET_STATUS, status);
 }
 
 // Read the u32 status word from the Metropolitan header
 defn metro_read_status(addr: Int) -> Result<Int, MmapError> {
-    term __mmap_read_u32(addr, METRO_OFFSET_STATUS);
+    term frgn__mmap_read_u32(addr, METRO_OFFSET_STATUS);
 }
 
 // Write payload size to the Metropolitan header
 defn metro_write_payload_size(addr: Int, size: Int) -> Result<Void, MmapError> {
-    term __mmap_write_u32(addr, METRO_OFFSET_PAYLOAD_SIZE, size);
+    term frgn__mmap_write_u32(addr, METRO_OFFSET_PAYLOAD_SIZE, size);
 }
 
 // Read payload size from the Metropolitan header
 defn metro_read_payload_size(addr: Int) -> Result<Int, MmapError> {
-    term __mmap_read_u32(addr, METRO_OFFSET_PAYLOAD_SIZE);
+    term frgn__mmap_read_u32(addr, METRO_OFFSET_PAYLOAD_SIZE);
 }
 
 // Write max capacity to the Metropolitan header
 defn metro_write_max_capacity(addr: Int, capacity: Int) -> Result<Void, MmapError> {
-    term __mmap_write_u32(addr, METRO_OFFSET_MAX_CAPACITY, capacity);
+    term frgn__mmap_write_u32(addr, METRO_OFFSET_MAX_CAPACITY, capacity);
 }
 
 // Initialize a Metropolitan channel header (set all fields to defaults)
@@ -202,7 +202,7 @@ defn metro_init_header(addr: Int, capacity: Int) -> Result<Void, MmapError> {
         [p.is_ok()] {
             let c = metro_write_max_capacity(addr, capacity);
             [c.is_ok()] {
-                term __mmap_write_u32(addr, METRO_OFFSET_CAS_LOCK, 0);
+                term frgn__mmap_write_u32(addr, METRO_OFFSET_CAS_LOCK, 0);
             };
         };
     };

@@ -74,12 +74,12 @@ impl Orchestrator {
         // 2026-07-14: Reject call when no input/output layout is provided
         if binding.input_layout.is_none() && binding.output_layout.is_none() {
             return Err(RuntimeError::UnsupportedIntrinsic(
-                format!("missing input/output layout for '{}'", binding.name)
+                format!("missing input/output layout for '{}'", binding.foreign_name)
             ));
         }        // Metropolitan dispatch: create/retrieve channel and marshal via shared memory
         if is_metropolitan_target(binding) {
             let channel_result = self.metro_hub.create_channel(
-                &binding.name,
+                &binding.foreign_name,
                 "c",
                 4096,
                 4096,
@@ -88,14 +88,14 @@ impl Orchestrator {
                 Ok(channel) => {
                     eprintln!(
                         "[INFO] Metropolitan dispatch: {} (channel: {:?})",
-                        binding.name,
+                        binding.foreign_name,
                         channel.id,
                     );
                 }
                 Err(e) => {
                     eprintln!(
                         "[WARN] Metropolitan channel creation failed for {}: {}; falling back to native",
-                        binding.name,
+                        binding.foreign_name,
                         e,
                     );
                 }

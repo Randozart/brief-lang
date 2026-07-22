@@ -630,7 +630,7 @@ impl ImportResolver {
                 let name = match item {
                     TopLevel::Definition(d) => Some(d.name.as_str()),
                     TopLevel::Signature(s) => Some(s.name.as_str()),
-                    TopLevel::ForeignBinding(fb) => Some(fb.name.as_str()),
+                    TopLevel::ForeignBinding(fb) => Some(fb.effective_brief_name()),
                     TopLevel::Transaction(t) => Some(t.name.as_str()),
                     TopLevel::Constant(c) => Some(c.name.as_str()),
                     TopLevel::Struct(s) => Some(s.name.as_str()),
@@ -760,7 +760,7 @@ fn dedup_items(items: Vec<TopLevel>) -> Vec<TopLevel> {
             TopLevel::Cell(c) => Some(("cell", &c.name)),
             TopLevel::Constant(c) => Some(("const", &c.name)),
             TopLevel::Signature(s) => Some(("sig", &s.name)),
-            TopLevel::ForeignBinding(fb) => Some(("frgn", &fb.name)),
+            TopLevel::ForeignBinding(fb) => Some(("frgn", &fb.foreign_name)),
             TopLevel::Struct(s) => Some(("struct", &s.name)),
             TopLevel::RStruct(r) => Some(("rstruct", &r.name)),
             TopLevel::Enum(e) => Some(("enum", &e.name)),

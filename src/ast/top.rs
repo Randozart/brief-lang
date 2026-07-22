@@ -567,12 +567,15 @@ pub enum Fallback {
 }
 
 /// Foreign function binding — a `frgn` declaration that wraps an external function.
+/// 2026-07-22: Treated as an import. `foreign_name` is the C/foreign symbol the
+/// linker looks for. `brief_name` (from `as` clause) is what Brief code calls it.
 #[derive(Debug, Clone)]
 pub struct ForeignBinding {
-    pub name: String,
-    /// 2026-07-22: The foreign symbol name when it differs from `name`.
-    /// `None` means the foreign symbol equals `name`.
-    pub as_name: Option<String>,
+    /// The C/foreign symbol name — what the linker looks for in the foreign module.
+    pub foreign_name: String,
+    /// The Brief name for this foreign function. `None` means `foreign_name` is used.
+    /// Set via the `as <brief_name>` clause in `frgn` declarations.
+    pub brief_name: Option<String>,
     pub from: FromSpec,
     pub target: ForeignTarget,
     pub inputs: Vec<(String, Type)>,
@@ -593,19 +596,18 @@ pub struct ForeignBinding {
 }
 
 impl ForeignBinding {
-    /// 2026-07-22: Extended with `as_name` and `fallback` for the
-    /// frgn/export/GLUE architecture. `as_name` renames the foreign symbol;
-    /// `fallback` declares what happens when the foreign call fails.
+    /// 2026-07-22: Construct a ForeignBinding.
+    /// `foreign_name` is the C symbol; `brief_name` is the optional Brief-side alias.
     pub fn new(
-        name: String,
-        as_name: Option<String>,
+        foreign_name: String,
+        brief_name: Option<String>,
         from: FromSpec,
         target: ForeignTarget,
         fallback: Fallback,
     ) -> Self {
         ForeignBinding {
-            name,
-            as_name,
+            foreign_name,
+            brief_name,
             from,
             target,
             inputs: Vec::new(),
@@ -623,6 +625,11 @@ impl ForeignBinding {
             fallback,
             span: None,
         }
+    }
+
+    /// The effective Brief name — uses `brief_name` if set, otherwise `foreign_name`.
+    pub fn effective_brief_name(&self) -> &str {
+        self.brief_name.as_deref().unwrap_or(&self.foreign_name)
     }
 }
 

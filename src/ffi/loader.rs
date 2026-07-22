@@ -220,8 +220,8 @@ fn parse_toml_bindings(content: &str) -> Result<Vec<ForeignBinding>, FfiError> {
         }
 
         let binding = ForeignBinding {
-            name,
-            as_name: None,
+            foreign_name: name,
+            brief_name: None,
             from: FromSpec::Literal(std::path::PathBuf::from(&location)),
             target,
             wasm_impl,
@@ -432,7 +432,7 @@ message = "String"
 
         let bindings = result.unwrap();
         assert_eq!(bindings.len(), 1);
-        assert_eq!(bindings[0].name, "read_file");
+        assert_eq!(bindings[0].foreign_name, "read_file");
         assert_eq!(bindings[0].from.as_str(), "std::fs::read_to_string");
         assert_eq!(bindings[0].error_type, "IoError");
     }

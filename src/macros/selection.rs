@@ -390,7 +390,7 @@ pub fn top_level_name(item: &TopLevel) -> Option<&str> {
         TopLevel::Import(i) => Some(i.path()),
         TopLevel::Trigger(t) => Some(&t.name),
         TopLevel::Constant(c) => Some(&c.name),
-        TopLevel::ForeignBinding(f) => Some(&f.name),
+        TopLevel::ForeignBinding(f) => Some(&f.foreign_name),
         TopLevel::Inop(i) => Some(&i.name),
         TopLevel::Struct(s) => Some(&s.name),
         TopLevel::Enum(e) => Some(&e.name),

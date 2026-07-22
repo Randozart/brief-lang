@@ -1,72 +1,62 @@
 // Atomic operations — Lock-free concurrent data structures
 // Tier 1: Primitives
 //
-// Uses LLVM atomic intrinsics via BILD for the LLVM backend.
-// The interpreter fallback provides correct semantics via volatile_load/store.
+// Uses atomic intrinsics (AtomicLoad#, AtomicStore#, AtomicCas#,
+// AtomicAdd#) which are observable and supported by all backends
+// and the interpreter.
 //
 // Types: All operations use Int (i64). For other types, cast through Ptr<Int>.
 
-inop! atomic_load(ptr: Ptr<Int>) -> Int
+defn atomic_load(ptr: Ptr<Int>) -> Int
     [ptr as Int >= 0][true]
 {
-    %p = inttoptr i64 %ptr to ptr;
-    %v = load atomic i64, ptr %p acquire, align 8
-    term %v;
-} fallback VolatileLoad#(ptr);
+    term AtomicLoad#(ptr);
+};
 
-inop! atomic_store(ptr: Ptr<Int>, val: Int) -> Int
+defn atomic_store(ptr: Ptr<Int>, val: Int) -> Int
     [ptr as Int >= 0][true]
 {
-    %p = inttoptr i64 %ptr to ptr;
-    store atomic i64 %val, ptr %p release, align 8
-    term %val;
-} fallback VolatileStore#(ptr, val);
+    term AtomicStore#(ptr, val);
+};
 
-inop! atomic_cas(ptr: Ptr<Int>, expected: Int, desired: Int) -> Int
+defn atomic_cas(ptr: Ptr<Int>, expected: Int, desired: Int) -> Int
     [ptr as Int >= 0][true]
 {
-    %p = inttoptr i64 %ptr to ptr;
-    %pair = cmpxchg ptr %p, i64 %expected, i64 %desired acquire acquire;
-    %success = extractvalue { i64, i1 } %pair, 1
-    term %success;
-} fallback 0;
+    term AtomicCas#(ptr, expected, desired);
+};
 
-inop! atomic_fetch_add(ptr: Ptr<Int>, val: Int) -> Int
+defn atomic_fetch_add(ptr: Ptr<Int>, val: Int) -> Int
     [ptr as Int >= 0][true]
 {
-    %p = inttoptr i64 %ptr to ptr;
-    %old = atomicrmw add ptr %p, i64 %val acquire
-    term %old;
-} fallback 0;
+    term AtomicAdd#(ptr, val);
+};
 
-inop! atomic_fetch_sub(ptr: Ptr<Int>, val: Int) -> Int
+defn atomic_fetch_sub(ptr: Ptr<Int>, val: Int) -> Int
     [ptr as Int >= 0][true]
 {
-    %p = inttoptr i64 %ptr to ptr;
-    %old = atomicrmw sub ptr %p, i64 %val acquire
-    term %old;
-} fallback 0;
+    term AtomicAdd#(ptr, -val);
+};
 
-inop! atomic_fetch_and(ptr: Ptr<Int>, val: Int) -> Int
+defn atomic_fetch_and(ptr: Ptr<Int>, val: Int) -> Int
     [ptr as Int >= 0][true]
 {
-    %p = inttoptr i64 %ptr to ptr;
-    %old = atomicrmw and ptr %p, i64 %val acquire
-    term %old;
-} fallback 0;
+    let old: Int = AtomicLoad#(ptr);
+    [AtomicCas#(ptr, old, old & val) == 1] { term old; };
+    term atomic_fetch_and(ptr, val);
+};
 
-inop! atomic_fetch_or(ptr: Ptr<Int>, val: Int) -> Int
+defn atomic_fetch_or(ptr: Ptr<Int>, val: Int) -> Int
     [ptr as Int >= 0][true]
 {
-    %p = inttoptr i64 %ptr to ptr;
-    %old = atomicrmw or ptr %p, i64 %val acquire
-    term %old;
-} fallback 0;
+    let old: Int = AtomicLoad#(ptr);
+    [AtomicCas#(ptr, old, old | val) == 1] { term old; };
+    term atomic_fetch_or(ptr, val);
+};
 
-inop! atomic_fetch_xor(ptr: Ptr<Int>, val: Int) -> Int
+defn atomic_fetch_xor(ptr: Ptr<Int>, val: Int) -> Int
     [ptr as Int >= 0][true]
 {
-    %p = inttoptr i64 %ptr to ptr;
-    %old = atomicrmw xor ptr %p, i64 %val acquire
-    term %old;
-} fallback 0;
+    let old: Int = AtomicLoad#(ptr);
+    [AtomicCas#(ptr, old, old ^ val) == 1] { term old; };
+    term atomic_fetch_xor(ptr, val);
+};

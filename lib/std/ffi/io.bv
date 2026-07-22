@@ -5,7 +5,7 @@
 // 2026-07-21: Return Int (not Void) to match C's int64_t return type.
 // LTO inlining requires the call site and definition signatures to match
 // (mismatched return types prevent LTO from inlining frgn functions).
-frgn __print_int(n: Int) -> Int from "std/brief_rt.bv";
-frgn __print_str(msg: String) -> Void from "std/brief_rt.bv";
-frgn __print_float(f: Float) -> Int from "std/brief_rt.bv";
-frgn __print_char(c: Int) -> Int from "std/brief_rt.bv";
+frgn __print_int(n: Int) -> Int as frgn__print_int from "link/brief_rt.c" fallback 0;
+frgn __print_str(msg: String) -> Void as frgn__print_str from "link/brief_rt.c" fallback;
+frgn __print_float(f: Float) -> Int as frgn__print_float from "link/brief_rt.c" fallback 0;
+frgn __print_char(c: Int) -> Int as frgn__print_char from "link/brief_rt.c" fallback 0;

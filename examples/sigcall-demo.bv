@@ -1,5 +1,5 @@
 // sigcall-demo.bv — Signature declarations and higher-order functions
-// Demonstrates: sig declarations, modifiers (#out, #inline, #export),
+// Demonstrates: sig declarations, modifiers (#out, #inline, export),
 // sig-as-type for higher-order functions, union/tuple return types
 
 // ===== SIMPLE SIGNATURE =====

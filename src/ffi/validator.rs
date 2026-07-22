@@ -33,10 +33,10 @@ pub fn validate_frgn_against_binding(
     binding: &ForeignBinding,
 ) -> Result<(), FfiError> {
     // Check name matches
-    if frgn.name != binding.name {
+    if frgn.name != binding.foreign_name {
         return Err(FfiError::ValidationError(format!(
             "Name mismatch: frgn '{}' vs binding '{}'",
-            frgn.name, binding.name
+            frgn.name, binding.foreign_name
         )));
     }
 
@@ -94,8 +94,8 @@ mod tests {
         };
 
         let binding = ForeignBinding {
-            name: "read_file".to_string(),
-            as_name: None,
+            foreign_name: "read_file".to_string(),
+            brief_name: None,
             from: FromSpec::Literal(PathBuf::from("std::fs::read_to_string")),
             target: crate::ast::ForeignTarget::Native,
             wasm_impl: None,
@@ -115,8 +115,8 @@ mod tests {
         };
 
         let binding2 = ForeignBinding {
-            name: "write_file".to_string(),
-            as_name: None,
+            foreign_name: "write_file".to_string(),
+            brief_name: None,
             from: FromSpec::Literal(PathBuf::from("test")),
             target: crate::ast::ForeignTarget::Native,
             wasm_impl: None,

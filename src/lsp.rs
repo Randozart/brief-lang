@@ -794,7 +794,7 @@ fn item_name(item: &TopLevel) -> String {
         TopLevel::Constant(c) => c.name.clone(),
         TopLevel::Struct(s) => s.name.clone(),
         TopLevel::Enum(e) => e.name.clone(),
-        TopLevel::ForeignBinding(fb) => fb.name.clone(),
+        TopLevel::ForeignBinding(fb) => fb.effective_brief_name().to_string(),
         TopLevel::Inop(i) => i.name.clone(),
         _ => "unnamed".to_string(),
     }

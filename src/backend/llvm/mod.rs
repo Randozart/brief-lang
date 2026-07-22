@@ -1767,7 +1767,7 @@ impl LlvmBackend {
                 }
                 TopLevel::ForeignBinding(fb) => {
                     let sig = crate::ast::ForeignSignature {
-                        name: fb.name.clone(),
+                        name: fb.foreign_name.clone(),
                         from: fb.from.clone(),
                         inputs: fb.inputs.clone(),
                         result_type: crate::ast::ResultType::Projection(fb.success_output.iter().map(|(_, t)| t.clone()).collect()),
@@ -1775,7 +1775,7 @@ impl LlvmBackend {
                         wasm_setup: fb.wasm_setup.clone(),
                         span: fb.span,
                     };
-                    self.ctx.frgn_map.insert(fb.name.clone(), sig);
+                    self.ctx.frgn_map.insert(fb.foreign_name.clone(), sig);
                 }
                 TopLevel::Inop(inop) => {
                     self.ctx.inop_decls.insert(inop.name.clone(), inop.clone());

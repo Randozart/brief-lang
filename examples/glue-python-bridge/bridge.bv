@@ -14,12 +14,12 @@ type Int <: Bits {
     alignment <~ 8;
 };
 
-#export
+export
 defn add(a: Int, b: Int) -> Int {
     term a + b;
 };
 
-#export
+export
 defn multiply(a: Int, b: Int) -> Int {
     term a * b;
 };

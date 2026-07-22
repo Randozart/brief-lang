@@ -98,7 +98,7 @@ pub fn resolve_single_frgn(
         return Ok(ResolvedFrgn::Unsupported(format!(
             "frgn '{}' has no file extension in its 'from' path. \
              Add a file extension so the compiler can determine the dispatch strategy",
-            fb.name
+            fb.effective_brief_name()
         )));
     }
 
@@ -110,7 +110,7 @@ pub fn resolve_single_frgn(
     // Inlineable means the backend can compile the source directly and
     // link the object code. Currently only .c/.cpp for LLVM backend.
     if backend == BackendKind::Llvm && matches!(ext, "c" | "cpp" | "cxx" | "rs") {
-        let symbol = fb.as_name.clone().unwrap_or_else(|| fb.name.clone());
+        let symbol = fb.foreign_name.clone();
         return Ok(ResolvedFrgn::Inline {
             symbol,
             compile_source: true,
@@ -132,7 +132,7 @@ pub fn resolve_single_frgn(
     // 2026-07-22: Native (Metropolitan) targets always inline since they
     // are already compiled. The backend calls them directly.
     if ext == "native" || ext == "o" || ext == "so" || ext == "a" {
-        let symbol = fb.as_name.clone().unwrap_or_else(|| fb.name.clone());
+        let symbol = fb.foreign_name.clone();
         return Ok(ResolvedFrgn::Inline {
             symbol,
             compile_source: false,
@@ -142,7 +142,7 @@ pub fn resolve_single_frgn(
     Ok(ResolvedFrgn::Unsupported(format!(
         "frgn '{}' from '{}': extension '.{}' is not supported by the {} backend. \
          Add a GLUE registry entry in lib/glue.toml or use a supported extension (.c, .rs, .py, .js, .mjs)",
-        fb.name,
+        fb.effective_brief_name(),
         ext,
         ext,
         match backend {
@@ -294,12 +294,14 @@ mod tests {
 
     #[test]
     fn test_resolve_single_frgn_inline_with_as() {
-        let fb = make_frgn_with_as("brief_name", "foreign_sym", "c");
+        // foreign_name = "c_symbol", brief_name = Some("brief_alias")
+        let fb = make_frgn_with_as("c_symbol", "brief_alias", "c");
         let targets = sample_glue_targets();
         let result = resolve_single_frgn(&fb, "c", &targets, BackendKind::Llvm).unwrap();
         match result {
             ResolvedFrgn::Inline { symbol, .. } => {
-                assert_eq!(symbol, "foreign_sym");
+                // Backend links against the C symbol, not the Brief alias
+                assert_eq!(symbol, "c_symbol");
             }
             other => panic!("Expected Inline, got {:?}", other),
         }

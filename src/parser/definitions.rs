@@ -67,20 +67,17 @@ impl<'a> Parser<'a> {
         }
     }
 
-    /// 2026-07-16: P3 — Parse `frgn` declaration.
-    /// Syntax: frgn name(params) -> Ret [as sym] from "path" [fallback <expr>];
-    ///         frgn name(params) -> Ret [as sym] from <name> [fallback <expr>];
-    ///         frgn name(params) -> Ret [as sym] from "path" target "c" [fallback <expr>];
-    /// 2026-07-22: Added `as <symbol>` and `fallback <expr>` clauses.
+    /// 2026-07-22: Parse `frgn` declaration (import model).
+    /// Syntax:
+    ///   frgn <foreign_symbol>(<params>) [-> <ret>] [as <brief_name>] from <source> [target "c"] [fallback <expr>];
+    ///   frgn <foreign_symbol>(<params>) [-> <ret>] [as <brief_name>] from <source> [target "c"] [fallback <fn>(<args>)];
+    ///   frgn <foreign_symbol>(<params>) [-> <ret>] [as <brief_name>] from <source> [target "c"] [fallback ;];
+    ///
+    /// `from` is required (provenance for the foreign module).
+    /// `as` is optional and comes before `from` (Brief name, different from the C symbol).
     fn parse_frgn_decl(&mut self) -> Result<ForeignBinding, SyntaxError> {
-        let name = self.expect_identifier()?;
-
-        // 2026-07-22: Parse optional `as <foreign_symbol>` — symbol rename, NOT a protocol hint.
-        let as_name = if self.eat_identifier("as") {
-            Some(self.expect_identifier()?)
-        } else {
-            None
-        };
+        // 2026-07-22: First name after `frgn` is the C/foreign symbol name.
+        let foreign_name = self.expect_identifier()?;
 
         self.expect(Token::LParen)?;
         let mut inputs = Vec::new();
@@ -99,11 +96,24 @@ impl<'a> Parser<'a> {
         } else {
             vec![]
         };
-        let from = if self.eat(&Token::From) {
-            self.parse_from_spec()?
+
+        // 2026-07-22: Parse optional `as <brief_name>` — Brief-side name, before `from`.
+        let brief_name = if self.eat_identifier("as") {
+            Some(self.expect_identifier()?)
         } else {
-            FromSpec::default()
+            None
         };
+
+        // 2026-07-22: `from` is REQUIRED — every frgn must declare provenance.
+        if !self.eat(&Token::From) {
+            let msg = format!(
+                "frgn '{}' requires `from <source>` — specify which foreign module provides this symbol",
+                foreign_name
+            );
+            return self.error_at_current(&msg);
+        }
+        let from = self.parse_from_spec()?;
+
         let mut target = ForeignTarget::C;
         if self.eat_identifier("target") {
             let target_str = self.expect_string()?;
@@ -151,8 +161,8 @@ impl<'a> Parser<'a> {
 
         self.expect(Token::Semicolon)?;
         Ok(ForeignBinding {
-            name,
-            as_name,
+            foreign_name,
+            brief_name,
             from,
             target,
             inputs,
@@ -1248,7 +1258,7 @@ mod tests {
     #[test]
     fn test_parse_frgn_literal_path() {
         let fb = parse_frgn(r#"frgn strlen(s: String) -> Int from "libc.so.6";"#).unwrap();
-        assert_eq!(fb.name, "strlen");
+        assert_eq!(fb.foreign_name, "strlen");
         assert_eq!(fb.inputs.len(), 1);
         assert_eq!(fb.inputs[0].0, "s");
         assert_eq!(fb.inputs[0].1, crate::ast::Type::string());
@@ -1264,7 +1274,7 @@ mod tests {
     #[test]
     fn test_parse_frgn_compiler_path() {
         let fb = parse_frgn(r#"frgn hash(data: Data) -> Int from <xxhash.c>;"#).unwrap();
-        assert_eq!(fb.name, "hash");
+        assert_eq!(fb.foreign_name, "hash");
         assert_eq!(fb.inputs.len(), 1);
         match &fb.from {
             crate::ast::FromSpec::CompilerRegistry(name) => {
@@ -1277,7 +1287,7 @@ mod tests {
     #[test]
     fn test_parse_frgn_no_return() {
         let fb = parse_frgn(r#"frgn print(s: String) from "libio.so";"#).unwrap();
-        assert_eq!(fb.name, "print");
+        assert_eq!(fb.foreign_name, "print");
         assert!(fb.success_output.is_empty());
     }
 

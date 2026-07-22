@@ -1,14 +1,14 @@
 // Standard HTTP Library
 // Foreign function declarations for WASM target
 
-frgn __http_get(url: String) -> Result<String, HttpError>;
-frgn __http_post(url: String, body: String) -> Result<String, HttpError>;
+frgn __http_get(url: String) -> Result<String, HttpError> as frgn__http_get from "link/brief_rt.c" fallback "";
+frgn __http_post(url: String, body: String) -> Result<String, HttpError> as frgn__http_post from "link/brief_rt.c" fallback "";
 defn http_get(url: String) -> Result<String, String> [url.starts_with("http")][term.is_ok() || term.is_err()] {
-    let body = __http_get(url);
+    let body = frgn__http_get(url);
     term Ok(body);
 };
 
 defn http_post(url: String, body: String) -> Result<String, String> [url.starts_with("http")][term.is_ok() || term.is_err()] {
-    let response = __http_post(url, body);
+    let response = frgn__http_post(url, body);
     term Ok(response);
 };

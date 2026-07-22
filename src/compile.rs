@@ -229,7 +229,7 @@ pub fn compile_source(file_path: &str, source: &str, opts: &BuildOptions) -> Res
         let dispatch = brief_compiler::analysis::frgn_dispatch::resolve_single_frgn(
             fb, &ext, &glue_targets, opts.backend,
         )?;
-        resolved_frgns.insert(fb.name.clone(), dispatch);
+        resolved_frgns.insert(fb.effective_brief_name().to_string(), dispatch);
     }
 
     // ── Layout optimization (frgn/export boundary) ─────────────────────

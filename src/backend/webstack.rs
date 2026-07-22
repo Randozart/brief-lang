@@ -347,9 +347,9 @@ impl WebstackGenerator {
                 }
                 TopLevel::ForeignBinding(fb) => {
                     self.ffi_bindings
-                        .insert(fb.name.clone(), fb.inputs.len());
+                        .insert(fb.effective_brief_name().to_string(), fb.inputs.len());
                     if let Some(impl_code) = &fb.wasm_impl {
-                        self.ffi_ts_impl.insert(fb.name.clone(), impl_code.clone());
+                        self.ffi_ts_impl.insert(fb.effective_brief_name().to_string(), impl_code.clone());
                     }
                     if let Some(setup_code) = &fb.wasm_setup {
                         self.ffi_ts_setups.insert(setup_code.clone());
