@@ -254,6 +254,7 @@ mod tests {
             calling_convention: "c_abi".to_string(),
             type_map: HashMap::new(),
             c_type_map: HashMap::new(),
+            conversions: HashMap::new(),
             templates: HashMap::new(),
         });
         map.insert("rust".to_string(), GlueTarget {
@@ -264,6 +265,7 @@ mod tests {
             calling_convention: "lto".to_string(),
             type_map: HashMap::new(),
             c_type_map: HashMap::new(),
+            conversions: HashMap::new(),
             templates: HashMap::new(),
         });
         map
