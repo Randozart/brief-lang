@@ -122,7 +122,11 @@ fn emit_definition(defn: &crate::ast::Definition, out: &mut String) -> Result<()
         })
         .unwrap_or_else(|| "void".into());
     writeln!(out, "define {} @{}({}) {{", ret_ty, defn.name, params.join(", ")).unwrap();
-    writeln!(out, "  ret {} 0", ret_ty).unwrap();
+    if ret_ty == "ptr" {
+        writeln!(out, "  ret ptr null").unwrap();
+    } else {
+        writeln!(out, "  ret {} 0", ret_ty).unwrap();
+    }
     writeln!(out, "}}").unwrap();
     Ok(())
 }
@@ -152,7 +156,11 @@ fn emit_export_wrapper(defn: &crate::ast::Definition, out: &mut String) -> Resul
         ret_ty, internal_name, 
         if params.is_empty() { String::new() } else { format!(", {}", params.join(", ")) }
     ).unwrap();
-    writeln!(out, "  ret {} 0", ret_ty).unwrap(); // stub body
+    if ret_ty == "ptr" {
+        writeln!(out, "  ret ptr null").unwrap(); // stub body
+    } else {
+        writeln!(out, "  ret {} 0", ret_ty).unwrap(); // stub body
+    }
     writeln!(out, "}}").unwrap();
     // Emit the outer wrapper with C-compatible signature (no %state)
     writeln!(out, "define {} @{}({}) #0 {{", ret_ty, export_name, params.join(", ")).unwrap();
@@ -165,7 +173,11 @@ fn emit_export_wrapper(defn: &crate::ast::Definition, out: &mut String) -> Resul
         ret_ty, internal_name,
         if call_args.is_empty() { String::new() } else { format!(", {}", call_args.join(", ")) }
     ).unwrap();
-    writeln!(out, "  ret {} %result", ret_ty).unwrap();
+    if ret_ty == "ptr" {
+        writeln!(out, "  ret ptr %result").unwrap();
+    } else {
+        writeln!(out, "  ret {} %result", ret_ty).unwrap();
+    }
     writeln!(out, "}}").unwrap();
     Ok(())
 }

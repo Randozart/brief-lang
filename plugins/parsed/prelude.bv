@@ -17,8 +17,6 @@ $(Parsed @ highest) {
             Import$("std/os/user.bv"),
             Import$("std/os/mem.bv"),
             Import$("std/os/atomic.bv"),
-            Import$("std/core/ptr.bv"),
-            Import$("std/core/string_builder.bv"),
             Import$("std/env.bv"),
             Import$("std/io.bv")
         );
@@ -35,8 +33,6 @@ $(Parsed @ highest) {
             Import$("std/os/user.bv"),
             Import$("std/os/mem.bv"),
             Import$("std/os/atomic.bv"),
-            Import$("std/core/ptr.bv"),
-            Import$("std/core/string_builder.bv"),
             Import$("std/env.bv"),
             Import$("std/io.bv")
         );
