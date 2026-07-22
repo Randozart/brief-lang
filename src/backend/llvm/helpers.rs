@@ -993,31 +993,17 @@ impl LlvmBackend {
             indent, result_ptr, result_i64
         )
         .ok();
-        self.emit_write_header(out, indent, &result_ptr, &total, "chp", "cba", "cdp", "cls");
-        self.emit_copy_data(
-            out,
-            indent,
-            &result_ptr,
-            &ha,
-            &la,
-            &a_clean,
-            "cad",
-            "cac",
-            "cds",
-            "cdo",
-        );
-        self.emit_copy_data(
-            out,
-            indent,
-            &result_ptr,
-            &hb,
-            &lb,
-            &b_clean,
-            "cbd",
-            "cbc",
-            "cdo_off",
-            "cdo2",
-        );
+        self.emit_write_header(out, indent, &result_ptr, &total, "chp", "cls");
+        // First data copy: dest = result + 8 (after length prefix)
+        let dest1 = self.fun.next_reg_with_prefix("cd1");
+        writeln!(out, "{}{} = getelementptr i8, ptr {}, i64 8", indent, dest1, result_ptr).ok();
+        self.emit_copy_data(out, indent, &dest1, &ha, &la, "cac", "cds");
+        // Second data copy: dest = result + 8 + la (after first string's data)
+        let dest2_off = self.fun.next_reg_with_prefix("cd2");
+        writeln!(out, "{}{} = add i64 8, {}", indent, dest2_off, la).ok();
+        let dest2 = self.fun.next_reg_with_prefix("cdr");
+        writeln!(out, "{}{} = getelementptr i8, ptr {}, i64 {}", indent, dest2, result_ptr, dest2_off).ok();
+        self.emit_copy_data(out, indent, &dest2, &hb, &lb, "cbc", "cdo");
         self.emit_null_terminate(out, indent, &result_ptr, &total, "cnt");
         self.emit_free_temporaries(out, indent, &a_boxed, &b_boxed, "cta", "cia", "ctb", "cib");
         self.emit_box_concat_result(out, indent, &result_ptr, "t")
@@ -1279,7 +1265,7 @@ impl LlvmBackend {
         let lp = self.fun.next_reg_with_prefix(gep_prefix);
         writeln!(
             out,
-            "{}{} = getelementptr i64, ptr {}, i64 1",
+            "{}{} = getelementptr i64, ptr {}, i64 0",
             indent, lp, header_ptr
         )
         .ok();
@@ -1302,7 +1288,7 @@ impl LlvmBackend {
         r
     }
 
-    /// Compute total allocation size: 16 (header) + total_chars + 1 (null).
+    /// Compute total allocation size: 8 (length prefix) + total_chars + 1 (null).
     fn compute_alloc_size(
         &mut self,
         out: &mut String,
@@ -1312,14 +1298,14 @@ impl LlvmBackend {
         alloc_prefix: &str,
     ) -> String {
         let hs = self.fun.next_reg_with_prefix(header_prefix);
-        writeln!(out, "{}{} = add i64 16, {}", indent, hs, total_chars).ok();
+        writeln!(out, "{}{} = add i64 8, {}", indent, hs, total_chars).ok();
         let as_ = self.fun.next_reg_with_prefix(alloc_prefix);
         writeln!(out, "{}{} = add i64 {}, 1", indent, as_, hs).ok();
         as_
     }
 
-    /// Write the capacity header (data pointer offset), length slot to a new
-    /// string allocation.
+    /// Write the length + data to a new string allocation.
+    /// Format: [i64 length][chars\0] — same as C heap string format.
     fn emit_write_header(
         &mut self,
         out: &mut String,
@@ -1327,21 +1313,14 @@ impl LlvmBackend {
         result: &str,
         total: &str,
         hp_prefix: &str,
-        base_prefix: &str,
-        dp_prefix: &str,
         len_prefix: &str,
     ) {
         let hp = self.fun.next_reg_with_prefix(hp_prefix);
         writeln!(out, "{}{} = bitcast ptr {} to ptr", indent, hp, result).ok();
-        let base = self.fun.next_reg_with_prefix(base_prefix);
-        writeln!(out, "{}{} = ptrtoint ptr {} to i64", indent, base, result).ok();
-        let dp = self.fun.next_reg_with_prefix(dp_prefix);
-        writeln!(out, "{}{} = add i64 {}, 16", indent, dp, base).ok();
-        writeln!(out, "{}store i64 {}, ptr {}, align 8", indent, dp, hp).ok();
         let ls = self.fun.next_reg_with_prefix(len_prefix);
         writeln!(
             out,
-            "{}{} = getelementptr i64, ptr {}, i64 1",
+            "{}{} = getelementptr i64, ptr {}, i64 0",
             indent, ls, hp
         )
         .ok();
@@ -1349,37 +1328,39 @@ impl LlvmBackend {
     }
 
     /// Copy string data from one allocation to another via memcpy.
+    /// dest_ptr is the pre-computed destination pointer (e.g., result+8, result+8+la).
     fn emit_copy_data(
         &mut self,
         out: &mut String,
         indent: &str,
-        result: &str,
+        dest_ptr: &str,
         header: &str,
         length: &str,
-        clean: &str,
-        dp_prefix: &str,
-        chars_prefix: &str,
+        src_prefix: &str,
         dest_prefix: &str,
-        dest_off_prefix: &str,
     ) {
-        let dp = self.fun.next_reg_with_prefix(dp_prefix);
-        writeln!(out, "{}{} = load i64, ptr {}, align 8", indent, dp, header).ok();
-        let chars = self.fun.next_reg_with_prefix(chars_prefix);
-        self.emit_inttoptr(out, indent, &chars, &dp);
+        // Source data is at header + 8 (skip length prefix)
+        let src = self.fun.next_reg_with_prefix(src_prefix);
+        writeln!(
+            out,
+            "{}{} = getelementptr i8, ptr {}, i64 8",
+            indent, src, header
+        )
+        .ok();
+        // Destination is the provided dest_ptr (caller computes the offset)
         let dest = self.fun.next_reg_with_prefix(dest_prefix);
         writeln!(
             out,
-            "{}{} = getelementptr i8, ptr {}, i64 16",
-            indent, dest, result
+            "{}{} = bitcast ptr {} to ptr",
+            indent, dest, dest_ptr
         )
         .ok();
         writeln!(
             out,
             "{}call void @llvm.memcpy.p0i8.p0i8.i64(i8* {}, ptr {}, i64 {}, i1 false)",
-            indent, dest, chars, length
+            indent, dest, src, length
         )
         .ok();
-        let _ = dest_off_prefix; // keep for API compatibility
     }
 
     /// Write a null terminator at the end of the string data.
@@ -1392,10 +1373,12 @@ impl LlvmBackend {
         prefix: &str,
     ) {
         let nt = self.fun.next_reg_with_prefix(prefix);
+        let nt_off = self.fun.next_reg_with_prefix("no");
+        writeln!(out, "{}{} = add i64 8, {}", indent, nt_off, total).ok();
         writeln!(
             out,
             "{}{} = getelementptr i8, ptr {}, i64 {}",
-            indent, nt, result, total
+            indent, nt, result, nt_off
         )
         .ok();
         writeln!(out, "{}store i8 0, ptr {}, align 1", indent, nt).ok();

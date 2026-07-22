@@ -52,6 +52,10 @@ typedef int32_t brief_int;
 // (not SSO, not a small integer, starts with printable ASCII).
 // Returns a heap-allocated string; caller must free(). NULL on error.
 char* brief_str_to_c(int64_t handle) {
+    // 2026-07-22: Strip tag bits (bottom 2 bits) — they mark temporary
+    // flags (bit 0 = SSO inline, bit 1 = temporary concat result).
+    // After stripping, we have the raw data pointer.
+    int64_t ptr = handle & ~3ULL;
     if (handle & 1) {
         // SSO string — inline data packed at bits >= 3
         // The LLVM SSO encoding: handle0 = (raw_data << 3) | 1
@@ -70,29 +74,29 @@ char* brief_str_to_c(int64_t handle) {
         c_str[len] = '\0';
         return c_str;
     }
-    // Check for C string pointer: handle looks like a valid pointer
+    // Check for C string pointer: ptr looks like a valid pointer
     // (not zero, not a small integer, first byte is printable ASCII).
-    if (handle > 4096 && handle < 0x800000000000) {
-        uint8_t first = *(uint8_t*)(uintptr_t)handle;
+    if (ptr > 4096 && ptr < 0x800000000000) {
+        uint8_t first = *(uint8_t*)(uintptr_t)ptr;
         if (first >= 32 && first < 127) {
             // Looks like a C string — strlen it
-            int64_t len = (int64_t)strlen((const char*)(uintptr_t)handle);
+            int64_t len = (int64_t)strlen((const char*)(uintptr_t)ptr);
             if (len > 0 && len < 4096) {
                 char* c_str = malloc((size_t)(len + 1));
                 if (!c_str) return NULL;
-                memcpy(c_str, (void*)(uintptr_t)handle, (size_t)len);
+                memcpy(c_str, (void*)(uintptr_t)ptr, (size_t)len);
                 c_str[len] = '\0';
                 return c_str;
             }
         }
     }
-    // Heap Brief string: handle is a pointer to [8-byte length][data].
-    if (handle == 0) return NULL;
-    int64_t len = *(int64_t*)(uintptr_t)handle;
+    // Heap Brief string: ptr is a pointer to [8-byte length][data].
+    if (ptr == 0) return NULL;
+    int64_t len = *(int64_t*)(uintptr_t)ptr;
     if (len < 0 || len > 1024 * 1024 * 1024) return NULL;
     char* c_str = malloc((size_t)(len + 1));
     if (!c_str) return NULL;
-    if (len > 0) memcpy(c_str, (void*)(uintptr_t)(handle + 8), (size_t)len);
+    if (len > 0) memcpy(c_str, (void*)(uintptr_t)(ptr + 8), (size_t)len);
     c_str[len] = '\0';
     return c_str;
 }

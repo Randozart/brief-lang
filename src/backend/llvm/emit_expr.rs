@@ -1017,13 +1017,15 @@ impl LlvmBackend {
                 self.ctx.string_constants.len() - 1
             });
         let g = format!("@str.{}", si);
-        // bitcast the struct to a plain ptr, then GEP to the data bytes
-        let bitcast = self.fun.gen_reg();
-        writeln!(out, "{}{} = bitcast <{{ i64, i64, [{} x i8] }}>* {} to ptr", 
-            indent, bitcast, bytes.len() + 1, g).ok();
-        writeln!(out, "{}{} = getelementptr inbounds i8, ptr {}, i64 16", indent, v, bitcast).ok();
+        // 2026-07-22: The handle is a pointer to the start of the struct
+        // {i64 data_ptr, i64 length, [N x i8] chars}, so that handle[1]
+        // (getelementptr i64, ptr %handle, i64 1) reads the length field.
+        // Do NOT add offset — emit_load_length expects the struct pointer.
+        let str_p = self.fun.gen_reg();
+        writeln!(out, "{}{} = bitcast <{{ i64, [{} x i8] }}>* {} to ptr",
+            indent, str_p, bytes.len() + 1, g).ok();
         let p2i = self.fun.gen_reg();
-        writeln!(out, "{}{} = ptrtoint ptr {} to i64", indent, p2i, v).ok();
+        writeln!(out, "{}{} = ptrtoint ptr {} to i64", indent, p2i, str_p).ok();
         TypedRegister {
             name: p2i,
             ty: Type::int(),

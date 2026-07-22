@@ -843,7 +843,7 @@ impl LlvmBackend {
                 let si = self.ctx.string_constants.iter().position(|x| x.as_str() == s_str).unwrap_or(0);
                 let g = format!("@str.{}", si);
                 let str_p = field_reg("s");
-                writeln!(out, "{}{} = bitcast <{{ i64, i64, [{} x i8] }}>* {} to ptr", indent, str_p, s.len() + 1, g).ok();
+                writeln!(out, "{}{} = bitcast <{{ i64, [{} x i8] }}>* {} to ptr", indent, str_p, s.len() + 1, g).ok();
                 if tag_strings {
                     // Tag with bit 0 = 1 to mark as static (not heap-allocated)
                     let tag_p = field_reg("t");

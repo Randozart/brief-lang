@@ -156,7 +156,6 @@ fn test_bits_static_via_ffi() {
 }
 
 #[test]
-#[ignore]
 fn test_pp_bits_via_ffi() {
     let (ref lib, state) = load_bridge();
     unsafe {

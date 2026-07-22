@@ -2226,17 +2226,13 @@ impl LlvmBackend {
         writeln!(out, "; %State is allocated on the stack in main() as %state = alloca %State").ok();
         writeln!(out).ok();
 
-        // Emit string constants as global Brief headers
-        // Each is a 2-slot header: { data_ptr (ptrtoint of slot 2), length, [chars] }
-        // This makes ALL string values in the IR uniform — same format as heap-allocated strings.
+        // Emit string constants in C-compatible format: [i64 length][chars\0]
+        // The handle points to the start, so handle[0] is the length.
         for (si, s) in self.ctx.string_constants.iter().enumerate() {
             let escaped = escape_llvm_string(s);
             let len = s.len();
-            writeln!(out, "@str.{} = private unnamed_addr constant <{{ i64, i64, [{} x i8] }}> <{{", si, len + 1).ok();
-            writeln!(out, "  i64 ptrtoint (i8* getelementptr inbounds (<{{ i64, i64, [{} x i8] }}>, <{{ i64, i64, [{} x i8] }}>* @str.{}, i64 0, i32 2) to i64),", len + 1, len + 1, si).ok();
-            writeln!(out, "  i64 {},", len).ok();
-            writeln!(out, "  [{} x i8] c\"{}\\00\"", len + 1, escaped).ok();
-            writeln!(out, "}}>, align 8").ok();
+            writeln!(out, "@str.{} = private unnamed_addr constant <{{ i64, [{} x i8] }}> <{{ i64 {}, [{} x i8] c\"{}\\00\" }}>, align 8",
+                si, len + 1, len, len + 1, escaped).ok();
         }
         if !self.ctx.string_constants.is_empty() { writeln!(out).ok(); }
 
