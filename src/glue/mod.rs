@@ -21,6 +21,7 @@
 // See docs/plans/2026-06-22-glue-architecture.md for full design.
 // See docs/plans/2026-06-23-glue-implementation-status.md for status.
 
+pub mod config;
 pub mod dbvl_reader;
 pub mod dbvs_validator;
 pub mod export;

@@ -1,0 +1,17 @@
+// 2026-07-22: Rust type declarations for Brief's type universe.
+// Rust uses LLVM LTO for interop — no C ABI boundary for scalars.
+// Types are defined for documentation and meld compatibility.
+
+type RstI64 <: Bits {
+    bytes <~ 8;
+    alignment <~ 8;
+    op CastTo(#Int) = identity(#L);
+    op CastFrom(#Int) = identity(#L);
+};
+
+type RstF64 <: Bits {
+    bytes <~ 8;
+    alignment <~ 8;
+    op CastTo(#Float<ieee754>) = identity(#L);
+    op CastFrom(#Float<ieee754>) = identity(#L);
+};
