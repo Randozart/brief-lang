@@ -467,33 +467,71 @@ pub fn run_export_cli(file_path: &str, language: &str, out_dir: &str) -> Result<
     }
     println!("  Object: {}", o_path.display());
 
-    // 2026-07-22: Step 7 — generate native wrapper source files
-    match language {
-        "python" => {
-            let py_content = generate_python_wrapper(&info.exports, bridge_name);
-            let py_path = output_dir.join("__init__.py");
-            std::fs::write(&py_path, &py_content)
-                .map_err(|e| format!("Failed to write '{}': {}", py_path.display(), e))?;
-            println!("  Python wrapper: {}", py_path.display());
+    // 2026-07-22: Step 7 — generate language wrappers from TOML templates.
+    // No hardcoded generators — every language is driven by lib/glue.toml.
+    let mut template_vars: HashMap<String, String> = HashMap::new();
+    template_vars.insert("bridge_name".to_string(), bridge_name.to_string());
+    template_vars.insert("s_init".to_string(), String::new());
+    template_vars.insert("s_param".to_string(), String::new());
+
+    // Render all exports + FFI declarations
+    let fn_template = target.templates.get("fn_template");
+    let ffi_template = target.templates.get("ffi_template");
+    let mut exports_buf = String::new();
+    let mut ffi_buf = String::new();
+
+    for (i, export) in info.exports.iter().enumerate() {
+        if i > 0 { exports_buf.push('\n'); }
+        if i > 0 { ffi_buf.push('\n'); }
+
+        // Build per-function variables
+        let mut fn_vars: HashMap<String, String> = HashMap::new();
+        fn_vars.insert("name".to_string(), export.name.clone());
+        fn_vars.insert("return".to_string(), map_type(&export.return_type, &target.type_map));
+        fn_vars.insert("c_return".to_string(), map_type(&export.return_type, &target.c_type_map));
+
+        // Build parameter lists
+        let params: Vec<String> = export.params.iter()
+            .map(|(name, ty)| format!("{}: {}", name, map_type(ty, &target.type_map)))
+            .collect();
+        let ffi_params: Vec<String> = export.params.iter()
+            .map(|(name, ty)| format!("{}: {}", name, map_type(ty, &target.c_type_map)))
+            .collect();
+        let args: Vec<String> = export.params.iter()
+            .map(|(name, _)| name.clone())
+            .collect();
+
+        fn_vars.insert("params".to_string(), params.join(", "));
+        fn_vars.insert("ffi_params".to_string(), ffi_params.join(", "));
+        fn_vars.insert("args".to_string(), args.join(", "));
+
+        if let Some(ft) = fn_template {
+            let rendered = render_template(ft, &fn_vars);
+            exports_buf.push_str(&rendered);
         }
-        "rust" => {
-            let files = generate_rust_crate_files(&info.exports, bridge_name);
-            for (filename, content) in &files {
-                let file_path = output_dir.join(filename);
-                if let Some(parent) = file_path.parent() {
-                    std::fs::create_dir_all(parent)
-                        .map_err(|e| format!("Failed to create dir '{}': {}", parent.display(), e))?;
-                }
-                std::fs::write(&file_path, content)
-                    .map_err(|e| format!("Failed to write '{}': {}", file_path.display(), e))?;
-            }
-            println!("  Rust crate: {}/Cargo.toml", output_dir.display());
+        if let Some(ffit) = ffi_template {
+            let rendered = render_template(ffit, &fn_vars);
+            ffi_buf.push_str(&rendered);
         }
-        _ => {
-            // 2026-07-22: Language wrapper generators are phase-in.
-            // Currently supported: python, rust.
-            println!("  Wrapper generation for '{}' not yet implemented; skipping.", language);
+    }
+
+    template_vars.insert("exports".to_string(), exports_buf);
+    template_vars.insert("ffi_decls".to_string(), ffi_buf);
+
+    // Write each file template
+    for (filename, template) in &target.templates {
+        if filename == "fn_template" || filename == "ffi_template" {
+            continue;
         }
+        let rendered = render_template(template, &template_vars);
+        let output_path = output_dir.join(filename);
+        if let Some(parent) = output_path.parent() {
+            std::fs::create_dir_all(parent)
+                .map_err(|e| format!("Failed to create dir '{}': {}", parent.display(), e))?;
+        }
+        std::fs::write(&output_path, &rendered)
+            .map_err(|e| format!("Failed to write '{}': {}", output_path.display(), e))?;
+        println!("  Written: {}", output_path.display());
     }
 
     // 2026-07-22: Step 8 — write bridge-exports.dbvl metadata
@@ -527,170 +565,36 @@ pub fn run_export_cli(file_path: &str, language: &str, out_dir: &str) -> Result<
     Ok(())
 }
 
-/// Generate Python ctypes wrapper for a GLUE bridge.
+/// Map a Brief type to a language type using the given type_map.
+fn map_type(ty: &str, type_map: &HashMap<String, String>) -> String {
+    type_map.get(ty).cloned().unwrap_or_else(|| ty.to_string())
+}
+
+/// Simple mustache-like template substitution.
 ///
-/// 2026-07-22: Produces an `__init__.py` that loads `bridge.so` via
-/// ctypes.CDLL and wraps each exported function with proper argtypes/restype.
-fn generate_python_wrapper(exports: &[ExportDecl], bridge_name: &str) -> String {
-    let mut out = String::new();
-    out.push_str(&format!(
-        r#""""GLUE bridge for {} — auto-generated."
-import ctypes
-import os
-
-_lib = ctypes.CDLL(os.path.join(os.path.dirname(__file__), "bridge.so"))
-
-def _init_state():
-    _lib.__brief_init_state.argtypes = []
-    _lib.__brief_init_state.restype = ctypes.c_void_p
-    return _lib.__brief_init_state()
-
-_STATE = _init_state()
-
-"#, bridge_name));
-
-    for e in exports {
-        let c_params: Vec<String> = e.params.iter()
-            .map(|(_, ty)| match ty.as_str() {
-                "Int" => "ctypes.c_int64".to_string(),
-                "Float" => "ctypes.c_double".to_string(),
-                "Bool" => "ctypes.c_bool".to_string(),
-                "Char" => "ctypes.c_char".to_string(),
-                "String" | "Data" => "ctypes.c_void_p".to_string(),
-                _ => "ctypes.c_void_p".to_string(),
-            })
-            .collect();
-        let c_return = match e.return_type.as_str() {
-            "Int" => "ctypes.c_int64".to_string(),
-            "Float" => "ctypes.c_double".to_string(),
-            "Bool" => "ctypes.c_bool".to_string(),
-            "Char" => "ctypes.c_char".to_string(),
-            "Void" => "None".to_string(),
-            _ => "ctypes.c_void_p".to_string(),
-        };
-
-        let params_str = e.params.iter()
-            .map(|(name, _)| name.clone())
-            .collect::<Vec<_>>()
-            .join(", ");
-
-        out.push_str(&format!(
-            r#"def {}({}):
-    _lib.{}.argtypes = [{}]
-    _lib.{}.restype = {}
-    return _lib.{}(_STATE, {})
-
-"#,
-            e.name, params_str,
-            e.name, c_params.join(", "),
-            e.name, c_return,
-            e.name, if params_str.is_empty() { "".to_string() } else { format!(", {}", params_str) },
-        ));
+/// Replaces `{{variable}}` with values from `vars`.
+/// No blocks, no loops — just single variable substitution.
+/// Per-function repetition is handled by the caller (see `run_export_cli`).
+fn render_template(template: &str, vars: &HashMap<String, String>) -> String {
+    let mut result = String::new();
+    let mut rest = template;
+    while let Some(start) = rest.find("{{") {
+        // Push everything before the `{{`
+        result.push_str(&rest[..start]);
+        let after_open = &rest[start + 2..];
+        if let Some(end) = after_open.find("}}") {
+            let var_name = &after_open[..end];
+            let value = vars.get(var_name).map(|s| s.as_str()).unwrap_or("");
+            result.push_str(value);
+            rest = &after_open[end + 2..];
+        } else {
+            // Unclosed `{{` — push rest as-is
+            result.push_str(&rest[start..]);
+            break;
+        }
     }
-    out
-}
-
-/// Generate Rust crate files for a GLUE bridge.
-///
-/// 2026-07-22: Produces Cargo.toml, build.rs, src/lib.rs, and src/ffi.rs
-/// for integrating with Rust via extern "C" wrappers.
-fn generate_rust_crate_files(exports: &[ExportDecl], bridge_name: &str) -> std::collections::HashMap<String, String> {
-    let mut files = std::collections::HashMap::new();
-
-    // Cargo.toml
-    files.insert("Cargo.toml".to_string(), format!(
-        r#"[package]
-name = "{}"
-version = "0.1.0"
-edition = "2021"
-
-[build-dependencies]
-"#, bridge_name));
-
-    // build.rs
-    files.insert("build.rs".to_string(), format!(
-        r#"// Auto-generated build script for GLUE bridge '{}'
-fn main() {{
-    println!("cargo:rustc-link-search=.");
-    println!("cargo:rustc-link-lib=bridge");
-}}
-"#, bridge_name));
-
-    // src/lib.rs
-    let mut lib_rs = format!(
-        r#"// GLUE bridge for '{}' — auto-generated.
-mod ffi;
-"#, bridge_name);
-
-    for e in exports {
-        let rust_params: Vec<String> = e.params.iter()
-            .map(|(name, ty)| format!("{}: {}", name, c_type_to_rust(ty)))
-            .collect();
-        let rust_return = c_type_to_rust(&e.return_type);
-        lib_rs.push_str(&format!(
-            r#"
-pub fn {}({}) -> {} {{
-    unsafe {{ ffi::{}({}) }}
-}}
-"#,
-            e.name, rust_params.join(", "), rust_return,
-            e.name,
-            e.params.iter().map(|(name, _)| name.clone()).collect::<Vec<_>>().join(", "),
-        ));
-    }
-    files.insert("src/lib.rs".to_string(), lib_rs);
-
-    // src/ffi.rs
-    let mut ffi_rs = String::from(
-        r#"// FFI declarations — auto-generated.
-#![allow(dead_code)]
-use std::ffi::c_void;
-
-extern "C" {
-    fn __brief_init_state() -> *mut c_void;
-"#);
-    for e in exports {
-        let c_params: Vec<String> = e.params.iter()
-            .map(|(_, ty)| rust_type_to_c(ty).to_string())
-            .collect();
-        let c_return = rust_type_to_c(&e.return_type);
-        ffi_rs.push_str(&format!(
-            "    fn {}(state: *mut c_void{}) -> {};\n",
-            e.name,
-            if c_params.is_empty() { "".to_string() } else { format!(", {}", c_params.join(", ")) },
-            c_return,
-        ));
-    }
-    ffi_rs.push_str("}\n");
-    files.insert("src/ffi.rs".to_string(), ffi_rs);
-
-    files
-}
-
-/// Map a C type name to Rust type for generated wrapper code.
-fn c_type_to_rust(ty: &str) -> &str {
-    match ty {
-        "Int" | "i64" | "int64_t" => "i64",
-        "Float" | "f64" | "double" => "f64",
-        "Bool" | "bool" => "bool",
-        "Char" | "char" => "u8",
-        "String" | "Data" | "cstring" | "c_void" => "*const u8",
-        "Void" => "()",
-        _ => "i64",
-    }
-}
-
-/// Map a Brief type to extern "C" FFI type for Rust.
-fn rust_type_to_c(ty: &str) -> &str {
-    match ty {
-        "Int" | "i64" | "int64_t" => "i64",
-        "Float" | "f64" | "double" => "f64",
-        "Bool" | "bool" => "bool",
-        "Char" | "char" => "u8",
-        "String" | "Data" | "cstring" | "c_void" => "*const u8",
-        "Void" => "()",
-        _ => "i64",
-    }
+    result.push_str(rest);
+    result
 }
 
 #[cfg(test)]

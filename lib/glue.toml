@@ -3,10 +3,26 @@
 # project-level override via --glue-config <path>.
 #
 # Each section declares:
-#   types_module    — .bv file declaring foreign type representations
-#   extension       — native source file extension
-#   bridge_kind     — how to call into this language from compiled Brief
-#   calling_convention — ABI at the boundary
+#   types_module       — .bv file declaring foreign type representations
+#   extension          — native source file extension
+#   bridge_kind        — how to call into this language from compiled Brief
+#   calling_convention — ABI at the boundary ("lto" for LLVM link, "c_abi" for FFI)
+#   type_map           — Brief type → language-native wrapper type
+#   c_type_map         — Brief type → C ABI type for FFI declarations
+#   templates          — Output file paths and their content ({{mustache}} substitution)
+#
+# Template variables:
+#   {{bridge_name}}    — Name of the bridge
+#   {{exports}}        — Replaced with per-function safe wrapper code
+#   {{ffi_decls}}      — Replaced with per-function FFI declarations
+#   {{name}}           — Function name
+#   {{params}}         — Parameter list ("name: Type, ...") using type_map
+#   {{ffi_params}}     — FFI parameter list ("state, name: CType, ...") using c_type_map
+#   {{args}}           — Argument names only ("name, ...")
+#   {{return}}         — Return type using type_map
+#   {{c_return}}       — Return type using c_type_map
+#   {{s_init}}         — State initialization code (if needed)
+#   {{s_param}}        — State parameter ("state: *mut c_void" for C ABI, "" for LTO)
 
 [python]
 types_module = "glue/python/types.bv"
@@ -14,11 +30,42 @@ extension = "py"
 bridge_kind = "native_module"
 calling_convention = "c_abi"
 
-[python.c_type_map]
-Int = "int64_t"
-Float = "double"
+[python.type_map]
+Int = "int"
+Float = "float"
 Bool = "bool"
-String = "cstring"
+String = "str"
+Data = "bytes"
+
+[python.c_type_map]
+Int = "ctypes.c_int64"
+Float = "ctypes.c_double"
+Bool = "ctypes.c_bool"
+String = "ctypes.c_void_p"
+Data = "ctypes.c_void_p"
+
+[python.templates]
+"__init__.py" = """
+\"\"\"GLUE bridge for {{bridge_name}} — auto-generated.\"\"\"
+import ctypes
+import os
+
+_lib = ctypes.CDLL(os.path.join(os.path.dirname(__file__), "bridge.so"))
+
+def _init_state():
+    _lib.__brief_init_state.argtypes = []
+    _lib.__brief_init_state.restype = ctypes.c_void_p
+    return _lib.__brief_init_state()
+
+_STATE = _init_state()
+
+{{exports}}
+"""
+"fn_template" = """def {{name}}({{params}}):
+    _lib.{{name}}.argtypes = [{{ffi_params}}]
+    _lib.{{name}}.restype = {{c_return}}
+    return _lib.{{name}}({{s_param}}{{args}})
+"""
 
 [node]
 types_module = "glue/node/types.bv"
@@ -26,14 +73,99 @@ extension = "mjs"
 bridge_kind = "esm_module"
 calling_convention = "c_abi"
 
+[node.type_map]
+Int = "bigint"
+Float = "number"
+Bool = "boolean"
+String = "string"
+Data = "Uint8Array"
+
 [node.c_type_map]
-Int = "int64_t"
+Int = "i64"
 Float = "double"
 Bool = "bool"
 String = "cstring"
+Data = "cstring"
+
+[node.templates]
+"index.mjs" = """
+// GLUE bridge for {{bridge_name}} — auto-generated.
+import { createRequire } from 'module';
+const require = createRequire(import.meta.url);
+const lib = require('./bridge.so');
+
+let _state = lib.__brief_init_state();
+
+{{exports}}
+"""
+"fn_template" = """
+export function {{name}}({{params}}) {
+    return lib.{{name}}({{s_param}}{{args}});
+}
+"""
 
 [rust]
 types_module = "glue/rust/types.bv"
 extension = "rs"
 bridge_kind = "extern_c_crate"
 calling_convention = "lto"
+
+[rust.type_map]
+Int = "i64"
+Float = "f64"
+Bool = "i32"
+String = "i64"
+Data = "i64"
+
+# LTO path: types cross as i64 (Brief ABI). Rust links the .ll directly,
+# LLVM inlines across the boundary at LTO time. No C ABI conversion.
+[rust.c_type_map]
+Int = "i64"
+Float = "double"
+Bool = "i32"
+String = "i64"
+Data = "i64"
+
+[rust.templates]
+"Cargo.toml" = """
+[package]
+name = "{{bridge_name}}"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+crate-type = ["staticlib", "lib"]
+
+[dependencies]
+"""
+
+"build.rs" = """
+fn main() {
+    println!("cargo:rustc-link-search={}", std::env::var("OUT_DIR").unwrap());
+    println!("cargo:rustc-link-lib={{bridge_name}}");
+}
+"""
+
+"src/lib.rs" = """
+// GLUE bridge for {{bridge_name}} — auto-generated.
+#![allow(dead_code)]
+
+mod ffi;
+
+{{exports}}
+"""
+
+"src/ffi.rs" = """
+// FFI declarations — auto-generated.
+#![allow(dead_code)]
+use std::ffi::c_void;
+
+extern "C" {
+{{ffi_decls}}
+}
+"""
+"fn_template" = """pub fn {{name}}({{params}}) -> {{return}} {
+    unsafe { ffi::{{name}}({{args}}) }
+}
+"""
+"ffi_template" = """    pub fn {{name}}({{ffi_params}}) -> {{c_return}};"""

@@ -252,7 +252,9 @@ mod tests {
             extension: "py".to_string(),
             bridge_kind: "native_module".to_string(),
             calling_convention: "c_abi".to_string(),
+            type_map: HashMap::new(),
             c_type_map: HashMap::new(),
+            templates: HashMap::new(),
         });
         map.insert("rust".to_string(), GlueTarget {
             language: "rust".to_string(),
@@ -260,7 +262,9 @@ mod tests {
             extension: "rs".to_string(),
             bridge_kind: "extern_c_crate".to_string(),
             calling_convention: "lto".to_string(),
+            type_map: HashMap::new(),
             c_type_map: HashMap::new(),
+            templates: HashMap::new(),
         });
         map
     }

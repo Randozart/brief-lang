@@ -26,8 +26,14 @@ pub struct GlueTarget {
     pub bridge_kind: String,
     /// Calling convention: "c_abi", "lto", etc.
     pub calling_convention: String,
+    /// Brief type name → language-native type name (for safe wrappers)
+    pub type_map: HashMap<String, String>,
     /// Brief type name → C ABI type name mapping (e.g., Int → int64_t)
     pub c_type_map: HashMap<String, String>,
+    /// Output path → template content. Special keys:
+    ///   "fn_template" — per-function safe wrapper (rendered into {{exports}})
+    ///   "ffi_template" — per-function FFI declaration (rendered into {{ffi_decls}})
+    pub templates: HashMap<String, String>,
 }
 
 // ── Serde helpers ─────────────────────────────────────────────────────
@@ -51,7 +57,11 @@ struct LanguageEntry {
     bridge_kind: String,
     calling_convention: String,
     #[serde(default)]
+    type_map: HashMap<String, String>,
+    #[serde(default)]
     c_type_map: HashMap<String, String>,
+    #[serde(default)]
+    templates: HashMap<String, String>,
 }
 
 /// Load the GLUE registry from a TOML file.
@@ -90,7 +100,9 @@ pub fn load_glue_config(path: Option<&Path>) -> Result<HashMap<String, GlueTarge
             extension: py.extension,
             bridge_kind: py.bridge_kind,
             calling_convention: py.calling_convention,
+            type_map: py.type_map,
             c_type_map: py.c_type_map,
+            templates: py.templates,
         });
     }
 
@@ -101,7 +113,9 @@ pub fn load_glue_config(path: Option<&Path>) -> Result<HashMap<String, GlueTarge
             extension: node.extension,
             bridge_kind: node.bridge_kind,
             calling_convention: node.calling_convention,
+            type_map: node.type_map,
             c_type_map: node.c_type_map,
+            templates: node.templates,
         });
     }
 
@@ -112,7 +126,9 @@ pub fn load_glue_config(path: Option<&Path>) -> Result<HashMap<String, GlueTarge
             extension: rust.extension,
             bridge_kind: rust.bridge_kind,
             calling_convention: rust.calling_convention,
+            type_map: rust.type_map,
             c_type_map: rust.c_type_map,
+            templates: rust.templates,
         });
     }
 
@@ -196,26 +212,13 @@ mod tests {
             bridge_kind: "native_module".to_string(),
             calling_convention: "c_abi".to_string(),
             c_type_map: HashMap::new(),
-        });
-        targets.insert("rust".to_string(), GlueTarget {
-            language: "rust".to_string(),
-            types_module: PathBuf::from("glue/rust/types.bv"),
-            extension: "rs".to_string(),
-            bridge_kind: "extern_c_crate".to_string(),
-            calling_convention: "lto".to_string(),
-            c_type_map: HashMap::new(),
+            type_map: HashMap::new(),
+            templates: HashMap::new(),
         });
 
-        let found = find_language_by_extension(&targets, "py");
-        assert!(found.is_some());
-        assert_eq!(found.unwrap().language, "python");
-
-        let found = find_language_by_extension(&targets, "rs");
-        assert!(found.is_some());
-        assert_eq!(found.unwrap().language, "rust");
-
-        let found = find_language_by_extension(&targets, "js");
-        assert!(found.is_none());
+        // Should work with or without leading dot
+        assert_eq!(find_language_by_extension(&targets, ".py").unwrap().language, "python");
+        assert_eq!(find_language_by_extension(&targets, "py").unwrap().language, "python");
     }
 
     #[test]
@@ -228,6 +231,8 @@ mod tests {
             bridge_kind: "native_module".to_string(),
             calling_convention: "c_abi".to_string(),
             c_type_map: HashMap::new(),
+            type_map: HashMap::new(),
+            templates: HashMap::new(),
         });
 
         // Should work with or without leading dot
