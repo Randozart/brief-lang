@@ -65,13 +65,12 @@ pub fn optimize_layouts(
 
         // 2026-07-22: Only optimize bridge-path frgns (GLUE-mediated calls).
         // Inline frgns and unsupported ones are skipped.
-        let language = match resolved_frgns.get(fb.effective_brief_name()) {
+        let target = match resolved_frgns.get(fb.effective_brief_name()) {
             Some(ResolvedFrgn::Bridge { language, .. }) => {
-                let _target = match glue_targets.get(language) {
+                match glue_targets.get(language) {
                     Some(t) => t,
                     None => continue,
-                };
-                language.clone()
+                }
             }
             _ => continue,
         };
@@ -83,15 +82,23 @@ pub fn optimize_layouts(
             };
 
             // 2026-07-22: Get the current type's layout from the universe.
-            // If the type isn't registered, we can't optimize it.
             let current = match universe.get(ty_key) {
                 Some(rt) => rt,
                 None => continue,
             };
 
-            // 2026-07-22: Derive the foreign type name for this Brief type
-            // in the target language (e.g., Int → PyInt for Python).
-            let foreign_ty_name = derive_foreign_type_name(param_ty, &language);
+            // 2026-07-22: Find the protocol category for this type via CastTo.
+            let protocol_cat = find_protocol_category(universe, ty_key);
+            let foreign_ty_name = match protocol_cat {
+                Some(cat) => {
+                    // Look up in the target's protocols map
+                    let protocol_key = format!("#{}", cat);
+                    target.protocols.get(&protocol_key)
+                        .map(|e| e.c_abi.clone())
+                        .unwrap_or_else(|| derive_foreign_type_name(param_ty, &target.language))
+                }
+                None => derive_foreign_type_name(param_ty, &target.language),
+            };
 
             // 2026-07-22: Get the foreign type's layout. If the foreign type
             // isn't in the universe (e.g., types.bv wasn't loaded), skip.
@@ -177,6 +184,18 @@ fn get_type_layout(universe: &TypeUniverse, type_name: &str) -> Option<(u64, u64
     universe.get(type_name).map(|rt| (rt.bytes, rt.alignment))
 }
 
+/// Find the protocol category a Brief type participates in via its CastTo properties.
+/// Returns the category name (e.g., "String" for Cast.#String) or None.
+fn find_protocol_category(universe: &TypeUniverse, type_name: &str) -> Option<String> {
+    let rt = universe.get(type_name)?;
+    for prop_key in rt.properties.keys() {
+        if let Some(cat) = prop_key.strip_prefix("Cast.#") {
+            return Some(cat.to_string());
+        }
+    }
+    None
+}
+
 /// Derive the foreign type name for a Brief parameter type in the target language.
 ///
 /// 2026-07-22: Maps Brief type names to their foreign equivalents based on
@@ -188,6 +207,9 @@ fn get_type_layout(universe: &TypeUniverse, type_name: &str) -> Option<(u64, u64
 /// * `derive_foreign_type_name(String, "node")` → `"JsString"`
 /// * `derive_foreign_type_name(Float, "rust")` → `"RstFloat"`
 fn derive_foreign_type_name(ty: &Type, language: &str) -> String {
+    // 2026-07-22: Foreign type name is the protocol's c_abi type.
+    // Look up the protocol category from the type's CastTo property.
+    // If the protocol exists, use its c_abi type. Otherwise, derive a name.
     let prefix = match language {
         "python" => "Py",
         "node" | "javascript" => "Js",
