@@ -20,125 +20,15 @@
 // that is itself a compiler, interpreter, or similar tool that incorporates
 // or embeds the Work.
 
-//! FFI System Coordinator
+//! Metropolitan FFI
 //!
-//! Coordinates all Foreign Function Interface components:
-//! - TOML binding file loading
-//! - Binding validation
-//! - Path resolution
-//! - Type mapping
-//! - Function registry
+//! Two mechanisms:
+//! - **GLUE** (compile-time bridge generation): `lib/glue.toml` + `src/glue/`
+//! - **Metropipe** (runtime shared memory IPC): `src/ffi/metropipe.rs`
 
-pub mod dynamic;    // Dynamic linker — dlsym-based FFI resolution
-pub mod error;   // NEW: Error handling
-pub mod loader;
-pub mod mapper;
-pub mod mappers;
-pub mod metro_cli;      // Metro CLI - brief metrod connect
-pub mod metropolitan;  // Metropolitan FFI - Shared Memory Negotiation
-pub mod native_mapper;
-pub mod orchestrator;
-pub mod protocol;
-pub mod registry;
-pub mod resolver;
-pub mod script;
-pub mod sentinel;
-pub mod types;
-pub mod validator;
+pub mod error;
+pub mod metropipe;         // Metropipe — shared memory IPC runtime
+pub mod metropipe_cli;     // `brief metrod connect` CLI
 
-pub use error::{ErrorConventions, ErrVariant, generate_bounds_check, generate_null_check};  // NEW
-pub use metropolitan::{MetropolitanChannel, MetropolitanHub, MetroStatus, SharedRegion};
-
-pub use loader::load_binding;
-pub use mapper::{create_mapper_registry, find_mapper};
-pub use mappers::{MapperInfo, MapperRegistry, MapperType};
-pub use native_mapper::NativeMapper;
-pub use orchestrator::Orchestrator;
-pub use protocol::Mapper;
-pub use registry::{FunctionRegistry, FFI_REGISTRY};
-pub use resolver::resolve_binding_path;
-pub use script::{ScriptFunction, ScriptLanguage, ScriptResolver};  // NEW
-pub use sentinel::Sentinel;
-pub use types::*;
-pub use types::{FfiValue, MemoryLayout};
-pub use validator::validate_frgn_against_binding;
-
-use crate::ast::ForeignBinding;
-use std::path::PathBuf;
-
-/// Error types for FFI operations
-#[derive(Debug, Clone)]
-pub enum FfiError {
-    /// File not found
-    FileNotFound(String),
-
-    /// Invalid TOML syntax
-    TomlParseError(String),
-
-    /// Missing required field in TOML
-    MissingField(String),
-
-    /// Type parsing error
-    TypeParseError(String),
-
-    /// Binding validation failed
-    ValidationError(String),
-
-    /// Path resolution failed
-    PathResolutionError(String),
-
-    /// Mapper not found
-    MapperNotFound(String),
-
-    /// Metropolitan dispatch failure
-    MetropolitanDispatch(String),
-}
-
-impl std::fmt::Display for FfiError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            FfiError::FileNotFound(path) => write!(f, "FFI binding file not found: {}", path),
-            FfiError::TomlParseError(err) => write!(f, "TOML parse error: {}", err),
-            FfiError::MissingField(field) => write!(f, "Missing required field in TOML: {}", field),
-            FfiError::TypeParseError(err) => write!(f, "Type parse error: {}", err),
-            FfiError::ValidationError(err) => write!(f, "Binding validation error: {}", err),
-            FfiError::PathResolutionError(err) => write!(f, "Path resolution error: {}", err),
-            FfiError::MapperNotFound(name) => write!(f, "Mapper not found: {}", name),
-            FfiError::MetropolitanDispatch(msg) => write!(f, "Metropolitan dispatch: {}", msg),
-        }
-    }
-}
-
-impl std::error::Error for FfiError {}
-
-/// Main entry point: Load and parse a TOML binding file
-pub fn load_binding_file(
-    path: &str,
-    project_root: &Option<PathBuf>,
-    source_file_path: &Option<PathBuf>,
-    no_stdlib: bool,
-    custom_stdlib_path: &Option<PathBuf>,
-) -> Result<Vec<ForeignBinding>, FfiError> {
-    // Resolve the path
-    let resolved_path = resolver::resolve_binding_path(
-        path,
-        project_root,
-        source_file_path,
-        no_stdlib,
-        custom_stdlib_path,
-    )?;
-
-    // Load and parse TOML
-    loader::load_binding(&resolved_path)
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_ffi_error_display() {
-        let err = FfiError::FileNotFound("test.toml".to_string());
-        assert!(err.to_string().contains("not found"));
-    }
-}
+pub use error::{ErrorConventions, ErrVariant, generate_bounds_check, generate_null_check};
+pub use metropipe::{MetropolitanChannel, MetropolitanHub, MetroStatus, SharedRegion};

@@ -243,7 +243,7 @@ No `if/else` chains. Use guards:
 
 ### 4. GLUE Protocol Bridge — Cross-Language FFI
 
-Brief can export functions to any language via the GLUE (Generated Language Universal Exchange) bridge system:
+Brief can export functions to any language via the GLUE (Generated Language Universal Exchange) bridge system, part of the broader **Metropolitan FFI** architecture:
 
 ```brief
 // Export a function for Rust/Python/Node
@@ -275,21 +275,21 @@ brief export bridge.bv node --out ./node-module  # ffi-napi Node.js module
 
 **GLUE is an ABI generator, not an FFI.** It computes, emits, and optimizes away the interface between languages. See `docs/architecture/glue-as-abi-generator.md`.
 
-### 5. Metropolitan FFI — Shared Memory IPC
+### 5. Metropipe — Shared Memory IPC
 
-The Metropolitan system enables zero-copy communication between Brief processes and foreign programs via shared memory:
+**Metropipe** is the runtime shared memory IPC mechanism within Metropolitan FFI, providing zero-copy communication between Brief processes and foreign programs:
 
 ```brief
-// Create a Metropolitan channel 
-let channel = MetroChannel::new(1024);
-channel.write(&my_data);
+let ch = frgn__metro_create_channel("my_channel", 1024, 1024);
+frgn__mmap_write(addr, 0, data, len);
 ```
 
 - **Shared memory segments** with atomic read/write semantics
 - **Auto-notification** via signal triggers when new data arrives
 - **Consensus protocol** for multi-process coordination
 - **60+ built-in mapper functions** for byte serialization
-- **876 lines** of production code in `src/ffi/metropolitan.rs`
+- **876 lines** of production code in `src/ffi/metropipe.rs`
+- **661 lines** in `src/ffi/metropipe_cli.rs` (`brief metrod connect`)
 
 ### 6. Compile-Time Verification
 

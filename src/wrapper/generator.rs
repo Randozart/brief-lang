@@ -421,7 +421,7 @@ pub fn generate_bridge_bv(result: &AnalysisResult) -> String {
 
 /// Generate foreign stub for C/Python/JS using MetropolitanHub
 pub fn generate_foreign_stub(
-    hub: &crate::ffi::metropolitan::MetropolitanHub,
+    hub: &crate::ffi::metropipe::MetropolitanHub,
     channel_id: &str,
     lang: &str,
 ) -> Result<String, String> {

@@ -17,7 +17,7 @@
 //! Connects to metropipe shared memory channels at `/dev/shm/metro_{service_name}`.
 //! Supports interactive REPL, one-shot RPC, and stub generation modes.
 
-use crate::ffi::metropolitan::MetropolitanHub;
+use crate::ffi::metropipe::MetropolitanHub;
 use std::fs;
 use std::io::{self, BufRead, Write};
 use std::path::Path;
