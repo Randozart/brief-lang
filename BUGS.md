@@ -1,21 +1,13 @@
 # Bugs
 
-## Three-Way String Concatenation `++` Drops Third Operand
+## Three-Way String Concatenation `++` Drops Third Operand — FIXED
 
 **Date:** 2026-07-22
-**Status:** Open
-**Area:** Frontend / Optimizer
-
-`"Bits(" ++ n ++ ")"` compiles to only `"Bits(" ++ n`. The third operand
-`")"` is dropped entirely. This affects all three-way `++` expressions
-and any pattern with multiple `++` calls (including let-binding chains
-that get inlined into a single call).
-
-**Workaround:** Use `fn_concat` wrappers or avoid three-way `++`.
-
-**Root cause:** The inlining pass merges two consecutive `Concat` operations
-into one but loses the third string. The `emit_inline_concat` function itself
-handles only two operands. Investigation needed in the optimizer/defn inliner. & Mistakes Log
+**Status:** Fixed
+**Fix:** The string format change from `{data_ptr, length, chars}` to
+`[length][data]` (C-compatible format) resolved the underlying issue.
+The arena allocator and emit_inline_concat now handle three-way `++`
+correctly. `term "Bits(" ++ n ++ ")";` produces `"Bits(42)"` as expected. & Mistakes Log
 
 ## Format
 - **Date**: YYYY-MM-DD

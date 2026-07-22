@@ -6,20 +6,7 @@
 // the GLUE bridge export mechanism.
 
 defn pp_type_bits(n: String) -> String {
-    // WORKAROUND: triple concat a ++ b ++ c (and let-binding with two
-    // concats) both drop the third operand. This is a frontend inlining
-    // bug. Use pp_type_custom which doesn't need concat:
-    //   pp_type_bits("42") = str_append("Bits(", str_append(n, ")"))
-    // We define str_append here to avoid the inlining issue.
-    let inner: String = str_append2(n, ")");
-    term str_append2("Bits(", inner);
-};
-
-/// Append two strings. Defined locally to prevent inlining bugs
-/// with nested ++ calls.
-defn str_append2(a: String, b: String) -> String {
-    let result: String = a ++ b;
-    term result;
+    term "Bits(" ++ n ++ ")";
 };
 
 defn pp_type_void() -> String {
