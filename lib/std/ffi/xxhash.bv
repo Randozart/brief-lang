@@ -18,7 +18,6 @@
 //   let h = xxh64("hello", 0);
 //   OUT__print_int(h);
 //
-import "link/xxhash/xxhash.c";
 
 // ===== RAW FFI DECLARATIONS =====
 // Parameters: data pointer (Int = raw address), length (Int), seed (Int)
@@ -28,15 +27,3 @@ frgn XXH64(data_ptr: Int, len: Int, seed: Int) -> Int as frgn__xxh64 from "link/
 frgn XXH32(data_ptr: Int, len: Int, seed: Int) -> Int as frgn__xxh32 from "link/xxhash/xxhash.c" fallback 0;
 
 // ===== CONVENIENCE WRAPPERS =====
-
-defn xxh64(data: String, seed: Int) -> Int {
-    let addr: Int = data :> Ptr :> Ptr;
-    let len: Int = data :> Size;
-    term XXH64(addr, len, seed);
-};
-
-defn xxh32(data: String, seed: Int) -> Int {
-    let addr: Int = data :> Ptr :> Ptr;
-    let len: Int = data :> Size;
-    term XXH32(addr, len, seed);
-};

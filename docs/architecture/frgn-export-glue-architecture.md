@@ -30,13 +30,14 @@ semantics of the chosen path.
 ### 1.1 Syntax
 
 ```brief
-frgn <brief_name>(<params>) -> <ret> as <foreign_symbol> from "<path>"
+frgn <foreign_symbol>(<params>) -> <ret> as <brief_name> from "<path>"
     fallback <expr>;
-frgn <brief_name>(<params>) -> <ret> as <foreign_symbol> from <<registry_name>>
+frgn <foreign_symbol>(<params>) -> <ret> as <brief_name> from <<registry_name>>
     fallback <fn_name>(<args>);
 
-// Minimal (as = brief_name, no fallback = zero-value or compile error if required)
-frgn log(msg: String) from "syslog.so";
+// Minimal (no `as` = brief_name same as foreign_symbol, `from` required)
+frgn log(msg: String) from "syslog.so" fallback; ;
+```
 
 // Full
 frgn __get_user(id: Int) -> User as get_user from "db.py"

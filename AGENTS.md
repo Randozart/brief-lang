@@ -445,7 +445,10 @@ and the warning comment at `src/backend/llvm/context.rs:223`.
 - Pre-populating interpreter state with enum constants (None, Some, Ok, Err)
 - Adding `x == x` self-references in preconditions to force liveness
 - Adding synthetic exit-condition fields solely to prevent dead-field elimination
-- **Hardcoded `from` strings**: `from "libruntime"` — use `from "c"` or omit
+- **Hardcoded `from` strings**: `from "libruntime"` — use `from "c"` or `from "link/brief_rt.c"`
+- **Missing `from` on frgn**: `from` is required for every frgn declaration
+- **`#export` modifier**: Use `export defn` (straight keyword), never `#export`
+- **`#out` modifier**: Removed — use `observable <~ true` metadata instead
 - **Hardcoded runtime declares**: `__rt_init` etc. must be `frgn` in `std/rt.bv`
 - **Name-based interpreter dispatch**: Dispatch on `Value::HashMap`, not `fn_name == "insert"`
 - **`"None"`/`"Err"` discriminant magic**: Use enum declaration order, not variant names
@@ -740,6 +743,10 @@ it. The more LLVM knows, the more aggressively it can optimize.
 
 12. **`Byte` is defined in `lib/std/types.bv`** — do not assume it
     exists without importing. If the type isn't needed, use `Int`.
+
+13. **`frgn` is an import** — first name after `frgn` is the C/foreign symbol,
+    `as` gives the Brief name. `from` is required. Example:
+    `frgn XXH64(data_ptr: Int, len: Int, seed: Int) -> Int as frgn__xxh64 from "link/xxhash/xxhash.c" fallback 0;`
 
 ### Type System
 

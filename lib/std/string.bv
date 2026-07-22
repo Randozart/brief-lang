@@ -7,41 +7,20 @@
 // ===== PURE FOREIGN (requires external implementation) =====
 
 // Case conversion
-frgn __to_upper(s: String) -> Result<String, StringError> as frgn__to_upper from "link/brief_rt.c" fallback "";
-frgn __to_title(s: String) -> Result<String, StringError> as frgn__to_title from "link/brief_rt.c" fallback "";
-frgn __is_lower(s: String) -> Result<Bool, StringError> as frgn__is_lower from "link/brief_rt.c" fallback false;
-frgn __is_upper(s: String) -> Result<Bool, StringError> as frgn__is_upper from "link/brief_rt.c" fallback false;
 // Whitespace checking
-frgn __is_whitespace(s: String) -> Result<Bool, StringError> as frgn__is_whitespace from "link/brief_rt.c" fallback false;
-frgn __is_alpha(s: String) -> Result<Bool, StringError> as frgn__is_alpha from "link/brief_rt.c" fallback false;
-frgn __is_alphanumeric(s: String) -> Result<Bool, StringError> as frgn__is_alphanumeric from "link/brief_rt.c" fallback false;
-frgn __is_numeric(s: String) -> Result<Bool, StringError> as frgn__is_numeric from "link/brief_rt.c" fallback false;
 // Complex search (requires iteration)
-frgn __rfind(s: String, needle: String) -> Result<Int, StringError> as frgn__rfind from "link/brief_rt.c" fallback 0;
 // Character operations
-frgn __get_chars(s: String) -> Result<List<String>, StringError> as frgn__get_chars from "link/brief_rt.c" fallback [];
-frgn __utf8_len(s: String) -> Result<Int, StringError> as frgn__utf8_len from "link/brief_rt.c" fallback 0;
 // Escaping
-frgn __escape(s: String) -> Result<String, StringError> as frgn__escape from "link/brief_rt.c" fallback "";
-frgn __unescape(s: String) -> Result<String, StringError> as frgn__unescape from "link/brief_rt.c" fallback "";
-frgn __quote(s: String) -> Result<String, StringError> as frgn__quote from "link/brief_rt.c" fallback "";
-frgn __unquote(s: String) -> Result<String, StringError> as frgn__unquote from "link/brief_rt.c" fallback "";
 // Encoding
+import "std/ffi/string.bv";
+
 defn bytes(s: String) -> Result<List<Int>, StringError> {
     term Ok(StrBytes#(s));
 };
-frgn __from_bytes(list: List<Int>) -> Result<String, StringError> as frgn__from_bytes from "link/brief_rt.c" fallback "";
 // Complex replacement
-frgn __replace_all(s: String, old: String, new: String) -> Result<String, StringError> as frgn__replace_all from "link/brief_rt.c" fallback "";
 // Split variations
-frgn __rsplit(s: String, delim: String) -> Result<List<String>, StringError> as frgn__rsplit from "link/brief_rt.c" fallback [];
-frgn __words(s: String) -> Result<List<String>, StringError> as frgn__words from "link/brief_rt.c" fallback [];
 // Comparison
-frgn __eq_ignore_case(a: String, b: String) -> Result<Bool, StringError> as frgn__eq_ignore_case from "link/brief_rt.c" fallback false;
-frgn __cmp(s1: String, s2: String) -> Result<Int, StringError> as frgn__cmp from "link/brief_rt.c" fallback 0;
 // Parsing
-frgn __parse_float(s: String) -> Result<Float, StringError> as frgn__parse_float from "link/brief_rt.c" fallback 0.0;
-frgn __to_bool(s: String) -> Result<Bool, StringError> as frgn__to_bool from "link/brief_rt.c" fallback false;
 // ===== NATIVE DEFINITIONS =====
 
 // Length

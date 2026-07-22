@@ -202,7 +202,8 @@ cell_input ::= "input" identifier ":" type ";"
 cell_output ::= "output" identifier ":" type ";"
               (* Only valid in .c.bv (cell-wrapped) files — declares the cell return type *)
 
-signature ::= "sig" ("#out" | "#inline")? identifier "(" parameters? ")" "->" output_type ("from" path | "=" identifier)? ";"
+signature ::= "sig" ("#inline")? identifier "(" parameters? ")" "->" output_type ("from" path | "=" identifier)? ";"
+(* Note: `#out` modifier is removed from the language. Use `observable <~ true` metadata instead. *)
 
 output_type ::= union_type
 union_type ::= product_type ("|" product_type)*
@@ -458,18 +459,23 @@ watchdog ::= ("?" | "!") "[" expression "]"
 ### 2.6 FFI Grammar
 
 ```bnf
-foreign_sig ::= ("frgn" | "frgn!") identifier parameters? "->" result_type ("from" string_literal)? ";"
+foreign_sig ::= "frgn" identifier "(" parameters? ")" ("->" result_type)?
+                ("as" identifier)? "from" source_spec
+                ("fallback" fallback_expr)? ";"
 
-frgn_binding ::= identifier parameters? "->" "Result" "[" type_params "]" "from" string_literal
+source_spec ::= string_literal          (* literal path, e.g. "link/brief_rt.c" *)
+              | "<" identifier ">"       (* compiler registry, e.g. <xxhash.c> *)
+
+fallback_expr ::= ";"                   (* implicit — skip call, return zero-value *)
+                | expression            (* static value, e.g. 0, "" *)
+                | identifier "(" arguments? ")"  (* function call *)
 
 result_type ::= "Result" "<" type "," type ">"
-              | "void"
               | type
+              | /* omitted = void */
 
-ffi_attributes ::= "#![" ffi_attr ("," ffi_attr)* "]"
-
-ffi_attr ::= "ffi" "(" string_literal ")"
-
+(* Note: `from` is REQUIRED — every frgn must declare provenance. *)
+(* `inop` and `#out` modifiers are removed from the language. *)
 ```
 
 ### 2.3 Statements
@@ -1905,7 +1911,7 @@ Compiled with `brief build --library`, this produces:
 - `.a` static library
 - `brief_types.h` C header with `__brief_init_state` and `__glue_release`
 
-**Replaces:** The old `#export` pragma. Both forms work during a
+**Replaces:** The old `#export` pragma (now removed — use `export defn` instead).
 deprecation window.
 
 ### 3.26 `alloc` Metadata \[2026-07-12: Planned\]

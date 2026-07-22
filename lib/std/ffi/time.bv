@@ -32,51 +32,18 @@ frgn __parse_datetime(s: String) -> Result<Int, TimeError> as frgn__parse_dateti
 // ===== NATIVE DEFINITIONS =====
 
 // Duration helpers - native arithmetic
-defn duration_seconds(secs: Int) [[term == secs] -> Int {
-  term secs;
-};
 
-defn duration_millis(ms: Int) [[term == ms] -> Int {
-  term ms;
-};
 
-defn duration_minutes(mins: Int) [[term == mins * 60] -> Int {
-  term mins * 60;
-};
 
-defn duration_hours(hours: Int) [[term == hours * 3600] -> Int {
-  term hours * 3600;
-};
 
-defn duration_days(days: Int) [[term == days * 86400] -> Int {
-  term days * 86400;
-};
 
 // Time arithmetic - native
-defn add_seconds(timestamp: Int, secs: Int) [true][term == timestamp + secs] -> Int {
-  term timestamp + secs;
-};
 
-defn add_minutes(timestamp: Int, mins: Int) [true][term == timestamp + mins * 60] -> Int {
-  term timestamp + mins * 60;
-};
 
-defn add_hours(timestamp: Int, hours: Int) [true][term == timestamp + hours * 3600] -> Int {
-  term timestamp + hours * 3600;
-};
 
-defn add_days(timestamp: Int, days: Int) [true][term == timestamp + days * 86400] -> Int {
-  term timestamp + days * 86400;
-};
 
 // Time differences - native
-defn diff_seconds(t1: Int, t2: Int) [true][term == t1 - t2] -> Int {
-  term t1 - t2;
-};
 
-defn diff_days(t1: Int, t2: Int) [[term == (t1 - t2) / 86400] -> Int {
-  term (t1 - t2) / 86400;
-};
 
 // Constants - these could be frgn or defn
 frgn __seconds_per_minute() -> Result<Int, TimeError> as frgn__seconds_per_minute from "link/brief_rt.c" fallback 0;

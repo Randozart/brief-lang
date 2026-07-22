@@ -3,6 +3,8 @@
 
 // ===== SHM ERROR TYPE =====
 
+import "std/ffi/shm.bv";
+
 enum ShmError {
     ShmAlreadyExists(String),
     ShmNotFound(String),
@@ -42,9 +44,6 @@ defn shm_ftruncate(fd: Int, length: Int) -> Result<Void, ShmError> {
     term Err(ShmOther("ftruncate failed"));
 };
 
-frgn __shm_list() -> Result<List<String>, ShmError> as frgn__shm_list from "link/brief_rt.c" fallback [];
-frgn __shm_exists(name: String) -> Result<Bool, ShmError> as frgn__shm_exists from "link/brief_rt.c" fallback false;
-frgn __shm_size(name: String) -> Result<Int, ShmError> as frgn__shm_size from "link/brief_rt.c" fallback 0;
 
 // ===== NATIVE WRAPPERS =====
 
@@ -137,12 +136,7 @@ defn mmap_anonymous_res(length: Int, prot: Int, flags: Int) -> Result<Int, MmapE
     term Err(MmapOther("mmap failed"));
 };
 
-frgn __msync(addr: Int, length: Int, flags: Int) -> Result<Void, MmapError> as frgn__msync from "link/brief_rt.c" fallback;
 
-frgn __mmap_write(addr: Int, offset: Int, data: List<Int>, length: Int) -> Result<Void, MmapError> as frgn__mmap_write from "link/brief_rt.c" fallback;
-frgn __mmap_read(addr: Int, offset: Int, length: Int) -> Result<List<Int>, MmapError> as frgn__mmap_read from "link/brief_rt.c" fallback [];
-frgn __mmap_read_u32(addr: Int, offset: Int) -> Result<Int, MmapError> as frgn__mmap_read_u32 from "link/brief_rt.c" fallback 0;
-frgn __mmap_write_u32(addr: Int, offset: Int, value: Int) -> Result<Void, MmapError> as frgn__mmap_write_u32 from "link/brief_rt.c" fallback;
 
 // PROT_READ | PROT_WRITE flags
 let PROT_READ_WRITE: Int = 0x03;

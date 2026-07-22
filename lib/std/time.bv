@@ -6,32 +6,15 @@
 // ===== PURE FOREIGN (requires system time) =====
 
 // Current time
-frgn __now() -> Result<Int, TimeError> as frgn__now from "link/brief_rt.c" fallback 0;
-frgn __now_millis() -> Result<Int, TimeError> as frgn__now_millis from "link/brief_rt.c" fallback 0;
-frgn __now_micros() -> Result<Int, TimeError> as frgn__now_micros from "link/brief_rt.c" fallback 0;
 // Time component extraction
-frgn __year(timestamp: Int) -> Result<Int, TimeError> as frgn__year from "link/brief_rt.c" fallback 0;
-frgn __month(timestamp: Int) -> Result<Int, TimeError> as frgn__month from "link/brief_rt.c" fallback 0;
-frgn __day(timestamp: Int) -> Result<Int, TimeError> as frgn__day from "link/brief_rt.c" fallback 0;
-frgn __hour(timestamp: Int) -> Result<Int, TimeError> as frgn__hour from "link/brief_rt.c" fallback 0;
-frgn __minute(timestamp: Int) -> Result<Int, TimeError> as frgn__minute from "link/brief_rt.c" fallback 0;
-frgn __second(timestamp: Int) -> Result<Int, TimeError> as frgn__second from "link/brief_rt.c" fallback 0;
-frgn __weekday(timestamp: Int) -> Result<Int, TimeError> as frgn__weekday from "link/brief_rt.c" fallback 0;
-frgn __yearday(timestamp: Int) -> Result<Int, TimeError> as frgn__yearday from "link/brief_rt.c" fallback 0;
 // Time creation
-frgn __timestamp(year: Int, month: Int, day: Int) -> Result<Int, TimeError> as frgn__timestamp from "link/brief_rt.c" fallback 0;
-frgn __timestamp_full(year: Int, month: Int, day: Int, hour: Int, minute: Int, second: Int) -> Result<Int, TimeError> as frgn__timestamp_full from "link/brief_rt.c" fallback 0;
 // Formatting
-frgn __format_timestamp(timestamp: Int, format: String) -> Result<String, TimeError> as frgn__format_timestamp from "link/brief_rt.c" fallback "";
-frgn __format_date(timestamp: Int) -> Result<String, TimeError> as frgn__format_date from "link/brief_rt.c" fallback "";
-frgn __format_time(timestamp: Int) -> Result<String, TimeError> as frgn__format_time from "link/brief_rt.c" fallback "";
-frgn __format_datetime(timestamp: Int) -> Result<String, TimeError> as frgn__format_datetime from "link/brief_rt.c" fallback "";
 // Parsing
-frgn __parse_timestamp(s: String) -> Result<Int, TimeError> as frgn__parse_timestamp from "link/brief_rt.c" fallback 0;
-frgn __parse_datetime(s: String) -> Result<Int, TimeError> as frgn__parse_datetime from "link/brief_rt.c" fallback 0;
 // ===== NATIVE DEFINITIONS =====
 
 // Duration helpers - native arithmetic
+import "std/ffi/time.bv";
+
 defn duration_seconds(secs: Int) [[term == secs] -> Int {
   term secs;
 };
@@ -79,8 +62,3 @@ defn diff_days(t1: Int, t2: Int) [[term == (t1 - t2) / 86400] -> Int {
 };
 
 // Constants - these could be frgn or defn
-frgn __seconds_per_minute() -> Result<Int, TimeError> as frgn__seconds_per_minute from "link/brief_rt.c" fallback 0;
-frgn __seconds_per_hour() -> Result<Int, TimeError> as frgn__seconds_per_hour from "link/brief_rt.c" fallback 0;
-frgn __seconds_per_day() -> Result<Int, TimeError> as frgn__seconds_per_day from "link/brief_rt.c" fallback 0;
-frgn __millis_per_second() -> Result<Int, TimeError> as frgn__millis_per_second from "link/brief_rt.c" fallback 0;
-frgn __micros_per_second() -> Result<Int, TimeError> as frgn__micros_per_second from "link/brief_rt.c" fallback 0;
