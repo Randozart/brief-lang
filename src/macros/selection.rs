@@ -358,7 +358,6 @@ pub fn top_level_tag(item: &TopLevel) -> Option<&str> {
         TopLevel::Trigger(_) => Some("trigger"),
         TopLevel::Constant(_) => Some("constant"),
         TopLevel::ForeignBinding(_) => Some("frgn"),
-        TopLevel::Inop(_) => Some("inop"),
         TopLevel::Struct(_) => Some("struct"),
         TopLevel::Enum(_) => Some("enum"),
         TopLevel::TriggerBinding { .. } => Some("trg"),
@@ -378,6 +377,7 @@ pub fn top_level_tag(item: &TopLevel) -> Option<&str> {
         TopLevel::SvgComponent { .. } => Some("svg"),
         TopLevel::SyncGroup { .. } => Some("sync"),
         TopLevel::Cfg(_) => Some("cfg"),
+        _ => None,
     }
 }
 
@@ -391,7 +391,6 @@ pub fn top_level_name(item: &TopLevel) -> Option<&str> {
         TopLevel::Trigger(t) => Some(&t.name),
         TopLevel::Constant(c) => Some(&c.name),
         TopLevel::ForeignBinding(f) => Some(&f.foreign_name),
-        TopLevel::Inop(i) => Some(&i.name),
         TopLevel::Struct(s) => Some(&s.name),
         TopLevel::Enum(e) => Some(&e.name),
         TopLevel::TriggerBinding { name, .. } => Some(name),

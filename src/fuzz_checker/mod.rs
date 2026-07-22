@@ -1,19 +1,13 @@
 // ── Fuzz Checker — Compile-Time Inline Test Verification ──────────
 //
-// Verifies `#fuzz` cases attached to defn, txn (callable), and inop items.
+// Verifies `#fuzz` cases attached to defn and txn (callable) items.
 //
 // For defn/txn: evaluates fuzz bindings, calls the interpreter's
 // `call_defn`/`call_txn`, and compares the result against expected.
 //
-// For inop: evaluates bindings, runs the BILD body via `bild_sim`,
-// and compares the result against expected. Also validates pre/post
-// conditions against fuzz inputs/outputs.
-//
 // Cells are skipped with a warning (state setup is deferred).
 
-pub mod bild_sim;
-
-use crate::ast::{Expr, TopLevel, FuzzCase, Definition, Transaction, InopDeclaration};
+use crate::ast::{Expr, TopLevel, FuzzCase, Definition, Transaction};
 use crate::errors::{FuzzError, Span};
 use crate::interpreter::{Interpreter, Value};
 use std::collections::HashMap;
@@ -65,9 +59,6 @@ fn verify_fuzz_case(
             } else {
                 verify_txn_fuzz(txn, fuzz_case, case_idx, interpreter, span)
             }
-        }
-        TopLevel::Inop(inop) => {
-            verify_inop_fuzz(inop, fuzz_case, case_idx, interpreter, span)
         }
         TopLevel::Cell(_) => {
             vec![FuzzError::Skipped {
@@ -195,97 +186,6 @@ fn verify_txn_fuzz(
         }
     };
 
-    if actual != expected {
-        errors.push(FuzzError::Mismatch {
-            function,
-            case_index: case_idx,
-            inputs: format_bindings(fuzz_case),
-            expected: format_value(&expected),
-            actual: format_value(&actual),
-            span,
-        });
-    }
-
-    errors
-}
-
-fn verify_inop_fuzz(
-    inop: &InopDeclaration,
-    fuzz_case: &FuzzCase,
-    case_idx: usize,
-    interpreter: &mut Interpreter,
-    span: Span,
-) -> Vec<FuzzError> {
-    let function = inop.name.clone();
-    let mut errors = Vec::new();
-
-    // Evaluate bindings using the interpreter (supports arbitrary expressions,
-    // including references to top-level lets and complex arithmetic).
-    let mut bindings: HashMap<String, Value> = HashMap::new();
-    for (name, expr) in &fuzz_case.bindings {
-        match interpreter.eval_expr(expr) {
-            Ok(val) => { bindings.insert(name.clone(), val); }
-            Err(e) => {
-                return vec![FuzzError::EvaluationError {
-                    function: function.clone(),
-                    case_index: case_idx,
-                    message: format!("cannot evaluate binding '{}': {:?}", name, e),
-                    span,
-                }];
-            }
-        }
-    }
-
-    // Evaluate expected using the interpreter.
-    let expected = match interpreter.eval_expr(&fuzz_case.expected) {
-        Ok(v) => v,
-        Err(e) => {
-            return vec![FuzzError::EvaluationError {
-                function: function.clone(),
-                case_index: case_idx,
-                message: format!("cannot evaluate expected expression: {:?}", e),
-                span,
-            }];
-        }
-    };
-
-    // Check precondition.
-    if !fuzz_case.bindings.is_empty() && inop.contract.pre_condition != Expr::Bool(true) {
-        let _ = ""; // precondition is structurally verified by the proof engine.
-        // For concrete fuzz: if the inop has a precondition, we trust the proof engine
-        // has validated it. The BILD sim runs regardless.
-    }
-
-    // Defer stateful inop simulation — state field layout is not available
-    // without the cell/transaction struct definition.
-    if inop.has_state_access {
-        return vec![FuzzError::Skipped {
-            function: function.clone(),
-            reason: "stateful inop simulation is not yet supported".to_string(),
-            span,
-        }];
-    }
-    let state_fields = HashMap::new();
-
-    // Execute BILD body.
-    let results = match bild_sim::execute_bild(
-        &inop.llvm_body,
-        &inop.params,
-        &bindings,
-        inop.has_state_access,
-        &state_fields,
-    ) {
-        Ok(r) => r,
-        Err(e) => return vec![e],
-    };
-
-    let actual = if results.len() == 1 {
-        results.into_iter().next().unwrap_or(Value::Void)
-    } else {
-        Value::List(results)
-    };
-
-    // Compare.
     if actual != expected {
         errors.push(FuzzError::Mismatch {
             function,

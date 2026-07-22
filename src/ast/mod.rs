@@ -3,7 +3,7 @@
 // Key differences from the old AST:
 // - No Intrinsic enum (use #-name dispatch via execute_intrinsic())
 // - No Expr::IntrinsicCall (use Expr::Call with # suffix)
-// - No InopDeclaration or TopLevel::Inop
+// - InopDeclaration and TopLevel::Inop removed (2026-07-22)
 // - No "feature" types (BinaryOpExpr, CallExpr, etc.) — unified Expr variants only
 // - Added Contract.is_entry for [#] entry points
 // - Added TopLevel::Export for export defn

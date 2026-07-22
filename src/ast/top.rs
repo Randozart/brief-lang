@@ -1,6 +1,6 @@
 // ── Top-Level Declaration AST Definitions ──────────────────────────────
 // 2026-07-12: Phase 0.2 — New architecture top-level types.
-// No InopDeclaration, no TopLevel::Inop.
+// No InopDeclaration — removed in 2026-07-22 Ship of Theseus cleanup.
 // Added Export struct and Contract.is_entry.
 //
 // 2026-07-13: Added backend-compat types (TriggerDeclaration, ForeignSignature,
@@ -27,7 +27,6 @@ pub enum TopLevel {
     // ── Backend-compat variants (old AST) ─────────────────────────────
     Constant(Constant),
     ForeignBinding(ForeignBinding),
-    Inop(InopDeclaration),
     Struct(StructDefinition),
     Enum(EnumDefinition),
     TriggerBinding {
@@ -658,17 +657,6 @@ pub struct TriggerDeclaration {
     pub modifiers: Vec<Annotation>,
 }
 
-#[derive(Debug, Clone)]
-pub struct InopDeclaration {
-    pub name: String,
-    pub params: Vec<(String, Type)>,
-    pub outputs: Vec<Type>,
-    pub contract: Contract,
-    pub llvm_body: Vec<String>,
-    pub has_side_effects: bool,
-    pub has_state_access: bool,
-    pub span: Option<Span>,
-}
 
 #[derive(Debug, Clone)]
 pub struct EnumDefinition {

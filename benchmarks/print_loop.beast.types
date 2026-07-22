@@ -1,0 +1,176 @@
+(
+  (
+  "Float"
+  ("bytes" "4")
+  ("alignment" "4")
+  ("properties" ("alignment" 4) ("llvm_type" "float"))
+)
+  (
+  "Int32"
+  ("bytes" "4")
+  ("alignment" "4")
+  ("properties" ("alignment" 4) ("llvm_type" "i32"))
+)
+  (
+  "Int8"
+  ("bytes" "1")
+  ("alignment" "1")
+  ("properties" ("alignment" 1) ("llvm_type" "i8"))
+)
+  (
+  "UInt16"
+  ("bytes" "2")
+  ("alignment" "2")
+  ("properties" ("alignment" 2) ("llvm_type" "i16"))
+)
+  (
+  "Data"
+  ("bytes" "8")
+  ("alignment" "8")
+  ("properties" ("llvm_type" "i8*") ("alignment" 8))
+)
+  (
+  "String"
+  ("bytes" "16")
+  ("alignment" "8")
+  ("properties" ("llvm_type" "{ i64, i64 }") ("alignment" 8))
+)
+  (
+  "Int64"
+  ("bytes" "8")
+  ("alignment" "8")
+  ("properties" ("llvm_type" "i64") ("alignment" 8))
+)
+  (
+  "Void"
+  ("bytes" "0")
+  ("alignment" "0")
+  ("properties" ("llvm_type" "void") ("alignment" 0))
+)
+  (
+  "Float32"
+  ("bytes" "4")
+  ("alignment" "4")
+  ("properties" ("alignment" 4) ("llvm_type" "float"))
+)
+  (
+  "UInt64"
+  ("bytes" "8")
+  ("alignment" "8")
+  ("properties" ("alignment" 8) ("llvm_type" "i64"))
+)
+  (
+  "UInt8"
+  ("bytes" "1")
+  ("alignment" "1")
+  ("properties" ("llvm_type" "i8") ("alignment" 1))
+)
+  (
+  "Bool"
+  ("bytes" "1")
+  ("alignment" "1")
+  ("properties" ("llvm_type" "i8") ("alignment" 1))
+)
+  (
+  "Char"
+  ("bytes" "4")
+  ("alignment" "4")
+  ("properties" ("alignment" 4) ("llvm_type" "i32"))
+)
+  (
+  "Double"
+  ("bytes" "8")
+  ("alignment" "8")
+  ("properties" ("alignment" 8) ("llvm_type" "double"))
+)
+  (
+  "UInt"
+  ("bytes" "8")
+  ("alignment" "8")
+  ("properties" ("llvm_type" "i64") ("alignment" 8))
+)
+  (
+  "Int"
+  ("bytes" "8")
+  ("alignment" "8")
+  ("properties" ("llvm_type" "i64") ("alignment" 8))
+)
+  (
+  "Int16"
+  ("bytes" "2")
+  ("alignment" "2")
+  ("properties" ("llvm_type" "i16") ("alignment" 2))
+)
+  (
+  "Float64"
+  ("bytes" "8")
+  ("alignment" "8")
+  ("properties" ("llvm_type" "double") ("alignment" 8))
+)
+  (
+  "UInt32"
+  ("bytes" "4")
+  ("alignment" "4")
+  ("properties" ("alignment" 4) ("llvm_type" "i32"))
+)
+  (
+  "toplevel"
+  "ForeignBinding(ForeignBinding { name: "__getenv_brief", from: Literal("std/brief_rt.bv"), target: C, inputs: [("key", Custom("String"))], success_output: [("", Custom("String"))], error_type: "Error", error_fields: [], input_layout: None, output_layout: None, precondition: None, postcondition: None, buffer_mode: None, default_watchdog: None, wasm_impl: None, wasm_setup: None, span: None })"
+)
+  (
+  "toplevel"
+  "ForeignBinding(ForeignBinding { name: "__getenv_int", from: Literal("std/brief_rt.bv"), target: C, inputs: [("key", Custom("String"))], success_output: [("", Custom("Int"))], error_type: "Error", error_fields: [], input_layout: None, output_layout: None, precondition: None, postcondition: None, buffer_mode: None, default_watchdog: None, wasm_impl: None, wasm_setup: None, span: None })"
+)
+  (
+  "defn"
+  "get_env_int"
+  ("params" ("param" "key" "String"))
+  ("outputs")
+  ("contract" ("pre" true) ("post" true))
+  ("body")
+  ("term" ("call" "__getenv_int" ("ident" "key")))
+)
+  (
+  "toplevel"
+  "Statement(Let { name: "bound", ty: Some(Custom("Int")), expr: Some(Call("get_env_int", [Quoted([66, 79, 85, 78, 68])], None)), modifiers: [] })"
+)
+  (
+  "toplevel"
+  "Statement(Let { name: "ops", ty: Some(Custom("Int")), expr: Some(Decimal(0)), modifiers: [] })"
+)
+  (
+  "txn"
+  "work"
+  ":reactive"
+  ("params")
+  (
+  "contract"
+  (
+  "pre"
+  (
+  "binop"
+  "And"
+  ("binop" "Gt" ("ident" "bound") 0)
+  ("binop" "Lt" ("ident" "ops") ("ident" "bound"))
+)
+)
+  ("post" ("binop" "Eq" ("ident" "ops") ("ident" "bound")))
+)
+  ("body")
+  (
+  "assign"
+  ("ident" "ops")
+  ("binop" "Add" ("ident" "ops") 1)
+)
+  (
+  "guarded"
+  ("binop" "Eq" ("binop" "Mod" ("ident" "ops") 100000) 0)
+  ("body")
+  (
+  "expr"
+  "Block([Expression(Call("__print_int", [Identifier("ops")], None)), Expression(Call("__print_char", [Decimal(10)], None))])"
+)
+)
+  ("term")
+)
+)

@@ -22,7 +22,7 @@ use crate::analysis::dependency_graph::DependencyGraph;
 use crate::analysis::pgo::PgoProfile;
 use crate::analysis::FieldMode;
 use crate::ast::{
-    CellDef, EnumDefinition, Expr, ForeignSignature, InopDeclaration, Statement,
+    CellDef, EnumDefinition, Expr, ForeignSignature, Statement,
     TriggerDeclaration, Type,
 };
 use crate::backend::llvm::directive::OptimizationRemark;
@@ -90,7 +90,6 @@ pub struct CompilerContext {
     pub triggers: HashMap<String, TriggerDeclaration>,
     pub trigger_names: Vec<String>,
     pub frgn_map: HashMap<String, ForeignSignature>,
-    pub inop_decls: HashMap<String, InopDeclaration>,
     pub defn_params: HashMap<String, Vec<Type>>,
     pub defn_return_types: HashMap<String, Vec<Type>>,
 
@@ -200,7 +199,6 @@ impl CompilerContext {
             triggers: HashMap::new(),
             trigger_names: Vec::new(),
             frgn_map: HashMap::new(),
-            inop_decls: HashMap::new(),
             defn_params: HashMap::new(),
             defn_return_types: HashMap::new(),
             string_constants: Vec::new(),

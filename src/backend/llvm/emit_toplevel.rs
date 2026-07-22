@@ -1,4 +1,3 @@
-use crate::analysis::bild_asm;
 use crate::ast::{BinaryOpKind, Expr, OutputType, Statement, TopLevel, Type};
 use crate::backend::llvm::emit_stmt::emit_statement;
 use crate::backend::llvm::{float_to_llvm_hex, float64_to_llvm_hex, LlvmBackend, TypedRegister};
@@ -1239,9 +1238,10 @@ impl LlvmBackend {
             }
             writeln!(out, ") local_unnamed_addr #0").ok();
             writeln!(out, "  ret {} %res", ll_ret_ty).ok();
-            writeln!(out, "}}").ok();
-        }
+        writeln!(out, "}}").ok();
     }
+
+}
     // 2026-06-13: Added ptr %state param — definitions can access global state.
     // Was missing the state pointer, causing invalid LLVM IR (SSA value out of scope).
 
@@ -1968,125 +1968,6 @@ impl LlvmBackend {
             emit_statement(self, out, s, "  ");
         }
         if !self.fun.terminated { writeln!(out, "  ret void").ok(); }
-        writeln!(out, "}}").ok();
-    }
-
-    /// Emit a user-defined `inop#` / `inop!#` intrinsic as a private LLVM function.
-    /// The body is pasted verbatim from the inop# declaration, with `term`
-    /// replaced by `ret` (or `br %post_label` in callable txn context).
-    ///
-    /// WHY BILD bodies are pasted verbatim into LLVM IR:
-    ///   BILD (Built-In LLVM Declaration) is a Brief feature that lets the user
-    ///   write raw LLVM IR directly in .bv files. The entire point of BILD is
-    ///   zero-abstraction access to LLVM — any transformation (e.g. IR rewriting,
-    ///   type re-mangling) would break the assumption that the user controls
-    ///   every instruction. Pasting verbatim means the user gets exactly the IR
-    ///   they wrote, with no opaque compiler layer between them and LLVM.
-    ///
-    /// WHY type resolution happens at emit time (not parse time):
-    ///   BILD declarations use Brief type aliases (like `my_type` which resolves
-    ///   to `Int` in the current scope). At parse time, the type environment is
-    ///   not fully built — generics, imports, and type aliases from other files
-    ///   are not yet resolved. By emit time, TypeUniverse has all definitions.
-    ///   resolve_bild_type converts declared types to concrete LLVM types so the
-    ///   parameter types in the function signature match what the user's IR
-    ///   instructions expect.
-    pub(super) fn emit_inop(&mut self, out: &mut String, inop: &crate::ast::InopDeclaration) {
-        let is_float_fn = inop.outputs.iter().any(|t| {
-            let resolved = self.resolve_bild_type(t);
-            matches!(resolved, Type::Custom(__t) if __t == "Float")
-        });
-
-        // Desugar `asm target { }` blocks before emission
-        let desugared_body = bild_asm::desugar_asm_target(&inop.llvm_body);
-
-        // Detect multi-output: term %q, %r — has comma-separated registers
-        let is_multi_output = desugared_body.iter().any(|line| {
-            let trimmed = line.trim();
-            (trimmed.starts_with("term ") || trimmed.starts_with("term!"))
-                && trimmed.contains(',')
-        });
-
-        let ll_ret_ty = if is_multi_output {
-            let count = inop.outputs.len().max(2);
-            let tys: Vec<&str> = (0..count).map(|_| if is_float_fn { "float" } else { "i64" }).collect();
-            format!("{{ {} }}", tys.join(", "))
-        } else if is_float_fn {
-            "float".to_string()
-        } else {
-            "i64".to_string()
-        };
-        self.fun.fn_ret_ty = ll_ret_ty.clone();
-        self.fun.returns_i64 = !is_float_fn && !is_multi_output;
-
-        // 2026-07-08: Phase 3 — internal linkage avoids libc symbol conflicts.
-    // inops generate `define internal i64 @name(...)` so they don't interfere
-    // with libc functions of the same name (open, read, write, etc.).
-    write!(out, "define internal {} @{}(", ll_ret_ty, inop.name).ok();
-        if inop.has_state_access {
-            write!(out, "ptr noalias nocapture align 8 %state").ok();
-        }
-        for (i, (n, t)) in inop.params.iter().enumerate() {
-            let resolved = self.resolve_bild_type(t);
-            let native_ty = self.llvm_type(&resolved);
-            if inop.has_state_access || i > 0 {
-                write!(out, ", {} %{}", native_ty, n).ok();
-            } else {
-                write!(out, "{} %{}", native_ty, n).ok();
-            }
-            self.fun.let_bindings.insert(n.clone(), format!("%{}", n));
-            self.fun.let_binding_types.insert(n.clone(), resolved.clone());
-            self.fun.let_original_types.insert(n.clone(), t.clone());
-        }
-        if let Some(ref section) = inop.span {
-            writeln!(out, ") section \"{}\" local_unnamed_addr #0 {{", section).ok();
-        } else {
-            writeln!(out, ") local_unnamed_addr #0 {{").ok();
-        }
-        writeln!(out, "  entry:").ok();
-        self.fun.txn_counter = 0;
-        self.fun.terminated = false;
-
-        for line in &desugared_body {
-            let trimmed = line.trim();
-            if trimmed.starts_with("term!") {
-                let after = trimmed.strip_prefix("term!").unwrap_or("").trim();
-                if !after.is_empty() {
-                    writeln!(out, "  store i64 {}, ptr %state, align 8", after).ok();
-                }
-                writeln!(out, "  br label %done").ok();
-                self.fun.terminated = true;
-            } else if trimmed == "term" || trimmed.starts_with("term ") {
-                let after = trimmed.strip_prefix("term").map(|s| s.trim()).unwrap_or("");
-                if !after.is_empty() {
-                    if is_multi_output {
-                        // Multi-output: term %q, %r → insertvalue chain + ret struct
-                        let regs: Vec<&str> = after.split(',').map(|s| s.trim().trim_end_matches(';')).collect();
-                        for (i, reg) in regs.iter().enumerate() {
-                            let base_ty = if is_float_fn { "float" } else { "i64" };
-                            if i == 0 {
-                                writeln!(out, "  %mv{} = insertvalue {} undef, {} {}, 0", self.fun.txn_counter, ll_ret_ty, base_ty, reg).ok();
-                            } else {
-                                writeln!(out, "  %mv{} = insertvalue {} %mv{}, {} {}, {}", self.fun.txn_counter, ll_ret_ty, self.fun.txn_counter - 1, base_ty, reg, i).ok();
-                            }
-                            self.fun.txn_counter += 1;
-                        }
-                        writeln!(out, "  ret {} %mv{}", ll_ret_ty, self.fun.txn_counter - 1).ok();
-                    } else if is_float_fn { writeln!(out, "  ret float {}", after).ok(); }
-                    else { writeln!(out, "  ret i64 {}", after).ok(); }
-                } else {
-                    if is_float_fn { writeln!(out, "  ret float 0.0").ok(); }
-                    else { writeln!(out, "  ret i64 0").ok(); }
-                }
-                self.fun.terminated = true;
-            } else {
-                writeln!(out, "  {}", line).ok();
-            }
-        }
-        if !self.fun.terminated {
-            if is_float_fn { writeln!(out, "  ret float 0.0").ok(); }
-            else { writeln!(out, "  ret i64 0").ok(); }
-        }
         writeln!(out, "}}").ok();
     }
 }

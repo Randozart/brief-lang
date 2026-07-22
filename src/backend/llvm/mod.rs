@@ -1777,9 +1777,6 @@ impl LlvmBackend {
                     };
                     self.ctx.frgn_map.insert(fb.foreign_name.clone(), sig);
                 }
-                TopLevel::Inop(inop) => {
-                    self.ctx.inop_decls.insert(inop.name.clone(), inop.clone());
-                }
                 TopLevel::Struct(s) => {
                     let fields: Vec<(String, Type)> = s.fields.iter()
                         .map(|f| (f.name.clone(), f.ty.clone()))
@@ -2274,13 +2271,6 @@ impl LlvmBackend {
                     }
                 }
                 _ => {}
-            }
-        }
-        // User-defined inop# intrinsics
-        for item in items {
-            if let TopLevel::Inop(inop) = item {
-                self.emit_inop(&mut out, inop);
-                writeln!(out).ok();
             }
         }
         // Transactions

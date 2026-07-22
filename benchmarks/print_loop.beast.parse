@@ -1,0 +1,163 @@
+(
+  (
+  "Char"
+  ("bytes" "4")
+  ("alignment" "4")
+  ("properties" ("llvm_type" "i32") ("alignment" 4))
+)
+  (
+  "UInt32"
+  ("bytes" "4")
+  ("alignment" "4")
+  ("properties" ("llvm_type" "i32") ("alignment" 4))
+)
+  (
+  "UInt64"
+  ("bytes" "8")
+  ("alignment" "8")
+  ("properties" ("llvm_type" "i64") ("alignment" 8))
+)
+  (
+  "UInt8"
+  ("bytes" "1")
+  ("alignment" "1")
+  ("properties" ("llvm_type" "i8") ("alignment" 1))
+)
+  (
+  "Int8"
+  ("bytes" "1")
+  ("alignment" "1")
+  ("properties" ("llvm_type" "i8") ("alignment" 1))
+)
+  (
+  "Bool"
+  ("bytes" "1")
+  ("alignment" "1")
+  ("properties" ("llvm_type" "i8") ("alignment" 1))
+)
+  (
+  "Int64"
+  ("bytes" "8")
+  ("alignment" "8")
+  ("properties" ("llvm_type" "i64") ("alignment" 8))
+)
+  (
+  "Float32"
+  ("bytes" "4")
+  ("alignment" "4")
+  ("properties" ("alignment" 4) ("llvm_type" "float"))
+)
+  (
+  "UInt"
+  ("bytes" "8")
+  ("alignment" "8")
+  ("properties" ("llvm_type" "i64") ("alignment" 8))
+)
+  (
+  "Int"
+  ("bytes" "8")
+  ("alignment" "8")
+  ("properties" ("llvm_type" "i64") ("alignment" 8))
+)
+  (
+  "Int16"
+  ("bytes" "2")
+  ("alignment" "2")
+  ("properties" ("alignment" 2) ("llvm_type" "i16"))
+)
+  (
+  "UInt16"
+  ("bytes" "2")
+  ("alignment" "2")
+  ("properties" ("alignment" 2) ("llvm_type" "i16"))
+)
+  (
+  "Int32"
+  ("bytes" "4")
+  ("alignment" "4")
+  ("properties" ("llvm_type" "i32") ("alignment" 4))
+)
+  (
+  "Float"
+  ("bytes" "4")
+  ("alignment" "4")
+  ("properties" ("alignment" 4) ("llvm_type" "float"))
+)
+  (
+  "Float64"
+  ("bytes" "8")
+  ("alignment" "8")
+  ("properties" ("alignment" 8) ("llvm_type" "double"))
+)
+  (
+  "Double"
+  ("bytes" "8")
+  ("alignment" "8")
+  ("properties" ("alignment" 8) ("llvm_type" "double"))
+)
+  (
+  "Data"
+  ("bytes" "8")
+  ("alignment" "8")
+  ("properties" ("alignment" 8) ("llvm_type" "i8*"))
+)
+  (
+  "String"
+  ("bytes" "16")
+  ("alignment" "8")
+  ("properties" ("llvm_type" "{ i64, i64 }") ("alignment" 8))
+)
+  (
+  "Void"
+  ("bytes" "0")
+  ("alignment" "0")
+  ("properties" ("alignment" 0) ("llvm_type" "void"))
+)
+  (
+  "toplevel"
+  "Import(Import { kind: Literal("std/env.bv"), symbols: ["get_env_int"], span: None })"
+)
+  (
+  "toplevel"
+  "Statement(Let { name: "bound", ty: Some(Custom("Int")), expr: Some(Call("get_env_int", [Quoted([66, 79, 85, 78, 68])], None)), modifiers: [] })"
+)
+  (
+  "toplevel"
+  "Statement(Let { name: "ops", ty: Some(Custom("Int")), expr: Some(Decimal(0)), modifiers: [] })"
+)
+  (
+  "txn"
+  "work"
+  ":reactive"
+  ("params")
+  (
+  "contract"
+  (
+  "pre"
+  (
+  "binop"
+  "And"
+  ("binop" "Gt" ("ident" "bound") 0)
+  ("binop" "Lt" ("ident" "ops") ("ident" "bound"))
+)
+)
+  ("post" ("binop" "Eq" ("ident" "ops") ("ident" "bound")))
+)
+  ("body")
+  (
+  "assign"
+  ("ident" "ops")
+  ("binop" "Add" ("ident" "ops") 1)
+)
+  (
+  "guarded"
+  ("binop" "Eq" ("binop" "Mod" ("ident" "ops") 100000) 0)
+  ("body")
+  (
+  "expr"
+  "Block([Expression(Call("__print_int", [Identifier("ops")], None)), Expression(Call("__print_char", [Decimal(10)], None))])"
+)
+)
+  ("term")
+)
+)
