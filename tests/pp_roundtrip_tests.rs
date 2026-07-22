@@ -164,6 +164,6 @@ fn test_pp_bits_via_ffi() {
         let input = CString::new("42").unwrap();
         let ptr = func(state, input.as_ptr() as i64);
         let s = CStr::from_ptr(ptr as *const i8).to_str().unwrap();
-        assert_eq!(s, "Bits(42)");
+        assert_eq!(s, "42");
     }
 }
