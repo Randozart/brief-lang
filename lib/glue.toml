@@ -110,21 +110,51 @@ extension = "rs"
 bridge_kind = "extern_c_crate"
 calling_convention = "lto"
 
+# type_map: Rust-safe types used in generated pub fn wrappers.
+# c_type_map: LLVM ABI types matching lower_type() in src/backend/llvm/types.rs.
+# conversions.to_abi / from_abi: Template expressions for type marshaling.
+#   {{name}} = parameter name, {{name}}_abi = converted ABI value.
+#   {{result}} = FFI return value, {{return}} = converted safe value.
+
 [rust.type_map]
 Int = "i64"
 Float = "f64"
 Bool = "i32"
-String = "i64"
-Data = "i64"
+String = "*mut u8"
+Data = "*mut u8"
+Char = "i32"
 
-# LTO path: types cross as i64 (Brief ABI). Rust links the .ll directly,
-# LLVM inlines across the boundary at LTO time. No C ABI conversion.
 [rust.c_type_map]
 Int = "i64"
-Float = "double"
+Float = "f64"
 Bool = "i32"
-String = "i64"
-Data = "i64"
+String = "*mut u8"
+Data = "*mut u8"
+Char = "i32"
+
+[rust.conversions.Int]
+to_abi = "{}"
+from_abi = "{}"
+
+[rust.conversions.Float]
+to_abi = "{}"
+from_abi = "{}"
+
+[rust.conversions.Bool]
+to_abi = "{}"
+from_abi = "{}"
+
+[rust.conversions.String]
+to_abi = "{}"
+from_abi = "{}"
+
+[rust.conversions.Data]
+to_abi = "{}"
+from_abi = "{}"
+
+[rust.conversions.Char]
+to_abi = "{}"
+from_abi = "{}"
 
 [rust.templates]
 "Cargo.toml" = """
@@ -164,8 +194,9 @@ extern "C" {
 {{ffi_decls}}
 }
 """
-"fn_template" = """pub fn {{name}}({{params}}) -> {{return}} {
-    unsafe { ffi::{{name}}({{args}}) }
-}
+"fn_template" = """pub fn {{name}}({{params}}) -> {{return}} { unsafe {
+    let result_abi = ffi::{{name}}({{args_abi}});
+    {{return_expr}}
+} }
 """
 "ffi_template" = """    pub fn {{name}}({{ffi_params}}) -> {{c_return}};"""

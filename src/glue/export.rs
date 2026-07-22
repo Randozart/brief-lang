@@ -501,9 +501,31 @@ pub fn run_export_cli(file_path: &str, language: &str, out_dir: &str) -> Result<
             .map(|(name, _)| name.clone())
             .collect();
 
+        // Build ABI conversion expressions from target.conversions.
+        // to_abi: {{name}} → {{name}}_abi (e.g., "n" → "n.as_ptr() as i64")
+        // from_abi: return value → safe type (e.g., "result_abi" → "String::from_raw_parts(...)")
+        let args_abi: Vec<String> = export.params.iter()
+            .map(|(name, ty)| {
+                let expr = target.conversions
+                    .get(&format!("{}.to_abi", ty))
+                    .cloned()
+                    .unwrap_or_else(|| "{name}".to_string());
+                expr.replace("{name}", name)
+                    .replace("{}", name)
+            })
+            .collect();
+        let return_expr = target.conversions
+            .get(&format!("{}.from_abi", export.return_type))
+            .cloned()
+            .unwrap_or_else(|| "result_abi".to_string())
+            .replace("{name}", "result_abi")
+            .replace("{}", "result_abi");
+
         fn_vars.insert("params".to_string(), params.join(", "));
         fn_vars.insert("ffi_params".to_string(), ffi_params.join(", "));
         fn_vars.insert("args".to_string(), args.join(", "));
+        fn_vars.insert("args_abi".to_string(), args_abi.join(", "));
+        fn_vars.insert("return_expr".to_string(), return_expr);
 
         if let Some(ft) = fn_template {
             let rendered = render_template(ft, &fn_vars);

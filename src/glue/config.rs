@@ -30,6 +30,10 @@ pub struct GlueTarget {
     pub type_map: HashMap<String, String>,
     /// Brief type name → C ABI type name mapping (e.g., Int → int64_t)
     pub c_type_map: HashMap<String, String>,
+    /// Type conversion expressions. Keys are "{Type}.to_abi" and "{Type}.from_abi",
+    /// values are template expressions with {name} as the variable placeholder.
+    /// E.g., "String.to_abi" = "{name}.as_ptr() as i64"
+    pub conversions: HashMap<String, String>,
     /// Output path → template content. Special keys:
     ///   "fn_template" — per-function safe wrapper (rendered into {{exports}})
     ///   "ffi_template" — per-function FFI declaration (rendered into {{ffi_decls}})
@@ -61,7 +65,21 @@ struct LanguageEntry {
     #[serde(default)]
     c_type_map: HashMap<String, String>,
     #[serde(default)]
+    conversions: HashMap<String, ConversionEntry>,
+    #[serde(default)]
     templates: HashMap<String, String>,
+}
+
+/// A conversion entry for a type at the FFI boundary.
+/// Expresses how to convert between the safe Rust type and the C ABI type.
+#[derive(serde::Deserialize, Debug, Clone)]
+pub struct ConversionEntry {
+    /// Expression to convert a safe value to ABI, with {name} as placeholder.
+    /// E.g., "{name}.as_ptr() as i64"
+    pub to_abi: String,
+    /// Expression to convert an ABI value back to a safe value.
+    /// E.g., "String::from_raw_parts({name} as *mut u8, len)"
+    pub from_abi: String,
 }
 
 /// Load the GLUE registry from a TOML file.
@@ -102,6 +120,7 @@ pub fn load_glue_config(path: Option<&Path>) -> Result<HashMap<String, GlueTarge
             calling_convention: py.calling_convention,
             type_map: py.type_map,
             c_type_map: py.c_type_map,
+            conversions: flatten_conversions(py.conversions),
             templates: py.templates,
         });
     }
@@ -115,6 +134,7 @@ pub fn load_glue_config(path: Option<&Path>) -> Result<HashMap<String, GlueTarge
             calling_convention: node.calling_convention,
             type_map: node.type_map,
             c_type_map: node.c_type_map,
+            conversions: flatten_conversions(node.conversions),
             templates: node.templates,
         });
     }
@@ -128,11 +148,24 @@ pub fn load_glue_config(path: Option<&Path>) -> Result<HashMap<String, GlueTarge
             calling_convention: rust.calling_convention,
             type_map: rust.type_map,
             c_type_map: rust.c_type_map,
+            conversions: flatten_conversions(rust.conversions),
             templates: rust.templates,
         });
     }
 
     Ok(targets)
+}
+
+/// Flatten nested conversion entries into flat "Type.to_abi"/"Type.from_abi" keys.
+fn flatten_conversions(
+    conv: HashMap<String, ConversionEntry>,
+) -> HashMap<String, String> {
+    let mut flat = HashMap::new();
+    for (ty, entry) in conv {
+        flat.insert(format!("{}.to_abi", ty), entry.to_abi);
+        flat.insert(format!("{}.from_abi", ty), entry.from_abi);
+    }
+    flat
 }
 
 /// Find a language target by extension.
@@ -212,6 +245,7 @@ mod tests {
             bridge_kind: "native_module".to_string(),
             calling_convention: "c_abi".to_string(),
             c_type_map: HashMap::new(),
+            conversions: HashMap::new(),
             type_map: HashMap::new(),
             templates: HashMap::new(),
         });
@@ -231,6 +265,7 @@ mod tests {
             bridge_kind: "native_module".to_string(),
             calling_convention: "c_abi".to_string(),
             c_type_map: HashMap::new(),
+            conversions: HashMap::new(),
             type_map: HashMap::new(),
             templates: HashMap::new(),
         });
