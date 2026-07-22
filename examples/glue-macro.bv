@@ -1,5 +1,5 @@
 // glue-macro.bv — Full GLUE bridge pattern
-// Demonstrates: #export, frgn, meld, GLUE macro adapter
+// 2026-07-22: Demonstrates export defn, frgn, meld.
 // Three-language bridge: Brief exports, Rust/Python/Node imports
 
 // The type bridge: prove Int and Float are layout-compatible
@@ -13,14 +13,14 @@ meld Int -> Float {
 frgn print_number(n: Int) -> Bool ;
 
 // Exported function: available to foreign callers
-#export add_and_print(a: Int, b: Int) -> Int {
+export defn add_and_print(a: Int, b: Int) -> Int {
     let sum: Int = a + b;
     let _ = print_number(sum);
     term sum;
 };
 
 // Another export with meld-proven type compatibility
-#export compute_dot(x: List<Float>, y: List<Float>) -> Float {
+export defn compute_dot(x: List<Float>, y: List<Float>) -> Float {
     let dot: Float = 0.0;
     let i: Int = 0;
     let n: Int = x :> Size;

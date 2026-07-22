@@ -232,6 +232,20 @@ pub fn compile_source(file_path: &str, source: &str, opts: &BuildOptions) -> Res
         resolved_frgns.insert(fb.name.clone(), dispatch);
     }
 
+    // ── Layout optimization (frgn/export boundary) ─────────────────────
+    // 2026-07-22: Propose adopting foreign type layouts to minimize
+    // protocol transform costs. Only applies to bridge-path frgns.
+    // This is additive — removing this pass does not affect correctness.
+    let layout_changes = brief_compiler::analysis::layout_optimizer::optimize_layouts(
+        &items, &universe, &resolved_frgns, &glue_targets,
+    )?;
+    for change in &layout_changes {
+        brief_compiler::analysis::layout_optimizer::apply_layout_change(&mut items, change)?;
+    }
+    if !layout_changes.is_empty() {
+        eprintln!("layout optimizer: {} change(s) applied", layout_changes.len());
+    }
+
     // ── Code generation ───────────────────────────────────────────────
     let (codegen_output, ext) = codegen(&items, &mut universe, &pm, opts, alloc_strategies, resolved_frgns)?;
 

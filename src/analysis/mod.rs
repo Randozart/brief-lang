@@ -24,6 +24,7 @@ pub mod allocation;
 pub mod meld_validation;
 pub mod frgn_dispatch;
 pub mod slp_isomorphism;
+pub mod layout_optimizer;
 
 /// Determines how a state field behaves in the %State struct layout.
 /// Used by the Adaptive Layout Engine (Phase 1) to eliminate unused fields

@@ -3,27 +3,28 @@
 **2026-07-22:** Full implementation plan for cross-language FFI architecture.
 See `docs/architecture/frgn-export-glue-architecture.md` for the design.
 
-**Status:** Pre-implementation. All phases must be implemented in order.
+**Status:** Phases 0–4 complete, Phase 5 complete (CLI wired, `#export` modifier removed from language, export is now a straight keyword). Phases 6–7 pending implementation.
 
 ---
 
 ## Table of Contents
 
-- [Phase 0: AST + Parser Changes](#phase-0-ast--parser-changes)
-- [Phase 1: TOML Registry + Type Files](#phase-1-toml-registry--type-files)
-- [Phase 2: ResolvedFrgn Dispatch in Compilation Pass](#phase-2-resolvedfrgn-dispatch-in-compilation-pass)
-- [Phase 3: GLUE Bridge Codegen](#phase-3-glue-bridge-codegen)
-- [Phase 4: Fallback Codegen](#phase-4-fallback-codegen)
-- [Phase 5: Export Unification + CLI Subcommands](#phase-5-export-unification--cli-subcommands)
+- [Phase 0: AST + Parser Changes (DONE)](#phase-0-ast--parser-changes)
+- [Phase 1: TOML Registry + Type Files (DONE)](#phase-1-toml-registry--type-files)
+- [Phase 2: ResolvedFrgn Dispatch in Compilation Pass (DONE)](#phase-2-resolvedfrgn-dispatch-in-compilation-pass)
+- [Phase 3: GLUE Bridge Codegen (DONE)](#phase-3-glue-bridge-codegen)
+- [Phase 4: Fallback Codegen (DONE)](#phase-4-fallback-codegen)
+- [Phase 5: Export Unification + CLI Subcommands (DONE)](#phase-5-export-unification--cli-subcommands)
 - [Phase 6: Layout Optimizer Pass](#phase-6-layout-optimizer-pass)
 - [Phase 7: Tests + Examples](#phase-7-tests--examples)
+- [Phase 8: Ship of Theseus — AST Pretty-Printer Stress Test](#phase-8-ship-of-theseus--ast-pretty-printer-stress-test)
 - [Documentation](#documentation)
 - [Edge Cases](#edge-cases)
 - [Regression Guard](#regression-guard)
 
 ---
 
-## Phase 0: AST + Parser Changes
+## Phase 0: AST + Parser Changes (DONE)
 
 **Goal:** Add `as_name` and `Fallback` to `ForeignBinding`, parse them.
 
@@ -178,7 +179,7 @@ Also update `ForeignBinding` display to include `as_name` and `fallback`.
 
 ---
 
-## Phase 1: TOML Registry + Type Files
+## Phase 1: TOML Registry + Type Files (DONE)
 
 **Goal:** Replace the old `glue.dbvl`/`glue.dbvs` registry with `lib/glue.toml`,
 create the per-language type `.bv` files.
@@ -394,7 +395,7 @@ Add `pub mod config;` and re-export key types.
 
 ---
 
-## Phase 2: ResolvedFrgn Dispatch in Compilation Pass
+## Phase 2: ResolvedFrgn Dispatch in Compilation Pass (DONE)
 
 **Goal:** The main compilation pass resolves each frgn declaration to a
 `ResolvedFrgn` (Inline, Bridge, Unsupported) before the backend runs.
@@ -580,7 +581,7 @@ override of the GLUE registry.
 
 ---
 
-## Phase 3: GLUE Bridge Codegen
+## Phase 3: GLUE Bridge Codegen (DONE)
 
 **Goal:** Generate bridge calls for `ResolvedFrgn::Bridge` paths across all
 backends.
@@ -714,7 +715,7 @@ Already caught by the hardware validator, but explicit is better.
 
 ---
 
-## Phase 4: Fallback Codegen
+## Phase 4: Fallback Codegen (DONE)
 
 **Goal:** Implement fallback IR emission for all three forms.
 
@@ -808,7 +809,7 @@ fn emit_fallback_value(
 
 ---
 
-## Phase 5: Export Unification + CLI Subcommands
+## Phase 5: Export Unification + CLI Subcommands (DONE)
 
 **Goal:** Add `brief export` and `brief link` subcommands, unify the two
 export paths.
@@ -817,28 +818,20 @@ export paths.
 
 **File:** `src/glue/export.rs`
 
-Modify `extract_exports()` (around line 108) to also handle
-`TopLevel::Export`:
+Modify `extract_exports()` (around line 108) to handle `TopLevel::Export`:
 
 ```rust
 fn extract_exports(items: &[TopLevel]) -> Vec<ExportDecl> {
     let mut exports = Vec::new();
     for item in items {
-        match item {
-            // Form A: export defn name(...) { ... } → TopLevel::Export
-            TopLevel::Export(export) => {
-                if let TopLevel::Definition(defn) = export.inner.as_ref() {
-                    exports.push(ExportDecl { name: defn.name.clone(), ... });
-                }
-            }
-            // Form B: #export modifier on defn
-            TopLevel::Definition(defn) if has_export_modifier(&defn.modifiers) => {
+        // Form: export defn name(...) { ... } → TopLevel::Export
+        if let TopLevel::Export(export) = item {
+            if let TopLevel::Definition(defn) = export.inner.as_ref() {
                 exports.push(ExportDecl { name: defn.name.clone(), ... });
             }
-            _ => {}
         }
     }
-    // Deduplicate by name — if both forms declare the same function, keep one
+    // Deduplicate by name
     exports.sort_by_key(|e| e.name.clone());
     exports.dedup_by_key(|e| e.name.clone());
     exports
@@ -1114,13 +1107,161 @@ Update the stale test script to:
 
 ---
 
+## Phase 8: Ship of Theseus — AST Pretty-Printer Stress Test
+
+**Goal:** Port the AST pretty-printer (`src/ast/display.rs`) from Rust to Brief,
+then call it through the GLUE bridge. This exercises the full FFI pipeline in
+reverse direction (Brief → Host), validates protocol transforms on recursive
+types, and provides the foundation for incremental self-hosting.
+
+### 8.1 — Identify the port boundary
+
+The AST pretty-printer is a set of `Display` impls in `src/ast/display.rs`:
+- `TopLevel` → string
+- `Definition` → string
+- `Expr` → string (recursive, ~30 variants)
+- `Type` → string
+- `Statement` → string
+- `ForeignBinding` → string
+- `Pattern`, `MatchArm`, `Modifier`, etc.
+
+Each is a pure function: `(AST node) -> String`. No global state, no I/O,
+no mutable references. Perfect Brief candidate.
+
+**Porting order** (increasing complexity):
+1. `Type::Display` — flat, non-recursive shape, few variants
+2. `ForeignBinding::Display` — moderate, has nested sub-structures
+3. `Statement::Display` — introduces control flow keywords
+4. `Expr::Display` — recursive, ~30 variants, the stress test
+5. `Definition::Display` — wraps exprs and statements
+6. `TopLevel::Display` — top-level dispatch
+
+### 8.2 — Brief implementation
+
+**New file:** `lib/pp/types.bv` — pretty-print functions for types:
+
+```brief
+// lib/pp/types.bv
+// 2026-07-22: AST pretty-printer ported to Brief (Phase 8).
+
+defn pp_type_int() -> String { term "Int"; }
+defn pp_type_float() -> String { term "Float"; }
+defn pp_type_bool() -> String { term "Bool"; }
+defn pp_type_ptr(elem: String) -> String {
+    term "Ptr<" ++ elem ++ ">";
+}
+// ... one function per Type variant
+```
+
+**New file:** `lib/pp/exprs.bv` — recursive expression pretty-printing:
+
+```brief
+// lib/pp/exprs.bv
+// 2026-07-22: Recursive expression printer. Each Expr variant is a
+// pure function taking sub-expression strings.
+
+defn pp_binop(lhs: String, op: String, rhs: String) -> String {
+    term "(" ++ lhs ++ " " ++ op ++ " " ++ rhs ++ ")";
+}
+
+defn pp_call(name: String, args: String) -> String {
+    // args is already a joined string
+    term name ++ "(" ++ args ++ ")";
+}
+// ...
+```
+
+### 8.3 — GLUE bridge wrapper
+
+**New file:** `bridge/pp-bridge.bv` — export the pretty-printer:
+
+```brief
+// bridge/pp-bridge.bv
+// 2026-07-22: Bridge for calling Brief pretty-printer from Rust compiler.
+// Import the pretty-printer implementation
+import "lib/pp/types.bv";
+import "lib/pp/exprs.bv";
+
+export defn brief_pp_type(type_tag: String, payload: String) -> String {
+    // Dispatch on type_tag, call the appropriate pp function
+    // ...
+};
+```
+
+The Rust compiler calls `brief_pp_type` via the GLUE bridge:
+```rust
+// In src/ast/display.rs (modified):
+fn display_type(ty: &Type) -> String {
+    if let Ok(result) = glue::call("brief_pp_type", &[serialize_type(ty)]) {
+        return result;
+    }
+    // Fallback: native Rust implementation
+    // ...
+}
+```
+
+### 8.4 — Verification
+
+**Round-trip test**: For every AST in the test suite:
+1. Generate the pretty-printed string using the Rust implementation
+2. Generate it using the Brief implementation via GLUE bridge
+3. Assert they match exactly
+
+```rust
+#[test]
+fn test_pp_ast_roundtrip() {
+    let ast = make_test_ast();
+    let rust_pp = format!("{}", ast);      // Rust Display impl
+    let brief_pp = call_brief_pp(&ast);    // Brief via GLUE
+    assert_eq!(rust_pp, brief_pp);
+}
+```
+
+**Regression test**: Run the full test suite with the GLUE bridge enabled and
+disabled. Both must pass with identical output.
+
+### 8.5 — Migration strategy
+
+| Phase 8 step | What changes | Risk |
+|-------------|-------------|------|
+| 8a — `Type` | 4-5 Brief functions, simple strings | Low |
+| 8b — `ForeignBinding` | Brief calls sub-printers | Low |
+| 8c — `Statement` | Keywords, block formatting | Medium |
+| 8d — `Expr` (all 30 variants) | Deeply recursive, stress-tests stack | **High** |
+| 8e — `Definition` | Wraps exprs + statements | Medium |
+| 8f — Full cutover | Rust Display impl delegates entirely to Brief | High |
+
+### 8.6 — What this validates about the GLUE pipeline
+
+| Requirement | How Phase 8 exercises it |
+|------------|-------------------------|
+| Protocol path resolution | Brief `String` ↔ Rust `String` via `#String<utf8>` |
+| Recursive type serialization | AST nodes contain sub-nodes (Expr in Expr) |
+| Fallback correctness | If GLUE bridge fails, Rust fallback must produce identical output |
+| Export wrapper generation | `brief export pp-bridge.bv rust --out ...` |
+| `calling_convention = "lto"` | Rust LTO path — no C ABI boundary overhead |
+| Performance | Pretty-printing is not hot code; tail-call optimization under Brief contracts |
+
+### 8.7 — When to consider Phase 8 done
+
+- `Type::Display` delegates to Brief (verified by round-trip test)
+- `ForeignBinding::Display` delegates to Brief
+- `Statement::Display` delegates to Brief
+- `Expr::Display` delegates to Brief (the big one — all 30+ variants)
+- `Definition::Display` and `TopLevel::Display` delegate to Brief
+- Full test suite passes with GLUE bridge enabled
+- Native Rust fallback produces identical output (verified by CI)
+
+---
+
 ## Documentation
 
-### Architecture docs to update
+### Architecture docs to update/author
 
 | File | Change |
 |------|--------|
-| `docs/architecture/frgn-export-glue-architecture.md` | Already written in this plan |
+| `docs/architecture/frgn-export-glue-architecture.md` | Remove `#export` modifier references (deprecation syntax removed) |
+| `docs/architecture/ship-of-theseus.md` | New: strategy for incremental self-hosting via GLUE bridge |
 | `docs/architecture/glue-pipeline.md` | Update Mermaid diagram, remove `$!macro` references, add TOML path |
 | `docs/architecture/casting-protocol.md` | Add note about frgn/export protocol path resolution |
 | `docs/architecture/overview.md` | Add frgn dispatch + layout optimizer to pipeline diagram |
@@ -1195,21 +1336,15 @@ error: no protocol path from 'CustomStruct' to 'python' target.
     - Add op CastTo(#String) to 'CustomStruct' for string serialization
 ```
 
-### E5 — Both `#export` and `export defn` on the same function
-
-The unified `extract_exports()` deduplicates by function name. If both forms
-declare `export defn add(...)` and `#export defn add(...)`, only one export
-entry is generated.
-
-### E6 — `brief export` with no exports
+### E5 — `brief export` with no exports
 
 Graceful: "No exports found in bridge file. Nothing to generate." Exit 0.
 
-### E7 — `brief link` on a library with no T (text) symbols
+### E6 — `brief link` on a library with no T (text) symbols
 
 Already handled by `analyze_library()` — returns error "No T (text) symbols found."
 
-### E8 — Interpreter cannot load native libraries
+### E7 — Interpreter cannot load native libraries
 
 The interpreter's `dispatch_ffi()` remains a stub. When the interpreter
 encounters a frgn call during compile-time evaluation:
@@ -1231,7 +1366,7 @@ FFI. Contract verification at runtime handles the real case.
 | `src/backend/llvm/mod.rs` | `frgn_map` insertion at line 1751 must still work |
 | `src/compile.rs` | `collect_extra_objects()` must still compile .c sources |
 | `src/library.rs` | `run_library_mode()` must still produce .a without GLUE |
-| `src/glue/export.rs` | `extract_exports()` with `#export` modifier must still work |
+| `src/glue/export.rs` | `extract_exports()` with `TopLevel::Export` must still work |
 | `src/glue/link.rs` | `analyze_library()` + `generate_bridge_bv()` must still work |
 | `src/parser/definitions.rs` | Existing `parse_frgn_decl()` tests must pass |
 

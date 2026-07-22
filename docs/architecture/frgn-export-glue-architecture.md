@@ -314,12 +314,6 @@ export defn <name>(<params>) -> <ret> { <body> };
 export node <name> [<pre>][<post>] { <body> };
 ```
 
-Also supported (deprecation window):
-```brief
-#export
-defn <name>(<params>) -> <ret> { <body> };
-```
-
 ### 4.2 The Export Mechanism is Configured Per Language
 
 The `lib/glue.toml` registry declares how each language wants to receive
@@ -585,16 +579,6 @@ not runtime FFI. A frgn call during interpretation either:
 - Falls back to the declared `fallback` value
 - Returns an error if no fallback and the interpreter cannot resolve it
 
-### 7.7 Both `#export` and `export defn` on the same function
-
-The two export paths (`TopLevel::Export` wrapping vs `#export` modifier) are
-independent but should not produce duplicate wrappers. The GLUE extraction
-(`extract_exports()`) should check BOTH forms:
-- `TopLevel::Export(export)` where inner is a Definition
-- `TopLevel::Definition` with `#export` modifier
-
-And deduplicate by function name.
-
 ---
 
 ## 8. Relationship to Existing Systems
@@ -618,7 +602,7 @@ And deduplicate by function name.
 
 ```
 1. Parse + typecheck bridge.bv
-2. Extract ExportDecl items (both TopLevel::Export and #export modifier)
+2. Extract ExportDecl items from TopLevel::Export
 3. Find language adapter in lib/glue.toml
 4. Generate LLVM IR wrappers via library mode codegen
 5. Compile to .ll → .o → .so/.a

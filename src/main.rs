@@ -4,11 +4,11 @@
 // 2026-07-14: Add --llvm, --out, --optimize-budget, --gpu-offload flags to build.
 
 mod compile;
-mod library;
 
 use std::env;
 use std::path::Path;
 
+use brief_compiler::library;
 use brief_compiler::target::{BackendKind, TargetConfig, get_extension};
 use compile::BeastStage;
 
@@ -24,6 +24,8 @@ fn main() {
         "check" => run_check(&args[2..]),
         "derive" => run_derive(&args[2..]),
         "library" | "lib" => library::run_library_mode(&args[2..]),
+        "export" => run_export(&args[2..]),
+        "link" => run_link(&args[2..]),
         "config" => run_config(&args[2..]),
         "init" => run_init(args.get(2).map(|s| s.as_str())),
         "register" => run_register(&args[2..]),
@@ -65,6 +67,8 @@ fn print_usage(program: &str) {
     eprintln!("  {} check <file.bv>               Type-check only", name);
     eprintln!("  {} derive <file.bv>              Synthesize derivation blocks", name);
     eprintln!("  {} library <file.bv>             Compile to .a library", name);
+    eprintln!("  {} export <file.bv> <lang> [--out <dir>]  Generate a GLUE bridge for <lang>", name);
+    eprintln!("  {} link <library.so/a/o>         Analyze a foreign library for frgn declarations", name);
     eprintln!("  {} config list                   List available config profiles", name);
     eprintln!("  {} config show                   Show active config profile", name);
     eprintln!("  {} config set <name>             Switch to a config profile", name);
@@ -286,6 +290,35 @@ fn run_config(args: &[String]) -> Result<(), String> {
         }
         _ => Err(format!("unknown config subcommand '{}'. Use: list, show, set <name>, init <name>", sub)),
     }
+}
+
+/// `brief export <file.bv> <language> [--out <dir>]`
+/// 2026-07-22: Generate a GLUE bridge for the target language.
+fn run_export(args: &[String]) -> Result<(), String> {
+    let file_path = args.first().ok_or("usage: brief export <file.bv> <language> [--out <dir>]")?;
+    let language = args.get(1).ok_or("usage: brief export <file.bv> <language> [--out <dir>]")?;
+    let mut out_dir = ".".to_string();
+    let mut i = 2;
+    while i < args.len() {
+        if args[i] == "--out" {
+            out_dir = args.get(i + 1).ok_or("--out requires a directory argument")?.clone();
+            i += 2;
+        } else {
+            return Err(format!("unknown flag: {}", args[i]));
+        }
+    }
+    brief_compiler::glue::export::run_export_cli(file_path, language, &out_dir)
+}
+
+/// `brief link <library.so/a/o>`
+/// 2026-07-22: Analyze a foreign library and generate frgn declarations.
+fn run_link(args: &[String]) -> Result<(), String> {
+    let lib_path = args.first().ok_or("usage: brief link <library.so/a/o>")?;
+    let result = brief_compiler::glue::link::analyze_library(std::path::Path::new(lib_path))?;
+    brief_compiler::glue::link::print_link_summary(&result);
+    let bridge_bv = brief_compiler::glue::link::generate_bridge_bv(&result);
+    println!("{}", bridge_bv);
+    Ok(())
 }
 
 fn run_init(name: Option<&str>) -> Result<(), String> {

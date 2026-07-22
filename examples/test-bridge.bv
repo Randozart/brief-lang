@@ -1,11 +1,10 @@
 // Test bridge for GLUE export pipeline
+// 2026-07-22: Uses `export defn` syntax (straight keyword, not modifier).
 
-#export("add")
-defn add(a: Int, b: Int) -> Int {
+export defn add(a: Int, b: Int) -> Int {
     term a + b;
 };
 
-#export("multiply")
-defn multiply(a: Int, b: Int) -> Int {
+export defn multiply(a: Int, b: Int) -> Int {
     term a * b;
 };

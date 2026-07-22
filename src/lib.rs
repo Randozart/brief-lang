@@ -53,6 +53,7 @@ pub mod intrinsic_signatures;
 pub mod interpreter;
 pub mod layout;
 pub mod lexer;
+pub mod library;
 pub mod lifetime;
 pub mod linkage;
 pub mod lsp;
