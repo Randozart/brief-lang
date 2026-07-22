@@ -1376,7 +1376,6 @@ impl LlvmBackend {
             BinaryOpKind::Eq => "Eq",
             BinaryOpKind::Neq => "Neq",
             BinaryOpKind::Lt => "Lt",
-            BinaryOpKind::Le => "Le",
             BinaryOpKind::Gt => "Gt",
             BinaryOpKind::Ge => "Ge",
             BinaryOpKind::And => "And",
@@ -1386,7 +1385,10 @@ impl LlvmBackend {
             BinaryOpKind::BitAnd => "BitAnd",
             BinaryOpKind::BitOr => "BitOr",
             BinaryOpKind::BitXor => "BitXor",
-            BinaryOpKind::Concat => "Concat",
+            // 2026-07-22: Concat is handled by emit_inline_concat directly
+            // (not by config templates). Short-circuit here to avoid the
+            // unnecessary llvm_type + template_for_op lookup.
+            BinaryOpKind::Concat => return None,
             _ => return None,
         };
         // Get the llvm_type of the LHS operand to drive template dispatch

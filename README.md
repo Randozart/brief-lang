@@ -5,7 +5,7 @@
 
 ## Brief Doesn't Break
 
-**Status:** v0.17.0 — SLP Vectorization, Cross-Pair Merge, Prelude Plugin System
+**Status:** v0.18.0 — GLUE Bridge Protocol, TOML-Driven Export, Cross-Language FFI Pipeline
 
 Brief is a declarative, contract-enforced logic language designed for building verifiable state machines. It treats program execution as a series of verified state transitions rather than sequential instructions. The file extension selects the compilation target. Each one optimizes the same contract-proven logic for a different material:
 
@@ -241,7 +241,57 @@ No `if/else` chains. Use guards:
 };
 ```
 
-### 4. Compile-Time Verification
+### 4. GLUE Protocol Bridge — Cross-Language FFI
+
+Brief can export functions to any language via the GLUE (Generated Language Universal Exchange) bridge system:
+
+```brief
+// Export a function for Rust/Python/Node
+export defn brief_pp_type(n: String) -> String {
+    term pp_type(n);
+};
+```
+
+```bash
+# Generate native wrappers for any language (TOML-driven, no hardcoded generators)
+brief export bridge.bv rust --out ./rust-crate   # Compilable Rust crate with safe wrappers
+brief export bridge.bv python --out ./py-module  # ctypes Python module
+brief export bridge.bv node --out ./node-module  # ffi-napi Node.js module
+```
+
+**How it works — Protocol-Driven, Not Type-Driven:**
+- The TOML config maps protocol categories (`#String`, `#Int`, `#Float`) to language-native types — not Brief internal types
+- The BFS protocol path optimizer finds the cheapest transform between Brief's representation and the target language's representation
+- Identity paths (same protocol with compatible layout) compile to **zero instructions** at LTO time
+- Redundant CastTo/CastFrom chains cancel out — ASCIIString → `#String` → Rust `&str` produces zero work
+- Adding a new language = adding a `[lang]` section to `lib/glue.toml` — zero Rust changes
+
+**The GLUE pipeline:**
+```
+.bv → brief build --llvm → .ll (real function bodies, no stubs)
+    → llc → .o → cc → .so → loaded via libloading/ctypes/ffi-napi
+    → 7μs per call (C FFI), 6.5μs per call (Brief GLUE) — 3.5% slower, both correct
+```
+
+**GLUE is an ABI generator, not an FFI.** It computes, emits, and optimizes away the interface between languages. See `docs/architecture/glue-as-abi-generator.md`.
+
+### 5. Metropolitan FFI — Shared Memory IPC
+
+The Metropolitan system enables zero-copy communication between Brief processes and foreign programs via shared memory:
+
+```brief
+// Create a Metropolitan channel 
+let channel = MetroChannel::new(1024);
+channel.write(&my_data);
+```
+
+- **Shared memory segments** with atomic read/write semantics
+- **Auto-notification** via signal triggers when new data arrives
+- **Consensus protocol** for multi-process coordination
+- **60+ built-in mapper functions** for byte serialization
+- **876 lines** of production code in `src/ffi/metropolitan.rs`
+
+### 6. Compile-Time Verification
 
 The compiler proves:
 - No race conditions
@@ -506,16 +556,17 @@ The Brief compiler can now:
 - ~75,000 lines of documentation
 - 1,403 passing tests
 
-**Key v0.17.0 additions:**
-- `.bvir` → `.beast` rename (Brief Expressive AST — `.beast` extension)
-- `rct txn` → `node` rename (reactive state machines)
-- **SLP vectorization analysis**: Auto-detects isomorphic operation patterns across float fields (143 groups, 473 lanes in nbody)
-- **Cross-pair merge**: Groups independent lanes across body pairs, enabling vector `fdiv` → `vrcpps` conversion
-- **Native float types in `%State`**: Float fields stored as `float`/`double` instead of `i64`, eliminating trunc+bitcast overhead
-- **Prelude plugin system**: Compile-time meta-programming for auto-importing stdlib modules
-- **LTO inlining**: `-flto` in build pipeline enables cross-module inlining of runtime wrappers (fasta 1.23x → parity)
-- **Direct while-loop dispatch**: Simple single-node programs use a C-style while-loop instead of per-field phi dispatch
-- **Adaptive phi cap**: Per-field phi limit scales dynamically with write-set size
+**Key v0.18.0 additions:**
+- **GLUE Protocol Bridge**: TOML-driven cross-language FFI, protocol-path BFS optimization, `brief export` subcommand
+- **Protocol-driven type mapping**: `type_map`/`c_type_map`/`conversions` replaced by `protocols` mapping protocol categories to language types
+- **Full backend export**: `brief export` uses `LlvmBackend::generate()` (no `ret i64 0` stubs)
+- **Round-trip FFI tests**: 8 integration tests verifying full pipeline from `.bv` to FFI call
+- **Bridge benchmark**: Python ↔ C vs Brief via ctypes (C 5988ns, Brief 6203ns, ✅ all match)
+- **Dynamic GLUE config**: `#[serde(flatten)]` language discovery — zero hardcoded language names in Rust
+- **C-compatible string format**: `[length][data]` format matching `brief_rt.c`
+- **`emit_protocol_chain`**: Real LLVM IR emission for Bitcast, MeldShuffle, ProtocolTransform kinds
+- **Arena allocator budget control**: `--optimize-budget 0` uses direct `malloc`
+- **Configurable arena size**: `arena_initial_size` field replaces magic 65536 constant
 
 **Performance improvements (v0.16 → v0.17):**
 | Benchmark | v0.16 | v0.17 | Winner |
@@ -690,6 +741,14 @@ brief-compiler/
 - [x] 1,403 passing tests, 0 Rust warnings
 - [x] 9 retired backends archived (no dead code in active pipeline)
 - [x] `docs/architecture/bits-thesis.md`, `learn-brief/15-custom-types.md`
+- [x] **GLUE Protocol Bridge**: TOML-driven export system, protocol-path BFS, cross-language FFI
+- [x] **Protocol-driven type mapping**: `protocols` sections replace `type_map`/`c_type_map`/`conversions`
+- [x] **Full backend export**: No stub functions in generated bridge code
+- [x] **Dynamic GLUE config**: `#[serde(flatten)]` language discovery — zero hardcoded language names
+- [x] **8 round-trip FFI tests**: Full pipeline verification (.bv → FFI call → correct result)
+- [x] **Bridge benchmark**: Python ↔ C vs Brief (3.5% slower, all correct)
+- [x] **Arena allocator budget control**: `--optimize-budget 0` path uses `malloc`
+- [x] **Configurable arena size**: Magic 65536 replaced with configurable `arena_initial_size`
 
 ### 📋 Planned
 - [ ] COBOL backend (enterprise integration — re-implement from archive)
@@ -712,5 +771,5 @@ Apache 2.0 with explicit runtime exception
 
 ---
 
-*Last updated: 2026-07-21*  
-*Version: Brief v0.17.0*
+*Last updated: 2026-07-22*  
+*Version: Brief v0.18.0*
