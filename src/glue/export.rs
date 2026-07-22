@@ -484,16 +484,16 @@ pub fn run_export_cli(file_path: &str, language: &str, out_dir: &str) -> Result<
     println!("  Object: {}", o_path.display());
 
     // 2026-07-22: Step 7 — generate language wrappers from TOML templates.
-    // No hardcoded generators — every language is driven by lib/glue.toml.
     let mut template_vars: HashMap<String, String> = HashMap::new();
     template_vars.insert("bridge_name".to_string(), bridge_name.to_string());
     // Populate state parameter based on calling convention
     if target.calling_convention == "c_abi" {
         template_vars.insert("s_param".to_string(), "_STATE, ".to_string());
-        template_vars.insert("s_init".to_string(), String::new()); // handled in template
-    } else {
-        template_vars.insert("s_param".to_string(), String::new());
         template_vars.insert("s_init".to_string(), String::new());
+    } else {
+        // LTO path (Rust): init_state is declared as an FFI function
+        template_vars.insert("s_param".to_string(), String::new());
+        template_vars.insert("s_init".to_string(), "    pub fn init_state(state: *mut c_void);\n".to_string());
     }
 
     // Render all exports + FFI declarations
@@ -535,18 +535,28 @@ pub fn run_export_cli(file_path: &str, language: &str, out_dir: &str) -> Result<
         // from_abi: return value → safe type
         let args_abi: Vec<String> = export.params.iter()
             .map(|(name, ty)| {
-                let (_, c_abi) = resolve_protocol(ty, &target.protocols);
-                match c_abi.as_str() {
-                    "i64" | "double" | "float" => format!("{}", name),
-                    _ if c_abi.contains("void_p") || c_abi == "ptr" => format!("{}", name),
-                    _ => format!("{} as {}", name, c_abi),
+                let (native, c_abi) = resolve_protocol(ty, &target.protocols);
+                if native == c_abi {
+                    format!("{}", name)
+                } else if c_abi == "i64" && native.contains('*') {
+                    format!("{} as i64", name)
+                } else if native == "i64" && c_abi.contains('*') {
+                    format!("{} as *mut u8", name)
+                } else {
+                    format!("{} as {}", name, c_abi)
                 }
             })
             .collect();
-        let return_expr = match c_ret.as_str() {
-            "i64" | "double" | "float" => "result_abi".to_string(),
-            _ if c_ret.contains("void_p") || c_ret == "ptr" => "result_abi".to_string(),
-            _ => format!("result_abi as {}", native_ret),
+        let (_, ret_c_abi) = resolve_protocol(&export.return_type, &target.protocols);
+        let (ret_native, _) = resolve_protocol(&export.return_type, &target.protocols);
+        let return_expr = if ret_native == ret_c_abi {
+            "result_abi".to_string()
+        } else if ret_c_abi == "i64" && ret_native.contains('*') {
+            format!("result_abi as {}", ret_native)
+        } else if ret_native == "i64" && ret_c_abi.contains('*') {
+            format!("result_abi as {}", ret_c_abi)
+        } else {
+            format!("result_abi as {}", ret_native)
         };
 
         fn_vars.insert("params".to_string(), params.join(", "));
