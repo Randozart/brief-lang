@@ -1,0 +1,102 @@
+// lib/pp/exprs.bv — AST pretty-printer for expressions and operators
+// 2026-07-22: Phase 8 — AST Pretty-Printer Port to Brief
+
+// ── Binary operators ──
+
+defn pp_binop_add() -> String { term "+"; };
+defn pp_binop_sub() -> String { term "-"; };
+defn pp_binop_mul() -> String { term "*"; };
+defn pp_binop_div() -> String { term "/"; };
+defn pp_binop_mod() -> String { term "%"; };
+defn pp_binop_eq() -> String { term "=="; };
+defn pp_binop_neq() -> String { term "!="; };
+defn pp_binop_lt() -> String { term "<"; };
+defn pp_binop_gt() -> String { term ">"; };
+defn pp_binop_le() -> String { term "<="; };
+defn pp_binop_ge() -> String { term ">="; };
+defn pp_binop_and() -> String { term "&&"; };
+defn pp_binop_or() -> String { term "||"; };
+defn pp_binop_bitand() -> String { term "&"; };
+defn pp_binop_bitor() -> String { term "|"; };
+defn pp_binop_bitxor() -> String { term "^"; };
+defn pp_binop_shl() -> String { term "<<"; };
+defn pp_binop_shr() -> String { term ">>"; };
+defn pp_binop_concat() -> String { term "++"; };
+
+defn pp_binop(kind: String) -> String {
+    [kind == "Add"] { term "+"; };
+    [kind == "Sub"] { term "-"; };
+    [kind == "Mul"] { term "*"; };
+    [kind == "Div"] { term "/"; };
+    [kind == "Mod"] { term "%"; };
+    [kind == "Eq"] { term "=="; };
+    [kind == "Neq"] { term "!="; };
+    [kind == "Lt"] { term "<"; };
+    [kind == "Gt"] { term ">"; };
+    [kind == "Le"] { term "<="; };
+    [kind == "Ge"] { term ">="; };
+    [kind == "And"] { term "&&"; };
+    [kind == "Or"] { term "||"; };
+    [kind == "BitAnd"] { term "&"; };
+    [kind == "BitOr"] { term "|"; };
+    [kind == "BitXor"] { term "^"; };
+    [kind == "Shl"] { term "<<"; };
+    [kind == "Shr"] { term ">>"; };
+    [kind == "Concat"] { term "++"; };
+    term "<?>";
+};
+
+// ── Unary operators ──
+
+defn pp_unary_op(kind: String) -> String {
+    [kind == "Neg"] { term "-"; };
+    [kind == "Not"] { term "!"; };
+    [kind == "BitNot"] { term "~"; };
+    term "<?>";
+};
+
+// ── Expression formatting helpers ──
+
+defn pp_binop_expr(lhs: String, op: String, rhs: String) -> String {
+    term "(" ++ lhs ++ " " ++ op ++ " " ++ rhs ++ ")";
+};
+
+defn pp_unary_expr(op: String, expr: String) -> String {
+    term op ++ expr;
+};
+
+defn pp_call(name: String, args: String) -> String {
+    term name ++ "(" ++ args ++ ")";
+};
+
+defn pp_field(obj: String, name: String) -> String {
+    term obj ++ "." ++ name;
+};
+
+defn pp_index(obj: String, idx: String) -> String {
+    term obj ++ "[" ++ idx ++ "]";
+};
+
+defn pp_tuple(elems: String) -> String {
+    term "(" ++ elems ++ ")";
+};
+
+defn pp_list(elems: String) -> String {
+    term "[" ++ elems ++ "]";
+};
+
+defn pp_cast(expr: String, ty: String) -> String {
+    term expr ++ " as " ++ ty;
+};
+
+defn pp_is_type(expr: String, ty: String) -> String {
+    term expr ++ " is " ++ ty;
+};
+
+defn pp_deref(inner: String) -> String {
+    term "*" ++ inner;
+};
+
+defn pp_addr_of(inner: String) -> String {
+    term "&" ++ inner;
+};

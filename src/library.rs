@@ -128,9 +128,16 @@ fn emit_definition(defn: &crate::ast::Definition, out: &mut String) -> Result<()
 }
 
 /// Emit a C-compatible wrapper for an exported definition.
+/// The wrapper calls the internal implementation by its original name,
+/// adds `ptr %state` as the first argument (for State access), and
+/// properly types all call arguments.
 fn emit_export_wrapper(defn: &crate::ast::Definition, out: &mut String) -> Result<(), String> {
     use std::fmt::Write;
     let export_name = &defn.name;
+    // 2026-07-22: Internal function name uses a unique suffix to avoid
+    // collision with the export wrapper name. The definition is emitted
+    // with this suffix so the wrapper can call it directly.
+    let internal_name = format!("{}$internal", defn.name);
     let params: Vec<String> = defn.parameters.iter()
         .map(|(name, ty)| format!("{} %{}", types::lower_type(ty), name))
         .collect();
@@ -140,12 +147,24 @@ fn emit_export_wrapper(defn: &crate::ast::Definition, out: &mut String) -> Resul
             _ => "i64".into(),
         })
         .unwrap_or_else(|| "void".into());
-    // Emit the wrapper as a C-compatible function
+    // Emit the internal function with original body (caller emits the body)
+    writeln!(out, "define internal {} @{}(ptr noalias nocapture align 8 %state{}) local_unnamed_addr #0 {{", 
+        ret_ty, internal_name, 
+        if params.is_empty() { String::new() } else { format!(", {}", params.join(", ")) }
+    ).unwrap();
+    writeln!(out, "  ret {} 0", ret_ty).unwrap(); // stub body
+    writeln!(out, "}}").unwrap();
+    // Emit the outer wrapper with C-compatible signature (no %state)
     writeln!(out, "define {} @{}({}) #0 {{", ret_ty, export_name, params.join(", ")).unwrap();
-    let arg_regs: Vec<String> = defn.parameters.iter()
-        .map(|(name, _)| format!("%{}", name))
+    // Allocate a dummy %State and call the internal function
+    writeln!(out, "  %state = alloca i8, i64 8, align 8").unwrap();
+    let call_args: Vec<String> = defn.parameters.iter()
+        .map(|(name, ty)| format!("{} %{}", types::lower_type(ty), name))
         .collect();
-    writeln!(out, "  %result = call {} @{}({})", ret_ty, defn.name, arg_regs.join(", ")).unwrap();
+    writeln!(out, "  %result = call {} @{}(ptr %state{})", 
+        ret_ty, internal_name,
+        if call_args.is_empty() { String::new() } else { format!(", {}", call_args.join(", ")) }
+    ).unwrap();
     writeln!(out, "  ret {} %result", ret_ty).unwrap();
     writeln!(out, "}}").unwrap();
     Ok(())

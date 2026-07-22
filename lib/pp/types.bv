@@ -1,0 +1,74 @@
+// lib/pp/types.bv — AST pretty-printer for Type variants
+// 2026-07-22: Phase 8 — AST Pretty-Printer Port to Brief
+//
+// Each function takes the sub-expression strings pre-formatted by the
+// caller (Rust Display impl handles recursion). This first pass tests
+// the GLUE bridge export mechanism.
+
+defn pp_type_bits(n: String) -> String {
+    term "Bits(" ++ n ++ ")";
+};
+
+defn pp_type_void() -> String {
+    term "void";
+};
+
+defn pp_type_custom(name: String) -> String {
+    term name;
+};
+
+defn pp_type_hashword(name: String) -> String {
+    term name;
+};
+
+defn pp_type_hashword_variant(name: String, var: String) -> String {
+    term name ++ "<" ++ var ++ ">";
+};
+
+defn pp_type_generic(name: String, args: String) -> String {
+    term name ++ "<" ++ args ++ ">";
+};
+
+defn pp_type_applied(name: String, args: String) -> String {
+    term name ++ "<" ++ args ++ ">";
+};
+
+defn pp_type_union(types: String) -> String {
+    term types;
+};
+
+defn pp_type_tuple(types: String) -> String {
+    term "(" ++ types ++ ")";
+};
+
+defn pp_type_typevar(name: String) -> String {
+    term name;
+};
+
+defn pp_type_ptr(inner: String) -> String {
+    term "Ptr<" ++ inner ++ ">";
+};
+
+defn pp_type_ptr_const(inner: String) -> String {
+    term "Ptr<const " ++ inner ++ ">";
+};
+
+defn pp_type_function(params: String, ret: String) -> String {
+    term "(" ++ params ++ ") -> " ++ ret;
+};
+
+defn pp_type_width(n: String) -> String {
+    term n;
+};
+
+defn pp_type_vector(ty: String, dims: String) -> String {
+    term ty ++ dims;
+};
+
+defn pp_type_constrained(ty: String, range: String) -> String {
+    term ty ++ " @/ " ++ range;
+};
+
+defn pp_type_layout_ptr(c: String) -> String {
+    term "Ptr<Bits @/" ++ c ++ ">";
+};
