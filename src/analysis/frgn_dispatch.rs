@@ -91,6 +91,7 @@ pub fn resolve_single_frgn(
     ext: &str,
     glue_targets: &HashMap<String, GlueTarget>,
     backend: BackendKind,
+    universe: Option<&crate::type_universe::TypeUniverse>,
 ) -> Result<ResolvedFrgn, String> {
     // 2026-07-22: Empty extension means the foreign path has no known type —
     // treat as unsupported with a clear error message.
@@ -119,12 +120,19 @@ pub fn resolve_single_frgn(
 
     // 2026-07-22: If a GLUE language target exists, this is a bridge call.
     if let Some(target) = language {
+        // 2026-07-22: Compute protocol transform for each parameter (one step each).
+        let param_paths: Vec<ProtocolStep> = fb.inputs.iter()
+            .map(|(_, brief_type)| {
+                compute_protocol_path(brief_type, brief_type, universe)
+                    .and_then(|steps| steps.into_iter().next().ok_or_else(|| "empty path".to_string()))
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        let return_path: Option<ProtocolStep> = fb.success_output.first()
+            .and_then(|(_, ty)| compute_protocol_path(ty, ty, universe).ok()?.into_iter().next());
         return Ok(ResolvedFrgn::Bridge {
             language: target.language.clone(),
-            // 2026-07-22: Protocol path computation is a stub for now.
-            // Full implementation in Phase 3 uses TypeUniverse BFS.
-            param_paths: Vec::new(),
-            return_path: None,
+            param_paths,
+            return_path,
             fallback: fb.fallback.clone(),
         });
     }
@@ -164,24 +172,75 @@ pub fn resolve_single_frgn(
 /// Stub: Returns an identity path. Full implementation in Phase 3.
 pub fn compute_protocol_path(
     brief_type: &crate::ast::Type,
-    foreign_type: &crate::ast::Type,
+    _foreign_type: &crate::ast::Type,
+    universe: Option<&crate::type_universe::TypeUniverse>,
 ) -> Result<Vec<ProtocolStep>, String> {
     // 2026-07-22: If types are structurally identical, return identity.
-    if brief_type == foreign_type {
+    if brief_type == _foreign_type {
         return Ok(vec![ProtocolStep {
             source: brief_type.clone(),
-            target: foreign_type.clone(),
+            target: _foreign_type.clone(),
             kind: TransformKind::Identity,
         }]);
     }
 
-    // 2026-07-22: Fallback: return a bitcast path. Full BFS + meld
-    // integration will be added in Phase 3 with the TypeUniverse.
+    // 2026-07-22: Use BFS via find_cast_path if universe is available.
+    if let Some(u) = universe {
+        let brief_key = type_to_key(brief_type);
+        let foreign_key = type_to_key(_foreign_type);
+        if let Some(path) = crate::analysis::layout_optimizer::find_cast_path(u, &brief_key, &foreign_key) {
+            let steps = path_to_protocol_steps(&path);
+            if !steps.is_empty() {
+                return Ok(steps);
+            }
+        }
+    }
+
+    // 2026-07-22: Fallback: return a bitcast path (Cast(#Bits)).
     Ok(vec![ProtocolStep {
         source: brief_type.clone(),
-        target: foreign_type.clone(),
+        target: _foreign_type.clone(),
         kind: TransformKind::Bitcast,
     }])
+}
+
+/// Convert a Type to a string key for use with find_cast_path BFS.
+fn type_to_key(ty: &crate::ast::Type) -> String {
+    match ty {
+        crate::ast::Type::Custom(name) => name.clone(),
+        crate::ast::Type::Applied(name, _) => name.clone(),
+        crate::ast::Type::Void => "Void".to_string(),
+        crate::ast::Type::Ptr(_) => "Ptr".to_string(),
+        crate::ast::Type::Bits(w) => format!("Bits({})", w),
+        crate::ast::Type::HashWord(name) => format!("#{}", name),
+        crate::ast::Type::HashWordVariant(name, var) => format!("#{}<{}>", name, var),
+        crate::ast::Type::Tuple(_) => "Tuple".to_string(),
+        crate::ast::Type::TypeVar(name) => name.clone(),
+        _ => format!("{:?}", ty),
+    }
+}
+
+/// Convert a path of type names from find_cast_path BFS into ProtocolStep entries.
+fn path_to_protocol_steps(path: &[String]) -> Vec<ProtocolStep> {
+    if path.len() < 2 {
+        return vec![];
+    }
+    let mut steps = Vec::new();
+    for pair in path.windows(2) {
+        let kind = if pair[0] == pair[1] {
+            TransformKind::Identity
+        } else if pair[0] == "#Bits" || pair[1] == "#Bits" {
+            TransformKind::Bitcast
+        } else {
+            TransformKind::ProtocolTransform(pair[1].clone())
+        };
+        steps.push(ProtocolStep {
+            source: crate::ast::Type::Custom(pair[0].clone()),
+            target: crate::ast::Type::Custom(pair[1].clone()),
+            kind,
+        });
+    }
+    steps
 }
 
 #[cfg(test)]
@@ -241,7 +300,7 @@ mod tests {
     fn test_resolve_single_frgn_inline_c() {
         let fb = make_frgn("my_func", "c");
         let targets = sample_glue_targets();
-        let result = resolve_single_frgn(&fb, "c", &targets, BackendKind::Llvm).unwrap();
+        let result = resolve_single_frgn(&fb, "c", &targets, BackendKind::Llvm, None).unwrap();
         match result {
             ResolvedFrgn::Inline { symbol, compile_source } => {
                 assert_eq!(symbol, "my_func");
@@ -255,7 +314,7 @@ mod tests {
     fn test_resolve_single_frgn_inline_rs() {
         let fb = make_frgn("my_func", "rs");
         let targets = sample_glue_targets();
-        let result = resolve_single_frgn(&fb, "rs", &targets, BackendKind::Llvm).unwrap();
+        let result = resolve_single_frgn(&fb, "rs", &targets, BackendKind::Llvm, None).unwrap();
         match result {
             ResolvedFrgn::Inline { symbol, .. } => {
                 assert_eq!(symbol, "my_func");
@@ -269,7 +328,7 @@ mod tests {
         // foreign_name = "c_symbol", brief_name = Some("brief_alias")
         let fb = make_frgn_with_as("c_symbol", "brief_alias", "c");
         let targets = sample_glue_targets();
-        let result = resolve_single_frgn(&fb, "c", &targets, BackendKind::Llvm).unwrap();
+        let result = resolve_single_frgn(&fb, "c", &targets, BackendKind::Llvm, None).unwrap();
         match result {
             ResolvedFrgn::Inline { symbol, .. } => {
                 // Backend links against the C symbol, not the Brief alias
@@ -283,7 +342,7 @@ mod tests {
     fn test_resolve_single_frgn_bridge_python() {
         let fb = make_frgn("py_func", "py");
         let targets = sample_glue_targets();
-        let result = resolve_single_frgn(&fb, "py", &targets, BackendKind::Llvm).unwrap();
+        let result = resolve_single_frgn(&fb, "py", &targets, BackendKind::Llvm, None).unwrap();
         match result {
             ResolvedFrgn::Bridge { language, .. } => {
                 assert_eq!(language, "python");
@@ -296,7 +355,7 @@ mod tests {
     fn test_resolve_single_frgn_unsupported_unknown_ext() {
         let fb = make_frgn("kotlin_func", "kt");
         let targets = sample_glue_targets();
-        let result = resolve_single_frgn(&fb, "kt", &targets, BackendKind::Llvm).unwrap();
+        let result = resolve_single_frgn(&fb, "kt", &targets, BackendKind::Llvm, None).unwrap();
         match result {
             ResolvedFrgn::Unsupported(msg) => {
                 assert!(msg.contains("kt"));
@@ -309,7 +368,7 @@ mod tests {
     fn test_resolve_single_frgn_unsupported_empty_ext() {
         let fb = make_frgn("no_ext", "");
         let targets = sample_glue_targets();
-        let result = resolve_single_frgn(&fb, "", &targets, BackendKind::Llvm).unwrap();
+        let result = resolve_single_frgn(&fb, "", &targets, BackendKind::Llvm, None).unwrap();
         match result {
             ResolvedFrgn::Unsupported(msg) => {
                 assert!(msg.contains("no file extension"));
@@ -322,7 +381,7 @@ mod tests {
     fn test_resolve_single_frgn_native_object() {
         let fb = make_frgn("native_fn", "so");
         let targets = sample_glue_targets();
-        let result = resolve_single_frgn(&fb, "so", &targets, BackendKind::Llvm).unwrap();
+        let result = resolve_single_frgn(&fb, "so", &targets, BackendKind::Llvm, None).unwrap();
         match result {
             ResolvedFrgn::Inline { symbol, compile_source } => {
                 assert_eq!(symbol, "native_fn");
@@ -335,7 +394,7 @@ mod tests {
     #[test]
     fn test_compute_protocol_path_identity() {
         let int_type = crate::ast::Type::Custom("Int".to_string());
-        let result = compute_protocol_path(&int_type, &int_type).unwrap();
+        let result = compute_protocol_path(&int_type, &int_type, None).unwrap();
         assert_eq!(result.len(), 1);
         assert!(matches!(result[0].kind, TransformKind::Identity));
     }

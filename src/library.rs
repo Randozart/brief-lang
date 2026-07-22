@@ -19,7 +19,7 @@ pub fn run_library_mode(args: &[String]) -> Result<(), String> {
     // Step 1: Compile to LLVM IR
     let source = std::fs::read_to_string(file_path)
         .map_err(|e| format!("cannot read '{}': {}", file_path, e))?;
-    let items = parse_and_check(file_path, &source)?;
+    let (items, _) = parse_and_check(file_path, &source)?;
     let llvm_ir = generate_with_exports(&items, file_path)?;
 
     // Write IR to temp file
@@ -60,10 +60,10 @@ pub fn run_library_mode(args: &[String]) -> Result<(), String> {
     Ok(())
 }
 
-/// Parse and check a source file.
-/// Parse and type-check a Brief source file (no codegen).
-/// 2026-07-22: Made public for use by `brief export` CLI subcommand.
-pub fn parse_and_check(file_path: &str, source: &str) -> Result<Vec<TopLevel>, String> {
+/// Parse, type-check, and resolve imports for a Brief source file.
+/// 2026-07-22: Resolves imports so the full LLVM backend has all definitions.
+pub fn parse_and_check(file_path: &str, source: &str) -> Result<(Vec<TopLevel>, TypeUniverse), String> {
+    use crate::import_resolver::ImportResolver;
     use logos::Logos;
 
     let lexer = Token::lexer(source);
@@ -72,8 +72,13 @@ pub fn parse_and_check(file_path: &str, source: &str) -> Result<Vec<TopLevel>, S
         .collect();
 
     let mut p = parser::Parser::new(tokens, source);
-    let items = p.parse_program()
+    let mut items = p.parse_program()
         .map_err(|e| format!("parse error: {}", e))?;
+
+    // 2026-07-22: Resolve imports so internal definitions are available
+    let mut resolver = ImportResolver::new();
+    items = resolver.resolve_imports(items, &std::path::PathBuf::from(file_path))
+        .map_err(|e| format!("import resolution error: {}", e))?;
 
     let universe = TypeUniverse::new();
     typechecker::check_program(&items, &universe)
@@ -82,7 +87,7 @@ pub fn parse_and_check(file_path: &str, source: &str) -> Result<Vec<TopLevel>, S
             format!("type errors:\n  {}", msgs.join("\n  "))
         })?;
 
-    Ok(items)
+    Ok((items, universe))
 }
 
 /// Generate LLVM IR, wrapping exported definitions with C-compatible wrappers.

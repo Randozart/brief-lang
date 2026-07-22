@@ -227,7 +227,7 @@ pub fn compile_source(file_path: &str, source: &str, opts: &BuildOptions) -> Res
         let brief_compiler::ast::TopLevel::ForeignBinding(fb) = item else { continue; };
         let ext = fb.from.extension().unwrap_or_default();
         let dispatch = brief_compiler::analysis::frgn_dispatch::resolve_single_frgn(
-            fb, &ext, &glue_targets, opts.backend,
+            fb, &ext, &glue_targets, opts.backend, Some(&universe),
         )?;
         resolved_frgns.insert(fb.effective_brief_name().to_string(), dispatch);
     }

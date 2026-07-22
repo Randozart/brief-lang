@@ -422,25 +422,41 @@ pub fn run_export_cli(file_path: &str, language: &str, out_dir: &str) -> Result<
         .file_stem()
         .and_then(|s| s.to_str())
         .unwrap_or("bridge");
-    let items = crate::library::parse_and_check(file_path, &source)?;
+    let (items, universe) = crate::library::parse_and_check(file_path, &source)?;
 
-    // 2026-07-22: Step 2 — extract bridge info
-    let info = extract_bridge_info(&items, bridge_name);
-    println!("  Bridge '{}': {} exports, {} frgns, {} melds",
-        info.name, info.exports.len(), info.frgns.len(), info.melds.len());
-
-    // 2026-07-22: Step 3 — find the language target in the GLUE registry
-    // Uses the TOML-based config (not the old dbvl format).
+    // 2026-07-22: Step 2 — find language target and extract bridge info
     let glue_targets = crate::glue::config::load_glue_config(None)?;
     let target = glue_targets.get(language).ok_or_else(|| {
         format!("Unknown export target '{}'.\n  Add an entry to lib/glue.toml or use a supported language: {}",
             language, glue_targets.keys().cloned().collect::<Vec<_>>().join(", "))
     })?;
+    let info = extract_bridge_info(&items, bridge_name);
+    println!("  Bridge '{}': {} exports, {} frgns, {} melds",
+        info.name, info.exports.len(), info.frgns.len(), info.melds.len());
     println!("  Target: {} (types: {}, bridge: {})",
         target.language, target.types_module.display(), target.bridge_kind);
 
-    // 2026-07-22: Step 4 — generate LLVM IR with C ABI wrappers
-    let llvm_ir = crate::library::generate_with_exports(&items, file_path)?;
+    // 2026-07-22: Step 3 — collect resolved frgns for dispatch
+    let mut resolved_frgns = std::collections::HashMap::new();
+    for item in &items {
+        if let crate::ast::TopLevel::ForeignBinding(fb) = item {
+            let ext = fb.from.extension().unwrap_or_default();
+            if let Ok(dispatch) = crate::analysis::frgn_dispatch::resolve_single_frgn(
+                fb, &ext, &glue_targets, crate::target::BackendKind::Llvm, Some(&universe),
+            ) {
+                resolved_frgns.insert(fb.effective_brief_name().to_string(), dispatch);
+            }
+        }
+    }
+
+    // 2026-07-22: Step 3 — generate LLVM IR with the full backend (real function bodies)
+    let llvm_ir = {
+        use crate::backend::llvm::LlvmBackend;
+        let mut b = LlvmBackend::new()
+            .with_type_universe(universe)
+            .with_resolved_frgns(resolved_frgns);
+        b.generate(&items, None)
+    };
 
     // 2026-07-22: Step 5 — create output directory and write files
     let output_dir = std::path::Path::new(out_dir).join(format!("{}-bridge", bridge_name));
@@ -471,8 +487,14 @@ pub fn run_export_cli(file_path: &str, language: &str, out_dir: &str) -> Result<
     // No hardcoded generators — every language is driven by lib/glue.toml.
     let mut template_vars: HashMap<String, String> = HashMap::new();
     template_vars.insert("bridge_name".to_string(), bridge_name.to_string());
-    template_vars.insert("s_init".to_string(), String::new());
-    template_vars.insert("s_param".to_string(), String::new());
+    // Populate state parameter based on calling convention
+    if target.calling_convention == "c_abi" {
+        template_vars.insert("s_param".to_string(), "_STATE, ".to_string());
+        template_vars.insert("s_init".to_string(), String::new()); // handled in template
+    } else {
+        template_vars.insert("s_param".to_string(), String::new());
+        template_vars.insert("s_init".to_string(), String::new());
+    }
 
     // Render all exports + FFI declarations
     let fn_template = target.templates.get("fn_template");

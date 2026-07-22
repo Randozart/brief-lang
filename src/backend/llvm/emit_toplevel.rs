@@ -340,6 +340,17 @@ impl LlvmBackend {
                 return "{ i64, i64 }".to_string();
             }
         }
+        // 2026-07-22: Non-SSO strings use ptr (opaque pointer), even if the
+        // universe declares them as {i64, i64}. The SSO code path converts
+        // between {i64, i64} and ptr internally; without SSO, the parameter
+        // is treated as a raw pointer.
+        if !self.feature_sso_strings {
+            if let Type::Custom(name) = ty {
+                if name == "String" || name == "Data" {
+                    return "ptr".to_string();
+                }
+            }
+        }
         // 2026-07-14: Universe query with derive_llvm_type replaces
         // the removed ResolvedType.llvm_type field.
         self.ctx.type_universe.as_ref()

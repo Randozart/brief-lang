@@ -251,7 +251,7 @@ fn has_safe_cast_path(universe: &TypeUniverse, foreign_type: &str, original_type
 /// Uses the type universe's property map, scanning for keys with the "Cast."
 /// prefix (e.g., "Cast.#Int", "Cast.#String"). #Bits is always reachable
 /// from every type (implicit Cast(#Bits)).
-fn find_cast_path(universe: &TypeUniverse, source_type: &str, target_type: &str) -> Option<Vec<String>> {
+pub(crate) fn find_cast_path(universe: &TypeUniverse, source_type: &str, target_type: &str) -> Option<Vec<String>> {
     use std::collections::VecDeque;
 
     let mut visited = std::collections::HashSet::new();

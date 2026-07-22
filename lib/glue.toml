@@ -239,6 +239,18 @@ fn main() {
 #![allow(dead_code)]
 
 mod ffi;
+use std::ffi::c_void;
+
+static mut STATE: *mut c_void = std::ptr::null_mut();
+
+fn init_state() {
+    unsafe {
+        let layout = std::alloc::Layout::from_size_align(32, 8).unwrap();
+        let buf = std::alloc::alloc_zeroed(layout) as *mut c_void;
+        ffi::init_state(buf);
+        STATE = buf;
+    }
+}
 
 {{exports}}
 """
@@ -253,8 +265,8 @@ extern "C" {
 }
 """
 "fn_template" = """pub fn {{name}}({{params}}) -> {{return}} { unsafe {
-    let result_abi = ffi::{{name}}({{args_abi}});
+    let result_abi = ffi::{{name}}(STATE, {{args_abi}});
     {{return_expr}}
 } }
 """
-"ffi_template" = """    pub fn {{name}}({{ffi_params}}) -> {{c_return}};"""
+"ffi_template" = """    pub fn {{name}}(state: *mut std::ffi::c_void, {{ffi_params}}) -> {{c_return}};"""

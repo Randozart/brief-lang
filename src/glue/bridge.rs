@@ -24,30 +24,76 @@ use crate::ast::Type;
 /// is emitted as the appropriate LLVM IR operation.
 ///
 /// Returns the register name holding the final transformed value.
-///
-/// Stub: Returns the value unchanged. Full implementation when the
-/// meld/identity/cast emission helpers are wired in.
 pub fn emit_protocol_chain(
+    out: &mut String,
     value_reg: &str,
     path: &[ProtocolStep],
-    _value_ty: &str,
+    value_ty: &str,
+    gen_reg: &mut dyn FnMut() -> String,
 ) -> Result<String, String> {
     if path.is_empty() {
         return Ok(value_reg.to_string());
     }
 
     let mut current_reg = value_reg.to_string();
+    let mut current_ty = value_ty.to_string();
+
     for step in path {
         match step.kind {
             TransformKind::Identity => {
                 // No transformation needed — types are structurally identical
             }
-            TransformKind::MeldShuffle | TransformKind::Bitcast => {
-                // 2026-07-22: Stub — full meld shuffle emission uses
-                // emit_meld_shuffle() in llvm/intrinsics.rs.
+            TransformKind::Bitcast => {
+                let target_ty = match &step.target {
+                    Type::Custom(t) => t.as_str(),
+                    Type::Bits(w) => match w {
+                        8 => "i8",
+                        16 => "i16",
+                        32 => "i32",
+                        64 => "i64",
+                        _ => "i64",
+                    },
+                    _ => "i64",
+                };
+                let result = gen_reg();
+                writeln!(
+                    out,
+                    "  {} = bitcast {} {} to {}",
+                    result, current_ty, current_reg, target_ty
+                ).ok();
+                current_reg = result;
+                current_ty = target_ty.to_string();
+            }
+            TransformKind::MeldShuffle => {
+                // MeldShuffle: extract fields from source struct and insert into dest.
+                // For now, emit a bitcast as a fallback (field reordering is specialized).
+                let target_ty = match &step.target {
+                    Type::Custom(t) => t.as_str(),
+                    _ => "i64",
+                };
+                let result = gen_reg();
+                writeln!(
+                    out,
+                    "  {} = bitcast {} {} to {}",
+                    result, current_ty, current_reg, target_ty
+                ).ok();
+                current_reg = result;
+                current_ty = target_ty.to_string();
             }
             TransformKind::ProtocolTransform(ref _category) => {
-                // 2026-07-22: Stub — CastTo/CastFrom inline emission.
+                // 2026-07-22: Protocol transform via CastTo/CastFrom intrinsic.
+                let target_ty = match &step.target {
+                    Type::Custom(t) => t.as_str(),
+                    _ => "i64",
+                };
+                let result = gen_reg();
+                writeln!(
+                    out,
+                    "  {} = call {} @_CastTo_{}({} {})",
+                    result, target_ty, _category, current_ty, current_reg
+                ).ok();
+                current_reg = result;
+                current_ty = target_ty.to_string();
             }
         }
     }
@@ -234,13 +280,17 @@ mod tests {
             target: Type::int(),
             kind: TransformKind::Identity,
         }];
-        let result = emit_protocol_chain("%val", &path, "i64").unwrap();
+        let mut out = String::new();
+        let mut gen_reg = test_gen_reg();
+        let result = emit_protocol_chain(&mut out, "%val", &path, "i64", &mut gen_reg).unwrap();
         assert_eq!(result, "%val");
     }
 
     #[test]
     fn test_emit_protocol_chain_empty() {
-        let result = emit_protocol_chain("%val", &[], "i64").unwrap();
+        let mut out = String::new();
+        let mut gen_reg = test_gen_reg();
+        let result = emit_protocol_chain(&mut out, "%val", &[], "i64", &mut gen_reg).unwrap();
         assert_eq!(result, "%val");
     }
 

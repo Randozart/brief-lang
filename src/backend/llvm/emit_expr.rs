@@ -1218,7 +1218,8 @@ impl LlvmBackend {
             let reg = self.emit_expr(out, arg, indent);
             let path_for_arg = param_paths.get(i).map(|p| std::slice::from_ref(p)).unwrap_or(&[]);
             let result_reg = crate::glue::bridge::emit_protocol_chain(
-                &reg.name, path_for_arg, &self.llvm_type(&reg.ty),
+                out, &reg.name, path_for_arg, &self.llvm_type(&reg.ty),
+                &mut || self.fun.gen_reg(),
             ).unwrap_or_else(|_| reg.name.clone());
             transformed_args.push(TypedRegister {
                 name: result_reg,
@@ -1253,7 +1254,8 @@ impl LlvmBackend {
         // 2026-07-22: Transform return value back to Brief type.
         let final_reg = if let Some(ret_path) = return_path {
             crate::glue::bridge::emit_protocol_chain(
-                v, std::slice::from_ref(ret_path), &ret_llvm,
+                out, v, std::slice::from_ref(ret_path), &ret_llvm,
+                &mut || self.fun.gen_reg(),
             ).unwrap_or_else(|_| v.to_string())
         } else {
             v.to_string()
