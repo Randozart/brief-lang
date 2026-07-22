@@ -97,6 +97,27 @@ char* brief_str_to_c(int64_t handle) {
     return c_str;
 }
 
+/// Convert a C string (null-terminated) to a Brief string handle.
+/// Returns a heap-allocated Brief string (8-byte length prefix + data).
+/// Caller should free via brief_free_brief_str().
+int64_t brief_cstr_to_brief(const char* c_str) {
+    if (!c_str) return 0;
+    int64_t len = (int64_t)strlen(c_str);
+    if (len > 1024 * 1024 * 1024) return 0; // sanity check
+    // Allocate: 8 bytes for length + len bytes for data + 1 for null terminator
+    char* buf = (char*)malloc((size_t)(len + 9));
+    if (!buf) return 0;
+    *(int64_t*)buf = len;               // write length prefix
+    if (len > 0) memcpy(buf + 8, c_str, (size_t)len);
+    buf[8 + len] = '\0';                // null terminator for C compatibility
+    return (int64_t)(uintptr_t)buf;
+}
+
+/// Free a Brief string allocated by brief_cstr_to_brief or similar.
+void brief_free_brief_str(int64_t handle) {
+    if (handle) free((void*)(uintptr_t)handle);
+}
+
 // ── Core intrinsics (kept) ────────────────────────────────────────────
 
 // 2026-07-19: Returns the environ pointer (char **environ) as an Int.

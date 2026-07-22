@@ -1970,6 +1970,7 @@ impl LlvmBackend {
                 crate::ast::ResultType::Projection(ref ts) => {
                     if ts.is_empty() || ts.iter().any(|t| matches!(t, Type::Void)) { "void" }
                     else if ts.iter().any(|t| matches!(t, Type::Custom(__t) if __t == "Float")) { "float" }
+                    else if ts.iter().any(|t| matches!(t, Type::Custom(__t) if __t == "String" || __t == "Data")) { "ptr" }
                     else { "i64" }
                 }
             };
@@ -1978,7 +1979,7 @@ impl LlvmBackend {
                 Type::Custom(__t) if __t == "Bool" => "i32",
                 Type::Custom(__t) if __t == "Char" => "i32",
                 Type::Custom(__t) if __t == "Float" => "float",
-                Type::Custom(__t) if __t == "String" || __t == "Data" => "i64",
+                Type::Custom(__t) if __t == "String" || __t == "Data" => "ptr",
                 _ => "i64",
             }).collect();
             write!(out, "declare {} @{}(", ret_ty, sig.name).ok();

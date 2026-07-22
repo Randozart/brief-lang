@@ -997,8 +997,10 @@ impl LlvmBackend {
         }
     }
 
-    // 2026-07-18: Legacy string literal emission (SSO OFF).
-    // Stack-allocated [len+1 x i8] buffer, ptrtoint to i64, returned as Int type.
+    // 2026-07-22: Legacy string literal emission (SSO OFF).
+    // Uses global @str.N constants to avoid dangling stack pointers.
+    // The old alloca-based approach caused use-after-free when string
+    // return values were passed to subsequent function calls.
     fn emit_legacy_string_literal(
         &mut self,
         out: &mut String,
@@ -1006,39 +1008,20 @@ impl LlvmBackend {
         bytes: &[u8],
         indent: &str,
     ) -> TypedRegister {
-        let len = bytes.len() + 1;
-        let alloca = self.fun.gen_reg();
-        writeln!(out, "{}{} = alloca [{} x i8], align 1", indent, alloca, len).ok();
-        for (i, &b) in bytes.iter().enumerate() {
-            let ptr = self.fun.gen_reg();
-            writeln!(
-                out,
-                "{}{} = getelementptr inbounds [{} x i8], ptr {}, i32 0, i32 {}",
-                indent, ptr, len, alloca, i
-            )
-            .ok();
-            writeln!(out, "{}store i8 {}, ptr {}", indent, b, ptr).ok();
-        }
-        // null terminator
-        let last = self.fun.gen_reg();
-        writeln!(
-            out,
-            "{}{} = getelementptr inbounds [{} x i8], ptr {}, i32 0, i32 {}",
-            indent,
-            last,
-            len,
-            alloca,
-            bytes.len()
-        )
-        .ok();
-        writeln!(out, "{}store i8 0, ptr {}", indent, last).ok();
-        writeln!(
-            out,
-            "{}{} = getelementptr inbounds [{} x i8], ptr {}, i32 0, i32 0",
-            indent, v, len, alloca
-        )
-        .ok();
-        // 2026-07-15: ptrtoint so callers see i64 (Brief universal type)
+        // 2026-07-22: Emit global constant if not already defined
+        let s_str = String::from_utf8_lossy(bytes);
+        let si = self.ctx.string_constants.iter()
+            .position(|x| x.as_str() == s_str)
+            .unwrap_or_else(|| {
+                self.ctx.string_constants.push(s_str.to_string());
+                self.ctx.string_constants.len() - 1
+            });
+        let g = format!("@str.{}", si);
+        // bitcast the struct to a plain ptr, then GEP to the data bytes
+        let bitcast = self.fun.gen_reg();
+        writeln!(out, "{}{} = bitcast <{{ i64, i64, [{} x i8] }}>* {} to ptr", 
+            indent, bitcast, bytes.len() + 1, g).ok();
+        writeln!(out, "{}{} = getelementptr inbounds i8, ptr {}, i64 16", indent, v, bitcast).ok();
         let p2i = self.fun.gen_reg();
         writeln!(out, "{}{} = ptrtoint ptr {} to i64", indent, p2i, v).ok();
         TypedRegister {
