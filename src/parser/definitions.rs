@@ -98,7 +98,7 @@ impl<'a> Parser<'a> {
         };
 
         // 2026-07-22: Parse optional `as <brief_name>` — Brief-side name, before `from`.
-        let brief_name = if self.eat_identifier("as") {
+        let brief_name = if self.eat(&Token::As) {
             Some(self.expect_identifier()?)
         } else {
             None

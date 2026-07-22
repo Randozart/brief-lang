@@ -1978,10 +1978,10 @@ impl LlvmBackend {
                 Type::Custom(__t) if __t == "Bool" => "i32",
                 Type::Custom(__t) if __t == "Char" => "i32",
                 Type::Custom(__t) if __t == "Float" => "float",
-        Type::Custom(__t) if __t == "String" || __t == "Data" => "i8*",
+                Type::Custom(__t) if __t == "String" || __t == "Data" => "i64",
                 _ => "i64",
             }).collect();
-            write!(out, "declare {} @{}(", ret_ty, name).ok();
+            write!(out, "declare {} @{}(", ret_ty, sig.name).ok();
             for (pi, pt) in param_tys.iter().enumerate() {
                 if pi > 0 { write!(out, ", ").ok(); }
                 write!(out, "{}", pt).ok();

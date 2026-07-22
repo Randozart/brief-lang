@@ -1,5 +1,5 @@
 // Standard HTTP Library
 // Foreign function declarations for WASM target
 
-frgn __http_get(url: String) -> Result<String, HttpError> as frgn__http_get from "link/brief_rt.c" fallback "";
-frgn __http_post(url: String, body: String) -> Result<String, HttpError> as frgn__http_post from "link/brief_rt.c" fallback "";
+frgn __http_get(url: String) -> Result<String, HttpError> as frgn__http_get from "lib/runtime/brief_rt.c" fallback "";
+frgn __http_post(url: String, body: String) -> Result<String, HttpError> as frgn__http_post from "lib/runtime/brief_rt.c" fallback "";

@@ -23,7 +23,7 @@
 // Parameters: data pointer (Int = raw address), length (Int), seed (Int)
 // Returns: 64-bit or 32-bit hash value
 
-frgn XXH64(data_ptr: Int, len: Int, seed: Int) -> Int as frgn__xxh64 from "link/xxhash/xxhash.c" fallback 0;
-frgn XXH32(data_ptr: Int, len: Int, seed: Int) -> Int as frgn__xxh32 from "link/xxhash/xxhash.c" fallback 0;
+frgn XXH64(data_ptr: Int, len: Int, seed: Int) -> Int as frgn__xxh64 from "lib/std/c/xxhash/xxhash.c" fallback 0;
+frgn XXH32(data_ptr: Int, len: Int, seed: Int) -> Int as frgn__xxh32 from "lib/std/c/xxhash/xxhash.c" fallback 0;
 
 // ===== CONVENIENCE WRAPPERS =====
