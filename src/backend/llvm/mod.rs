@@ -1459,13 +1459,9 @@ impl LlvmBackend {
             writeln!(out, "@str__{} = private unnamed_addr constant [{} x i8] c\"{}\\00\"",
                 d.name, d.name.len() + 1, escaped).ok();
         }
-        writeln!(out, "@str_parse_ii = private unnamed_addr constant [3 x i8] c\"ii\\00\"").ok();
-
-        // ── PyMethodDef type ───────────────────────────────────────
-        writeln!(out, "%PyMethodDef = type {{ ptr, ptr, i64, ptr }}").ok();
+        writeln!(out, "@str_parse_LL = private unnamed_addr constant [3 x i8] c\"LL\\00\"").ok();
 
         // ── Emit Python-callable bridge wrappers ───────────────────
-        // Python C API expects PyCFunction (ptr self, ptr args) -> ptr.
         writeln!(out, "declare ptr @PyLong_FromLongLong(i64)").ok();
         writeln!(out, "declare i32 @PyArg_ParseTuple(ptr, ptr, ...)").ok();
 
@@ -1478,7 +1474,7 @@ impl LlvmBackend {
             } else {
                 writeln!(out, "  %a = alloca i64, align 8").ok();
                 writeln!(out, "  %b = alloca i64, align 8").ok();
-                writeln!(out, "  %ok = call i32 @PyArg_ParseTuple(ptr %args, ptr @str_parse_ii, ptr %a, ptr %b)").ok();
+                writeln!(out, "  %ok = call i32 @PyArg_ParseTuple(ptr %args, ptr @str_parse_LL, ptr %a, ptr %b)").ok();
                 writeln!(out, "  %av = load i64, ptr %a, align 8").ok();
                 writeln!(out, "  %bv = load i64, ptr %b, align 8").ok();
                 writeln!(out, "  %r = call i64 @{}(i64 %av, i64 %bv)", d.name).ok();
@@ -1489,6 +1485,7 @@ impl LlvmBackend {
         }
 
         // ── Method table (PyMethodDef array) ───────────────────────
+        writeln!(out, "%PyMethodDef = type {{ ptr, ptr, i64, ptr }}").ok();
         writeln!(out, "@methods = constant [{} x %PyMethodDef] [",
             exports.len() + 1).ok();
         for (i, d) in exports.iter().enumerate() {
