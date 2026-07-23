@@ -1093,6 +1093,68 @@ fn eval_nav_call(
                 None => Ok(NavValue::List(vec![])),
             }
         }
+        // 2026-07-23: Inject foreign struct layout into the type universe.
+        // Used by ABI probing: injects field names, types, and offsets so
+        // the protocol graph BFS can find Identity paths for matching types.
+        "InjectTypeLayout$" => {
+            let type_name = expect_str_arg(args, 0, "InjectTypeLayout$", scope)?;
+            let size_str = expect_str_arg(args, 1, "InjectTypeLayout$", scope)?;
+            let size: u64 = size_str.parse()
+                .map_err(|_| format!("InjectTypeLayout$: invalid size '{}'", size_str))?;
+            let fields_val = eval_nav_chain(&args[2], program, universe, stage, scope, sandbox, pm)?;
+            // Accept both a List of [name, type, offset] triples and a
+            // flat string "name:type:offset,name:type:offset,..."
+            let parsed_fields: Vec<(String, String, u64)> = match &fields_val {
+                NavValue::List(items) => {
+                    let mut result = Vec::new();
+                    for (i, item) in items.iter().enumerate() {
+                        let triple = match item {
+                            NavValue::List(parts) if parts.len() >= 3 => parts,
+                            _ => return Err(format!("InjectTypeLayout$: field {} must be a [name, type, offset] list", i)),
+                        };
+                        let fname = nav_to_string(&triple[0]);
+                        let ftype = nav_to_string(&triple[1]);
+                        let foffset: u64 = nav_to_i64(&triple[2]) as u64;
+                        result.push((fname, ftype, foffset));
+                    }
+                    result
+                }
+                NavValue::Str(s) => {
+                    let mut result = Vec::new();
+                    for part in s.split(',') {
+                        let segments: Vec<&str> = part.splitn(3, ':').collect();
+                        if segments.len() != 3 {
+                            return Err(format!("InjectTypeLayout$: invalid field spec '{}' (expected name:type:offset)", part));
+                        }
+                        let foffset: u64 = segments[2].parse()
+                            .map_err(|_| format!("InjectTypeLayout$: invalid offset '{}'", segments[2]))?;
+                        result.push((segments[0].to_string(), segments[1].to_string(), foffset));
+                    }
+                    result
+                }
+                _ => return Err("InjectTypeLayout$: arg 2 must be a List or String".into()),
+            };
+            let entry = universe.types.entry(type_name.clone()).or_insert_with(|| {
+                crate::type_universe::ResolvedType {
+                    name: type_name.clone(),
+                    base: String::new(),
+                    bytes: size,
+                    alignment: 0,
+                    properties: std::collections::HashMap::new(),
+                    fields: vec![],
+                }
+            });
+            entry.bytes = size;
+            let mut field_names = Vec::new();
+            for (i, (fname, ftype, foffset)) in parsed_fields.iter().enumerate() {
+                entry.properties.insert(format!("field.{}.name", i), crate::ast::PropertyValue::String(fname.clone()));
+                entry.properties.insert(format!("field.{}.offset", i), crate::ast::PropertyValue::Int(*foffset as i64));
+                entry.properties.insert(format!("field.{}.type", i), crate::ast::PropertyValue::String(ftype.clone()));
+                field_names.push((fname.clone(), crate::ast::Type::Custom(ftype.clone())));
+            }
+            entry.fields = field_names;
+            Ok(NavValue::Void)
+        }
 
         // ── Type Information (2026-07-22) ────────────────────────────
         "TypeInfo$" => {
