@@ -179,3 +179,85 @@ Only stages > the current one.
 - See `docs/architecture/features/plugins.md` for the full intrinsic reference.
 - See `examples/stage/` for runnable plugin examples.
 - See `docs/plans/2026-07-21-granular-pipeline-and-ast-navigation.md` for the design.
+
+## Beyond AST: Generic Compile-Time Intrinsics
+
+The `$` system is not limited to AST manipulation. Generic intrinsics
+provide file I/O, string processing, configuration reading, universe
+queries, and external command execution — usable by ANY plugin, not
+just bridge generators.
+
+### String Processing
+
+```brief
+$(Parsed) {
+    let msg = StrReplace$("Found {{n}} errors", "{{n}}", "42");
+    EmitInfo$(msg);  // prints "Found 42 errors"
+
+    let parts = StrSplit$("a,b,c", ",");
+    let joined = StrJoin$(parts, " | ");
+    EmitInfo$(joined);  // prints "a | b | c"
+};
+```
+
+### File I/O
+
+```brief
+$(Parsed) {
+    // Read a config file
+    let cfg = FileRead$("config.toml");
+
+    // Write generated output
+    FileWrite$("output.txt", "generated content");
+};
+```
+
+### Configuration Reading
+
+```brief
+$(Parsed) {
+    let tmpl = ConfigGet$("rust", "templates.fn_template");
+    // Reads lib/glue.toml → [rust.templates] → "fn_template"
+};
+```
+
+### Type Information
+
+```brief
+$(Parsed) {
+    let name = TypeInfo$(Named$("my_fn").First$(), "name");
+    let pcount = TypeInfo$(Named$("my_fn").First$(), "params.count");
+    let p0type = TypeInfo$(Named$("my_fn").First$(), "params.0.type");
+};
+```
+
+### Protocol Path Queries
+
+```brief
+$(Parsed) {
+    // Compute protocol path between two types
+    let path = CastPath$("String", "#String");
+    // Returns ["String", "#String"] — identity path
+};
+```
+
+### External Commands
+
+```brief
+$(Parsed) {
+    // Run an external tool at compile time
+    let output = ShellCmd$("brief", "check", "file.bv");
+};
+```
+
+### Design Principle
+
+Every `$` intrinsic is **fully generic** — it must have at least 3 distinct
+non-GLUE use cases before it's accepted into the engine. If a capability is
+only useful for bridge generation, it belongs in the bridge generator `.bv`
+file (as a composition of generic intrinsics), not as a new Rust intrinsic.
+
+The bridge generator itself is a `.bv` plugin that combines exactly 7 generic
+intrinsics: `ConfigGet$`, `StrReplace$`, `TypeInfo$`, `CastPath$`, `FileWrite$`,
+`ShellCmd$`, and the AST selection/traversal chain.
+
