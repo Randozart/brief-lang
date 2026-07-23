@@ -190,7 +190,7 @@ pub fn delete_selection(items: &mut Vec<TopLevel>, sel: &Selection) -> Result<u3
     Ok(count)
 }
 
-fn collect_toplevel_indices(sel: &Selection) -> Vec<usize> {
+pub(crate) fn collect_toplevel_indices(sel: &Selection) -> Vec<usize> {
     let mut indices = Vec::new();
     for node in &sel.nodes {
         if let NodeRef::TopLevel(i) = node {

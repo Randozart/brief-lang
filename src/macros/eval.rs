@@ -22,6 +22,7 @@ use super::selection::{
 use super::actions::{
     Position, insert_items, insert_before_each, insert_after_each,
     delete_selection, replace_selection, set_metadata, rename_selection,
+    collect_toplevel_indices,
 };
 use super::text_ops::TextSelection;
 use super::stage_target;
@@ -545,7 +546,25 @@ fn eval_nav_call(
         "Delete$" => {
             let prev = eval_nav_chain(&args[0], program, universe, stage, scope, sandbox, pm)?;
             match prev {
-                NavValue::Selection(sel) => delete_selection(program, &sel).map(|_| NavValue::Void),
+                NavValue::Selection(sel) => {
+                    // 2026-07-23: Adjust tainted indices for deleted items.
+                    // Removed indices are dropped; remaining tainted indices >= a
+                    // deleted index shift down by the number of deletions before them.
+                    let indices = collect_toplevel_indices(&sel);
+                    delete_selection(program, &sel)?;
+                    if let Some(pm_inner) = pm {
+                        let deleted: BTreeSet<usize> = indices.iter().cloned().collect();
+                        let shifted: BTreeSet<usize> = pm_inner.tainted_indices.iter()
+                            .filter(|ti| !deleted.contains(ti))
+                            .map(|ti| {
+                                let shift = deleted.iter().filter(|d| **d < *ti).count();
+                                ti - shift
+                            })
+                            .collect();
+                        pm_inner.tainted_indices = shifted;
+                    }
+                    Ok(NavValue::Void)
+                }
                 _ => Err("Delete$ requires a Selection operand".into()),
             }
         }
@@ -558,7 +577,15 @@ fn eval_nav_call(
             };
             match prev {
                 NavValue::Selection(sel) => {
-                    replace_selection(program, &sel, repl_node).map(|_| NavValue::Void)
+                    // 2026-07-23: Mark replaced indices as tainted.
+                    let indices = collect_toplevel_indices(&sel);
+                    replace_selection(program, &sel, repl_node)?;
+                    if let Some(pm_inner) = pm {
+                        for i in &indices {
+                            pm_inner.tainted_indices.insert(*i);
+                        }
+                    }
+                    Ok(NavValue::Void)
                 }
                 _ => Err("ReplaceWith$ requires a Selection operand".into()),
             }
@@ -2326,5 +2353,205 @@ mod tests {
         assert!(!pm.tainted_indices.contains(&0),
             "original node at index 0 must NOT be tainted");
         assert_eq!(program.len(), 2, "one node should have been inserted");
+    }
+
+    #[test]
+    fn test_delete_shifts_tainted_indices() {
+        // Deleting non-tainted nodes shifts tainted indices down.
+        // Program: [a(idx 0), b(idx 1), c(idx 2)], Tainted: {1, 2} (b and c).
+        // Tag$("import") returns {0} only (tainted 1 and 2 are filtered out).
+        // Delete$ removes index 0 (a). Remaining: [b(idx 0), c(idx 1)].
+        // Tainted indices 1 and 2 shift down: {0, 1}.
+        let mut program = vec![
+            TopLevel::Import(Import::literal("std/a.bv", vec![])),
+            TopLevel::Import(Import::literal("std/b.bv", vec![])),
+            TopLevel::Import(Import::literal("std/c.bv", vec![])),
+        ];
+        let mut universe = TypeUniverse::new();
+        let mut pm = test_pm_with_tainted(vec![1, 2]);
+        let mut pm_opt = Some(&mut pm);
+        let sel = Expr::Call("Tag$".into(), vec![Expr::Quoted("import".into())], None);
+        let delete_call = Expr::Call("Delete$".into(), vec![sel], None);
+        eval_nav_chain(&delete_call, &mut program, &mut universe,
+            StageKind::Parsed, &empty_scope(), &mut test_sandbox(), &mut pm_opt).unwrap();
+        assert_eq!(program.len(), 2, "one non-tainted node deleted");
+        assert!(pm.tainted_indices.contains(&0),
+            "b (orig 1) should be at 0 and still tainted");
+        assert!(pm.tainted_indices.contains(&1),
+            "c (orig 2) should be at 1 and still tainted");
+    }
+
+    #[test]
+    fn test_delete_skips_tainted_in_selection() {
+        // When a tainted node is already excluded from a selector, deleting
+        // the remaining (non-tainted) nodes correctly shifts remaining taint.
+        let mut program = vec![
+            TopLevel::Import(Import::literal("std/a.bv", vec![])),
+            TopLevel::Import(Import::literal("std/b.bv", vec![])),
+        ];
+        let mut universe = TypeUniverse::new();
+        let mut pm = test_pm_with_tainted(vec![0]); // a is tainted
+        let mut pm_opt = Some(&mut pm);
+        // All$() returns {1} only (tainted 0 filtered). Delete removes index 1.
+        let sel = Expr::Call("All$".into(), vec![], None);
+        let delete_call = Expr::Call("Delete$".into(), vec![sel], None);
+        eval_nav_chain(&delete_call, &mut program, &mut universe,
+            StageKind::Parsed, &empty_scope(), &mut test_sandbox(), &mut pm_opt).unwrap();
+        assert_eq!(program.len(), 1, "tainted node (a) should remain");
+        // Tainted index 0 stays at 0 (no shift because deletion was at 1)
+        assert!(pm.tainted_indices.contains(&0),
+            "a at index 0 should remain tainted");
+        // Index 1 was not in tainted set, so nothing was removed from it
+        assert_eq!(pm.tainted_indices.len(), 1,
+            "only index 0 should be in tainted set");
+    }
+
+    #[test]
+    fn test_replace_with_marks_tainted() {
+        // ReplaceWith$ at a position should mark that position as tainted.
+        let mut program = vec![
+            TopLevel::Import(Import::literal("std/a.bv", vec![])),
+            TopLevel::Import(Import::literal("std/b.bv", vec![])),
+        ];
+        let mut universe = TypeUniverse::new();
+        let mut pm = PluginManager::new();
+        let mut pm_opt = Some(&mut pm);
+        let first_call = Expr::Call("First$".into(), vec![Expr::Call("All$".into(), vec![], None)], None);
+        let import_call = Expr::Call("Import$".into(), vec![Expr::Quoted("std/replacement.bv".into())], None);
+        let replace_call = Expr::Call("ReplaceWith$".into(), vec![first_call, import_call], None);
+        let result = eval_nav_chain(&replace_call, &mut program, &mut universe,
+            StageKind::Parsed, &empty_scope(), &mut test_sandbox(), &mut pm_opt);
+        assert!(result.is_ok(), "ReplaceWith$ should succeed: {:?}", result.err());
+        // Index 0 should be tainted (was replaced)
+        assert!(pm.tainted_indices.contains(&0),
+            "replaced index 0 should be tainted");
+        assert!(!pm.tainted_indices.contains(&1),
+            "index 1 should NOT be tainted (unchanged)");
+    }
+
+    #[test]
+    fn test_replace_with_keeps_existing_taint() {
+        // ReplaceWith$ at an already-tainted index keeps it tainted.
+        let mut program = vec![
+            TopLevel::Import(Import::literal("std/a.bv", vec![])),
+        ];
+        let mut universe = TypeUniverse::new();
+        let mut pm = test_pm_with_tainted(vec![0]);
+        let mut pm_opt = Some(&mut pm);
+        let first_call = Expr::Call("First$".into(), vec![Expr::Call("All$".into(), vec![], None)], None);
+        let import_call = Expr::Call("Import$".into(), vec![Expr::Quoted("std/replacement.bv".into())], None);
+        let replace_call = Expr::Call("ReplaceWith$".into(), vec![first_call, import_call], None);
+        eval_nav_chain(&replace_call, &mut program, &mut universe,
+            StageKind::Parsed, &empty_scope(), &mut test_sandbox(), &mut pm_opt).unwrap();
+        assert!(pm.tainted_indices.contains(&0),
+            "index 0 should remain tainted after replacement");
+    }
+
+    #[test]
+    fn test_delete_mixed_taint_shift() {
+        // Delete multiple nodes where some are before and after tainted nodes.
+        // Program: [a(idx 0), b(idx 1), c(idx 2), d(idx 3)], Tainted: {1, 3} (b and d).
+        // Tag$("import") returns {0, 2} (tainted 1, 3 are filtered).
+        // Delete removes indices 0 and 2. Remaining: [b(idx 0), d(idx 1)].
+        // Tainted: orig 1 (b) → 0, orig 3 (d) → 3 - 1 (one deleted before) = 2... 
+        // No wait, this is wrong. After Tag$ returns {0, 2}, we delete both.
+        // delete_selection removes in reverse: first 2, then 0.
+        // After removing 2: [a, b, d]. Index 3 → 2. Tainted {1, 3} → {1, 2}.
+        // After removing 0: [b, d]. Index 1 → 0. Tainted {1, 2} → {0, 1}.
+        // So final: [b(tainted, at 0), d(tainted, at 1)], tainted {0, 1}.
+        let mut program = vec![
+            TopLevel::Import(Import::literal("std/a.bv", vec![])),
+            TopLevel::Import(Import::literal("std/b.bv", vec![])),
+            TopLevel::Import(Import::literal("std/c.bv", vec![])),
+            TopLevel::Import(Import::literal("std/d.bv", vec![])),
+        ];
+        let mut universe = TypeUniverse::new();
+        let mut pm = test_pm_with_tainted(vec![1, 3]);
+        let mut pm_opt = Some(&mut pm);
+        let sel = Expr::Call("Tag$".into(), vec![Expr::Quoted("import".into())], None);
+        let delete_call = Expr::Call("Delete$".into(), vec![sel], None);
+        eval_nav_chain(&delete_call, &mut program, &mut universe,
+            StageKind::Parsed, &empty_scope(), &mut test_sandbox(), &mut pm_opt).unwrap();
+        assert_eq!(program.len(), 2, "two non-tainted nodes deleted");
+        assert!(pm.tainted_indices.contains(&0), "b should be at 0 and tainted");
+        assert!(pm.tainted_indices.contains(&1), "d should be at 1 and tainted");
+    }
+
+    #[test]
+    fn test_end_to_end_taint_isolation() {
+        // Full integration: Insert a tainted node, verify selectors exclude it,
+        // then delete a non-tainted node and verify remaining taint shifts correctly.
+        let mut program = vec![
+            TopLevel::Import(Import::literal("std/a.bv", vec![])),
+            TopLevel::Import(Import::literal("std/b.bv", vec![])),
+        ];
+        let mut universe = TypeUniverse::new();
+        let mut pm = PluginManager::new();
+        // Insert a tainted node at index 0 (before the first import)
+        let tag_call = Expr::Call("Tag$".into(), vec![Expr::Quoted("import".into())], None);
+        let before_call = Expr::Call("Before$".into(), vec![tag_call.clone()], None);
+        let import_call = Expr::Call("Import$".into(), vec![Expr::Quoted("std/tainted.bv".into())], None);
+        let insert_call = Expr::Call("Insert$".into(), vec![before_call, import_call], None);
+        {
+            let mut pm_opt = Some(&mut pm);
+            eval_nav_chain(&insert_call, &mut program, &mut universe,
+                StageKind::Parsed, &empty_scope(), &mut test_sandbox(), &mut pm_opt).unwrap();
+        }
+        // Program: [tainted(idx 0), a(idx 1), b(idx 2)]. Tainted: {0}.
+        // All$ should exclude index 0 (the tainted node)
+        let all_expr = Expr::Call("All$".into(), vec![], None);
+        {
+            let mut pm_opt = Some(&mut pm);
+            let all_result = eval_nav_chain(&all_expr, &mut program, &mut universe,
+                StageKind::Parsed, &empty_scope(), &mut test_sandbox(), &mut pm_opt).unwrap();
+            match all_result {
+                NavValue::Selection(sel) => assert_eq!(sel.count(), 2, "All$ should exclude tainted node"),
+                other => panic!("expected Selection, got {:?}", other),
+            }
+        }
+        // Tag$ should also exclude the tainted import
+        {
+            let mut pm_opt = Some(&mut pm);
+            let tag_result = eval_nav_chain(&tag_call, &mut program, &mut universe,
+                StageKind::Parsed, &empty_scope(), &mut test_sandbox(), &mut pm_opt).unwrap();
+            match tag_result {
+                NavValue::Selection(sel) => assert_eq!(sel.count(), 2, "Tag$ should exclude tainted node"),
+                other => panic!("expected Selection, got {:?}", other),
+            }
+        }
+        // Delete the first non-tainted node (a at index 1). After deletion,
+        // program becomes [tainted, b]. Tainted index 0 stays at 0.
+        let first_non_tainted = Expr::Call("First$".into(), vec![all_expr.clone()], None);
+        let delete_call = Expr::Call("Delete$".into(), vec![first_non_tainted], None);
+        {
+            let mut pm_opt = Some(&mut pm);
+            eval_nav_chain(&delete_call, &mut program, &mut universe,
+                StageKind::Parsed, &empty_scope(), &mut test_sandbox(), &mut pm_opt).unwrap();
+        }
+        assert_eq!(program.len(), 2, "one node deleted, one remains + tainted");
+        assert!(pm.tainted_indices.contains(&0),
+            "tainted index 0 should remain after deleting index 1");
+        // Insert another tainted node after the non-tainted node (b at index 1)
+        {
+            let mut pm_opt = Some(&mut pm);
+            let after_first_tainted = Expr::Call("After$".into(), vec![
+                Expr::Call("All$".into(), vec![], None),
+            ], None);
+            let import_call2_node = Expr::Call("Import$".into(), vec![Expr::Quoted("std/tainted2.bv".into())], None);
+            let insert_call2 = Expr::Call("Insert$".into(), vec![after_first_tainted, import_call2_node], None);
+            eval_nav_chain(&insert_call2, &mut program, &mut universe,
+                StageKind::Parsed, &empty_scope(), &mut test_sandbox(), &mut pm_opt).unwrap();
+        }
+        assert_eq!(program.len(), 3, "two tainted nodes + one original");
+        // All$ should return only the non-tainted node (b at index 1)
+        {
+            let mut pm_opt = Some(&mut pm);
+            let final_all = eval_nav_chain(&Expr::Call("All$".into(), vec![], None), &mut program, &mut universe,
+                StageKind::Parsed, &empty_scope(), &mut test_sandbox(), &mut pm_opt).unwrap();
+            match final_all {
+                NavValue::Selection(sel) => assert_eq!(sel.count(), 1, "only b should remain visible"),
+                other => panic!("expected Selection, got {:?}", other),
+            }
+        }
     }
 }
