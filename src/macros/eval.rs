@@ -37,6 +37,7 @@ pub enum NavValue {
     Str(String),
     TopLevel(TopLevel),
     VecTopLevel(Vec<TopLevel>),
+    List(Vec<NavValue>),
     Void,
 }
 
@@ -500,6 +501,178 @@ fn eval_nav_call(
             Ok(NavValue::Void)
         }
 
+        // ── String Operations (2026-07-22) ───────────────────────────
+        "StrLen$" => {
+            let s = expect_str_arg(args, 0, "StrLen$")?;
+            Ok(NavValue::Int(s.len() as i64))
+        }
+        "StrReplace$" => {
+            let s = expect_str_arg(args, 0, "StrReplace$")?;
+            let from = expect_str_arg(args, 1, "StrReplace$")?;
+            let to = expect_str_arg(args, 2, "StrReplace$")?;
+            Ok(NavValue::Str(s.replace(&from, &to)))
+        }
+        "StrJoin$" => {
+            let list_val = eval_nav_chain(&args[0], program, universe, stage, scope, pm)?;
+            let parts: Vec<String> = match &list_val {
+                NavValue::List(items) => items.iter().map(|v| nav_to_string(v)).collect(),
+                NavValue::Names(names) => names.clone(),
+                _ => return Err("StrJoin$: first arg must be a List or Names".into()),
+            };
+            let sep = expect_str_arg(args, 1, "StrJoin$")?;
+            Ok(NavValue::Str(parts.join(&sep)))
+        }
+        "StrSplit$" => {
+            let s = expect_str_arg(args, 0, "StrSplit$")?;
+            let pat = expect_str_arg(args, 1, "StrSplit$")?;
+            let parts: Vec<NavValue> = s.split(&pat).map(|p| NavValue::Str(p.to_string())).collect();
+            Ok(NavValue::List(parts))
+        }
+        "StrSubstr$" => {
+            let s = expect_str_arg(args, 0, "StrSubstr$")?;
+            let start = expect_int_arg(args, 1, "StrSubstr$")? as usize;
+            let end = expect_int_arg(args, 2, "StrSubstr$")? as usize;
+            let end = end.min(s.len());
+            if start > s.len() || start > end {
+                return Err(format!("StrSubstr$: invalid range {}..{} for string of length {}", start, end, s.len()));
+            }
+            Ok(NavValue::Str(s[start..end].to_string()))
+        }
+
+        // ── File I/O (2026-07-22) ────────────────────────────────────
+        "FileRead$" => {
+            let path = expect_str_arg(args, 0, "FileRead$")?;
+            let content = std::fs::read_to_string(&path)
+                .map_err(|e| format!("FileRead$: cannot read '{}': {}", path, e))?;
+            Ok(NavValue::Str(content))
+        }
+        "FileWrite$" => {
+            let path = expect_str_arg(args, 0, "FileWrite$")?;
+            let content = expect_str_arg(args, 1, "FileWrite$")?;
+            if let Some(parent) = std::path::Path::new(&path).parent() {
+                if !parent.as_os_str().is_empty() {
+                    std::fs::create_dir_all(parent)
+                        .map_err(|e| format!("FileWrite$: cannot create dir '{}': {}", parent.display(), e))?;
+                }
+            }
+            std::fs::write(&path, &content)
+                .map_err(|e| format!("FileWrite$: cannot write '{}': {}", path, e))?;
+            Ok(NavValue::Void)
+        }
+
+        // ── Configuration (2026-07-22) ───────────────────────────────
+        "ConfigGet$" => {
+            let section = expect_str_arg(args, 0, "ConfigGet$")?;
+            let key = expect_str_arg(args, 1, "ConfigGet$")?;
+            let targets = crate::glue::config::load_glue_config(None)
+                .map_err(|e| format!("ConfigGet$: {}", e))?;
+            let target = targets.get(&section)
+                .ok_or_else(|| format!("ConfigGet$: no section '{}' in lib/glue.toml", section))?;
+            // Resolve dotted key (e.g., "templates.fn_template" → target.templates["fn_template"])
+            if let Some(dot) = key.find('.') {
+                let (sub, field) = key.split_at(dot);
+                let field = &field[1..];
+                match sub {
+                    "templates" => {
+                        let val = target.templates.get(field)
+                            .ok_or_else(|| format!("ConfigGet$: no template '{}'", field))?;
+                        Ok(NavValue::Str(val.clone()))
+                    }
+                    "protocols" => {
+                        let proto_key = format!("#{}", field);
+                        let entry = target.protocols.get(&proto_key);
+                        match entry {
+                            Some(e) => Ok(NavValue::Str(format!("{}/{}", e.native, e.c_abi))),
+                            None => Err(format!("ConfigGet$: no protocol '{}' in section '{}'", field, section)),
+                        }
+                    }
+                    _ => Err(format!("ConfigGet$: unknown sub-section '{}'", sub)),
+                }
+            } else {
+                Err("ConfigGet$: need dotted key like 'templates.fn_template'".into())
+            }
+        }
+
+        // ── Universe Queries (2026-07-22) ────────────────────────────
+        "DocRead$" => {
+            let type_name = expect_str_arg(args, 0, "DocRead$")?;
+            let prop = expect_str_arg(args, 1, "DocRead$")?;
+            let rt = universe.get(&type_name)
+                .ok_or_else(|| format!("DocRead$: type '{}' not in universe", type_name))?;
+            match prop.as_str() {
+                "properties" => {
+                    let props: Vec<String> = rt.properties.keys().cloned().collect();
+                    Ok(NavValue::Names(props))
+                }
+                "bytes" => Ok(NavValue::Int(rt.bytes as i64)),
+                "fields" => {
+                    let field_names: Vec<String> = rt.fields.iter().map(|(n, _)| n.clone()).collect();
+                    Ok(NavValue::Names(field_names))
+                }
+                _ => match rt.properties.get(&prop) {
+                    Some(v) => Ok(NavValue::Str(format!("{:?}", v))),
+                    None => Err(format!("DocRead$: no property '{}' on type '{}'", prop, type_name)),
+                }
+            }
+        }
+        "CastPath$" => {
+            let src = expect_str_arg(args, 0, "CastPath$")?;
+            let tgt = expect_str_arg(args, 1, "CastPath$")?;
+            let path = crate::analysis::layout_optimizer::find_cast_path(universe, &src, &tgt);
+            match path {
+                Some(types) => {
+                    let steps: Vec<NavValue> = types.into_iter()
+                        .map(|t| NavValue::Str(t)).collect();
+                    Ok(NavValue::List(steps))
+                }
+                None => Ok(NavValue::List(vec![])),
+            }
+        }
+
+        // ── Type Information (2026-07-22) ────────────────────────────
+        "TypeInfo$" => {
+            let sel_val = eval_nav_chain(&args[0], program, universe, stage, scope, pm)?;
+            let field = expect_str_arg(args, 1, "TypeInfo$")?;
+            let tl = match &sel_val {
+                NavValue::Selection(sel) => {
+                    let node = sel.nodes.first()
+                        .ok_or_else::<String, _>(|| "TypeInfo$: empty selection".into())?;
+                    match node {
+                        crate::macros::selection::NodeRef::TopLevel(i) => {
+                            program.get(*i).ok_or_else::<String, _>(|| "TypeInfo$: invalid node index".into())?
+                        }
+                        _ => return Err("TypeInfo$: only top-level items supported".into()),
+                    }
+                }
+                NavValue::TopLevel(tl) => tl,
+                _ => return Err("TypeInfo$: first arg must be a Selection or TopLevel".into()),
+            };
+            let result = type_info_from_toplevel(tl, &field)?;
+            Ok(NavValue::Str(result))
+        }
+
+        // ── External Commands (2026-07-22) ───────────────────────────
+        "ShellCmd$" => {
+            let cmd = expect_str_arg(args, 0, "ShellCmd$")?;
+            let cmd_args: Vec<String> = args[1..].iter()
+                .map(|a| eval_nav_chain(a, program, universe, stage, scope, pm))
+                .map(|r| r.and_then(|v| match v {
+                    NavValue::Str(s) => Ok(s),
+                    NavValue::Int(n) => Ok(n.to_string()),
+                    _ => Err("ShellCmd$: arg must be a string or integer".into()),
+                }))
+                .collect::<Result<Vec<_>, _>>()?;
+            let output = std::process::Command::new(&cmd)
+                .args(&cmd_args)
+                .output()
+                .map_err(|e| format!("ShellCmd$: failed to execute '{}': {}", cmd, e))?;
+            if !output.status.success() {
+                let stderr = String::from_utf8_lossy(&output.stderr);
+                return Err(format!("ShellCmd$: '{}' failed: {}", cmd, stderr));
+            }
+            Ok(NavValue::Str(String::from_utf8_lossy(&output.stdout).to_string()))
+        }
+
         _ => Err(format!("unknown navigation intrinsic '{}'", name)),
     }
 }
@@ -618,6 +791,48 @@ where F: FnOnce(usize) -> Result<NavValue, String> {
 /// indicating a Stage$.Foo$ method call rather than a navigation chain.
 fn is_stage_receiver(args: &[Expr]) -> bool {
     matches!(args.first(), Some(Expr::Identifier(s)) if s == "Stage$")
+}
+
+/// Convert a NavValue to a string for StrJoin$ and similar operations.
+fn nav_to_string(val: &NavValue) -> String {
+    match val {
+        NavValue::Str(s) => s.clone(),
+        NavValue::Int(n) => n.to_string(),
+        NavValue::Count(n) => n.to_string(),
+        NavValue::Bool(b) => b.to_string(),
+        NavValue::Names(names) => names.join(", "),
+        NavValue::Selection(sel) => format!("Selection({})", sel.count()),
+        _ => format!("{:?}", val),
+    }
+}
+
+/// Extract type information from a TopLevel AST node by field path.
+fn type_info_from_toplevel(tl: &TopLevel, field: &str) -> Result<String, String> {
+    match (tl, field) {
+        (TopLevel::Definition(d), "name") => Ok(d.name.clone()),
+        (TopLevel::Definition(d), "params.count") => Ok(d.parameters.len().to_string()),
+        (TopLevel::Definition(d), f) if f.starts_with("params.") => {
+            let rest = &f[7..]; // strip "params."
+            let parts: Vec<&str> = rest.split('.').collect();
+            let idx: usize = parts[0].parse()
+                .map_err(|_| format!("TypeInfo$: invalid param index '{}'", parts[0]))?;
+            let param = d.parameters.get(idx)
+                .ok_or_else(|| format!("TypeInfo$: param index {} out of bounds (max {})", idx, d.parameters.len().saturating_sub(1)))?;
+            match parts.get(1) {
+                Some(&"name") => Ok(param.0.clone()),
+                Some(&"type") => Ok(format!("{}", param.1)),
+                _ => Err(format!("TypeInfo$: unknown param field '{:?}'", parts.get(1))),
+            }
+        }
+        (TopLevel::Definition(d), "output_type") => {
+            Ok(format!("{:?}", d.output_type))
+        }
+        (TopLevel::Definition(d), "outputs.count") => Ok(d.outputs.len().to_string()),
+        (TopLevel::ForeignBinding(fb), "name") => Ok(fb.foreign_name.clone()),
+        (TopLevel::ForeignBinding(fb), "brief_name") => Ok(fb.effective_brief_name().to_string()),
+        (TopLevel::Import(i), "path") => Ok(i.path().to_string()),
+        _ => Err(format!("TypeInfo$: unknown field '{}' for this item type", field)),
+    }
 }
 
 // ── Tests ──────────────────────────────────────────────────────────────
