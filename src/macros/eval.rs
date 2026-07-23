@@ -183,6 +183,9 @@ fn evaluate_stage_block_inner(
     if let Some(pm_inner) = pm {
         for i in prev_len..program.len() {
             pm_inner.tainted_indices.insert(i);
+            // 2026-07-23: Record expansion trace for appended nodes.
+            let desc = format!("StageBlock appended at index {}", i);
+            pm_inner.expansion_traces.insert(i, desc);
         }
     }
     Ok(())
@@ -534,11 +537,21 @@ fn eval_nav_call(
         "Insert$" => {
             let pos_result = eval_nav_chain(&args[0], program, universe, stage, scope, sandbox, pm)?;
             let mut nodes = Vec::new();
+            // 2026-07-23: Build descriptions for expansion traces.
+            let mut trace_descs: Vec<String> = Vec::new();
             for arg in &args[1..] {
                 let val = eval_nav_chain(arg, program, universe, stage, scope, sandbox, pm)?;
                 match val {
-                    NavValue::TopLevel(tl) => nodes.push(tl),
-                    NavValue::VecTopLevel(v) => nodes.extend(v),
+                    NavValue::TopLevel(tl) => {
+                        trace_descs.push(node_summary(&tl));
+                        nodes.push(tl);
+                    }
+                    NavValue::VecTopLevel(v) => {
+                        for item in &v {
+                            trace_descs.push(node_summary(item));
+                        }
+                        nodes.extend(v);
+                    }
                     _ => return Err("Insert$: argument must produce an AST node".into()),
                 }
             }
@@ -562,7 +575,15 @@ fn eval_nav_call(
                     if is_toplevel {
                         if let Some(pm_inner) = pm {
                             for offset in 0..count {
-                                pm_inner.tainted_indices.insert(base + offset);
+                                let idx = base + offset;
+                                pm_inner.tainted_indices.insert(idx);
+                                // 2026-07-23: Record expansion trace for inserted nodes.
+                                let desc = if offset < trace_descs.len() {
+                                    format!("Insert$ -> {}", trace_descs[offset])
+                                } else {
+                                    "Insert$ -> <node>".into()
+                                };
+                                pm_inner.expansion_traces.insert(idx, desc);
                             }
                         }
                     }
@@ -608,12 +629,14 @@ fn eval_nav_call(
             };
             match prev {
                 NavValue::Selection(sel) => {
-                    // 2026-07-23: Mark replaced indices as tainted.
+                    // 2026-07-23: Mark replaced indices as tainted and record expansion trace.
                     let indices = collect_toplevel_indices(&sel);
+                    let desc = format!("ReplaceWith$ -> {}", node_summary(&repl_node));
                     replace_selection(program, &sel, repl_node)?;
                     if let Some(pm_inner) = pm {
                         for i in &indices {
                             pm_inner.tainted_indices.insert(*i);
+                            pm_inner.expansion_traces.insert(*i, desc.clone());
                         }
                     }
                     Ok(NavValue::Void)
@@ -1261,6 +1284,36 @@ fn filter_tainted_nodes(nodes: &mut Vec<NodeRef>, tainted: &BTreeSet<usize>) {
         NodeRef::TopLevel(i) => !tainted.contains(i),
         _ => true,
     });
+}
+
+/// Build a short human-readable summary of a TopLevel AST node.
+/// 2026-07-23: Used for expansion trace descriptions.
+fn node_summary(tl: &TopLevel) -> String {
+    match tl {
+        TopLevel::Import(i) => format!("import \"{}\"", i.path()),
+        TopLevel::Definition(d) => format!("defn {}", d.name),
+        TopLevel::Transaction(t) => format!("txn {}", t.name),
+        TopLevel::Cell(c) => format!("cell {}", c.name),
+        TopLevel::ForeignBinding(f) => format!("frgn {}", f.foreign_name),
+        TopLevel::Export(e) => match &e.export_name {
+            Some(n) => format!("export {}", n),
+            None => "export".into(),
+        },
+        TopLevel::Constant(c) => format!("constant {}", c.name),
+        TopLevel::Struct(s) => format!("struct {}", s.name),
+        TopLevel::Enum(e) => format!("enum {}", e.name),
+        TopLevel::Statement(_) => "statement".into(),
+        _ => "ast-node".into(),
+    }
+}
+
+/// Record an expansion trace at the given top-level index.
+/// 2026-07-23: Used by AST constructors and action intrinsics to document
+/// which $ intrinsic created or last modified each program node.
+fn record_expansion(pm: &mut Option<&mut PluginManager>, index: usize, description: String) {
+    if let Some(pm_inner) = pm {
+        pm_inner.expansion_traces.insert(index, description);
+    }
 }
 
 /// Convert a NavValue to a string for StrJoin$ and similar operations.
@@ -2685,5 +2738,58 @@ mod tests {
         assert!(result.is_ok(), "stage block must succeed: {:?}", result.err());
         assert_eq!(pm.vfs.get("test.txt").map(|s| s.as_str()), Some("hello"),
             "VFS must contain the committed file");
+    }
+
+    #[test]
+    fn test_insert_records_expansion_trace() {
+        let mut program = vec![
+            TopLevel::Import(Import::literal("std/io.bv", vec![])),
+        ];
+        let mut universe = TypeUniverse::new();
+        let mut pm = PluginManager::new();
+        let mut pm_opt = Some(&mut pm);
+        let insert_call = Expr::Call("Insert$".into(), vec![
+            Expr::Call("Before$".into(), vec![
+                Expr::Call("First$".into(), vec![
+                    Expr::Call("All$".into(), vec![], None),
+                ], None),
+            ], None),
+            Expr::Call("Import$".into(), vec![Expr::Quoted("std/foo.bv".into())], None),
+        ], None);
+        eval_nav_chain(&insert_call, &mut program, &mut universe,
+            StageKind::Parsed, &empty_scope(), &mut test_sandbox(), &mut pm_opt).unwrap();
+        assert!(pm.expansion_traces.contains_key(&0),
+            "Insert$ should record an expansion trace at index 0");
+        let desc = &pm.expansion_traces[&0];
+        assert!(desc.starts_with("Insert$ -> import"),
+            "trace should describe the inserted node, got: {}", desc);
+    }
+
+    #[test]
+    fn test_replace_with_records_expansion_trace() {
+        let mut program = vec![
+            TopLevel::Import(Import::literal("std/io.bv", vec![])),
+        ];
+        let mut universe = TypeUniverse::new();
+        let mut pm = PluginManager::new();
+        let mut pm_opt = Some(&mut pm);
+        let replace_call = Expr::Call("ReplaceWith$".into(), vec![
+            Expr::Call("First$".into(), vec![
+                Expr::Call("All$".into(), vec![], None),
+            ], None),
+            Expr::Call("Defn$".into(), vec![
+                Expr::Quoted("my_fn".into()),
+                Expr::List(vec![]),
+                Expr::Quoted("Int".into()),
+                Expr::Decimal(42),
+            ], None),
+        ], None);
+        eval_nav_chain(&replace_call, &mut program, &mut universe,
+            StageKind::Parsed, &empty_scope(), &mut test_sandbox(), &mut pm_opt).unwrap();
+        assert!(pm.expansion_traces.contains_key(&0),
+            "ReplaceWith$ should record an expansion trace at index 0");
+        let desc = &pm.expansion_traces[&0];
+        assert!(desc.starts_with("ReplaceWith$ -> defn"),
+            "trace should describe the replacement, got: {}", desc);
     }
 }

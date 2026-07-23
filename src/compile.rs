@@ -131,6 +131,8 @@ pub struct BuildOptions {
     pub dump_vfs: bool,
     /// 2026-07-23: Regenerate macro-lock.toml from current plugin files.
     pub update_lockfile: bool,
+    /// 2026-07-23: Print macro expansion traces after compilation.
+    pub dump_traces: bool,
 }
 
 /// Compile a Brief source file: produce an executable binary (or `.ll` with `--llvm`).
@@ -346,6 +348,19 @@ pub fn compile_source(file_path: &str, source: &str, opts: &BuildOptions) -> Res
         println!("=== End VFS ===");
     }
 
+    // ── Expansion traces dump ─────────────────────────────────────────
+    // 2026-07-23: If --dump-traces was specified, print macro expansion traces.
+    if opts.dump_traces && !pm.expansion_traces.is_empty() {
+        println!("\n=== Macro Expansion Traces ===");
+        let mut sorted: Vec<(usize, String)> = pm.expansion_traces.iter()
+            .map(|(k, v)| (*k, v.clone())).collect();
+        sorted.sort_by_key(|(k, _)| *k);
+        for (idx, desc) in &sorted {
+            println!("  [{}] {}", idx, desc);
+        }
+        println!("=== End Expansion Traces ===");
+    }
+
     Ok(())
 }
 
@@ -379,6 +394,7 @@ pub fn check_source(file_path: &str, source: &str) -> Result<(), String> {
         macro_budget: 0,
         dump_vfs: false,
         update_lockfile: false,
+        dump_traces: false,
     };
     let (_items, _universe) = parse_and_check(file_path, source, &default_opts)?;
     println!("OK");
