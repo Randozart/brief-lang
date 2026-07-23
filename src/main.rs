@@ -11,7 +11,7 @@ use std::path::Path;
 
 use brief_compiler::library;
 use brief_compiler::target::{BackendKind, TargetConfig, get_extension};
-use compile::BeastStage;
+use compile::BeastFilter;
 
 fn main() {
     let args: Vec<String> = env::args().collect();
@@ -111,7 +111,7 @@ fn parse_build_args(args: &[String]) -> Result<compile::BuildOptions, String> {
     let mut optimize_budget = 256u64;
     let mut gpu_offload = false;
     let mut shared = false;
-    let mut emit_beast: Vec<BeastStage> = Vec::new();
+    let mut emit_beast = Vec::new();
     let mut backend_override: Option<String> = None;
     let mut no_stdlib = false;
     let mut stdlib_path: Option<String> = None;
@@ -158,22 +158,25 @@ fn parse_build_args(args: &[String]) -> Result<compile::BuildOptions, String> {
                 .map_err(|_| format!("invalid --optimize-budget value: '{}'", val))?;
             i += 2;
         } else if arg == "--emit-beast" {
-            // --emit-beast with optional stage arg
-            // If no arg or "all", emit all stages.
+            // --emit-beast [stage][.position] like "parse", "parse.before", "parse.after"
             let next = args.get(i + 1);
             let stage_str = next.filter(|s| !s.starts_with('-')).map(|s| s.as_str());
             let all_stages = vec![
-                BeastStage::Parse, BeastStage::Resolve, BeastStage::TypeCheck,
-                BeastStage::Normalize, BeastStage::Verify, BeastStage::Alloc,
-                BeastStage::Provenance, BeastStage::Codegen, BeastStage::Optimize,
+                "parse", "resolve", "type-check", "normalize", "verify",
+                "alloc", "provenance", "codegen", "optimize",
             ];
             match stage_str {
                 Some("all") | None => {
-                    for s in all_stages { emit_beast.push(s); }
+                    for s in all_stages {
+                        let filter: BeastFilter
+                            = s.parse().map_err(|e: String| e)?;
+                        emit_beast.push(filter);
+                    }
                 }
                 Some(s) => {
-                    let stage: BeastStage = s.parse().map_err(|e: String| e)?;
-                    emit_beast.push(stage);
+                    let filter: BeastFilter
+                        = s.parse().map_err(|e: String| e)?;
+                    emit_beast.push(filter);
                 }
             }
             i += if stage_str.is_some() { 2 } else { 1 };
