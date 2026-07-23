@@ -1,0 +1,13 @@
+// lib/glue/python.bv — Python C API bridge declarations
+// 2026-07-23: FFI functions for Python extension module ABI.
+// Used by generator.bv to emit Python-callable bridge code.
+
+frgn PyArg_ParseTuple(Ptr, Ptr, ...) -> Int from "c" fallback 0;
+frgn Py_BuildValue(Ptr, ...) -> Ptr from "c" fallback 0;
+frgn PyModule_Create(Ptr) -> Ptr from "c" fallback 0;
+frgn PyLong_FromLongLong(Int) -> Ptr from "c" fallback 0;
+frgn PyLong_AsLongLong(Ptr) -> Int from "c" fallback 0;
+frgn PyFloat_FromDouble(Float) -> Ptr from "c" fallback 0;
+frgn PyFloat_AsDouble(Ptr) -> Float from "c" fallback 0;
+frgn PyUnicode_FromString(Ptr) -> Ptr from "c" fallback 0;
+frgn PyCapsule_New(Ptr, Ptr, Ptr) -> Ptr from "c" fallback 0;

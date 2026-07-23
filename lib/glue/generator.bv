@@ -1,124 +1,44 @@
 // glue-generator.bv — Brief-written GLUE bridge generator
-// 2026-07-23: Uses $defn helpers for template rendering, demonstrating
-// the compile-time function system. Cleaner than chained StrReplace$.
-//
-// Run with: brief build bridge.bv --enable-plugin glue-generator
+// 2026-07-23: Generates native Brief bridge code.
+// Include the stage block inline in your bridge file.
 
-$defn render_fn(tmpl: String, name: String, params: String, ffi_params: String,
-                args_abi: String, ret_native: String, ret_c_abi: String,
-                return_expr: String, c_types: String, args: String,
-                s_param: String) -> String {
-    let body = StrReplace$(tmpl, "{{name}}", name);
-    let body = StrReplace$(body, "{{params}}", params);
-    let body = StrReplace$(body, "{{ffi_params}}", ffi_params);
-    let body = StrReplace$(body, "{{args_abi}}", args_abi);
-    let body = StrReplace$(body, "{{return}}", ret_native);
-    let body = StrReplace$(body, "{{c_return}}", ret_c_abi);
-    let body = StrReplace$(body, "{{return_expr}}", return_expr);
-    let body = StrReplace$(body, "{{c_types}}", c_types);
-    let body = StrReplace$(body, "{{args}}", args);
-    let body = StrReplace$(body, "{{s_param}}", s_param);
-    term body;
-};
-
-$defn render_ffi(tmpl: String, name: String, ffi_params: String,
-                 c_return: String, s_param: String) -> String {
-    let body = StrReplace$(tmpl, "{{name}}", name);
-    let body = StrReplace$(body, "{{ffi_params}}", ffi_params);
-    let body = StrReplace$(body, "{{c_return}}", c_return);
-    let body = StrReplace$(body, "{{s_param}}", s_param);
-    term body;
-};
-
-$defn render_file_tmpl(tmpl: String, bridge_name: String, exports: String,
-                       ffi_decls: String, s_param: String, s_init: String) -> String {
-    let body = StrReplace$(tmpl, "{{bridge_name}}", bridge_name);
-    let body = StrReplace$(body, "{{exports}}", exports);
-    let body = StrReplace$(body, "{{ffi_decls}}", ffi_decls);
-    let body = StrReplace$(body, "{{s_param}}", s_param);
-    let body = StrReplace$(body, "{{s_init}}", s_init);
-    term body;
-};
-
-$(Normalized @ highest) {
-    let target = "rust";
-    let bridge_name = "bridge";
-    let s_param = "_STATE, ";
-    let s_init = "    pub fn init_state(state: *mut c_void);\n";
-
-    let fn_tmpl = ConfigGet$(target, "templates.fn_template");
-    let ffi_tmpl = ConfigGet$(target, "templates.ffi_template");
-    let lib_tmpl = ConfigGet$(target, "templates.src/lib.rs");
-    let ffi_file_tmpl = ConfigGet$(target, "templates.src/ffi.rs");
-
-    EmitInfo$("GLUE generator: loaded templates for " + target);
-
-    let exports = Tag$("export");
-    when exports.IsEmpty$() {
-        EmitInfo$("no exports found, nothing to generate");
-    };
-
-    let exports_code = "";
-    let ffi_code = "";
+$defn generate_bridge(exports: Selection, bridge_name: String) -> String {
+    let code = "// Bridge module for " + bridge_name + " — auto-generated\n";
 
     foreach(exp in exports) {
         let name = TypeInfo$(exp, "name");
         let pcount = TypeInfo$(exp, "params.count");
         let ret_type = TypeInfo$(exp, "output_type");
 
-        let ret_native = ConfigGet$(target, "protocols." + ret_type + ".native");
-        let ret_c_abi = ConfigGet$(target, "protocols." + ret_type + ".c_abi");
-        let return_expr = "result_abi as " + ret_native;
+        code = code + "export defn bridge_" + name + "(";
 
-        let params_str = "";
-        let ffi_params_str = "";
-        let c_types_str = "";
-        let args_abi_str = "";
         let pnames_str = "";
-
         when pcount > 0 {
             let p0n = TypeInfo$(exp, "params.0.name");
-            let p0t = TypeInfo$(exp, "params.0.type");
-            let p0nat = ConfigGet$(target, "protocols." + p0t + ".native");
-            let p0c = ConfigGet$(target, "protocols." + p0t + ".c_abi");
-            params_str = p0n + ": " + p0nat;
-            ffi_params_str = p0n + ": " + p0c;
-            c_types_str = p0c;
-            args_abi_str = p0n + " as " + p0c;
             pnames_str = p0n;
+            code = code + p0n + ": " + TypeInfo$(exp, "params.0.type");
         };
-
         when pcount > 1 {
             let p1n = TypeInfo$(exp, "params.1.name");
-            let p1t = TypeInfo$(exp, "params.1.type");
-            let p1nat = ConfigGet$(target, "protocols." + p1t + ".native");
-            let p1c = ConfigGet$(target, "protocols." + p1t + ".c_abi");
-            params_str = params_str + ", " + p1n + ": " + p1nat;
-            ffi_params_str = ffi_params_str + ", " + p1n + ": " + p1c;
-            c_types_str = c_types_str + ", " + p1c;
-            args_abi_str = args_abi_str + ", " + p1n + " as " + p1c;
             pnames_str = pnames_str + ", " + p1n;
+            code = code + ", " + p1n + ": " + TypeInfo$(exp, "params.1.type");
+        };
+        when pcount > 2 {
+            let p2n = TypeInfo$(exp, "params.2.name");
+            pnames_str = pnames_str + ", " + p2n;
+            code = code + ", " + p2n + ": " + TypeInfo$(exp, "params.2.type");
         };
 
-        let fn_body = render_fn(fn_tmpl, name, params_str, ffi_params_str,
-            args_abi_str, ret_native, ret_c_abi, return_expr,
-            c_types_str, pnames_str, s_param);
-        exports_code = exports_code + fn_body + "\n";
-
-        let ffi_body = render_ffi(ffi_tmpl, name, ffi_params_str,
-            ret_c_abi, s_param);
-        ffi_code = ffi_code + ffi_body + "\n";
-
-        EmitInfo$("  GLUE export: " + name);
+        code = code + ") -> " + ret_type + " {\n";
+        code = code + "    term " + name + "(" + pnames_str + ");\n";
+        code = code + "};\n\n";
     };
 
-    let lib_rs = render_file_tmpl(lib_tmpl, bridge_name, exports_code,
-        ffi_code, s_param, s_init);
-    let ffi_rs = render_file_tmpl(ffi_file_tmpl, bridge_name, ffi_code,
-        ffi_code, s_param, s_init);
-
-    FileWrite$("glue-out/src/lib.rs", lib_rs, true);
-    FileWrite$("glue-out/src/ffi.rs", ffi_rs, true);
-
-    EmitInfo$("GLUE generator: wrote 2 files to glue-out/");
+    term code;
 };
+
+// Example usage:
+// $(Normalized @ highest) {
+//     let code = generate_bridge(Tag$("export"), "bridge");
+//     FileWrite$("glue-out/bridge.bv", code, true);
+// };

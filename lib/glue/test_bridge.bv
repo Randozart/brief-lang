@@ -1,100 +1,70 @@
-// test_bridge.bv — Test file for GLUE bridge generator
+// test_bridge.bv — GLUE-in-Brief demo
 // Build: brief build lib/glue/test_bridge.bv
 
 export defn add(a: Int, b: Int) -> Int {
-    a + b;
-}
+    term a + b;
+};
 
 export defn greet(name: String) -> String {
-    name;
-}
+    term "hello " + name;
+};
 
 export defn double(x: Float) -> Float {
-    x * 2.0;
-}
+    term x * 2.0;
+};
 
-$(Normalized @ highest) {
-    let target = "rust";
-    let s_param = "_STATE, ";
-
-    let fn_tmpl = ConfigGet$(target, "templates.fn_template");
-    let ffi_tmpl = ConfigGet$(target, "templates.ffi_template");
-    let lib_tmpl = ConfigGet$(target, "templates.src/lib.rs");
-    let ffi_file_tmpl = ConfigGet$(target, "templates.src/ffi.rs");
-
-    EmitInfo$("GLUE generator: loaded templates for " + target);
-
-    let exports = Tag$("export");
-    when exports.IsEmpty$() {
-        EmitInfo$("no exports found, nothing to generate");
-    };
-
-    let exports_code = "";
-    let ffi_code = "";
+$defn generate_python_bridge(exports: Selection, bridge_name: String) -> String {
+    let code = "// Bridge module for " + bridge_name + " — auto-generated\n";
+    code = code + "// Include in your project: brief build bridge.bv\n\n";
 
     foreach(exp in exports) {
         let name = TypeInfo$(exp, "name");
         let pcount = TypeInfo$(exp, "params.count");
         let ret_type = TypeInfo$(exp, "output_type");
 
-        let ret_native = ConfigGet$(target, "protocols." + ret_type + ".native");
-        let ret_c_abi = ConfigGet$(target, "protocols." + ret_type + ".c_abi");
+        code = code + "export defn bridge_" + name + "(";
 
-        let params_str = "";
-        let ffi_params_str = "";
-        let args_abi_str = "";
-
+        let pnames_str = "";
         when pcount > 0 {
             let p0n = TypeInfo$(exp, "params.0.name");
-            let p0t = TypeInfo$(exp, "params.0.type");
-            let p0nat = ConfigGet$(target, "protocols." + p0t + ".native");
-            let p0c = ConfigGet$(target, "protocols." + p0t + ".c_abi");
-            params_str = p0n + ": " + p0nat;
-            ffi_params_str = p0n + ": " + p0c;
-            args_abi_str = p0n + " as " + p0c;
+            pnames_str = p0n;
+            code = code + p0n + ": " + TypeInfo$(exp, "params.0.type");
         };
-
         when pcount > 1 {
             let p1n = TypeInfo$(exp, "params.1.name");
-            let p1t = TypeInfo$(exp, "params.1.type");
-            let p1nat = ConfigGet$(target, "protocols." + p1t + ".native");
-            let p1c = ConfigGet$(target, "protocols." + p1t + ".c_abi");
-            params_str = params_str + ", " + p1n + ": " + p1nat;
-            ffi_params_str = ffi_params_str + ", " + p1n + ": " + p1c;
-            args_abi_str = args_abi_str + ", " + p1n + " as " + p1c;
+            pnames_str = pnames_str + ", " + p1n;
+            code = code + ", " + p1n + ": " + TypeInfo$(exp, "params.1.type");
+        };
+        when pcount > 2 {
+            let p2n = TypeInfo$(exp, "params.2.name");
+            pnames_str = pnames_str + ", " + p2n;
+            code = code + ", " + p2n + ": " + TypeInfo$(exp, "params.2.type");
         };
 
-        let fn_body = StrReplace$(fn_tmpl, "{{name}}", name);
-        fn_body = StrReplace$(fn_body, "{{params}}", params_str);
-        fn_body = StrReplace$(fn_body, "{{ffi_params}}", ffi_params_str);
-        fn_body = StrReplace$(fn_body, "{{args_abi}}", args_abi_str);
-        fn_body = StrReplace$(fn_body, "{{return}}", ret_native);
-        fn_body = StrReplace$(fn_body, "{{c_return}}", ret_c_abi);
-        fn_body = StrReplace$(fn_body, "{{return_expr}}", "result_abi as " + ret_native);
-        fn_body = StrReplace$(fn_body, "{{s_param}}", s_param);
-        exports_code = exports_code + fn_body + "\n";
-
-        let ffi_body = StrReplace$(ffi_tmpl, "{{name}}", name);
-        ffi_body = StrReplace$(ffi_body, "{{ffi_params}}", ffi_params_str);
-        ffi_body = StrReplace$(ffi_body, "{{c_return}}", ret_c_abi);
-        ffi_body = StrReplace$(ffi_body, "{{s_param}}", s_param);
-        ffi_code = ffi_code + ffi_body + "\n";
-
-        EmitInfo$("  GLUE export: " + name);
+        code = code + ") -> " + ret_type + " {\n";
+        code = code + "    term " + name + "(" + pnames_str + ");\n";
+        code = code + "};\n\n";
     };
 
-    let lib_rs = StrReplace$(lib_tmpl, "{{bridge_name}}", "bridge");
-    lib_rs = StrReplace$(lib_rs, "{{exports}}", exports_code);
-    lib_rs = StrReplace$(lib_rs, "{{ffi_decls}}", ffi_code);
-    lib_rs = StrReplace$(lib_rs, "{{s_param}}", s_param);
-    lib_rs = StrReplace$(lib_rs, "{{s_init}}", "    pub fn init_state(state: *mut c_void);\n");
+    term code;
+};
 
-    let ffi_rs = StrReplace$(ffi_file_tmpl, "{{bridge_name}}", "bridge");
-    ffi_rs = StrReplace$(ffi_rs, "{{ffi_decls}}", ffi_code);
-    ffi_rs = StrReplace$(ffi_rs, "{{s_init}}", "    pub fn init_state(state: *mut c_void);\n");
+$(Normalized @ highest) {
+    let bridge_name = "bridge";
 
-    FileWrite$("glue-out/src/lib.rs", lib_rs, true);
-    FileWrite$("glue-out/src/ffi.rs", ffi_rs, true);
+    let exports = Tag$("export");
+    when exports.IsEmpty$() {
+        EmitInfo$("no exports found, nothing to generate");
+    };
 
-    EmitInfo$("GLUE generator: wrote 2 files to glue-out/");
+    let bridge_code = generate_python_bridge(exports, bridge_name);
+    FileWrite$("glue-out/" + bridge_name + ".bv", bridge_code, true);
+    EmitInfo$("GLUE bridge: wrote " + bridge_name + ".bv");
+
+    foreach(exp in exports) {
+        let name = TypeInfo$(exp, "name");
+        let pcount = TypeInfo$(exp, "params.count");
+        let ret_type = TypeInfo$(exp, "output_type");
+        EmitInfo$("  export " + name + "(..." + pcount + " args) -> " + ret_type);
+    };
 };
