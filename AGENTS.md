@@ -392,13 +392,16 @@ fn emit_binop(builder: &mut LlvmBuilder, op: BinOp, lhs: Type, rhs: Type) -> Res
 
 This makes dependencies explicit, improves testability, and documents which data each function actually uses.
 
-### 8. GLUE Export Is TOML-Driven (Phase 8)
+### 8. Metropolitan FFI — GLUE Export Is TOML-Driven (Phase 8)
 
 The `brief export` command generates language wrappers entirely from
 `lib/glue.toml` templates. No Rust code knows about specific languages.
-Adding a language = adding a `[lang]` section with `type_map`, `c_type_map`,
-`conversions`, and `templates`. Config discovery uses `#[serde(flatten)]` —
-no named struct fields for languages.
+Adding a language = adding a `[lang]` section with `protocols` and `templates`.
+Config discovery uses `#[serde(flatten)]` — no named struct fields for languages.
+
+GLUE and Metropipe are the two mechanisms under the **Metropolitan FFI** umbrella.
+GLUE handles compile-time bridge generation; Metropipe handles runtime shared
+memory IPC (`src/ffi/metropipe.rs`).
 
 ### 9. Export Uses the Full LLVM Backend (Phase 8)
 

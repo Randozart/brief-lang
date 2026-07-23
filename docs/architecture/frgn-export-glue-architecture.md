@@ -1,4 +1,4 @@
-# frgn / export / GLUE — Cross-Language FFI Architecture
+# Metropolitan FFI — frgn / export / GLUE Architecture
 
 **Date:** 2026-07-22
 **Status:** Stable — Phase 8 complete
@@ -9,13 +9,19 @@
 
 ## Overview
 
-Brief's FFI architecture has three pillars:
+Brief's **Metropolitan FFI** architecture has three pillars:
 
 | Pillar | Direction | Purpose |
 |--------|-----------|---------|
 | **`frgn`** | Host → Brief | Declare an external function so Brief can call it |
 | **`export`** | Brief → Host | Expose a Brief function so foreign code can call it |
-| **GLUE** | Broker | Negotiate protocol paths, meld data, generate bridge code |
+| **GLUE** | Broker (compile-time) | Negotiate protocol paths, meld data, generate bridge code |
+| **Metropipe** | Runtime | Shared memory IPC between running processes |
+
+GLUE and Metropipe are the two mechanisms under the Metropolitan FFI umbrella.
+GLUE handles **compile-time bridge generation** — it's what runs when you
+invoke `brief export`. Metropipe handles **runtime shared memory** — it's
+what runs when two processes communicate through a `MetropolitanChannel`.
 
 The backend decides *how* to implement each frgn or export. `.c` sources get
 compiled and LTO-inlined by LLVM. `.py` sources cannot be inlined — GLUE

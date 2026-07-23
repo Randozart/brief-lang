@@ -195,6 +195,11 @@ The rationale: **contracts are optimization information**. The more complete you
 
 ## Key Features
 
+The **Metropolitan FFI** is the umbrella architecture for Brief's cross-language interoperability, comprising two mechanisms:
+
+- **GLUE** (compile-time bridge generation) — exports Brief functions as native wrappers for any language, driven by protocol-path BFS in `lib/glue.toml`
+- **Metropipe** (runtime shared memory IPC) — zero-copy communication between processes via `src/ffi/metropipe.rs`
+
 ### 1. Contracts First
 
 Every transaction declares what must be true **before** and **after**:
@@ -241,7 +246,9 @@ No `if/else` chains. Use guards:
 };
 ```
 
-### 4. GLUE Protocol Bridge — Cross-Language FFI
+### 4. Metropolitan FFI — GLUE (Compile-Time Bridge Generation)
+
+The GLUE bridge system exports Brief functions as native wrappers for any language, driven entirely by `lib/glue.toml`:
 
 Brief can export functions to any language via the GLUE (Generated Language Universal Exchange) bridge system, part of the broader **Metropolitan FFI** architecture:
 
@@ -275,9 +282,9 @@ brief export bridge.bv node --out ./node-module  # ffi-napi Node.js module
 
 **GLUE is an ABI generator, not an FFI.** It computes, emits, and optimizes away the interface between languages. See `docs/architecture/glue-as-abi-generator.md`.
 
-### 5. Metropipe — Shared Memory IPC
+### 5. Metropolitan FFI — Metropipe (Runtime Shared Memory IPC)
 
-**Metropipe** is the runtime shared memory IPC mechanism within Metropolitan FFI, providing zero-copy communication between Brief processes and foreign programs:
+Metropipe provides zero-copy communication between Brief processes and foreign programs via shared memory:
 
 ```brief
 let ch = frgn__metro_create_channel("my_channel", 1024, 1024);
