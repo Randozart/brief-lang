@@ -1,6 +1,6 @@
 # Macro System — Compile-Time `$` Intrinsics
 
-**Date:** 2026-07-22
+**Date:** 2026-07-23
 **Status:** Architecture documentation
 
 ---
@@ -17,7 +17,26 @@ not as a new intrinsic in the Rust engine.
 
 ---
 
-## Current Intrinsics
+## Architecture
+
+Macros run as `$(Stage) { body }` blocks at specified pipeline stages.
+The compiler extracts them at parse time, evaluates them at their declared
+stage using a tree-walking interpreter, and the body can:
+
+- Select AST nodes via `Tag$`, `Named$`, `All$`, etc.
+- Traverse via `Children$`, `First$`, `Parent$`, etc.
+- Modify via `Insert$`, `Delete$`, `ReplaceWith$`
+- Construct new nodes via `Import$`, `Defn$`, `Call$`, etc.
+- Read configuration via `ConfigGet$`
+- Query type info via `TypeInfo$`
+- Read/write files via `FileRead$`/`FileWrite$`
+- Execute shell commands via `ShellCmd$`
+- Emit diagnostics via `EmitInfo$`/`EmitWarning$`/`EmitError$`
+- Control flow: `let`, `when`, `foreach`, assignment (`=`), string concat (`+`)
+
+---
+
+## Intrinsic Reference
 
 ### AST Selection
 
@@ -37,22 +56,13 @@ Navigate the tree relative to a selection:
 
 | Intrinsic | Signature | Returns | Example |
 |-----------|-----------|---------|---------|
-| `First$` | `([n])` → Selection | Single element | `Tag$("txn").First$()` — first transaction |
-| `Last$` | `([n])` → Selection | Single element | `Tag$("txn").Last$()` — last transaction |
-| `Nth$` | `(n: int)` → Selection | Single element | `Tag$("txn").Nth$(1)` — second transaction |
-| `Children$` | `([filter])` → Selection | Child nodes | `Named$("main").Children$()` |
-| `Descendants$` | `([filter])` → Selection | All descendants | `Named$("main").Descendants$("Call")` |
-| `Parent$` | `()` → Selection | Parent node | `Tag$("param").Parent$()` |
-
-### AST Introspection
-
-Query properties of selections:
-
-| Intrinsic | Returns | Example |
-|-----------|---------|---------|
-| `Count$` | `Int` | `Tag$("txn").Count$()` — number of transactions |
-| `Names$` | `Vec<String>` | `Tag$("defn").Names$()` — all defn names |
-| `IsEmpty$` | `Bool` | `Tag$("error").IsEmpty$()` — true if no errors |
+| `First$` | `([n])` | Selection | `Tag$("txn").First$()` — first transaction |
+| `Last$` | `([n])` | Selection | `Tag$("txn").Last$()` — last transaction |
+| `Nth$` | `(n: int)` | Selection | `Tag$("txn").Nth$(1)` — second transaction |
+| `Children$` | `([filter])` | Selection | `Named$("main").Children$()` |
+| `Descendants$` | `([filter])` | Selection | All descendants |
+| `Parent$` | `()` | Selection | Parent node |
+| `IsEmpty$` | `()` | Bool | `Tag$("error").IsEmpty$()` |
 
 ### AST Positions
 
@@ -86,10 +96,10 @@ Build new AST nodes:
 |-----------|---------|---------|
 | `Import$(path)` | TopLevel | `Import$("std/env.bv")` |
 | `Defn$(name)` | TopLevel | `Defn$("my_fn")` |
-| `Call$(name, args...)` | Statement | `Call$("print", Str$("hello"))` |
+| `Call$(name, args...)` | Statement | `Call$("print", "hello")` |
 | `Block$(stmts...)` | Statement | `Block$(Call$("work"))` |
 
-### Compile-Time Data (Added 2026-07-22)
+### Compile-Time Data
 
 | Intrinsic | Signature | Returns | Category |
 |-----------|-----------|---------|----------|
@@ -99,12 +109,276 @@ Build new AST nodes:
 | `StrSplit$` | `(s, pat)` | List | String |
 | `StrSubstr$` | `(s, start, end)` | String | String |
 | `FileRead$` | `(path)` | String | I/O |
-| `FileWrite$` | `(path, content)` | Void | I/O |
-| `ConfigGet$` | `(section, dotted_key)` | String | Config |
+| `FileWrite$` | `(path, content, [persist])` | Void | I/O |
+| `ConfigGet$` | `(section, key)` | String | Config |
 | `DocRead$` | `(type_name, property)` | varies | Universe |
 | `TypeInfo$` | `(selection, field)` | varies | Type |
 | `CastPath$` | `(src_type, tgt_type)` | List | Protocol |
 | `ShellCmd$` | `(cmd, args...)` | String | Process |
+| `Quote$` | `(template)` | TopLevel | Meta |
+| `SysQuery$` | `(query)` | Int/Str | System |
+| `TimeNow$` | `()` | Int | Timestamp |
+| `EnvGet$` | `(name)` | String | Environment |
+| `HttpFetch$` | `(url)` | String | Network |
+| `EmitInfo$` | `(msg)` | Void | Diagnostic |
+| `EmitWarning$` | `(msg)` | Void | Diagnostic |
+| `EmitError$` | `(msg)` | Void | Diagnostic |
+| `Count$` | `([sel])` | Int | Introspection |
+| `Names$` | `(sel)` | List[String] | Introspection |
+
+### ConfigGet$ Key Syntax
+
+`ConfigGet$(lang, "templates.fn_template")` supports dotted keys:
+
+| Pattern | Example | Returns |
+|---------|---------|---------|
+| `templates.<name>` | `templates.fn_template` | Template string |
+| `protocols.<Type>` | `protocols.Int` | `"native/c_abi"` |
+| `protocols.<Type>.native` | `protocols.Int.native` | Native type name |
+| `protocols.<Type>.c_abi` | `protocols.Int.c_abi` | C ABI type name |
+
+### TypeInfo$ Field Reference
+
+| Field | Works on | Example result |
+|-------|----------|----------------|
+| `name` | `defn`, `txn`, `frgn`, `import` | `"my_function"` |
+| `params.count` | `defn`, `txn` | `"2"` |
+| `params.0.name` | `defn`, `txn` | `"a"` |
+| `params.0.type` | `defn`, `txn` | `"Int"` |
+| `output_type` | `defn` | `"Int"` |
+| `outputs.count` | `defn` | `"0"` |
+| `path` | `import` | `"std/io.bv"` |
+
+`TypeInfo$` delegates through `TopLevel::Export` — calling it on an export node
+automatically queries the inner definition.
+
+---
+
+## Security & Sandboxing
+
+### Capability Sandbox
+
+Every I/O-bearing `$` intrinsic is gated by a `Capability` check:
+
+| Capability | Intrinsics | CLI flag |
+|-----------|------------|----------|
+| `DiskRead` | `FileRead$` | `--allow-read` |
+| `DiskWrite` | `FileWrite$` | `--allow-write` |
+| `Shell` | `ShellCmd$` | `--allow-run` |
+| `SysQuery` | `SysQuery$` | `--allow-sys-query` |
+| `Network` | `HttpFetch$` | `--allow-net` |
+| `Pure` | All others | Always granted |
+
+### Gas Budget
+
+`--macro-budget <N>` sets an instruction limit (0 = unlimited). Each `$`
+intrinsic call consumes one unit.
+
+### Virtual Filesystem (VFS)
+
+`FileWrite$` writes to an in-memory VFS by default. Pass `true` as the third
+argument to persist to physical disk. `FileRead$` checks VFS first, then disk.
+`--dump-vfs` prints VFS contents after compilation.
+
+### Macro Lockfile
+
+`macro-lock.toml` at the project root records approved capabilities per plugin
+`.bv`. Validated by SHA-256 hash. `--update-lockfile` regenerates.
+
+---
+
+## Tainted Node Filtering
+
+Macros can produce output that must be isolated from subsequent plugin
+evaluation. The `tainted_indices: BTreeSet<usize>` set on `PluginManager`
+tracks which top-level indices were produced by macros:
+
+| Operation | Taint effect |
+|-----------|-------------|
+| `Insert$` at top-level position | Inserted indices are marked tainted. Traces recorded. |
+| `Delete$` | Deleted indices removed from taint set; remaining indices shifted by count of deletions before them. |
+| `ReplaceWith$` | Replaced indices marked tainted. |
+| StageBlock append | All nodes from `prev_len..program.len()` are marked tainted at end of evaluation. |
+
+AST selection intrinsics (`All$`, `Tag$`, `Named$`, `WithKey$`, `WithAttr$`)
+filter tainted nodes out via `filter_tainted_nodes()` after selection.
+This prevents macros from seeing each other's output unless they explicitly
+opt in via the selection mechanism.
+
+---
+
+## Transactional Macro Execution
+
+`evaluate_stage_block` wraps execution in a snapshot/restore mechanism:
+
+1. Before execution: snapshot `program.clone()`, `pm.vfs.clone()`, `pm.tainted_indices.clone()`
+2. Execute the stage block body
+3. On any `Err`: restore all three snapshots, propagating the error
+
+This ensures that a failing macro does not leave the AST, VFS, or taint
+state in a corrupted half-applied state.
+
+---
+
+## Expansion Traces
+
+`expansion_traces: HashMap<usize, String>` on `PluginManager` records
+the provenance of every macro-produced AST node:
+
+- `Insert$` records `"Insert$ -> defn my_fn"`
+- `ReplaceWith$` records `"ReplaceWith$ -> defn my_fn"`  
+- StageBlock appends record `"StageBlock appended at index N"`
+
+Use `--dump-traces` after compilation to print the trace map sorted by index:
+
+```
+=== Macro Expansion Traces ===
+  [12] Insert$ -> import "std/foo.bv"
+  [13] Insert$ -> defn helper
+  [14] ReplaceWith$ -> defn optimized_fn
+=== End Expansion Traces ===
+```
+
+The `record_expansion(pm, index, description)` helper in `eval.rs` allows
+custom intrinsics to write traces.
+
+---
+
+## `--diff` / Dry-Run Mode
+
+`--diff` shows what macros changed without writing output:
+
+1. Snapshots the program after parsing
+2. Runs all compilation stages normally
+3. Computes a diff between original and final program
+4. Prints the diff and exits early (no codegen or output file)
+
+Diff detection (`src/macros/diff.rs`):
+
+| Entry | Meaning | Format |
+|-------|---------|--------|
+| `Added(idx, summary)` | Item present only in final | `+ [12] defn helper` |
+| `Removed(idx, summary)` | Item present only in original | `- [3] defn old_fn` |
+| `Modified(before, after, summary)` | Item changed between passes | `~ [3→5] defn foo → defn foo` |
+
+Items are matched by name-based keys (`defn:foo`, `import:std/io.bv`).
+Modification is detected via Debug output comparison.
+
+---
+
+## Macro DSL Expression Support
+
+Inside `$(Stage)` blocks, the following expression types are evaluated:
+
+| Expression | Handling | Example |
+|-----------|----------|---------|
+| `$` intrinsic call | `eval_nav_call` | `Tag$("defn")` |
+| `.Method$()` chain | `eval_nav_field_method` | `exports.First$()` |
+| `Identifier` | Scope lookup | `name` (resolves from `let` bindings) |
+| `Decimal`, `Float`, `Bool` | Literal | `42`, `3.14`, `true` |
+| `Quoted` (string literal) | `NavValue::Str` | `"hello"` |
+| `+` (BinaryOp::Add) | String/int concatenation | `"a" + name + "b"` |
+| `List` | `NavValue::List` | `[a, b, c]` |
+
+### String Concatenation
+
+The `+` operator works for `Str + Str`, `Str + Int`, `Int + Str`, `Int + Int`.
+Used pervasively in the GLUE generator to build template variables:
+
+```
+let msg = "cpu.cores = " + SysQuery$("cpu.cores");
+```
+
+### List Construction
+
+`[elem1, elem2]` produces `NavValue::List`, used with `StrJoin$`:
+
+```
+StrJoin$(["a", "b", "c"], ", ")  → "a, b, c"
+```
+
+### Assignment
+
+`let x = expr;` creates a scope binding. `x = expr;` (reassignment) updates
+an existing binding. Both use `Statement::Assign` for the second form.
+
+### Variable Resolution in Intrinsic Arguments
+
+`expect_str_arg` resolves `Expr::Identifier` from the compile-time scope.
+This means `StrReplace$(tmpl, "{{name}}", name)` correctly uses the value
+of `name` from a previous `let` binding, rather than the literal string
+`"name"`. Complex expressions (concatenations) are evaluated via
+`eval_nav_chain` fallback.
+
+---
+
+## Multi-Target Compilation
+
+### SysQuery$ Override System
+
+Three override sources, cascading precedence (low → high):
+
+| Source | Format | Priority |
+|--------|--------|----------|
+| `--target <name>` | brief.toml `[target.*]` profile | Lowest |
+| `--sysquery-file <path>` | Plain text key=value file | Medium |
+| `--sysquery <key=value>` | CLI pairs (repeatable) | Highest |
+
+The file format for `--sysquery-file`:
+```
+# comments and blank lines are ignored
+cpu.cores=32
+cpu.arch=x86_64
+cpu.cache_line_size=64
+```
+
+### SysQuery$ Override Check
+
+When `SysQuery$("cpu.cores")` is called, the handler checks
+`sandbox.sysquery_overrides` first. If an override exists for the key,
+the mocked value is returned. Otherwise the real host is queried.
+
+### Per-Target Output
+
+With `--target <name>`, output goes to `bin/<name>/`. Without any target
+flags, behavior is identical to pre-multi-target compilation (backward
+compatible).
+
+---
+
+## The Bridge Generator as a `.bv` Plugin
+
+The GLUE bridge generator (`lib/glue/generator.bv`) is implemented entirely
+in Brief using `$` intrinsics — a stress test of the full macro system:
+
+```brief
+$(Normalized @ highest) {
+    let fn_tmpl = ConfigGet$("rust", "templates.fn_template");
+    let ffi_tmpl = ConfigGet$("rust", "templates.ffi_template");
+
+    let exports = Tag$("export");
+    foreach(exp in exports) {
+        let name = TypeInfo$(exp, "name");
+        let pcount = TypeInfo$(exp, "params.count");
+        let ret_type = TypeInfo$(exp, "output_type");
+
+        let ret_native = ConfigGet$(target, "protocols." + ret_type + ".native");
+        let ret_c_abi = ConfigGet$(target, "protocols." + ret_type + ".c_abi");
+
+        // Build param strings, render fn_template + ffi_template
+        // via StrReplace$ chaining, accumulate into exports_code/ffi_code
+        // ...
+    };
+
+    // Render file-level templates and write output
+    FileWrite$("glue-out/src/lib.rs", lib_rs, true);
+    FileWrite$("glue-out/src/ffi.rs", ffi_rs, true);
+};
+```
+
+Intrinsics exercised: `ConfigGet$`, `Tag$`, `TypeInfo$`, `StrReplace$`,
+`FileWrite$`, `EmitInfo$`, `IsEmpty$`, `+` (string concat), `foreach`,
+`when` guards, `let` bindings, `=` assignment.
 
 ---
 
@@ -130,6 +404,7 @@ Every proposed intrinsic must have at least 3 distinct non-GLUE use cases:
 | `TypeInfo$` | Bridge generator | Doc generator | Linter |
 | `CastPath$` | Bridge generator | Type checker extension | Protocol debugger |
 | `ShellCmd$` | Bridge build step | External formatter | Test runner |
+| `SysQuery$` | Multi-target profiles | Hardware detection | Conditional compilation |
 
 ### Principle 3: `NavValue` variants stay orthogonal
 
@@ -147,42 +422,3 @@ Every proposed intrinsic must have at least 3 distinct non-GLUE use cases:
 | `VecTopLevel` | Multiple AST nodes | `Insert$` |
 | `Void` | No value | `FileWrite$`, actions |
 | `Map` | Key-value pairs | `ConfigGet$` (output) |
-
----
-
-## The Bridge Generator as a `.bv` Plugin
-
-The GLUE bridge generator uses exactly 7 generic `$` intrinsics, composed
-in a single `.bv` file:
-
-```brief
-$(Glue @ highest) {
-    // 1. Read templates from config
-    let fn_tmpl = ConfigGet$("rust", "templates.fn_template");
-    let ffi_tmpl = ConfigGet$("rust", "templates.ffi_template");
-
-    // 2. Find all exported definitions
-    let exports = Tag$("export").Children$("Definition");
-
-    // 3. For each export, generate wrapper code
-    for export in exports {
-        let name = TypeInfo$(export, "name");
-        let params = TypeInfo$(export, "params");
-
-        // 4. Compute protocol path for each parameter
-        let path = CastPath$(params, "#String");
-
-        // 5. Substitute template variables
-        let fn_body = StrReplace$(fn_tmpl, "{{name}}", name);
-        let fn_body = StrReplace$(fn_body, "{{params}}", params);
-
-        // 6. Write output files
-        FileWrite$("src/lib.rs", fn_body);
-    };
-};
-```
-
-This is the proof that the `$` system is complete: a cross-language bridge
-generator that does file I/O, config reading, string templating, protocol
-path computation, and AST inspection — all using generic primitives, with
-zero Rust changes for language-specific logic.

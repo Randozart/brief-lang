@@ -433,6 +433,88 @@ $(Typed) {
 
 ---
 
+## Tainted Node Filtering
+
+Macro-produced AST nodes are tracked via `tainted_indices: BTreeSet<usize>`
+on `PluginManager`. Selection intrinsics filter these out by default:
+
+| Operation | Taint Behavior |
+|-----------|---------------|
+| `Insert$` (top-level) | Inserted indices marked tainted |
+| `Delete$` | Removed indices dropped from taint set; remaining shifted |
+| `ReplaceWith$` | Replaced indices marked tainted |
+| StageBlock evaluation | All appended nodes marked tainted |
+
+This prevents cascading interference between plugins — one macro's output
+is invisible to subsequent selectors unless explicitly addressed.
+
+---
+
+## Transactional Rollback
+
+`evaluate_stage_block` snapshots `program`, `vfs`, and `tainted_indices`
+before execution. On any error, all three are restored to their pre-execution
+state. No stale modifications survive a failing macro.
+
+---
+
+## Expansion Traces
+
+`expansion_traces: HashMap<usize, String>` records the provenance of each
+macro-produced node. `--dump-traces` prints the trace map:
+
+```
+=== Macro Expansion Traces ===
+  [12] Insert$ -> import "std/foo.bv"
+  [13] Insert$ -> defn helper
+  [14] ReplaceWith$ -> defn optimized_fn
+=== End Expansion Traces ===
+```
+
+The `record_expansion(pm, index, description)` helper is available for
+custom intrinsics to write their own traces.
+
+---
+
+## `--diff` / Dry-Run Mode
+
+`--diff` shows what macros changed without compiling:
+
+1. Snapshots the program after parsing
+2. Runs all stages normally
+3. Diffs original vs final program using name-based key matching
+4. Prints added/removed/modified items and exits early
+
+Output format:
+```
+=== Macro Changes (2 change(s)) ===
+  + [12] defn helper
+  - [3] defn old_fn
+  ~ [5→7] txn loop → txn compute
+=== End Macro Changes ===
+```
+
+---
+
+## Multi-Target SysQuery$ Overrides
+
+The `--sysquery <key=value>` and `--sysquery-file <path>` flags override
+`SysQuery$` results without changing source code:
+
+```bash
+brief build hello.bv \
+  --sysquery cpu.cores=32 \
+  --sysquery cpu.arch=x86_64 \
+  --sysquery-file ./prod-sysquery.txt
+```
+
+Precedence (low → high): `--target` profile → `--sysquery-file` → `--sysquery`.
+
+The file format is one `key=value` pair per line, with `#` comments and
+blank lines skipped. No TOML/serde dependency required.
+
+---
+
 ## Why WASM?
 
 WASM plugin support is unchanged.  See prior documentation for the rationale:

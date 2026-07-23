@@ -1,15 +1,70 @@
 # Macros and Templates in Brief — Learning Guide
 
-**Last updated:** 2026-06-18
+**Last updated:** 2026-07-23
 
-Brief's metaprogramming system has two tiers:
+Brief's metaprogramming system has three tiers:
 
-| Sigil | Keyword | Hygiene | I/O | Use case |
-|-------|---------|---------|-----|----------|
-| `$` | `template` | Automatic (`__gensym_N`) | ❌ | Safe boilerplate reduction, wrappers |
-| `$!` | `macro` | Manual (`gensym#()`) | ✅ (behind `--unsafe-macros`) | Code generation, DSLs, compile-time file I/O |
+| Tier | Mechanism | Use case |
+|------|-----------|----------|
+| `$(Stage)` blocks | `$` intrinsics (compile-time DSL) | AST navigation, file I/O, code generation at any pipeline stage |
+| `template $` | Hygienic `quote { }` substitution | Safe boilerplate reduction |
+| `macro $!` | String mixin via `compile#()` | Full-power AST transformation with I/O |
 
-Both run **before type-checking** — expanded output is standard Brief AST by the time the type checker sees it.
+The `$` intrinsic system is the **primary** mechanism. The old `template`/`macro`
+system is maintained for backward compatibility but new code should use
+`$(Stage)` blocks.
+
+---
+
+## 0. `$` Intrinsic System (`$(Stage) { }`)
+
+Run at compile time at a specified pipeline stage.
+
+### Stage Block Syntax
+
+```brief
+$(Parsed) {
+    let imports = Tag$("import");
+    when imports.IsEmpty$() {
+        EmitWarning$("no imports");
+    };
+};
+```
+
+### Key Intrinsics
+
+| Intrinsic | Purpose |
+|-----------|---------|
+| `Tag$("defn")` | Select all definitions |
+| `Named$("main")` | Select item by name |
+| `TypeInfo$(sel, "name")` | Extract type info from AST node |
+| `ConfigGet$("rust", "templates.x")` | Read glue.toml config |
+| `StrReplace$(tmpl, "{{x}}", val)` | Template substitution |
+| `FileWrite$("path", content, true)` | Write file to disk |
+| `EmitInfo$(msg)` | Print compile-time diagnostic |
+| `Insert$(pos, nodes...)` | Insert AST nodes |
+| `Delete$(sel)` | Remove AST nodes |
+| `SysQuery$("cpu.cores")` | Query host hardware |
+
+### Flow Control
+
+| Construct | Description |
+|-----------|-------------|
+| `let x = expr;` | Bind value |
+| `x = expr;` | Reassign value |
+| `when cond { body };` | Conditional (comparison with `>`, `<`, `==`, etc.) |
+| `foreach(item in selection) { body };` | Iterate over selected AST nodes |
+| `"a" + x + "b"` | String concatenation (`+` works for Str, Int, Str+Int) |
+
+### Diagnostics
+
+```brief
+EmitInfo$("found " + count + " exports");
+EmitWarning$("deprecated pattern detected");
+EmitError$("fatal: " + reason);   // halts compilation
+```
+
+See `docs/architecture/macro-system.md` for the full reference.
 
 ---
 

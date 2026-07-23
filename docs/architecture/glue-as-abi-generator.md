@@ -102,3 +102,26 @@ independently chose, and optimizes the boundary away when they converge.
 
 The system is designed from the ground up so that every language calling
 Brief thinks it's calling itself.
+
+---
+
+## Implementation
+
+The GLUE bridge generator has two implementations that produce identical output:
+
+### Rust Pipeline (`src/glue/export.rs`)
+
+The original implementation. Used by `brief export` for standalone bridge
+generation. Full pipeline: parse → resolve frgns → compute protocol paths →
+LLVM codegen → llc → template rendering → file writing.
+
+### `.bv` Plugin (`lib/glue/generator.bv`)
+
+A Brief-written equivalent using `$` intrinsics. Used by `brief build` with
+inline `$(Normalized)` stage blocks. Exercises the full macro system:
+`ConfigGet$`, `Tag$`, `TypeInfo$`, `StrReplace$`, `FileWrite$`,
+`foreach`, `when` guards, string concatenation, and assignment.
+
+The `.bv` plugin produces the same template-rendered output as the Rust
+pipeline, proving that the `$` intrinsic system is complete enough to
+implement a cross-language bridge generator entirely in Brief.

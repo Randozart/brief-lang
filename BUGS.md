@@ -1,5 +1,80 @@
 # Bugs
 
+## `expect_str_arg` Returns Literal Identifier, Not Variable Value — FIXED
+
+**Date:** 2026-07-23  
+**Status:** Fixed  
+**Root cause:** `expect_str_arg` matched `Expr::Identifier(s)` and returned `s` (the
+literal identifier text) rather than resolving the variable from the compile-time
+scope. So `StrReplace$(tmpl, "{{name}}", name)` used the string `"name"` as the
+replacement value, not the value bound to variable `name`.  
+**Fix:** `expect_str_arg` now takes `scope: &Scope` and resolves `Expr::Identifier`
+from the scope. If not found in scope, falls back to the literal identifier (for
+field names like `"name"` in `TypeInfo$` calls). Complex expressions (string
+concatenation) fall through to `eval_nav_chain`.  
+**Impact:** All `$` intrinsics that take string arguments now correctly resolve
+variables. This was a fundamental bug affecting every `$(Stage)` block that
+used variable references in intrinsic arguments.
+
+## `Statement::Assign` Was No-Op in Stage Blocks — FIXED
+
+**Date:** 2026-07-23  
+**Status:** Fixed  
+**Root cause:** `evaluate_stage_stmt` did not handle `Statement::Assign(target, value)`.
+The assignment fell through to the wildcard arm `_ => Ok(())` and was silently
+discarded. Variable reassignment (`x = x + 1;`) produced no effect.  
+**Fix:** Added `Statement::Assign` handler that evaluates the RHS via
+`eval_nav_chain` and updates the scope binding. The target must be an
+`Expr::Identifier`.  
+**Impact:** Essential for accumulator patterns in stage blocks.
+
+## Macro DSL Missing Expression Types — FIXED
+
+**Date:** 2026-07-23  
+**Status:** Fixed  
+**Root cause:** `eval_nav_chain` only handled `Expr::Call` ($-intrinsics),
+`Expr::Field` (methods), `Expr::Identifier`, `Expr::Decimal`, `Expr::Float`,
+and `Expr::Bool`. Common expressions like `Expr::Quoted` (string literals),
+`Expr::BinaryOp` (`+`), and `Expr::List` (`[...]`) returned errors.  
+**Fix:** Added handlers for:
+- `Expr::Quoted` → `NavValue::Str` (string literals)
+- `Expr::BinaryOp(BinaryOpKind::Add, ...)` → string/int concatenation
+- `Expr::List(items)` → `NavValue::List` (list construction)
+**Impact:** Stage blocks can now use `"hello"`, `"a" + x + "b"`, and `[a, b, c]`.
+
+## `TypeInfo$` Not Delegating Through `TopLevel::Export` — FIXED
+
+**Date:** 2026-07-23  
+**Status:** Fixed  
+**Root cause:** `type_info_from_toplevel` matched on `(TopLevel::Definition(d), field)`
+but not on `(TopLevel::Export(e), field)`. Calling `TypeInfo$(export_node, "name")`
+returned "unknown field for this item type" for export-wrapped definitions.  
+**Fix:** Added delegation at the top of `type_info_from_toplevel`:
+`if let TopLevel::Export(e) = tl { return type_info_from_toplevel(&e.inner, field); }`.  
+**Impact:** The GLUE bridge generator can query exported definitions directly
+without unwrapping the export.
+
+## `TypeInfo$` `output_type` Field Returns Debug Format — FIXED
+
+**Date:** 2026-07-23  
+**Status:** Fixed  
+**Root cause:** The `"output_type"` arm used `format!("{:?}", d.output_type)` which
+produced `Some(Single(Custom("Int")))` instead of `"Int"`.  
+**Fix:** Added `single_type_name` helper that recurses through `OutputType` variants
+to extract the clean type name. For `OutputType::Single(ty)`, returns `format!("{}", ty)`.  
+**Impact:** `TypeInfo$(export, "output_type")` now returns `"Int"` instead of
+`Some(Single(Custom("Int")))`.
+
+## `nav_to_i64` Doesn't Handle `NavValue::Str` — FIXED
+
+**Date:** 2026-07-23  
+**Status:** Fixed  
+**Root cause:** `nav_to_i64` handled `Count`, `Int`, and `Bool` but not `Str`.
+Since `TypeInfo$(sel, "params.count")` returns `NavValue::Str("2")`, the
+`when pcount > 0` guard evaluated `nav_to_i64(NavValue::Str("2"))` as 0.  
+**Fix:** Added `NavValue::Str(s) => s.parse::<i64>().unwrap_or(0)`.  
+**Impact:** `when pcount > 0` guards now correctly evaluate parameter counts.
+
 ## Three-Way String Concatenation `++` Drops Third Operand — FIXED
 
 **Date:** 2026-07-22
