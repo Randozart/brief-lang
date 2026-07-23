@@ -1,8 +1,10 @@
 // ── Navigation Chain Evaluation ─────────────────────────────────────────
 // 2026-07-21: Evaluates a tree of $ calls against the live compilation state.
 // Each $ name dispatches to the appropriate selection, traversal, position,
-// or action handler. Fix 1: ForEach loop binding via compile-time scope.
-// Fix 2: Stage$ dispatch via PluginManager pointer. Fix 3: Set$ value types.
+// or action handler.
+// 2026-07-23: Added capability sandboxing — each intrinsic checks its
+// capability requirement before executing. Side-effect intrinsics require
+// explicit --allow-* flags.
 //
 // Max 2 levels per function. Flat dispatch: one arm per intrinsic name.
 
@@ -24,6 +26,84 @@ use super::actions::{
 use super::text_ops::TextSelection;
 use super::stage_target;
 
+/// Sandbox permissions for compile-time $ intrinsics.
+/// Each capability corresponds to a --allow-* CLI flag.
+/// By default, only pure AST/string intrinsics are allowed.
+#[derive(Debug, Clone, Default)]
+pub struct Sandbox {
+    /// Read files via FileRead$
+    pub allow_read: bool,
+    /// Write files via FileWrite$
+    pub allow_write: bool,
+    /// Execute shell commands via ShellCmd$
+    pub allow_run: bool,
+    /// Query host hardware via SysQuery$
+    pub allow_sys_query: bool,
+    /// Access network via HttpFetch$
+    pub allow_net: bool,
+    /// Instruction budget (gas limit), 0 = unlimited
+    pub budget: u64,
+    /// Remaining instructions this macro can execute
+    pub remaining: u64,
+}
+
+impl Sandbox {
+    /// Create a new sandbox with all capabilities granted (for backward compat).
+    pub fn permissive() -> Self {
+        Self {
+            allow_read: true, allow_write: true, allow_run: true,
+            allow_sys_query: true, allow_net: true,
+            budget: 0, remaining: 0,
+        }
+    }
+
+    /// Consume one unit of the instruction budget.
+    /// Returns an error if the budget is exhausted.
+    pub fn consume(&mut self, intrinsic: &str) -> Result<(), String> {
+        if self.budget > 0 {
+            if self.remaining == 0 {
+                return Err(format!(
+                    "instruction budget exceeded (limit {}): called '{}'",
+                    self.budget, intrinsic
+                ));
+            }
+            self.remaining -= 1;
+        }
+        Ok(())
+    }
+
+    /// Check that a capability is granted.
+    pub fn check(&self, cap: Capability, intrinsic: &str) -> Result<(), String> {
+        let granted = match cap {
+            Capability::Pure => true,
+            Capability::DiskRead => self.allow_read,
+            Capability::DiskWrite => self.allow_write,
+            Capability::Shell => self.allow_run,
+            Capability::SysQuery => self.allow_sys_query,
+            Capability::Network => self.allow_net,
+        };
+        if !granted {
+            Err(format!(
+                "intrinsic '{}' requires capability '{:?}'. Run with the corresponding --allow-* flag.",
+                intrinsic, cap
+            ))
+        } else {
+            Ok(())
+        }
+    }
+}
+
+/// Capability categories for $ intrinsics.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum Capability {
+    Pure,
+    DiskRead,
+    DiskWrite,
+    Shell,
+    SysQuery,
+    Network,
+}
+
 /// Result of evaluating a single navigation chain link.
 #[derive(Debug, Clone)]
 pub enum NavValue {
@@ -41,7 +121,9 @@ pub enum NavValue {
     Void,
 }
 
-/// Compile-time scope: maps variable names to their NavValues.
+/// Extract a reference to the Sandbox from the optional PluginManager.
+/// When no PluginManager is available (tests), returns a permissive sandbox.
+
 type Scope = HashMap<String, NavValue>;
 
 // ── Main Entry Points ──────────────────────────────────────────────────
@@ -55,8 +137,10 @@ pub fn evaluate_stage_block(
     mut pm: &mut Option<&mut PluginManager>,
 ) -> Result<(), String> {
     let mut scope = Scope::new();
+    let sandbox = pm.as_ref().map(|p| p.sandbox.clone()).unwrap_or_else(Sandbox::permissive);
+    let mut sandbox = sandbox;
     for stmt in body {
-        evaluate_stage_stmt(stmt, program, universe, stage, &mut scope, &mut pm)?;
+        evaluate_stage_stmt(stmt, program, universe, stage, &mut scope, &mut sandbox, &mut pm)?;
     }
     Ok(())
 }
@@ -68,14 +152,15 @@ pub fn eval_nav_chain(
     universe: &mut TypeUniverse,
     stage: StageKind,
     scope: &Scope,
+    sandbox: &mut Sandbox,
     pm: &mut Option<&mut PluginManager>,
 ) -> Result<NavValue, String> {
     match expr {
         Expr::Call(name, args, _) if name.ends_with('$') => {
-            eval_nav_call(name, args, program, universe, stage, scope, pm)
+            eval_nav_call(name, args, program, universe, stage, scope, sandbox, pm)
         }
         Expr::Field(obj, name) if name.ends_with('$') => {
-            let prev = eval_nav_chain(obj, program, universe, stage, scope, pm)?;
+            let prev = eval_nav_chain(obj, program, universe, stage, scope, sandbox, pm)?;
             eval_nav_field_method(name, prev, program, stage)
         }
         // Fix 1: Resolve identifiers from the compile-time scope
@@ -113,27 +198,27 @@ fn evaluate_stage_stmt(
     universe: &mut TypeUniverse,
     stage: StageKind,
     scope: &mut Scope,
+    sandbox: &mut Sandbox,
     pm: &mut Option<&mut PluginManager>,
 ) -> Result<(), String> {
     match stmt {
         Statement::Expression(expr) => {
-            let _result = eval_nav_chain(expr, program, universe, stage, scope, pm)?;
+            let _result = eval_nav_chain(expr, program, universe, stage, scope, sandbox, pm)?;
             Ok(())
         }
         Statement::Let { name, expr: Some(e), .. } => {
-            let result = eval_nav_chain(e, program, universe, stage, scope, pm)?;
+            let result = eval_nav_chain(e, program, universe, stage, scope, sandbox, pm)?;
             scope.insert(name.clone(), result);
             Ok(())
         }
         Statement::Block(statements) => {
             for s in statements {
-                evaluate_stage_stmt(s, program, universe, stage, scope, pm)?;
+                evaluate_stage_stmt(s, program, universe, stage, scope, sandbox, pm)?;
             }
             Ok(())
         }
-        // Fix 1: Foreach — bind loop variable in scope, evaluate body per element
         Statement::Foreach { item, list, body } => {
-            let list_val = eval_nav_chain(list, program, universe, stage, scope, pm)?;
+            let list_val = eval_nav_chain(list, program, universe, stage, scope, sandbox, pm)?;
             let items = match list_val {
                 NavValue::Selection(sel) => sel,
                 _ => return Err("foreach: expected a Selection from the list expression".into()),
@@ -143,7 +228,7 @@ fn evaluate_stage_stmt(
                 let selection = Selection::single(node.clone());
                 scope.insert(item.clone(), NavValue::Selection(selection));
                 for s in body {
-                    evaluate_stage_stmt(s, program, universe, stage, scope, pm)?;
+                    evaluate_stage_stmt(s, program, universe, stage, scope, sandbox, pm)?;
                 }
             }
             scope.remove(item);
@@ -157,8 +242,8 @@ fn evaluate_stage_stmt(
             // eval_nav_chain doesn't support directly.
             let result = match guard {
                 Expr::BinaryOp(op, left, right) => {
-                    let l = eval_nav_chain(left, program, universe, stage, scope, pm)?;
-                    let r = eval_nav_chain(right, program, universe, stage, scope, pm)?;
+                    let l = eval_nav_chain(left, program, universe, stage, scope, sandbox, pm)?;
+                    let r = eval_nav_chain(right, program, universe, stage, scope, sandbox, pm)?;
                     // Extract integer values from both sides for comparison
                     let lv = nav_to_i64(&l);
                     let rv = nav_to_i64(&r);
@@ -173,7 +258,7 @@ fn evaluate_stage_stmt(
                     };
                     NavValue::Bool(cmp)
                 }
-                _ => eval_nav_chain(guard, program, universe, stage, scope, pm)?,
+                _ => eval_nav_chain(guard, program, universe, stage, scope, sandbox, pm)?,
             };
             let is_truthy = match &result {
                 NavValue::Selection(sel) => !sel.nodes.is_empty(),
@@ -186,7 +271,7 @@ fn evaluate_stage_stmt(
             };
             if is_truthy {
                 for s in body {
-                    evaluate_stage_stmt(s, program, universe, stage, scope, pm)?;
+                    evaluate_stage_stmt(s, program, universe, stage, scope, sandbox, pm)?;
                 }
             }
             Ok(())
@@ -205,8 +290,11 @@ fn eval_nav_call(
     universe: &mut TypeUniverse,
     stage: StageKind,
     scope: &Scope,
+    sandbox: &mut Sandbox,
     pm: &mut Option<&mut PluginManager>,
 ) -> Result<NavValue, String> {
+    // 2026-07-23: Every $ intrinsic call consumes one unit of the gas budget.
+    sandbox.consume(name)?;
     match name {
         // ── Selectors ──────────────────────────────────────────────
         "Tag$" => selector_1_str(args, |s| {
@@ -231,14 +319,14 @@ fn eval_nav_call(
 
         // ── Traversal ──────────────────────────────────────────────
         "First$" => selector_1_int_opt(args, |n| {
-            let prev = eval_nav_chain(&args[0], program, universe, stage, scope, pm)?;
+            let prev = eval_nav_chain(&args[0], program, universe, stage, scope, sandbox, pm)?;
             match prev {
                 NavValue::Selection(sel) => Ok(NavValue::Selection(sel.first(n))),
                 _ => Err("First$ requires a Selection operand".into()),
             }
         }),
         "Last$" => selector_1_int_opt(args, |n| {
-            let prev = eval_nav_chain(&args[0], program, universe, stage, scope, pm)?;
+            let prev = eval_nav_chain(&args[0], program, universe, stage, scope, sandbox, pm)?;
             match prev {
                 NavValue::Selection(sel) => Ok(NavValue::Selection(sel.last(n))),
                 _ => Err("Last$ requires a Selection operand".into()),
@@ -246,7 +334,7 @@ fn eval_nav_call(
         }),
         "Nth$" => {
             let n = expect_int_arg(args, 0, "Nth$")? as usize;
-            let prev = eval_nav_chain(&args[1], program, universe, stage, scope, pm)?;
+            let prev = eval_nav_chain(&args[1], program, universe, stage, scope, sandbox, pm)?;
             match prev {
                 NavValue::Selection(sel) => Ok(NavValue::Selection(sel.nth(n))),
                 _ => Err("Nth$ requires a Selection operand".into()),
@@ -258,7 +346,7 @@ fn eval_nav_call(
             let Some(prev_arg) = prev_arg else {
                 return Err("Children$: missing operand".into());
             };
-            let prev = eval_nav_chain(prev_arg, program, universe, stage, scope, pm)?;
+            let prev = eval_nav_chain(prev_arg, program, universe, stage, scope, sandbox, pm)?;
             match prev {
                 NavValue::Selection(sel) => Ok(NavValue::Selection(
                     sel.children(program, filter.as_deref())
@@ -272,7 +360,7 @@ fn eval_nav_call(
             let Some(prev_arg) = prev_arg else {
                 return Err("Descendants$: missing operand".into());
             };
-            let prev = eval_nav_chain(prev_arg, program, universe, stage, scope, pm)?;
+            let prev = eval_nav_chain(prev_arg, program, universe, stage, scope, sandbox, pm)?;
             match prev {
                 NavValue::Selection(sel) => Ok(NavValue::Selection(
                     sel.descendants(program, filter.as_deref())
@@ -281,7 +369,7 @@ fn eval_nav_call(
             }
         }
         "Parent$" => {
-            let prev = eval_nav_chain(&args[0], program, universe, stage, scope, pm)?;
+            let prev = eval_nav_chain(&args[0], program, universe, stage, scope, sandbox, pm)?;
             match prev {
                 NavValue::Selection(sel) => Ok(NavValue::Selection(sel.parent(program))),
                 _ => Err("Parent$ requires a Selection operand".into()),
@@ -293,7 +381,7 @@ fn eval_nav_call(
             let prev = if args.is_empty() {
                 NavValue::Selection(Selection { nodes: AllSelector.apply(program)? })
             } else {
-                eval_nav_chain(&args[0], program, universe, stage, scope, pm)?
+                eval_nav_chain(&args[0], program, universe, stage, scope, sandbox, pm)?
             };
             match prev {
                 NavValue::Selection(sel) => Ok(NavValue::Count(sel.count())),
@@ -301,14 +389,14 @@ fn eval_nav_call(
             }
         }
         "Names$" => {
-            let prev = eval_nav_chain(&args[0], program, universe, stage, scope, pm)?;
+            let prev = eval_nav_chain(&args[0], program, universe, stage, scope, sandbox, pm)?;
             match prev {
                 NavValue::Selection(sel) => Ok(NavValue::Names(sel.names(program))),
                 _ => Err("Names$ requires a Selection operand".into()),
             }
         }
         "IsEmpty$" => {
-            let prev = eval_nav_chain(&args[0], program, universe, stage, scope, pm)?;
+            let prev = eval_nav_chain(&args[0], program, universe, stage, scope, sandbox, pm)?;
             match prev {
                 NavValue::Selection(sel) => Ok(NavValue::Bool(sel.is_empty())),
                 _ => Err("IsEmpty$ requires a Selection operand".into()),
@@ -317,7 +405,7 @@ fn eval_nav_call(
 
         // ── Positions ──────────────────────────────────────────────
         "Before$" => {
-            let prev = eval_nav_chain(&args[0], program, universe, stage, scope, pm)?;
+            let prev = eval_nav_chain(&args[0], program, universe, stage, scope, sandbox, pm)?;
             match prev {
                 NavValue::Selection(ref sel) => Position::before(sel)
                     .map(|p| NavValue::Position(p))
@@ -326,7 +414,7 @@ fn eval_nav_call(
             }
         }
         "After$" => {
-            let prev = eval_nav_chain(&args[0], program, universe, stage, scope, pm)?;
+            let prev = eval_nav_chain(&args[0], program, universe, stage, scope, sandbox, pm)?;
             match prev {
                 NavValue::Selection(ref sel) => Position::after(sel)
                     .map(|p| NavValue::Position(p))
@@ -335,7 +423,7 @@ fn eval_nav_call(
             }
         }
         "Replace$" => {
-            let prev = eval_nav_chain(&args[0], program, universe, stage, scope, pm)?;
+            let prev = eval_nav_chain(&args[0], program, universe, stage, scope, sandbox, pm)?;
             match prev {
                 NavValue::Selection(ref sel) => Position::replace(sel)
                     .map(|p| NavValue::Position(p))
@@ -344,7 +432,7 @@ fn eval_nav_call(
             }
         }
         "Inside$" => {
-            let prev = eval_nav_chain(&args[0], program, universe, stage, scope, pm)?;
+            let prev = eval_nav_chain(&args[0], program, universe, stage, scope, sandbox, pm)?;
             match prev {
                 NavValue::Selection(ref sel) => Position::inside(sel)
                     .map(|p| NavValue::Position(p))
@@ -353,7 +441,7 @@ fn eval_nav_call(
             }
         }
         "AppendTo$" => {
-            let prev = eval_nav_chain(&args[0], program, universe, stage, scope, pm)?;
+            let prev = eval_nav_chain(&args[0], program, universe, stage, scope, sandbox, pm)?;
             match prev {
                 NavValue::Selection(ref sel) => Position::append_to(sel)
                     .map(|p| NavValue::Position(p))
@@ -375,10 +463,10 @@ fn eval_nav_call(
         }
         // ── Actions ────────────────────────────────────────────────
         "Insert$" => {
-            let pos_result = eval_nav_chain(&args[0], program, universe, stage, scope, pm)?;
+            let pos_result = eval_nav_chain(&args[0], program, universe, stage, scope, sandbox, pm)?;
             let mut nodes = Vec::new();
             for arg in &args[1..] {
-                let val = eval_nav_chain(arg, program, universe, stage, scope, pm)?;
+                let val = eval_nav_chain(arg, program, universe, stage, scope, sandbox, pm)?;
                 match val {
                     NavValue::TopLevel(tl) => nodes.push(tl),
                     NavValue::VecTopLevel(v) => nodes.extend(v),
@@ -396,15 +484,15 @@ fn eval_nav_call(
             }
         }
         "Delete$" => {
-            let prev = eval_nav_chain(&args[0], program, universe, stage, scope, pm)?;
+            let prev = eval_nav_chain(&args[0], program, universe, stage, scope, sandbox, pm)?;
             match prev {
                 NavValue::Selection(sel) => delete_selection(program, &sel).map(|_| NavValue::Void),
                 _ => Err("Delete$ requires a Selection operand".into()),
             }
         }
         "ReplaceWith$" => {
-            let prev = eval_nav_chain(&args[0], program, universe, stage, scope, pm)?;
-            let repl = eval_nav_chain(&args[1], program, universe, stage, scope, pm)?;
+            let prev = eval_nav_chain(&args[0], program, universe, stage, scope, sandbox, pm)?;
+            let repl = eval_nav_chain(&args[1], program, universe, stage, scope, sandbox, pm)?;
             let repl_node = match repl {
                 NavValue::TopLevel(tl) => tl,
                 _ => return Err("ReplaceWith$: second arg must produce a TopLevel node".into()),
@@ -418,7 +506,7 @@ fn eval_nav_call(
         }
         // Fix 3: Set$ — parse second arg as PropertyValue
         "Set$" => {
-            let prev = eval_nav_chain(&args[0], program, universe, stage, scope, pm)?;
+            let prev = eval_nav_chain(&args[0], program, universe, stage, scope, sandbox, pm)?;
             let key = expect_str_arg(args, 1, "Set$")?;
             let val = expect_prop_arg(args, 2, "Set$")?;
             match prev {
@@ -429,7 +517,7 @@ fn eval_nav_call(
             }
         }
         "Rename$" => {
-            let prev = eval_nav_chain(&args[0], program, universe, stage, scope, pm)?;
+            let prev = eval_nav_chain(&args[0], program, universe, stage, scope, sandbox, pm)?;
             let name = expect_str_arg(args, 1, "Rename$")?;
             match prev {
                 NavValue::Selection(sel) => {
@@ -458,7 +546,7 @@ fn eval_nav_call(
             let fn_name = expect_str_arg(args, 0, "Call$")?;
             let mut call_args = Vec::new();
             for arg in &args[1..] {
-                let val = eval_nav_chain(arg, program, universe, stage, scope, pm)?;
+                let val = eval_nav_chain(arg, program, universe, stage, scope, sandbox, pm)?;
                 if let NavValue::TopLevel(TopLevel::Statement(stmt)) = val {
                     if let Statement::Expression(expr) = stmt.as_ref() {
                         call_args.push(expr.clone());
@@ -473,7 +561,7 @@ fn eval_nav_call(
             let mut stmts = Vec::new();
             for arg in args {
                 if let NavValue::TopLevel(TopLevel::Statement(stmt)) =
-                    eval_nav_chain(arg, program, universe, stage, scope, pm)?
+                    eval_nav_chain(arg, program, universe, stage, scope, sandbox, pm)?
                 {
                     stmts.push(*stmt);
                 }
@@ -513,7 +601,7 @@ fn eval_nav_call(
             Ok(NavValue::Str(s.replace(&from, &to)))
         }
         "StrJoin$" => {
-            let list_val = eval_nav_chain(&args[0], program, universe, stage, scope, pm)?;
+            let list_val = eval_nav_chain(&args[0], program, universe, stage, scope, sandbox, pm)?;
             let parts: Vec<String> = match &list_val {
                 NavValue::List(items) => items.iter().map(|v| nav_to_string(v)).collect(),
                 NavValue::Names(names) => names.clone(),
@@ -541,12 +629,14 @@ fn eval_nav_call(
 
         // ── File I/O (2026-07-22) ────────────────────────────────────
         "FileRead$" => {
+            sandbox.check(Capability::DiskRead, "FileRead$")?;
             let path = expect_str_arg(args, 0, "FileRead$")?;
             let content = std::fs::read_to_string(&path)
                 .map_err(|e| format!("FileRead$: cannot read '{}': {}", path, e))?;
             Ok(NavValue::Str(content))
         }
         "FileWrite$" => {
+            sandbox.check(Capability::DiskWrite, "FileWrite$")?;
             let path = expect_str_arg(args, 0, "FileWrite$")?;
             let content = expect_str_arg(args, 1, "FileWrite$")?;
             if let Some(parent) = std::path::Path::new(&path).parent() {
@@ -631,7 +721,7 @@ fn eval_nav_call(
 
         // ── Type Information (2026-07-22) ────────────────────────────
         "TypeInfo$" => {
-            let sel_val = eval_nav_chain(&args[0], program, universe, stage, scope, pm)?;
+            let sel_val = eval_nav_chain(&args[0], program, universe, stage, scope, sandbox, pm)?;
             let field = expect_str_arg(args, 1, "TypeInfo$")?;
             let tl = match &sel_val {
                 NavValue::Selection(sel) => {
@@ -653,9 +743,10 @@ fn eval_nav_call(
 
         // ── External Commands (2026-07-22) ───────────────────────────
         "ShellCmd$" => {
+            sandbox.check(Capability::Shell, "ShellCmd$")?;
             let cmd = expect_str_arg(args, 0, "ShellCmd$")?;
             let cmd_args: Vec<String> = args[1..].iter()
-                .map(|a| eval_nav_chain(a, program, universe, stage, scope, pm))
+                .map(|a| eval_nav_chain(a, program, universe, stage, scope, sandbox, pm))
                 .map(|r| r.and_then(|v| match v {
                     NavValue::Str(s) => Ok(s),
                     NavValue::Int(n) => Ok(n.to_string()),
@@ -859,6 +950,8 @@ mod tests {
 
     fn empty_scope() -> Scope { Scope::new() }
 
+    fn test_sandbox() -> Sandbox { Sandbox::permissive() }
+
     #[test]
     fn test_tag_selector_via_call() {
         let mut program = vec![
@@ -867,7 +960,7 @@ mod tests {
         let mut universe = TypeUniverse::new();
         let expr = Expr::Call("Tag$".into(), vec![Expr::Quoted("import".into())], None);
         let result = eval_nav_chain(&expr, &mut program, &mut universe,
-            StageKind::Parsed, &empty_scope(), &mut None).unwrap();
+            StageKind::Parsed, &empty_scope(), &mut test_sandbox(), &mut None).unwrap();
         match result { NavValue::Selection(sel) => assert_eq!(sel.count(), 1), _ => panic!() }
     }
 
@@ -881,7 +974,7 @@ mod tests {
         let inner = Expr::Call("Tag$".into(), vec![Expr::Quoted("import".into())], None);
         let expr = Expr::Call("Count$".into(), vec![inner], None);
         let result = eval_nav_chain(&expr, &mut program, &mut universe,
-            StageKind::Parsed, &empty_scope(), &mut None).unwrap();
+            StageKind::Parsed, &empty_scope(), &mut test_sandbox(), &mut None).unwrap();
         match result { NavValue::Count(n) => assert_eq!(n, 2), _ => panic!() }
     }
 
@@ -904,7 +997,7 @@ mod tests {
         let before_call = Expr::Call("Before$".into(), vec![first_call], None);
         let insert_call = Expr::Call("Insert$".into(), vec![before_call, import_call], None);
         let result = eval_nav_chain(&insert_call, &mut program, &mut universe,
-            StageKind::Parsed, &empty_scope(), &mut None).unwrap();
+            StageKind::Parsed, &empty_scope(), &mut test_sandbox(), &mut None).unwrap();
         assert!(matches!(result, NavValue::Void));
         assert_eq!(program.len(), 3);
         match &program[0] {
@@ -920,7 +1013,7 @@ mod tests {
         let tag_call = Expr::Call("Tag$".into(), vec![Expr::Quoted("import".into())], None);
         let delete_call = Expr::Call("Delete$".into(), vec![tag_call], None);
         let result = eval_nav_chain(&delete_call, &mut program, &mut universe,
-            StageKind::Parsed, &empty_scope(), &mut None).unwrap();
+            StageKind::Parsed, &empty_scope(), &mut test_sandbox(), &mut None).unwrap();
         assert!(matches!(result, NavValue::Void));
         assert!(program.is_empty());
     }
@@ -969,7 +1062,7 @@ mod tests {
             Expr::Bool(true),
         ], None);
         let result = eval_nav_chain(&set_call, &mut program, &mut universe,
-            StageKind::Parsed, &empty_scope(), &mut None).unwrap();
+            StageKind::Parsed, &empty_scope(), &mut test_sandbox(), &mut None).unwrap();
         assert!(matches!(result, NavValue::Void));
         if let TopLevel::Definition(d) = &program[0] {
             assert_eq!(d.metadata.get("entry"), Some(&PropertyValue::Bool(true)));

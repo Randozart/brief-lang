@@ -64,6 +64,12 @@ fn print_usage(program: &str) {
     eprintln!("  {} build <file.bv> --stdlib-path <p>   Set stdlib search path", name);
     eprintln!("  {} build <file.bv> --disable-plugin <name>  Disable a system plugin by name", name);
     eprintln!("  {} build <file.bv> --enable-plugin <name>   Enable only specific plugins", name);
+    eprintln!("  {} build <file.bv> --macro-budget <n>       Set instruction limit for macros (0 = unlimited)", name);
+    eprintln!("  {} build <file.bv> --allow-read             Allow macros to read files", name);
+    eprintln!("  {} build <file.bv> --allow-write            Allow macros to write files", name);
+    eprintln!("  {} build <file.bv> --allow-run              Allow macros to execute shell commands", name);
+    eprintln!("  {} build <file.bv> --allow-sys-query        Allow macros to query host hardware", name);
+    eprintln!("  {} build <file.bv> --allow-net              Allow macros network access", name);
     eprintln!("  {} check <file.bv>               Type-check only", name);
     eprintln!("  {} derive <file.bv>              Synthesize derivation blocks", name);
     eprintln!("  {} library <file.bv>             Compile to .a library", name);
@@ -102,6 +108,12 @@ fn parse_build_args(args: &[String]) -> Result<compile::BuildOptions, String> {
     let mut disable_plugins = Vec::new();
     let mut enable_plugins = Vec::new();
     let mut trg_unresolved_action = compile::TrgUnresolvedAction::Warn;
+    let mut allow_read = false;
+    let mut allow_write = false;
+    let mut allow_run = false;
+    let mut allow_sys_query = false;
+    let mut allow_net = false;
+    let mut macro_budget = 0u64;
 
     let mut i = 0;
     while i < args.len() {
@@ -167,6 +179,26 @@ fn parse_build_args(args: &[String]) -> Result<compile::BuildOptions, String> {
             let name = args.get(i + 1).ok_or("--enable-plugin requires a plugin name argument")?;
             enable_plugins.push(name.clone());
             i += 2;
+        } else if arg == "--allow-read" {
+            allow_read = true;
+            i += 1;
+        } else if arg == "--allow-write" {
+            allow_write = true;
+            i += 1;
+        } else if arg == "--allow-run" {
+            allow_run = true;
+            i += 1;
+        } else if arg == "--allow-sys-query" {
+            allow_sys_query = true;
+            i += 1;
+        } else if arg == "--allow-net" {
+            allow_net = true;
+            i += 1;
+        } else if arg == "--macro-budget" {
+            let val = args.get(i + 1).ok_or("--macro-budget requires a number argument")?;
+            macro_budget = val.parse()
+                .map_err(|_| format!("invalid --macro-budget value: '{}'", val))?;
+            i += 2;
         } else if arg == "--warn-unresolved-trg" {
             trg_unresolved_action = compile::TrgUnresolvedAction::Warn;
             i += 1;
@@ -218,6 +250,12 @@ fn parse_build_args(args: &[String]) -> Result<compile::BuildOptions, String> {
         feature_svo: false,
         glue_config: None,
         stack_threshold: 4096,
+        allow_read,
+        allow_write,
+        allow_run,
+        allow_sys_query,
+        allow_net,
+        macro_budget,
     })
 }
 

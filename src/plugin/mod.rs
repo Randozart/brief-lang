@@ -103,6 +103,8 @@ pub struct PluginManager {
     disabled: Vec<String>,
     /// If non-empty, ONLY these plugins run (overrides extension filter).
     enabled_only: Vec<String>,
+    /// 2026-07-23: Capability sandbox for $ intrinsics.
+    pub sandbox: crate::macros::eval::Sandbox,
 }
 
 impl PluginManager {
@@ -112,6 +114,7 @@ impl PluginManager {
             all: Vec::new(),
             disabled: Vec::new(),
             enabled_only: Vec::new(),
+            sandbox: crate::macros::eval::Sandbox::permissive(),
         }
     }
 
@@ -146,7 +149,24 @@ impl PluginManager {
         self
     }
 
-    /// 2026-07-23: Public accessors for extensible_plugin_manager.
+    /// Set the sandbox for $ intrinsic capability checking.
+    /// 2026-07-23: Default is permissive (all capabilities granted).
+    /// Call with a restricted sandbox before running untrusted plugins.
+    pub fn with_sandbox(mut self, sandbox: crate::macros::eval::Sandbox) -> Self {
+        self.sandbox = sandbox;
+        self
+    }
+
+    /// Return a reference to the current sandbox.
+    /// 2026-07-23: Used by the macro evaluator to check capabilities.
+    pub fn sandbox(&self) -> &crate::macros::eval::Sandbox {
+        &self.sandbox
+    }
+
+    /// Return a mutable reference to the sandbox.
+    pub fn sandbox_mut(&mut self) -> &mut crate::macros::eval::Sandbox {
+        &mut self.sandbox
+    }
     /// Returns the current enabled_only list (may be empty).
     pub fn enabled_only(&self) -> &[String] {
         &self.enabled_only

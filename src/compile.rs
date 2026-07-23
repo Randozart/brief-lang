@@ -115,6 +115,18 @@ pub struct BuildOptions {
     /// Used by the runtime fallback check in emit_dynamic_alloc.
     /// Default 4096 (4KB) — safe for most stack frames.
     pub stack_threshold: u64,
+    /// 2026-07-23: Allow macros to read files (FileRead$).
+    pub allow_read: bool,
+    /// 2026-07-23: Allow macros to write files (FileWrite$).
+    pub allow_write: bool,
+    /// 2026-07-23: Allow macros to execute shell commands (ShellCmd$).
+    pub allow_run: bool,
+    /// 2026-07-23: Allow macros to query host hardware (SysQuery$).
+    pub allow_sys_query: bool,
+    /// 2026-07-23: Allow macros network access (HttpFetch$).
+    pub allow_net: bool,
+    /// 2026-07-23: Instruction budget for macro execution (0 = unlimited).
+    pub macro_budget: u64,
 }
 
 /// Compile a Brief source file: produce an executable binary (or `.ll` with `--llvm`).
@@ -315,6 +327,12 @@ pub fn check_source(file_path: &str, source: &str) -> Result<(), String> {
         feature_svo: false,
         glue_config: None,
         stack_threshold: 4096,
+        allow_read: false,
+        allow_write: false,
+        allow_run: false,
+        allow_sys_query: false,
+        allow_net: false,
+        macro_budget: 0,
     };
     let (_items, _universe) = parse_and_check(file_path, source, &default_opts)?;
     println!("OK");
@@ -351,6 +369,19 @@ fn build_plugin_manager(file_path: &str, opts: &BuildOptions) -> PluginManager {
     if opts.no_stdlib {
         pm = pm.with_disabled(vec!["prelude".to_string()]);
     }
+
+    // Apply sandbox from CLI flags
+    use brief_compiler::macros::eval::Sandbox;
+    let sandbox = Sandbox {
+        allow_read: opts.allow_read,
+        allow_write: opts.allow_write,
+        allow_run: opts.allow_run,
+        allow_sys_query: opts.allow_sys_query,
+        allow_net: opts.allow_net,
+        budget: opts.macro_budget,
+        remaining: opts.macro_budget,
+    };
+    pm = pm.with_sandbox(sandbox);
 
     pm
 }
