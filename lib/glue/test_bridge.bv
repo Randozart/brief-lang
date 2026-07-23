@@ -1,17 +1,21 @@
-// glue-generator.bv — Brief-written GLUE bridge generator
-// 2026-07-23: Full rewrite as a stress test of the $ macro system.
-// Uses ConfigGet$, Tag$, TypeInfo$, StrReplace$, FileWrite$, foreach,
-// when-guards, string concatenation, and list construction.
-//
-// Works as a $(Normalized @ highest) stage plugin — runs after type
-// checking when all exports are fully resolved.
-// Run with: brief build bridge.bv --enable-plugin glue-generator
+// test_bridge.bv — Test file for GLUE bridge generator
+// Build: brief build lib/glue/test_bridge.bv
+
+export defn add(a: Int, b: Int) -> Int {
+    a + b;
+}
+
+export defn greet(name: String) -> String {
+    name;
+}
+
+export defn double(x: Float) -> Float {
+    x * 2.0;
+}
 
 $(Normalized @ highest) {
     let target = "rust";
-    let bridge_name = "bridge";
     let s_param = "_STATE, ";
-    let s_init = "    pub fn init_state(state: *mut c_void);\n";
 
     let fn_tmpl = ConfigGet$(target, "templates.fn_template");
     let ffi_tmpl = ConfigGet$(target, "templates.ffi_template");
@@ -30,19 +34,15 @@ $(Normalized @ highest) {
 
     foreach(exp in exports) {
         let name = TypeInfo$(exp, "name");
-        let pcount_str = TypeInfo$(exp, "params.count");
-        let pcount = pcount_str;
+        let pcount = TypeInfo$(exp, "params.count");
         let ret_type = TypeInfo$(exp, "output_type");
 
         let ret_native = ConfigGet$(target, "protocols." + ret_type + ".native");
         let ret_c_abi = ConfigGet$(target, "protocols." + ret_type + ".c_abi");
-        let return_expr = "result_abi as " + ret_native;
 
         let params_str = "";
         let ffi_params_str = "";
-        let c_types_str = "";
         let args_abi_str = "";
-        let pnames_str = "";
 
         when pcount > 0 {
             let p0n = TypeInfo$(exp, "params.0.name");
@@ -51,9 +51,7 @@ $(Normalized @ highest) {
             let p0c = ConfigGet$(target, "protocols." + p0t + ".c_abi");
             params_str = p0n + ": " + p0nat;
             ffi_params_str = p0n + ": " + p0c;
-            c_types_str = p0c;
             args_abi_str = p0n + " as " + p0c;
-            pnames_str = p0n;
         };
 
         when pcount > 1 {
@@ -63,9 +61,7 @@ $(Normalized @ highest) {
             let p1c = ConfigGet$(target, "protocols." + p1t + ".c_abi");
             params_str = params_str + ", " + p1n + ": " + p1nat;
             ffi_params_str = ffi_params_str + ", " + p1n + ": " + p1c;
-            c_types_str = c_types_str + ", " + p1c;
             args_abi_str = args_abi_str + ", " + p1n + " as " + p1c;
-            pnames_str = pnames_str + ", " + p1n;
         };
 
         let fn_body = StrReplace$(fn_tmpl, "{{name}}", name);
@@ -74,9 +70,7 @@ $(Normalized @ highest) {
         fn_body = StrReplace$(fn_body, "{{args_abi}}", args_abi_str);
         fn_body = StrReplace$(fn_body, "{{return}}", ret_native);
         fn_body = StrReplace$(fn_body, "{{c_return}}", ret_c_abi);
-        fn_body = StrReplace$(fn_body, "{{return_expr}}", return_expr);
-        fn_body = StrReplace$(fn_body, "{{c_types}}", c_types_str);
-        fn_body = StrReplace$(fn_body, "{{args}}", pnames_str);
+        fn_body = StrReplace$(fn_body, "{{return_expr}}", "result_abi as " + ret_native);
         fn_body = StrReplace$(fn_body, "{{s_param}}", s_param);
         exports_code = exports_code + fn_body + "\n";
 
@@ -89,15 +83,15 @@ $(Normalized @ highest) {
         EmitInfo$("  GLUE export: " + name);
     };
 
-    let lib_rs = StrReplace$(lib_tmpl, "{{bridge_name}}", bridge_name);
+    let lib_rs = StrReplace$(lib_tmpl, "{{bridge_name}}", "bridge");
     lib_rs = StrReplace$(lib_rs, "{{exports}}", exports_code);
     lib_rs = StrReplace$(lib_rs, "{{ffi_decls}}", ffi_code);
     lib_rs = StrReplace$(lib_rs, "{{s_param}}", s_param);
-    lib_rs = StrReplace$(lib_rs, "{{s_init}}", s_init);
+    lib_rs = StrReplace$(lib_rs, "{{s_init}}", "    pub fn init_state(state: *mut c_void);\n");
 
-    let ffi_rs = StrReplace$(ffi_file_tmpl, "{{bridge_name}}", bridge_name);
+    let ffi_rs = StrReplace$(ffi_file_tmpl, "{{bridge_name}}", "bridge");
     ffi_rs = StrReplace$(ffi_rs, "{{ffi_decls}}", ffi_code);
-    ffi_rs = StrReplace$(ffi_rs, "{{s_init}}", s_init);
+    ffi_rs = StrReplace$(ffi_rs, "{{s_init}}", "    pub fn init_state(state: *mut c_void);\n");
 
     FileWrite$("glue-out/src/lib.rs", lib_rs, true);
     FileWrite$("glue-out/src/ffi.rs", ffi_rs, true);

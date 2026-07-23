@@ -9,7 +9,7 @@
 // Max 2 levels per function. Flat dispatch: one arm per intrinsic name.
 
 use std::collections::{BTreeSet, HashMap};
-use crate::ast::{Expr, Statement, TopLevel, PropertyValue, ImportKind, Type};
+use crate::ast::{Expr, Statement, TopLevel, PropertyValue, ImportKind, Type, BinaryOpKind};
 use crate::ast::top::*;
 use crate::ast::StageKind;
 use crate::type_universe::TypeUniverse;
@@ -220,6 +220,29 @@ pub fn eval_nav_chain(
         Expr::Decimal(n) => Ok(NavValue::Int(*n)),
         Expr::Float(n) => Ok(NavValue::Int(*n as i64)),
         Expr::Bool(b) => Ok(NavValue::Bool(*b)),
+        // 2026-07-23: String literal (Quoted) in macro DSL.
+        Expr::Quoted(bytes) => String::from_utf8(bytes.clone())
+            .map(NavValue::Str)
+            .map_err(|_| "invalid UTF-8 string literal".into()),
+        // 2026-07-23: String concatenation for macro DSL.
+        Expr::BinaryOp(kind, lhs, rhs) if matches!(kind, BinaryOpKind::Add) => {
+            let lv = eval_nav_chain(lhs, program, universe, stage, scope, sandbox, pm)?;
+            let rv = eval_nav_chain(rhs, program, universe, stage, scope, sandbox, pm)?;
+            match (lv, rv) {
+                (NavValue::Str(a), NavValue::Str(b)) => Ok(NavValue::Str(a + &b)),
+                (NavValue::Int(a), NavValue::Int(b)) => Ok(NavValue::Int(a + b)),
+                (NavValue::Str(a), NavValue::Int(b)) => Ok(NavValue::Str(a + &b.to_string())),
+                (NavValue::Int(a), NavValue::Str(b)) => Ok(NavValue::Str(a.to_string() + &b)),
+                _ => Err(format!("+ operator not supported for these operand types")),
+            }
+        }
+        // 2026-07-23: List construction for macro DSL (e.g., [a, b, c]).
+        Expr::List(items) => {
+            let values: Result<Vec<NavValue>, String> = items.iter()
+                .map(|item| eval_nav_chain(item, program, universe, stage, scope, sandbox, pm))
+                .collect();
+            Ok(NavValue::List(values?))
+        }
         other => Err(format!(
             "expected a $ navigation call, got {:?}", other
         )),
@@ -234,6 +257,7 @@ fn nav_to_i64(val: &NavValue) -> i64 {
         NavValue::Count(n) => *n as i64,
         NavValue::Int(n) => *n,
         NavValue::Bool(b) => if *b { 1 } else { 0 },
+        NavValue::Str(s) => s.parse::<i64>().unwrap_or(0),
         _ => 0,
     }
 }
@@ -280,9 +304,16 @@ fn evaluate_stage_stmt(
             scope.remove(item);
             Ok(())
         }
-        // 2026-07-21: Fix A — evaluate when guards in stage blocks.
-        // Without this, the prelude plugin's `when anchor.Count$() > 0 { ... }`
-        // is silently skipped, never inserting stdlib imports.
+        // 2026-07-23: Assignment — evaluate the RHS and update scope.
+        Statement::Assign(target, value) => {
+            let name = match target {
+                Expr::Identifier(n) => n.clone(),
+                other => return Err(format!("assignment target must be an identifier, got {:?}", other)),
+            };
+            let result = eval_nav_chain(value, program, universe, stage, scope, sandbox, pm)?;
+            scope.insert(name, result);
+            Ok(())
+        }
         Statement::Guarded(guard, body) => {
             // Handle BinaryOp comparisons (Count$() > 0, etc.) which
             // eval_nav_chain doesn't support directly.
@@ -344,7 +375,7 @@ fn eval_nav_call(
     match name {
         // ── Selectors ──────────────────────────────────────────────
         "Tag$" => {
-            let s = expect_str_arg(args, 0, "Tag$")?;
+            let s = expect_str_arg(args, 0, "Tag$", scope)?;
             let mut nodes = TagSelector { tag: s }.apply(program)?;
             let tainted = get_tainted_set(pm);
             if !tainted.is_empty() {
@@ -353,7 +384,7 @@ fn eval_nav_call(
             Ok(NavValue::Selection(Selection { nodes }))
         }
         "Named$" => {
-            let s = expect_str_arg(args, 0, "Named$")?;
+            let s = expect_str_arg(args, 0, "Named$", scope)?;
             let mut nodes = NamedSelector { name: s }.apply(program)?;
             let tainted = get_tainted_set(pm);
             if !tainted.is_empty() {
@@ -362,7 +393,7 @@ fn eval_nav_call(
             Ok(NavValue::Selection(Selection { nodes }))
         }
         "WithKey$" => {
-            let s = expect_str_arg(args, 0, "WithKey$")?;
+            let s = expect_str_arg(args, 0, "WithKey$", scope)?;
             let mut nodes = WithKeySelector { key: s }.apply(program)?;
             let tainted = get_tainted_set(pm);
             if !tainted.is_empty() {
@@ -371,8 +402,8 @@ fn eval_nav_call(
             Ok(NavValue::Selection(Selection { nodes }))
         }
         "WithAttr$" => {
-            let key = expect_str_arg(args, 0, "WithAttr$")?;
-            let val = expect_str_arg(args, 1, "WithAttr$")?;
+            let key = expect_str_arg(args, 0, "WithAttr$", scope)?;
+            let val = expect_str_arg(args, 1, "WithAttr$", scope)?;
             let mut nodes = WithAttrSelector { key, val }.apply(program)?;
             let tainted = get_tainted_set(pm);
             if !tainted.is_empty() {
@@ -529,7 +560,7 @@ fn eval_nav_call(
             let Some(pm) = pm else {
                 return Err("Stage$.Insert$: no PluginManager available".into());
             };
-            let path = expect_str_arg(args, 1, "Stage$.Insert$")?;
+            let path = expect_str_arg(args, 1, "Stage$.Insert$", scope)?;
             stage_target::insert_plugin_from_file(pm, &path, stage)
                 .map(|_| NavValue::Void)
         }
@@ -647,7 +678,7 @@ fn eval_nav_call(
         // Fix 3: Set$ — parse second arg as PropertyValue
         "Set$" => {
             let prev = eval_nav_chain(&args[0], program, universe, stage, scope, sandbox, pm)?;
-            let key = expect_str_arg(args, 1, "Set$")?;
+            let key = expect_str_arg(args, 1, "Set$", scope)?;
             let val = expect_prop_arg(args, 2, "Set$")?;
             match prev {
                 NavValue::Selection(sel) => {
@@ -658,7 +689,7 @@ fn eval_nav_call(
         }
         "Rename$" => {
             let prev = eval_nav_chain(&args[0], program, universe, stage, scope, sandbox, pm)?;
-            let name = expect_str_arg(args, 1, "Rename$")?;
+            let name = expect_str_arg(args, 1, "Rename$", scope)?;
             match prev {
                 NavValue::Selection(sel) => {
                     rename_selection(program, &sel, &name).map(|_| NavValue::Void)
@@ -669,11 +700,11 @@ fn eval_nav_call(
 
         // ── AST Constructors ───────────────────────────────────────
         "Import$" => {
-            let path = expect_str_arg(args, 0, "Import$")?;
+            let path = expect_str_arg(args, 0, "Import$", scope)?;
             Ok(NavValue::TopLevel(TopLevel::Import(Import::literal(path, vec![]))))
         }
         "Defn$" => {
-            let name = expect_str_arg(args, 0, "Defn$")?;
+            let name = expect_str_arg(args, 0, "Defn$", scope)?;
             Ok(NavValue::TopLevel(TopLevel::Definition(Definition {
                 name, type_params: vec![], parameters: vec![],
                 output_type: None, outputs: vec![],
@@ -683,7 +714,7 @@ fn eval_nav_call(
             })))
         }
         "Call$" => {
-            let fn_name = expect_str_arg(args, 0, "Call$")?;
+            let fn_name = expect_str_arg(args, 0, "Call$", scope)?;
             let mut call_args = Vec::new();
             for arg in &args[1..] {
                 let val = eval_nav_chain(arg, program, universe, stage, scope, sandbox, pm)?;
@@ -715,7 +746,7 @@ fn eval_nav_call(
         // from compile-time scope variables. $$escapes to literal $.
         // Returns TopLevel (single item) or VecTopLevel (multiple items).
         "Quote$" => {
-            let template = expect_str_arg(args, 0, "Quote$")?;
+            let template = expect_str_arg(args, 0, "Quote$", scope)?;
             let tokens = crate::lexer::tokenize(&template)
                 .map_err(|e| format!("Quote$: tokenization error: {}", e))?;
             let mut parser = crate::parser::Parser::new(tokens, &template);
@@ -746,20 +777,20 @@ fn eval_nav_call(
             let Some(pm) = pm else {
                 return Err("Stage$.Remove$: no PluginManager available".into());
             };
-            let name = expect_str_arg(args, 1, "Stage$.Remove$")?;
+            let name = expect_str_arg(args, 1, "Stage$.Remove$", scope)?;
             stage_target::remove_plugin(pm, &name);
             Ok(NavValue::Void)
         }
 
         // ── String Operations (2026-07-22) ───────────────────────────
         "StrLen$" => {
-            let s = expect_str_arg(args, 0, "StrLen$")?;
+            let s = expect_str_arg(args, 0, "StrLen$", scope)?;
             Ok(NavValue::Int(s.len() as i64))
         }
         "StrReplace$" => {
-            let s = expect_str_arg(args, 0, "StrReplace$")?;
-            let from = expect_str_arg(args, 1, "StrReplace$")?;
-            let to = expect_str_arg(args, 2, "StrReplace$")?;
+            let s = expect_str_arg(args, 0, "StrReplace$", scope)?;
+            let from = expect_str_arg(args, 1, "StrReplace$", scope)?;
+            let to = expect_str_arg(args, 2, "StrReplace$", scope)?;
             Ok(NavValue::Str(s.replace(&from, &to)))
         }
         "StrJoin$" => {
@@ -769,17 +800,17 @@ fn eval_nav_call(
                 NavValue::Names(names) => names.clone(),
                 _ => return Err("StrJoin$: first arg must be a List or Names".into()),
             };
-            let sep = expect_str_arg(args, 1, "StrJoin$")?;
+            let sep = expect_str_arg(args, 1, "StrJoin$", scope)?;
             Ok(NavValue::Str(parts.join(&sep)))
         }
         "StrSplit$" => {
-            let s = expect_str_arg(args, 0, "StrSplit$")?;
-            let pat = expect_str_arg(args, 1, "StrSplit$")?;
+            let s = expect_str_arg(args, 0, "StrSplit$", scope)?;
+            let pat = expect_str_arg(args, 1, "StrSplit$", scope)?;
             let parts: Vec<NavValue> = s.split(&pat).map(|p| NavValue::Str(p.to_string())).collect();
             Ok(NavValue::List(parts))
         }
         "StrSubstr$" => {
-            let s = expect_str_arg(args, 0, "StrSubstr$")?;
+            let s = expect_str_arg(args, 0, "StrSubstr$", scope)?;
             let start = expect_int_arg(args, 1, "StrSubstr$")? as usize;
             let end = expect_int_arg(args, 2, "StrSubstr$")? as usize;
             let end = end.min(s.len());
@@ -792,8 +823,8 @@ fn eval_nav_call(
         // ── File I/O (2026-07-22) ────────────────────────────────────
         "FileWrite$" => {
             sandbox.check(Capability::DiskWrite, "FileWrite$")?;
-            let path = expect_str_arg(args, 0, "FileWrite$")?;
-            let content = expect_str_arg(args, 1, "FileWrite$")?;
+            let path = expect_str_arg(args, 0, "FileWrite$", scope)?;
+            let content = expect_str_arg(args, 1, "FileWrite$", scope)?;
             // Third argument: `{ persist: true }` to flush to physical disk
             let persist = args.get(2).map(|a| matches!(a, Expr::Bool(true))).unwrap_or(false);
 
@@ -818,7 +849,7 @@ fn eval_nav_call(
         }
         "FileRead$" => {
             sandbox.check(Capability::DiskRead, "FileRead$")?;
-            let path = expect_str_arg(args, 0, "FileRead$")?;
+            let path = expect_str_arg(args, 0, "FileRead$", scope)?;
             if path.starts_with("virtual://") {
                 let vfs_path = path.strip_prefix("virtual://").unwrap_or(&path).to_string();
                 match pm.as_ref().and_then(|p| p.vfs.get(&vfs_path)) {
@@ -838,8 +869,8 @@ fn eval_nav_call(
 
         // ── Configuration (2026-07-22) ───────────────────────────────
         "ConfigGet$" => {
-            let section = expect_str_arg(args, 0, "ConfigGet$")?;
-            let key = expect_str_arg(args, 1, "ConfigGet$")?;
+            let section = expect_str_arg(args, 0, "ConfigGet$", scope)?;
+            let key = expect_str_arg(args, 1, "ConfigGet$", scope)?;
             let targets = crate::glue::config::load_glue_config(None)
                 .map_err(|e| format!("ConfigGet$: {}", e))?;
             let target = targets.get(&section)
@@ -855,11 +886,25 @@ fn eval_nav_call(
                         Ok(NavValue::Str(val.clone()))
                     }
                     "protocols" => {
-                        let proto_key = format!("#{}", field);
-                        let entry = target.protocols.get(&proto_key);
-                        match entry {
-                            Some(e) => Ok(NavValue::Str(format!("{}/{}", e.native, e.c_abi))),
-                            None => Err(format!("ConfigGet$: no protocol '{}' in section '{}'", field, section)),
+                        // Support both "Int" (returns "native/c_abi") and
+                        // "Int.native" / "Int.c_abi" (returns single field).
+                        if let Some(dot2) = field.find('.') {
+                            let (type_name, proto_field) = field.split_at(dot2);
+                            let proto_field = &proto_field[1..];
+                            let entry = target.protocols.get(&format!("#{}", type_name));
+                            match (entry, proto_field) {
+                                (Some(e), "native") => Ok(NavValue::Str(e.native.clone())),
+                                (Some(e), "c_abi") => Ok(NavValue::Str(e.c_abi.clone())),
+                                (Some(_), _) => Err(format!("ConfigGet$: unknown protocol field '{}' (expected 'native' or 'c_abi')", proto_field)),
+                                (None, _) => Err(format!("ConfigGet$: no protocol for type '{}' in section '{}'", type_name, section)),
+                            }
+                        } else {
+                            let proto_key = format!("#{}", field);
+                            let entry = target.protocols.get(&proto_key);
+                            match entry {
+                                Some(e) => Ok(NavValue::Str(format!("{}/{}", e.native, e.c_abi))),
+                                None => Err(format!("ConfigGet$: no protocol '{}' in section '{}'", field, section)),
+                            }
                         }
                     }
                     _ => Err(format!("ConfigGet$: unknown sub-section '{}'", sub)),
@@ -871,8 +916,8 @@ fn eval_nav_call(
 
         // ── Universe Queries (2026-07-22) ────────────────────────────
         "DocRead$" => {
-            let type_name = expect_str_arg(args, 0, "DocRead$")?;
-            let prop = expect_str_arg(args, 1, "DocRead$")?;
+            let type_name = expect_str_arg(args, 0, "DocRead$", scope)?;
+            let prop = expect_str_arg(args, 1, "DocRead$", scope)?;
             let rt = universe.get(&type_name)
                 .ok_or_else(|| format!("DocRead$: type '{}' not in universe", type_name))?;
             match prop.as_str() {
@@ -892,8 +937,8 @@ fn eval_nav_call(
             }
         }
         "CastPath$" => {
-            let src = expect_str_arg(args, 0, "CastPath$")?;
-            let tgt = expect_str_arg(args, 1, "CastPath$")?;
+            let src = expect_str_arg(args, 0, "CastPath$", scope)?;
+            let tgt = expect_str_arg(args, 1, "CastPath$", scope)?;
             let path = crate::analysis::layout_optimizer::find_cast_path(universe, &src, &tgt);
             match path {
                 Some(types) => {
@@ -908,7 +953,7 @@ fn eval_nav_call(
         // ── Type Information (2026-07-22) ────────────────────────────
         "TypeInfo$" => {
             let sel_val = eval_nav_chain(&args[0], program, universe, stage, scope, sandbox, pm)?;
-            let field = expect_str_arg(args, 1, "TypeInfo$")?;
+            let field = expect_str_arg(args, 1, "TypeInfo$", scope)?;
             let tl = match &sel_val {
                 NavValue::Selection(sel) => {
                     let node = sel.nodes.first()
@@ -930,7 +975,7 @@ fn eval_nav_call(
         // ── External Commands (2026-07-22) ───────────────────────────
         "ShellCmd$" => {
             sandbox.check(Capability::Shell, "ShellCmd$")?;
-            let cmd = expect_str_arg(args, 0, "ShellCmd$")?;
+            let cmd = expect_str_arg(args, 0, "ShellCmd$", scope)?;
             let cmd_args: Vec<String> = args[1..].iter()
                 .map(|a| eval_nav_chain(a, program, universe, stage, scope, sandbox, pm))
                 .map(|r| r.and_then(|v| match v {
@@ -952,17 +997,17 @@ fn eval_nav_call(
 
         // ── Diagnostics (2026-07-23) ────────────────────────────────
         "EmitInfo$" => {
-            let msg = expect_str_arg(args, 0, "EmitInfo$")?;
+            let msg = expect_str_arg(args, 0, "EmitInfo$", scope)?;
             println!("info: {}", msg);
             Ok(NavValue::Void)
         }
         "EmitWarning$" => {
-            let msg = expect_str_arg(args, 0, "EmitWarning$")?;
+            let msg = expect_str_arg(args, 0, "EmitWarning$", scope)?;
             eprintln!("warning: {}", msg);
             Ok(NavValue::Void)
         }
         "EmitError$" => {
-            let msg = expect_str_arg(args, 0, "EmitError$")?;
+            let msg = expect_str_arg(args, 0, "EmitError$", scope)?;
             Err(msg)
         }
 
@@ -979,7 +1024,7 @@ fn eval_nav_call(
         //   pagesize            → system page size in bytes
         "SysQuery$" => {
             sandbox.check(Capability::SysQuery, "SysQuery$")?;
-            let query = expect_str_arg(args, 0, "SysQuery$")?;
+            let query = expect_str_arg(args, 0, "SysQuery$", scope)?;
             match query.as_str() {
                 "cpu.cores" => {
                     let cores = std::thread::available_parallelism()
@@ -1130,7 +1175,7 @@ fn eval_nav_call(
         // if the variable is not set. Requires --allow-sys-query.
         "EnvGet$" => {
             sandbox.check(Capability::SysQuery, "EnvGet$")?;
-            let name = expect_str_arg(args, 0, "EnvGet$")?;
+            let name = expect_str_arg(args, 0, "EnvGet$", scope)?;
             match std::env::var(&name) {
                 Ok(val) => Ok(NavValue::Str(val)),
                 Err(_) => Ok(NavValue::Str(String::new())),
@@ -1142,7 +1187,7 @@ fn eval_nav_call(
         // body as a string. Requires --allow-net.
         "HttpFetch$" => {
             sandbox.check(Capability::Network, "HttpFetch$")?;
-            let url = expect_str_arg(args, 0, "HttpFetch$")?;
+            let url = expect_str_arg(args, 0, "HttpFetch$", scope)?;
             let resp = ureq::get(&url).call()
                 .map_err(|e| format!("HttpFetch$: failed to fetch '{}': {}", url, e))?;
             let body = resp.into_string()
@@ -1199,16 +1244,50 @@ fn eval_nav_field_method(
 
 // ── Helpers ────────────────────────────────────────────────────────────
 
-fn expect_str_arg(args: &[Expr], idx: usize, intrinsic: &str) -> Result<String, String> {
+/// Extract a string value from a $ intrinsic argument.
+/// Resolves identifiers from the compile-time scope, so variable
+/// bindings (let x = ...) work correctly in $ intrinsic calls.
+/// 2026-07-23: Added scope resolution for identifiers and fallback
+/// evaluation for complex expressions (string concatenation, etc.).
+fn expect_str_arg(args: &[Expr], idx: usize, intrinsic: &str, scope: &Scope) -> Result<String, String> {
     let arg = args.get(idx).ok_or_else(|| {
         format!("{}: missing argument {}", intrinsic, idx)
     })?;
+    // Quick path: simple literals and identifiers
     match arg {
-        Expr::Quoted(bytes) => String::from_utf8(bytes.clone())
+        Expr::Quoted(bytes) => return String::from_utf8(bytes.clone())
             .map_err(|_| format!("{}: arg {} is not valid UTF-8", intrinsic, idx)),
-        Expr::Identifier(s) => Ok(s.clone()),
-        Expr::Decimal(n) => Ok(n.to_string()),
-        _ => Err(format!("{}: arg {} must be a string", intrinsic, idx)),
+        Expr::Identifier(s) => {
+            if let Some(val) = scope.get(s) {
+                return match val {
+                    NavValue::Str(v) => Ok(v.clone()),
+                    NavValue::Int(n) => Ok(n.to_string()),
+                    NavValue::Count(n) => Ok(n.to_string()),
+                    NavValue::Bool(b) => Ok(if *b { "true".into() } else { "false".into() }),
+                    _ => Err(format!("{}: variable '{}' has unsupported type for string argument", intrinsic, s)),
+                };
+            } else {
+                return Ok(s.clone());
+            }
+        }
+        Expr::Decimal(n) => return Ok(n.to_string()),
+        _ => {}
+    }
+    // Fallback: evaluate the expression via eval_nav_chain (handles concatenation, etc.)
+    // We need a dummy program and universe since we only need string evaluation.
+    // This is safe because string concatenation doesn't mutate the AST.
+    let mut dummy_program = Vec::new();
+    let mut dummy_universe = TypeUniverse::new();
+    let mut dummy_sandbox = Sandbox::permissive();
+    let mut dummy_pm: Option<&mut PluginManager> = None;
+    match eval_nav_chain(arg, &mut dummy_program, &mut dummy_universe,
+        StageKind::Normalized, scope, &mut dummy_sandbox, &mut dummy_pm)
+    {
+        Ok(NavValue::Str(s)) => Ok(s),
+        Ok(NavValue::Int(n)) => Ok(n.to_string()),
+        Ok(NavValue::Count(n)) => Ok(n.to_string()),
+        Ok(other) => Err(format!("{}: arg {} has type {:?}, expected a string", intrinsic, idx, other)),
+        Err(e) => Err(format!("{}: arg {} evaluation failed: {}", intrinsic, idx, e)),
     }
 }
 
@@ -1248,9 +1327,9 @@ fn extract_str_lit(expr: &Expr) -> Option<String> {
     }
 }
 
-fn selector_1_str<F>(args: &[Expr], f: F) -> Result<NavValue, String>
+fn selector_1_str<F>(args: &[Expr], f: F, scope: &Scope) -> Result<NavValue, String>
 where F: FnOnce(String) -> Result<NavValue, String> {
-    let s = expect_str_arg(args, 0, "?")?;
+    let s = expect_str_arg(args, 0, "?", scope)?;
     f(s)
 }
 
@@ -1331,6 +1410,10 @@ fn nav_to_string(val: &NavValue) -> String {
 
 /// Extract type information from a TopLevel AST node by field path.
 fn type_info_from_toplevel(tl: &TopLevel, field: &str) -> Result<String, String> {
+    // 2026-07-23: Export delegates to its inner item.
+    if let TopLevel::Export(e) = tl {
+        return type_info_from_toplevel(&e.inner, field);
+    }
     match (tl, field) {
         (TopLevel::Definition(d), "name") => Ok(d.name.clone()),
         (TopLevel::Definition(d), "params.count") => Ok(d.parameters.len().to_string()),
@@ -1348,13 +1431,30 @@ fn type_info_from_toplevel(tl: &TopLevel, field: &str) -> Result<String, String>
             }
         }
         (TopLevel::Definition(d), "output_type") => {
-            Ok(format!("{:?}", d.output_type))
+            match &d.output_type {
+                Some(ot) => Ok(single_type_name(ot)),
+                None => Ok("Void".into()),
+            }
         }
         (TopLevel::Definition(d), "outputs.count") => Ok(d.outputs.len().to_string()),
         (TopLevel::ForeignBinding(fb), "name") => Ok(fb.foreign_name.clone()),
         (TopLevel::ForeignBinding(fb), "brief_name") => Ok(fb.effective_brief_name().to_string()),
         (TopLevel::Import(i), "path") => Ok(i.path().to_string()),
         _ => Err(format!("TypeInfo$: unknown field '{}' for this item type", field)),
+    }
+}
+
+/// Extract the type name from a single-type OutputType.
+/// For complex types (tuples, unions), returns the first type name.
+/// 2026-07-23: Used by TypeInfo$ "output_type" field.
+fn single_type_name(ot: &OutputType) -> String {
+    match ot {
+        OutputType::Single(ty) => format!("{}", ty),
+        OutputType::Array(inner) => single_type_name(inner) + "[]",
+        OutputType::Named(_, inner) => single_type_name(inner),
+        OutputType::Tuple(types) | OutputType::Union(types) => {
+            types.first().map(|t| single_type_name(t)).unwrap_or_else(|| "Void".into())
+        }
     }
 }
 
