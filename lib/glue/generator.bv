@@ -1,0 +1,51 @@
+// glue-generator.bv — Brief-written GLUE bridge generator
+// 2026-07-23: Uses the generic $ macro intrinsics to generate
+// language-specific wrappers from exported definitions.
+//
+// Works as a $(Parsed @ highest) stage plugin.
+// Run with: brief build bridge.bv --enable-plugin glue-generator
+
+$(Parsed @ highest) {
+    // 1. Read the target language config
+    let fn_tmpl = ConfigGet$("rust", "templates.fn_template");
+    let ffi_tmpl = ConfigGet$("rust", "templates.ffi_template");
+    let s_init_tmpl = ConfigGet$("rust", "templates.s_init_template");
+
+    EmitInfo$("GLUE generator: loaded Rust templates");
+
+    // 2. Find all exported definitions
+    let exports = Tag$("export");
+    when exports.IsEmpty$() {
+        EmitInfo$("no exports found");
+    };
+
+    // 3. For each export, generate wrapper code
+    let mut lib_content = String$("");
+    let mut ffi_content = String$("");
+    foreach(exp in exports) {
+        let defn = exp.Children$("defn");
+        let name = TypeInfo$(defn.First$(), "name");
+        let pcount = TypeInfo$(defn.First$(), "params.count");
+        let p0name = TypeInfo$(defn.First$(), "params.0.name");
+        let p0type = TypeInfo$(defn.First$(), "params.0.type");
+
+        // Generate safe wrapper using fn_template
+        let fn_body = StrReplace$(fn_tmpl, "{{name}}", name);
+        let fn_body2 = StrReplace$(fn_body, "{{params}}", p0name);
+        let fn_body3 = StrReplace$(fn_body2, "{{args_abi}}", p0name);
+        let fn_body4 = StrReplace$(fn_body3, "{{return}}", "()");
+        let fn_body5 = StrReplace$(fn_body4, "{{return_expr}}", "result_abi");
+
+        lib_content = StrReplace$(lib_content, "{{exports}}", fn_body5);
+
+        // Generate FFI declaration
+        let ffi_body = StrReplace$(ffi_tmpl, "{{name}}", name);
+        let ffi_body2 = StrReplace$(ffi_body, "{{ffi_params}}", p0name);
+        let ffi_body3 = StrReplace$(ffi_body2, "{{c_return}}", "i64");
+        ffi_content = StrReplace$(ffi_content, "{{ffi_decls}}", ffi_body3);
+
+        EmitInfo$("  generated: " + name);
+    };
+
+    EmitInfo$("GLUE generator: done");
+};

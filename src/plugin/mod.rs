@@ -291,8 +291,11 @@ impl PluginManager {
 
                 // Check disabled list
                 if self.disabled.contains(&name.to_string()) {
+                    eprintln!("DEBUG active_plugins: DISABLED '{}'", name);
                     return false;
                 }
+
+                eprintln!("DEBUG active_plugins: ACTIVE '{}'", name);
 
                 true
             })

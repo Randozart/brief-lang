@@ -235,8 +235,10 @@ pub fn extract_inline_stage_blocks(
     let mut block_idx = 0u32;
     for (i, block) in blocks.into_iter().rev() {
         let plugin_name = format!("inline:{}", block_idx);
+        let priority = block.priority;
+        eprintln!("DEBUG extract: registering plugin '{}' at stage {:?} priority {}", plugin_name, block.stage, priority);
         let plugin = StageBlockPlugin::new(plugin_name, block);
-        mgr.register_with_priority(Box::new(plugin), 200);
+        mgr.register_with_priority(Box::new(plugin), priority);
         program.remove(i);
         block_idx += 1;
     }

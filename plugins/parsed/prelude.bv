@@ -21,20 +21,24 @@ $(Parsed @ highest) {
             Import$("std/io.bv")
         );
     };
-    // 2026-07-21: No imports — insert before the first node.
+    // 2026-07-21: No imports — insert before the first txn.
+    // 2026-07-23: Check Count$() before Before$() to avoid error on empty selection.
     when anchor.Count$() == 0 {
-        Tag$("txn").First$().Before$().Insert$(
-            Import$("std/types/bootstrap.bv"),
-            Import$("std/os/fs.bv"),
-            Import$("std/os/net.bv"),
-            Import$("std/os/signal.bv"),
-            Import$("std/os/ipc.bv"),
-            Import$("std/os/thread.bv"),
-            Import$("std/os/user.bv"),
-            Import$("std/os/mem.bv"),
-            Import$("std/os/atomic.bv"),
-            Import$("std/env.bv"),
-            Import$("std/io.bv")
-        );
+        let txn_anchor = Tag$("txn").First$();
+        when txn_anchor.Count$() > 0 {
+            txn_anchor.Before$().Insert$(
+                Import$("std/types/bootstrap.bv"),
+                Import$("std/os/fs.bv"),
+                Import$("std/os/net.bv"),
+                Import$("std/os/signal.bv"),
+                Import$("std/os/ipc.bv"),
+                Import$("std/os/thread.bv"),
+                Import$("std/os/user.bv"),
+                Import$("std/os/mem.bv"),
+                Import$("std/os/atomic.bv"),
+                Import$("std/env.bv"),
+                Import$("std/io.bv")
+            );
+        };
     };
 };
