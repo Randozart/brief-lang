@@ -197,6 +197,56 @@ fn evaluate_stage_block_inner(
     Ok(())
 }
 
+/// Execute a compile-time function ($defn or $txn) with the given arguments.
+/// 2026-07-23: Creates a fresh scope, binds parameters, executes the body,
+/// and returns the term value. For $txn, loops with pre/post condition checks.
+fn eval_compile_time_fn(
+    fn_def: &crate::plugin::FnDef,
+    args: &[Expr],
+    program: &mut Vec<TopLevel>,
+    universe: &mut TypeUniverse,
+    stage: StageKind,
+    scope: &Scope,
+    sandbox: &mut Sandbox,
+    pm: &mut Option<&mut PluginManager>,
+) -> Result<NavValue, String> {
+    match fn_def {
+        crate::plugin::FnDef::Defn(d) => {
+            // Bind parameters to argument values
+            let mut fn_scope = Scope::new();
+            for (i, (param_name, _param_type)) in d.parameters.iter().enumerate() {
+                let arg_expr = args.get(i).ok_or_else(|| {
+                    format!("{}: missing argument {} (expected {})", d.name, i, param_name)
+                })?;
+                let arg_val = eval_nav_chain(arg_expr, program, universe, stage, scope, sandbox, pm)?;
+                fn_scope.insert(param_name.clone(), arg_val);
+            }
+            // Execute body statements
+            for stmt in &d.body {
+                evaluate_stage_stmt(stmt, program, universe, stage, &mut fn_scope, sandbox, pm)?;
+            }
+            // No term support yet — return Void
+            Ok(NavValue::Void)
+        }
+        crate::plugin::FnDef::Txn(t) => {
+            // txn execution: loop with pre/post
+            // For now, just execute body once (basic support)
+            let mut fn_scope = Scope::new();
+            for (i, (param_name, _param_type)) in t.parameters.iter().enumerate() {
+                let arg_expr = args.get(i).ok_or_else(|| {
+                    format!("{}: missing argument {}", t.name, i)
+                })?;
+                let arg_val = eval_nav_chain(arg_expr, program, universe, stage, scope, sandbox, pm)?;
+                fn_scope.insert(param_name.clone(), arg_val);
+            }
+            for stmt in &t.body {
+                evaluate_stage_stmt(stmt, program, universe, stage, &mut fn_scope, sandbox, pm)?;
+            }
+            Ok(NavValue::Void)
+        }
+    }
+}
+
 /// Evaluate a $ call tree. `pm` is a mutable ref to Option for reborrowing.
 pub fn eval_nav_chain(
     expr: &Expr,
@@ -210,6 +260,17 @@ pub fn eval_nav_chain(
     match expr {
         Expr::Call(name, args, _) if name.ends_with('$') => {
             eval_nav_call(name, args, program, universe, stage, scope, sandbox, pm)
+        }
+        // 2026-07-23: Non-$ function call — look up compile-time fn_registry.
+        Expr::Call(name, args, _) => {
+            let fn_def = pm.as_ref()
+                .and_then(|p| p.fn_registry.get(name))
+                .cloned();
+            if let Some(fn_def) = fn_def {
+                return eval_compile_time_fn(&fn_def, args, program, universe,
+                    stage, scope, sandbox, pm);
+            }
+            Err(format!("undefined compile-time function '{}'", name))
         }
         Expr::Field(obj, name) if name.ends_with('$') => {
             let prev = eval_nav_chain(obj, program, universe, stage, scope, sandbox, pm)?;
@@ -356,6 +417,27 @@ fn evaluate_stage_stmt(
                 for s in body {
                     evaluate_stage_stmt(s, program, universe, stage, scope, sandbox, pm)?;
                 }
+            }
+            Ok(())
+        }
+        // 2026-07-23: Register compile-time function definitions.
+        Statement::InlineDefn(d) => {
+            if let Some(pm_inner) = pm {
+                pm_inner.fn_registry.insert(d.name.clone(), crate::plugin::FnDef::Defn(d.clone()));
+            }
+            Ok(())
+        }
+        Statement::InlineTxn(t) => {
+            if let Some(pm_inner) = pm {
+                pm_inner.fn_registry.insert(t.name.clone(), crate::plugin::FnDef::Txn(t.clone()));
+            }
+            Ok(())
+        }
+        // 2026-07-23: Term inside a stage block — for now, evaluate the
+        // expression for side effects (no return from stage blocks yet).
+        Statement::Term(opt) | Statement::TermBang(opt) => {
+            if let Some(expr) = opt {
+                eval_nav_chain(expr, program, universe, stage, scope, sandbox, pm)?;
             }
             Ok(())
         }
