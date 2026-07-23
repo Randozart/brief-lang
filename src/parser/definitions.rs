@@ -61,6 +61,13 @@ impl<'a> Parser<'a> {
                 self.parse_frgn_decl().map(TopLevel::ForeignBinding)
             }
             _ => {
+                // 2026-07-23: $defn and $txn at top level (lexed as identifiers)
+                if self.check_identifier("$defn") {
+                    return self.parse_compile_time_defn();
+                }
+                if self.check_identifier("$txn") {
+                    return self.parse_compile_time_txn();
+                }
                 let name = self.expect_identifier()?;
                 self.error_at_current(&format!("unexpected top-level item '{}'", name))
             }
@@ -1208,6 +1215,61 @@ impl<'a> Parser<'a> {
                 slots, metadata: std::collections::HashMap::new(),
                 projections: vec![], bindings: vec![], operators: vec![], constraints: vec![], span: None,
             },
+        }))
+    }
+
+    /// $defn name(params) -> Type { body } — compile-time-only definition.
+    /// 2026-07-23: Top-level item, extracted before codegen.
+    fn parse_compile_time_defn(&mut self) -> Result<TopLevel, SyntaxError> {
+        self.pos += 1; // consume $defn identifier
+        let name = self.expect_identifier()?;
+        let type_params = self.parse_type_params()?;
+        let parameters = if self.eat(&Token::LParen) {
+            let p = self.parse_parameter_list()?;
+            self.expect(Token::RParen)?;
+            p
+        } else {
+            vec![]
+        };
+        let output_type = self.parse_output_type()?;
+        let contract = self.parse_contract()?;
+        let body = self.parse_block()?;
+        let derivation = self.parse_derivation_block()?;
+        let metadata = self.parse_body_metadata()?;
+        Ok(TopLevel::CompileTimeDefn(Definition {
+            name, type_params, parameters,
+            output_type: output_type.clone(),
+            outputs: vec![],
+            contract, body, metadata,
+            derivation, modifiers: vec![], annotations: vec![], span: None,
+        }))
+    }
+
+    /// $txn name(params) [pre][post] -> Type { body } — compile-time-only tx.
+    /// 2026-07-23: Convergent loop with pre/post, top-level before codegen.
+    fn parse_compile_time_txn(&mut self) -> Result<TopLevel, SyntaxError> {
+        self.pos += 1; // consume $txn identifier
+        let name = self.expect_identifier()?;
+        let type_params = self.parse_type_params()?;
+        let parameters = if self.eat(&Token::LParen) {
+            let p = self.parse_parameter_list()?;
+            self.expect(Token::RParen)?;
+            p
+        } else {
+            vec![]
+        };
+        let output_type = self.parse_output_type()?;
+        let contract = self.parse_contract()?;
+        let body = self.parse_block()?;
+        let derivation = self.parse_derivation_block()?;
+        let metadata = self.parse_body_metadata()?;
+        Ok(TopLevel::CompileTimeTxn(Transaction {
+            name, type_params, parameters,
+            output_type: output_type.clone(),
+            outputs: vec![],
+            contract, body, metadata,
+            is_reactive: true, is_async: false,
+            derivation, modifiers: vec![], span: None,
         }))
     }
 }

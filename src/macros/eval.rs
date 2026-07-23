@@ -420,19 +420,6 @@ fn evaluate_stage_stmt(
             }
             Ok(())
         }
-        // 2026-07-23: Register compile-time function definitions.
-        Statement::InlineDefn(d) => {
-            if let Some(pm_inner) = pm {
-                pm_inner.fn_registry.insert(d.name.clone(), crate::plugin::FnDef::Defn(d.clone()));
-            }
-            Ok(())
-        }
-        Statement::InlineTxn(t) => {
-            if let Some(pm_inner) = pm {
-                pm_inner.fn_registry.insert(t.name.clone(), crate::plugin::FnDef::Txn(t.clone()));
-            }
-            Ok(())
-        }
         // 2026-07-23: Term inside a stage block — for now, evaluate the
         // expression for side effects (no return from stage blocks yet).
         Statement::Term(opt) | Statement::TermBang(opt) => {
@@ -1505,9 +1492,12 @@ fn nav_to_string(val: &NavValue) -> String {
 
 /// Extract type information from a TopLevel AST node by field path.
 fn type_info_from_toplevel(tl: &TopLevel, field: &str) -> Result<String, String> {
-    // 2026-07-23: Export delegates to its inner item.
-    if let TopLevel::Export(e) = tl {
-        return type_info_from_toplevel(&e.inner, field);
+    // 2026-07-23: Export and compile-time defns delegate to inner items.
+    match tl {
+        TopLevel::Export(e) => return type_info_from_toplevel(&e.inner, field),
+        TopLevel::CompileTimeDefn(d) => return type_info_from_toplevel(&TopLevel::Definition(d.clone()), field),
+        TopLevel::CompileTimeTxn(t) => return type_info_from_toplevel(&TopLevel::Transaction(t.clone()), field),
+        _ => {}
     }
     match (tl, field) {
         (TopLevel::Definition(d), "name") => Ok(d.name.clone()),
@@ -1874,6 +1864,18 @@ fn resolve_dollar_refs_in_toplevel(tl: &mut TopLevel, scope: &Scope) -> Result<(
         | TopLevel::RenderBlock(_) | TopLevel::Stylesheet(_)
         | TopLevel::SvgComponent { .. } | TopLevel::SyncGroup { .. }
         | TopLevel::Cfg(_) => Ok(()),
+        TopLevel::CompileTimeDefn(d) => {
+            for stmt in &mut d.body {
+                resolve_dollar_refs_in_stmt(stmt, scope)?;
+            }
+            Ok(())
+        }
+        TopLevel::CompileTimeTxn(t) => {
+            for stmt in &mut t.body {
+                resolve_dollar_refs_in_stmt(stmt, scope)?;
+            }
+            Ok(())
+        }
     }
 }
 

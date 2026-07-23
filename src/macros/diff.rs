@@ -45,6 +45,8 @@ fn item_key(tl: &TopLevel) -> String {
         Statement(_) | Stylesheet(_) | SvgComponent { .. } | SyncGroup { .. } | StageBlock(_) | RenderBlock(_) | Cfg(_) => {
             format!("{:?}", tl)
         }
+        CompileTimeDefn(d) => format!("$defn:{}", d.name),
+        CompileTimeTxn(t) => format!("$txn:{}", t.name),
     }
 }
 
@@ -80,6 +82,8 @@ pub fn item_summary(tl: &TopLevel) -> String {
         SvgComponent { name, .. } => format!("svg {}", name),
         SyncGroup { .. } => "sync-group".into(),
         Cfg(_) => "cfg".into(),
+        CompileTimeDefn(d) => format!("$defn {}", d.name),
+        CompileTimeTxn(t) => format!("$txn {}", t.name),
     }
 }
 

@@ -54,6 +54,12 @@ pub enum TopLevel {
     Statement(Box<Statement>),
     // 2026-07-15: $(Stage) compile-time metaprogramming block
     StageBlock(StageBlock),
+    /// $defn name(params) -> Type { body } — compile-time-only definition.
+    /// 2026-07-23: Top-level item, extracted before codegen.
+    CompileTimeDefn(Definition),
+    /// $txn name(params) [pre][post] -> Type { body } — compile-time-only tx.
+    /// 2026-07-23: Convergent loop with pre/post, top-level before codegen.
+    CompileTimeTxn(Transaction),
     RenderBlock(RenderBlock),
     Stylesheet(String),
     SvgComponent {

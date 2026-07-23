@@ -246,6 +246,28 @@ pub fn extract_inline_stage_blocks(
         program.remove(i);
         block_idx += 1;
     }
+
+    // 2026-07-23: Extract $defn/$txn compile-time functions.
+    // These are top-level items, registered in fn_registry and removed
+    // before codegen so they never reach the LLVM backend.
+    let mut fn_indices: Vec<usize> = Vec::new();
+    for (i, item) in program.iter().enumerate() {
+        match item {
+            TopLevel::CompileTimeDefn(d) => {
+                mgr.fn_registry.insert(d.name.clone(), crate::plugin::FnDef::Defn(d.clone()));
+                fn_indices.push(i);
+            }
+            TopLevel::CompileTimeTxn(t) => {
+                mgr.fn_registry.insert(t.name.clone(), crate::plugin::FnDef::Txn(t.clone()));
+                fn_indices.push(i);
+            }
+            _ => {}
+        }
+    }
+    // Remove in reverse order to preserve indices
+    for i in fn_indices.into_iter().rev() {
+        program.remove(i);
+    }
 }
 
 // ── ValidationPlugin (kept from Phase 7) ──────────────────────────────
