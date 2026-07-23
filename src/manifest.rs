@@ -45,6 +45,10 @@ pub struct Manifest {
     pub project: Project,
     #[serde(default)]
     pub dependencies: HashMap<String, Dependency>,
+    /// 2026-07-23: Target profiles for multi-target compilation.
+    /// Defined as `[target.<name>]` sections in brief.toml.
+    #[serde(default)]
+    pub target: HashMap<String, TargetProfile>,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -67,6 +71,128 @@ fn default_version() -> String {
 
 fn default_entry() -> String {
     "main.bv".to_string()
+}
+
+/// A compilation target profile. Defines how SysQuery$ resolves hardware
+/// queries and what overrides to apply.
+/// 2026-07-23: Used by multi-target compilation (--target / --all-targets).
+#[derive(Debug, Clone)]
+pub struct TargetProfile {
+    /// How to resolve SysQuery$ queries:
+    ///   "host"       — query real hardware (default)
+    ///   "inline"     — use key-value overrides from this struct
+    ///   "file://..." — read overrides from a JSON/YAML/TOML file
+    pub introspection: String,
+    /// 2026-07-23: SysQuery$ key → value overrides.
+    /// Applied before real host queries. Keys use dot notation
+    /// (e.g., "cpu.cores", "cpu.arch").
+    pub overrides: HashMap<String, OverrideValue>,
+}
+
+fn default_introspection() -> String {
+    "host".into()
+}
+
+impl TargetProfile {
+    /// Build a HashMap of SysQuery$ overrides with string values.
+    pub fn sysquery_overrides(&self) -> HashMap<String, String> {
+        self.overrides.iter().map(|(k, v)| (k.clone(), v.as_string())).collect()
+    }
+}
+
+impl<'de> Deserialize<'de> for TargetProfile {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where D: serde::Deserializer<'de> {
+        let raw: HashMap<String, OverrideValue> = HashMap::deserialize(deserializer)?;
+        let introspection = raw.get("introspection")
+            .map(|v| match v {
+                OverrideValue::String(s) => s.clone(),
+                _ => "host".to_string(),
+            })
+            .unwrap_or_else(default_introspection);
+        let overrides: HashMap<String, OverrideValue> = raw.into_iter()
+            .filter(|(k, _)| k != "introspection")
+            .collect();
+        Ok(TargetProfile { introspection, overrides })
+    }
+}
+
+impl Serialize for TargetProfile {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        use serde::ser::SerializeMap;
+        let mut map = serializer.serialize_map(Some(self.overrides.len() + 1))?;
+        map.serialize_entry("introspection", &self.introspection)?;
+        for (k, v) in &self.overrides {
+            map.serialize_entry(k, v)?;
+        }
+        map.end()
+    }
+}
+
+/// A value for a SysQuery$ override. Can be a string, integer, float, or bool.
+/// 2026-07-23: Used by TargetProfile overrides in multi-target compilation.
+#[derive(Debug, Clone)]
+pub enum OverrideValue {
+    String(String),
+    Int(i64),
+    Float(f64),
+    Bool(bool),
+}
+
+impl OverrideValue {
+    pub fn as_string(&self) -> String {
+        match self {
+            OverrideValue::String(s) => s.clone(),
+            OverrideValue::Int(n) => n.to_string(),
+            OverrideValue::Float(f) => f.to_string(),
+            OverrideValue::Bool(b) => b.to_string(),
+        }
+    }
+}
+
+// Custom serde for OverrideValue — handles TOML scalar types
+impl<'de> Deserialize<'de> for OverrideValue {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where D: serde::Deserializer<'de> {
+        use serde::de;
+        struct OverrideVisitor;
+        impl<'de> de::Visitor<'de> for OverrideVisitor {
+            type Value = OverrideValue;
+            fn expecting(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+                f.write_str("a string, integer, float, or boolean")
+            }
+            fn visit_str<E: de::Error>(self, v: &str) -> Result<OverrideValue, E> {
+                Ok(OverrideValue::String(v.to_string()))
+            }
+            fn visit_string<E: de::Error>(self, v: String) -> Result<OverrideValue, E> {
+                Ok(OverrideValue::String(v))
+            }
+            fn visit_i64<E: de::Error>(self, v: i64) -> Result<OverrideValue, E> {
+                Ok(OverrideValue::Int(v))
+            }
+            fn visit_u64<E: de::Error>(self, v: u64) -> Result<OverrideValue, E> {
+                Ok(OverrideValue::Int(v as i64))
+            }
+            fn visit_f64<E: de::Error>(self, v: f64) -> Result<OverrideValue, E> {
+                Ok(OverrideValue::Float(v))
+            }
+            fn visit_bool<E: de::Error>(self, v: bool) -> Result<OverrideValue, E> {
+                Ok(OverrideValue::Bool(v))
+            }
+        }
+        deserializer.deserialize_any(OverrideVisitor)
+    }
+}
+
+impl Serialize for OverrideValue {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        match self {
+            OverrideValue::String(s) => serializer.serialize_str(s),
+            OverrideValue::Int(n) => serializer.serialize_i64(*n),
+            OverrideValue::Float(f) => serializer.serialize_f64(*f),
+            OverrideValue::Bool(b) => serializer.serialize_bool(*b),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -195,6 +321,7 @@ pub fn create_default_manifest(path: &Path) -> Result<Manifest, ManifestError> {
             entry: default_entry(),
         },
         dependencies: HashMap::new(),
+        target: HashMap::new(),
     };
     manifest.save(path)?;
     Ok(manifest)

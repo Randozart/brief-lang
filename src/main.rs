@@ -5,6 +5,7 @@
 
 mod compile;
 
+use std::collections::HashMap;
 use std::env;
 use std::path::Path;
 
@@ -74,6 +75,7 @@ fn print_usage(program: &str) {
     eprintln!("  {} build <file.bv> --dump-vfs               Print virtual filesystem contents after build", name);
     eprintln!("  {} build <file.bv> --dump-traces            Print macro expansion traces after build", name);
     eprintln!("  {} build <file.bv> --diff                   Show macro changes (dry-run, no output)", name);
+    eprintln!("  {} build <file.bv> --target <name>           Build for a specific target profile from brief.toml", name);
     eprintln!("  {} build <file.bv> --update-lockfile        Regenerate macro-lock.toml from plugin files", name);
     eprintln!("  {} audit [file.bv]                Scan for $ intrinsic usage and capability requirements", name);
     eprintln!("  {} check <file.bv>               Type-check only", name);
@@ -124,6 +126,7 @@ fn parse_build_args(args: &[String]) -> Result<compile::BuildOptions, String> {
     let mut update_lockfile = false;
     let mut dump_traces = false;
     let mut diff_mode = false;
+    let mut target_name: Option<String> = None;
 
     let mut i = 0;
     while i < args.len() {
@@ -216,6 +219,10 @@ fn parse_build_args(args: &[String]) -> Result<compile::BuildOptions, String> {
         } else if arg == "--diff" {
             diff_mode = true;
             i += 1;
+        } else if arg == "--target" {
+            let val = args.get(i + 1).ok_or("--target requires a target name argument")?;
+            target_name = Some(val.clone());
+            i += 2;
         } else if arg == "--macro-budget" {
             let val = args.get(i + 1).ok_or("--macro-budget requires a number argument")?;
             macro_budget = val.parse()
@@ -282,6 +289,8 @@ fn parse_build_args(args: &[String]) -> Result<compile::BuildOptions, String> {
         update_lockfile,
         dump_traces,
         diff_mode,
+        sysquery_overrides: HashMap::new(),
+        target: target_name,
     })
 }
 
@@ -289,7 +298,74 @@ fn run_build(args: &[String]) -> Result<(), String> {
     let opts = parse_build_args(args)?;
     let source = std::fs::read_to_string(&opts.file_path)
         .map_err(|e| format!("cannot read '{}': {}", opts.file_path, e))?;
-    compile::compile_source(&opts.file_path, &source, &opts)
+
+    // 2026-07-23: Multi-target compilation — load brief.toml and apply
+    // target profiles. If --target <name> is given, compile for that target.
+    // If no target specified, compile once (backward compatible).
+    let project_dir = std::path::Path::new(&opts.file_path)
+        .parent()
+        .map(|p| p.to_path_buf())
+        .unwrap_or_else(|| std::env::current_dir().unwrap_or_default());
+
+    // Try to load manifest for target profiles
+    let (manifest, manifest_path) = match brief_compiler::manifest::find_manifest(&project_dir) {
+        Some(path) => {
+            match brief_compiler::manifest::Manifest::load(&path) {
+                Ok(m) => (Some(m), Some(path)),
+                Err(_) => (None, None),
+            }
+        }
+        None => (None, None),
+    };
+
+    // Determine which target profiles to compile for
+    let targets_to_build: Vec<(String, HashMap<String, String>)> = if let Some(ref target_name) = opts.target {
+        // --target <name>: build for specific target
+        let manifest = manifest.as_ref().ok_or_else(|| {
+            format!("--target '{}' requires a brief.toml with target profiles", target_name)
+        })?;
+        let profile = manifest.target.get(target_name).ok_or_else(|| {
+            format!("target '{}' not found in brief.toml. Available targets: {}",
+                target_name, manifest.target.keys().cloned().collect::<Vec<_>>().join(", "))
+        })?;
+        vec![(target_name.clone(), profile.sysquery_overrides())]
+    } else if let Some(ref manifest) = manifest {
+        if !manifest.target.is_empty() {
+            // No --target specified, but brief.toml has targets: build all
+            manifest.target.iter()
+                .map(|(name, profile)| (name.clone(), profile.sysquery_overrides()))
+                .collect()
+        } else {
+            // No target profiles: single build
+            vec![("default".to_string(), HashMap::new())]
+        }
+    } else {
+        // No brief.toml: single build
+        vec![("default".to_string(), HashMap::new())]
+    };
+
+    // Run compilation for each target
+    for (target_name, sysquery_overrides) in &targets_to_build {
+        if targets_to_build.len() > 1 {
+            println!("Building for target: {}", target_name);
+        }
+
+        let mut target_opts = opts.clone();
+        target_opts.sysquery_overrides = sysquery_overrides.clone();
+
+        // Set up per-target output directory
+        let original_out = target_opts.out_dir.clone();
+        if *target_name != "default" {
+            let target_out = original_out.clone()
+                .map(|d| format!("{}/{}", d, target_name))
+                .unwrap_or_else(|| format!("bin/{}", target_name));
+            target_opts.out_dir = Some(target_out);
+        }
+
+        compile::compile_source(&opts.file_path, &source, &target_opts)?;
+    }
+
+    Ok(())
 }
 
 fn run_check(args: &[String]) -> Result<(), String> {

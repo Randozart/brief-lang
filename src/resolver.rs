@@ -230,6 +230,7 @@ mod tests {
                     path: PathBuf::from("lib/auth.bv"),
                 }),
             )]),
+            target: HashMap::new(),
         };
         manifest.save(&manifest_path).unwrap();
 
@@ -255,7 +256,8 @@ mod tests {
         let manifest_path = tmp.path().join("brief.toml");
         let manifest = Manifest {
             project: crate::manifest::Project::default(),
-            dependencies: HashMap::new(),
+            dependencies: std::collections::HashMap::new(),
+            target: std::collections::HashMap::new(),
         };
         manifest.save(&manifest_path).unwrap();
 

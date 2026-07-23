@@ -12,6 +12,7 @@ use std::collections::{BTreeSet, HashMap};
 use crate::ast::{Expr, Statement, TopLevel, PropertyValue, ImportKind, Type, BinaryOpKind};
 use crate::ast::top::*;
 use crate::ast::StageKind;
+use std::fmt;
 use crate::type_universe::TypeUniverse;
 use crate::plugin::PluginManager;
 use super::selection::{
@@ -46,6 +47,10 @@ pub struct Sandbox {
     pub budget: u64,
     /// Remaining instructions this macro can execute
     pub remaining: u64,
+    /// 2026-07-23: Overrides for SysQuery$ results. When set, SysQuery$
+    /// returns the override value instead of querying the real host.
+    /// Used by multi-target compilation to mock hardware profiles.
+    pub sysquery_overrides: HashMap<String, String>,
 }
 
 impl Sandbox {
@@ -55,6 +60,7 @@ impl Sandbox {
             allow_read: true, allow_write: true, allow_run: true,
             allow_sys_query: true, allow_net: true,
             budget: 0, remaining: 0,
+            sysquery_overrides: HashMap::new(),
         }
     }
 
@@ -1025,6 +1031,13 @@ fn eval_nav_call(
         "SysQuery$" => {
             sandbox.check(Capability::SysQuery, "SysQuery$")?;
             let query = expect_str_arg(args, 0, "SysQuery$", scope)?;
+            // 2026-07-23: Check target profile overrides first (multi-target).
+            if let Some(override_val) = sandbox.sysquery_overrides.get(&query) {
+                if let Ok(n) = override_val.parse::<i64>() {
+                    return Ok(NavValue::Int(n));
+                }
+                return Ok(NavValue::Str(override_val.clone()));
+            }
             match query.as_str() {
                 "cpu.cores" => {
                     let cores = std::thread::available_parallelism()

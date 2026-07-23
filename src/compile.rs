@@ -10,6 +10,7 @@
 //             from config/targets.toml. System plugin discovery from
 //             plugins/{front,mid,post,back}/.
 
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
@@ -76,6 +77,7 @@ impl std::str::FromStr for BeastStage {
 }
 
 /// Options parsed from the `brief-compiler build` CLI flags.
+#[derive(Clone)]
 pub struct BuildOptions {
     pub config_dir: Option<String>,
     pub file_path: String,
@@ -136,6 +138,11 @@ pub struct BuildOptions {
     /// 2026-07-23: Diff mode — show changes macros make to the AST without
     /// writing output. Acts as a dry-run: shows added/removed/modified items.
     pub diff_mode: bool,
+    /// 2026-07-23: Overrides for SysQuery$ results per target profile.
+    /// Used by multi-target compilation. Empty = query real host.
+    pub sysquery_overrides: HashMap<String, String>,
+    /// 2026-07-23: Target profile name (--target). None = default/single build.
+    pub target: Option<String>,
 }
 
 /// Compile a Brief source file: produce an executable binary (or `.ll` with `--llvm`).
@@ -328,6 +335,12 @@ pub fn compile_source(file_path: &str, source: &str, opts: &BuildOptions) -> Res
 
     // 2026-07-15: SPIR-V writes inside codegen (binary format), skip outer write
     if opts.backend != BackendKind::Spirv {
+        if let Some(parent) = std::path::Path::new(&out_path).parent() {
+            if !parent.as_os_str().is_empty() {
+                std::fs::create_dir_all(parent)
+                    .map_err(|e| format!("cannot create output dir '{}': {}", parent.display(), e))?;
+            }
+        }
         std::fs::write(&out_path, &output)
             .map_err(|e| format!("cannot write '{}': {}", out_path, e))?;
         println!("wrote {}", out_path);
@@ -421,6 +434,8 @@ pub fn check_source(file_path: &str, source: &str) -> Result<(), String> {
         update_lockfile: false,
         dump_traces: false,
         diff_mode: false,
+        sysquery_overrides: HashMap::new(),
+        target: None,
     };
     let (_items, _universe) = parse_and_check(file_path, source, &default_opts)?;
     println!("OK");
@@ -468,6 +483,7 @@ fn build_plugin_manager(file_path: &str, opts: &BuildOptions) -> PluginManager {
         allow_net: opts.allow_net,
         budget: opts.macro_budget,
         remaining: opts.macro_budget,
+        sysquery_overrides: opts.sysquery_overrides.clone(),
     };
     pm = pm.with_sandbox(sandbox);
 
