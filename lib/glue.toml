@@ -16,9 +16,10 @@
 
 [python]
 types_module = "glue/python/types.bv"
-extension = "py"
+extension = "so"
 bridge_kind = "native_module"
 calling_convention = "c_abi"
+module_init = true
 
 [python.protocols]
 "#String" = { native = "str", c_abi = "ctypes.c_void_p" }

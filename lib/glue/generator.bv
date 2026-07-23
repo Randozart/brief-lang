@@ -77,6 +77,13 @@ $defn probe_struct_2fields(name: String, f1: String, f1t: String,
 
 // Example:
 // $(Normalized @ highest) {
+//     InjectTypeLayout$("PyMethodDef", "32",
+//         "name:Ptr:0,meth:Ptr:8,flags:LongLong:16,doc:Ptr:24");
+//     InjectTypeLayout$("PyModuleDef", "104",
+//         "m_base:PyModuleDef_Base:0,m_name:Ptr:32,m_doc:Ptr:40,"
+//         + "m_size:LongLong:48,m_methods:Ptr:56,m_slots:Ptr:64,"
+//         + "m_traverse:Ptr:72,m_clear:Ptr:80,m_free:Ptr:88,"
+//         + "m_module:Ptr:96");
 //     let code = generate_bridge(Tag$("export"), "bridge");
 //     FileWrite$("glue-out/bridge.bv", code, true);
 // };

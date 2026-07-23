@@ -28,6 +28,10 @@ pub struct GlueTarget {
     pub bridge_kind: String,
     /// Calling convention: "c_abi", "lto", etc.
     pub calling_convention: String,
+    /// 2026-07-23: Emit native C extension module init metadata
+    /// (PyMethodDef/PyModuleDef for Python, NAPI for Node, etc.).
+    /// When true, the LLVM backend emits module init at codegen time.
+    pub module_init: bool,
     /// Protocol category → native/C ABI type mapping.
     /// Keys like "#String", "#Int", "#Float" — protocol categories only,
     /// never Brief-internal type names.
@@ -69,6 +73,8 @@ struct LanguageEntry {
     extension: String,
     bridge_kind: String,
     calling_convention: String,
+    #[serde(default)]
+    module_init: bool,
     #[serde(default)]
     protocols: HashMap<String, ProtocolEntry>,
     #[serde(default)]
@@ -123,6 +129,7 @@ pub fn load_glue_config(path: Option<&Path>) -> Result<HashMap<String, GlueTarge
             extension: entry.extension,
             bridge_kind: entry.bridge_kind,
             calling_convention: entry.calling_convention,
+            module_init: entry.module_init,
             protocols: entry.protocols,
             templates: entry.templates,
         });

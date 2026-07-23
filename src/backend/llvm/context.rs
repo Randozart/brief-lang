@@ -59,6 +59,8 @@ pub struct CompilerContext {
     pub dump_layout: bool,
     pub library_mode: bool,
     pub is_shared_lib: bool,
+    /// 2026-07-23: Emit C extension module init metadata (PyInit_*, etc.)
+    pub module_init: bool,
 
     // State layout (built during generate(), then read-only)
     pub field_index_map: HashMap<String, usize>,
@@ -183,6 +185,7 @@ impl CompilerContext {
             dump_layout: false,
             library_mode: false,
             is_shared_lib: false,
+            module_init: false,
             field_index_map: HashMap::new(),
             field_types: Vec::new(),
             field_brief_types: Vec::new(),
