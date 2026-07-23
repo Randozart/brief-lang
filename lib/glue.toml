@@ -107,11 +107,11 @@ bridge_kind = "extern_c_crate"
 calling_convention = "lto"
 
 [rust.protocols]
-"#String" = { native = "*mut u8", c_abi = "i64" }
+"#String" = { native = "*mut u8", c_abi = "*mut u8" }
 "#Int" = { native = "i64", c_abi = "i64" }
-"#Float" = { native = "f64", c_abi = "double" }
-"#Bool" = { native = "i32", c_abi = "i32" }
-"#Data" = { native = "*mut u8", c_abi = "i64" }
+"#Float" = { native = "f64", c_abi = "f64" }
+"#Bool" = { native = "bool", c_abi = "bool" }
+"#Data" = { native = "*mut u8", c_abi = "*mut u8" }
 "#Char" = { native = "i32", c_abi = "i32" }
 
 [rust.templates]
