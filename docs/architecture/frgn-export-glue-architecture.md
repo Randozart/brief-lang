@@ -23,6 +23,10 @@ GLUE handles **compile-time bridge generation** — it's what runs when you
 invoke `brief export`. Metropipe handles **runtime shared memory** — it's
 what runs when two processes communicate through a `MetropolitanChannel`.
 
+**Protocol types** drive the boundary between languages. See
+`docs/architecture/protocol-types.md` for the full explanation of hashwords,
+CastTo/CastFrom, and protocol path BFS.
+
 The backend decides *how* to implement each frgn or export. `.c` sources get
 compiled and LTO-inlined by LLVM. `.py` sources cannot be inlined — GLUE
 mediates through protocol negotiation and zero-copy melds. The frontend

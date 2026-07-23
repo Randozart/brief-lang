@@ -1,123 +1,244 @@
-# Foreign Function Interface (FFI)
+# Metropolitan FFI — Foreign Function Interface
 
-FFI allows Brief to call functions in other languages (C, Rust, Python, etc.).
+Brief's **Metropolitan FFI** is the umbrella architecture for all cross-language
+interoperability. It has two mechanisms:
 
-## 1. FFI Signatures
+| Mechanism | When | What it does |
+|-----------|------|-------------|
+| **GLUE** | Compile time | Exports Brief functions as native wrappers (Rust crate, Python module, Node module) |
+| **Metropipe** | Runtime | Shared memory IPC between running processes |
 
-Declare foreign functions with `frgn`:
+Both use the same `frgn` declaration syntax for importing foreign functions,
+and the same `export defn` syntax for exporting Brief functions.
+
+---
+
+## 1. `frgn` — Importing Foreign Functions
+
+Declare functions from C, Rust, Python, or any other language:
 
 ```brief
-// C function: double sqrt(double x);
-frgn sqrt(x: Float) -> Result<Float, MathError>;
-
-// Rust function: fn log_message(msg: &str);
-frgn! log_message(msg: String);
-
-// Python function: def read_file(path: str) -> str;
-frgn read_file(path: String) -> Result<String, IOError>;
+// C function: int64_t getenv_brief(const char* key);
+// Brief calls it "frgn__getenv_brief"
+frgn __getenv_brief(key: String) -> String as frgn__getenv_brief
+  from "lib/runtime/brief_rt.c" fallback "";
 ```
 
-**FFI Keywords:**
-- `frgn` - Returns `Result<T, E>` (must handle error)
-- `frgn!` - Returns `void` (fire-and-forget)
-- `syscall` - Kernel call returning `Result<Int, E>`
-- `syscall!` - Kernel call returning `void`
+**The Syntax:**
 
-Functions without `from` resolve through `import "link/..."` targets:
-
-```brief
-import "link/brief_rt.c";
-
-frgn __print_int(n: Int) -> Result<Bool, Error>;
+```
+frgn <C_symbol>(<params>) [-> <ret>] [as <brief_name>] from <source> [fallback <expr>];
 ```
 
-## 2. Calling Foreign Functions
+| Part | Meaning |
+|------|---------|
+| `frgn` | Keyword — this is an import declaration |
+| `__getenv_brief` | The **C/foreign symbol name** — what the linker sees |
+| `(key: String)` | Parameters with Brief types |
+| `-> String` | Return type (optional, defaults to void) |
+| `as frgn__getenv_brief` | Brief-side name — what Brief code uses at call sites |
+| `from "..."` | **Required** — provenance of the foreign module (path or registry name) |
+| `fallback ""` | Value to use if the foreign function cannot be called |
+
+### Calling Imported Functions
+
+Imported functions resolve through the GLUE pipeline and produce either inline
+calls (C/Rust sources) or bridge calls (Python/JavaScript):
 
 ```brief
-import "std/math";
+import "std/env.bv";
 
-txn calculate() [true][true] {
-    let result = math.sqrt(16.0);
-    
-    // Handle Result type
-    [result.is_ok()] {
-        let value = result.value;
-        println("Square root: " + String(value));
-    };
-    [result.is_err()] {
-        println("Error: " + String(result.error));
-    };
-};
-```
-
-## 3. Error Handling
-
-FFI calls return `Result<T, E>`. You must handle both Ok and Err paths:
-
-```brief
-frgn read_file(path: String) -> Result<String, IOError>;
-
-txn load_config() [true][true] {
-    let content = read_file("config.toml");
-    
-    [content.is_ok()] {
-        &config_data = content.value;
-    };
-    [content.is_err()] {
-        println("Failed to load config: " + String(content.error));
+txn print_env() [true][true] {
+    let home = frgn__getenv_brief("HOME");
+    // Result type handling...
+    [home.is_ok()] {
+        frgn__print_str(home.value);
     };
 };
 ```
 
-Use `frgn!` for fire-and-forget calls where you don't need the return value:
+### Common Patterns
 
 ```brief
-frgn! log_message(msg: String);
+// C symbol has no underscore prefix — use `as` for clear naming
+frgn XXH64(data: Int, len: Int, seed: Int) -> Int as frgn__xxh64
+  from "lib/xxhash.c" fallback 0;
+
+// Void return — no `->` needed
+frgn log_message(msg: String) from "lib/runtime/brief_rt.c" fallback;
+
+// Result type with custom error
+frgn read_file(path: String) -> Result<String, IOError>
+  from "lib/runtime/brief_rt.c" fallback Err(IOError { message: "" });
 ```
 
-## 4. Type Mapping
+### Naming Convention
 
-| Brief type | C type | Rust type | Python type |
-|------------|--------|-----------|-------------|
-| `Int` | `int64_t` | `i64` | `int` |
-| `Float` | `double` | `f64` | `float` |
-| `Bool` | `bool` | `bool` | `bool` |
-| `String` | `char*` | `String` | `str` |
-| `Char` | `int32_t` | `char` | `str` (len 1) |
-| `Data` | `uint8_t*` | `Vec<u8>` | `bytes` |
-| `Ptr<T>` | `T*` | `*const T` | `ctypes` |
-
-## 5. Custom Link Dependencies
-
-Link external C/Rust/Zig libraries via `import "link/"`:
+Raw FFI declarations use `frgn__` prefix in the Brief name:
 
 ```brief
-// Link C math library
-import "link/libm.so.6";
+frgn __getenv_brief(key: String) -> String as frgn__getenv_brief ...
+```
 
-frgn sqrt(x: Float) -> Result<Float, MathError>;
+The `frgn__` prefix is a convention (not enforced by the compiler) that makes
+FFI boundaries visually distinct from pure Brief function calls. When the C
+symbol already starts with `frgn` or doesn't need renaming, the `as` clause
+can be omitted:
 
-txn calculate() [true][true] {
-    let result = sqrt(16.0);
-    // Result handling...
+```brief
+frgn frgn__to_upper(s: String) -> String from "lib/runtime/brief_rt.c" fallback "";
+```
+
+### `from` Sources
+
+| Source form | Example | What happens |
+|-------------|---------|-------------|
+| `from "path/to/file.c"` | `from "lib/runtime/brief_rt.c"` | Compiles C source and links it |
+| `from "<registry_name>"` | `from "<xxhash.c>"` | Resolves via TypeUniverse registry |
+| `from "link/library.so"` | `from "link/libm.so.6"` | Links to system library |
+
+---
+
+## 2. `export defn` — Exporting Brief Functions
+
+Expose a Brief function so foreign code can call it:
+
+```brief
+export defn brief_pp_type(n: String) -> String {
+    term pp_type(n);
 };
 ```
 
-The compiler:
-1. Searches for the linked file in `lib/` and project paths
-2. Compiles C/Rust/Zig sources to LLVM bitcode via `compile_to_bitcode()`
-3. Links with `llvm-link` and optimizes with `opt -O2`
-4. Inlines foreign function calls when contracts prove safety
+The `export` keyword creates a `dso_local` symbol that's visible to the linker.
+At LTO time, LLVM can inline across the boundary — zero-cost calls.
 
-## 6. Metropolitan FFI (Zero-Copy)
+### Exporting for Specific Languages
 
-For high-performance shared memory and inter-process communication:
+Use the `brief export` CLI to generate language-specific wrappers:
 
-```brief
-import "std/metropolitan/shm";
+```bash
+# Generate a compilable Rust crate with safe wrappers
+brief export my_bridge.bv rust --out ./rust-crate
 
-// Open a shared memory segment
-let segment = shm::open("data_buffer", 1024, [true]);
+# Generate a ctypes Python module
+brief export my_bridge.bv python --out ./py-module
+
+# Generate an ffi-napi Node.js module
+brief export my_bridge.bv node --out ./node-module
 ```
 
-See `METROPOLITAN_FFI.md` for the complete reference.
+Adding a new language = adding a `[lang]` section to `lib/glue.toml` — zero
+Rust changes.
+
+### How Export Works
+
+The `brief export` command:
+
+1. Compiles the bridge `.bv` file through the **full LLVM backend** (real
+   function bodies, no `ret i64 0` stubs)
+2. Reads the language target's configuration from `lib/glue.toml`
+3. For each exported function, generates:
+   - A **safe wrapper** using the language's native types (from `protocols`)
+   - An **FFI declaration** using the C ABI types (from `c_abi` fields)
+   - **Conversion expressions** when native and C ABI types differ
+4. Outputs a complete crate/module with the bridge `.so`
+
+The generated wrappers handle:
+- State allocation and initialization (`init_state()`)
+- Type conversion between native and C ABI representations
+- Proper `state` pointer passing to every exported function
+
+---
+
+## 3. Protocol-Driven Type Mapping
+
+The type mapping between Brief types and foreign types is driven by
+**protocol categories** (`#String`, `#Int`, `#Float`, `#Bits`), not by
+Brief-type-specific rules.
+
+**In `lib/glue.toml`:**
+```toml
+[rust.protocols]
+"#String" = { native = "str", c_abi = "i64" }
+"#Int" = { native = "i64", c_abi = "i64" }
+"#Float" = { native = "f64", c_abi = "double" }
+```
+
+**Resolution flow:**
+1. A Brief `String` parameter has `CastTo(#String)` in the type universe
+2. The protocol is `#String` → look up in TOML → native = `"str"`, c_abi = `"i64"`
+3. The wrapper uses `str` as the parameter type, the FFI uses `i64`
+4. The conversion is: `n as i64` (pointer → integer)
+
+For **Rust** (calling convention `"lto"`), the generated wrapper:
+
+```rust
+pub fn brief_pp_type(n: *mut u8) -> *mut u8 {
+    unsafe { ffi::brief_pp_type(STATE, n as i64) as *mut u8 }
+}
+```
+
+The `protocols` section replaces the old `type_map` + `c_type_map` + `conversions`
+system — only protocol categories appear in the TOML.
+
+---
+
+## 4. Protocol Path Optimization
+
+When a frgn call crosses a language boundary, the BFS in `find_cast_path()`
+computes the cheapest transform chain. If both sides speak the same protocol
+with compatible layouts, the boundary compiles to **zero instructions**:
+
+```
+Brief String (SSO {i64,i64}) → #String → Rust &str ({ptr, len})
+  Step 1: CastTo(#String) — identity (both layouts represent UTF-8)
+  Step 2: CastFrom(#String) — identity (both are {ptr, len} UTF-8)
+  Total cost: 0 → LLVM eliminates the boundary at LTO time
+```
+
+If the types differ in layout, the bridge emits the necessary transforms:
+
+| Transform | When | IR Emitted |
+|-----------|------|-----------|
+| **Identity** | Same layout | Nothing |
+| **Bitcast** | Same byte width | `%r = bitcast T1 %v to T2` |
+| **MeldShuffle** | Field reordering | `extractvalue`/`insertvalue` |
+| **ProtocolTransform** | Real conversion needed | `call @_CastTo_#Cat(T %v)` |
+
+---
+
+## 5. Metropipe (Runtime Shared Memory)
+
+For inter-process communication at runtime, use **Metropipe**:
+
+```brief
+import "std/metro_bridge.bv";
+
+txn exchange_data() [true][true] {
+    let ch = frgn__metro_create_channel("my_channel", 1024, 1024);
+    frgn__mmap_write(addr, 0, data, length);
+    frgn__atomic_store_u32(addr, 0, 1);  // signal readiness
+};
+```
+
+Metropipe provides:
+- Shared memory segments with atomic operations
+- Signal triggers for data availability notification
+- Consensus protocol for multi-process coordination
+
+---
+
+## 6. Summary
+
+| Task | Syntax | Tool |
+|------|--------|------|
+| Call a C function | `frgn ... as ... from "file.c" ...` | Compiler |
+| Call a Python function | `frgn ... as ... from "file.py" ...` | GLUE bridge |
+| Export to Rust | `export defn ...` + `brief export ... rust` | GLUE |
+| Export to Python | `export defn ...` + `brief export ... python` | GLUE |
+| Process IPC | `import "std/metro_bridge.bv"` | Metropipe |
+
+The `frgn` and `export` syntax gives you import/export for any language.
+The protocol system ensures type safety at the boundary. The GLUE bridge
+handles code generation for the wrapper. Metropipe handles runtime IPC.
+All under the **Metropolitan FFI** umbrella.

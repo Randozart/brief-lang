@@ -160,3 +160,34 @@ type HashMap<K: #String, V> {
 (`CastTo(#String)`, `CastFrom(#String)`, `Extract(#Char)`, `InsertAt(#Char)`,
 `Concat(#String)`, `:> Size`). At instantiation, the concrete type is
 verified against the protocol.
+
+## 8. Protocol Participation and GLUE Bridge
+
+Types that declare `op CastTo(#Category)` gain automatic FFI support through
+the GLUE bridge. When a function with a custom type parameter is exported:
+
+1. The protocol BFS (`find_cast_path`) discovers the `Cast.#Category` property
+2. The protocol category is looked up in `lib/glue.toml`
+3. The language-appropriate native type and C ABI type are selected
+4. The `CastTo` function generates the conversion code at the boundary
+
+```brief
+// A custom type that speaks the #Int protocol
+type MyFixedInt {
+    data: Bits<32>;
+    op CastTo(#Int);
+    op CastFrom(#Int);
+};
+
+// Exported to Rust: the bridge automatically maps #Int → i64
+export defn process(n: MyFixedInt) -> MyFixedInt {
+    ...
+};
+```
+
+No `lib/glue.toml` changes needed — the protocol system discovers
+`CastTo(#Int)` from the type declaration. The TOML only needs to know
+about protocol categories, not every custom type that implements them.
+
+See `docs/architecture/protocol-types.md` for the full architecture doc.
+
