@@ -129,8 +129,39 @@ type Scope = HashMap<String, NavValue>;
 
 // ── Main Entry Points ──────────────────────────────────────────────────
 
-/// Evaluate a $(Stage) block body.
+/// Evaluate a $(Stage) block body, with transactional rollback on failure.
+/// 2026-07-23: Snapshot program + VFS + tainted_indices before execution and
+/// restore on error, preventing partial mutations from corrupting the pipeline.
 pub fn evaluate_stage_block(
+    body: &[Statement],
+    program: &mut Vec<TopLevel>,
+    universe: &mut TypeUniverse,
+    stage: StageKind,
+    mut pm: &mut Option<&mut PluginManager>,
+) -> Result<(), String> {
+    let saved_program = program.clone();
+    let saved_vfs = pm.as_ref().map(|p| p.vfs.clone());
+    let saved_tainted = pm.as_ref().map(|p| p.tainted_indices.clone());
+
+    let result = evaluate_stage_block_inner(body, program, universe, stage, pm);
+
+    if result.is_err() {
+        *program = saved_program;
+        if let Some(pm_inner) = pm {
+            if let Some(vfs) = saved_vfs {
+                pm_inner.vfs = vfs;
+            }
+            if let Some(tainted) = saved_tainted {
+                pm_inner.tainted_indices = tainted;
+            }
+        }
+    }
+    result
+}
+
+/// Inner evaluation without transactional wrapping.
+/// 2026-07-23: Extracted for transaction boundary in evaluate_stage_block.
+fn evaluate_stage_block_inner(
     body: &[Statement],
     program: &mut Vec<TopLevel>,
     universe: &mut TypeUniverse,
@@ -2553,5 +2584,106 @@ mod tests {
                 other => panic!("expected Selection, got {:?}", other),
             }
         }
+    }
+
+    #[test]
+    fn test_transactional_rollback_program_on_error() {
+        let mut program = vec![
+            TopLevel::Import(Import::literal("std/a.bv", vec![])),
+        ];
+        let mut universe = TypeUniverse::new();
+        let mut pm = PluginManager::new();
+        let body = vec![
+            Statement::Expression(
+                Expr::Call("Insert$".into(), vec![
+                    Expr::Call("After$".into(), vec![
+                        Expr::Call("All$".into(), vec![], None),
+                    ], None),
+                    Expr::Call("Import$".into(), vec![Expr::Quoted("std/new.bv".into())], None),
+                ], None)
+            ),
+            Statement::Expression(
+                Expr::Call("Before$".into(), vec![Expr::Decimal(42)], None),
+            ),
+        ];
+        let result = evaluate_stage_block(&body, &mut program, &mut universe,
+            StageKind::Parsed, &mut Some(&mut pm));
+        assert!(result.is_err(), "stage block must fail");
+        assert_eq!(program.len(), 1, "program must be rolled back to original");
+        assert!(pm.tainted_indices.is_empty(),
+            "tainted set must be rolled back on error");
+        match &program[0] {
+            TopLevel::Import(imp) => assert_eq!(imp.path(), "std/a.bv"),
+            other => panic!("expected Import, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_transactional_rollback_vfs_on_error() {
+        let mut program = vec![
+            TopLevel::Import(Import::literal("std/a.bv", vec![])),
+        ];
+        let mut universe = TypeUniverse::new();
+        let mut pm = PluginManager::new();
+        let body = vec![
+            Statement::Expression(
+                Expr::Call("FileWrite$".into(), vec![
+                    Expr::Quoted("virtual://test.txt".into()),
+                    Expr::Quoted("hello".into()),
+                ], None)
+            ),
+            Statement::Expression(
+                Expr::Call("Before$".into(), vec![Expr::Decimal(42)], None),
+            ),
+        ];
+        let result = evaluate_stage_block(&body, &mut program, &mut universe,
+            StageKind::Parsed, &mut Some(&mut pm));
+        assert!(result.is_err(), "stage block must fail");
+        assert!(pm.vfs.is_empty(), "VFS must be rolled back on error");
+    }
+
+    #[test]
+    fn test_transactional_commits_on_success() {
+        let mut program = vec![
+            TopLevel::Import(Import::literal("std/a.bv", vec![])),
+        ];
+        let mut universe = TypeUniverse::new();
+        let mut pm = PluginManager::new();
+        let body = vec![
+            Statement::Expression(
+                Expr::Call("Insert$".into(), vec![
+                    Expr::Call("After$".into(), vec![
+                        Expr::Call("All$".into(), vec![], None),
+                    ], None),
+                    Expr::Call("Import$".into(), vec![Expr::Quoted("std/new.bv".into())], None),
+                ], None)
+            ),
+        ];
+        let result = evaluate_stage_block(&body, &mut program, &mut universe,
+            StageKind::Parsed, &mut Some(&mut pm));
+        assert!(result.is_ok(), "stage block must succeed: {:?}", result.err());
+        assert_eq!(program.len(), 2, "new node must be committed");
+        assert!(pm.tainted_indices.contains(&1),
+            "appended node at index 1 must be tainted");
+    }
+
+    #[test]
+    fn test_transactional_commits_vfs_on_success() {
+        let mut program = vec![];
+        let mut universe = TypeUniverse::new();
+        let mut pm = PluginManager::new();
+        let body = vec![
+            Statement::Expression(
+                Expr::Call("FileWrite$".into(), vec![
+                    Expr::Quoted("virtual://test.txt".into()),
+                    Expr::Quoted("hello".into()),
+                ], None)
+            ),
+        ];
+        let result = evaluate_stage_block(&body, &mut program, &mut universe,
+            StageKind::Parsed, &mut Some(&mut pm));
+        assert!(result.is_ok(), "stage block must succeed: {:?}", result.err());
+        assert_eq!(pm.vfs.get("test.txt").map(|s| s.as_str()), Some("hello"),
+            "VFS must contain the committed file");
     }
 }
