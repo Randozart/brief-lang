@@ -138,11 +138,18 @@ pub struct BuildOptions {
     /// 2026-07-23: Diff mode — show changes macros make to the AST without
     /// writing output. Acts as a dry-run: shows added/removed/modified items.
     pub diff_mode: bool,
-    /// 2026-07-23: Overrides for SysQuery$ results per target profile.
-    /// Used by multi-target compilation. Empty = query real host.
+    /// 2026-07-23: Overrides for SysQuery$ results.
+    /// Populated by --sysquery <key=value> and --sysquery-file <path> flags.
+    /// Also populated by --target <name> from brief.toml profiles.
+    /// Empty = query real host. Later values override earlier ones.
     pub sysquery_overrides: HashMap<String, String>,
     /// 2026-07-23: Target profile name (--target). None = default/single build.
+    /// Overrides are resolved from brief.toml and merged into sysquery_overrides.
     pub target: Option<String>,
+    /// 2026-07-23: Raw --sysquery flag pairs (unresolved, for run_build).
+    pub sysquery_pairs: Vec<(String, String)>,
+    /// 2026-07-23: Raw --sysquery-file paths (unresolved, for run_build).
+    pub sysquery_files: Vec<String>,
 }
 
 /// Compile a Brief source file: produce an executable binary (or `.ll` with `--llvm`).
@@ -436,6 +443,8 @@ pub fn check_source(file_path: &str, source: &str) -> Result<(), String> {
         diff_mode: false,
         sysquery_overrides: HashMap::new(),
         target: None,
+        sysquery_pairs: vec![],
+        sysquery_files: vec![],
     };
     let (_items, _universe) = parse_and_check(file_path, source, &default_opts)?;
     println!("OK");

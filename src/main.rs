@@ -76,6 +76,8 @@ fn print_usage(program: &str) {
     eprintln!("  {} build <file.bv> --dump-traces            Print macro expansion traces after build", name);
     eprintln!("  {} build <file.bv> --diff                   Show macro changes (dry-run, no output)", name);
     eprintln!("  {} build <file.bv> --target <name>           Build for a specific target profile from brief.toml", name);
+    eprintln!("  {} build <file.bv> --sysquery <key=value>    Override a SysQuery$ result (repeatable, highest priority)", name);
+    eprintln!("  {} build <file.bv> --sysquery-file <path>    Load SysQuery$ overrides from a key=value file", name);
     eprintln!("  {} build <file.bv> --update-lockfile        Regenerate macro-lock.toml from plugin files", name);
     eprintln!("  {} audit [file.bv]                Scan for $ intrinsic usage and capability requirements", name);
     eprintln!("  {} check <file.bv>               Type-check only", name);
@@ -127,6 +129,8 @@ fn parse_build_args(args: &[String]) -> Result<compile::BuildOptions, String> {
     let mut dump_traces = false;
     let mut diff_mode = false;
     let mut target_name: Option<String> = None;
+    let mut sysquery_pairs: Vec<(String, String)> = Vec::new();
+    let mut sysquery_files: Vec<String> = Vec::new();
 
     let mut i = 0;
     while i < args.len() {
@@ -223,6 +227,18 @@ fn parse_build_args(args: &[String]) -> Result<compile::BuildOptions, String> {
             let val = args.get(i + 1).ok_or("--target requires a target name argument")?;
             target_name = Some(val.clone());
             i += 2;
+        } else if arg == "--sysquery" {
+            let val = args.get(i + 1).ok_or("--sysquery requires a key=value argument")?;
+            let parts: Vec<&str> = val.splitn(2, '=').collect();
+            if parts.len() != 2 {
+                return Err(format!("--sysquery: expected key=value, got '{}'", val));
+            }
+            sysquery_pairs.push((parts[0].to_string(), parts[1].to_string()));
+            i += 2;
+        } else if arg == "--sysquery-file" {
+            let val = args.get(i + 1).ok_or("--sysquery-file requires a file path argument")?;
+            sysquery_files.push(val.clone());
+            i += 2;
         } else if arg == "--macro-budget" {
             let val = args.get(i + 1).ok_or("--macro-budget requires a number argument")?;
             macro_budget = val.parse()
@@ -291,6 +307,8 @@ fn parse_build_args(args: &[String]) -> Result<compile::BuildOptions, String> {
         diff_mode,
         sysquery_overrides: HashMap::new(),
         target: target_name,
+        sysquery_pairs,
+        sysquery_files,
     })
 }
 
@@ -299,28 +317,48 @@ fn run_build(args: &[String]) -> Result<(), String> {
     let source = std::fs::read_to_string(&opts.file_path)
         .map_err(|e| format!("cannot read '{}': {}", opts.file_path, e))?;
 
-    // 2026-07-23: Multi-target compilation — load brief.toml and apply
-    // target profiles. If --target <name> is given, compile for that target.
-    // If no target specified, compile once (backward compatible).
-    let project_dir = std::path::Path::new(&opts.file_path)
-        .parent()
-        .map(|p| p.to_path_buf())
-        .unwrap_or_else(|| std::env::current_dir().unwrap_or_default());
+    // 2026-07-23: Resolve SysQuery$ overrides from three sources (low→high):
+    //   1. --target <name> loads per-target overrides from brief.toml profiles
+    //   2. --sysquery-file <path> loads key=value pairs from a text file
+    //   3. --sysquery <key=value> CLI flags (highest priority)
+    // Each source merges over the previous. If no overrides from any source,
+    // SysQuery$ queries the real host (backward compatible).
 
-    // Try to load manifest for target profiles
-    let (manifest, manifest_path) = match brief_compiler::manifest::find_manifest(&project_dir) {
-        Some(path) => {
-            match brief_compiler::manifest::Manifest::load(&path) {
-                Ok(m) => (Some(m), Some(path)),
-                Err(_) => (None, None),
-            }
+    // Helper: merge a HashMap into the base, later values override earlier.
+    let mut merge_overrides = |incoming: HashMap<String, String>, base: &mut HashMap<String, String>| {
+        for (k, v) in incoming {
+            base.insert(k, v);
         }
-        None => (None, None),
     };
 
-    // Determine which target profiles to compile for
-    let targets_to_build: Vec<(String, HashMap<String, String>)> = if let Some(ref target_name) = opts.target {
-        // --target <name>: build for specific target
+    // Helper: read a key=value file (one pair per line, # comments, blank lines skipped).
+    let load_sysquery_file = |path: &str| -> Result<HashMap<String, String>, String> {
+        let content = std::fs::read_to_string(path)
+            .map_err(|e| format!("cannot read sysquery file '{}': {}", path, e))?;
+        let mut map = HashMap::new();
+        for (lineno, line) in content.lines().enumerate() {
+            let trimmed = line.trim();
+            if trimmed.is_empty() || trimmed.starts_with('#') {
+                continue;
+            }
+            let parts: Vec<&str> = trimmed.splitn(2, '=').collect();
+            if parts.len() != 2 {
+                return Err(format!("{}:{}: expected key=value, got '{}'", path, lineno + 1, trimmed));
+            }
+            map.insert(parts[0].trim().to_string(), parts[1].trim().to_string());
+        }
+        Ok(map)
+    };
+
+    // ── Determine what to build ──────────────────────────────────────
+    // Each entry: (target_name, base_overrides_from_profile)
+    let target_profiles: Vec<(String, HashMap<String, String>)> = if let Some(ref target_name) = opts.target {
+        // --target <name>: single target from brief.toml
+        let project_dir = std::path::Path::new(&opts.file_path)
+            .parent().map(|p| p.to_path_buf())
+            .unwrap_or_else(|| std::env::current_dir().unwrap_or_default());
+        let manifest = brief_compiler::manifest::find_manifest(&project_dir)
+            .and_then(|p| brief_compiler::manifest::Manifest::load(&p).ok());
         let manifest = manifest.as_ref().ok_or_else(|| {
             format!("--target '{}' requires a brief.toml with target profiles", target_name)
         })?;
@@ -329,37 +367,41 @@ fn run_build(args: &[String]) -> Result<(), String> {
                 target_name, manifest.target.keys().cloned().collect::<Vec<_>>().join(", "))
         })?;
         vec![(target_name.clone(), profile.sysquery_overrides())]
-    } else if let Some(ref manifest) = manifest {
-        if !manifest.target.is_empty() {
-            // No --target specified, but brief.toml has targets: build all
-            manifest.target.iter()
-                .map(|(name, profile)| (name.clone(), profile.sysquery_overrides()))
-                .collect()
-        } else {
-            // No target profiles: single build
-            vec![("default".to_string(), HashMap::new())]
-        }
     } else {
-        // No brief.toml: single build
+        // Single default build (no --target)
         vec![("default".to_string(), HashMap::new())]
     };
 
-    // Run compilation for each target
-    for (target_name, sysquery_overrides) in &targets_to_build {
-        if targets_to_build.len() > 1 {
+    // ── Compile each target ───────────────────────────────────────────
+    for (target_name, profile_overrides) in &target_profiles {
+        if target_profiles.len() > 1 {
             println!("Building for target: {}", target_name);
         }
 
-        let mut target_opts = opts.clone();
-        target_opts.sysquery_overrides = sysquery_overrides.clone();
+        // Build sysquery_overrides with cascading precedence
+        let mut overrides = profile_overrides.clone();           // lowest: target profile
 
-        // Set up per-target output directory
-        let original_out = target_opts.out_dir.clone();
+        // Middle: --sysquery-file paths (load in order, later overrides earlier)
+        for file_path in &opts.sysquery_files {
+            let file_overrides = load_sysquery_file(file_path)?;
+            merge_overrides(file_overrides, &mut overrides);
+        }
+
+        // Highest: --sysquery <key=value> CLI pairs (later overrides earlier)
+        for (key, value) in &opts.sysquery_pairs {
+            overrides.insert(key.clone(), value.clone());
+        }
+
+        let mut target_opts = opts.clone();
+        target_opts.sysquery_overrides = overrides;
+
+        // Per-target output directory
         if *target_name != "default" {
-            let target_out = original_out.clone()
-                .map(|d| format!("{}/{}", d, target_name))
-                .unwrap_or_else(|| format!("bin/{}", target_name));
-            target_opts.out_dir = Some(target_out);
+            let orig = target_opts.out_dir.clone();
+            target_opts.out_dir = Some(
+                orig.map(|d| format!("{}/{}", d, target_name))
+                    .unwrap_or_else(|| format!("bin/{}", target_name))
+            );
         }
 
         compile::compile_source(&opts.file_path, &source, &target_opts)?;
