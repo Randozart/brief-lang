@@ -3896,6 +3896,8 @@ impl LlvmBackend {
             TopLevel::SyncGroup { item: inner, .. } => {
                 self.scan_item_for_wires(inner);
             }
+            // 2026-07-23: Export wraps an inner item (defn, txn, etc.).
+            TopLevel::Export(e) => self.scan_item_for_wires(&e.inner),
             _ => {}
         }
     }

@@ -1227,10 +1227,22 @@ impl LlvmBackend {
         if !self.fun.terminated {
             if is_float_fn {
                 writeln!(out, "  ret float 0.0").ok();
-            } else if d.outputs.is_empty() {
+            } else if d.outputs.is_empty() && d.output_type.is_none() {
+                // 2026-07-23: Check both legacy outputs and modern output_type.
+                // Without this, definitions using -> Int (which sets output_type
+                // but leaves outputs empty) get ret void while the function
+                // signature says i64.
                 writeln!(out, "  ret void").ok();
             } else {
-                writeln!(out, "  ret i64 0").ok();
+                // 2026-07-23: Emit the correct zero value for the return type.
+                // Previously always used "ret i64 0", which broke functions
+                // returning ptr, float, double, etc.
+                let zero_val = match ll_ret_ty.as_str() {
+                    "ptr" => "null",
+                    "float" | "double" => "0.0",
+                    _ => "0",
+                };
+                writeln!(out, "  ret {} {}", ll_ret_ty, zero_val).ok();
             }
         }
         writeln!(out, "}}").ok();
