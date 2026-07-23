@@ -673,6 +673,22 @@ fn eval_nav_call(
             Ok(NavValue::Str(String::from_utf8_lossy(&output.stdout).to_string()))
         }
 
+        // ── Diagnostics (2026-07-23) ────────────────────────────────
+        "EmitInfo$" => {
+            let msg = expect_str_arg(args, 0, "EmitInfo$")?;
+            println!("info: {}", msg);
+            Ok(NavValue::Void)
+        }
+        "EmitWarning$" => {
+            let msg = expect_str_arg(args, 0, "EmitWarning$")?;
+            eprintln!("warning: {}", msg);
+            Ok(NavValue::Void)
+        }
+        "EmitError$" => {
+            let msg = expect_str_arg(args, 0, "EmitError$")?;
+            Err(msg)
+        }
+
         _ => Err(format!("unknown navigation intrinsic '{}'", name)),
     }
 }

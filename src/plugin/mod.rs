@@ -140,12 +140,21 @@ impl PluginManager {
         self
     }
 
-    /// Set the enabled-only list. When non-empty, ONLY plugins in this
-    /// list run. This overrides the extension filter.
-    /// 2026-07-15: Phase 2f — CLI support.
+    /// Override plugin filter to only run these plugins.
     pub fn with_enabled_only(mut self, names: Vec<String>) -> Self {
         self.enabled_only = names;
         self
+    }
+
+    /// 2026-07-23: Public accessors for extensible_plugin_manager.
+    /// Returns the current enabled_only list (may be empty).
+    pub fn enabled_only(&self) -> &[String] {
+        &self.enabled_only
+    }
+
+    /// 2026-07-23: Mutable accessor for adding inline plugins.
+    pub fn enabled_only_mut(&mut self) -> &mut Vec<String> {
+        &mut self.enabled_only
     }
 
     /// Return the list of plugin names enabled after applying:
@@ -291,11 +300,8 @@ impl PluginManager {
 
                 // Check disabled list
                 if self.disabled.contains(&name.to_string()) {
-                    eprintln!("DEBUG active_plugins: DISABLED '{}'", name);
                     return false;
                 }
-
-                eprintln!("DEBUG active_plugins: ACTIVE '{}'", name);
 
                 true
             })

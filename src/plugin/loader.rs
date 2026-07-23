@@ -236,9 +236,13 @@ pub fn extract_inline_stage_blocks(
     for (i, block) in blocks.into_iter().rev() {
         let plugin_name = format!("inline:{}", block_idx);
         let priority = block.priority;
-        eprintln!("DEBUG extract: registering plugin '{}' at stage {:?} priority {}", plugin_name, block.stage, priority);
-        let plugin = StageBlockPlugin::new(plugin_name, block);
+        let plugin = StageBlockPlugin::new(plugin_name.clone(), block);
         mgr.register_with_priority(Box::new(plugin), priority);
+        // 2026-07-23: Inline plugins must also be added to enabled_only when it
+        // is set (by filter_for_extension), otherwise they are silently filtered out.
+        if !mgr.enabled_only().is_empty() {
+            mgr.enabled_only_mut().push(plugin_name);
+        }
         program.remove(i);
         block_idx += 1;
     }

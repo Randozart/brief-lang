@@ -1,0 +1,7 @@
+defn main() -> Int { term 0; };
+
+$(Parsed @ highest) {
+    EmitInfo$("hello from Brief");
+    let len = StrLen$("Bits(42)");
+    EmitInfo$("StrLen$ Bits(42) = 8");
+};
