@@ -26,6 +26,7 @@ fn main() {
         "library" | "lib" => library::run_library_mode(&args[2..]),
         "export" => run_export(&args[2..]),
         "link" => run_link(&args[2..]),
+        "audit" => run_audit_cmd(&args[2..]),
         "config" => run_config(&args[2..]),
         "init" => run_init(args.get(2).map(|s| s.as_str())),
         "register" => run_register(&args[2..]),
@@ -72,6 +73,7 @@ fn print_usage(program: &str) {
     eprintln!("  {} build <file.bv> --allow-net              Allow macros network access", name);
     eprintln!("  {} build <file.bv> --dump-vfs               Print virtual filesystem contents after build", name);
     eprintln!("  {} build <file.bv> --update-lockfile        Regenerate macro-lock.toml from plugin files", name);
+    eprintln!("  {} audit [file.bv]                Scan for $ intrinsic usage and capability requirements", name);
     eprintln!("  {} check <file.bv>               Type-check only", name);
     eprintln!("  {} derive <file.bv>              Synthesize derivation blocks", name);
     eprintln!("  {} library <file.bv>             Compile to .a library", name);
@@ -283,6 +285,13 @@ fn run_check(args: &[String]) -> Result<(), String> {
     let source = std::fs::read_to_string(file_path)
         .map_err(|e| format!("cannot read '{}': {}", file_path, e))?;
     compile::check_source(file_path, &source)
+}
+
+fn run_audit_cmd(args: &[String]) -> Result<(), String> {
+    let source_file = args.first().map(|s| s.as_str());
+    let results = brief_compiler::macros::audit::run_audit(source_file)?;
+    brief_compiler::macros::audit::print_audit(&results);
+    Ok(())
 }
 
 /// `brief-compiler register <name>` — register a project/target schema.

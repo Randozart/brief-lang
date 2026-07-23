@@ -3,6 +3,7 @@
 // manipulation inside $(Stage) blocks.
 
 pub mod actions;
+pub mod audit;
 pub mod compile_time;
 pub mod eval;
 pub mod lockfile;
