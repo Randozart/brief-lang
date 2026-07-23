@@ -266,6 +266,114 @@ Modification is detected via Debug output comparison.
 
 ---
 
+## Compile-Time Functions (`$defn` / `$txn`)
+
+`$defn` and `$txn` are compile-time-only function definitions. They live
+at the top level alongside `$(Stage)` blocks, are extracted before codegen,
+and can call `$` intrinsics. They push logic from Rust into Brief.
+
+### Syntax
+
+```brief
+$defn render(tmpl: String, name: String) -> String {
+    let body = StrReplace$(tmpl, "{{name}}", name);
+    let body = StrReplace$(body, "{{other}}", "...");
+    term body;
+};
+
+$txn converge(x: Int) [x < 100][x >= 100] {
+    when x < 50 { x = x + 10; };
+    when x >= 50 { x = 100; term x; };
+};
+```
+
+### Semantics
+
+| Construct | Semantics |
+|-----------|-----------|
+| `$defn name(params) -> Type { body }` | Pure function. Body executes when called. `term` returns a value. |
+| `$txn name(params) [pre][post] { body }` | Convergent loop. Runs body repeatedly until postcondition is met. |
+
+### `$defn` Execution
+
+1. Bind parameters from call arguments
+2. Execute body statements sequentially
+3. `term expr` → evaluate `expr`, return value immediately
+4. `escape expr` → abort with error
+5. No `term` reached → return `Void`
+
+### `$txn` Execution (Convergent Loop)
+
+1. Evaluate **precondition**. If false → converged, return `Void`.
+2. Execute body:
+   - `term expr` → store `expr` as candidate, exit body
+   - `escape expr` → abort with error
+3. Evaluate **postcondition**. If true → converged, return candidate (or `Void`).
+4. If false → repeat from step 1.
+5. Max 1000 iterations guard.
+
+The pre/post conditions are `Expr` values evaluated in the function scope.
+They can reference parameters and local variables:
+
+```brief
+$txn accum(list: List, n: Int) [list.Count$() < 100][list.Count$() >= 100] {
+    list <- n;
+};
+```
+
+### Control Flow Inside Bodies
+
+Only `when` is available for conditionals (no `if`). Only `term` and `escape`
+for exit:
+
+| Statement | Effect |
+|-----------|--------|
+| `let x = expr;` | Bind variable |
+| `x = expr;` | Reassign variable |
+| `when guard { body };` | Execute body if guard is truthy |
+| `term expr;` | Return value from function |
+| `escape expr;` | Abort with error message |
+| `expr;` | Evaluate expression (typically a `$` intrinsic call) |
+
+### Calling from Stage Blocks
+
+```brief
+$defn greet(name: String) -> String {
+    let msg = "hello " + name;
+    term msg;
+};
+
+$(Parsed @ highest) {
+    let result = greet("world");
+    EmitInfo$("msg: " + result);  // prints "msg: hello world"
+};
+```
+
+### Extraction Before Codegen
+
+`$defn`/`$txn` items are extracted by `extract_inline_stage_blocks` in
+`src/plugin/loader.rs`. They are:
+1. Found in the top-level program after parsing
+2. Registered in `PluginManager.fn_registry`
+3. Removed from the program before codegen
+
+They never reach the LLVM backend, so `$` intrinsics inside them are
+unavailable at runtime — enforced by the double barrier of extraction +
+runtime evaluation failure.
+
+### `$` Prefix Convention
+
+| Prefix | Category | Example |
+|--------|----------|---------|
+| `$` before keyword | Compile-time function definition | `$defn`, `$txn` |
+| `$` after identifier | `$` intrinsic call | `Tag$`, `Insert$` |
+| `#` after identifier | Backend intrinsic | `Sqrt#`, `Malloc#` |
+
+The prefix `$` before `defn`/`txn` is intentionally scannable — `grep '$defn' *.bv`
+finds all compile-time definitions instantly.
+
+---
+
 ## Macro DSL Expression Support
 
 Inside `$(Stage)` blocks, the following expression types are evaluated:
@@ -349,36 +457,30 @@ compatible).
 ## The Bridge Generator as a `.bv` Plugin
 
 The GLUE bridge generator (`lib/glue/generator.bv`) is implemented entirely
-in Brief using `$` intrinsics — a stress test of the full macro system:
+in Brief using `$defn` helpers and `$` intrinsics — a stress test:
 
 ```brief
+$defn render_fn(tmpl: String, name: String, params: String, ...) -> String {
+    // single-pass template substitution using $defn + StrReplace$
+    term body;
+};
+
 $(Normalized @ highest) {
     let fn_tmpl = ConfigGet$("rust", "templates.fn_template");
-    let ffi_tmpl = ConfigGet$("rust", "templates.ffi_template");
-
     let exports = Tag$("export");
     foreach(exp in exports) {
         let name = TypeInfo$(exp, "name");
-        let pcount = TypeInfo$(exp, "params.count");
-        let ret_type = TypeInfo$(exp, "output_type");
-
-        let ret_native = ConfigGet$(target, "protocols." + ret_type + ".native");
-        let ret_c_abi = ConfigGet$(target, "protocols." + ret_type + ".c_abi");
-
-        // Build param strings, render fn_template + ffi_template
-        // via StrReplace$ chaining, accumulate into exports_code/ffi_code
         // ...
+        let fn_body = render_fn(fn_tmpl, name, params_str, ...);
+        exports_code = exports_code + fn_body + "\n";
     };
-
-    // Render file-level templates and write output
     FileWrite$("glue-out/src/lib.rs", lib_rs, true);
-    FileWrite$("glue-out/src/ffi.rs", ffi_rs, true);
 };
 ```
 
-Intrinsics exercised: `ConfigGet$`, `Tag$`, `TypeInfo$`, `StrReplace$`,
-`FileWrite$`, `EmitInfo$`, `IsEmpty$`, `+` (string concat), `foreach`,
-`when` guards, `let` bindings, `=` assignment.
+Intrinsics exercised: `$defn`, `ConfigGet$`, `Tag$`, `TypeInfo$`,
+`StrReplace$`, `FileWrite$`, `EmitInfo$`, `IsEmpty$`, `+` (string concat),
+`foreach`, `when` guards, `let` bindings, `=` assignment.
 
 ---
 
