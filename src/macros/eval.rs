@@ -804,6 +804,190 @@ fn eval_nav_call(
             Err(msg)
         }
 
+        // ── System Queries (2026-07-23) ────────────────────────────────
+        // SysQuery$ provides structured host hardware introspection.
+        // Requires --allow-sys-query. Supports:
+        //   cpu.cores           → number of logical cores
+        //   cpu.arch            → CPU architecture string (x86_64, aarch64, etc.)
+        //   os                  → OS type string (linux, macos, windows, etc.)
+        //   os.version          → OS kernel/release version
+        //   hostname            → machine hostname
+        //   memory.total        → total physical RAM in bytes (Linux only)
+        //   memory.free         → available RAM in bytes (Linux only)
+        //   pagesize            → system page size in bytes
+        "SysQuery$" => {
+            sandbox.check(Capability::SysQuery, "SysQuery$")?;
+            let query = expect_str_arg(args, 0, "SysQuery$")?;
+            match query.as_str() {
+                "cpu.cores" => {
+                    let cores = std::thread::available_parallelism()
+                        .map(|n| n.get() as i64)
+                        .unwrap_or(1);
+                    Ok(NavValue::Int(cores))
+                }
+                "cpu.arch" => {
+                    Ok(NavValue::Str(std::env::consts::ARCH.to_string()))
+                }
+                "os" => {
+                    Ok(NavValue::Str(std::env::consts::OS.to_string()))
+                }
+                "os.version" => {
+                    // 2026-07-23: On Linux, read /proc/sys/kernel/osrelease.
+                    // On other platforms, fall back to `uname -r` or "unknown".
+                    #[cfg(target_os = "linux")]
+                    {
+                        let version = std::fs::read_to_string("/proc/sys/kernel/osrelease")
+                            .unwrap_or_else(|_| "unknown".into());
+                        return Ok(NavValue::Str(version.trim().to_string()));
+                    }
+                    #[cfg(not(target_os = "linux"))]
+                    {
+                        let version = std::process::Command::new("uname")
+                            .arg("-r")
+                            .output()
+                            .ok()
+                            .and_then(|o| {
+                                if o.status.success() {
+                                    String::from_utf8(o.stdout).ok()
+                                } else {
+                                    None
+                                }
+                            })
+                            .unwrap_or_else(|| "unknown".into());
+                        return Ok(NavValue::Str(version.trim().to_string()));
+                    }
+                }
+                "hostname" => {
+                    // 2026-07-23: On Linux, read /proc/sys/kernel/hostname.
+                    // Fall back to `hostname` command on other platforms.
+                    #[cfg(target_os = "linux")]
+                    {
+                        let hostname = std::fs::read_to_string("/proc/sys/kernel/hostname")
+                            .unwrap_or_else(|_| "unknown".into());
+                        return Ok(NavValue::Str(hostname.trim().to_string()));
+                    }
+                    #[cfg(not(target_os = "linux"))]
+                    {
+                        let hostname = std::process::Command::new("hostname")
+                            .output()
+                            .ok()
+                            .and_then(|o| {
+                                if o.status.success() {
+                                    String::from_utf8(o.stdout).ok()
+                                } else {
+                                    None
+                                }
+                            })
+                            .unwrap_or_else(|| "unknown".into());
+                        return Ok(NavValue::Str(hostname.trim().to_string()));
+                    }
+                }
+                "memory.total" | "memory.free" => {
+                    // 2026-07-23: Parse /proc/meminfo on Linux for total/available RAM.
+                    // Returns bytes (parsed from kB values).
+                    #[cfg(target_os = "linux")]
+                    {
+                        let meminfo = std::fs::read_to_string("/proc/meminfo")
+                            .map_err(|e| format!("SysQuery$: cannot read /proc/meminfo: {}", e))?;
+                        let prefix = if query == "memory.total" { "MemTotal:" } else { "MemAvailable:" };
+                        for line in meminfo.lines() {
+                            if let Some(rest) = line.strip_prefix(prefix) {
+                                let val = rest.trim().strip_suffix(" kB").unwrap_or(rest.trim());
+                                if let Ok(kb) = val.trim().parse::<i64>() {
+                                    return Ok(NavValue::Int(kb * 1024));
+                                }
+                            }
+                        }
+                        Err(format!("SysQuery$: could not parse {} from /proc/meminfo", query))
+                    }
+                    #[cfg(not(target_os = "linux"))]
+                    {
+                        Err(format!("SysQuery$: '{}' is only supported on Linux", query))
+                    }
+                }
+                "pagesize" => {
+                    // 2026-07-23: Return the system page size.
+                    // Uses `getconf PAGE_SIZE` on POSIX, defaults to 4096.
+                    #[cfg(not(windows))]
+                    {
+                        let pagesize = std::process::Command::new("getconf")
+                            .arg("PAGE_SIZE")
+                            .output()
+                            .ok()
+                            .and_then(|o| {
+                                if o.status.success() {
+                                    String::from_utf8(o.stdout).ok()
+                                } else {
+                                    None
+                                }
+                            })
+                            .and_then(|s| s.trim().parse::<i64>().ok())
+                            .unwrap_or(4096);
+                        Ok(NavValue::Int(pagesize))
+                    }
+                    #[cfg(windows)]
+                    {
+                        // Windows page size is always 4096
+                        Ok(NavValue::Int(4096))
+                    }
+                }
+                _ => Err(format!("SysQuery$: unknown query '{}'", query)),
+            }
+        }
+
+        // ── Timestamp (2026-07-23) ──────────────────────────────────────
+        // TimeNow$ returns a deterministic timestamp for reproducibility.
+        // Uses the most recent git commit timestamp if available, falling
+        // back to the current system time. Pure intrinsic — no sandbox check.
+        "TimeNow$" => {
+            // 2026-07-23: Try git commit timestamp first (reproducible per commit),
+            // then fall back to current wall-clock time.
+            let ts = std::process::Command::new("git")
+                .args(["log", "-1", "--format=%ct"])
+                .output()
+                .ok()
+                .and_then(|o| {
+                    if o.status.success() {
+                        let s = String::from_utf8_lossy(&o.stdout);
+                        s.trim().parse::<i64>().ok()
+                    } else {
+                        None
+                    }
+                })
+                .unwrap_or_else(|| {
+                    std::time::SystemTime::now()
+                        .duration_since(std::time::UNIX_EPOCH)
+                        .unwrap_or_default()
+                        .as_secs() as i64
+                });
+            Ok(NavValue::Int(ts))
+        }
+
+        // ── Environment Variables (2026-07-23) ──────────────────────────
+        // EnvGet$ reads a named environment variable. Returns empty string
+        // if the variable is not set. Requires --allow-sys-query.
+        "EnvGet$" => {
+            sandbox.check(Capability::SysQuery, "EnvGet$")?;
+            let name = expect_str_arg(args, 0, "EnvGet$")?;
+            match std::env::var(&name) {
+                Ok(val) => Ok(NavValue::Str(val)),
+                Err(_) => Ok(NavValue::Str(String::new())),
+            }
+        }
+
+        // ── HTTP Fetch (2026-07-23) ─────────────────────────────────────
+        // HttpFetch$ fetches a URL via HTTP GET and returns the response
+        // body as a string. Requires --allow-net.
+        "HttpFetch$" => {
+            sandbox.check(Capability::Network, "HttpFetch$")?;
+            let url = expect_str_arg(args, 0, "HttpFetch$")?;
+            let resp = ureq::get(&url).call()
+                .map_err(|e| format!("HttpFetch$: failed to fetch '{}': {}", url, e))?;
+            let body = resp.into_string()
+                .map_err(|e| format!("HttpFetch$: failed to read body from '{}': {}", url, e))?;
+            Ok(NavValue::Str(body))
+        }
+
         _ => Err(format!("unknown navigation intrinsic '{}'", name)),
     }
 }
@@ -1093,5 +1277,171 @@ mod tests {
         } else {
             panic!("expected Definition");
         }
+    }
+
+    // ── SysQuery$ Tests (2026-07-23) ──────────────────────────────
+
+    #[test]
+    fn test_sys_query_cpu_cores() {
+        let mut program = vec![];
+        let mut universe = TypeUniverse::new();
+        let expr = Expr::Call("SysQuery$".into(), vec![Expr::Quoted("cpu.cores".into())], None);
+        let result = eval_nav_chain(&expr, &mut program, &mut universe,
+            StageKind::Parsed, &empty_scope(), &mut test_sandbox(), &mut None).unwrap();
+        match result {
+            NavValue::Int(n) => assert!(n >= 1, "cpu.cores should be >= 1, got {}", n),
+            other => panic!("expected Int, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_sys_query_cpu_arch() {
+        let mut program = vec![];
+        let mut universe = TypeUniverse::new();
+        let expr = Expr::Call("SysQuery$".into(), vec![Expr::Quoted("cpu.arch".into())], None);
+        let result = eval_nav_chain(&expr, &mut program, &mut universe,
+            StageKind::Parsed, &empty_scope(), &mut test_sandbox(), &mut None).unwrap();
+        match result {
+            NavValue::Str(s) => assert!(!s.is_empty(), "cpu.arch should not be empty"),
+            other => panic!("expected Str, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_sys_query_os() {
+        let mut program = vec![];
+        let mut universe = TypeUniverse::new();
+        let expr = Expr::Call("SysQuery$".into(), vec![Expr::Quoted("os".into())], None);
+        let result = eval_nav_chain(&expr, &mut program, &mut universe,
+            StageKind::Parsed, &empty_scope(), &mut test_sandbox(), &mut None).unwrap();
+        match result {
+            NavValue::Str(s) => assert!(!s.is_empty(), "os should not be empty"),
+            other => panic!("expected Str, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_sys_query_hostname() {
+        let mut program = vec![];
+        let mut universe = TypeUniverse::new();
+        let expr = Expr::Call("SysQuery$".into(), vec![Expr::Quoted("hostname".into())], None);
+        let result = eval_nav_chain(&expr, &mut program, &mut universe,
+            StageKind::Parsed, &empty_scope(), &mut test_sandbox(), &mut None).unwrap();
+        match result {
+            NavValue::Str(s) => assert!(!s.is_empty(), "hostname should not be empty"),
+            other => panic!("expected Str, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_sys_query_unknown_query() {
+        let mut program = vec![];
+        let mut universe = TypeUniverse::new();
+        let expr = Expr::Call("SysQuery$".into(), vec![Expr::Quoted("nonexistent".into())], None);
+        let result = eval_nav_chain(&expr, &mut program, &mut universe,
+            StageKind::Parsed, &empty_scope(), &mut test_sandbox(), &mut None);
+        assert!(result.is_err(), "unknown query should error");
+    }
+
+    #[test]
+    fn test_sys_query_rejects_without_capability() {
+        let mut program = vec![];
+        let mut universe = TypeUniverse::new();
+        let mut restricted = Sandbox::default(); // all false
+        let expr = Expr::Call("SysQuery$".into(), vec![Expr::Quoted("cpu.cores".into())], None);
+        let result = eval_nav_chain(&expr, &mut program, &mut universe,
+            StageKind::Parsed, &empty_scope(), &mut restricted, &mut None);
+        assert!(result.is_err(), "SysQuery$ should error without --allow-sys-query");
+        let err = result.unwrap_err();
+        assert!(err.contains("SysQuery"), "error should mention capability, got: {}", err);
+    }
+
+    // ── TimeNow$ Tests (2026-07-23) ──────────────────────────────
+
+    #[test]
+    fn test_time_now_returns_positive() {
+        let mut program = vec![];
+        let mut universe = TypeUniverse::new();
+        let expr = Expr::Call("TimeNow$".into(), vec![], None);
+        let result = eval_nav_chain(&expr, &mut program, &mut universe,
+            StageKind::Parsed, &empty_scope(), &mut test_sandbox(), &mut None).unwrap();
+        match result {
+            NavValue::Int(ts) => {
+                // Should be a reasonable Unix timestamp (> 2020-01-01 = 1577836800)
+                assert!(ts > 1577836800, "TimeNow$: timestamp {} seems too old", ts);
+            }
+            other => panic!("expected Int, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_time_now_no_sandbox_check_needed() {
+        // TimeNow$ is Pure — should work even with a restricted sandbox
+        let mut program = vec![];
+        let mut universe = TypeUniverse::new();
+        let mut restricted = Sandbox::default(); // all false
+        let expr = Expr::Call("TimeNow$".into(), vec![], None);
+        let result = eval_nav_chain(&expr, &mut program, &mut universe,
+            StageKind::Parsed, &empty_scope(), &mut restricted, &mut None);
+        assert!(result.is_ok(), "TimeNow$ should work without any capabilities");
+    }
+
+    // ── EnvGet$ Tests (2026-07-23) ───────────────────────────────
+
+    #[test]
+    fn test_env_get_var() {
+        let mut program = vec![];
+        let mut universe = TypeUniverse::new();
+        // Set a test env var
+        // SAFETY: single-threaded test environment — no concurrent reads
+        unsafe { std::env::set_var("BRIEF_TEST_VAR", "hello_world"); }
+        let expr = Expr::Call("EnvGet$".into(), vec![Expr::Quoted("BRIEF_TEST_VAR".into())], None);
+        let result = eval_nav_chain(&expr, &mut program, &mut universe,
+            StageKind::Parsed, &empty_scope(), &mut test_sandbox(), &mut None).unwrap();
+        match result {
+            NavValue::Str(s) => assert_eq!(s, "hello_world"),
+            other => panic!("expected Str, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_env_get_missing_var() {
+        let mut program = vec![];
+        let mut universe = TypeUniverse::new();
+        let expr = Expr::Call("EnvGet$".into(), vec![Expr::Quoted("BRIEF_VAR_THAT_DOES_NOT_EXIST_XYZ".into())], None);
+        let result = eval_nav_chain(&expr, &mut program, &mut universe,
+            StageKind::Parsed, &empty_scope(), &mut test_sandbox(), &mut None).unwrap();
+        match result {
+            NavValue::Str(s) => assert!(s.is_empty(), "missing env var should return empty string"),
+            other => panic!("expected Str, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_env_get_rejects_without_capability() {
+        let mut program = vec![];
+        let mut universe = TypeUniverse::new();
+        let mut restricted = Sandbox::default(); // all false
+        let expr = Expr::Call("EnvGet$".into(), vec![Expr::Quoted("HOME".into())], None);
+        let result = eval_nav_chain(&expr, &mut program, &mut universe,
+            StageKind::Parsed, &empty_scope(), &mut restricted, &mut None);
+        assert!(result.is_err(), "EnvGet$ should error without --allow-sys-query");
+        let err = result.unwrap_err();
+        assert!(err.contains("SysQuery"), "error should mention capability, got: {}", err);
+    }
+
+    // ── HttpFetch$ Tests (2026-07-23) ────────────────────────────
+
+    #[test]
+    fn test_http_fetch_rejects_without_capability() {
+        let mut program = vec![];
+        let mut universe = TypeUniverse::new();
+        let mut restricted = Sandbox::default(); // all false
+        let expr = Expr::Call("HttpFetch$".into(), vec![Expr::Quoted("http://example.com".into())], None);
+        let result = eval_nav_chain(&expr, &mut program, &mut universe,
+            StageKind::Parsed, &empty_scope(), &mut restricted, &mut None);
+        assert!(result.is_err(), "HttpFetch$ should error without --allow-net");
+        let err = result.unwrap_err();
+        assert!(err.contains("Network"), "error should mention Network capability, got: {}", err);
     }
 }

@@ -129,13 +129,38 @@ pub struct BuildOptions {
     pub macro_budget: u64,
     /// 2026-07-23: Print virtual filesystem contents after compilation.
     pub dump_vfs: bool,
+    /// 2026-07-23: Regenerate macro-lock.toml from current plugin files.
+    pub update_lockfile: bool,
 }
 
 /// Compile a Brief source file: produce an executable binary (or `.ll` with `--llvm`).
 pub fn compile_source(file_path: &str, source: &str, opts: &BuildOptions) -> Result<(), String> {
+    // ── Macro lockfile handling ────────────────────────────────────
+    // 2026-07-23: If --update-lockfile, regenerate macro-lock.toml from
+    // current plugin files and --allow-* flags. Otherwise validate the
+    // lockfile against loaded plugins and apply approved capabilities.
+    let mut pm = build_plugin_manager(file_path, opts);
+    let project_root = std::env::current_dir()
+        .map_err(|e| format!("cannot determine project root: {}", e))?;
+    let project_root_str = project_root.to_string_lossy().to_string();
+    if opts.update_lockfile {
+        let granted = brief_compiler::macros::lockfile::cli_granted_set(
+            opts.allow_read,
+            opts.allow_write,
+            opts.allow_run,
+            opts.allow_sys_query,
+            opts.allow_net,
+        );
+        let lock = brief_compiler::macros::lockfile::generate_lockfile(&granted, None)?;
+        brief_compiler::macros::lockfile::save_lockfile(&project_root_str, &lock)?;
+    } else {
+        if let Some(lock) = brief_compiler::macros::lockfile::load_lockfile(&project_root_str)? {
+            brief_compiler::macros::lockfile::validate_and_apply(&lock, &mut pm, None)?;
+        }
+    }
+
     // ── PreLex stage: source transformation ──────────────────────────
     let mut source = source.to_string();
-    let mut pm = build_plugin_manager(file_path, opts);
     pm.run_source(StageKind::PreLex, &mut source)?;
 
     // ── Parse ─────────────────────────────────────────────────────────
@@ -353,6 +378,7 @@ pub fn check_source(file_path: &str, source: &str) -> Result<(), String> {
         allow_net: false,
         macro_budget: 0,
         dump_vfs: false,
+        update_lockfile: false,
     };
     let (_items, _universe) = parse_and_check(file_path, source, &default_opts)?;
     println!("OK");

@@ -5,6 +5,7 @@
 pub mod actions;
 pub mod compile_time;
 pub mod eval;
+pub mod lockfile;
 pub mod pattern_live;
 pub mod selection;
 pub mod stage_target;

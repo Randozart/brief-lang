@@ -71,6 +71,7 @@ fn print_usage(program: &str) {
     eprintln!("  {} build <file.bv> --allow-sys-query        Allow macros to query host hardware", name);
     eprintln!("  {} build <file.bv> --allow-net              Allow macros network access", name);
     eprintln!("  {} build <file.bv> --dump-vfs               Print virtual filesystem contents after build", name);
+    eprintln!("  {} build <file.bv> --update-lockfile        Regenerate macro-lock.toml from plugin files", name);
     eprintln!("  {} check <file.bv>               Type-check only", name);
     eprintln!("  {} derive <file.bv>              Synthesize derivation blocks", name);
     eprintln!("  {} library <file.bv>             Compile to .a library", name);
@@ -116,6 +117,7 @@ fn parse_build_args(args: &[String]) -> Result<compile::BuildOptions, String> {
     let mut allow_net = false;
     let mut macro_budget = 0u64;
     let mut dump_vfs = false;
+    let mut update_lockfile = false;
 
     let mut i = 0;
     while i < args.len() {
@@ -199,6 +201,9 @@ fn parse_build_args(args: &[String]) -> Result<compile::BuildOptions, String> {
         } else if arg == "--dump-vfs" {
             dump_vfs = true;
             i += 1;
+        } else if arg == "--update-lockfile" {
+            update_lockfile = true;
+            i += 1;
         } else if arg == "--macro-budget" {
             let val = args.get(i + 1).ok_or("--macro-budget requires a number argument")?;
             macro_budget = val.parse()
@@ -262,6 +267,7 @@ fn parse_build_args(args: &[String]) -> Result<compile::BuildOptions, String> {
         allow_net,
         macro_budget,
         dump_vfs,
+        update_lockfile,
     })
 }
 
