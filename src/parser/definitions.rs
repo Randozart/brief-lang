@@ -242,7 +242,7 @@ impl<'a> Parser<'a> {
     // 2026-07-14: Parens are optional (mirrors parse_transaction) so that
     // `defn name -> Int { ... }` works without empty `()`. Test files and
     // the standard library use both forms.
-    fn parse_definition(&mut self) -> Result<Definition, SyntaxError> {
+    pub(crate) fn parse_definition(&mut self) -> Result<Definition, SyntaxError> {
         self.pos += 1; // consume 'defn'
         let name = self.expect_identifier()?;
         let type_params = self.parse_type_params()?;
@@ -291,7 +291,7 @@ impl<'a> Parser<'a> {
     }
 
     /// Parse: txn name [pre][post] { body }
-    fn parse_transaction(
+    pub(crate) fn parse_transaction(
         &mut self,
         is_reactive: bool,
         is_async: bool,

@@ -614,7 +614,7 @@ pub fn infer_statement(stmt: &Statement, ctx: &mut TypecheckContext) -> Result<(
             infer_type_only(instance, ctx)?;
             Ok(())
         }
-        Statement::InlineAsm { .. } => Ok(()),
+        Statement::InlineAsm { .. } | Statement::InlineDefn(_) | Statement::InlineTxn(_) => Ok(()),
         Statement::SyncBlock(body) => {
             for stmt in body {
                 infer_statement(stmt, ctx)?;

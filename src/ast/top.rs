@@ -157,7 +157,7 @@ pub struct CellDef {
 
 // ── Statement ──────────────────────────────────────────────────────────
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone)]
 pub enum Statement {
     /// let name: Type = expr;
     Let {
@@ -206,6 +206,44 @@ pub enum Statement {
     },
     /// sync { ... }
     SyncBlock(Vec<Statement>),
+    /// $defn name(params) -> Type { body } — compile-time-only definition.
+    /// 2026-07-23: Only valid inside $(Stage) blocks. Body can call $ intrinsics.
+    InlineDefn(Definition),
+    /// $txn name(params) [pre][post] -> Type { body } — compile-time-only tx.
+    /// 2026-07-23: Evaluated as a convergent loop with pre/post checks.
+    InlineTxn(Transaction),
+}
+
+// 2026-07-23: Manual PartialEq — InlineDefn/InlineTxn wrap Definition/Transaction
+// which don't implement PartialEq. All other variants compare field-by-field.
+impl PartialEq for Statement {
+    fn eq(&self, other: &Self) -> bool {
+        match (self, other) {
+            (Statement::InlineDefn(_), _) | (_, Statement::InlineDefn(_)) => false,
+            (Statement::InlineTxn(_), _) | (_, Statement::InlineTxn(_)) => false,
+            (Statement::Let { name: n1, ty: t1, expr: e1, modifiers: m1 },
+             Statement::Let { name: n2, ty: t2, expr: e2, modifiers: m2 }) =>
+                n1 == n2 && t1 == t2 && e1 == e2 && m1 == m2,
+            (Statement::Assign(l1, r1), Statement::Assign(l2, r2)) => l1 == l2 && r1 == r2,
+            (Statement::Term(e1), Statement::Term(e2)) => e1 == e2,
+            (Statement::TermBang(e1), Statement::TermBang(e2)) => e1 == e2,
+            (Statement::Return(e1), Statement::Return(e2)) => e1 == e2,
+            (Statement::Guarded(c1, b1), Statement::Guarded(c2, b2)) => c1 == c2 && b1 == b2,
+            (Statement::Expression(e1), Statement::Expression(e2)) => e1 == e2,
+            (Statement::If(c1, t1, e1), Statement::If(c2, t2, e2)) => c1 == c2 && t1 == t2 && e1 == e2,
+            (Statement::Block(b1), Statement::Block(b2)) => b1 == b2,
+            (Statement::MetadataAssignment(k1, v1), Statement::MetadataAssignment(k2, v2)) => k1 == k2 && v1 == v2,
+            (Statement::Escape(e1), Statement::Escape(e2)) => e1 == e2,
+            (Statement::Foreach { item: i1, list: l1, body: b1 },
+             Statement::Foreach { item: i2, list: l2, body: b2 }) => i1 == i2 && l1 == l2 && b1 == b2,
+            (Statement::TrgBinding { name: n1, instance: i1, port: p1 },
+             Statement::TrgBinding { name: n2, instance: i2, port: p2 }) => n1 == n2 && i1 == i2 && p1 == p2,
+            (Statement::InlineAsm { asm_string: a1, clobbers: c1, span: s1 },
+             Statement::InlineAsm { asm_string: a2, clobbers: c2, span: s2 }) => a1 == a2 && c1 == c2 && s1 == s2,
+            (Statement::SyncBlock(b1), Statement::SyncBlock(b2)) => b1 == b2,
+            _ => false,
+        }
+    }
 }
 
 // ── Supporting Types ───────────────────────────────────────────────────

@@ -29,11 +29,15 @@ impl<'a> Parser<'a> {
             // 2026-07-17: Discard: `<- &queue;` — pop and discard the value.
             Some(Token::ArrowLeft) => self.parse_arrow_discard_statement(),
             _ => {
-                // Keywords that lex as identifiers: return, if
+                // Keywords that lex as identifiers: return, if, $defn, $txn
                 if self.check_identifier("return") {
                     self.parse_return_statement()
                 } else if self.check_identifier("if") {
                     self.parse_if_statement()
+                } else if self.check_identifier("$defn") {
+                    self.parse_inline_defn()
+                } else if self.check_identifier("$txn") {
+                    self.parse_inline_txn()
                 } else if self.check(&Token::TildeArrow) {
                     self.parse_metadata_statement()
                 } else {
@@ -322,5 +326,21 @@ impl<'a> Parser<'a> {
             return Ok(Statement::Assign(target, value));
         }
         Ok(Statement::Expression(lhs))
+    }
+
+    /// $defn name(params) -> Type { body } — compile-time-only definition.
+    /// 2026-07-23: Only valid inside $(Stage) blocks.
+    fn parse_inline_defn(&mut self) -> Result<Statement, SyntaxError> {
+        self.pos += 1;
+        let defn = self.parse_definition()?;
+        Ok(Statement::InlineDefn(defn))
+    }
+
+    /// $txn name(params) [pre][post] -> Type { body } — compile-time-only tx.
+    /// 2026-07-23: Convergent loop with pre/post conditions.
+    fn parse_inline_txn(&mut self) -> Result<Statement, SyntaxError> {
+        self.pos += 1;
+        let txn = self.parse_transaction(false, false)?;
+        Ok(Statement::InlineTxn(txn))
     }
 }

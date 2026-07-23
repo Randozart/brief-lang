@@ -327,6 +327,8 @@ impl fmt::Display for Statement {
                 }
                 write!(f, "}}")
             }
+            Statement::InlineDefn(d) => write!(f, "$defn {}", d.name),
+            Statement::InlineTxn(t) => write!(f, "$txn {}", t.name),
         }
     }
 }

@@ -288,7 +288,7 @@ impl LlvmBackend {
                     .map(|s| Self::rewrite_cell_stmt_identifiers(s, cell_name))
                     .collect(),
             },
-            Statement::MetadataAssignment(..) => stmt.clone(),
+            Statement::MetadataAssignment(..) | Statement::InlineDefn(_) | Statement::InlineTxn(_) => stmt.clone(),
         }
     }
 

@@ -1678,7 +1678,8 @@ fn resolve_dollar_refs_in_stmt(stmt: &mut Statement, scope: &Scope) -> Result<()
         Statement::TrgBinding { instance, .. } => {
             resolve_dollar_refs_in_expr(instance, scope)
         }
-        Statement::InlineAsm { .. } | Statement::MetadataAssignment(..) => Ok(()),
+        Statement::InlineAsm { .. } | Statement::MetadataAssignment(..)
+        | Statement::InlineDefn(_) | Statement::InlineTxn(_) => Ok(()),
     }
 }
 

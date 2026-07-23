@@ -277,7 +277,7 @@ fn collect_unsafe_ffi_stmt(stmt: &Statement, reasons: &mut Vec<String>) {
         Statement::TrgBinding { instance, .. } => {
             collect_unsafe_ffi(instance, reasons);
         }
-        Statement::InlineAsm { .. } | Statement::MetadataAssignment(..) => {
+        Statement::InlineAsm { .. } | Statement::MetadataAssignment(..) | Statement::InlineDefn(_) | Statement::InlineTxn(_) => {
             // No expression recursion needed
         }
     }

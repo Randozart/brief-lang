@@ -101,7 +101,9 @@ impl Annotator {
                 Statement::InlineAsm { .. }
                 | Statement::MetadataAssignment(..)
                 | Statement::SyncBlock(..)
-                | Statement::TrgBinding { .. } => {}
+                | Statement::TrgBinding { .. }
+                | Statement::InlineDefn(_)
+                | Statement::InlineTxn(_) => {}
             }
         }
     }
@@ -457,6 +459,12 @@ impl Annotator {
             }
             Statement::InlineAsm { asm_string, .. } => {
                 format!("{}asm \"{}\";\n", spaces, asm_string)
+            }
+            Statement::InlineDefn(d) => {
+                format!("{}// compile-time defn {}\n", spaces, d.name)
+            }
+            Statement::InlineTxn(t) => {
+                format!("{}// compile-time txn {}\n", spaces, t.name)
             }
         }
     }

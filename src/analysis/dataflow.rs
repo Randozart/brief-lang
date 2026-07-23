@@ -208,7 +208,7 @@ impl<'a> DataflowAnalyzer<'a> {
                 }
             }
             Statement::InlineAsm { .. } | Statement::TrgBinding { .. }
-            | Statement::MetadataAssignment(..) => {}
+            | Statement::MetadataAssignment(..) | Statement::InlineDefn(_) | Statement::InlineTxn(_) => {}
         }
     }
 
