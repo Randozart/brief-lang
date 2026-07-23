@@ -127,6 +127,8 @@ pub struct BuildOptions {
     pub allow_net: bool,
     /// 2026-07-23: Instruction budget for macro execution (0 = unlimited).
     pub macro_budget: u64,
+    /// 2026-07-23: Print virtual filesystem contents after compilation.
+    pub dump_vfs: bool,
 }
 
 /// Compile a Brief source file: produce an executable binary (or `.ll` with `--llvm`).
@@ -302,6 +304,23 @@ pub fn compile_source(file_path: &str, source: &str, opts: &BuildOptions) -> Res
         pm.run_bin(bin_path)?;
     }
 
+    // ── VFS dump / flush ────────────────────────────────────────────
+    // 2026-07-23: If --dump-vfs was specified, print virtual filesystem contents.
+    if opts.dump_vfs && !pm.vfs.is_empty() {
+        println!("\n=== Virtual Filesystem Contents ===");
+        let mut sorted: Vec<&String> = pm.vfs.keys().collect();
+        sorted.sort();
+        for path in &sorted {
+            let content = &pm.vfs[*path];
+            println!("  {} ({} bytes)", path, content.len());
+            if let Some(first_line) = content.lines().next() {
+                let preview = if first_line.len() > 80 { &first_line[..77] } else { first_line };
+                println!("    -> {}", preview);
+            }
+        }
+        println!("=== End VFS ===");
+    }
+
     Ok(())
 }
 
@@ -333,6 +352,7 @@ pub fn check_source(file_path: &str, source: &str) -> Result<(), String> {
         allow_sys_query: false,
         allow_net: false,
         macro_budget: 0,
+        dump_vfs: false,
     };
     let (_items, _universe) = parse_and_check(file_path, source, &default_opts)?;
     println!("OK");

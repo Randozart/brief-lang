@@ -30,7 +30,13 @@ pub mod print_plugin;
 use crate::ast::{StageKind, TopLevel};
 use crate::target::TargetConfig;
 use crate::type_universe::TypeUniverse;
+use std::collections::HashMap;
 use std::path::Path;
+
+/// 2026-07-23: In-memory virtual filesystem for macro-generated output.
+/// Files written to `virtual://` paths are stored here. Physical disk
+/// flush happens only at the end of compilation (if --allow-write).
+pub type Vfs = HashMap<String, String>;
 
 /// A single compiler plugin.
 ///
@@ -105,6 +111,9 @@ pub struct PluginManager {
     enabled_only: Vec<String>,
     /// 2026-07-23: Capability sandbox for $ intrinsics.
     pub sandbox: crate::macros::eval::Sandbox,
+    /// 2026-07-23: Virtual filesystem — stores macro-generated files in memory.
+    /// Flushed to physical disk only at end of compilation.
+    pub vfs: Vfs,
 }
 
 impl PluginManager {
@@ -115,6 +124,7 @@ impl PluginManager {
             disabled: Vec::new(),
             enabled_only: Vec::new(),
             sandbox: crate::macros::eval::Sandbox::permissive(),
+            vfs: Vfs::new(),
         }
     }
 

@@ -628,26 +628,50 @@ fn eval_nav_call(
         }
 
         // ── File I/O (2026-07-22) ────────────────────────────────────
-        "FileRead$" => {
-            sandbox.check(Capability::DiskRead, "FileRead$")?;
-            let path = expect_str_arg(args, 0, "FileRead$")?;
-            let content = std::fs::read_to_string(&path)
-                .map_err(|e| format!("FileRead$: cannot read '{}': {}", path, e))?;
-            Ok(NavValue::Str(content))
-        }
         "FileWrite$" => {
             sandbox.check(Capability::DiskWrite, "FileWrite$")?;
             let path = expect_str_arg(args, 0, "FileWrite$")?;
             let content = expect_str_arg(args, 1, "FileWrite$")?;
-            if let Some(parent) = std::path::Path::new(&path).parent() {
-                if !parent.as_os_str().is_empty() {
-                    std::fs::create_dir_all(parent)
-                        .map_err(|e| format!("FileWrite$: cannot create dir '{}': {}", parent.display(), e))?;
+            // Third argument: `{ persist: true }` to flush to physical disk
+            let persist = args.get(2).map(|a| matches!(a, Expr::Bool(true))).unwrap_or(false);
+
+            if path.starts_with("virtual://") || !persist {
+                // Default: write to in-memory virtual filesystem
+                let vfs_path = path.strip_prefix("virtual://").unwrap_or(&path).to_string();
+                if let Some(pm_inner) = pm.as_mut() {
+                    pm_inner.vfs.insert(vfs_path, content);
                 }
+            } else {
+                // Explicit persist: write to physical disk
+                if let Some(parent) = std::path::Path::new(&path).parent() {
+                    if !parent.as_os_str().is_empty() {
+                        std::fs::create_dir_all(parent)
+                            .map_err(|e| format!("FileWrite$: cannot create dir '{}': {}", parent.display(), e))?;
+                    }
+                }
+                std::fs::write(&path, &content)
+                    .map_err(|e| format!("FileWrite$: cannot write '{}': {}", path, e))?;
             }
-            std::fs::write(&path, &content)
-                .map_err(|e| format!("FileWrite$: cannot write '{}': {}", path, e))?;
             Ok(NavValue::Void)
+        }
+        "FileRead$" => {
+            sandbox.check(Capability::DiskRead, "FileRead$")?;
+            let path = expect_str_arg(args, 0, "FileRead$")?;
+            if path.starts_with("virtual://") {
+                let vfs_path = path.strip_prefix("virtual://").unwrap_or(&path).to_string();
+                match pm.as_ref().and_then(|p| p.vfs.get(&vfs_path)) {
+                    Some(content) => Ok(NavValue::Str(content.clone())),
+                    None => Err(format!("FileRead$: '{}' not found in virtual filesystem", path)),
+                }
+            } else {
+                // Check VFS first, then physical disk
+                if let Some(content) = pm.as_ref().and_then(|p| p.vfs.get(&path)) {
+                    return Ok(NavValue::Str(content.clone()));
+                }
+                let content = std::fs::read_to_string(&path)
+                    .map_err(|e| format!("FileRead$: cannot read '{}': {}", path, e))?;
+                Ok(NavValue::Str(content))
+            }
         }
 
         // ── Configuration (2026-07-22) ───────────────────────────────
