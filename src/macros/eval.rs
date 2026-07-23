@@ -221,11 +221,14 @@ fn eval_compile_time_fn(
                 let arg_val = eval_nav_chain(arg_expr, program, universe, stage, scope, sandbox, pm)?;
                 fn_scope.insert(param_name.clone(), arg_val);
             }
-            // Execute body statements
+            // Execute body statements, return the term value
             for stmt in &d.body {
-                evaluate_stage_stmt(stmt, program, universe, stage, &mut fn_scope, sandbox, pm)?;
+                if let Some(val) = evaluate_stage_stmt(stmt, program, universe,
+                    stage, &mut fn_scope, sandbox, pm)?
+                {
+                    return Ok(val);
+                }
             }
-            // No term support yet — return Void
             Ok(NavValue::Void)
         }
         crate::plugin::FnDef::Txn(t) => {
@@ -240,7 +243,11 @@ fn eval_compile_time_fn(
                 fn_scope.insert(param_name.clone(), arg_val);
             }
             for stmt in &t.body {
-                evaluate_stage_stmt(stmt, program, universe, stage, &mut fn_scope, sandbox, pm)?;
+                if let Some(val) = evaluate_stage_stmt(stmt, program, universe,
+                    stage, &mut fn_scope, sandbox, pm)?
+                {
+                    return Ok(val);
+                }
             }
             Ok(NavValue::Void)
         }
@@ -337,22 +344,24 @@ fn evaluate_stage_stmt(
     scope: &mut Scope,
     sandbox: &mut Sandbox,
     pm: &mut Option<&mut PluginManager>,
-) -> Result<(), String> {
+) -> Result<Option<NavValue>, String> {
     match stmt {
         Statement::Expression(expr) => {
             let _result = eval_nav_chain(expr, program, universe, stage, scope, sandbox, pm)?;
-            Ok(())
+            Ok(None)
         }
         Statement::Let { name, expr: Some(e), .. } => {
             let result = eval_nav_chain(e, program, universe, stage, scope, sandbox, pm)?;
             scope.insert(name.clone(), result);
-            Ok(())
+            Ok(None)
         }
         Statement::Block(statements) => {
             for s in statements {
-                evaluate_stage_stmt(s, program, universe, stage, scope, sandbox, pm)?;
+                if let Some(val) = evaluate_stage_stmt(s, program, universe, stage, scope, sandbox, pm)? {
+                    return Ok(Some(val));
+                }
             }
-            Ok(())
+            Ok(None)
         }
         Statement::Foreach { item, list, body } => {
             let list_val = eval_nav_chain(list, program, universe, stage, scope, sandbox, pm)?;
@@ -365,11 +374,14 @@ fn evaluate_stage_stmt(
                 let selection = Selection::single(node.clone());
                 scope.insert(item.clone(), NavValue::Selection(selection));
                 for s in body {
-                    evaluate_stage_stmt(s, program, universe, stage, scope, sandbox, pm)?;
+                    if let Some(val) = evaluate_stage_stmt(s, program, universe, stage, scope, sandbox, pm)? {
+                        scope.remove(item);
+                        return Ok(Some(val));
+                    }
                 }
             }
             scope.remove(item);
-            Ok(())
+            Ok(None)
         }
         // 2026-07-23: Assignment — evaluate the RHS and update scope.
         Statement::Assign(target, value) => {
@@ -379,7 +391,7 @@ fn evaluate_stage_stmt(
             };
             let result = eval_nav_chain(value, program, universe, stage, scope, sandbox, pm)?;
             scope.insert(name, result);
-            Ok(())
+            Ok(None)
         }
         Statement::Guarded(guard, body) => {
             // Handle BinaryOp comparisons (Count$() > 0, etc.) which
@@ -415,20 +427,29 @@ fn evaluate_stage_stmt(
             };
             if is_truthy {
                 for s in body {
-                    evaluate_stage_stmt(s, program, universe, stage, scope, sandbox, pm)?;
+                    if let Some(val) = evaluate_stage_stmt(s, program, universe, stage, scope, sandbox, pm)? {
+                        return Ok(Some(val));
+                    }
                 }
             }
-            Ok(())
+            Ok(None)
         }
-        // 2026-07-23: Term inside a stage block — for now, evaluate the
-        // expression for side effects (no return from stage blocks yet).
-        Statement::Term(opt) | Statement::TermBang(opt) => {
+        // 2026-07-23: Term — evaluate and return the expression value.
+        Statement::Term(opt) => {
+            let val = match opt {
+                Some(expr) => eval_nav_chain(expr, program, universe, stage, scope, sandbox, pm)?,
+                None => NavValue::Void,
+            };
+            Ok(Some(val))
+        }
+        // 2026-07-23: TermBang — evaluate for side effects, return Void.
+        Statement::TermBang(opt) => {
             if let Some(expr) = opt {
                 eval_nav_chain(expr, program, universe, stage, scope, sandbox, pm)?;
             }
-            Ok(())
+            Ok(Some(NavValue::Void))
         }
-        _ => Ok(()),
+        _ => Ok(None),
     }
 }
 
