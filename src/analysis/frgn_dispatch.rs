@@ -320,6 +320,7 @@ mod tests {
             extension: "py".to_string(),
             bridge_kind: "native_module".to_string(),
             calling_convention: "c_abi".to_string(),
+            module_init: false,
             protocols: HashMap::new(),
             templates: HashMap::new(),
         });
@@ -329,6 +330,7 @@ mod tests {
             extension: "rs".to_string(),
             bridge_kind: "extern_c_crate".to_string(),
             calling_convention: "lto".to_string(),
+            module_init: false,
             protocols: HashMap::new(),
             templates: HashMap::new(),
         });
