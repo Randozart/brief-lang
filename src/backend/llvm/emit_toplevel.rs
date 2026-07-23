@@ -1117,8 +1117,20 @@ impl LlvmBackend {
 
     fn expr_needs_state(expr: &Expr) -> bool {
         match expr {
-            Expr::Call(_, _, _) => true,
+            // Field access always needs state (reads struct metadata)
             Expr::Field(_, _) => true,
+            // Calls: only observable/stateful intrinsics need state.
+            // Regular function calls pass state through but don't use it.
+            Expr::Call(name, _, _) => {
+                matches!(name.as_str(),
+                    "Malloc#" | "Memcpy#" | "Memmove#" | "Memset#"
+                    | "PrintInt#" | "PrintChar#" | "PrintFloat#" | "Print#"
+                    | "FileRead#" | "FileWrite#" | "ShellCmd#"
+                    | "SysQuery#" | "EnvGet#" | "HttpFetch#"
+                    | "AllocArray#" | "AllocInitArray#" | "StringNew#"
+                    | "StringFromPtr#" | "StringConcat#"
+                )
+            }
             Expr::BinaryOp(_, lhs, rhs) => {
                 Self::expr_needs_state(lhs) || Self::expr_needs_state(rhs)
             }
