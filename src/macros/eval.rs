@@ -232,8 +232,7 @@ fn eval_compile_time_fn(
             Ok(NavValue::Void)
         }
         crate::plugin::FnDef::Txn(t) => {
-            // txn execution: loop with pre/post
-            // For now, just execute body once (basic support)
+            // Convergent loop: precondition → body → postcondition → repeat
             let mut fn_scope = Scope::new();
             for (i, (param_name, _param_type)) in t.parameters.iter().enumerate() {
                 let arg_expr = args.get(i).ok_or_else(|| {
@@ -242,14 +241,36 @@ fn eval_compile_time_fn(
                 let arg_val = eval_nav_chain(arg_expr, program, universe, stage, scope, sandbox, pm)?;
                 fn_scope.insert(param_name.clone(), arg_val);
             }
-            for stmt in &t.body {
-                if let Some(val) = evaluate_stage_stmt(stmt, program, universe,
-                    stage, &mut fn_scope, sandbox, pm)?
-                {
-                    return Ok(val);
+            let max_iter = 1000;
+            let mut term_val = NavValue::Void;
+            let mut term_hit = false;
+            for _iter in 0..max_iter {
+                // Evaluate precondition — if false, converged
+                let pre_result = eval_nav_chain(
+                    &t.contract.pre_condition, program, universe, stage, &fn_scope, sandbox, pm
+                )?;
+                if !nav_is_truthy(&pre_result) {
+                    break;
                 }
+                // Execute body one statement at a time
+                term_hit = false;
+                for stmt in &t.body {
+                    match evaluate_stage_stmt(stmt, program, universe, stage, &mut fn_scope, sandbox, pm) {
+                        Ok(Some(val)) => { term_hit = true; term_val = val; break; }
+                        Ok(None) => {}
+                        Err(e) => return Err(format!("{}: {}", t.name, e)),
+                    }
+                }
+                // Evaluate postcondition — if true, converged
+                let post_result = eval_nav_chain(
+                    &t.contract.post_condition, program, universe, stage, &fn_scope, sandbox, pm
+                )?;
+                if nav_is_truthy(&post_result) {
+                    return if term_hit { Ok(term_val) } else { Ok(NavValue::Void) };
+                }
+                // Postcondition not met — continue loop
             }
-            Ok(NavValue::Void)
+            Err(format!("{}: exceeded max iterations ({}) without convergence", t.name, max_iter))
         }
     }
 }
@@ -298,16 +319,29 @@ pub fn eval_nav_chain(
         Expr::Quoted(bytes) => String::from_utf8(bytes.clone())
             .map(NavValue::Str)
             .map_err(|_| "invalid UTF-8 string literal".into()),
-        // 2026-07-23: String concatenation for macro DSL.
-        Expr::BinaryOp(kind, lhs, rhs) if matches!(kind, BinaryOpKind::Add) => {
+        // 2026-07-23: Binary operators — arithmetic and comparison.
+        Expr::BinaryOp(kind, lhs, rhs) => {
             let lv = eval_nav_chain(lhs, program, universe, stage, scope, sandbox, pm)?;
             let rv = eval_nav_chain(rhs, program, universe, stage, scope, sandbox, pm)?;
-            match (lv, rv) {
-                (NavValue::Str(a), NavValue::Str(b)) => Ok(NavValue::Str(a + &b)),
-                (NavValue::Int(a), NavValue::Int(b)) => Ok(NavValue::Int(a + b)),
-                (NavValue::Str(a), NavValue::Int(b)) => Ok(NavValue::Str(a + &b.to_string())),
-                (NavValue::Int(a), NavValue::Str(b)) => Ok(NavValue::Str(a.to_string() + &b)),
-                _ => Err(format!("+ operator not supported for these operand types")),
+            let li = nav_to_i64(&lv);
+            let ri = nav_to_i64(&rv);
+            match kind {
+                BinaryOpKind::Add => {
+                    match (lv, rv) {
+                        (NavValue::Str(a), NavValue::Str(b)) => Ok(NavValue::Str(a + &b)),
+                        (NavValue::Int(a), NavValue::Int(b)) => Ok(NavValue::Int(a + b)),
+                        (NavValue::Str(a), NavValue::Int(b)) => Ok(NavValue::Str(a + &b.to_string())),
+                        (NavValue::Int(a), NavValue::Str(b)) => Ok(NavValue::Str(a.to_string() + &b)),
+                        _ => Err(format!("+ operator not supported for these operand types")),
+                    }
+                }
+                BinaryOpKind::Eq => Ok(NavValue::Bool(li == ri)),
+                BinaryOpKind::Neq => Ok(NavValue::Bool(li != ri)),
+                BinaryOpKind::Gt => Ok(NavValue::Bool(li > ri)),
+                BinaryOpKind::Lt => Ok(NavValue::Bool(li < ri)),
+                BinaryOpKind::Ge => Ok(NavValue::Bool(li >= ri)),
+                BinaryOpKind::Le => Ok(NavValue::Bool(li <= ri)),
+                _ => Err(format!("unsupported binary operator {:?}", kind)),
             }
         }
         // 2026-07-23: List construction for macro DSL (e.g., [a, b, c]).
@@ -324,6 +358,20 @@ pub fn eval_nav_chain(
 }
 
 // ── Statement Evaluation ───────────────────────────────────────────────
+
+/// Return true if a NavValue is "truthy" in a guard context.
+/// 2026-07-23: Extracted from Guarded handler for use in $txn loops.
+fn nav_is_truthy(val: &NavValue) -> bool {
+    match val {
+        NavValue::Selection(sel) => !sel.nodes.is_empty(),
+        NavValue::Count(n) => *n > 0,
+        NavValue::Bool(b) => *b,
+        NavValue::Int(n) => *n != 0,
+        NavValue::Str(s) => !s.is_empty(),
+        NavValue::Void => false,
+        _ => true,
+    }
+}
 
 /// Extract an i64 value from a NavValue for comparison operators.
 fn nav_to_i64(val: &NavValue) -> i64 {
@@ -416,15 +464,7 @@ fn evaluate_stage_stmt(
                 }
                 _ => eval_nav_chain(guard, program, universe, stage, scope, sandbox, pm)?,
             };
-            let is_truthy = match &result {
-                NavValue::Selection(sel) => !sel.nodes.is_empty(),
-                NavValue::Count(n) => *n > 0,
-                NavValue::Bool(b) => *b,
-                NavValue::Int(n) => *n != 0,
-                NavValue::Str(s) => !s.is_empty(),
-                NavValue::Void => false,
-                _ => true,
-            };
+            let is_truthy = nav_is_truthy(&result);
             if is_truthy {
                 for s in body {
                     if let Some(val) = evaluate_stage_stmt(s, program, universe, stage, scope, sandbox, pm)? {
@@ -448,6 +488,14 @@ fn evaluate_stage_stmt(
                 eval_nav_chain(expr, program, universe, stage, scope, sandbox, pm)?;
             }
             Ok(Some(NavValue::Void))
+        }
+        // 2026-07-23: Escape — abort compile-time function with error.
+        Statement::Escape(opt) => {
+            let msg = match opt {
+                Some(expr) => format!("{:?}", eval_nav_chain(expr, program, universe, stage, scope, sandbox, pm)?),
+                None => "compile-time escape".into(),
+            };
+            Err(msg)
         }
         _ => Ok(None),
     }
