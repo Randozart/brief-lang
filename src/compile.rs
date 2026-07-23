@@ -133,6 +133,9 @@ pub struct BuildOptions {
     pub update_lockfile: bool,
     /// 2026-07-23: Print macro expansion traces after compilation.
     pub dump_traces: bool,
+    /// 2026-07-23: Diff mode — show changes macros make to the AST without
+    /// writing output. Acts as a dry-run: shows added/removed/modified items.
+    pub diff_mode: bool,
 }
 
 /// Compile a Brief source file: produce an executable binary (or `.ll` with `--llvm`).
@@ -172,6 +175,13 @@ pub fn compile_source(file_path: &str, source: &str, opts: &BuildOptions) -> Res
     // Extract inline $(Stage) blocks from the AST — they are plugins,
     // not runtime code.
     extract_inline_stage_blocks(&mut items, &mut pm);
+
+    // 2026-07-23: Snapshot the program before any macro evaluation for --diff.
+    let pre_macro_items = if opts.diff_mode {
+        Some(items.clone())
+    } else {
+        None
+    };
 
     // ── Parsed stage: AST transformation (before import resolution) ───
     {
@@ -287,6 +297,21 @@ pub fn compile_source(file_path: &str, source: &str, opts: &BuildOptions) -> Res
         eprintln!("layout optimizer: {} change(s) applied", layout_changes.len());
     }
 
+    // ── Diff mode / dry-run ─────────────────────────────────────────────
+    // 2026-07-23: If --diff was specified, show what macros changed and exit
+    // before codegen/writing. No output file is produced.
+    if let Some(ref pre_macro) = pre_macro_items {
+        let diff = brief_compiler::macros::diff::compute_diff(pre_macro, &items);
+        if diff.is_empty() {
+            println!("(no changes)");
+        } else {
+            println!("\n=== Macro Changes ({} change(s)) ===", diff.len());
+            brief_compiler::macros::diff::print_diff(&diff);
+            println!("=== End Macro Changes ===");
+        }
+        return Ok(());
+    }
+
     // ── Code generation ───────────────────────────────────────────────
     let (codegen_output, ext) = codegen(&items, &mut universe, &pm, opts, alloc_strategies, resolved_frgns)?;
 
@@ -395,6 +420,7 @@ pub fn check_source(file_path: &str, source: &str) -> Result<(), String> {
         dump_vfs: false,
         update_lockfile: false,
         dump_traces: false,
+        diff_mode: false,
     };
     let (_items, _universe) = parse_and_check(file_path, source, &default_opts)?;
     println!("OK");

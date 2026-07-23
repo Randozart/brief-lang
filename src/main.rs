@@ -73,6 +73,7 @@ fn print_usage(program: &str) {
     eprintln!("  {} build <file.bv> --allow-net              Allow macros network access", name);
     eprintln!("  {} build <file.bv> --dump-vfs               Print virtual filesystem contents after build", name);
     eprintln!("  {} build <file.bv> --dump-traces            Print macro expansion traces after build", name);
+    eprintln!("  {} build <file.bv> --diff                   Show macro changes (dry-run, no output)", name);
     eprintln!("  {} build <file.bv> --update-lockfile        Regenerate macro-lock.toml from plugin files", name);
     eprintln!("  {} audit [file.bv]                Scan for $ intrinsic usage and capability requirements", name);
     eprintln!("  {} check <file.bv>               Type-check only", name);
@@ -122,6 +123,7 @@ fn parse_build_args(args: &[String]) -> Result<compile::BuildOptions, String> {
     let mut dump_vfs = false;
     let mut update_lockfile = false;
     let mut dump_traces = false;
+    let mut diff_mode = false;
 
     let mut i = 0;
     while i < args.len() {
@@ -211,6 +213,9 @@ fn parse_build_args(args: &[String]) -> Result<compile::BuildOptions, String> {
         } else if arg == "--dump-traces" {
             dump_traces = true;
             i += 1;
+        } else if arg == "--diff" {
+            diff_mode = true;
+            i += 1;
         } else if arg == "--macro-budget" {
             let val = args.get(i + 1).ok_or("--macro-budget requires a number argument")?;
             macro_budget = val.parse()
@@ -276,6 +281,7 @@ fn parse_build_args(args: &[String]) -> Result<compile::BuildOptions, String> {
         dump_vfs,
         update_lockfile,
         dump_traces,
+        diff_mode,
     })
 }
 
