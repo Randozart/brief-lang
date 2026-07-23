@@ -570,6 +570,28 @@ fn eval_nav_call(
                 Statement::Block(stmts)
             ))))
         }
+        // 2026-07-23: Quote$ — structural quasiquoting.
+        // Template string parsed as Brief source; $ident references resolved
+        // from compile-time scope variables. $$escapes to literal $.
+        // Returns TopLevel (single item) or VecTopLevel (multiple items).
+        "Quote$" => {
+            let template = expect_str_arg(args, 0, "Quote$")?;
+            let tokens = crate::lexer::tokenize(&template)
+                .map_err(|e| format!("Quote$: tokenization error: {}", e))?;
+            let mut parser = crate::parser::Parser::new(tokens, &template);
+            let mut items = parser.parse_program()
+                .map_err(|e| format!("Quote$: parse error: {}", e))?;
+            // Resolve $$ → $ escapes and $ident references from scope.
+            // $$handled at AST level by resolve_dollar_refs_in_expr.
+            for item in items.iter_mut() {
+                resolve_dollar_refs_in_toplevel(item, scope)?;
+            }
+            if items.len() == 1 {
+                Ok(NavValue::TopLevel(items.into_iter().next().unwrap()))
+            } else {
+                Ok(NavValue::VecTopLevel(items))
+            }
+        }
 
         // Fix 2: Stage$.List$ — list registered plugins
         "List$" if is_stage_receiver(args) => {
@@ -1150,6 +1172,341 @@ fn type_info_from_toplevel(tl: &TopLevel, field: &str) -> Result<String, String>
     }
 }
 
+// ── Quote$ Helpers ──────────────────────────────────────────────────────
+// 2026-07-23: AST-level quasiquoting — resolve $identifier references from
+// scope, convert NavValues to Exprs, and handle $$ escaping.
+
+/// Parse a string as a single Brief expression.
+fn parse_expr_from_string(s: &str) -> Result<Expr, String> {
+    let tokens = crate::lexer::tokenize(s)
+        .map_err(|e| format!("cannot tokenize expression '{}': {}", s, e))?;
+    let mut parser = crate::parser::Parser::new(tokens, s);
+    parser.parse_expression()
+        .map_err(|e| format!("cannot parse '{}' as expression: {}", s, e))
+}
+
+/// Human-readable name for a NavValue variant.
+fn nav_type_name(val: &NavValue) -> &'static str {
+    match val {
+        NavValue::Selection(_) => "Selection",
+        NavValue::Position(_) => "Position",
+        NavValue::TextSelection(_) => "TextSelection",
+        NavValue::Count(_) => "Count",
+        NavValue::Names(_) => "Names",
+        NavValue::Bool(_) => "Bool",
+        NavValue::Int(_) => "Int",
+        NavValue::Str(_) => "Str",
+        NavValue::TopLevel(_) => "TopLevel",
+        NavValue::VecTopLevel(_) => "VecTopLevel",
+        NavValue::List(_) => "List",
+        NavValue::Void => "Void",
+    }
+}
+
+/// Convert a NavValue to an Expr for substitution into a quasiquote template.
+fn nav_value_to_expr(val: &NavValue) -> Result<Expr, String> {
+    match val {
+        NavValue::Int(n) => Ok(Expr::Decimal(*n)),
+        NavValue::Bool(b) => Ok(Expr::Bool(*b)),
+        NavValue::Count(n) => Ok(Expr::Decimal(*n as i64)),
+        NavValue::Str(s) => parse_expr_from_string(s),
+        NavValue::Names(names) => {
+            let exprs: Vec<Expr> = names.iter()
+                .map(|n| Expr::Quoted(n.as_bytes().to_vec()))
+                .collect();
+            Ok(Expr::List(exprs))
+        }
+        NavValue::TopLevel(TopLevel::Statement(stmt)) => {
+            match stmt.as_ref() {
+                Statement::Expression(expr) => Ok(expr.clone()),
+                _ => Err(format!(
+                    "cannot substitute a non-expression statement '{}' as an expression",
+                    stmt
+                )),
+            }
+        }
+        other => Err(format!(
+            "cannot substitute {} as an expression (use Str, Int, Bool, Count, Names, or an expression statement)",
+            nav_type_name(other)
+        )),
+    }
+}
+
+/// Recursively resolve $ident references in an Expr tree.
+/// $$ident → $ident (literal, escape). $ident → scope lookup.
+fn resolve_dollar_refs_in_expr(expr: &mut Expr, scope: &Scope) -> Result<(), String> {
+    match expr {
+        Expr::Identifier(name) => {
+            // $$escape → produce literal $ident (no interpolation). The leading
+            // $ is preserved but won't be re-matched by $ident because we return.
+            if let Some(rest) = name.strip_prefix("$$") {
+                *expr = Expr::Identifier(format!("${}", rest));
+                return Ok(());
+            }
+            // $ident → scope lookup
+            if let Some(var_name) = name.strip_prefix('$') {
+                if !var_name.is_empty() {
+                    if let Some(val) = scope.get(var_name) {
+                        let replacement = nav_value_to_expr(val)?;
+                        *expr = replacement;
+                    }
+                }
+            }
+            Ok(())
+        }
+        Expr::Call(_, args, _) => {
+            for arg in args.iter_mut() {
+                resolve_dollar_refs_in_expr(arg, scope)?;
+            }
+            Ok(())
+        }
+        Expr::BinaryOp(_, lhs, rhs) => {
+            resolve_dollar_refs_in_expr(lhs, scope)?;
+            resolve_dollar_refs_in_expr(rhs, scope)
+        }
+        Expr::UnaryOp(_, operand) => resolve_dollar_refs_in_expr(operand, scope),
+        Expr::Field(obj, _) => resolve_dollar_refs_in_expr(obj, scope),
+        Expr::Index(obj, index) => {
+            resolve_dollar_refs_in_expr(obj, scope)?;
+            resolve_dollar_refs_in_expr(index, scope)
+        }
+        Expr::If(cond, then, else_) => {
+            resolve_dollar_refs_in_expr(cond, scope)?;
+            resolve_dollar_refs_in_expr(then, scope)?;
+            if let Some(el) = else_ {
+                resolve_dollar_refs_in_expr(el, scope)?;
+            }
+            Ok(())
+        }
+        Expr::Block(stmts) => {
+            for stmt in stmts.iter_mut() {
+                resolve_dollar_refs_in_stmt(stmt, scope)?;
+            }
+            Ok(())
+        }
+        Expr::Match(scrutinee, arms) => {
+            resolve_dollar_refs_in_expr(scrutinee, scope)?;
+            for arm in arms.iter_mut() {
+                if let Some(ref mut g) = arm.guard {
+                    resolve_dollar_refs_in_expr(g, scope)?;
+                }
+                resolve_dollar_refs_in_expr(&mut arm.body, scope)?;
+            }
+            Ok(())
+        }
+        Expr::Tuple(items) | Expr::List(items) => {
+            for item in items.iter_mut() {
+                resolve_dollar_refs_in_expr(item, scope)?;
+            }
+            Ok(())
+        }
+        Expr::Lambda(_, body) => resolve_dollar_refs_in_expr(body, scope),
+        Expr::Cast(inner, _)
+        | Expr::Within(inner, _)
+        | Expr::IsType(inner, _)
+        | Expr::Deref(inner)
+        | Expr::AddrOf(inner) => resolve_dollar_refs_in_expr(inner, scope),
+        Expr::PluginIntercept { args: pargs, .. } => {
+            for arg in pargs.iter_mut() {
+                resolve_dollar_refs_in_expr(arg, scope)?;
+            }
+            Ok(())
+        }
+        Expr::DerivationBlock(db) => {
+            if let Some(ref mut syn) = db.synthesized {
+                resolve_dollar_refs_in_expr(syn, scope)?;
+            }
+            Ok(())
+        }
+        // Literals and simple values — no nested identifiers
+        Expr::Quoted(_) | Expr::Decimal(_) | Expr::Float(_) | Expr::Bool(_)
+        | Expr::TaggedLiteral(_, _) | Expr::PropertyGet(_)
+        | Expr::FormattingAnnotation(_) => Ok(()),
+    }
+}
+
+/// Recursively resolve $ident references in a Statement tree.
+fn resolve_dollar_refs_in_stmt(stmt: &mut Statement, scope: &Scope) -> Result<(), String> {
+    match stmt {
+        Statement::Let { expr, .. } => {
+            if let Some(e) = expr {
+                resolve_dollar_refs_in_expr(e, scope)?;
+            }
+            Ok(())
+        }
+        Statement::Assign(target, value) => {
+            resolve_dollar_refs_in_expr(target, scope)?;
+            resolve_dollar_refs_in_expr(value, scope)
+        }
+        Statement::Term(expr) | Statement::TermBang(expr)
+        | Statement::Return(expr) | Statement::Escape(expr) => {
+            if let Some(e) = expr {
+                resolve_dollar_refs_in_expr(e, scope)?;
+            }
+            Ok(())
+        }
+        Statement::Expression(expr) => resolve_dollar_refs_in_expr(expr, scope),
+        Statement::If(cond, then, else_) => {
+            resolve_dollar_refs_in_expr(cond, scope)?;
+            for s in then.iter_mut() {
+                resolve_dollar_refs_in_stmt(s, scope)?;
+            }
+            for s in else_.iter_mut() {
+                resolve_dollar_refs_in_stmt(s, scope)?;
+            }
+            Ok(())
+        }
+        Statement::Guarded(guard, body) => {
+            resolve_dollar_refs_in_expr(guard, scope)?;
+            for s in body.iter_mut() {
+                resolve_dollar_refs_in_stmt(s, scope)?;
+            }
+            Ok(())
+        }
+        Statement::Block(stmts) | Statement::SyncBlock(stmts) => {
+            for s in stmts.iter_mut() {
+                resolve_dollar_refs_in_stmt(s, scope)?;
+            }
+            Ok(())
+        }
+        Statement::Foreach { list, body, .. } => {
+            resolve_dollar_refs_in_expr(list, scope)?;
+            for s in body.iter_mut() {
+                resolve_dollar_refs_in_stmt(s, scope)?;
+            }
+            Ok(())
+        }
+        Statement::TrgBinding { instance, .. } => {
+            resolve_dollar_refs_in_expr(instance, scope)
+        }
+        Statement::InlineAsm { .. } | Statement::MetadataAssignment(..) => Ok(()),
+    }
+}
+
+/// Recursively resolve $ident references in a Type tree (minimal — handles
+/// Custom name lookup from Str scope values).
+fn resolve_dollar_refs_in_type(ty: &mut Type, scope: &Scope) -> Result<(), String> {
+    match ty {
+        Type::Custom(name) => {
+            if let Some(var_name) = name.strip_prefix('$') {
+                if let Some(val) = scope.get(var_name) {
+                    match val {
+                        NavValue::Str(s) => {
+                            *ty = Type::Custom(s.clone());
+                        }
+                        _ => return Err(format!(
+                            "cannot substitute {} as a type name (use a Str scope variable)",
+                            nav_type_name(val)
+                        )),
+                    }
+                }
+            }
+            Ok(())
+        }
+        Type::Generic(_, args) | Type::Applied(_, args)
+        | Type::Tuple(args) | Type::Union(args) => {
+            for a in args.iter_mut() {
+                resolve_dollar_refs_in_type(a, scope)?;
+            }
+            Ok(())
+        }
+        Type::Ptr(inner) | Type::PtrConst(inner) => {
+            resolve_dollar_refs_in_type(inner, scope)
+        }
+        Type::Vector(inner, _) | Type::Constrained(inner, _) => {
+            resolve_dollar_refs_in_type(inner, scope)
+        }
+        Type::Void | Type::Bits(_) | Type::Width(_)
+        | Type::TypeVar(_) | Type::HashWord(_) | Type::HashWordVariant(_, _)
+        | Type::LayoutPtr(_) | Type::Function(_, _) => Ok(()),
+    }
+}
+
+/// Recursively resolve $ident references in a TopLevel AST node.
+/// Handles common TopLevel variants; less common ones (Meld, Trigger, etc.)
+/// are skipped conservatively.
+fn resolve_dollar_refs_in_toplevel(tl: &mut TopLevel, scope: &Scope) -> Result<(), String> {
+    match tl {
+        TopLevel::Statement(stmt) => resolve_dollar_refs_in_stmt(stmt, scope),
+        TopLevel::Definition(def) => {
+            for stmt in &mut def.body {
+                resolve_dollar_refs_in_stmt(stmt, scope)?;
+            }
+            Ok(())
+        }
+        TopLevel::Transaction(txn) => {
+            for stmt in &mut txn.body {
+                resolve_dollar_refs_in_stmt(stmt, scope)?;
+            }
+            Ok(())
+        }
+        TopLevel::StageBlock(sb) => {
+            for stmt in &mut sb.body {
+                resolve_dollar_refs_in_stmt(stmt, scope)?;
+            }
+            Ok(())
+        }
+        TopLevel::ForeignBinding(fb) => {
+            for (_, ty) in &mut fb.inputs {
+                resolve_dollar_refs_in_type(ty, scope)?;
+            }
+            for (_, ty) in &mut fb.success_output {
+                resolve_dollar_refs_in_type(ty, scope)?;
+            }
+            Ok(())
+        }
+        TopLevel::Struct(s) => {
+            for field in &mut s.fields {
+                resolve_dollar_refs_in_type(&mut field.ty, scope)?;
+            }
+            Ok(())
+        }
+        TopLevel::Enum(e) => {
+            for variant in &mut e.variants {
+                match variant {
+                    crate::ast::top::EnumVariant::Unit(_) => {}
+                    crate::ast::top::EnumVariant::Tuple(_, types) => {
+                        for ty in types.iter_mut() {
+                            resolve_dollar_refs_in_type(ty, scope)?;
+                        }
+                    }
+                    crate::ast::top::EnumVariant::Struct(_, fields) => {
+                        for (_, ty) in fields.iter_mut() {
+                            resolve_dollar_refs_in_type(ty, scope)?;
+                        }
+                    }
+                }
+            }
+            Ok(())
+        }
+        TopLevel::Constant(c) => {
+            resolve_dollar_refs_in_expr(&mut c.expr, scope)?;
+            Ok(())
+        }
+        TopLevel::Import(_) | TopLevel::Export(_) | TopLevel::Cell(_)
+        | TopLevel::Meld(_) | TopLevel::Trigger(_) | TopLevel::Signature(_)
+        | TopLevel::StateDecl(_) | TopLevel::TriggerBinding { .. }
+        | TopLevel::LinkDependency(_) | TopLevel::ResourceDecl(_)
+        | TopLevel::RStruct(_) | TopLevel::TypeDef(_) | TopLevel::Codec(_)
+        | TopLevel::Assertion { .. } | TopLevel::Fuzzed { .. }
+        | TopLevel::RenderBlock(_) | TopLevel::Stylesheet(_)
+        | TopLevel::SvgComponent { .. } | TopLevel::SyncGroup { .. }
+        | TopLevel::Cfg(_) => Ok(()),
+    }
+}
+
+/// Restore $$ → $ in all identifiers within a TopLevel AST node.
+/// Called after parse-time sentinel replacement to handle identifiers
+/// that contain the sentinel byte.
+fn restore_double_dollar_in_toplevel(tl: &mut TopLevel) {
+    // For the initial implementation, this is a no-op at the AST level
+    // because $$ is not a valid identifier start in Brief's lexer —
+    // it would be lexed as two separate tokens: $ and $identifier.
+    // The sentinel replacement at the string level handles this correctly.
+    // This function is a hook for future $$-in-identifier support.
+    let _ = tl;
+}
+
 // ── Tests ──────────────────────────────────────────────────────────────
 
 #[cfg(test)]
@@ -1443,5 +1800,271 @@ mod tests {
         assert!(result.is_err(), "HttpFetch$ should error without --allow-net");
         let err = result.unwrap_err();
         assert!(err.contains("Network"), "error should mention Network capability, got: {}", err);
+    }
+
+    // ── Quote$ Tests (2026-07-23) ───────────────────────────────────
+
+    fn scope_with(pairs: Vec<(&str, NavValue)>) -> Scope {
+        let mut s = Scope::new();
+        for (k, v) in pairs {
+            s.insert(k.to_string(), v);
+        }
+        s
+    }
+
+    fn eval_quote(template: &str, scope: &Scope) -> Result<NavValue, String> {
+        let mut program = vec![];
+        let mut universe = TypeUniverse::new();
+        let expr = Expr::Call("Quote$".into(), vec![Expr::Quoted(template.as_bytes().to_vec())], None);
+        eval_nav_chain(&expr, &mut program, &mut universe,
+            StageKind::Parsed, &scope, &mut test_sandbox(), &mut None)
+    }
+
+    #[test]
+    fn test_quote_basic_int_interpolation() {
+        let scope = scope_with(vec![("val", NavValue::Int(42))]);
+        let result = eval_quote("let x = $val;", &scope).unwrap();
+        match result {
+            NavValue::TopLevel(TopLevel::Statement(stmt)) => {
+                match stmt.as_ref() {
+                    Statement::Let { name, expr: Some(e), .. } => {
+                        assert_eq!(name, "x");
+                        assert!(matches!(e, Expr::Decimal(42)), "expected Decimal(42), got {:?}", e);
+                    }
+                    other => panic!("expected Let statement, got {:?}", other),
+                }
+            }
+            other => panic!("expected TopLevel, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_quote_str_as_expression() {
+        let scope = scope_with(vec![("expr", NavValue::Str("a + b".into()))]);
+        let result = eval_quote("let x = $expr;", &scope).unwrap();
+        match result {
+            NavValue::TopLevel(TopLevel::Statement(stmt)) => {
+                match stmt.as_ref() {
+                    Statement::Let { expr: Some(e), .. } => {
+                        // Should parse "a + b" as BinaryOp(Add, Identifier("a"), Identifier("b"))
+                        match e {
+                            Expr::BinaryOp(kind, _, _) => {
+                                assert_eq!(*kind, crate::ast::BinaryOpKind::Add,
+                                    "expected Add, got {:?}", kind);
+                            }
+                            other => panic!("expected BinaryOp, got {:?}", other),
+                        }
+                    }
+                    other => panic!("expected Let with expr, got {:?}", other),
+                }
+            }
+            other => panic!("expected TopLevel, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_quote_bool_interpolation() {
+        let scope = scope_with(vec![("flag", NavValue::Bool(true))]);
+        let result = eval_quote("let x = $flag;", &scope).unwrap();
+        match result {
+            NavValue::TopLevel(TopLevel::Statement(stmt)) => {
+                match stmt.as_ref() {
+                    Statement::Let { expr: Some(Expr::Bool(b)), .. } => {
+                        assert!(b);
+                    }
+                    other => panic!("expected Let with Bool(true), got {:?}", other),
+                }
+            }
+            other => panic!("expected TopLevel, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_quote_multiple_variables() {
+        // Use $name in expression position (not the LET name field, which is a String)
+        let scope = scope_with(vec![
+            ("name", NavValue::Str("counter".into())),
+            ("val", NavValue::Int(0)),
+        ]);
+        let result = eval_quote("let x = $name; let y = $val;", &scope).unwrap();
+        match result {
+            NavValue::VecTopLevel(items) => {
+                assert_eq!(items.len(), 2);
+                if let TopLevel::Statement(stmt) = &items[0] {
+                    match stmt.as_ref() {
+                        Statement::Let { expr: Some(Expr::Identifier(s)), .. } => {
+                            assert_eq!(s, "counter", "$name should resolve to 'counter'");
+                        }
+                        other => panic!("expected Let with Identifier(counter), got {:?}", other),
+                    }
+                } else {
+                    panic!("expected first item to be a Statement");
+                }
+                if let TopLevel::Statement(stmt) = &items[1] {
+                    match stmt.as_ref() {
+                        Statement::Let { expr: Some(Expr::Decimal(0)), .. } => {
+                            // OK
+                        }
+                        other => panic!("expected second Let = Decimal(0), got {:?}", other),
+                    }
+                } else {
+                    panic!("expected second item to be a Statement");
+                }
+            }
+            other => panic!("expected VecTopLevel, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_quote_double_dollar_escape() {
+        // $$myvar inside a let expression should produce literal $myvar
+        let scope = scope_with(vec![("myvar", NavValue::Str("secret".into()))]);
+        let result = eval_quote("let x = $$myvar;", &scope).unwrap();
+        match result {
+            NavValue::TopLevel(TopLevel::Statement(stmt)) => {
+                match stmt.as_ref() {
+                    Statement::Let { expr: Some(Expr::Identifier(name)), .. } => {
+                        assert_eq!(name, "$myvar", "$$ should escape to literal $");
+                    }
+                    other => panic!("expected Let with Identifier($myvar), got {:?}", other),
+                }
+            }
+            other => panic!("expected TopLevel, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_quote_ident_not_in_scope() {
+        // $unknown not in scope — should be left as-is in expression position
+        let scope = empty_scope();
+        let result = eval_quote("let x = $unknown;", &scope).unwrap();
+        match result {
+            NavValue::TopLevel(TopLevel::Statement(stmt)) => {
+                match stmt.as_ref() {
+                    Statement::Let { expr: Some(Expr::Identifier(name)), .. } => {
+                        assert_eq!(name, "$unknown");
+                    }
+                    other => panic!("expected Let with Identifier($unknown), got {:?}", other),
+                }
+            }
+            other => panic!("expected TopLevel, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_quote_no_substitution() {
+        let scope = empty_scope();
+        let result = eval_quote("let x = 42;", &scope).unwrap();
+        match result {
+            NavValue::TopLevel(TopLevel::Statement(stmt)) => {
+                match stmt.as_ref() {
+                    Statement::Let { name, expr: Some(Expr::Decimal(42)), .. } => {
+                        assert_eq!(name, "x");
+                    }
+                    other => panic!("expected Let x = Decimal(42), got {:?}", other),
+                }
+            }
+            other => panic!("expected TopLevel, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_quote_multiple_top_level_items() {
+        let scope = scope_with(vec![("a", NavValue::Int(1)), ("b", NavValue::Int(2))]);
+        let result = eval_quote("let x = $a; let y = $b;", &scope).unwrap();
+        match result {
+            NavValue::VecTopLevel(items) => {
+                assert_eq!(items.len(), 2);
+                if let TopLevel::Statement(stmt) = &items[0] {
+                    match stmt.as_ref() {
+                        Statement::Let { name, expr: Some(Expr::Decimal(1)), .. } => {
+                            assert_eq!(name, "x");
+                        }
+                        other => panic!("expected first Let x = 1, got {:?}", other),
+                    }
+                } else {
+                    panic!("expected first item to be a Statement");
+                }
+                if let TopLevel::Statement(stmt) = &items[1] {
+                    match stmt.as_ref() {
+                        Statement::Let { name, expr: Some(Expr::Decimal(2)), .. } => {
+                            assert_eq!(name, "y");
+                        }
+                        other => panic!("expected second Let y = 2, got {:?}", other),
+                    }
+                } else {
+                    panic!("expected second item to be a Statement");
+                }
+            }
+            other => panic!("expected VecTopLevel, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_quote_nested_in_call() {
+        let scope = scope_with(vec![
+            ("a", NavValue::Str("x".into())),
+            ("b", NavValue::Int(42)),
+        ]);
+        let result = eval_quote("let result = foo($a, $b);", &scope).unwrap();
+        match result {
+            NavValue::TopLevel(TopLevel::Statement(stmt)) => {
+                match stmt.as_ref() {
+                    Statement::Let { expr: Some(Expr::Call(name, args, _)), .. } => {
+                        assert_eq!(name, "foo");
+                        assert_eq!(args.len(), 2);
+                        assert!(matches!(&args[0], Expr::Identifier(s) if s == "x"));
+                        assert!(matches!(&args[1], Expr::Decimal(42)));
+                    }
+                    other => panic!("expected Let with Call, got {:?}", other),
+                }
+            }
+            other => panic!("expected TopLevel, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_quote_empty_template() {
+        let scope = empty_scope();
+        let result = eval_quote("", &scope).unwrap();
+        match result {
+            NavValue::VecTopLevel(items) => {
+                assert!(items.is_empty(), "empty template should produce empty VecTopLevel");
+            }
+            NavValue::TopLevel(_) => panic!("empty template should produce VecTopLevel, not TopLevel"),
+            other => panic!("expected VecTopLevel, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_quote_template_with_block() {
+        let scope = scope_with(vec![("val", NavValue::Int(99))]);
+        let result = eval_quote("defn main() { let x = $val; }", &scope).unwrap();
+        match result {
+            NavValue::TopLevel(TopLevel::Definition(def)) => {
+                assert_eq!(def.name, "main");
+                assert_eq!(def.body.len(), 1);
+                match &def.body[0] {
+                    Statement::Let { name, expr: Some(Expr::Decimal(99)), .. } => {
+                        assert_eq!(name, "x");
+                    }
+                    other => panic!("expected Let x = 99 in defn body, got {:?}", other),
+                }
+            }
+            other => panic!("expected TopLevel::Definition, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_quote_pure_intrinsic_no_sandbox_check() {
+        // Quote$ is pure — should work without any capabilities
+        let scope = scope_with(vec![("val", NavValue::Int(7))]);
+        let mut program = vec![];
+        let mut universe = TypeUniverse::new();
+        let mut restricted = Sandbox::default(); // all false
+        let expr = Expr::Call("Quote$".into(), vec![Expr::Quoted("let x = $val;".as_bytes().to_vec())], None);
+        let result = eval_nav_chain(&expr, &mut program, &mut universe,
+            StageKind::Parsed, &scope, &mut restricted, &mut None);
+        assert!(result.is_ok(), "Quote$ should work without any capabilities");
     }
 }
