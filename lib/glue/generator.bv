@@ -1,11 +1,44 @@
 // glue-generator.bv — Brief-written GLUE bridge generator
-// 2026-07-23: Full rewrite as a stress test of the $ macro system.
-// Uses ConfigGet$, Tag$, TypeInfo$, StrReplace$, FileWrite$, foreach,
-// when-guards, string concatenation, and list construction.
+// 2026-07-23: Uses $defn helpers for template rendering, demonstrating
+// the compile-time function system. Cleaner than chained StrReplace$.
 //
-// Works as a $(Normalized @ highest) stage plugin — runs after type
-// checking when all exports are fully resolved.
 // Run with: brief build bridge.bv --enable-plugin glue-generator
+
+$defn render_fn(tmpl: String, name: String, params: String, ffi_params: String,
+                args_abi: String, ret_native: String, ret_c_abi: String,
+                return_expr: String, c_types: String, args: String,
+                s_param: String) -> String {
+    let body = StrReplace$(tmpl, "{{name}}", name);
+    let body = StrReplace$(body, "{{params}}", params);
+    let body = StrReplace$(body, "{{ffi_params}}", ffi_params);
+    let body = StrReplace$(body, "{{args_abi}}", args_abi);
+    let body = StrReplace$(body, "{{return}}", ret_native);
+    let body = StrReplace$(body, "{{c_return}}", ret_c_abi);
+    let body = StrReplace$(body, "{{return_expr}}", return_expr);
+    let body = StrReplace$(body, "{{c_types}}", c_types);
+    let body = StrReplace$(body, "{{args}}", args);
+    let body = StrReplace$(body, "{{s_param}}", s_param);
+    term body;
+};
+
+$defn render_ffi(tmpl: String, name: String, ffi_params: String,
+                 c_return: String, s_param: String) -> String {
+    let body = StrReplace$(tmpl, "{{name}}", name);
+    let body = StrReplace$(body, "{{ffi_params}}", ffi_params);
+    let body = StrReplace$(body, "{{c_return}}", c_return);
+    let body = StrReplace$(body, "{{s_param}}", s_param);
+    term body;
+};
+
+$defn render_file_tmpl(tmpl: String, bridge_name: String, exports: String,
+                       ffi_decls: String, s_param: String, s_init: String) -> String {
+    let body = StrReplace$(tmpl, "{{bridge_name}}", bridge_name);
+    let body = StrReplace$(body, "{{exports}}", exports);
+    let body = StrReplace$(body, "{{ffi_decls}}", ffi_decls);
+    let body = StrReplace$(body, "{{s_param}}", s_param);
+    let body = StrReplace$(body, "{{s_init}}", s_init);
+    term body;
+};
 
 $(Normalized @ highest) {
     let target = "rust";
@@ -30,8 +63,7 @@ $(Normalized @ highest) {
 
     foreach(exp in exports) {
         let name = TypeInfo$(exp, "name");
-        let pcount_str = TypeInfo$(exp, "params.count");
-        let pcount = pcount_str;
+        let pcount = TypeInfo$(exp, "params.count");
         let ret_type = TypeInfo$(exp, "output_type");
 
         let ret_native = ConfigGet$(target, "protocols." + ret_type + ".native");
@@ -68,36 +100,22 @@ $(Normalized @ highest) {
             pnames_str = pnames_str + ", " + p1n;
         };
 
-        let fn_body = StrReplace$(fn_tmpl, "{{name}}", name);
-        fn_body = StrReplace$(fn_body, "{{params}}", params_str);
-        fn_body = StrReplace$(fn_body, "{{ffi_params}}", ffi_params_str);
-        fn_body = StrReplace$(fn_body, "{{args_abi}}", args_abi_str);
-        fn_body = StrReplace$(fn_body, "{{return}}", ret_native);
-        fn_body = StrReplace$(fn_body, "{{c_return}}", ret_c_abi);
-        fn_body = StrReplace$(fn_body, "{{return_expr}}", return_expr);
-        fn_body = StrReplace$(fn_body, "{{c_types}}", c_types_str);
-        fn_body = StrReplace$(fn_body, "{{args}}", pnames_str);
-        fn_body = StrReplace$(fn_body, "{{s_param}}", s_param);
+        let fn_body = render_fn(fn_tmpl, name, params_str, ffi_params_str,
+            args_abi_str, ret_native, ret_c_abi, return_expr,
+            c_types_str, pnames_str, s_param);
         exports_code = exports_code + fn_body + "\n";
 
-        let ffi_body = StrReplace$(ffi_tmpl, "{{name}}", name);
-        ffi_body = StrReplace$(ffi_body, "{{ffi_params}}", ffi_params_str);
-        ffi_body = StrReplace$(ffi_body, "{{c_return}}", ret_c_abi);
-        ffi_body = StrReplace$(ffi_body, "{{s_param}}", s_param);
+        let ffi_body = render_ffi(ffi_tmpl, name, ffi_params_str,
+            ret_c_abi, s_param);
         ffi_code = ffi_code + ffi_body + "\n";
 
         EmitInfo$("  GLUE export: " + name);
     };
 
-    let lib_rs = StrReplace$(lib_tmpl, "{{bridge_name}}", bridge_name);
-    lib_rs = StrReplace$(lib_rs, "{{exports}}", exports_code);
-    lib_rs = StrReplace$(lib_rs, "{{ffi_decls}}", ffi_code);
-    lib_rs = StrReplace$(lib_rs, "{{s_param}}", s_param);
-    lib_rs = StrReplace$(lib_rs, "{{s_init}}", s_init);
-
-    let ffi_rs = StrReplace$(ffi_file_tmpl, "{{bridge_name}}", bridge_name);
-    ffi_rs = StrReplace$(ffi_rs, "{{ffi_decls}}", ffi_code);
-    ffi_rs = StrReplace$(ffi_rs, "{{s_init}}", s_init);
+    let lib_rs = render_file_tmpl(lib_tmpl, bridge_name, exports_code,
+        ffi_code, s_param, s_init);
+    let ffi_rs = render_file_tmpl(ffi_file_tmpl, bridge_name, ffi_code,
+        ffi_code, s_param, s_init);
 
     FileWrite$("glue-out/src/lib.rs", lib_rs, true);
     FileWrite$("glue-out/src/ffi.rs", ffi_rs, true);
