@@ -93,7 +93,7 @@ pub fn eval_expr(
         Expr::Lambda(_, _) => Ok(Value::Void),
 
         // ── Derivation block ─────────────────────────────────────
-        Expr::DerivationBlock(_) => Ok(Value::Void),
+        Expr::DerivationBlock(_) | Expr::StructLiteral { .. } => Ok(Value::Void),
 
         // ── Dereference ──────────────────────────────────────────
         // 2026-07-18: Evaluate inner, expect Value::Ref(wrapped), return *wrapped.

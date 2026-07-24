@@ -142,7 +142,7 @@ impl<'a> DataflowAnalyzer<'a> {
                     self.extract_ids_from_statement(stmt, ids);
                 }
             }
-            Expr::PropertyGet(_) | Expr::FormattingAnnotation(_) | Expr::DerivationBlock(_) => {}
+            Expr::PropertyGet(_) | Expr::FormattingAnnotation(_) | Expr::DerivationBlock(_) | Expr::StructLiteral { .. } => {}
             Expr::PluginIntercept { args, .. } => {
                 for a in args { self.extract_ids_recursive(a, ids); }
             }

@@ -320,7 +320,13 @@ impl<'a> Parser<'a> {
             }
 
             // ── Identifiers (including # names like Sqrt#) ──────────
-            Some((Token::Identifier(name), _)) => self.parse_identifier_or_special(name),
+            Some((Token::Identifier(name), _)) => {
+                // 2026-07-24: Struct literal: TypeName { field: expr; ... }
+                if self.peek() == Some(&Token::LBrace) {
+                    return self.parse_struct_literal(name);
+                }
+                self.parse_identifier_or_special(name)
+            }
 
             // ── Grouping: (expr) ────────────────────────────────────
             Some((Token::LParen, _)) => self.parse_grouping(),
@@ -469,6 +475,22 @@ impl<'a> Parser<'a> {
             }
             _ => self.error_at_current("expected pattern"),
         }
+    }
+
+    /// Parse a struct literal: TypeName { field: expr; ... }
+    /// 2026-07-24: Constructs a value of a static struct type.
+    fn parse_struct_literal(&mut self, type_name: String) -> Result<Expr, SyntaxError> {
+        self.pos += 1; // consume {
+        let mut fields = Vec::new();
+        while !self.check(&Token::RBrace) && !self.is_at_end() {
+            let name = self.expect_identifier()?;
+            self.expect(Token::Colon)?;
+            let value = self.parse_expression()?;
+            self.eat(&Token::Semicolon);
+            fields.push((name, value));
+        }
+        self.expect(Token::RBrace)?;
+        Ok(Expr::StructLiteral { type_name, fields })
     }
 
     /// Parse a block of statements (used by both Block and function bodies).

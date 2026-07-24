@@ -255,7 +255,7 @@ pub fn infer_expression(
             let (_, _) = infer_expression(scope, ctx)?;
             infer_expression(expr, ctx)
         }
-        Expr::DerivationBlock(_) => Ok((Type::void(), Provenance::Unknown)),
+        Expr::DerivationBlock(_) | Expr::StructLiteral { .. } => Ok((Type::void(), Provenance::Unknown)),
         // 2026-07-17: Address-of: &expr returns a Ptr to the inner type.
         // Provenance carries through so the backend can distinguish
         // mutable state borrows from immutable local borrows.

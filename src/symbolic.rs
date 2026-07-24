@@ -266,7 +266,7 @@ pub fn eval_symbolic(expr: &Expr, state: &SymbolicState) -> SymbolicValue {
         Expr::Cast(_, _) | Expr::IsType(_, _) | Expr::Within(_, _) => SymbolicValue::Unknown,
 
         // Derivation and metadata
-        Expr::DerivationBlock(_)
+        Expr::DerivationBlock(_) | Expr::StructLiteral { .. }
         | Expr::PropertyGet(_)
         | Expr::FormattingAnnotation(_) => SymbolicValue::Unknown,
 

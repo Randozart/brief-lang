@@ -355,6 +355,8 @@ pub fn eval_nav_chain(
                 .collect();
             Ok(NavValue::List(values?))
         }
+        // 2026-07-24: Struct literal in macro DSL — for now, return Void.
+        Expr::StructLiteral { .. } => Ok(NavValue::Void),
         other => Err(format!(
             "expected a $ navigation call, got {:?}", other
         )),
@@ -1837,7 +1839,7 @@ fn resolve_dollar_refs_in_expr(expr: &mut Expr, scope: &Scope) -> Result<(), Str
         // Literals and simple values — no nested identifiers
         Expr::Quoted(_) | Expr::Decimal(_) | Expr::Float(_) | Expr::Bool(_)
         | Expr::TaggedLiteral(_, _) | Expr::PropertyGet(_)
-        | Expr::FormattingAnnotation(_) => Ok(()),
+        | Expr::FormattingAnnotation(_) | Expr::StructLiteral { .. } => Ok(()),
     }
 }
 

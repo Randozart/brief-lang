@@ -252,7 +252,7 @@ pub fn collect_expr_identifiers(expr: &Expr, ids: &mut std::collections::HashSet
         Expr::AddrOf(inner) => {
             collect_expr_identifiers(inner, ids);
         }
-        Expr::PropertyGet(_) | Expr::FormattingAnnotation(_) => {}
+        Expr::PropertyGet(_) | Expr::FormattingAnnotation(_) | Expr::StructLiteral { .. } => {}
         Expr::Decimal(_) | Expr::TaggedLiteral(_, _) | Expr::Bool(_) | Expr::Float(_) | Expr::Quoted(_) => {}
         Expr::PluginIntercept { args, .. } => {
             for a in args { collect_expr_identifiers(a, ids); }

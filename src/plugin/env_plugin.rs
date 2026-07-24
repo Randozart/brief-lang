@@ -203,6 +203,7 @@ fn walk_expr(expr: &mut Expr) {
         Expr::Decimal(_) | Expr::TaggedLiteral(_, _) | Expr::Bool(_) | Expr::Float(_) | Expr::Quoted(_)
         | Expr::Identifier(_) | Expr::PropertyGet(_)
         | Expr::FormattingAnnotation(_) => {}
+        Expr::StructLiteral { .. } => {}
     }
 }
 

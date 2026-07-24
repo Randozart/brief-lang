@@ -36,6 +36,12 @@ pub enum Expr {
     // ── Compound values ─────────────────────────────────────────
     Tuple(Vec<Expr>),
     List(Vec<Expr>),
+    /// struct Name { field: expr; ... } — struct literal.
+    /// 2026-07-24: Constructs a value of a static struct type.
+    StructLiteral {
+        type_name: String,
+        fields: Vec<(String, Expr)>,
+    },
 
     // ── Functions ───────────────────────────────────────────────
     Lambda(Vec<String>, Box<Expr>),

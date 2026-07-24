@@ -180,6 +180,7 @@ impl Annotator {
             | Expr::Bool(..)
             | Expr::Float(..)
             | Expr::Identifier(..) => {}
+            Expr::StructLiteral { .. } => {}
             Expr::PluginIntercept { args, .. } => {
                 for a in args {
                     self.collect_calls_from_expr(a, calls);
@@ -571,6 +572,7 @@ impl Annotator {
                 let args_str: Vec<String> = args.iter().map(|a| self.format_expr(a)).collect();
                 format!("{}!({})", name, args_str.join(", "))
             }
+            Expr::StructLiteral { type_name, .. } => format!("{} {{ ... }}", type_name),
         }
     }
 }

@@ -69,7 +69,7 @@ impl LlvmBackend {
             | Expr::Bool(_)
             | Expr::Float(_)
             | Expr::Quoted(_)
-            | Expr::PropertyGet(_)
+            | Expr::PropertyGet(_) | Expr::StructLiteral { .. }
             | Expr::FormattingAnnotation(_)
             | Expr::TaggedLiteral(_, _) => expr.clone(),
 

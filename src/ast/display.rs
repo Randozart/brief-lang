@@ -102,6 +102,7 @@ impl fmt::Display for Expr {
             }
             Expr::PropertyGet(name) => write!(f, "property '{}'", name),
             Expr::FormattingAnnotation(fmt_) => write!(f, "formatting <~ {}", fmt_.name()),
+            Expr::StructLiteral { type_name, .. } => write!(f, "{} {{ ... }}", type_name),
         }
     }
 }

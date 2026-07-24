@@ -63,23 +63,47 @@ Defaults (utf8, ieee754, unicode) are hardcoded in the parser — they work with
 
 ## Design
 
-### Syntax
+### Syntax — minimal by design
 
 ```brief
-// Protocol declaration — defines a variant and its compatibility edges
+// Minimal — just edges, no contract
 #String ascii {
     CastTo(#String<utf8>);
     CastFrom(#String<utf8>);
-    // Optional: backend-directive ops
-    op Length(#String<ascii>) -> Int;
+};
+
+// With optional contract (recommended) using #Self hashword
+#String ascii [forall(i in 0..#Self:>Size, #Self[i] < 128)] {
+    CastTo(#String<utf8>);
+    CastFrom(#String<utf8>);
+};
+
+// With an optional cross-variant op override
+#String ascii {
+    CastTo(#String<utf8>);
+    CastFrom(#String<utf8>);
+    op Add(#String<utf8>) = add_utf8_to_ascii(#L, #R);
 };
 ```
 
-- `#Category variant { ... }` is a new top-level form
-- Disambiguated from `type` by the initial `#`
+A protocol declaration is primarily about **edges**. Self-referencing ops (e.g. adding `ascii` to `ascii`) are never declared — they fall through to the default protocol via CastTo. Ops are only declared for **cross-variant overrides**: `op Add(#String<utf8>) = fn(#L, #R)` means "if you ever need to add utf8 directly to me, no need to walk the graph — this is the way." The self-variant is implicit (the protocol's own variant).
+
+- `#Category variant { ... }` — new top-level form, disambiguated from `type` by the initial `#`
 - `CastTo(#Other<Variant>)` / `CastFrom(#Other<Variant>)` — edges in the protocol graph
-- `op Name(#Params)` — backend-directive (not a binding); tells the backend "when you see types in this protocol being operated on with this name, apply your default semantics"
+- `op Name(#TargetCategory<target_variant>) = fn(#L, #R)` — *optional* cross-variant override. Declares how this variant handles an operation against a *different* variant of the same category. No self-referencing ops — those delegate to default.
+- `[contract]` before the body — *optional* contract, recommended. Uses Brief expression syntax with `#Self` as a hashword referencing the value at the protocol boundary. `#Self` follows the PascalCase hashword convention (`#Int`, `#String`, `#Self`). Contracts are not required — a protocol without one trusts the programmer.
 - No `layout` field — layout is implicit. Types that participate in a protocol declare their own layout. The protocol only defines *semantic compatibility*.
+
+### Three tiers of effort
+
+| Tier | What you write | What the compiler does |
+|:---:|---|---|
+| 0 — Default delegation | Just the type definition, no protocol declaration | Everything uses the primordial default (`utf8`, `ieee754`) |
+| 1 — Edges only | `#String latin15 { CastTo(#String<utf8>); ... };` | Ops fall through to default via CastTo. No custom op code needed. |
+| 2 — Edges + contract (recommended) | Tier 1 + `[forall(...)]` before the body | Proof engine checks boundary crossings. Denies compilation on unprovable paths. |
+| 3 — Edges + contract + custom ops | Tier 2 + `op Add(#String<utf8>) = fn(#L, #R);` | Cross-variant ops use explicit binding. Contract still enforced. |
+
+Tier 1 is the common case — most variants differ only in encoding/layout, not in operation semantics. Tier 2 is the escape hatch for when a genuinely different operation is needed.
 
 ### Graph semantics
 
@@ -87,10 +111,44 @@ Defaults (utf8, ieee754, unicode) are hardcoded in the parser — they work with
 - Sharing a base category (`#String`) does NOT imply interoperability — edges must be explicitly declared
 - `#Bits` remains universally reachable (existing invariant)
 - BFS finds the shortest path through variant nodes
+- Undefined self-ops (e.g. `Length` for `ascii`) resolve by: CastTo default → run default op → CastFrom back. The compiler handles this transparently.
+- If a protocol has a contract (`[expr]`), the proof engine checks it at every boundary crossing — data entering via CastTo and data exiting via CastFrom. If the contract cannot be proven at compile time for a given call site, compilation is denied. The programmer acknowledges with `Info#()`, `Warning#()`, or `Error#()`. Without a contract, no boundary check is performed (trusts the programmer).
+
+### Compiler proof — boundary enforcement
+
+When a protocol has an optional contract `[expr]`, the proof engine checks it at every boundary crossing:
+
+- **Entering** via CastTo: the incoming value must satisfy the contract
+- **Exiting** via CastFrom: the outgoing value must satisfy the contract
+- If unprovable at compile time for a given call site → **compilation denied**
+- The programmer acknowledges with `Info#()`, `Warning#()`, or `Error#()` at the call site
+- Without a contract, no boundary check — the cast is trusted
+
+The `#Self` hashword in the contract refers to the value at the boundary crossing. For example:
+
+```brief
+#String ascii [forall(i in 0..#Self:>Size, #Self[i] < 128)] { ... }
+```
+
+The compiler does not need to know what "ascii" means. It only knows: "data in this protocol must satisfy `forall(... < 128)`."
+
+### Compiler proof of custom paths (aspirational)
+
+When a user declares a cross-variant override like:
+
+```brief
+op Add(#String<utf8>) = add_utf8_to_ascii(#L, #R);
+```
+
+The compiler should ideally verify equivalence:
+- **Graph path**: `CastTo(#String<utf8>)` on self → `Add(utf8, utf8)` → `CastFrom(#String<utf8>)`
+- **Custom path**: `add_utf8_to_ascii(#L, #R)`
+
+If the symbolic proof engine (`symbolic.rs`) can determine these produce the same result, the custom declaration is validated. If they diverge, the compiler warns. This is an aspirational feature — the initial implementation accepts the user's declaration without proof.
 
 ## Implementation Phases
 
-### Phase 1: AST + Parser (~110 lines)
+### Phase 1: AST + Parser (~100 lines)
 
 **AST additions (`src/ast/top.rs`):**
 
@@ -98,8 +156,11 @@ Defaults (utf8, ieee754, unicode) are hardcoded in the parser — they work with
 pub struct ProtocolDef {
     pub category: String,       // "String"
     pub variant: String,        // "ascii"
+    pub contract: Option<Contract>,  // optional, recommended — enforced at boundaries
     pub cast_edges: Vec<CastEdge>,
-    pub operators: Vec<OperatorDef>,
+    /// Optional cross-variant op overrides.
+    /// Never self-referencing — those delegate to the default protocol.
+    pub cross_ops: Vec<OperatorDef>,
     pub span: Option<Span>,
 }
 
@@ -119,14 +180,19 @@ Add `ProtocolDef(ProtocolDef)` variant to `TopLevel` enum.
 New arm in `parse_top_level()`: when `peek()` is `Identifier(name)` where `name` starts with `#` (and isn't one of the reserved multi-char tokens `#[`, `#!`, `#?`, `#L`, `#R`, `#T`):
 1. Consume `#Category` identifier
 2. Expect `identifier` for variant name
-3. Parse `{ CastTo(...); CastFrom(...); op ...; }` body
-4. Return `TopLevel::ProtocolDef(...)`
+3. Parse optional contract `[expr]` using the existing contract parser (`parse_contract`)
+4. Parse `{ CastTo(...); CastFrom(...); op Name(#Target<Variant>) = fn(#L, #R); }` body
+5. Return `TopLevel::ProtocolDef(...)`
 
 Default primordial resolution in `src/parser/types.rs:40-48` is unchanged:
 - `#String` → `HashWordVariant("#String", "utf8")`
 - `#Float` → `HashWordVariant("#Float", "ieee754")`
 - `#Char` → `HashWordVariant("#Char", "unicode")`
 - All others → `HashWord(name)` (no variant)
+
+**Lexer addition (`src/lexer.rs`):**
+
+Add `#Self` as a recognized multi-character hash token (like `#L`, `#R`, `#T`). It's lexed as `Token::HashSelf` (or equivalent) and resolved at protocol-boundary checking time to "the value at the boundary crossing." Unlike `#L`/`#R` which are positional markers for op bindings, `#Self` is a self-reference for protocol contracts.
 
 ### Phase 2: Protocol Graph (~150 lines)
 
@@ -143,8 +209,9 @@ pub struct ProtocolGraph {
 
 Methods:
 - `new()` — register primordial defaults
-- `build_from(items: &[TopLevel])` — scan for `ProtocolDef` items, insert edges
+- `build_from(items: &[TopLevel])` — scan for `ProtocolDef` items, insert edges and cross-variant ops
 - `find_protocol_path(source_cat, source_var, target_cat, target_var) -> Option<Vec<CastEdge>>` — BFS through variant-aware graph
+- `find_default_delegation(cat, var) -> Option<Vec<CastEdge>>` — BFS from variant to default (for implicit self-op resolution)
 - `register_edges(universe: &mut TypeUniverse)` — inject graph edges as `Cast.#` properties for existing BFS to find
 
 **Integration (`src/analysis/layout_optimizer.rs`):**
@@ -163,6 +230,7 @@ In `plugins/parsed/prelude.bv` (or a companion file discovered by the same plugi
 ```brief
 // Non-default protocol variants.
 // Defaults (utf8, ieee754, unicode) are primordial — no declaration needed.
+// These only declare Cast edges; self-ops implicitly delegate to defaults.
 
 #String ascii {
     CastTo(#String<utf8>);
@@ -197,9 +265,21 @@ Existing 4-step pipeline, unchanged:
 - `compute_protocol_path()` — try protocol graph if universe BFS fails, before bitcast fallback
 - GLUE export — protocol graph supplements `lib/glue.toml`. TOML config wins when present
 
-**Protocol-level `op` semantics:**
+**Self-op resolution (implicit delegation):**
 
-`op Add(#String<ascii>, #String<ascii>)` inside a protocol declaration is a backend directive. It tells the backend: "when types in this protocol use `Add`, apply your default semantics for the concrete type." No binding code, no `= fn(#L, #R)`. If the backend knows the concrete type, it emits native ops; if not, it falls through to function call.
+When the compiler encounters `#String<ascii>` used with a self-referencing op (e.g. `Length`, `Add` to self) and no explicit binding exists on the variant:
+1. Query `ProtocolGraph::find_default_delegation` for path to default variant
+2. Emit: `CastTo(default) → default_op → CastFrom(variant)`
+3. LLVM optimizes the round-trip
+
+This is transparent — no source-level declaration needed. The protocol graph resolves it.
+
+**Cross-variant op overrides:**
+
+When `op Add(#String<utf8>) = add_utf8_to_ascii(#L, #R)` exists on `#String<ascii>`:
+- Store on `ProtocolGraph` as a cross-op edge: `(ascii, Add, utf8) → add_utf8_to_ascii`
+- When dispatching `Add(#String<ascii>, #String<utf8>)`, check for cross-op before walking graph
+- The override is a direct declaration: "for this pair, use this path"
 
 ## Backward Compatibility
 
@@ -214,20 +294,22 @@ Existing 4-step pipeline, unchanged:
 ## Testing
 
 ### Parser
-- `test_protocol_def_simple`: `#String ascii { CastTo(#String<utf8>); };` parses correctly
-- `test_protocol_def_with_ops`: protocol def with `op Length(#String<ascii>) -> Int`
-- `test_protocol_def_empty_body`: valid with empty braces
-- `test_protocol_def_invalid_category`: `#123` rejected
+- `test_protocol_def_edges_only`: `#String ascii { CastTo(#String<utf8>); };` parses with empty cross_ops
+- `test_protocol_def_cross_op`: `#String ascii { CastTo(#String<utf8>); op Add(#String<utf8>) = fn(#L, #R); };`
+- `test_protocol_def_empty_body`: `#String ascii {};` — valid, just no edges
+- `test_protocol_def_no_self_ops`: verify self-referencing ops like `op Length(#String<ascii>)` are rejected (self-ops delegate to default, never declared)
 
 ### Protocol Graph
 - `test_graph_single_edge`: utf8 → ascii path found
 - `test_graph_multi_hop`: utf8 → ascii → utf16 path found
+- `test_graph_default_delegation`: ascii → utf8 delegation path found for implicit self-ops
+- `test_graph_cross_op_lookup`: cross-variant override found for Add(ascii, utf8)
 - `test_graph_no_path`: unrelated variants return None
 - `test_graph_fallback_to_bits`: every variant reaches `#Bits`
-- `test_graph_primordial_defaults`: defaults always registered
 
 ### Integration
-- `test_protocol_path_in_cast_resolution`: frgn dispatch finds path through protocol graph
+- `test_implicit_self_op_delegation`: `#String<ascii>` uses Length without declaration — resolves through CastTo → default Length → CastFrom
+- `test_cross_op_override`: Add between ascii and utf8 uses explicit binding instead of graph walk
 - `test_prelude_variants_available`: ascii/utf16 present with stdlib, absent with `--no-stdlib`
 - `test_existing_cast_paths_unchanged`: old `Cast.#` properties still resolve
 
@@ -235,11 +317,11 @@ Existing 4-step pipeline, unchanged:
 
 | Phase | What | Files | Lines |
 |:---:|---|:---|---:|
-| 1 | AST + parser | `src/ast/top.rs`, `src/parser/definitions.rs` | ~110 |
+| 1 | AST + parser | `src/ast/top.rs`, `src/parser/definitions.rs` | ~100 |
 | 2 | Protocol graph + BFS | `src/analysis/protocol_graph.rs` (new), `layout_optimizer.rs` | ~150 |
 | 3 | Prelude declarations | `plugins/parsed/prelude.bv` | ~15 |
 | 4 | Wire into backend + GLUE | `intrinsics.rs`, `frgn_dispatch.rs`, `bridge.rs` | ~30 |
 | — | Tests | Various test files | ~120 |
-| | **Total** | | **~450** |
+| | **Total** | | **~415** |
 
-Zero new intrinsics. Zero existing paths modified. Zero TOML config changes. The protocol graph is just more data for the same BFS LLVM never sees protocols — only concrete types and operations.
+Zero new intrinsics. Zero existing paths modified. Zero TOML config changes. The protocol graph is just more data for the same BFS. LLVM never sees protocols — only concrete types and operations.

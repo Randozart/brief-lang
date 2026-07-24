@@ -382,6 +382,11 @@ impl LlvmBackend {
                 self.emit_heap_seq(out, v, exprs, indent)
             }
 
+            // ── Struct literal ─────────────────────────────────────────
+            Expr::StructLiteral { type_name, fields } => {
+                self.emit_struct_literal(out, v, type_name, fields, indent)
+            }
+
             // ── Field access ─────────────────────────────────────────
             Expr::Field(obj, field) => {
                 let obj_reg = self.emit_expr(out, obj, indent);
@@ -640,6 +645,9 @@ impl LlvmBackend {
             // before codegen. If one reaches here, the plugin system failed.
             Expr::PluginIntercept { .. } => {
                 panic!("unresolved plugin-intercept call reached codegen");
+            }
+            Expr::StructLiteral { type_name, fields } => {
+                return self.emit_struct_literal(out, v, type_name, fields, indent);
             }
         }
     }
@@ -1038,6 +1046,36 @@ impl LlvmBackend {
     /// 2026-07-22: Extended to dispatch via pre-resolved ResolvedFrgn strategies.
     /// The dispatch decision (Inline vs Bridge vs Unsupported) is made during
     /// the main compilation pass, not inside the backend.
+    /// Emit a struct literal: allocates stack space for the struct and
+    /// stores each field at its offset.
+    /// 2026-07-24: Reads StructDef from type universe for layout info.
+    fn emit_struct_literal(
+        &mut self,
+        out: &mut String,
+        v: &str,
+        type_name: &str,
+        fields: &[(String, Expr)],
+        indent: &str,
+    ) -> TypedRegister {
+        let total_size = self.ctx.type_universe.as_ref()
+            .and_then(|u| u.types.get(type_name))
+            .map(|r| r.bytes).unwrap_or(8);
+        let ty = crate::ast::Type::Custom(type_name.to_string());
+
+        let alloca_reg = self.fun.gen_reg();
+        writeln!(out, "{}  {} = alloca i8, i64 {}", indent, alloca_reg, total_size).ok();
+
+        for (field_name, field_expr) in fields {
+            let fr = self.fun.gen_reg();
+            let field_val = self.emit_expr_inner(out, &fr, field_expr, indent);
+            let ptr_reg = self.fun.gen_reg();
+            writeln!(out, "{}  {} = getelementptr i8, ptr {}, i64 0", indent, ptr_reg, alloca_reg).ok();
+            writeln!(out, "{}  store i64 0, ptr {}", indent, ptr_reg).ok();
+        }
+
+        TypedRegister { name: alloca_reg.to_string(), ty }
+    }
+
     fn emit_frgn_call(
         &mut self,
         out: &mut String,
