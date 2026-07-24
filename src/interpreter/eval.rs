@@ -356,5 +356,6 @@ pub fn eval_statement(
         }
         Statement::Foreach { .. } => Ok(Value::Void),
         Statement::TrgBinding { .. } => Ok(Value::Void),
+        Statement::Match { .. } => unreachable!("match only in $defn"),
     }
 }

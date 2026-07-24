@@ -230,6 +230,9 @@ pub enum Token {
     When,
 
     // ── Operators ─────────────────────────────────────────────
+    #[token("=>")]
+    FatArrow,
+
     #[token("=")]
     Eq,
 
@@ -600,6 +603,7 @@ impl std::fmt::Display for Token {
             Token::Input => write!(f, "input"),
             Token::Output => write!(f, "output"),
             Token::When => write!(f, "when"),
+            Token::FatArrow => write!(f, "=>"),
             Token::Eq => write!(f, "="),
             Token::EqEq => write!(f, "=="),
             Token::Ne => write!(f, "!="),

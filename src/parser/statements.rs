@@ -19,6 +19,7 @@ impl<'a> Parser<'a> {
             Some(Token::Foreach) => self.parse_foreach_statement(),
             Some(Token::Trg) => self.parse_trg_binding(),
             Some(Token::Sync) => self.parse_sync_block(),
+            Some(Token::Match) => self.parse_match_statement(),
             Some(Token::LBrace) => self.parse_block_statement(),
             Some(Token::LBracket) => self.parse_guard_statement_bracket(),
             Some(Token::When) => self.parse_guard_statement_when(),
@@ -343,5 +344,38 @@ impl<'a> Parser<'a> {
         self.pos += 1;
         let txn = self.parse_transaction(false, false)?;
         Ok(Statement::InlineTxn(txn))
+    }
+
+    /// match expr { pattern => body; pattern => body; };
+    /// 2026-07-24: Compile-time pattern matching for $defn bodies.
+    /// Patterns: literal integer, literal string, or wildcard.
+    fn parse_match_statement(&mut self) -> Result<Statement, SyntaxError> {
+        self.pos += 1; // consume 'match'
+        let expr = Box::new(self.parse_expression()?);
+        self.expect(Token::LBrace)?;
+
+        let mut arms = Vec::new();
+        while !self.check(&Token::RBrace) {
+            let pattern = if self.eat(&Token::Underscore) {
+                crate::ast::StmtMatchPattern::Wildcard
+            } else if let Some(&Token::Integer(n)) = self.peek() {
+                self.pos += 1;
+                crate::ast::StmtMatchPattern::Literal(n as i128)
+            } else if let Some(&Token::String(ref s)) = self.peek() {
+                let s = s.clone();
+                self.pos += 1;
+                crate::ast::StmtMatchPattern::String(s)
+            } else {
+                return self.error_at_current("expected pattern in match arm (string, integer, or _)");
+            };
+
+            self.expect(crate::lexer::Token::FatArrow)?;
+            let body = self.parse_block()?;
+            self.expect(Token::Semicolon)?;
+            arms.push(crate::ast::StmtMatchArm { pattern, body });
+        }
+        self.pos += 1; // consume '}'
+        self.expect(Token::Semicolon)?;
+        Ok(Statement::Match { expr, arms })
     }
 }

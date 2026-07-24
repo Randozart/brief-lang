@@ -266,7 +266,7 @@ impl Reactor {
                 }
                 Ok(StmtResult::Continue)
             }
-            Statement::InlineAsm { .. } | Statement::InlineDefn(_) | Statement::InlineTxn(_) => {
+            Statement::InlineAsm { .. } | Statement::InlineDefn(_) | Statement::InlineTxn(_) | Statement::Match { .. } => {
                 Ok(StmtResult::Continue)
             }
             Statement::Expression(expr) => {

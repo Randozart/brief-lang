@@ -450,7 +450,7 @@ pub fn stmt_tag(stmt: &Statement) -> &str {
         Statement::Escape(_) => "escape",
         Statement::Foreach { .. } => "foreach",
         Statement::TrgBinding { .. } => "trg",
-        Statement::InlineAsm { .. } | Statement::InlineDefn(_) | Statement::InlineTxn(_) => "inline",
+        Statement::InlineAsm { .. } | Statement::InlineDefn(_) | Statement::InlineTxn(_) | Statement::Match { .. } => "inline",
         Statement::SyncBlock(_) => "sync",
     }
 }

@@ -103,7 +103,8 @@ impl Annotator {
                 | Statement::SyncBlock(..)
                 | Statement::TrgBinding { .. }
                 | Statement::InlineDefn(_)
-                | Statement::InlineTxn(_) => {}
+                | Statement::InlineTxn(_)
+                | Statement::Match { .. } => {}
             }
         }
     }
@@ -466,6 +467,9 @@ impl Annotator {
             }
             Statement::InlineTxn(t) => {
                 format!("{}// compile-time txn {}\n", spaces, t.name)
+            }
+            Statement::Match { .. } => {
+                format!("{}// compile-time match\n", spaces)
             }
         }
     }

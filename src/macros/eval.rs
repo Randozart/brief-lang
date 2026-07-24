@@ -449,6 +449,31 @@ fn evaluate_stage_stmt(
             scope.remove(item);
             Ok(None)
         }
+        Statement::Match { expr, arms } => {
+            let val = eval_nav_chain(expr, program, universe, stage, scope, sandbox, pm)?;
+            for arm in arms {
+                let matches = match &arm.pattern {
+                    crate::ast::StmtMatchPattern::Wildcard => true,
+                    crate::ast::StmtMatchPattern::Literal(n) => match &val {
+                        NavValue::Int(i) => *i as i128 == *n,
+                        _ => false,
+                    },
+                    crate::ast::StmtMatchPattern::String(s) => match &val {
+                        NavValue::Str(v) => v == s,
+                        _ => false,
+                    },
+                };
+                if matches {
+                    for s in &arm.body {
+                        if let Some(val) = evaluate_stage_stmt(s, program, universe, stage, scope, sandbox, pm)? {
+                            return Ok(Some(val));
+                        }
+                    }
+                    break;
+                }
+            }
+            Ok(None)
+        }
         // 2026-07-23: Assignment — evaluate the RHS and update scope.
         Statement::Assign(target, value) => {
             let name = match target {
@@ -1918,7 +1943,7 @@ fn resolve_dollar_refs_in_stmt(stmt: &mut Statement, scope: &Scope) -> Result<()
             resolve_dollar_refs_in_expr(instance, scope)
         }
         Statement::InlineAsm { .. } | Statement::MetadataAssignment(..)
-        | Statement::InlineDefn(_) | Statement::InlineTxn(_) => Ok(()),
+        | Statement::InlineDefn(_) | Statement::InlineTxn(_) | Statement::Match { .. } => Ok(()),
     }
 }
 

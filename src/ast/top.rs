@@ -227,6 +227,34 @@ pub enum Statement {
     /// $txn name(params) [pre][post] -> Type { body } — compile-time-only tx.
     /// 2026-07-23: Evaluated as a convergent loop with pre/post checks.
     InlineTxn(Transaction),
+    /// match expr { pattern => body; ... }; — compile-time match.
+    /// 2026-07-24: Added for clean $defn branching (replaces when chains).
+    Match {
+        expr: Box<Expr>,
+        arms: Vec<StmtMatchArm>,
+    },
+}
+
+/// 2026-07-24: A single arm in a statement-level match (inside $defn bodies).
+/// Differs from ast::expr::MatchArm which is for expression-level match.
+#[derive(Debug, Clone)]
+pub struct StmtMatchArm {
+    pub pattern: StmtMatchPattern,
+    pub body: Vec<Statement>,
+}
+
+impl PartialEq for StmtMatchArm {
+    fn eq(&self, other: &Self) -> bool {
+        self.pattern == other.pattern && self.body == other.body
+    }
+}
+
+/// 2026-07-24: A pattern in a statement-level match arm.
+#[derive(Debug, Clone, PartialEq)]
+pub enum StmtMatchPattern {
+    Literal(i128),
+    String(String),
+    Wildcard,
 }
 
 // 2026-07-23: Manual PartialEq — InlineDefn/InlineTxn wrap Definition/Transaction
@@ -256,6 +284,8 @@ impl PartialEq for Statement {
             (Statement::InlineAsm { asm_string: a1, clobbers: c1, span: s1 },
              Statement::InlineAsm { asm_string: a2, clobbers: c2, span: s2 }) => a1 == a2 && c1 == c2 && s1 == s2,
             (Statement::SyncBlock(b1), Statement::SyncBlock(b2)) => b1 == b2,
+            (Statement::Match { expr: e1, arms: a1 }, Statement::Match { expr: e2, arms: a2 }) => e1 == e2 && a1 == a2,
+            (Statement::Match { .. }, _) | (_, Statement::Match { .. }) => false,
             _ => false,
         }
     }
