@@ -989,7 +989,24 @@ impl<'a> Parser<'a> {
     /// Extracted from the original parse_type_definition body block.
     fn parse_type_body(&mut self, name: String, type_params: Vec<crate::ast::top::TypeParam>) -> Result<Box<TypeDef>, SyntaxError> {
         let base = if self.eat(&Token::LtColon) {
-            self.parse_expression()?
+            // 2026-07-24: Check for Bits<N> syntax. parse_expression would
+            // treat '<' as a less-than operator, so we handle it here.
+            if self.check_identifier("Bits") || self.check_identifier("bits") {
+                self.pos += 1;
+                let bits_arg = if self.eat(&Token::Lt) {
+                    let n = match self.peek() {
+                        Some(&Token::Integer(v)) => { self.pos += 1; v }
+                        _ => 0,
+                    };
+                    self.expect(Token::Gt)?;
+                    vec![Expr::Decimal(n as i64)]
+                } else {
+                    vec![] // flexible Bits — no argument
+                };
+                Expr::Call("Bits".to_string(), bits_arg, None)
+            } else {
+                self.parse_expression()?
+            }
         } else {
             Expr::Identifier("Bits".to_string())
         };

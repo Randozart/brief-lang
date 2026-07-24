@@ -94,6 +94,22 @@ impl<'a> Parser<'a> {
 
     /// Parse a named type, possibly with generic parameters, pointer prefix, or extension.
     fn parse_named_type_body(&mut self, name: &str) -> Result<Type, SyntaxError> {
+        // Bits<N> — numeric bit width, no annotation = flexible
+        if name == "Bits" || name == "bits" {
+            if self.eat(&Token::Lt) {
+                let bits = match self.peek() {
+                    Some(&Token::Integer(n)) => {
+                        self.pos += 1;
+                        n as u64
+                    }
+                    _ => return self.error_at_current("expected bit count (integer) in Bits<N>"),
+                };
+                self.expect(Token::Gt)?;
+                return Ok(Type::from_bits(bits));
+            }
+            return Ok(Type::Bits(0)); // flexible-width Bits
+        }
+
         // Ptr<T> handling
         if name == "Ptr" || name == "Ptr!" {
             if self.eat(&Token::Lt) {

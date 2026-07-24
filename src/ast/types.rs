@@ -6,7 +6,8 @@ use std::collections::HashMap;
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Type {
-    /// Raw bit sequence: Bits(8) = 8 bytes = 64 bits. The sole physical primitive.
+    /// Raw bit sequence: Bits(64) = 64 bits = 8 bytes. The sole physical primitive.
+    /// Internally stores bytes. Use `Type::from_bits(n)` to create from bits.
     Bits(u64),
     /// Void = Bits(0). Not a separate concept.
     Void,
@@ -88,6 +89,19 @@ impl Type {
     }
     pub fn bits(bytes: u64) -> Type {
         Type::Bits(bytes)
+    }
+    /// Create a Bits type from a bit count (converts bits to bytes internally).
+    /// e.g., `Type::from_bits(64)` = `Type::Bits(8)`.
+    pub fn from_bits(bits: u64) -> Type {
+        let bytes = bits.div_ceil(8);
+        Type::Bits(bytes)
+    }
+    /// Return the bit width of this Bits type. Returns 0 for flexible-width Bits.
+    pub fn bit_width(&self) -> u64 {
+        match self {
+            Type::Bits(bytes) => bytes * 8,
+            _ => 0,
+        }
     }
     pub fn ptr(inner: Type) -> Type {
         Type::Ptr(Box::new(inner))
