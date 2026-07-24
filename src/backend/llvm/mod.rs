@@ -1839,6 +1839,32 @@ impl LlvmBackend {
                         }
                     }
                 }
+                // 2026-07-24: StaticStruct (C-compatible struct) registration.
+                // These use `struct Name { ... }` syntax.
+                TopLevel::StaticStruct(s) => {
+                    let fields: Vec<(String, Type)> = s.fields.iter()
+                        .map(|(n, t)| (n.clone(), t.clone()))
+                        .collect();
+                    self.ctx.struct_types.insert(s.name.clone(), fields.clone());
+                    if let Some(ref mut universe) = self.ctx.type_universe {
+                        if !universe.types.contains_key(&s.name) {
+                            let bytes: u64 = fields.iter().map(|(_, ty)| {
+                                crate::backend::llvm::types::type_size(ty)
+                            }).sum();
+                            let rt = crate::type_universe::ResolvedType {
+                                name: s.name.clone(),
+                                base: "Bits".to_string(),
+                                bytes,
+                                min_bits: bytes * 8,
+                                max_bits: bytes * 8,
+                                alignment: 8,
+                                properties: std::collections::HashMap::new(),
+                                fields: fields.clone(),
+                            };
+                            universe.types.insert(s.name.clone(), rt);
+                        }
+                    }
+                }
                 // 2026-07-24: Handle TopLevel::TypeDef with slots as struct types.
                 // This handles `obj` declarations (which parse to TypeDef) and
                 // other type declarations with field slots.
@@ -1866,6 +1892,9 @@ impl LlvmBackend {
                             universe.types.insert(td.name.clone(), rt);
                         }
                     }
+                }
+                TopLevel::Enum(e) => {
+                    self.ctx.enum_types.insert(e.name.clone(), e.clone());
                 }
                 _ => {}
             }
