@@ -1068,7 +1068,11 @@ impl LlvmBackend {
                 let ret_type = sig.result_type.return_type().unwrap_or(Type::int());
                 if ret_type != Type::Void {
                     let ret_llvm = self.llvm_type(&ret_type);
-                    writeln!(out, "{}  {} = {} zeroinitializer", indent, v, ret_llvm).ok();
+                    if ret_llvm == "ptr" {
+                        writeln!(out, "{}  {} = inttoptr i64 0 to ptr", indent, v).ok();
+                    } else {
+                        writeln!(out, "{}  {} = {} zeroinitializer", indent, v, ret_llvm).ok();
+                    }
                     TypedRegister { name: v.to_string(), ty: ret_type }
                 } else {
                     TypedRegister { name: v.to_string(), ty: Type::Void }
