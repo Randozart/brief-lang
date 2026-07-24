@@ -2138,6 +2138,284 @@ fn test_emit_address_of() {
 }
 
 #[test]
+fn test_frgn_ptr_declare() {
+    let mut backend = LlvmBackend::new();
+    let program = vec![
+        TopLevel::ForeignBinding(ForeignBinding {
+            foreign_name: "test_fn".to_string(),
+            brief_name: None,
+            from: FromSpec::CompilerRegistry("c".to_string()),
+            target: ForeignTarget::C,
+            inputs: vec![("arg".to_string(), Type::Ptr(Box::new(Type::int())))],
+            success_output: vec![("".to_string(), Type::int())],
+            error_type: String::new(),
+            error_fields: vec![],
+            input_layout: None,
+            output_layout: None,
+            precondition: None,
+            postcondition: None,
+            buffer_mode: None,
+            default_watchdog: None,
+            wasm_impl: None,
+            wasm_setup: None,
+            fallback: Fallback::None,
+            span: None,
+            doc: None,
+        }),
+    ];
+    let output = backend.generate(&program, None);
+    assert!(output.contains("declare i64 @test_fn(ptr)"),
+        "Ptr param should produce 'ptr' in declare, not 'i64'.\nGot:\n{}", output);
+}
+
+#[test]
+fn test_frgn_ptr_return() {
+    let mut backend = LlvmBackend::new();
+    let program = vec![
+        TopLevel::ForeignBinding(ForeignBinding {
+            foreign_name: "make_ptr".to_string(),
+            brief_name: None,
+            from: FromSpec::CompilerRegistry("c".to_string()),
+            target: ForeignTarget::C,
+            inputs: vec![("n".to_string(), Type::int())],
+            success_output: vec![("".to_string(), Type::Ptr(Box::new(Type::int())))],
+            error_type: String::new(),
+            error_fields: vec![],
+            input_layout: None,
+            output_layout: None,
+            precondition: None,
+            postcondition: None,
+            buffer_mode: None,
+            default_watchdog: None,
+            wasm_impl: None,
+            wasm_setup: None,
+            fallback: Fallback::None,
+            span: None,
+            doc: None,
+        }),
+    ];
+    let output = backend.generate(&program, None);
+    assert!(output.contains("declare ptr @make_ptr(i64)"),
+        "Ptr return should produce 'ptr' in declare, not 'i64'.\nGot:\n{}", output);
+}
+
+#[test]
+fn test_struct_literal_field_offsets() {
+    let mut backend = LlvmBackend::new();
+    let program = vec![
+        TopLevel::StaticStruct(StructDef {
+            name: "Mixed".to_string(),
+            fields: vec![
+                ("a".to_string(), Type::int()),
+                ("b".to_string(), Type::bool_()),
+                ("c".to_string(), Type::char_()),
+            ],
+            metadata: HashMap::new(),
+            span: None,
+        }),
+        TopLevel::Definition(Definition {
+            name: "test".to_string(),
+            type_params: vec![],
+            parameters: vec![],
+            outputs: vec![],
+            output_type: None,
+            contract: default_contract(),
+            body: vec![
+                Statement::Let {
+                    name: "x".to_string(),
+                    ty: None,
+                    expr: Some(Expr::StructLiteral {
+                        type_name: "Mixed".to_string(),
+                        fields: vec![
+                            ("a".to_string(), Expr::Decimal(42)),
+                            ("b".to_string(), Expr::Bool(true)),
+                            ("c".to_string(), Expr::Decimal(65)),
+                        ],
+                    }),
+                    modifiers: vec![],
+                },
+                Statement::Term(Some(Expr::Decimal(0))),
+            ],
+            modifiers: vec![],
+            metadata: HashMap::new(),
+            derivation: None,
+            annotations: vec![],
+            span: None,
+            doc: None,
+        }),
+    ];
+    let output = backend.generate(&program, None);
+    // Field layout (pack=1): a(Int=8B)@0, b(Bool=1B)@8, c(Char=4B)@9
+    assert!(output.contains("getelementptr i8, ptr %t1, i64 0"),
+        "Field 'a' should be at offset 0.\nGot:\n{}", output);
+    assert!(output.contains("getelementptr i8, ptr %t1, i64 8"),
+        "Field 'b' (Bool) should be at offset 8.\nGot:\n{}", output);
+    assert!(output.contains("getelementptr i8, ptr %t1, i64 9"),
+        "Field 'c' (Char) should be at offset 9.\nGot:\n{}", output);
+}
+
+#[test]
+fn test_addr_of_struct_literal() {
+    let mut backend = LlvmBackend::new();
+    let program = vec![
+        TopLevel::StaticStruct(StructDef {
+            name: "Point".to_string(),
+            fields: vec![
+                ("x".to_string(), Type::int()),
+                ("y".to_string(), Type::int()),
+            ],
+            metadata: HashMap::new(),
+            span: None,
+        }),
+        TopLevel::ForeignBinding(ForeignBinding {
+            foreign_name: "use_ptr".to_string(),
+            brief_name: None,
+            from: FromSpec::CompilerRegistry("c".to_string()),
+            target: ForeignTarget::C,
+            inputs: vec![("p".to_string(), Type::Ptr(Box::new(Type::int())))],
+            success_output: vec![("".to_string(), Type::int())],
+            error_type: String::new(),
+            error_fields: vec![],
+            input_layout: None,
+            output_layout: None,
+            precondition: None,
+            postcondition: None,
+            buffer_mode: None,
+            default_watchdog: None,
+            wasm_impl: None,
+            wasm_setup: None,
+            fallback: Fallback::None,
+            span: None,
+            doc: None,
+        }),
+        TopLevel::Definition(Definition {
+            name: "main".to_string(),
+            type_params: vec![],
+            parameters: vec![],
+            outputs: vec![],
+            output_type: None,
+            contract: default_contract(),
+            body: vec![
+                Statement::Let {
+                    name: "pt".to_string(),
+                    ty: None,
+                    expr: Some(Expr::StructLiteral {
+                        type_name: "Point".to_string(),
+                        fields: vec![
+                            ("x".to_string(), Expr::Decimal(10)),
+                            ("y".to_string(), Expr::Decimal(20)),
+                        ],
+                    }),
+                    modifiers: vec![],
+                },
+                // Call frgn with &pt param
+                Statement::Expression(Expr::Call(
+                    "use_ptr".to_string(),
+                    vec![Expr::AddrOf(Box::new(Expr::Identifier("pt".to_string())))],
+                    None,
+                )),
+                Statement::Term(Some(Expr::Decimal(0))),
+            ],
+            modifiers: vec![],
+            metadata: HashMap::new(),
+            derivation: None,
+            annotations: vec![],
+            span: None,
+            doc: None,
+        }),
+    ];
+    let output = backend.generate(&program, None);
+    // &pt should emit ptrtoint on the struct alloca, NOT ptrtoint on a function ptr
+    // The alloca is created by emit_struct_literal: alloca i8, i64 16 (2 x i64 = 16B)
+    assert!(output.contains("alloca i8, i64 16"),
+        "Struct literal should allocate 16 bytes (2 x 8B fields).\nGot:\n{}", output);
+    assert!(output.contains("ptrtoint ptr %t"),
+        "Should emit ptrtoint of the struct alloca for &pt.\nGot:\n{}", output);
+    // Should NOT reference @pt as a function symbol
+    assert!(!output.contains("ptrtoint ptr @pt"),
+        "Should NOT emit ptrtoint of @pt as if it were a function.\nGot:\n{}", output);
+}
+
+#[test]
+fn test_frgn_ptr_param_inttoptr() {
+    let mut backend = LlvmBackend::new();
+    let program = vec![
+        TopLevel::StaticStruct(StructDef {
+            name: "Point".to_string(),
+            fields: vec![
+                ("x".to_string(), Type::int()),
+                ("y".to_string(), Type::int()),
+            ],
+            metadata: HashMap::new(),
+            span: None,
+        }),
+        TopLevel::ForeignBinding(ForeignBinding {
+            foreign_name: "use_ptr".to_string(),
+            brief_name: None,
+            from: FromSpec::CompilerRegistry("c".to_string()),
+            target: ForeignTarget::C,
+            inputs: vec![("p".to_string(), Type::Ptr(Box::new(Type::int())))],
+            success_output: vec![("".to_string(), Type::int())],
+            error_type: String::new(),
+            error_fields: vec![],
+            input_layout: None,
+            output_layout: None,
+            precondition: None,
+            postcondition: None,
+            buffer_mode: None,
+            default_watchdog: None,
+            wasm_impl: None,
+            wasm_setup: None,
+            fallback: Fallback::None,
+            span: None,
+            doc: None,
+        }),
+        TopLevel::Definition(Definition {
+            name: "main".to_string(),
+            type_params: vec![],
+            parameters: vec![],
+            outputs: vec![],
+            output_type: None,
+            contract: default_contract(),
+            body: vec![
+                Statement::Let {
+                    name: "pt".to_string(),
+                    ty: None,
+                    expr: Some(Expr::StructLiteral {
+                        type_name: "Point".to_string(),
+                        fields: vec![
+                            ("x".to_string(), Expr::Decimal(10)),
+                            ("y".to_string(), Expr::Decimal(20)),
+                        ],
+                    }),
+                    modifiers: vec![],
+                },
+                Statement::Expression(Expr::Call(
+                    "use_ptr".to_string(),
+                    vec![Expr::AddrOf(Box::new(Expr::Identifier("pt".to_string())))],
+                    None,
+                )),
+                Statement::Term(Some(Expr::Decimal(0))),
+            ],
+            modifiers: vec![],
+            metadata: HashMap::new(),
+            derivation: None,
+            annotations: vec![],
+            span: None,
+            doc: None,
+        }),
+    ];
+    let output = backend.generate(&program, None);
+    // When calling a frgn with Ptr param, the i64 address should be converted
+    // via inttoptr so the LLVM call uses ptr type matching the declare.
+    assert!(output.contains("inttoptr i64"),
+        "Should emit inttoptr to convert i64 to ptr for Ptr param.\nGot:\n{}", output);
+    // The call should use ptr type for the Ptr param
+    assert!(output.contains("call i64 @use_ptr(ptr"),
+        "Call to use_ptr(ptr) should use 'ptr' type for the first param.\nGot:\n{}", output);
+}
+
+#[test]
 fn test_trg_deref_error_flag() {
     // When --error-unresolved-trg is set, a @ *ptr dynamic trigger should
     // emit a null check + unreachable before the load volatile.

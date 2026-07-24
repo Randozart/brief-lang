@@ -1826,10 +1826,7 @@ impl LlvmBackend {
                     if let Some(ref mut universe) = self.ctx.type_universe {
                         if !universe.types.contains_key(&s.name) {
                             let bytes: u64 = fields.iter().map(|(_, ty)| {
-                                match ty {
-                                    Type::Custom(n) if n == "Bool" => 1,
-                                    _ => 8,
-                                }
+                                crate::backend::llvm::types::type_size(ty)
                             }).sum();
                             let rt = crate::type_universe::ResolvedType {
                                 name: s.name.clone(),
@@ -1837,7 +1834,34 @@ impl LlvmBackend {
                                 bytes,
                                 alignment: 8,
                                 properties: std::collections::HashMap::new(),
-                                fields: vec![],
+                                fields: fields.clone(),
+                            };
+                            universe.types.insert(s.name.clone(), rt);
+                        }
+                    }
+                }
+                // 2026-07-24: StaticStruct (C-compatible struct) registration.
+                // These are declared with `struct Name { ... }` syntax and need
+                // to be in the type universe for struct literal codegen to work
+                // (field offset computation, pointer field detection, total size).
+                TopLevel::StaticStruct(s) => {
+                    let fields: Vec<(String, Type)> = s.fields.iter()
+                        .map(|(n, t)| (n.clone(), t.clone()))
+                        .collect();
+                    self.ctx.struct_types.insert(s.name.clone(), fields.clone());
+
+                    if let Some(ref mut universe) = self.ctx.type_universe {
+                        if !universe.types.contains_key(&s.name) {
+                            let bytes: u64 = fields.iter().map(|(_, ty)| {
+                                crate::backend::llvm::types::type_size(ty)
+                            }).sum();
+                            let rt = crate::type_universe::ResolvedType {
+                                name: s.name.clone(),
+                                base: "Bits".to_string(),
+                                bytes,
+                                alignment: 8,
+                                properties: std::collections::HashMap::new(),
+                                fields,
                             };
                             universe.types.insert(s.name.clone(), rt);
                         }
@@ -2001,6 +2025,7 @@ impl LlvmBackend {
                     if ts.is_empty() || ts.iter().any(|t| matches!(t, Type::Void)) { "void" }
                     else if ts.iter().any(|t| matches!(t, Type::Custom(__t) if __t == "Float")) { "float" }
                     else if ts.iter().any(|t| matches!(t, Type::Custom(__t) if __t == "String" || __t == "Data")) { "ptr" }
+                    else if ts.iter().any(|t| matches!(t, Type::Ptr(_))) { "ptr" }
                     else { "i64" }
                 }
             };
@@ -2010,6 +2035,7 @@ impl LlvmBackend {
                 Type::Custom(__t) if __t == "Char" => "i32",
                 Type::Custom(__t) if __t == "Float" => "float",
                 Type::Custom(__t) if __t == "String" || __t == "Data" => "ptr",
+                Type::Ptr(_) => "ptr",
                 _ => "i64",
             }).collect();
             write!(out, "declare {} @{}(", ret_ty, sig.name).ok();

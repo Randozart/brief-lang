@@ -27,6 +27,11 @@ pub fn emit_statement(backend: &mut LlvmBackend, out: &mut String, stmt: &Statem
             if expr.is_none() {
                 backend.fun.let_binding_allocas.insert(val.name.clone());
             }
+            // 2026-07-24: Transfer struct literal alloca tracking from result
+            // register to variable name, so &let_var retrieves the stack address.
+            if let Some(alloca) = backend.fun.struct_literal_allocas.remove(&val.name) {
+                backend.fun.struct_literal_allocas.insert(name.clone(), alloca);
+            }
             backend.fun.let_bindings.insert(name.clone(), val.name.clone());
             backend.fun.let_binding_types.insert(name.clone(), val.ty.clone());
             TypedRegister { name: val.name, ty: Type::void() }

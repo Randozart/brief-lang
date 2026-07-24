@@ -13,6 +13,7 @@ use crate::ast::*;
 use crate::ast::{Expr, Statement, Type};
 use crate::backend::llvm::emit_stmt;
 use crate::backend::llvm::intrinsics::{emit_intrinsic_call, template_for_op};
+use crate::backend::llvm::types;
 use crate::backend::llvm::{LlvmBackend, TypedRegister};
 
 use std::fmt::Write;
@@ -593,6 +594,36 @@ impl LlvmBackend {
                                 name: ptr,
                                 ty: Type::int(),
                             }
+                        } else if let Some(alloca) = self.fun.struct_literal_allocas.get(name).cloned() {
+                            // 2026-07-24: &struct_literal emits the alloca pointer.
+                            // Used by PyModule_Create2(&moduledef, ...) in bridge code.
+                            let ptr = self.fun.gen_reg();
+                            writeln!(out, "{}{} = ptrtoint ptr {} to i64", indent, ptr, alloca).ok();
+                            TypedRegister {
+                                name: ptr,
+                                ty: Type::int(),
+                            }
+                        } else if let Some(reg) = self.get_local(name) {
+                            // 2026-07-24: &let_var — take address of let-bound variable.
+                            let slot = if self.fun.let_binding_allocas.contains(&reg)
+                                || self.fun.param_slots.values().any(|s| s == &reg)
+                            {
+                                reg
+                            } else {
+                                // SSA register — spill to alloca first.
+                                let slot = self.fun.gen_reg();
+                                writeln!(out, "{}{} = alloca i64, align 8", indent, slot).ok();
+                                writeln!(out, "{}store i64 {}, ptr {}", indent, reg, slot).ok();
+                                self.fun.let_bindings.insert(name.clone(), slot.clone());
+                                self.fun.let_binding_allocas.insert(slot.clone());
+                                slot
+                            };
+                            let ptr = self.fun.gen_reg();
+                            writeln!(out, "{}{} = ptrtoint ptr {} to i64", indent, ptr, slot).ok();
+                            TypedRegister {
+                                name: ptr,
+                                ty: Type::int(),
+                            }
                         } else {
                             // 2026-07-24: &function_name emits function pointer.
                             // Used by struct literals for method table entries.
@@ -1052,6 +1083,7 @@ impl LlvmBackend {
     /// Emit a struct literal: allocates stack space for the struct and
     /// stores each field at its offset.
     /// 2026-07-24: Reads StructDef from type universe for layout info.
+    /// Falls back to struct_types (from registration pass) when universe unavailable.
     fn emit_struct_literal(
         &mut self,
         out: &mut String,
@@ -1060,9 +1092,7 @@ impl LlvmBackend {
         fields: &[(String, Expr)],
         indent: &str,
     ) -> TypedRegister {
-        let total_size = self.ctx.type_universe.as_ref()
-            .and_then(|u| u.types.get(type_name))
-            .map(|r| r.bytes).unwrap_or(8);
+        let total_size = self.struct_type_size(type_name);
         let struct_ty = crate::ast::Type::Custom(type_name.to_string());
 
         let alloca_reg = self.fun.gen_reg();
@@ -1087,18 +1117,58 @@ impl LlvmBackend {
 
         let result = self.fun.gen_reg();
         writeln!(out, "{}  {} = ptrtoint ptr {} to i64", indent, result, alloca_reg).ok();
+        // 2026-07-24: Record the alloca pointer so &let_var on a struct-typed
+        // binding retrieves the stack address, not the ptrtoint value.
+        self.fun.struct_literal_allocas.insert(result.clone(), alloca_reg.clone());
         TypedRegister { name: result, ty: struct_ty }
     }
 
     /// Look up the byte offset of a field in a struct definition.
-    fn lookup_field_offset(&self, type_name: &str, field_name: &str) -> u64 {
-        if let Some(info) = self.ctx.type_universe.as_ref()
-            .and_then(|u| u.types.get(type_name))
-        {
-            for (i, (fname, _)) in info.fields.iter().enumerate() {
-                if fname == field_name {
-                    return i as u64 * 8; // Simplified: 8 bytes per field
+    /// Get the fields of a struct type from the type universe or struct_types.
+    /// 2026-07-24: Falls back to struct_types (registration pass) when the
+    /// type universe is unavailable (common in test environments).
+    fn get_struct_fields(&self, type_name: &str) -> Option<&[(String, Type)]> {
+        // Try type universe first (production path, has precise types)
+        if let Some(ref u) = self.ctx.type_universe {
+            if let Some(info) = u.types.get(type_name) {
+                if !info.fields.is_empty() {
+                    return Some(&info.fields);
                 }
+            }
+        }
+        // Fall back to struct_types (set during registration, always available)
+        self.ctx.struct_types.get(type_name).map(|v| v.as_slice())
+    }
+
+    /// Compute total byte size of a struct type from its fields.
+    /// 2026-07-24: Falls back to struct_types when universe unavailable.
+    fn struct_type_size(&self, type_name: &str) -> u64 {
+        // Try type universe first
+        if let Some(ref u) = self.ctx.type_universe {
+            if let Some(info) = u.types.get(type_name) {
+                if info.bytes > 0 {
+                    return info.bytes;
+                }
+            }
+        }
+        // Fall back: compute from struct_types fields
+        self.ctx.struct_types.get(type_name)
+            .map(|fields| {
+                fields.iter().map(|(_, ty)| types::type_size(ty)).sum()
+            })
+            .unwrap_or(8)
+    }
+
+    /// 2026-07-24: Computes offsets from field types using type_size (pack=1).
+    /// Previously used simplified i*8 which was wrong for mixed-size fields.
+    fn lookup_field_offset(&self, type_name: &str, field_name: &str) -> u64 {
+        if let Some(fields) = self.get_struct_fields(type_name) {
+            let mut offset = 0u64;
+            for (fname, ftype) in fields {
+                if fname == field_name {
+                    return offset;
+                }
+                offset += types::type_size(ftype);
             }
         }
         0
@@ -1106,10 +1176,8 @@ impl LlvmBackend {
 
     /// Check if a struct field has pointer type.
     fn is_ptr_field(&self, type_name: &str, field_name: &str) -> bool {
-        if let Some(info) = self.ctx.type_universe.as_ref()
-            .and_then(|u| u.types.get(type_name))
-        {
-            for (fn_, ftype) in &info.fields {
+        if let Some(fields) = self.get_struct_fields(type_name) {
+            for (fn_, ftype) in fields {
                 if fn_ == field_name {
                     return matches!(ftype, Type::Ptr(_));
                 }
@@ -1244,7 +1312,26 @@ impl LlvmBackend {
                 })
                 .collect()
         };
-        let arg_strs: Vec<String> = meld_args
+        // 2026-07-24: Convert i64 args to ptr when the frgn param expects Ptr.
+        // This handles PyModule_Create2(&moduledef, ...) where &moduledef returns
+        // an i64 address but the C function expects a pointer parameter.
+        let final_args: Vec<TypedRegister> = meld_args
+            .iter()
+            .zip(sig.inputs.iter())
+            .map(|(arg, (_, param_ty))| {
+                if matches!(param_ty, Type::Ptr(_)) && arg.ty == Type::int() {
+                    let ptr_reg = self.fun.gen_reg();
+                    writeln!(out, "{}  {} = inttoptr i64 {} to ptr", indent, ptr_reg, arg.name).ok();
+                    TypedRegister {
+                        name: ptr_reg,
+                        ty: Type::Ptr(Box::new(Type::int())),
+                    }
+                } else {
+                    arg.clone()
+                }
+            })
+            .collect();
+        let arg_strs: Vec<String> = final_args
             .iter()
             .map(|reg| format!("{} {}", self.llvm_type(&reg.ty), reg.name))
             .collect();
@@ -1316,7 +1403,24 @@ impl LlvmBackend {
 
         // 2026-07-22: Emit the foreign call through the bridge.
         // For now, emit a direct call with a bridge_ prefix to distinguish.
-        let arg_strs: Vec<String> = transformed_args
+        // 2026-07-24: Convert i64 args to ptr when the frgn param expects Ptr.
+        let bridge_args: Vec<TypedRegister> = transformed_args
+            .iter()
+            .zip(sig.inputs.iter())
+            .map(|(arg, (_, param_ty))| {
+                if matches!(param_ty, Type::Ptr(_)) && arg.ty == Type::int() {
+                    let ptr_reg = self.fun.gen_reg();
+                    writeln!(out, "{}  {} = inttoptr i64 {} to ptr", indent, ptr_reg, arg.name).ok();
+                    TypedRegister {
+                        name: ptr_reg,
+                        ty: Type::Ptr(Box::new(Type::int())),
+                    }
+                } else {
+                    arg.clone()
+                }
+            })
+            .collect();
+        let arg_strs: Vec<String> = bridge_args
             .iter()
             .map(|reg| format!("{} {}", self.llvm_type(&reg.ty), reg.name))
             .collect();
