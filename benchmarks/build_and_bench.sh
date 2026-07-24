@@ -80,6 +80,7 @@ TAG[kalman_filter_runtime]=runtime
 TAG[knucleotide]=runtime
 TAG[cancel_math]=runtime
 TAG[bridge_glue]=runtime
+TAG[bridge_multi]=runtime
 TAG[bit_clear]=runtime
 TAG[queue_drain]=runtime
 TAG[queue_drain_sym]=runtime
@@ -121,6 +122,7 @@ BENCHMARKS=(
     "queue_drain_idio"
     "interval_step"
     "bridge_glue"
+    "bridge_multi"
     # "gpu/saxpy"        # no .bv file exists
     # "meld-bridge"      # no .bv file exists
     # "meld-bridge-sym"  # no .bv file exists
@@ -383,6 +385,27 @@ bench_self_term() {
         return
     fi
 
+    # 2026-07-24: Multi-language bridge benchmark
+    if [ "$name" = "bridge_multi" ]; then
+        echo "  Python ctypes + protocol, Node.js koffi + protocol, shell protocol"
+        local multi_dir="benchmarks/multi_lang"
+        if [ -d "$multi_dir" ] && [ -x "$(command -v python3)" ]; then
+            python3 "$multi_dir/bench_multi_lang.py" 2>&1 | sed 's/^/    /'
+        else
+            echo "  SKIP — no Python"
+        fi
+        if [ -d "$multi_dir" ] && [ -x "$(command -v node)" ]; then
+            node "$multi_dir/bench_node.mjs" 2>&1 | sed 's/^/    /'
+        else
+            echo "  SKIP — no Node.js"
+        fi
+        if [ -d "$multi_dir" ] && [ -x "$(command -v bash)" ] && [ -x "$multi_dir/bench_shell.sh" ]; then
+            bash "$multi_dir/bench_shell.sh" 2>&1 | sed 's/^/    /'
+        fi
+        record_result "$name" "done" "" "" "" "PASS"
+        return
+    fi
+
     # Check for precomputed
     if is_precompute_ok "$name"; then
         local brief_text=0
@@ -501,6 +524,9 @@ for name in "${BENCHMARKS[@]}"; do
     if [ "$name" = "bridge_glue" ]; then
         echo "  bridge_glue: building C + Brief .so files..."
         make -C benchmarks/bridge PROJECT_ROOT="$PWD" BRIDGE_DIR="$PWD/target/bridge_bench" all 2>&1 | sed 's/^/    /'
+    elif [ "$name" = "bridge_multi" ]; then
+        echo "  bridge_multi: building Brief .so + protocol shim..."
+        make -C benchmarks/multi_lang PROJECT_ROOT="$PWD" BUILD_DIR="$PWD/target/multi_lang" all 2>&1 | sed 's/^/    /'
     else
         build_c "$name"
     fi

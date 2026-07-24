@@ -1,0 +1,7 @@
+export defn add(a: Int, b: Int) -> Int {
+    term a + b;
+};
+
+export defn mul(a: Int, b: Int) -> Int {
+    term a * b;
+};
