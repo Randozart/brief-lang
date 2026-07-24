@@ -29,6 +29,11 @@ impl<'a> Parser<'a> {
             // 2026-07-17: Discard: `<- &queue;` — pop and discard the value.
             Some(Token::ArrowLeft) => self.parse_arrow_discard_statement(),
             _ => {
+                // 2026-07-24: Skip doc comments inside blocks too
+                if let Some(&Token::DocComment(_) | &Token::DocCommentBang(_)) = self.peek() {
+                    self.pos += 1;
+                    return self.parse_statement();
+                }
                 // Keywords that lex as identifiers: return, if, $defn, $txn
                 if self.check_identifier("return") {
                     self.parse_return_statement()
@@ -157,29 +162,6 @@ impl<'a> Parser<'a> {
             name,
             instance,
             port,
-        })
-    }
-
-    /// asm "instruction" { clobbers };
-    fn parse_inline_asm(&mut self) -> Result<Statement, SyntaxError> {
-        self.pos += 1;
-        let asm_string = self.expect_string()?;
-        let clobbers = if self.eat(&Token::LBrace) {
-            let mut cl = Vec::new();
-            while !self.check(&Token::RBrace) && !self.is_at_end() {
-                cl.push(self.expect_string()?);
-                self.eat(&Token::Comma);
-            }
-            self.expect(Token::RBrace)?;
-            cl
-        } else {
-            Vec::new()
-        };
-        self.expect(Token::Semicolon)?;
-        Ok(Statement::InlineAsm {
-            asm_string,
-            clobbers,
-            span: None,
         })
     }
 

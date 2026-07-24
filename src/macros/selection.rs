@@ -698,6 +698,7 @@ mod tests {
                 modifiers: vec![],
                 annotations: vec![],
                 span: None,
+                doc: None,
             }),
             TopLevel::Transaction(Transaction {
                 name: "compute".into(),
@@ -717,6 +718,7 @@ mod tests {
                 derivation: None,
                 modifiers: vec![],
                 span: None,
+                doc: None,
             }),
         ]
     }

@@ -431,6 +431,7 @@ mod tests {
             derivation: None,
             modifiers: vec![],
             span: None,
+            doc: None,
         })
     }
 

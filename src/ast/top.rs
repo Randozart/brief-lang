@@ -89,6 +89,8 @@ pub struct Definition {
     pub modifiers: Vec<Annotation>,
     pub annotations: Vec<TypeBinding>,
     pub span: Option<Span>,
+    /// 2026-07-24: Doc comment text (/// or /** */), without the /// prefix.
+    pub doc: Option<String>,
 }
 
 // ── Transaction ────────────────────────────────────────────────────────
@@ -108,6 +110,8 @@ pub struct Transaction {
     pub derivation: Option<DerivationBlock>,
     pub modifiers: Vec<Annotation>,
     pub span: Option<Span>,
+    /// 2026-07-24: Doc comment text.
+    pub doc: Option<String>,
 }
 
 // ── Contract ───────────────────────────────────────────────────────────
@@ -159,6 +163,8 @@ pub struct CellDef {
     pub is_persistent: bool,
     pub metadata: HashMap<String, PropertyValue>,
     pub span: Option<Span>,
+    /// 2026-07-24: Doc comment text.
+    pub doc: Option<String>,
 }
 
 // ── Statement ──────────────────────────────────────────────────────────
@@ -636,6 +642,8 @@ pub struct ForeignBinding {
     /// 2026-07-22: Fallback strategy when the foreign call fails.
     pub fallback: Fallback,
     pub span: Option<Span>,
+    /// 2026-07-24: Doc comment text.
+    pub doc: Option<String>,
 }
 
 impl ForeignBinding {
@@ -667,6 +675,7 @@ impl ForeignBinding {
             wasm_setup: None,
             fallback,
             span: None,
+            doc: None,
         }
     }
 

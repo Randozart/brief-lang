@@ -633,6 +633,7 @@ use std::collections::HashMap;
             metadata: HashMap::new(),
             modifiers: vec![],
             derivation: None,
+            doc: None,
         })
     }
 

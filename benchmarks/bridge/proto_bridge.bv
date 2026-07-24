@@ -1,0 +1,48 @@
+export defn add(a: Int, b: Int) -> Int {
+    term a + b;
+};
+
+export defn greet(name: String) -> String {
+    term "hello " + name;
+};
+
+export defn double(x: Float) -> Float {
+    term x * 2.0;
+};
+
+export defn negate(x: Int) -> Int {
+    term 0 - x;
+};
+
+$(Normalized @ highest) {
+    let exports = Tag$("export");
+    when exports.IsEmpty$() {
+        EmitInfo$("no exports");
+    };
+
+    // Build a protocol bridge executable (text protocol over stdin/stdout)
+    let c = "#include <stdio.h>\n#include <stdint.h>\n#include <string.h>\n#include <dlfcn.h>\n\n";
+    c = c + "int main(int argc, char** argv) {\n";
+    c = c + "    void* lib = dlopen(argv[0], RTLD_LAZY);\n";
+    c = c + "    int64_t (*add_fn)(int64_t, int64_t) = dlsym(lib, \"add\");\n";
+    c = c + "    int64_t (*neg_fn)(int64_t) = dlsym(lib, \"negate\");\n";
+    c = c + "    char line[8192];\n";
+    c = c + "    while (fgets(line, sizeof(line), stdin)) {\n";
+    c = c + "        char fn[256]; int64_t a = 0, b = 0;\n";
+    c = c + "        if (sscanf(line, \"%255s %ld %ld\", fn, &a, &b) >= 1) {\n";
+    c = c + "            if (strcmp(fn, \"add\") == 0)   { printf(\"%ld\\n\", add_fn(a, b)); fflush(stdout); }\n";
+    c = c + "            else if (strcmp(fn, \"neg\") == 0) { printf(\"%ld\\n\", neg_fn(a)); fflush(stdout); }\n";
+    c = c + "            else { printf(\"-1\\n\"); fflush(stdout); }\n";
+    c = c + "        }\n";
+    c = c + "    }\n";
+    c = c + "    dlclose(lib);\n";
+    c = c + "    return 0;\n";
+    c = c + "}\n";
+
+    FileWrite$("glue-out/proto_shim.c", c, true);
+    let out = ShellCmd$("gcc", "-c", "-fPIC", "-O2",
+        "glue-out/proto_shim.c",
+        "-o", "glue-out/proto_shim.o");
+    InsertObject$("glue-out/proto_shim.o");
+    EmitInfo$("protocol bridge shim built");
+};

@@ -425,6 +425,7 @@ mod tests {
                 modifiers: vec![],
                 annotations: vec![],
                 span: None,
+                doc: None,
             }),
         ]
     }

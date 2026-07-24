@@ -187,6 +187,7 @@ mod tests {
             modifiers: vec![],
             derivation: None,
             span: None,
+            doc: None,
         };
 
         assert!(verify_true_assertion(&sig, &defn).is_ok());
@@ -220,6 +221,7 @@ mod tests {
             modifiers: vec![],
             derivation: None,
             span: None,
+            doc: None,
         };
 
         assert!(verify_true_assertion(&sig, &defn).is_err());
@@ -256,6 +258,7 @@ mod tests {
             modifiers: vec![],
             derivation: None,
             span: None,
+            doc: None,
         };
 
         assert!(verify_true_assertion(&sig, &defn).is_ok());
@@ -291,6 +294,7 @@ mod tests {
             modifiers: vec![],
             derivation: None,
             span: None,
+            doc: None,
         };
 
         assert!(verify_true_assertion(&sig, &defn).is_err());
@@ -324,6 +328,7 @@ mod tests {
             modifiers: vec![],
             derivation: None,
             span: None,
+            doc: None,
         };
 
         // Should be OK because the sig output is Int, not Bool (no assertion)

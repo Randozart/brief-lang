@@ -1392,9 +1392,11 @@ mod tests {
             metadata: std::collections::HashMap::new(),
             modifiers: vec![],
             derivation: None,
+            doc: None,
         };
         let txn2 = Transaction {
             name: "txn_b".to_string(),
+            doc: None,
             .. txn1.clone()
         };
         let pairs: Vec<(String, &Transaction)> = vec![
@@ -1434,10 +1436,12 @@ mod tests {
             metadata: std::collections::HashMap::new(),
             modifiers: vec![],
             derivation: None,
+            doc: None,
         };
         let txn_b = Transaction {
             body: body_b,
             name: "txn_b".to_string(),
+            doc: None,
             .. txn_a.clone()
         };
         let pairs: Vec<(String, &Transaction)> = vec![
@@ -1470,6 +1474,7 @@ mod tests {
             metadata: std::collections::HashMap::new(),
             modifiers: vec![],
             derivation: None,
+            doc: None,
         };
         let pairs: Vec<(String, &Transaction)> = vec![("only".to_string(), &txn)];
         assert!(!is_uniform_body_group(&pairs));
@@ -1509,6 +1514,7 @@ mod tests {
                 metadata: std::collections::HashMap::new(),
                 modifiers: vec![],
                 derivation: None,
+                doc: None,
             }),
         ];
         let graph = ReactorTransitionGraph::build(&items, &None, &vec![]);
@@ -1535,6 +1541,7 @@ mod tests {
                 is_async: false, is_reactive: false, span: None,
                 metadata: std::collections::HashMap::new(),
                 modifiers: vec![], derivation: None,
+                doc: None,
             }),
         ];
         let usage = compute_projection_usage(&items);
@@ -1562,6 +1569,7 @@ mod tests {
                 is_async: false, is_reactive: false, span: None,
                 metadata: std::collections::HashMap::new(),
                 modifiers: vec![], derivation: None,
+                doc: None,
             }),
         ];
         let usage = compute_projection_usage(&items);

@@ -13,6 +13,8 @@ pub struct Parser<'a> {
     pub strict_mode: bool,
     /// 2026-07-16: P2 — Extension group expansion stores extra TypeDefs here.
     pub pending_types: std::vec::IntoIter<TopLevel>,
+    /// 2026-07-24: Pending doc comment to attach to the next definition.
+    pub pending_doc: Option<String>,
 }
 
 impl<'a> Parser<'a> {
@@ -23,6 +25,7 @@ impl<'a> Parser<'a> {
             source,
             strict_mode: false,
             pending_types: Vec::new().into_iter(),
+            pending_doc: None,
         }
     }
 
@@ -68,6 +71,16 @@ impl<'a> Parser<'a> {
         }
     }
 
+    /// 2026-07-24: Take the pending doc comment and return it, clearing the buffer.
+    pub fn take_doc(&mut self) -> Option<String> {
+        self.pending_doc.take()
+    }
+
+    /// 2026-07-24: Set the pending doc comment from a DocComment token.
+    pub fn set_doc(&mut self, text: String) {
+        self.pending_doc = Some(text);
+    }
+
     /// Advance past the current token and return it.
     pub fn advance(&mut self) -> Option<(Token, std::ops::Range<usize>)> {
         let tok = self.tokens.get(self.pos).cloned();
@@ -82,8 +95,6 @@ impl<'a> Parser<'a> {
         match self.advance() {
             Some((Token::Identifier(name), _)) => Ok(name),
             Some((tok, span)) => {
-                // 2026-07-14: Many keywords are also used as identifiers
-                // in benchmarks and user code. Accept them gracefully.
                 if let Some(name) = self.keyword_as_identifier(&tok) {
                     Ok(name)
                 } else {
@@ -101,7 +112,7 @@ impl<'a> Parser<'a> {
         }
     }
 
-    /// Get the current token as an integer, or error.
+    /// Shortcut: check for Digit
     pub fn expect_integer(&mut self) -> Result<i64, SyntaxError> {
         match self.advance() {
             Some((Token::Integer(n), _)) => Ok(n),

@@ -1,0 +1,14 @@
+// bench_full.bv — GLUE-in-Brief demo
+// Build: brief build lib/glue/bench_full.bv --enable-plugin glue-generator
+
+export defn add(a: Int, b: Int) -> Int {
+    term a + b;
+};
+
+export defn greet(name: String) -> String {
+    term "hello " + name;
+};
+
+export defn double(x: Float) -> Float {
+    term x * 2.0;
+};

@@ -30,6 +30,7 @@ fn make_txn(name: &str, modifiers: Vec<Annotation>) -> TopLevel {
         derivation: None,
         modifiers,
         span: None,
+        doc: None,
     })
 }
 
@@ -101,6 +102,7 @@ fn test_llvm_generates_transaction() {
             derivation: None,
             modifiers: vec![],
             span: None,
+            doc: None,
         }),
     ];
     let output = backend.generate(&program, None);
@@ -132,6 +134,7 @@ fn test_llvm_has_noalias() {
             derivation: None,
             modifiers: vec![],
             span: None,
+            doc: None,
         }),
     ];
     let output = backend.generate(&program, None);
@@ -283,6 +286,7 @@ fn test_no_range_lower_bound_defaults_to_i64_min() {
             derivation: None,
             modifiers: vec![],
             span: None,
+            doc: None,
         }),
     ];
     let output = backend.generate(&program, None);
@@ -330,6 +334,7 @@ fn test_binop_no_nuw_nsw() {
             derivation: None,
             modifiers: vec![],
             span: None,
+            doc: None,
         }),
     ];
     let output = backend.generate(&program, None);
@@ -363,6 +368,7 @@ fn test_float_binary_add() {
             derivation: None,
             modifiers: vec![],
             span: None,
+            doc: None,
         }),
     ];
     let output = backend.generate(&program, None);
@@ -607,6 +613,7 @@ fn make_point_program(body: Vec<Statement>) -> Vec<TopLevel> {
             derivation: None,
             modifiers: vec![],
             span: None,
+            doc: None,
         }),
     ]
 }
@@ -642,6 +649,7 @@ fn test_string_state_init_not_null() {
             derivation: None,
             modifiers: vec![],
             span: None,
+            doc: None,
         }),
     ];
     let output = backend.generate(&program, None);
@@ -675,6 +683,7 @@ fn test_const_trg_write_emits_error() {
             derivation: None,
             modifiers: vec![],
             span: None,
+            doc: None,
         }),
     ];
     let output = backend.generate(&program, None);
@@ -708,6 +717,7 @@ fn test_local_float_binding() {
             derivation: None,
             modifiers: vec![],
             span: None,
+            doc: None,
         }),
     ];
     let output = backend.generate(&program, None);
@@ -771,6 +781,7 @@ fn make_wake_program_no_triggers() -> Vec<TopLevel> {
             derivation: None,
             modifiers: vec![],
             span: None,
+            doc: None,
         }),
     ]
 }
@@ -848,6 +859,7 @@ fn make_exit_program(exit_expr: Option<Expr>, is_wake: bool) -> Vec<TopLevel> {
         derivation: None,
         modifiers: vec![],
         span: None,
+        doc: None,
     };
     items.push(TopLevel::Transaction(txn));
     items
@@ -1001,6 +1013,7 @@ fn make_slp_float_program(n_floats: usize, cross_body: Vec<Statement>, precondit
         derivation: None,
         modifiers: vec![],
         span: None,
+        doc: None,
     }));
     items
 }
@@ -1236,6 +1249,7 @@ fn test_imported_alias_is_mmio() {
             derivation: None,
             modifiers: vec![],
             span: None,
+            doc: None,
         }),
     ];
     let output = backend.generate(&program, None);
@@ -1283,6 +1297,7 @@ fn test_unimported_alias_not_mmio() {
             derivation: None,
             modifiers: vec![],
             span: None,
+            doc: None,
         }),
     ];
     let output = backend.generate(&program, None);
@@ -1318,6 +1333,7 @@ fn make_intrinsic_program(intrinsic: Expr) -> Vec<TopLevel> {
             derivation: None,
             modifiers: vec![],
             span: None,
+            doc: None,
         }),
     ]
 }
@@ -1346,6 +1362,7 @@ fn make_float_intrinsic_program(intrinsic: Expr) -> Vec<TopLevel> {
             derivation: None,
             modifiers: vec![],
             span: None,
+            doc: None,
         }),
     ]
 }
@@ -1376,6 +1393,7 @@ fn test_emit_cast_int_to_string() {
             derivation: None,
             modifiers: vec![],
             span: None,
+            doc: None,
         }),
     ];
     let output = backend.generate(&program, None);
@@ -1409,6 +1427,7 @@ fn test_emit_cast_string_to_int() {
             derivation: None,
             modifiers: vec![],
             span: None,
+            doc: None,
         }),
     ];
     let output = backend.generate(&program, None);
@@ -1434,6 +1453,7 @@ fn test_list_literal_2slot_header() {
                 Statement::Assign(Expr::Identifier("lst".to_string()), Expr::List(vec![Expr::Decimal(10), Expr::Decimal(20)])),
             ],
             metadata: HashMap::new(), derivation: None, modifiers: vec![], span: None,
+            doc: None,
         }),
     ];
     let output = backend.generate(&program, None);
@@ -1459,6 +1479,7 @@ fn test_empty_list_global_sentinel() {
                 Statement::Assign(Expr::Identifier("e".to_string()), Expr::List(vec![])),
             ],
             metadata: HashMap::new(), derivation: None, modifiers: vec![], span: None,
+            doc: None,
         }),
     ];
     let output = backend.generate(&program, None);
@@ -1483,6 +1504,7 @@ fn test_nonempty_list_uses_malloc() {
                 Statement::Assign(Expr::Identifier("v".to_string()), Expr::List(vec![Expr::Decimal(1), Expr::Decimal(2), Expr::Decimal(3)])),
             ],
             metadata: HashMap::new(), derivation: None, modifiers: vec![], span: None,
+            doc: None,
         }),
     ];
     let output = backend.generate(&program, None);
@@ -1510,6 +1532,7 @@ fn test_list_index_uses_2slot_header() {
                 Statement::Assign(Expr::Identifier("elem".to_string()), Expr::Index(Box::new(Expr::List(vec![Expr::Decimal(99)])), Box::new(Expr::Decimal(0)))),
             ],
             metadata: HashMap::new(), derivation: None, modifiers: vec![], span: None,
+            doc: None,
         }),
     ];
     let output = backend.generate(&program, None);
@@ -1533,6 +1556,7 @@ fn test_list_len_loads_length() {
                 Statement::Assign(Expr::Identifier("len".to_string()), Expr::Call("Len#".to_string(), vec![Expr::List(vec![Expr::Decimal(1), Expr::Decimal(2)])], None)),
             ],
             metadata: HashMap::new(), derivation: None, modifiers: vec![], span: None,
+            doc: None,
         }),
     ];
     let output = backend.generate(&program, None);
@@ -1557,6 +1581,7 @@ fn test_tuple_emits_2slot_header() {
                 Statement::Assign(Expr::Identifier("t".to_string()), Expr::Tuple(vec![Expr::Decimal(1), Expr::Decimal(2), Expr::Decimal(3)])),
             ],
             metadata: HashMap::new(), derivation: None, modifiers: vec![], span: None,
+            doc: None,
         }),
     ];
     let output = backend.generate(&program, None);
@@ -1609,6 +1634,7 @@ fn make_chain_program(
             derivation: None,
             modifiers: vec![],
             span: None,
+            doc: None,
         }));
     }
     items
@@ -1806,6 +1832,7 @@ fn make_async_pair_program() -> Vec<TopLevel> {
             derivation: None,
             modifiers: vec![],
             span: None,
+            doc: None,
         }),
         TopLevel::Transaction(Transaction {
             name: "inc_b".to_string(),
@@ -1824,6 +1851,7 @@ fn make_async_pair_program() -> Vec<TopLevel> {
             derivation: None,
             modifiers: vec![],
             span: None,
+            doc: None,
         }),
     ]
 }
@@ -1907,6 +1935,7 @@ fn test_struct_param_uses_ptr_in_signature() {
             derivation: None,
             annotations: vec![],
             span: None,
+            doc: None,
         }),
     ];
     let output = backend.generate(&program, None);
@@ -1947,6 +1976,7 @@ fn test_struct_param_ptrtoint_at_entry() {
             derivation: None,
             annotations: vec![],
             span: None,
+            doc: None,
         }),
     ];
     let output = backend.generate(&program, None);
@@ -1987,6 +2017,7 @@ fn test_struct_param_field_access_works() {
             derivation: None,
             annotations: vec![],
             span: None,
+            doc: None,
         }),
     ];
     let output = backend.generate(&program, None);
@@ -2021,6 +2052,7 @@ fn test_event_model_trigger_handling() {
             derivation: None,
             modifiers: vec![],
             span: None,
+            doc: None,
         }),
     ];
     let output = backend.generate(&program, None);
@@ -2056,6 +2088,7 @@ fn make_fn_ptr_program() -> Vec<TopLevel> {
             derivation: None,
             modifiers: vec![],
             span: None,
+            doc: None,
         }),
     ]
 }
@@ -2092,6 +2125,7 @@ fn test_emit_address_of() {
             derivation: None,
             modifiers: vec![],
             span: None,
+            doc: None,
         }),
     ];
     let output = LlvmBackend::new().generate(&program, None);
@@ -2143,6 +2177,7 @@ fn test_trg_deref_error_flag() {
             derivation: None,
             modifiers: vec![],
             span: None,
+            doc: None,
         }),
     ];
     let output = LlvmBackend::new()
@@ -2187,6 +2222,7 @@ fn test_trg_deref_warn_default_no_null_check() {
             derivation: None,
             modifiers: vec![],
             span: None,
+            doc: None,
         }),
     ];
     let output = LlvmBackend::new().generate(&program, None);

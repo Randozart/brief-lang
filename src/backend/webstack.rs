@@ -1206,6 +1206,7 @@ mod tests {
                 derivation: None,
                 modifiers: vec![],
                 span: None,
+                doc: None,
             }),
         ];
         let output = backend.generate(&items, &[], "test");
@@ -1337,6 +1338,7 @@ mod tests {
                 derivation: None,
                 modifiers: vec![],
                 span: None,
+                doc: None,
             }),
         ];
         let output = backend.generate(&items, &[], "arm_test");

@@ -89,6 +89,7 @@ pub fn arb_transaction(max_depth: usize) -> impl Strategy<Value = TopLevel> {
             outputs: Vec::new(),
             output_type: None,
             derivation: None,
+            doc: None,
         })
     })
 }
@@ -131,6 +132,7 @@ pub fn arb_definition(max_depth: usize) -> impl Strategy<Value = TopLevel> {
             modifiers: vec![],
             derivation: None,
             span: None,
+            doc: None,
         })
     })
 }

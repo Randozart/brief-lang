@@ -193,6 +193,7 @@ impl<'a> Parser<'a> {
             wasm_setup: None,
             fallback,
             span: None,
+            doc: None,
         })
     }
 
@@ -285,6 +286,7 @@ impl<'a> Parser<'a> {
             modifiers: vec![],
             annotations: vec![],
             span: None,
+            doc: None,
         })
     }
 
@@ -342,6 +344,7 @@ impl<'a> Parser<'a> {
             derivation,
             modifiers: vec![],
             span: None,
+            doc: None,
         })
     }
 
@@ -373,6 +376,7 @@ impl<'a> Parser<'a> {
             derivation,
             modifiers: vec![],
             span: None,
+            doc: None,
         })
     }
 
@@ -404,6 +408,7 @@ impl<'a> Parser<'a> {
             is_persistent: false,
             metadata: std::collections::HashMap::new(),
             span: None,
+            doc: None,
         })
     }
 
@@ -1248,7 +1253,7 @@ impl<'a> Parser<'a> {
             output_type: output_type.clone(),
             outputs: vec![],
             contract, body, metadata,
-            derivation, modifiers: vec![], annotations: vec![], span: None,
+            derivation, modifiers: vec![], annotations: vec![], span: None, doc: None,
         }))
     }
 
@@ -1276,7 +1281,7 @@ impl<'a> Parser<'a> {
             outputs: vec![],
             contract, body, metadata,
             is_reactive: true, is_async: false,
-            derivation, modifiers: vec![], span: None,
+            derivation, modifiers: vec![], span: None, doc: None,
         }))
     }
 }

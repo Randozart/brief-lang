@@ -362,6 +362,7 @@ mod tests {
             derivation: None,
             modifiers: vec![],
             span: None,
+            doc: None,
         };
         let program = vec![TopLevel::Transaction(txn)];
         // CheckReactive$ was removed in 2026-07-21

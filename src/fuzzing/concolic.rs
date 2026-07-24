@@ -299,6 +299,7 @@ mod tests {
             outputs: vec![],
             output_type: None,
             derivation: None,
+            doc: None,
         }
     }
 

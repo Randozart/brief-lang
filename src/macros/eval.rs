@@ -859,6 +859,7 @@ fn eval_nav_call(
                 contract: Contract::new(Expr::Bool(true), Expr::Bool(true)),
                 body: vec![], metadata: Default::default(),
                 derivation: None, modifiers: vec![], annotations: vec![], span: None,
+                doc: None,
             })))
         }
         "Call$" => {
@@ -2081,6 +2082,7 @@ mod tests {
                 contract: Contract::new(Expr::Bool(true), Expr::Bool(true)),
                 body: vec![], metadata: Default::default(),
                 derivation: None, modifiers: vec![], annotations: vec![], span: None,
+                doc: None,
             }),
         ];
         let mut universe = TypeUniverse::new();
@@ -2144,6 +2146,7 @@ mod tests {
                 contract: Contract::new(Expr::Bool(true), Expr::Bool(true)),
                 body: vec![], metadata: Default::default(),
                 derivation: None, modifiers: vec![], annotations: vec![], span: None,
+                doc: None,
             }),
         ];
         let mut universe = TypeUniverse::new();
@@ -2655,6 +2658,7 @@ mod tests {
                 contract: Contract::new(Expr::Bool(true), Expr::Bool(true)),
                 body: vec![], metadata: Default::default(),
                 derivation: None, modifiers: vec![], annotations: vec![], span: None,
+                doc: None,
             }),
             TopLevel::Definition(Definition {
                 name: "helper".into(), type_params: vec![], parameters: vec![],
@@ -2662,6 +2666,7 @@ mod tests {
                 contract: Contract::new(Expr::Bool(true), Expr::Bool(true)),
                 body: vec![], metadata: Default::default(),
                 derivation: None, modifiers: vec![], annotations: vec![], span: None,
+                doc: None,
             }),
         ];
         let mut universe = TypeUniverse::new();

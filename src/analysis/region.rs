@@ -1759,6 +1759,7 @@ mod tests {
             outputs: Vec::new(),
             output_type: None,
             derivation: None,
+            doc: None,
      })
     }
 

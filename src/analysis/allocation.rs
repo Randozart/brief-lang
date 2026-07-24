@@ -348,6 +348,7 @@ mod tests {
             type_params: vec![], contract: Contract::new(Expr::Bool(true), Expr::Bool(true)),
             body, derivation: None, metadata: Default::default(),
             modifiers: vec![], annotations: vec![], span: None,
+            doc: None,
         })
     }
 

@@ -81,6 +81,7 @@ mod tests {
             derivation: None,
             modifiers: vec![],
             span: None,
+            doc: None,
         };
         let program = vec![TopLevel::Transaction(txn)];
         let result = compile_spirv(&program, "vec_add");

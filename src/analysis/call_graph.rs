@@ -221,6 +221,7 @@ mod tests {
             metadata: HashMap::new(),
             modifiers: vec![],
             derivation: None,
+            doc: None,
         })
     }
 

@@ -210,7 +210,7 @@ fn parse_definition(parts: &[SExpr]) -> Result<Definition, String> {
     }
     Ok(Definition { name, parameters: params, outputs, body, type_params: vec![],
         output_type: None, contract, metadata, annotations: vec![],
-        derivation: None, modifiers: vec![], span: None })
+        derivation: None, modifiers: vec![], span: None, doc: None })
 }
 
 fn parse_transaction(parts: &[SExpr]) -> Result<Transaction, String> {
@@ -239,7 +239,7 @@ fn parse_transaction(parts: &[SExpr]) -> Result<Transaction, String> {
     }
     Ok(Transaction { name, parameters: params, type_params: vec![], is_reactive, is_async,
         contract, body, outputs: vec![], output_type: None, metadata: HashMap::new(),
-        derivation: None, modifiers: vec![], span: None })
+        derivation: None, modifiers: vec![], span: None, doc: None })
 }
 
 fn parse_contract(expr: &SExpr) -> Result<Contract, String> {

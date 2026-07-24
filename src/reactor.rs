@@ -445,6 +445,7 @@ mod tests {
             outputs: vec![],
             output_type: None,
             derivation: None,
+            doc: None,
         })
     }
 
@@ -484,6 +485,7 @@ mod tests {
                 body: vec![], modifiers: vec![],
                 derivation: None,
                 span: None,
+                doc: None,
             }),
             TopLevel::Transaction(Transaction {
                 name: "bar".into(), is_reactive: false, is_async: false, type_params: vec![], parameters: vec![],
@@ -492,6 +494,7 @@ mod tests {
                 metadata: HashMap::new(),
                 output_type: None,
                 derivation: None,
+                doc: None,
             }),
         ]);
         let reactor = build_reactor(&prog);
@@ -618,6 +621,7 @@ mod tests {
             outputs: vec![],
             output_type: None,
             derivation: None,
+            doc: None,
         };
         let reactor = build_reactor(&simple_program(vec![TopLevel::Transaction(txn)]));
         assert_eq!(reactor.transactions.len(), 1);
@@ -652,6 +656,7 @@ mod tests {
             outputs: vec![],
             output_type: None,
             derivation: None,
+            doc: None,
         };
         let mut interp = Interpreter::new();
         interp.state.insert("x".into(), crate::interpreter::i64_to_bits(0));
@@ -690,6 +695,7 @@ mod tests {
             outputs: vec![],
             output_type: None,
             derivation: None,
+            doc: None,
         };
         let mut interp = Interpreter::new();
         let mut reactor = build_reactor(&simple_program(vec![TopLevel::Transaction(txn)]));
