@@ -182,6 +182,20 @@ fn narrow_body(name: &str, params: &[(String, Type)], body: &[Statement]) -> Has
     bindings
 }
 
+fn process(d: &Definition, all: &mut HashMap<String, HashMap<String, u64>>) {
+    let bindings = narrow_body(&d.name, &d.parameters, &d.body);
+    if !bindings.is_empty() {
+        all.insert(d.name.clone(), bindings);
+    }
+}
+
+fn process_txn(t: &Transaction, all: &mut HashMap<String, HashMap<String, u64>>) {
+    let bindings = narrow_body(&t.name, &t.parameters, &t.body);
+    if !bindings.is_empty() {
+        all.insert(t.name.clone(), bindings);
+    }
+}
+
 /// Main entry point: walk all TopLevel items and infer Int width narrowing.
 /// Returns a map: fn_name → { binding_name → narrowed_bits }
 ///
@@ -192,16 +206,11 @@ pub fn narrow_types(items: &[TopLevel]) -> HashMap<String, HashMap<String, u64>>
     let mut all_bindings = HashMap::new();
     for item in items {
         match item {
-            TopLevel::Definition(d) => {
-                let bindings = narrow_body(&d.name, &d.parameters, &d.body);
-                if !bindings.is_empty() {
-                    all_bindings.insert(d.name.clone(), bindings);
-                }
-            }
-            TopLevel::Transaction(t) => {
-                let bindings = narrow_body(&t.name, &t.parameters, &t.body);
-                if !bindings.is_empty() {
-                    all_bindings.insert(t.name.clone(), bindings);
+            TopLevel::Definition(d) => process(d, &mut all_bindings),
+            TopLevel::Transaction(t) => process_txn(t, &mut all_bindings),
+            TopLevel::Export(e) => {
+                if let TopLevel::Definition(d) = e.inner.as_ref() {
+                    process(d, &mut all_bindings);
                 }
             }
             _ => {}
