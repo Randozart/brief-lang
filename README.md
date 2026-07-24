@@ -1,5 +1,34 @@
 # Brief: A Programming Language
 
+### TL;DR
+
+**Brief is currently a WIP, be aware the design has not been entirely locked in yet**
+
+Brief is programming language with the following features:
+
+- Contract driven partial correctness verification (without needing to write essays of formal proof)
+- Partially declarative, partially imperative, functional invariant based programming
+- Invariant based runtime optimization (with execution speed at parity, or even better than C in several cases)
+- Backend independence through state-management based syntax and backend handling of intrinsics
+- Backend targeting by extension (`.bv`, `.ebv`, `.rbv`, `.abv`, `.cbv`)
+- A lightweight systems language that handles complexity at compile time
+- Syntax that is equally applicable to the other backends, not just systems programming
+- Inferred command flow through reactive top level `node` declarations
+- Memory management by proof through AST graphing
+- Syntax which encourages and optimizes for flat programming
+- Legible metaprogramming syntax for macros and compiler plugins with intermediate `.beast` AST files for understanding how the compiler transforms the code
+- The Metropolitan FFI which adapts compiled Brief code to any and every other programming language by adapting their calling and memory conventions through the Metropipe and GLUE system
+- Helpful compiler hints on failed compilation
+- Optional Python-like indent-based syntax for those who despise curly braces through the opt-in `.f.*bv` extension argument
+- Optional extra strictness through the `.s.*bv` extension argument
+- No types, everything is `Bits` with type-based protocols assigned (but don't worry, `let string: String` is still possible through the standard library auto-imported through the prelude plugin)
+- Extensible compile-time literals
+- A highlighter shipped with the repo
+
+And for those people for whom this is very important, even if the language itself is already robust enough:
+
+- A cute mascot called _Breeve_
+
 | <img src="assets/breeve_present.png" alt="Breeve showing you the logos" width="250"/><br/> <p align="center">*Breeve*, the Cybersphinx<p> <p align="center"><sup><sub>(For those people who like a mascot to come with their language)</sup></sub><p> | <img src="assets/brief-logo.svg" alt="Brief" width="200"/><br/><p align="center">**Brief**<p><img src="assets/e-brief-logo.svg" alt="Embedded Brief" width="200"/><br/><p align="center">**Embedded Brief**<p><img src="assets/a-brief-logo.svg" alt="Accelerated Brief" width="200"/><br/><p align="center">**Accelerated Brief**<p> | <img src="assets/r-brief-logo.svg" alt="Rendered Brief" width="200"/><br/><p align="center">**Rendered Brief**<p><img src="assets/d-brief-logo.svg" alt="Data Brief" width="200"/><br/><p align="center">**Data Brief**<p><img src="assets/c-brief-logo.svg" alt="Circuit Brief" width="200"/><p align="center">**Circuit Brief**<p> |
 |---|---|---|
 
@@ -7,7 +36,7 @@
 
 **Status:** v0.18.0 — GLUE Bridge Protocol, TOML-Driven Export, Cross-Language FFI Pipeline
 
-Brief is a declarative, contract-enforced logic language designed for building verifiable state machines. It treats program execution as a series of verified state transitions rather than sequential instructions. The file extension selects the compilation target. Each one optimizes the same contract-proven logic for a different material:
+Brief is a contract-enforced language designed for building verifiable state machines. It treats program execution as a series of verified state transitions rather than sequential instructions. The file extension selects the compilation target. Each one optimizes the same contract-proven logic for a different material:
 
 | Extension | Variant | Compiles to |
 |-----------|---------|-------------|
@@ -32,7 +61,7 @@ Regards,
 
 Most programming languages are built around _operations in sequence_. Brief describes the _sequence of operations_ - the spatial connections between logical states.
 
-*   **Logic as a Map:** Brief defines a world where roads exist all at once. The "sequence" is the _connection_, not the _timing_.
+*   **Logic as a Map:** Brief defines a world where roads exist all at once. The "sequence" is then can call o _connection_, not the _timing_.
 *   **Physical Isomorphism:** Because the logic defines a _shape_ rather than a _schedule_, it adapts to the physics of its material:
     *   **In Software:** The compiler hires a worker (the CPU) to walk these roads in order.
     *   **In Hardware:** The compiler builds the roads directly out of copper.
@@ -42,9 +71,9 @@ Most programming languages are built around _operations in sequence_. Brief desc
 
 ## The Philosophical Pillars
 
-### All operations are expressed in transactions, and only transactions can call operations. They either complete fully, or not at all.
+### All operations are expressed in nodes, and only nodes and transactions can call operations. They either complete fully, or not at all.
 
-Transactions are inherently cyclical. If you properly define a postcondition a cyclically executed transaction will eventually reach, it automatically starts behaving like a loop, but one that can predictably halt. A transaction with `[pre][post]` converges when the precondition becomes false. This means the postcondition describes the terminal state, and the precondition is the loop condition. You do not write `while (counter < 100)`, instead the precondition `[counter < 100]` already says "keep running while this holds." You do not write `for (i = 0; i < N; i++)`, here too the postcondition `[i == @i + 1]` expresses the step and the invariant all at once. The compiler proves the postcondition is reachable and that the loop terminates. This gives the contract system a role beyond *merely* serving the proof engine.
+Nodes and transactions are inherently cyclical. If you properly define a postcondition a cyclically executed transaction will eventually reach, it automatically starts behaving like a loop, but one that can predictably halt. A transaction with `[pre][post]` converges when the precondition becomes false. This means the postcondition describes the terminal state, and the precondition is the loop condition. You do not write `while (counter < 100)`, instead the precondition `[counter < 100]` already says "keep running while this holds." You do not write `for (i = 0; i < N; i++)`, here too the postcondition `[i == @i + 1]` expresses the step and the invariant all at once. The compiler proves the postcondition is reachable and that the loop terminates. This gives the contract system a role beyond *merely* serving the proof engine.
 
 ### Brief doesn't need you to be correct, it just needs you to be right.
 

@@ -1,16 +1,12 @@
 // test_bridge.bv — Pure-Brief GLUE bridge demo
-// Build: brief build lib/glue/test_bridge.bv
+// Build: brief build lib/glue/test_bridge.bv --allow-write
 
 export defn add(a: Int, b: Int) -> Int {
     term a + b;
 };
 
-export defn greet(name: String) -> String {
-    term "hello " + name;
-};
-
-export defn double(x: Float) -> Float {
-    term x * 2.0;
+export defn mul(a: Int, b: Int) -> Int {
+    term a * b;
 };
 
 $defn generate_pure_bridge(exports: Selection, bridge_name: String) -> String {
@@ -40,12 +36,23 @@ $defn generate_pure_bridge(exports: Selection, bridge_name: String) -> String {
         code += "};\n\n";
     };
 
+    // Build methods array dynamically from exports
+    code += "let methods = [\n";
+    let first = true;
+    foreach(exp in exports) {
+        let name = TypeInfo$(exp, "name");
+        when !first { code += ",\n"; };
+        code += "    PyMethodDef { name: \"" + name + "\"; meth: &pybridge_" + name + "; flags: 1; doc: null; }";
+        first = false;
+    };
+    code += "\n];\n\n";
+
     code += "let moduledef = PyModuleDef {\n";
     code += "    m_base: PyModuleDef_Base { ob_refcnt: 1; ob_type: null; m_init: null; };\n";
     code += "    m_name: \"bridge\";\n";
     code += "    m_doc: null;\n";
     code += "    m_size: -1;\n";
-    code += "    m_methods: null;\n";
+    code += "    m_methods: &methods;\n";
     code += "    m_slots: null;\n";
     code += "    m_traverse: null;\n";
     code += "    m_clear: null;\n";

@@ -372,6 +372,13 @@ impl LlvmBackend {
 
             // ── List literal ─────────────────────────────────────────
             Expr::List(exprs) => {
+                // 2026-07-24: Struct array optimization. When ALL elements
+                // are struct literals of the same known struct type, emit
+                // a contiguous stack array instead of a heap-allocated list.
+                // This produces a C-compatible pointer for bridge code.
+                if let Some(elem_ty) = self.detect_struct_list(exprs) {
+                    return self.emit_struct_array(out, v, exprs, &elem_ty, indent);
+                }
                 // 2026-07-18: SVO — emit inline handle for small lists
                 // when feature_svo is ON and the type is vector-like.
                 if self.feature_svo && exprs.len() <= 3 {
@@ -1121,6 +1128,86 @@ impl LlvmBackend {
         // binding retrieves the stack address, not the ptrtoint value.
         self.fun.struct_literal_allocas.insert(result.clone(), alloca_reg.clone());
         TypedRegister { name: result, ty: struct_ty }
+    }
+
+    // 2026-07-24: Struct array list literal — detect when all elements
+    // are struct literals of the same C-compatible struct type.
+    fn detect_struct_list(&self, exprs: &[Expr]) -> Option<String> {
+        if exprs.is_empty() {
+            return None;
+        }
+        let mut common_type: Option<&str> = None;
+        for expr in exprs {
+            match expr {
+                Expr::StructLiteral { type_name, .. } => {
+                    match common_type {
+                        None => {
+                            if self.ctx.struct_types.contains_key(type_name) {
+                                common_type = Some(type_name.as_str());
+                            } else {
+                                return None;
+                            }
+                        }
+                        Some(t) => {
+                            if type_name != t {
+                                return None;
+                            }
+                        }
+                    }
+                }
+                _ => return None,
+            }
+        }
+        common_type.map(|s| s.to_string())
+    }
+
+    // 2026-07-24: Struct array list codegen — emit a contiguous stack array
+    // for a list literal whose elements are all struct literals of the same
+    // known struct type. Used by bridge code for C-compatible method tables.
+    fn emit_struct_array(
+        &mut self,
+        out: &mut String,
+        v: &str,
+        exprs: &[Expr],
+        elem_type_name: &str,
+        indent: &str,
+    ) -> TypedRegister {
+        let elem_size = self.struct_type_size(elem_type_name);
+        let count = exprs.len() as u64;
+        let total_size = elem_size * count;
+
+        let alloca_reg = self.fun.gen_reg();
+        writeln!(out, "{}  {} = alloca i8, i64 {}", indent, alloca_reg, total_size).ok();
+
+        for (i, expr) in exprs.iter().enumerate() {
+            let Expr::StructLiteral { type_name, fields } = expr else { continue; };
+            let base_offset = (i as u64) * elem_size;
+            for (field_name, field_expr) in fields {
+                let fr = self.fun.gen_reg();
+                let val = self.emit_expr_inner(out, &fr, field_expr, indent);
+                let field_offset = self.lookup_field_offset(type_name, field_name);
+                let offset = base_offset + field_offset;
+                let ptr_reg = self.fun.gen_reg();
+                writeln!(out, "{}  {} = getelementptr i8, ptr {}, i64 {}",
+                    indent, ptr_reg, alloca_reg, offset).ok();
+                if val.ty == Type::int() && self.is_ptr_field(type_name, field_name) {
+                    let conv = self.fun.gen_reg();
+                    writeln!(out, "{}  {} = inttoptr i64 {} to ptr",
+                        indent, conv, val.name).ok();
+                    writeln!(out, "{}  store ptr {}, ptr {}",
+                        indent, conv, ptr_reg).ok();
+                } else {
+                    let fty = self.llvm_type(&val.ty);
+                    writeln!(out, "{}  store {} {}, ptr {}",
+                        indent, fty, val.name, ptr_reg).ok();
+                }
+            }
+        }
+
+        let result = self.fun.gen_reg();
+        writeln!(out, "{}  {} = ptrtoint ptr {} to i64", indent, result, alloca_reg).ok();
+        self.fun.struct_literal_allocas.insert(result.clone(), alloca_reg.clone());
+        TypedRegister { name: result, ty: Type::Custom(elem_type_name.to_string()) }
     }
 
     /// Look up the byte offset of a field in a struct definition.

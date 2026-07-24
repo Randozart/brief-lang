@@ -30,8 +30,16 @@ $defn generate_bridge(exports: Selection, bridge_name: String) -> String {
         code += "};\n\n";
     };
 
-    // Module definition with struct literals
-    code += "let methods = [PyMethodDef { name: \"add\"; meth: &pybridge_add; flags: 1; doc: null; }];\n\n";
+    // Build methods array dynamically from exports
+    code += "let methods = [\n";
+    let first = true;
+    foreach(exp in exports) {
+        let name = TypeInfo$(exp, "name");
+        when !first { code += ",\n"; };
+        code += "    PyMethodDef { name: \"" + name + "\"; meth: &pybridge_" + name + "; flags: 1; doc: null; }";
+        first = false;
+    };
+    code += "\n];\n\n";
 
     code += "let moduledef = PyModuleDef {\n";
     code += "    m_base: PyModuleDef_Base { ob_refcnt: 1; ob_type: null; m_init: null; };\n";

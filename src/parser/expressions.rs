@@ -20,8 +20,6 @@ impl<'a> Parser<'a> {
         let mut expr = self.parse_or()?;
         if self.eat(&Token::Eq) {
             let value = self.parse_assignment()?;
-            // For now, treat assignment as a binary op; the typechecker
-            // will validate lvalue-ness.
             expr = Expr::BinaryOp(BinaryOpKind::Eq, Box::new(expr), Box::new(value));
         }
         Ok(expr)
@@ -322,7 +320,11 @@ impl<'a> Parser<'a> {
             // ── Identifiers (including # names like Sqrt#) ──────────
             Some((Token::Identifier(name), _)) => {
                 // 2026-07-24: Struct literal: TypeName { field: expr; ... }
-                if self.peek() == Some(&Token::LBrace) {
+                // Only parse as struct literal when the name starts with
+                // uppercase (PascalCase type names). This prevents `!first { ... }`
+                // from being parsed as a struct literal — `{` must remain for
+                // `when`/`foreach` block bodies.
+                if self.peek() == Some(&Token::LBrace) && name.starts_with(|c: char| c.is_uppercase()) {
                     return self.parse_struct_literal(name);
                 }
                 self.parse_identifier_or_special(name)

@@ -78,3 +78,5 @@ pub mod macros;
 pub mod watch;
 pub mod wrapper;
 
+pub mod doc;
+

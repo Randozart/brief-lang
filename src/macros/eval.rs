@@ -451,6 +451,11 @@ fn evaluate_stage_stmt(
             // Handle BinaryOp comparisons (Count$() > 0, etc.) which
             // eval_nav_chain doesn't support directly.
             let result = match guard {
+                Expr::UnaryOp(crate::ast::UnaryOpKind::Not, inner) => {
+                    let val = eval_nav_chain(inner, program, universe, stage, scope, sandbox, pm)?;
+                    let truthy = nav_is_truthy(&val);
+                    NavValue::Bool(!truthy)
+                }
                 Expr::BinaryOp(op, left, right) => {
                     let l = eval_nav_chain(left, program, universe, stage, scope, sandbox, pm)?;
                     let r = eval_nav_chain(right, program, universe, stage, scope, sandbox, pm)?;

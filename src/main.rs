@@ -26,6 +26,7 @@ fn main() {
         "derive" => run_derive(&args[2..]),
         "library" | "lib" => library::run_library_mode(&args[2..]),
         "export" => run_export(&args[2..]),
+        "doc" => run_doc(&args[2..]),
         "link" => run_link(&args[2..]),
         "audit" => run_audit_cmd(&args[2..]),
         "config" => run_config(&args[2..]),
@@ -84,6 +85,7 @@ fn print_usage(program: &str) {
     eprintln!("  {} derive <file.bv>              Synthesize derivation blocks", name);
     eprintln!("  {} library <file.bv>             Compile to .a library", name);
     eprintln!("  {} export <file.bv> <lang> [--out <dir>]  Generate a GLUE bridge for <lang>", name);
+    eprintln!("  {} doc <file.bv>                  Generate HTML documentation from doc comments", name);
     eprintln!("  {} link <library.so/a/o>         Analyze a foreign library for frgn declarations", name);
     eprintln!("  {} config list                   List available config profiles", name);
     eprintln!("  {} config show                   Show active config profile", name);
@@ -452,6 +454,12 @@ fn load_target_config(config_dir: Option<&str>) -> TargetConfig {
         }
         None => TargetConfig::load(),
     }
+}
+
+/// `brief doc <file.bv>` — generate HTML documentation.
+fn run_doc(args: &[String]) -> Result<(), String> {
+    let file_path = args.first().ok_or("usage: brief doc <file.bv>")?;
+    brief_compiler::doc::generate_doc(file_path)
 }
 
 /// `brief-compiler config <subcommand>` — manage config profiles.

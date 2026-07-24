@@ -2510,3 +2510,162 @@ fn test_trg_deref_warn_default_no_null_check() {
     // The null check flag is "null_check" in the IR comments, not icmp.
     assert!(!output.contains("null_check"), "Default mode should not emit null check");
 }
+
+#[test]
+fn test_struct_array_list_literal() {
+    // When a list literal contains only struct literals of the same
+    // known struct type, the backend should emit a contiguous stack array
+    // (alloca) instead of a heap-allocated list (malloc).
+    let mut backend = LlvmBackend::new();
+    let program = vec![
+        TopLevel::StaticStruct(StructDef {
+            name: "Point".to_string(),
+            fields: vec![
+                ("x".to_string(), Type::int()),
+                ("y".to_string(), Type::int()),
+            ],
+            metadata: HashMap::new(),
+            span: None,
+        }),
+        TopLevel::Definition(Definition {
+            name: "main".to_string(),
+            type_params: vec![],
+            parameters: vec![],
+            outputs: vec![],
+            output_type: None,
+            contract: default_contract(),
+            body: vec![
+                Statement::Let {
+                    name: "pts".to_string(),
+                    ty: None,
+                    expr: Some(Expr::List(vec![
+                        Expr::StructLiteral {
+                            type_name: "Point".to_string(),
+                            fields: vec![
+                                ("x".to_string(), Expr::Decimal(10)),
+                                ("y".to_string(), Expr::Decimal(20)),
+                            ],
+                        },
+                        Expr::StructLiteral {
+                            type_name: "Point".to_string(),
+                            fields: vec![
+                                ("x".to_string(), Expr::Decimal(30)),
+                                ("y".to_string(), Expr::Decimal(40)),
+                            ],
+                        },
+                    ])),
+                    modifiers: vec![],
+                },
+                Statement::Term(Some(Expr::Decimal(0))),
+            ],
+            modifiers: vec![],
+            metadata: HashMap::new(),
+            derivation: None,
+            annotations: vec![],
+            span: None,
+            doc: None,
+        }),
+    ];
+    let output = backend.generate(&program, None);
+    // Should allocate 32 bytes (2 elements * 16 bytes each)
+    assert!(output.contains("alloca i8, i64 32"),
+        "Should allocate 32 bytes for 2-element Point array.\nGot:\n{}", output);
+    // First element at offset 0: x=10, y=20
+    assert!(output.contains("getelementptr i8, ptr %t"),
+        "Should emit GEP for first element's first field at offset 0.\nGot:\n{}", output);
+    // Should NOT call malloc (no heap allocation)
+    assert!(!output.contains("call @malloc"),
+        "Should NOT emit malloc call for struct array list.\nGot:\n{}", output);
+    // Should emit ptrtoint (the handle is the pointer to the stack array)
+    assert!(output.contains("ptrtoint ptr"),
+        "Should emit ptrtoint to produce i64 handle.\nGot:\n{}", output);
+}
+
+#[test]
+fn test_struct_array_addr_of_and_frgn_call() {
+    // Struct array + &var + frgn call with Ptr param.
+    // The address-of should produce the alloca pointer, and the frgn call
+    // should emit inttoptr to convert i64 handle to ptr for the Ptr param.
+    let mut backend = LlvmBackend::new();
+    let program = vec![
+        TopLevel::StaticStruct(StructDef {
+            name: "PyMethodDef".to_string(),
+            fields: vec![
+                ("name".to_string(), Type::int()),
+                ("flags".to_string(), Type::int()),
+            ],
+            metadata: HashMap::new(),
+            span: None,
+        }),
+        TopLevel::ForeignBinding(ForeignBinding {
+            foreign_name: "use_methods".to_string(),
+            brief_name: None,
+            from: FromSpec::CompilerRegistry("c".to_string()),
+            target: ForeignTarget::C,
+            inputs: vec![("p".to_string(), Type::Ptr(Box::new(Type::int())))],
+            success_output: vec![("".to_string(), Type::int())],
+            error_type: String::new(),
+            error_fields: vec![],
+            input_layout: None,
+            output_layout: None,
+            precondition: None,
+            postcondition: None,
+            buffer_mode: None,
+            default_watchdog: None,
+            wasm_impl: None,
+            wasm_setup: None,
+            fallback: Fallback::None,
+            span: None,
+            doc: None,
+        }),
+        TopLevel::Definition(Definition {
+            name: "main".to_string(),
+            type_params: vec![],
+            parameters: vec![],
+            outputs: vec![],
+            output_type: None,
+            contract: default_contract(),
+            body: vec![
+                Statement::Let {
+                    name: "methods".to_string(),
+                    ty: None,
+                    expr: Some(Expr::List(vec![
+                        Expr::StructLiteral {
+                            type_name: "PyMethodDef".to_string(),
+                            fields: vec![
+                                ("name".to_string(), Expr::Decimal(1)),
+                                ("flags".to_string(), Expr::Decimal(2)),
+                            ],
+                        },
+                    ])),
+                    modifiers: vec![],
+                },
+                Statement::Expression(Expr::Call(
+                    "use_methods".to_string(),
+                    vec![Expr::AddrOf(Box::new(Expr::Identifier("methods".to_string())))],
+                    None,
+                )),
+                Statement::Term(Some(Expr::Decimal(0))),
+            ],
+            modifiers: vec![],
+            metadata: HashMap::new(),
+            derivation: None,
+            annotations: vec![],
+            span: None,
+            doc: None,
+        }),
+    ];
+    let output = backend.generate(&program, None);
+    // Should allocate 16 bytes (1 element * 16 bytes = 2 x i64)
+    assert!(output.contains("alloca i8, i64 16"),
+        "Should allocate 16 bytes for 1-element PyMethodDef array.\nGot:\n{}", output);
+    // Should NOT call malloc
+    assert!(!output.contains("call @malloc"),
+        "Should NOT emit malloc call.\nGot:\n{}", output);
+    // Should emit inttoptr for passing the struct array pointer to the frgn
+    assert!(output.contains("inttoptr i64"),
+        "Should emit inttoptr for Ptr param.\nGot:\n{}", output);
+    // The call should use ptr type for the Ptr param
+    assert!(output.contains("call i64 @use_methods(ptr"),
+        "Should call use_methods with ptr type.\nGot:\n{}", output);
+}
