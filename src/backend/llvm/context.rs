@@ -59,6 +59,9 @@ pub struct CompilerContext {
     pub dump_layout: bool,
     pub library_mode: bool,
     pub is_shared_lib: bool,
+    /// 2026-07-23: Skip emitting the default main() entry point.
+    /// Used by protocol bridge generators that provide their own main.
+    pub no_main: bool,
     /// 2026-07-23: Emit C extension module init metadata (PyInit_*, etc.)
     pub module_init: bool,
 
@@ -185,6 +188,7 @@ impl CompilerContext {
             dump_layout: false,
             library_mode: false,
             is_shared_lib: false,
+            no_main: false,
             module_init: false,
             field_index_map: HashMap::new(),
             field_types: Vec::new(),

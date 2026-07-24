@@ -1027,6 +1027,13 @@ impl LlvmBackend {
         self
     }
 
+    /// 2026-07-23: Skip emitting the default main() entry point.
+    /// The caller provides its own main (e.g., protocol bridge shim).
+    pub fn with_no_main(mut self, v: bool) -> Self {
+        self.ctx.no_main = v;
+        self
+    }
+
     /// 2026-07-22: Provide pre-resolved frgn dispatch strategies.
     /// The backend uses these to decide how to emit foreign calls.
     pub fn with_resolved_frgns(
@@ -3016,7 +3023,9 @@ impl LlvmBackend {
                 }
                 self.fun.txn_counter = 0;
                 self.fun.within_counter = 0;
-                self.emit_main(&mut out, has_wake_triggers);
+                if !self.ctx.no_main {
+                    self.emit_main(&mut out, has_wake_triggers);
+                }
                 // Wake trigger metadata
                 if has_wake_triggers {
                     self.emit_wake_metadata(&mut out);
@@ -3031,7 +3040,9 @@ impl LlvmBackend {
                 // Main
                 self.fun.txn_counter = 0;
                 self.fun.within_counter = 0;
-                self.emit_main(&mut out, false);
+                if !self.ctx.no_main {
+                    self.emit_main(&mut out, false);
+                }
             }
             }
         }
