@@ -53,6 +53,25 @@ The generator emits the entire Python C extension as Brief source using
 The `$(Normalized)` stage block generates `PyMethodDef[]`, `PyModuleDef`,
 and `PyInit_bridge` as Brief source that the compiler compiles natively.
 
+### Blockers
+
+**1. `frgn Ptr` → `i64` mismatch.** The LLVM backend lowers `frgn`
+parameters and return types of `Ptr` to `i64` (Brief's internal pointer
+representation). For external C functions like `PyModule_Create2`,
+pointers must be LLVM `ptr`, not `i64`. Fix needed in `emit_frgn_call`:
+when the frgn signature has `Ptr`, emit LLVM `ptr` type, not `i64`.
+
+**2. `&list` in struct literals.** `&methods` where `methods` is a
+`let`-bound list produces the address of a heap-allocated sequence, not a
+C-compatible array pointer. For `PyMethodDef[]`, the struct literal needs a
+pointer to a static constant array, not a heap list. Fix: struct literal
+fields of type `Ptr` should accept both `&var` and `&"string"`.
+
+**3. Struct field offsets.** `lookup_field_offset` uses `i * 8` (simplified).
+Real struct layouts need C ABI packing rules (platform-specific alignment).
+Fix: compute field offsets from the `struct` declaration's field types using
+platform ABI rules (or pack = 1).
+
 ---
 
 ## 3. Protocol Bridge (stdin/stdout)
@@ -99,3 +118,33 @@ layouts without needing header files or probe programs.
 3. Protocol bridge — target languages without C FFI
 4. `brief doc` — documentation output
 5. DWARF discovery — eliminates probe programs
+
+---
+
+## 6. Multi-Language Bridge Benchmark
+
+Build and benchmark bridges for 5+ languages to prove Brief's GLUE system
+can match or beat native interop for any calling convention.
+
+| Language | Bridge type | Expected latency | Status |
+|----------|-------------|------------------|--------|
+| Python (native C ext) | C wrapper | ~150ns | ✅ Working |
+| Python (ctypes) | cdylib | ~800ns | ✅ Working |
+| Python (subprocess) | Protocol bridge | ~200µs | 🔧 Need stdin/stdout shim |
+| Node.js | Subprocess protocol | ~200µs | 🔧 Need JS wrapper |
+| WASM | Shared memory protocol | ~50ns (wasm call) | ❌ Need llc -march=wasm64 |
+| Shell/awk | Subprocess protocol | ~200µs | ✅ Working (echo \| bridge) |
+| gRPC | HTTP/2 server | ~500µs | ❌ Need C shim + protobuf |
+
+### Benchmark protocol
+
+- Same operation (`add(3,4)`) for all bridges
+- 200K iterations, median latency
+- Compare against native C .so baseline
+- Measure: call latency, throughput, binary size, init time
+
+### Goal
+
+Show the full spectrum: from 150ns (native C extension) to 200µs (protocol
+bridge) with clear trade-offs. Brief adapts to the calling convention of
+whatever language it needs to talk to — no single approach dominates.
