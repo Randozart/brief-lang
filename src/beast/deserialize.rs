@@ -100,6 +100,8 @@ fn parse_universe(parts: &[SExpr]) -> Result<ResolvedType, String> {
         name: name.clone(),
         base: "Bits".into(),
         bytes: 8,
+        min_bits: 0,
+        max_bits: 0,
         alignment: 8,
         properties: HashMap::new(),
         fields: vec![],
@@ -168,7 +170,7 @@ fn parse_typedef(parts: &[SExpr]) -> Result<Box<TypeDef>, String> {
         }
     }
     Ok(Box::new(TypeDef {
-        name, type_params: vec![], base: Box::new(Expr::Identifier("Bits".into())),
+        name, type_params: vec![], parent: None, protocol: None,
         bit_range: None, span: None,
         body: TypeDefBody { slots, metadata, projections: vec![], bindings: vec![],
             operators: vec![], constraints: vec![], span: None },

@@ -8,7 +8,7 @@
 //   brief build --disable-plugin prelude --library bridge.bv --out .  # bridge.ll
 //   cargo build                                            # build.rs llc + link
 
-type Int <: Bits {
+type Int: #Int {
     bytes <~ 8;
     alignment <~ 8;
 };

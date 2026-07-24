@@ -16,7 +16,7 @@ const add = lib.func('add', 'int64_t', ['int64_t', 'int64_t']);
 
 // Warmup
 let warm = add(3, 4);
-if (warm !== 7n) { console.error('wrong result:', warm); process.exit(1); }
+if (Number(warm) !== 7) { console.error('wrong result:', warm); process.exit(1); }
 
 // Native baseline
 function native_add(a, b) { return a + b; }

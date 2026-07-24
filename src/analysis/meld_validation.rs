@@ -707,6 +707,8 @@ mod tests {
             name: name.to_string(),
             base: "Bits".to_string(),
             bytes,
+            min_bits: bytes * 8,
+            max_bits: bytes * 8,
             alignment: 8,
             properties: props,
             fields: vec![],

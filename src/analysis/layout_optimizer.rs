@@ -373,6 +373,8 @@ mod tests {
                 name: name.to_string(),
                 base: "Bits".to_string(),
                 bytes,
+                min_bits: bytes * 8,
+                max_bits: bytes * 8,
                 alignment,
                 properties: std::collections::HashMap::new(),
                 fields: vec![],
@@ -388,7 +390,8 @@ mod tests {
         TopLevel::TypeDef(Box::new(TypeDef {
             name: name.to_string(),
             type_params: vec![],
-            base: Box::new(Expr::Identifier("Bits".to_string())),
+            parent: None,
+            protocol: None,
             bit_range: None,
             body: TypeDefBody {
                 slots: vec![],

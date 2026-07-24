@@ -17,7 +17,7 @@
 // conceptual definition shows what Int IS.
 // ─────────────────────────────────────────────────────────────
 
-type Int <: Bits @/0..63 {
+type Int: #Int {
     // Silent defaults (you don't need to write these):
     bytes <~ 8;
     alignment <~ 8;
@@ -50,19 +50,19 @@ type Int <: Bits @/0..63 {
 // Compiled via FAdd#/FSub#/FMul#/FDiv# intrinsics.
 // ─────────────────────────────────────────────────────────────
 
-type Float <: Bits @/0..31 {
+type Float: #Float {
     bytes <~ 4;
     alignment <~ 8;
 
     // Arithmetic via #-intrinsics (compiler provides these):
-    Add(rhs)  = _ :> FAdd#(rhs);
-    Sub(rhs)  = _ :> FSub#(rhs);
-    Mul(rhs)  = _ :> FMul#(rhs);
-    Div(rhs)  = _ :> FDiv#(rhs);
-    Neg       <~ _:> FNeg#;
-    Eq(rhs)   = _ :> FCmpOq#(rhs);
-    Lt(rhs)   = _ :> FCmpOlt#(rhs);
-    Gt(rhs)   = _ :> FCmpOgt#(rhs);
+    Add(rhs)  = _.# FAdd#(rhs);
+    Sub(rhs)  = _.# FSub#(rhs);
+    Mul(rhs)  = _.# FMul#(rhs);
+    Div(rhs)  = _.# FDiv#(rhs);
+    Neg       <~ _.# FNeg#;
+    Eq(rhs)   = _.# FCmpOq#(rhs);
+    Lt(rhs)   = _.# FCmpOlt#(rhs);
+    Gt(rhs)   = _.# FCmpOgt#(rhs);
 };
 
 // ─────────────────────────────────────────────────────────────
@@ -78,9 +78,9 @@ type String <: Bits @/0..127 {
     Ptr          <~ _ @/0..63;     // Pointer to UTF-8 data
     Len          <~ _ @/64..127;   // Length in bytes
 
-    Size         <~ _ :> Len;         // Number of bytes
-    IsEmpty      <~ _ :> Size == 0;
-    At(i)        = _ :> Ptr :> LoadU8#(i);   // Read char at index
+    Size         <~ _.# Len;         // Number of bytes
+    IsEmpty      <~ _.# Size == 0;
+    At(i)        = _.# Ptr :> LoadU8#(i);   // Read char at index
 };
 
 // ─────────────────────────────────────────────────────────────
@@ -95,9 +95,9 @@ type List <: Bits @/0..191 {
     Len          <~ _ @/64..127;   // Element count
     Cap          <~ _ @/128..191;  // Allocated capacity
 
-    Size         <~ _ :> Len;
-    IsEmpty      <~ _ :> Size == 0;
-    At(i)        = _ :> Ptr :> LoadElem#(i);
+    Size         <~ _.# Len;
+    IsEmpty      <~ _.# Size == 0;
+    At(i)        = _.# Ptr :> LoadElem#(i);
 
     // 2026-07-18: SVO — inline storage for ≤3 Int elements.
     // Tag bit 0: 0 = heap (existing ptr/len/cap), 1 = inline (packed in state).
@@ -138,9 +138,9 @@ type HashMap_KV <: Bits @/0..(BUCKETS * ENTRY_SIZE * 8) {
     fixedsize  <~ true;
 
     // Uses a Lookup# intrinsic for O(1) hashed access
-    Contains(k)  = _ :> Lookup#(k) > -1;
-    Get(k)       = _ :> Lookup#(k) :> At;
-    Insert(k,v)  = _ :> Insert#(k, v);
+    Contains(k)  = _.# Lookup#(k) > -1;
+    Get(k)       = _.# Lookup#(k) :> At;
+    Insert(k,v)  = _.# Insert#(k, v);
 };
 
 // View B: List<(K,V)>-inherited
@@ -149,8 +149,8 @@ type HashMap_KV <: Bits @/0..(BUCKETS * ENTRY_SIZE * 8) {
 
 type HashMap <: List {
     elementtype <~ (K, V);
-    Contains(k)  = _ :> Lookup#(k) > -1;
-    Get(k)       = _ :> Lookup#(k) :> At;
+    Contains(k)  = _.# Lookup#(k) > -1;
+    Get(k)       = _.# Lookup#(k) :> At;
 };
 
 // ─────────────────────────────────────────────────────────────
@@ -164,7 +164,7 @@ type HashMap <: List {
 type SkipList<T> <: List<T> {
     insertat <~ _sl_insert;
     extractfrom <~ _sl_remove;
-    Contains(v) = _ :> sl_contains(v);
+    Contains(v) = _.# sl_contains(v);
 };
 
 // ─────────────────────────────────────────────────────────────
@@ -178,9 +178,9 @@ type Matrix4x4 <: Bits @/0..(16 * 8 - 1) {
     At(col, row) = _ @/((col * 4 + row) * 32)..((col * 4 + row) * 32 + 31);
 
     // Custom projections
-    Transpose    <~ _ :> TransposeMatrix#;
-    Determinant  <~ _ :> DetMatrix#;
-    Multiply(m)  <~ _ :> MulMatrix#(m);
+    Transpose    <~ _.# TransposeMatrix#;
+    Determinant  <~ _.# DetMatrix#;
+    Multiply(m)  <~ _.# MulMatrix#(m);
 };
 
 // ─────────────────────────────────────────────────────────────
@@ -220,8 +220,8 @@ type Counter <: Bits @/0..7 {
     elementtype  <~ "Int";        // Ignored by CBV
     allowindex   <~ false;        // Ignored by CBV — no index instr in HW
 
-    Incr         <~ _ :> CountInc#;
-    Reset        <~ _ :> CountRst#;
+    Incr         <~ _.# CountInc#;
+    Reset        <~ _.# CountRst#;
 };
 
 // ─────────────────────────────────────────────────────────────
@@ -235,12 +235,12 @@ type CString <: Bits @/0..63 {
     bytes <~ 8;       // Just a pointer
 
     // Zero-cost: reads char via pointer arithmetic, no strlen
-    At(i)     = _ :> Ptr :> LoadU8#(i);
+    At(i)     = _.# Ptr :> LoadU8#(i);
 
     // O(N) cost: strlen only when Size is explicitly queried
-    Size      <~ _ :> Ptr :> StrLen#;
+    Size      <~ _.# Ptr :> StrLen#;
 
-    IsEmpty   <~ _ :> Ptr :> LoadU8#(0) == '\0';
+    IsEmpty   <~ _.# Ptr :> LoadU8#(0) == '\0';
 };
 
 // ─────────────────────────────────────────────────────────────

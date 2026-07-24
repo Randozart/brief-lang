@@ -242,9 +242,6 @@ impl<'a> Parser<'a> {
                 // Field access: a.f
                 let name = self.expect_identifier()?;
                 // 2026-07-21: Navigation chain call: a.first$(args).
-                // When the field name ends with $ and is followed by (,
-                // convert to Call("first$", [a, ...args]) so the navigation
-                // engine can evaluate it as a chain step.
                 if name.ends_with('$') && self.check(&Token::LParen) {
                     self.expect(Token::LParen)?;
                     let mut args = vec![expr];
@@ -257,8 +254,14 @@ impl<'a> Parser<'a> {
                     self.expect(Token::RParen)?;
                     expr = Expr::Call(name, args, None);
                 } else {
-                    expr = Expr::Field(Box::new(expr), name);
+                    expr = Expr::PropertyGet(name);
                 }
+            } else if self.eat(&Token::DotHash) {
+                // Protocol property access: a.#prop
+                // 2026-07-24: Replaces the old :> syntax for accessing type
+                // properties like Size, Count, Capacity, etc.
+                let name = self.expect_identifier()?;
+                expr = Expr::PropertyGet(name);
             } else if self.eat(&Token::LBracket) {
                 // Index: a[b]
                 let index = self.parse_expression()?;

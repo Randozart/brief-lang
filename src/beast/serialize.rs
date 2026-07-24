@@ -104,7 +104,12 @@ fn emit_constant(c: &Constant) -> SExpr {
 
 fn emit_typedef(t: &TypeDef) -> SExpr {
     let mut children: Vec<SExpr> = vec![atom("typedef"), atom(&t.name)];
-    children.push(list(&[atom("base"), emit_expr(&t.base)]));
+    if let Some(parent) = &t.parent {
+        children.push(list(&[atom("parent"), emit_expr(parent)]));
+    }
+    if let Some(protocol) = &t.protocol {
+        children.push(list(&[atom("protocol"), atom(protocol)]));
+    }
     let mut slots: Vec<SExpr> = vec![atom("slots")];
     for slot in &t.body.slots {
         slots.push(list(&[atom("slot"), atom(&slot.name), emit_type(&slot.ty)]));

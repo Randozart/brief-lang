@@ -951,7 +951,8 @@ impl<'a> Parser<'a> {
             extra_types.push(TopLevel::TypeDef(Box::new(TypeDef {
                 name: full_name,
                 type_params: vec![],
-                base: Box::new(base.clone()),
+                parent: Some(Box::new(base.clone())),
+            protocol: None,
                 bit_range: None,
                 body: TypeDefBody {
                     slots: slots.clone(),
@@ -970,7 +971,8 @@ impl<'a> Parser<'a> {
         Ok(Box::new(TypeDef {
             name: first_name,
             type_params: vec![],
-            base: Box::new(base),
+            parent: Some(Box::new(base)),
+            protocol: None,
             bit_range: None,
             body: TypeDefBody {
                 slots,
@@ -985,31 +987,32 @@ impl<'a> Parser<'a> {
         }))
     }
 
-    /// 2026-07-16: P2 — Parse `type Name <: Parent { body }` (single type, not a group).
-    /// Extracted from the original parse_type_definition body block.
+    /// 2026-07-24: Parse `type Name [ : [Parent] [Protocol] ] { body }`.
     fn parse_type_body(&mut self, name: String, type_params: Vec<crate::ast::top::TypeParam>) -> Result<Box<TypeDef>, SyntaxError> {
-        let base = if self.eat(&Token::LtColon) {
-            // 2026-07-24: Check for Bits<N> syntax. parse_expression would
-            // treat '<' as a less-than operator, so we handle it here.
-            if self.check_identifier("Bits") || self.check_identifier("bits") {
-                self.pos += 1;
-                let bits_arg = if self.eat(&Token::Lt) {
-                    let n = match self.peek() {
-                        Some(&Token::Integer(v)) => { self.pos += 1; v }
-                        _ => 0,
-                    };
-                    self.expect(Token::Gt)?;
-                    vec![Expr::Decimal(n as i64)]
-                } else {
-                    vec![] // flexible Bits — no argument
-                };
-                Expr::Call("Bits".to_string(), bits_arg, None)
-            } else {
-                self.parse_expression()?
+        let mut parent: Option<Box<Expr>> = None;
+        let mut protocol: Option<String> = None;
+        if self.eat(&Token::Colon) {
+            // Parse optional protocol (#HashWord) or parent type name
+            match self.peek() {
+                Some(&Token::Identifier(ref s)) if s.starts_with('#') => {
+                    let proto = s.clone(); self.pos += 1;
+                    protocol = Some(proto);
+                }
+                Some(&Token::Identifier(_)) => {
+                    let pname = self.expect_identifier()?;
+                    parent = Some(Box::new(Expr::Identifier(pname)));
+                    // Optional protocol after parent
+                    match self.peek() {
+                        Some(&Token::Identifier(ref s)) if s.starts_with('#') => {
+                            let proto = s.clone(); self.pos += 1;
+                            protocol = Some(proto);
+                        }
+                        _ => {}
+                    }
+                }
+                _ => {}
             }
-        } else {
-            Expr::Identifier("Bits".to_string())
-        };
+        }
         let mut slots = Vec::new();
         let mut metadata = std::collections::HashMap::new();
         let mut operators: Vec<OperatorDef> = Vec::new();
@@ -1078,7 +1081,8 @@ impl<'a> Parser<'a> {
         Ok(Box::new(TypeDef {
             name,
             type_params,
-            base: Box::new(base),
+            parent,
+            protocol,
             bit_range: None,
             body: TypeDefBody {
                 slots,
@@ -1212,7 +1216,8 @@ impl<'a> Parser<'a> {
         }
         self.eat(&Token::Semicolon);
         Ok(Box::new(TypeDef {
-            name, type_params: vec![], base: Box::new(Expr::Identifier("Bits".into())),
+            name, type_params: vec![], parent: None,
+            protocol: None,
             bit_range: None, span: None,
             body: TypeDefBody {
                 slots, metadata: std::collections::HashMap::new(),
@@ -1270,7 +1275,8 @@ impl<'a> Parser<'a> {
         }
         self.eat(&Token::Semicolon);
         Ok(Box::new(TypeDef {
-            name, type_params: vec![], base: Box::new(Expr::Identifier("Bits".into())),
+            name, type_params: vec![], parent: None,
+            protocol: None,
             bit_range: None, span: None,
             body: TypeDefBody {
                 slots, metadata: std::collections::HashMap::new(),

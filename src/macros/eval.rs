@@ -1200,6 +1200,8 @@ fn eval_nav_call(
                     name: type_name.clone(),
                     base: String::new(),
                     bytes: size,
+                    min_bits: 0,
+                    max_bits: 0,
                     alignment: 0,
                     properties: std::collections::HashMap::new(),
                     fields: vec![],

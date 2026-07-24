@@ -1,5 +1,5 @@
 // ─────────────────────────────────────────────────────────────
-// fn-ptr-demo.bv — Function pointers via :> Ptr + indirect calls
+// fn-ptr-demo.bv — Function pointers via .#Ptr + indirect calls
 // (Phase 5: function pointer types, indirect dispatch)
 // ─────────────────────────────────────────────────────────────
 
@@ -7,9 +7,9 @@
 defn cmp_int(a: Int, b: Int) -> Bool { term a == b; };
 defn cmp_lt(a: Int, b: Int) -> Bool { term a < b; };
 
-// Create function pointers via :> Ptr projection
-let eq_fn = cmp_int :> Ptr;
-let lt_fn = cmp_lt :> Ptr;
+// Create function pointers via .#Ptr projection
+let eq_fn = cmp_int .#Ptr;
+let lt_fn = cmp_lt .#Ptr;
 
 // Indirect call through function pointer
 let result_eq = eq_fn(42, 42);  // true
@@ -18,7 +18,7 @@ let result_lt = lt_fn(3, 5);    // true
 // Function pointer in state field (for dynamic dispatch)
 node comparator [done < 2][done == 2] {
     [done == 0] {
-        let cmp = cmp_int :> Ptr;
+        let cmp = cmp_int .#Ptr;
         let r = cmp(2, 2);
         term! -> __print_int(r); // prints 1 (true)
     };

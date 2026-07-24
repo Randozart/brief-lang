@@ -1820,9 +1820,6 @@ impl LlvmBackend {
                         .map(|f| (f.name.clone(), f.ty.clone()))
                         .collect();
                     self.ctx.struct_types.insert(s.name.clone(), fields.clone());
-
-                    // 2026-07-14: Struct auto-registration in TypeUniverse with
-                    // dynamic byte size computed from field types.
                     if let Some(ref mut universe) = self.ctx.type_universe {
                         if !universe.types.contains_key(&s.name) {
                             let bytes: u64 = fields.iter().map(|(_, ty)| {
@@ -1832,6 +1829,8 @@ impl LlvmBackend {
                                 name: s.name.clone(),
                                 base: "Bits".to_string(),
                                 bytes,
+                                min_bits: bytes * 8,
+                                max_bits: bytes * 8,
                                 alignment: 8,
                                 properties: std::collections::HashMap::new(),
                                 fields: fields.clone(),
@@ -1840,78 +1839,31 @@ impl LlvmBackend {
                         }
                     }
                 }
-                // 2026-07-24: StaticStruct (C-compatible struct) registration.
-                // These are declared with `struct Name { ... }` syntax and need
-                // to be in the type universe for struct literal codegen to work
-                // (field offset computation, pointer field detection, total size).
-                TopLevel::StaticStruct(s) => {
-                    let fields: Vec<(String, Type)> = s.fields.iter()
-                        .map(|(n, t)| (n.clone(), t.clone()))
+                // 2026-07-24: Handle TopLevel::TypeDef with slots as struct types.
+                // This handles `obj` declarations (which parse to TypeDef) and
+                // other type declarations with field slots.
+                TopLevel::TypeDef(td) if !td.body.slots.is_empty() => {
+                    let fields: Vec<(String, Type)> = td.body.slots.iter()
+                        .map(|s| (s.name.clone(), s.ty.clone()))
                         .collect();
-                    self.ctx.struct_types.insert(s.name.clone(), fields.clone());
-
+                    // 2026-07-24: Register struct type in both struct_types and universe
+                    self.ctx.struct_types.insert(td.name.clone(), fields.clone());
                     if let Some(ref mut universe) = self.ctx.type_universe {
-                        if !universe.types.contains_key(&s.name) {
+                        if !universe.types.contains_key(&td.name) {
                             let bytes: u64 = fields.iter().map(|(_, ty)| {
                                 crate::backend::llvm::types::type_size(ty)
                             }).sum();
                             let rt = crate::type_universe::ResolvedType {
-                                name: s.name.clone(),
+                                name: td.name.clone(),
                                 base: "Bits".to_string(),
                                 bytes,
+                                min_bits: bytes * 8,
+                                max_bits: bytes * 8,
                                 alignment: 8,
                                 properties: std::collections::HashMap::new(),
-                                fields,
+                                fields: fields.clone(),
                             };
-                            universe.types.insert(s.name.clone(), rt);
-                        }
-                    }
-                }
-                // 2026-07-20: Only register TypeDefs with actual data slots.
-                // Primitive types like `type Int <: Bits { op Add(#Int); ... }` have
-                // empty slots (operators and metadata only) — they're NOT struct types.
-                // Struct-like types like `type RingBuffer<T> { data: Ptr<T>; head: Int; }`
-                // have named data slots and need LLVM struct type declarations.
-                TopLevel::TypeDef(td) => {
-                    if !td.body.slots.is_empty() {
-                        let fields: Vec<(String, Type)> = td.body.slots.iter()
-                            .map(|s| (s.name.clone(), s.ty.clone()))
-                            .collect();
-                        self.ctx.struct_types.insert(td.name.clone(), fields);
-                    }
-                }
-                TopLevel::Enum(e) => {
-                    self.ctx.enum_types.insert(e.name.clone(), e.clone());
-                }
-                TopLevel::Cell(c) => {
-                    self.ctx.cell_defs.insert(c.name.clone(), c.clone());
-                }
-                TopLevel::TriggerBinding { name, instance, port, ty, modifiers: _ } => {
-                    // Register a cell binding trigger: trg name @ CellName!.port
-                    if let Expr::Identifier(cell_name) = instance {
-                        let resolved_port = if port.is_empty() {
-                            // Auto-detect single output port: use the first named output
-                            if let Some(cell_def) = self.ctx.cell_defs.get(cell_name.as_str()) {
-                                "line".to_string() // Console's first output port
-                            } else { String::new() }
-                        } else { port.clone() };
-                        if !resolved_port.is_empty() {
-                            self.ctx.cell_trigger_bindings.push((
-                                name.clone(), cell_name.clone(), resolved_port.clone()
-                            ));
-                            // Register the trigger so its storage is allocated in %State
-                            let trig_ty = ty.clone().unwrap_or(crate::ast::Type::string());
-                            self.ctx.trigger_names.push(name.clone());
-                            let trg_decl = crate::ast::TriggerDeclaration {
-                                name: name.clone(),
-                                ty: trig_ty,
-                                address: crate::ast::LinkRef::Explicit(0),
-                                bit_range: None, stages: vec![], condition: None,
-                                is_wake: false, is_const: false, span: None,
-                                annotations: vec![],
-                                modifiers: vec![],
-                            };
-                            self.ctx.triggers.insert(name.clone(), trg_decl);
+                            universe.types.insert(td.name.clone(), rt);
                         }
                     }
                 }

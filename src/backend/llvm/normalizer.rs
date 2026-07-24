@@ -209,10 +209,9 @@ fn register_typedefs(items: &[TopLevel], universe: &mut TypeUniverse) {
             })
             .unwrap_or_else(|| bytes.min(8));
         let mut properties: std::collections::HashMap<String, PropertyValue> = td.body.metadata.clone();
-        let base = match td.base.as_ref() {
-            Expr::Identifier(name) => name.clone(),
-            _ => "Bits".to_string(),
-        };
+        let base = td.parent.as_ref()
+            .and_then(|e| match e.as_ref() { Expr::Identifier(n) => Some(n.clone()), _ => None })
+            .unwrap_or_else(|| "Bits".to_string());
         let fields: Vec<(String, Type)> = td.body.slots.iter()
             .map(|s| (s.name.clone(), s.ty.clone()))
             .collect();
@@ -220,6 +219,8 @@ fn register_typedefs(items: &[TopLevel], universe: &mut TypeUniverse) {
             name: td.name.clone(),
             base,
             bytes,
+            min_bits: bytes * 8,  // exact from declaration
+            max_bits: bytes * 8,  // exact from declaration
             alignment,
             properties,
             fields,

@@ -31,7 +31,17 @@ use std::collections::HashMap;
 pub struct ResolvedType {
     pub name: String,
     pub base: String,
+    /// Exact byte width (for fixed-width types like Int32, Float).
+    /// For flexible types (Int), use max_bits instead.
     pub bytes: u64,
+    /// Minimum bit width (0 = unknown/flexible). The compiler may narrow
+    /// the type to any width between min_bits and max_bits.
+    /// 2026-07-24: Added for value-range narrowing.
+    pub min_bits: u64,
+    /// Maximum bit width (upper bound). The type MUST fit in this width.
+    /// For fixed types like Int32, min_bits == max_bits == 32.
+    /// For flexible types like Int, min_bits=0, max_bits=64.
+    pub max_bits: u64,
     pub alignment: u64,
     pub properties: HashMap<String, crate::ast::PropertyValue>,
     /// 2026-07-18: Struct field declarations — (name, type) pairs from
@@ -73,28 +83,30 @@ impl TypeUniverse {
     /// from bytes) doesn't re-derive well-known types as raw integers.
     /// Hashword op signatures are the new dispatch mechanism.
     fn seed_primordial_types(&mut self) {
-        // Table: (name, bytes, alignment, llvm_type)
-        const PRIMORDIALS: &[(&str, u64, u64, &str)] = &[
-            ("Int",    8, 8, "i64"),
-            ("UInt",   8, 8, "i64"),
-            ("Int8",   1, 1, "i8"),
-            ("UInt8",  1, 1, "i8"),
-            ("Int16",  2, 2, "i16"),
-            ("UInt16", 2, 2, "i16"),
-            ("Int32",  4, 4, "i32"),
-            ("UInt32", 4, 4, "i32"),
-            ("Int64",  8, 8, "i64"),
-            ("UInt64", 8, 8, "i64"),
-            ("Float",  4, 4, "float"),
-            ("Float32",4, 4, "float"),
-            ("Float64",8, 8, "double"),
-            ("Double", 8, 8, "double"),
-            ("Bool",   1, 1, "i8"),
-            ("Char",   4, 4, "i32"),
-            ("Data",   8, 8, "i8*"),
-            ("Void",   0, 0, "void"),
+        // Table: (name, bytes, min_bits, max_bits, alignment, llvm_type)
+        // bytes is the exact width for fixed types; min_bits/max_bits is
+        // the range for flexible types (Int has max_bits=64, min_bits=0).
+        const PRIMORDIALS: &[(&str, u64, u64, u64, u64, &str)] = &[
+            ("Int",    8, 0, 64, 8, "i64"),     // flexible: up to 64 bits
+            ("UInt",   8, 0, 64, 8, "i64"),     // flexible: up to 64 bits
+            ("Int8",   1, 8, 8,  1, "i8"),      // exact: 8 bits
+            ("UInt8",  1, 8, 8,  1, "i8"),      // exact: 8 bits
+            ("Int16",  2, 16, 16, 2, "i16"),    // exact: 16 bits
+            ("UInt16", 2, 16, 16, 2, "i16"),    // exact: 16 bits
+            ("Int32",  4, 32, 32, 4, "i32"),    // exact: 32 bits
+            ("UInt32", 4, 32, 32, 4, "i32"),    // exact: 32 bits
+            ("Int64",  8, 64, 64, 8, "i64"),    // exact: 64 bits
+            ("UInt64", 8, 64, 64, 8, "i64"),    // exact: 64 bits
+            ("Float",  4, 32, 32, 4, "float"),  // exact: 32 bits
+            ("Float32",4, 32, 32, 4, "float"),  // exact: 32 bits
+            ("Float64",8, 64, 64, 8, "double"), // exact: 64 bits
+            ("Double", 8, 64, 64, 8, "double"), // exact: 64 bits
+            ("Bool",   1, 8, 8,  1, "i8"),      // exact: 8 bits
+            ("Char",   4, 32, 32, 4, "i32"),    // exact: 32 bits
+            ("Data",   8, 64, 64, 8, "i8*"),    // exact: 64 bits
+            ("Void",   0, 0,  0,  0, "void"),   // zero bits
         ];
-        for &(name, bytes, alignment, llvm_ty) in PRIMORDIALS {
+        for &(name, bytes, min_bits, max_bits, alignment, llvm_ty) in PRIMORDIALS {
             let mut properties = std::collections::HashMap::new();
             properties.insert("llvm_type".into(), crate::ast::PropertyValue::String(llvm_ty.to_string()));
             properties.insert("alignment".into(), crate::ast::PropertyValue::Int(alignment as i64));
@@ -102,6 +114,8 @@ impl TypeUniverse {
                 name: name.to_string(),
                 base: "Bits".to_string(),
                 bytes,
+                min_bits,
+                max_bits,
                 alignment,
                 properties,
                 fields: vec![],
@@ -118,6 +132,8 @@ impl TypeUniverse {
                 name: "String".to_string(),
                 base: "Bits".to_string(),
                 bytes: 16,
+                min_bits: 128,
+                max_bits: 128,
                 alignment: 8,
                 properties: p,
                 fields: vec![
@@ -263,6 +279,7 @@ mod tests {
         let mut u = TypeUniverse::new();
         u.types.insert("String.c".into(), ResolvedType {
             name: "String.c".into(), base: "String".into(), bytes: 8, alignment: 8,
+            min_bits: 64, max_bits: 64,
             properties: HashMap::new(), fields: vec![],
         });
         assert!(u.get_extension("String", "c").is_some());
@@ -324,6 +341,7 @@ mod tests {
         let mut u = TypeUniverse::new();
         u.types.insert("String.c".into(), ResolvedType {
             name: "String.c".into(), base: "String".into(), bytes: 8, alignment: 8,
+            min_bits: 64, max_bits: 64,
             properties: HashMap::new(), fields: vec![],
         });
         let result = u.find_meld_to_extension("String", "c");

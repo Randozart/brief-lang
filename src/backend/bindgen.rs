@@ -311,8 +311,10 @@ mod tests {
             name: name.to_string(),
             base: "Bits".to_string(),
             bytes,
+            min_bits: bytes * 8,
+            max_bits: bytes * 8,
             alignment: 8,
-            properties: HashMap::new(),
+            properties: std::collections::HashMap::new(),
             fields: vec![],
         }
     }

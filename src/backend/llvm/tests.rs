@@ -521,7 +521,8 @@ fn test_type_with_slots_populates_struct_types() {
         TopLevel::TypeDef(Box::new(TypeDef {
             name: "MyBuffer".to_string(),
             type_params: vec![],
-            base: Box::new(Expr::Identifier("Bits".to_string())),
+            parent: None,
+            protocol: None,
             bit_range: None,
             body: TypeDefBody {
                 slots: vec![

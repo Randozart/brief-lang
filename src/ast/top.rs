@@ -849,7 +849,12 @@ pub struct StructField {
 pub struct TypeDef {
     pub name: String,
     pub type_params: Vec<TypeParam>,
-    pub base: Box<Expr>,
+    /// 2026-07-24: Parent type (e.g., Int for i64). Optional.
+    /// Replaces the old `base` field which was `Box<Expr>` from `<:` syntax.
+    pub parent: Option<Box<Expr>>,
+    /// 2026-07-24: Protocol hashword (e.g., "#Int", "#String"). Optional.
+    /// If both parent and protocol are None, the type is abstract.
+    pub protocol: Option<String>,
     pub bit_range: Option<BitRange>,
     pub body: TypeDefBody,
     pub span: Option<Span>,

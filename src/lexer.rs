@@ -376,6 +376,9 @@ pub enum Token {
     #[token(":>")]
     ColonGreaterThan,
 
+    #[token(".#")]
+    DotHash,
+
     /// := — derivation / compile-time assertion block
     #[token(":=")]
     ColonEq,
@@ -648,6 +651,7 @@ impl std::fmt::Display for Token {
             Token::Semicolon => write!(f, ";"),
             Token::LtColon => write!(f, "<:"),
             Token::ColonGreaterThan => write!(f, ":>"),
+            Token::DotHash => write!(f, ".#"),
             Token::ColonEq => write!(f, ":="),
             Token::Colon => write!(f, ":"),
             Token::ColonColon => write!(f, "::"),
