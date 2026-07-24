@@ -165,11 +165,48 @@ fn infer_ranges_in_body(body: &[Statement], scope: &mut HashMap<String, IntRange
     (return_range, narrowed_bindings)
 }
 
+/// Extract parameter ranges from a contract precondition expression.
+/// Handles `a < N && b < M` patterns — the common case for range constraints.
+fn apply_contract_ranges(expr: &Expr, scope: &mut HashMap<String, IntRange>) {
+    match expr {
+        // Single constraint: x < N
+        Expr::BinaryOp(BinaryOpKind::Lt, lhs, rhs) => {
+            if let Expr::Identifier(name) = lhs.as_ref() {
+                let bound = extract_constant(rhs.as_ref());
+                if let Some(hi) = bound {
+                    if let Some(entry) = scope.get(name) {
+                        let narrowed = IntRange { min: entry.min, max: entry.max.min(hi - 1) };
+                        scope.insert(name.clone(), narrowed);
+                    }
+                }
+            }
+        }
+        // Conjunction: x < N && y < M && ...
+        Expr::BinaryOp(BinaryOpKind::And, lhs, rhs) => {
+            apply_contract_ranges(lhs.as_ref(), scope);
+            apply_contract_ranges(rhs.as_ref(), scope);
+        }
+        _ => {}
+    }
+}
+
+/// Extract a constant integer value from an expression, if possible.
+fn extract_constant(expr: &Expr) -> Option<i128> {
+    match expr {
+        Expr::Decimal(n) => Some(*n as i128),
+        _ => None,
+    }
+}
+
 /// Narrow a single definition/function — returns per-binding narrowed widths.
-fn narrow_body(name: &str, params: &[(String, Type)], body: &[Statement]) -> HashMap<String, u64> {
+fn narrow_body(name: &str, params: &[(String, Type)], body: &[Statement], contract: Option<&Contract>) -> HashMap<String, u64> {
     let mut scope = HashMap::new();
     for (pname, _ty) in params {
         scope.insert(pname.clone(), IntRange::UNKNOWN);
+    }
+    // Apply contract precondition ranges
+    if let Some(c) = contract {
+        apply_contract_ranges(&c.pre_condition, &mut scope);
     }
     let (return_range, mut bindings) = infer_ranges_in_body(body, &mut scope);
     if let Some(range) = return_range {
@@ -179,18 +216,28 @@ fn narrow_body(name: &str, params: &[(String, Type)], body: &[Statement]) -> Has
             }
         }
     }
+    // Narrow parameter types where contract range proves they fit in fewer bits
+    for (i, (pname, _ty)) in params.iter().enumerate() {
+        if let Some(range) = scope.get(pname) {
+            if let Some(bits) = range.bit_width() {
+                if bits < 64 {
+                    bindings.insert(format!("param_{}", i), bits);
+                }
+            }
+        }
+    }
     bindings
 }
 
 fn process(d: &Definition, all: &mut HashMap<String, HashMap<String, u64>>) {
-    let bindings = narrow_body(&d.name, &d.parameters, &d.body);
+    let bindings = narrow_body(&d.name, &d.parameters, &d.body, Some(&d.contract));
     if !bindings.is_empty() {
         all.insert(d.name.clone(), bindings);
     }
 }
 
 fn process_txn(t: &Transaction, all: &mut HashMap<String, HashMap<String, u64>>) {
-    let bindings = narrow_body(&t.name, &t.parameters, &t.body);
+    let bindings = narrow_body(&t.name, &t.parameters, &t.body, Some(&t.contract));
     if !bindings.is_empty() {
         all.insert(t.name.clone(), bindings);
     }

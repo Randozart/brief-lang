@@ -1169,13 +1169,12 @@ impl LlvmBackend {
                 .unwrap_or_else(|| "i64".to_string())
         };
         // 2026-07-24: Override return type with narrowed width from
-        // value-range inference pass. On WASM this eliminates BigInt.
-        let ll_ret_ty = if let Some(&narrowed) = self.fun.narrowed.get("ret") {
-            if ll_ret_ty.starts_with('i') {
-                format!("i{}", narrowed)
-            } else {
-                ll_ret_ty.clone()
-            }
+        // value-range inference pass. Use i32 when ≤32 bits (WASM natural word),
+        // otherwise use the exact narrowed width (e.g. i33-i64 need BigInt).
+        let ll_ret_ty = if let Some(&n) = self.fun.narrowed.get("ret") {
+            if ll_ret_ty.starts_with('i') && n <= 32 { "i32".to_string() }
+            else if ll_ret_ty.starts_with('i') { format!("i{}", n) }
+            else { ll_ret_ty.clone() }
         } else { ll_ret_ty.clone() };
         let is_float_fn = ll_ret_ty == "float" || ll_ret_ty == "double";
         self.fun.fn_ret_ty = ll_ret_ty.clone();
@@ -1621,9 +1620,11 @@ impl LlvmBackend {
         };
 
         // 2026-07-24: Override return type with narrowed width from
-        // value-range inference pass (if narrower than 64-bit).
-        let ret_llvm = if let Some(&narrowed) = self.fun.narrowed.get("ret") {
-            if ret_llvm.starts_with('i') { format!("i{}", narrowed) } else { ret_llvm.clone() }
+        // value-range inference pass. Use i32 when ≤32 bits.
+        let ret_llvm = if let Some(&n) = self.fun.narrowed.get("ret") {
+            if ret_llvm.starts_with('i') && n <= 32 { "i32".to_string() }
+            else if ret_llvm.starts_with('i') { format!("i{}", n) }
+            else { ret_llvm.clone() }
         } else { ret_llvm.clone() };
 
         // Resolve #inline / #?inline directives for callable txns.
