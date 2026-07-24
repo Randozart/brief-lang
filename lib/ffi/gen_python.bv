@@ -15,12 +15,12 @@ $defn py_c_type(t: String) -> String {
 };
 
 $defn py_parse_fmt(t: String) -> String {
-    when t == "Int"    { term "\"ll\""; };
-    when t == "Float"  { term "\"d\""; };
-    when t == "Bool"   { term "\"l\""; };
-    when t == "String" { term "\"s\""; };
-    when t == "Ptr"    { term "\"O&\""; };
-    term "\"ll\"";
+    when t == "Int"    { term "ll"; };
+    when t == "Float"  { term "d"; };
+    when t == "Bool"   { term "l"; };
+    when t == "String" { term "s"; };
+    when t == "Ptr"    { term "O&"; };
+    term "ll";
 };
 
 $defn py_to_python(t: String, expr: String) -> String {
@@ -67,9 +67,9 @@ $defn gen_python_bridge(exports: Selection, bridge_name: String) -> String {
         code = code + "static PyObject* pybridge_" + name + "(PyObject* self, PyObject* args) {\n";
         code = code + "    (void)self;\n";
 
-        let fmt = "\"";
+        let fmt = "";
         let pargs = "";
-        when pcount >= 1 { fmt = fmt + py_parse_fmt(TypeInfo$(exp, "params.0.type")); pargs = "&carg_0"; };
+        when pcount >= 1 { fmt = py_parse_fmt(TypeInfo$(exp, "params.0.type")); pargs = "&carg_0"; };
         when pcount >= 2 { fmt = fmt + " " + py_parse_fmt(TypeInfo$(exp, "params.1.type")); pargs = pargs + ", &carg_1"; };
         when pcount >= 3 { fmt = fmt + " " + py_parse_fmt(TypeInfo$(exp, "params.2.type")); pargs = pargs + ", &carg_2"; };
         when pcount >= 4 { fmt = fmt + " " + py_parse_fmt(TypeInfo$(exp, "params.3.type")); pargs = pargs + ", &carg_3"; };
@@ -77,7 +77,7 @@ $defn gen_python_bridge(exports: Selection, bridge_name: String) -> String {
         when pcount >= 6 { fmt = fmt + " " + py_parse_fmt(TypeInfo$(exp, "params.5.type")); pargs = pargs + ", &carg_5"; };
 
         when pcount > 0 {
-            code = code + "    if (!PyArg_ParseTuple(args, " + fmt + "\", " + pargs + ")) return NULL;\n";
+            code = code + "    if (!PyArg_ParseTuple(args, \"" + fmt + "\", " + pargs + ")) return NULL;\n";
         };
 
         when TypeInfo$(exp, "output_type") == "Void" {
@@ -93,20 +93,17 @@ $defn gen_python_bridge(exports: Selection, bridge_name: String) -> String {
 
     // PyMethodDef array
     code = code + "\nstatic PyMethodDef methods[] = {\n";
-    let first = true;
     foreach(exp in exports) {
         let name = TypeInfo$(exp, "name");
-        when !first { code = code + ",\n"; };
-        code = code + "    {\"" + name + "\", pybridge_" + name + ", METH_VARARGS, \"Brief export " + name + "\"}";
-        first = false;
+        code = code + "    {\"" + name + "\", pybridge_" + name + ", METH_VARARGS, \"Brief export " + name + "\"},\n";
     };
-    code = code + "\n    {NULL, NULL, 0, NULL}\n};\n\n";
+    code = code + "    {NULL, NULL, 0, NULL}\n};\n\n";
 
     code = code + "static struct PyModuleDef module_def = {\n";
     code = code + "    PyModuleDef_HEAD_INIT,\n";
     code = code + "    \"" + bridge_name + "\",\n";
     code = code + "    \"Brief bridge (Metropolitan FFI)\",\n";
-    code = code + "    -1,\n";
+    code = code + "    0,\n";
     code = code + "    methods\n";
     code = code + "};\n\n";
 

@@ -323,6 +323,18 @@ pub fn eval_nav_chain(
         Expr::BinaryOp(kind, lhs, rhs) => {
             let lv = eval_nav_chain(lhs, program, universe, stage, scope, sandbox, pm)?;
             let rv = eval_nav_chain(rhs, program, universe, stage, scope, sandbox, pm)?;
+            // 2026-07-24: String comparison for Eq/Neq. nav_to_i64 would parse
+            // "Int" as 0 (parse failure), breaking string equality checks.
+            if matches!(*kind, BinaryOpKind::Eq | BinaryOpKind::Neq) {
+                match (&lv, &rv) {
+                    (NavValue::Str(a), NavValue::Str(b)) => {
+                        let eq = a == b;
+                        let result = if *kind == BinaryOpKind::Eq { eq } else { !eq };
+                        return Ok(NavValue::Bool(result));
+                    }
+                    _ => {}
+                }
+            }
             let li = nav_to_i64(&lv);
             let ri = nav_to_i64(&rv);
             match kind {
@@ -459,17 +471,29 @@ fn evaluate_stage_stmt(
                 Expr::BinaryOp(op, left, right) => {
                     let l = eval_nav_chain(left, program, universe, stage, scope, sandbox, pm)?;
                     let r = eval_nav_chain(right, program, universe, stage, scope, sandbox, pm)?;
-                    // Extract integer values from both sides for comparison
-                    let lv = nav_to_i64(&l);
-                    let rv = nav_to_i64(&r);
-                    let cmp = match op {
-                        crate::ast::BinaryOpKind::Eq => lv == rv,
-                        crate::ast::BinaryOpKind::Neq => lv != rv,
-                        crate::ast::BinaryOpKind::Gt => lv > rv,
-                        crate::ast::BinaryOpKind::Lt => lv < rv,
-                        crate::ast::BinaryOpKind::Ge => lv >= rv,
-                        crate::ast::BinaryOpKind::Le => lv <= rv,
-                        _ => return Err(format!("unsupported operator in when guard: {:?}", op)),
+                    // 2026-07-24: String comparison for Eq/Neq. nav_to_i64 would
+                    // parse "Int" as 0, breaking string equality in when guards.
+                    let is_str_cmp = matches!(*op, crate::ast::BinaryOpKind::Eq | crate::ast::BinaryOpKind::Neq) &&
+                        matches!((&l, &r), (NavValue::Str(_), NavValue::Str(_)));
+                    let cmp = if is_str_cmp {
+                        match (&l, &r) {
+                            (NavValue::Str(a), NavValue::Str(b)) => {
+                                if *op == crate::ast::BinaryOpKind::Eq { a == b } else { a != b }
+                            }
+                            _ => false,
+                        }
+                    } else {
+                        let lv = nav_to_i64(&l);
+                        let rv = nav_to_i64(&r);
+                        match op {
+                            crate::ast::BinaryOpKind::Eq => lv == rv,
+                            crate::ast::BinaryOpKind::Neq => lv != rv,
+                            crate::ast::BinaryOpKind::Gt => lv > rv,
+                            crate::ast::BinaryOpKind::Lt => lv < rv,
+                            crate::ast::BinaryOpKind::Ge => lv >= rv,
+                            crate::ast::BinaryOpKind::Le => lv <= rv,
+                            _ => return Err(format!("unsupported operator in when guard: {:?}", op)),
+                        }
                     };
                     NavValue::Bool(cmp)
                 }

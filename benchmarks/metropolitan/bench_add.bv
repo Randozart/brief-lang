@@ -1,0 +1,10 @@
+// Common export functions for Metropolitan FFI benchmarks
+// 2026-07-24
+
+export defn add(a: Int, b: Int) -> Int {
+    term a + b;
+};
+
+export defn mul(a: Int, b: Int) -> Int {
+    term a * b;
+};
