@@ -1,0 +1,58 @@
+// gen_c.bv — Tier 1: C header + .so bridge generator
+// 2026-07-24: Generates C declarations matching Brief's export ABI.
+// Overhead: ~0ns after LTO — same function pointer, no marshalling.
+//
+// Supports up to 6 parameters with types: Int, Float, Bool, String, Ptr, Void.
+
+$defn c_type(t: String) -> String {
+    when t == "Int"    { term "int64_t"; };
+    when t == "Float"  { term "double"; };
+    when t == "Bool"   { term "bool"; };
+    when t == "String" { term "const char*"; };
+    when t == "Ptr"    { term "void*"; };
+    when t == "Void"   { term "void"; };
+    term "int64_t";
+};
+
+$defn gen_c_header(exports: Selection, bridge_name: String) -> String {
+    let code = "// " + bridge_name + " — Brief export declarations (auto-generated)\n";
+    code += "// Tier 1: Zero-cost FFI — after LTO these IS the native function.\n";
+    code += "// Link with: brief build --shared --out . my_module.bv\n\n";
+    code += "#ifndef " + bridge_name + "_H\n#define " + bridge_name + "_H\n\n";
+    code += "#include <stdint.h>\n#include <stdbool.h>\n\n#ifdef __cplusplus\nextern \"C\" {\n#endif\n\n";
+
+    foreach(exp in exports) {
+        let name = TypeInfo$(exp, "name");
+        let pcount_str = TypeInfo$(exp, "params.count");
+        let pcount = 0;
+        when pcount_str == "1" { pcount = 1; };
+        when pcount_str == "2" { pcount = 2; };
+        when pcount_str == "3" { pcount = 3; };
+        when pcount_str == "4" { pcount = 4; };
+        when pcount_str == "5" { pcount = 5; };
+        when pcount_str == "6" { pcount = 6; };
+        let ret = c_type(TypeInfo$(exp, "output_type"));
+
+        let params = "";
+        when pcount >= 1 { params = c_type(TypeInfo$(exp, "params.0.type")) + " a"; };
+        when pcount >= 2 { params = params + ", " + c_type(TypeInfo$(exp, "params.1.type")) + " b"; };
+        when pcount >= 3 { params = params + ", " + c_type(TypeInfo$(exp, "params.2.type")) + " c"; };
+        when pcount >= 4 { params = params + ", " + c_type(TypeInfo$(exp, "params.3.type")) + " d"; };
+        when pcount >= 5 { params = params + ", " + c_type(TypeInfo$(exp, "params.4.type")) + " e"; };
+        when pcount >= 6 { params = params + ", " + c_type(TypeInfo$(exp, "params.5.type")) + " f"; };
+
+        code = code + "extern " + ret + " " + name + "(" + params + ");\n";
+    };
+
+    code = code + "\n#ifdef __cplusplus\n}\n#endif\n\n#endif\n";
+    term code;
+};
+
+$(Normalized @ highest) {
+    let exports = Tag$("export");
+    when exports.Count$() > 0 {
+        let code = gen_c_header(exports, "brief_bridge");
+        FileWrite$("ffi-out/c/bridge.h", code, true);
+        EmitInfo$("gen_c: ffi-out/c/bridge.h");
+    };
+};

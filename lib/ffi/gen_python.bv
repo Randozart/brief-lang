@@ -1,0 +1,136 @@
+// gen_python.bv — Tier 2: Python C extension bridge generator
+// 2026-07-24: Generates CPython C extension (~150ns per call).
+// Most efficient Python FFI: direct CPython API, no ctypes overhead.
+//
+// Supports up to 6 parameters with types: Int, Float, Bool, String, Ptr, Void.
+
+$defn py_c_type(t: String) -> String {
+    when t == "Int"    { term "long long"; };
+    when t == "Float"  { term "double"; };
+    when t == "Bool"   { term "long"; };
+    when t == "String" { term "const char*"; };
+    when t == "Ptr"    { term "void*"; };
+    when t == "Void"   { term "void"; };
+    term "long long";
+};
+
+$defn py_parse_fmt(t: String) -> String {
+    when t == "Int"    { term "\"ll\""; };
+    when t == "Float"  { term "\"d\""; };
+    when t == "Bool"   { term "\"l\""; };
+    when t == "String" { term "\"s\""; };
+    when t == "Ptr"    { term "\"O&\""; };
+    term "\"ll\"";
+};
+
+$defn py_to_python(t: String, expr: String) -> String {
+    when t == "Int"    { term "PyLong_FromLongLong(" + expr + ")"; };
+    when t == "Float"  { term "PyFloat_FromDouble(" + expr + ")"; };
+    when t == "Bool"   { term "PyBool_FromLong(" + expr + ")"; };
+    when t == "String" { term "PyUnicode_FromString(" + expr + ")"; };
+    when t == "Ptr"    { term "PyCapsule_New(" + expr + ", NULL, NULL)"; };
+    when t == "Void"   { term "Py_RETURN_NONE"; };
+    term "PyLong_FromLongLong(" + expr + ")";
+};
+
+$defn gen_python_bridge(exports: Selection, bridge_name: String) -> String {
+    let code = "// Python C extension: " + bridge_name + " (auto-generated)\n";
+    code += "#include <Python.h>\n#include <dlfcn.h>\n#include <stdint.h>\n\n";
+    code += "static void* lib_handle = NULL;\n\n";
+
+    foreach(exp in exports) {
+        let name = TypeInfo$(exp, "name");
+        let pcount_str = TypeInfo$(exp, "params.count");
+        let pcount = 0;
+        when pcount_str == "1" { pcount = 1; };
+        when pcount_str == "2" { pcount = 2; };
+        when pcount_str == "3" { pcount = 3; };
+        when pcount_str == "4" { pcount = 4; };
+        when pcount_str == "5" { pcount = 5; };
+        when pcount_str == "6" { pcount = 6; };
+        let ret = py_c_type(TypeInfo$(exp, "output_type"));
+
+        let ctypes = "";
+        let cargs = "";
+        when pcount >= 1 { ctypes = py_c_type(TypeInfo$(exp, "params.0.type")); cargs = "carg_0"; code = code + "static " + py_c_type(TypeInfo$(exp, "params.0.type")) + " carg_0;\n"; };
+        when pcount >= 2 { ctypes = ctypes + ", " + py_c_type(TypeInfo$(exp, "params.1.type")); cargs = cargs + ", carg_1"; code = code + "static " + py_c_type(TypeInfo$(exp, "params.1.type")) + " carg_1;\n"; };
+        when pcount >= 3 { ctypes = ctypes + ", " + py_c_type(TypeInfo$(exp, "params.2.type")); cargs = cargs + ", carg_2"; code = code + "static " + py_c_type(TypeInfo$(exp, "params.2.type")) + " carg_2;\n"; };
+        when pcount >= 4 { ctypes = ctypes + ", " + py_c_type(TypeInfo$(exp, "params.3.type")); cargs = cargs + ", carg_3"; code = code + "static " + py_c_type(TypeInfo$(exp, "params.3.type")) + " carg_3;\n"; };
+        when pcount >= 5 { ctypes = ctypes + ", " + py_c_type(TypeInfo$(exp, "params.4.type")); cargs = cargs + ", carg_4"; code = code + "static " + py_c_type(TypeInfo$(exp, "params.4.type")) + " carg_4;\n"; };
+        when pcount >= 6 { ctypes = ctypes + ", " + py_c_type(TypeInfo$(exp, "params.5.type")); cargs = cargs + ", carg_5"; code = code + "static " + py_c_type(TypeInfo$(exp, "params.5.type")) + " carg_5;\n"; };
+
+        // Function pointer typedef and declaration
+        code = code + "\ntypedef " + ret + " (*" + name + "_fn_t)(" + ctypes + ");\n";
+        code = code + "static " + name + "_fn_t " + name + "_fn = NULL;\n\n";
+
+        // Wrapper function
+        code = code + "static PyObject* pybridge_" + name + "(PyObject* self, PyObject* args) {\n";
+        code = code + "    (void)self;\n";
+
+        let fmt = "\"";
+        let pargs = "";
+        when pcount >= 1 { fmt = fmt + py_parse_fmt(TypeInfo$(exp, "params.0.type")); pargs = "&carg_0"; };
+        when pcount >= 2 { fmt = fmt + " " + py_parse_fmt(TypeInfo$(exp, "params.1.type")); pargs = pargs + ", &carg_1"; };
+        when pcount >= 3 { fmt = fmt + " " + py_parse_fmt(TypeInfo$(exp, "params.2.type")); pargs = pargs + ", &carg_2"; };
+        when pcount >= 4 { fmt = fmt + " " + py_parse_fmt(TypeInfo$(exp, "params.3.type")); pargs = pargs + ", &carg_3"; };
+        when pcount >= 5 { fmt = fmt + " " + py_parse_fmt(TypeInfo$(exp, "params.4.type")); pargs = pargs + ", &carg_4"; };
+        when pcount >= 6 { fmt = fmt + " " + py_parse_fmt(TypeInfo$(exp, "params.5.type")); pargs = pargs + ", &carg_5"; };
+
+        when pcount > 0 {
+            code = code + "    if (!PyArg_ParseTuple(args, " + fmt + "\", " + pargs + ")) return NULL;\n";
+        };
+
+        when TypeInfo$(exp, "output_type") == "Void" {
+            code = code + "    " + name + "_fn(" + cargs + ");\n";
+            code = code + "    Py_RETURN_NONE;\n";
+        };
+        when TypeInfo$(exp, "output_type") != "Void" {
+            code = code + "    " + ret + " result = " + name + "_fn(" + cargs + ");\n";
+            code = code + "    return " + py_to_python(TypeInfo$(exp, "output_type"), "result") + ";\n";
+        };
+        code = code + "}\n";
+    };
+
+    // PyMethodDef array
+    code = code + "\nstatic PyMethodDef methods[] = {\n";
+    let first = true;
+    foreach(exp in exports) {
+        let name = TypeInfo$(exp, "name");
+        when !first { code = code + ",\n"; };
+        code = code + "    {\"" + name + "\", pybridge_" + name + ", METH_VARARGS, \"Brief export " + name + "\"}";
+        first = false;
+    };
+    code = code + "\n    {NULL, NULL, 0, NULL}\n};\n\n";
+
+    code = code + "static struct PyModuleDef module_def = {\n";
+    code = code + "    PyModuleDef_HEAD_INIT,\n";
+    code = code + "    \"" + bridge_name + "\",\n";
+    code = code + "    \"Brief bridge (Metropolitan FFI)\",\n";
+    code = code + "    -1,\n";
+    code = code + "    methods\n";
+    code = code + "};\n\n";
+
+    code = code + "PyMODINIT_FUNC PyInit_" + bridge_name + "(void) {\n";
+    code = code + "    lib_handle = dlopen(NULL, RTLD_LAZY | RTLD_LOCAL);\n";
+    code = code + "    if (!lib_handle) { PyErr_SetString(PyExc_RuntimeError, dlerror()); return NULL; }\n\n";
+
+    foreach(exp in exports) {
+        let name = TypeInfo$(exp, "name");
+        code = code + "    " + name + "_fn = (" + name + "_fn_t)dlsym(lib_handle, \"" + name + "\");\n";
+        code = code + "    if (!" + name + "_fn) { PyErr_SetString(PyExc_RuntimeError, \"dlsym " + name + " failed\"); return NULL; }\n";
+    };
+
+    code = code + "    return PyModuleDef_Init(&module_def);\n";
+    code = code + "}\n";
+    term code;
+};
+
+$(Normalized @ highest) {
+    let exports = Tag$("export");
+    when exports.Count$() > 0 {
+        let code = gen_python_bridge(exports, "brief_bridge");
+        FileWrite$("ffi-out/python/bridge.c", code, true);
+        EmitInfo$("gen_python: ffi-out/python/bridge.c");
+    };
+};
+

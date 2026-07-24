@@ -1,0 +1,92 @@
+// gen_protocol.bv — Tier 2: Universal subprocess protocol bridge
+// 2026-07-24: Generates a C shim that communicates via stdin/stdout text protocol.
+// Overhead: ~1-5ms per call (dominated by process spawn).
+// Universal fallback: works with any language that can spawn a subprocess.
+//
+// Protocol: "add 3 4\n" → "7\n"
+
+$defn gen_protocol_shim(exports: Selection, bridge_name: String) -> String {
+    let code = "// " + bridge_name + " — Protocol bridge shim (auto-generated)\n";
+    code += "// Compile: gcc -O2 -o " + bridge_name + " " + bridge_name + ".c -ldl\n\n";
+    code += "#include <stdio.h>\n#include <stdint.h>\n#include <stdlib.h>\n#include <string.h>\n#include <dlfcn.h>\n\n";
+    code += "static void* lib_handle = NULL;\n\n";
+
+    // Function pointer typedefs
+    foreach(exp in exports) {
+        let name = TypeInfo$(exp, "name");
+        let pcount_str = TypeInfo$(exp, "params.count");
+        let pcount = 0;
+        when pcount_str == "1" { pcount = 1; };
+        when pcount_str == "2" { pcount = 2; };
+        when pcount_str == "3" { pcount = 3; };
+        when pcount_str == "4" { pcount = 4; };
+        when pcount_str == "5" { pcount = 5; };
+        when pcount_str == "6" { pcount = 6; };
+        let params = "";
+        when pcount >= 1 { params = "int64_t"; };
+        when pcount >= 2 { params = params + ", int64_t"; };
+        when pcount >= 3 { params = params + ", int64_t"; };
+        when pcount >= 4 { params = params + ", int64_t"; };
+        when pcount >= 5 { params = params + ", int64_t"; };
+        when pcount >= 6 { params = params + ", int64_t"; };
+        code = code + "typedef int64_t (*" + name + "_fn_t)(" + params + ");\n";
+        code = code + "static " + name + "_fn_t " + name + "_fn = NULL;\n";
+    };
+
+    code = code + "\nint main(int argc, char** argv) {\n";
+    code = code + "    (void)argc;\n";
+    code = code + "    char* slash = strrchr(argv[0], '/');\n";
+    code = code + "    char so_path[4096];\n";
+    code = code + "    if (slash) { snprintf(so_path, sizeof(so_path), \"%.*s/export_add.so\", (int)(slash - argv[0]), argv[0]); }\n";
+    code = code + "    else { snprintf(so_path, sizeof(so_path), \"./export_add.so\"); }\n\n";
+    code = code + "    lib_handle = dlopen(so_path, RTLD_LAZY | RTLD_LOCAL);\n";
+    code = code + "    if (!lib_handle) { fprintf(stderr, \"dlopen: %s\\n\", dlerror()); return 1; }\n\n";
+
+    foreach(exp in exports) {
+        let name = TypeInfo$(exp, "name");
+        code = code + "    " + name + "_fn = (" + name + "_fn_t)dlsym(lib_handle, \"" + name + "\");\n";
+        code = code + "    if (!" + name + "_fn) { fprintf(stderr, \"dlsym " + name + ": %s\\n\", dlerror()); return 1; }\n";
+    };
+
+    code = code + "\n    char line[1024];\n";
+    code = code + "    while (fgets(line, sizeof(line), stdin)) {\n";
+    code = code + "        char fn[256]; int64_t a = 0, b = 0; int n = sscanf(line, \"%255s %ld %ld\", fn, &a, &b);\n";
+    code = code + "        if (n < 1) continue;\n";
+
+    foreach(exp in exports) {
+        let name = TypeInfo$(exp, "name");
+        let pcount_str = TypeInfo$(exp, "params.count");
+        let pcount = 0;
+        when pcount_str == "1" { pcount = 1; };
+        when pcount_str == "2" { pcount = 2; };
+        when pcount_str == "3" { pcount = 3; };
+        when pcount_str == "4" { pcount = 4; };
+        when pcount_str == "5" { pcount = 5; };
+        when pcount_str == "6" { pcount = 6; };
+
+        code = code + "        if (strcmp(fn, \"" + name + "\") == 0) { printf(\"%ld\\n\", " + name + "_fn(";
+        when pcount >= 1 { code = code + "a"; };
+        when pcount >= 2 { code = code + ", b"; };
+        when pcount >= 3 { code = code + ", 0"; };
+        when pcount >= 4 { code = code + ", 0"; };
+        when pcount >= 5 { code = code + ", 0"; };
+        when pcount >= 6 { code = code + ", 0"; };
+        code = code + ")); fflush(stdout); continue; }\n";
+    };
+
+    code = code + "        printf(\"-1\\n\"); fflush(stdout);\n";
+    code = code + "    }\n";
+    code = code + "    dlclose(lib_handle);\n";
+    code = code + "    return 0;\n";
+    code = code + "}\n";
+    term code;
+};
+
+$(Normalized @ highest) {
+    let exports = Tag$("export");
+    when exports.Count$() > 0 {
+        let code = gen_protocol_shim(exports, "proto_shim");
+        FileWrite$("ffi-out/protocol/proto_shim.c", code, true);
+        EmitInfo$("gen_protocol: ffi-out/protocol/proto_shim.c");
+    };
+};

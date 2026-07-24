@@ -624,6 +624,11 @@ impl ImportResolver {
                 if matches!(item, TopLevel::LinkDependency(_)) {
                     return true;
                 }
+                // 2026-07-24: Keep stage blocks and compile-time defns from
+                // imported files so plugins in library modules can auto-execute.
+                if matches!(item, TopLevel::StageBlock(_) | TopLevel::CompileTimeDefn(_) | TopLevel::CompileTimeTxn(_)) {
+                    return true;
+                }
                 let name = match item {
                     TopLevel::Definition(d) => Some(d.name.as_str()),
                     TopLevel::Signature(s) => Some(s.name.as_str()),

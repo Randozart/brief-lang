@@ -262,6 +262,11 @@ pub fn compile_source(file_path: &str, source: &str, opts: &BuildOptions) -> Res
     }
     items = resolver.resolve_imports(items, &std::path::PathBuf::from(file_path))?;
 
+    // 2026-07-24: Extract stage blocks from imported files. The first
+    // extract_inline_stage_blocks ran before import resolution, so stage
+    // blocks in imported modules were not captured.
+    extract_inline_stage_blocks(&mut items, &mut pm);
+
     {
         emit_beast_snapshot(file_path, BeastStage::Resolve, BeastPosition::Before, &items, &TypeUniverse::new(), opts)?;
                 pm.run_ast(StageKind::Resolved, &mut items, &mut TypeUniverse::new())?;

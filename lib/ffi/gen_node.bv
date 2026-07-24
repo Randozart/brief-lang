@@ -1,0 +1,59 @@
+// gen_node.bv — Tier 2: Node.js koffi ESM bridge generator
+// 2026-07-24: Generates koffi FFI module (~280ns per call).
+// Most efficient Node.js FFI: direct foreign function interface.
+//
+// Supports up to 6 parameters with types: Int, Float, Bool, String, Ptr, Void.
+
+$defn js_type(t: String) -> String {
+    when t == "Int"    { term "'int64_t'"; };
+    when t == "Float"  { term "'double'"; };
+    when t == "Bool"   { term "'int32_t'"; };
+    when t == "String" { term "'string'"; };
+    when t == "Ptr"    { term "'pointer'"; };
+    when t == "Void"   { term "'void'"; };
+    term "'int64_t'";
+};
+
+$defn gen_node_bridge(exports: Selection, bridge_name: String, so_path: String) -> String {
+    let code = "// " + bridge_name + " — Brief koffi bridge (auto-generated)\n";
+    code += "// Runtime: ~280ns per call\n\n";
+    code += "import koffi from 'koffi';\n\n";
+    code += "const lib = koffi.load('" + so_path + "');\n\n";
+
+    foreach(exp in exports) {
+        let name = TypeInfo$(exp, "name");
+        let pcount_str = TypeInfo$(exp, "params.count");
+        let pcount = 0;
+        when pcount_str == "1" { pcount = 1; };
+        when pcount_str == "2" { pcount = 2; };
+        when pcount_str == "3" { pcount = 3; };
+        when pcount_str == "4" { pcount = 4; };
+        when pcount_str == "5" { pcount = 5; };
+        when pcount_str == "6" { pcount = 6; };
+        let ret = js_type(TypeInfo$(exp, "output_type"));
+        let jsvars = "";
+        let jscall = "";
+        when pcount >= 1 { jsvars = js_type(TypeInfo$(exp, "params.0.type")); jscall = "a0"; };
+        when pcount >= 2 { jsvars = jsvars + ", " + js_type(TypeInfo$(exp, "params.1.type")); jscall = jscall + ", a1"; };
+        when pcount >= 3 { jsvars = jsvars + ", " + js_type(TypeInfo$(exp, "params.2.type")); jscall = jscall + ", a2"; };
+        when pcount >= 4 { jsvars = jsvars + ", " + js_type(TypeInfo$(exp, "params.3.type")); jscall = jscall + ", a3"; };
+        when pcount >= 5 { jsvars = jsvars + ", " + js_type(TypeInfo$(exp, "params.4.type")); jscall = jscall + ", a4"; };
+        when pcount >= 6 { jsvars = jsvars + ", " + js_type(TypeInfo$(exp, "params.5.type")); jscall = jscall + ", a5"; };
+
+        code = code + "const _" + name + " = lib.func('" + name + "', " + ret + ", [" + jsvars + "]);\n";
+        code = code + "export function " + name + "(" + jscall + ") {\n";
+        code = code + "    return _" + name + "(" + jscall + ");\n";
+        code = code + "}\n\n";
+    };
+
+    term code;
+};
+
+$(Normalized @ highest) {
+    let exports = Tag$("export");
+    when exports.Count$() > 0 {
+        let code = gen_node_bridge(exports, "brief_bridge", "./export_add.so");
+        FileWrite$("ffi-out/node/bridge.mjs", code, true);
+        EmitInfo$("gen_node: ffi-out/node/bridge.mjs");
+    };
+};

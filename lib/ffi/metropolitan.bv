@@ -1,0 +1,27 @@
+// metropolitan.bv — Metropolitan FFI orchestrator
+// 2026-07-24: Imports all language-specific bridge generators.
+// Each gen_*.bv has its own $(Normalized @ highest) stage block that
+// auto-executes on import — no extra stage block needed here.
+//
+// Usage: import "lib/ffi/metropolitan"
+// Generates bridges for ALL supported languages at once.
+//
+// To generate bridges for only one language, import the specific gen_*:
+//   import "lib/ffi/gen_python";  // Python only
+//   import "lib/ffi/gen_c";        // C only
+
+import "lib/ffi/gen_c";
+import "lib/ffi/gen_rust";
+import "lib/ffi/gen_python";
+import "lib/ffi/gen_node";
+import "lib/ffi/gen_protocol";
+
+$(Normalized @ highest) {
+    let exports = Tag$("export");
+    when exports.Count$() > 0 {
+        EmitInfo$("metropolitan: bridges generated for all languages");
+    };
+    when exports.Count$() == 0 {
+        EmitInfo$("metropolitan: no exports found");
+    };
+};

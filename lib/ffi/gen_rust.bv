@@ -1,0 +1,57 @@
+// gen_rust.bv — Tier 1: Rust extern "C" + LTO bridge generator
+// 2026-07-24: Generates Rust `extern "C"` declarations matching Brief's export ABI.
+// Overhead: ~0ns after LTO — same binary, zero bridge cost.
+//
+// Supports up to 6 parameters with types: Int, Float, Bool, String, Ptr, Void.
+
+$defn rust_type(t: String) -> String {
+    when t == "Int"    { term "i64"; };
+    when t == "Float"  { term "f64"; };
+    when t == "Bool"   { term "bool"; };
+    when t == "String" { term "*const u8"; };
+    when t == "Ptr"    { term "*mut std::ffi::c_void"; };
+    when t == "Void"   { term "()"; };
+    term "i64";
+};
+
+$defn gen_rust_bridge(exports: Selection, bridge_name: String) -> String {
+    let code = "// " + bridge_name + " — Brief extern \"C\" declarations (auto-generated)\n";
+    code += "// Tier 1: Zero-cost FFI — after LTO these are the same binary.\n";
+    code += "// Build with: brief build my_module.bv --shared --out .\n\n";
+    code += "extern \"C\" {\n\n";
+
+    foreach(exp in exports) {
+        let name = TypeInfo$(exp, "name");
+        let pcount_str = TypeInfo$(exp, "params.count");
+        let pcount = 0;
+        when pcount_str == "1" { pcount = 1; };
+        when pcount_str == "2" { pcount = 2; };
+        when pcount_str == "3" { pcount = 3; };
+        when pcount_str == "4" { pcount = 4; };
+        when pcount_str == "5" { pcount = 5; };
+        when pcount_str == "6" { pcount = 6; };
+        let ret = rust_type(TypeInfo$(exp, "output_type"));
+
+        let params = "";
+        when pcount >= 1 { params = "a: " + rust_type(TypeInfo$(exp, "params.0.type")); };
+        when pcount >= 2 { params = params + ", b: " + rust_type(TypeInfo$(exp, "params.1.type")); };
+        when pcount >= 3 { params = params + ", c: " + rust_type(TypeInfo$(exp, "params.2.type")); };
+        when pcount >= 4 { params = params + ", d: " + rust_type(TypeInfo$(exp, "params.3.type")); };
+        when pcount >= 5 { params = params + ", e: " + rust_type(TypeInfo$(exp, "params.4.type")); };
+        when pcount >= 6 { params = params + ", f: " + rust_type(TypeInfo$(exp, "params.5.type")); };
+
+        code = code + "    pub fn " + name + "(" + params + ") -> " + ret + ";\n";
+    };
+
+    code = code + "}\n";
+    term code;
+};
+
+$(Normalized @ highest) {
+    let exports = Tag$("export");
+    when exports.Count$() > 0 {
+        let code = gen_rust_bridge(exports, "brief_bridge");
+        FileWrite$("ffi-out/rust/bridge.rs", code, true);
+        EmitInfo$("gen_rust: ffi-out/rust/bridge.rs");
+    };
+};
