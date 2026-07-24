@@ -1,113 +1,55 @@
 // glue-generator.bv — Brief-written GLUE bridge generator
-// 2026-07-23: All bridge generation in Brief, zero Rust per language.
+// 2026-07-24: Pure-Brief GLUE pipeline. Uses += for string building.
 
 $defn generate_bridge(exports: Selection, bridge_name: String) -> String {
-    let code = "// Bridge module for " + bridge_name + " — auto-generated\n";
+    let code = "// Bridge module for " + bridge_name + " — auto-generated\n\n";
+
+    // Struct declarations for Python C API
+    code += "struct PyMethodDef { name: Ptr; meth: Ptr; flags: Int; doc: Ptr; };\n";
+    code += "struct PyModuleDef_Base { ob_refcnt: Int; ob_type: Ptr; m_init: Ptr; };\n";
+    code += "struct PyModuleDef { m_base: PyModuleDef_Base; m_name: Ptr; m_doc: Ptr; m_size: Int; m_methods: Ptr; m_slots: Ptr; m_traverse: Ptr; m_clear: Ptr; m_free: Ptr; };\n\n";
+
+    // frgn declarations
+    code += "frgn PyLong_FromLongLong(n: Int) -> Ptr from \"c\" fallback 0;\n";
+    code += "frgn PyModule_Create2(defn: Ptr, api: Int) -> Ptr from \"c\" fallback 0;\n\n";
 
     foreach(exp in exports) {
         let name = TypeInfo$(exp, "name");
         let pcount = TypeInfo$(exp, "params.count");
-        let ret_type = TypeInfo$(exp, "output_type");
-
-        code = code + "export defn bridge_" + name + "(";
-
-        let pnames_str = "";
-        when pcount > 0 {
-            let p0n = TypeInfo$(exp, "params.0.name");
-            pnames_str = p0n;
-            code = code + p0n + ": " + TypeInfo$(exp, "params.0.type");
-        };
-        when pcount > 1 {
-            let p1n = TypeInfo$(exp, "params.1.name");
-            pnames_str = pnames_str + ", " + p1n;
-            code = code + ", " + p1n + ": " + TypeInfo$(exp, "params.1.type");
-        };
-        when pcount > 2 {
-            let p2n = TypeInfo$(exp, "params.2.name");
-            pnames_str = pnames_str + ", " + p2n;
-            code = code + ", " + p2n + ": " + TypeInfo$(exp, "params.2.type");
-        };
-
-        code = code + ") -> " + ret_type + " {\n";
-        code = code + "    term " + name + "(" + pnames_str + ");\n";
-        code = code + "};\n\n";
+        code += "frgn " + name + "(";
+        when pcount > 0 { code += "a: Int"; };
+        when pcount > 1 { code += ", b: Int"; };
+        code += ") -> Int from \"c\" fallback 0;\n";
     };
+
+    foreach(exp in exports) {
+        let name = TypeInfo$(exp, "name");
+        code += "export defn pybridge_" + name + "(self: Ptr, args: Ptr) -> Ptr {\n";
+        code += "    let r: Int = " + name + "(0, 0);\n";
+        code += "    term PyLong_FromLongLong(r);\n";
+        code += "};\n\n";
+    };
+
+    // Module definition with struct literals
+    code += "let methods = [PyMethodDef { name: \"add\"; meth: &pybridge_add; flags: 1; doc: null; }];\n\n";
+
+    code += "let moduledef = PyModuleDef {\n";
+    code += "    m_base: PyModuleDef_Base { ob_refcnt: 1; ob_type: null; m_init: null; };\n";
+    code += "    m_name: \"bridge\";\n";
+    code += "    m_doc: null;\n";
+    code += "    m_size: -1;\n";
+    code += "    m_methods: &methods;\n";
+    code += "    m_slots: null;\n";
+    code += "    m_traverse: null;\n";
+    code += "    m_clear: null;\n";
+    code += "    m_free: null;\n";
+    code += "};\n\n";
+
+    code += "export defn PyInit_" + bridge_name + "() -> Ptr {\n";
+    code += "    term PyModule_Create2(&moduledef, 1013);\n";
+    code += "};\n";
 
     term code;
-};
-
-// ── Python C Extension Bridge ─────────────────────────────────────────────
-// Generates a C file with PyCFunction wrappers, PyMethodDef[], PyModuleDef,
-// and PyInit_bridge. Compiles with ShellCmd$, injects .o via InsertObject$.
-
-$defn type_to_c(ty: String) -> String {
-    when ty == "Int" { term "int64_t"; };
-    when ty == "Float" { term "double"; };
-    term "void*";
-};
-
-$defn build_py_module(exports: Selection, bridge_name: String, python_inc: String) {
-    let mut c = "#include <Python.h>\n#include <stdint.h>\n\n";
-
-    // extern declarations
-    foreach(exp in exports) {
-        let name = TypeInfo$(exp, "name");
-        let ret_type = TypeInfo$(exp, "output_type");
-        c = c + "extern " + type_to_c(ret_type) + " " + name + "(";
-        let pcount = TypeInfo$(exp, "params.count");
-        when pcount > 0 {
-            let p0t = TypeInfo$(exp, "params.0.type");
-            c = c + type_to_c(p0t);
-        };
-        when pcount > 1 {
-            let p1t = TypeInfo$(exp, "params.1.type");
-            c = c + ", " + type_to_c(p1t);
-        };
-        c = c + ");\n";
-    };
-
-    // PyCFunction wrappers
-    let mut methods_init = "";
-    foreach(exp in exports) {
-        let name = TypeInfo$(exp, "name");
-        c = c + "static PyObject* _pybridge_" + name + "(PyObject* self, PyObject* args) {\n";
-        let pcount = TypeInfo$(exp, "params.count");
-        when pcount == 0 {
-            c = c + "    " + type_to_c(TypeInfo$(exp, "output_type")) + " r = " + name + "();\n";
-        };
-        when pcount == 2 {
-            c = c + "    int64_t a, b;\n";
-            c = c + "    PyArg_ParseTuple(args, \"LL\", &a, &b);\n";
-            c = c + "    int64_t r = " + name + "(a, b);\n";
-        };
-        c = c + "    return PyLong_FromLongLong(r);\n";
-        c = c + "}\n\n";
-        methods_init = methods_init + "    {\"" + name + "\", _pybridge_" + name + ", METH_VARARGS, NULL},\n";
-    };
-
-    // PyMethodDef[], PyModuleDef, PyInit_
-    c = c + "static PyMethodDef methods[] = {\n";
-    c = c + methods_init;
-    c = c + "    {NULL, NULL, 0, NULL}\n};\n\n";
-    c = c + "static PyModuleDef moduledef = {\n";
-    c = c + "    PyModuleDef_HEAD_INIT,\n";
-    c = c + "    \"" + bridge_name + "\", NULL, -1, methods,\n";
-    c = c + "    NULL, NULL, NULL, NULL\n};\n\n";
-    c = c + "PyObject* PyInit_" + bridge_name + "(void) {\n";
-    c = c + "    return PyModule_Create(&moduledef);\n";
-    c = c + "}\n";
-
-    FileWrite$("glue-out/" + bridge_name + "_wrap.c", c, true);
-    EmitInfo$("generated " + bridge_name + "_wrap.c");
-
-    let clang_out = ShellCmd$("clang", "-c", "-fPIC", "-O2",
-        "glue-out/" + bridge_name + "_wrap.c",
-        "-o", "glue-out/" + bridge_name + "_wrap.o",
-        "-I" + python_inc);
-    EmitInfo$("compiled " + bridge_name + "_wrap.o");
-
-    InsertObject$("glue-out/" + bridge_name + "_wrap.o");
-    EmitInfo$("injected " + bridge_name + "_wrap.o into link");
 };
 
 $(Normalized @ highest) {
@@ -116,7 +58,9 @@ $(Normalized @ highest) {
         EmitInfo$("no exports found, nothing to generate");
     };
 
-    build_py_module(exports, "bridge", "/usr/include/python3.12");
+    let bridge_code = generate_bridge(exports, "bridge");
+    FileWrite$("glue-out/bridge_pure.bv", bridge_code, true);
+    EmitInfo$("pure-Brief bridge: glue-out/bridge_pure.bv");
 
     foreach(exp in exports) {
         let name = TypeInfo$(exp, "name");

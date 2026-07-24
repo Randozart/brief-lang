@@ -594,9 +594,12 @@ impl LlvmBackend {
                                 ty: Type::int(),
                             }
                         } else {
-                            writeln!(out, "{}{} = add i64 0, 0", indent, v).ok();
+                            // 2026-07-24: &function_name emits function pointer.
+                            // Used by struct literals for method table entries.
+                            let ptr = self.fun.gen_reg();
+                            writeln!(out, "{}{} = ptrtoint ptr @{} to i64", indent, ptr, name).ok();
                             TypedRegister {
-                                name: v.to_string(),
+                                name: ptr,
                                 ty: Type::int(),
                             }
                         }
@@ -1060,22 +1063,62 @@ impl LlvmBackend {
         let total_size = self.ctx.type_universe.as_ref()
             .and_then(|u| u.types.get(type_name))
             .map(|r| r.bytes).unwrap_or(8);
-        let ty = crate::ast::Type::Custom(type_name.to_string());
+        let struct_ty = crate::ast::Type::Custom(type_name.to_string());
 
         let alloca_reg = self.fun.gen_reg();
         writeln!(out, "{}  {} = alloca i8, i64 {}", indent, alloca_reg, total_size).ok();
 
         for (field_name, field_expr) in fields {
             let fr = self.fun.gen_reg();
-            let field_val = self.emit_expr_inner(out, &fr, field_expr, indent);
+            let val = self.emit_expr_inner(out, &fr, field_expr, indent);
+            let offset = self.lookup_field_offset(type_name, field_name);
             let ptr_reg = self.fun.gen_reg();
-            writeln!(out, "{}  {} = getelementptr i8, ptr {}, i64 0", indent, ptr_reg, alloca_reg).ok();
-            writeln!(out, "{}  store i64 0, ptr {}", indent, ptr_reg).ok();
+            writeln!(out, "{}  {} = getelementptr i8, ptr {}, i64 {}", indent, ptr_reg, alloca_reg, offset).ok();
+            // Convert i64 to ptr if the field type expects a pointer
+            if val.ty == Type::int() && self.is_ptr_field(type_name, field_name) {
+                let conv = self.fun.gen_reg();
+                writeln!(out, "{}  {} = inttoptr i64 {} to ptr", indent, conv, val.name).ok();
+                writeln!(out, "{}  store ptr {}, ptr {}", indent, conv, ptr_reg).ok();
+            } else {
+                let fty = self.llvm_type(&val.ty);
+                writeln!(out, "{}  store {} {}, ptr {}", indent, fty, val.name, ptr_reg).ok();
+            }
         }
 
-        TypedRegister { name: alloca_reg.to_string(), ty }
+        let result = self.fun.gen_reg();
+        writeln!(out, "{}  {} = ptrtoint ptr {} to i64", indent, result, alloca_reg).ok();
+        TypedRegister { name: result, ty: struct_ty }
     }
 
+    /// Look up the byte offset of a field in a struct definition.
+    fn lookup_field_offset(&self, type_name: &str, field_name: &str) -> u64 {
+        if let Some(info) = self.ctx.type_universe.as_ref()
+            .and_then(|u| u.types.get(type_name))
+        {
+            for (i, (fname, _)) in info.fields.iter().enumerate() {
+                if fname == field_name {
+                    return i as u64 * 8; // Simplified: 8 bytes per field
+                }
+            }
+        }
+        0
+    }
+
+    /// Check if a struct field has pointer type.
+    fn is_ptr_field(&self, type_name: &str, field_name: &str) -> bool {
+        if let Some(info) = self.ctx.type_universe.as_ref()
+            .and_then(|u| u.types.get(type_name))
+        {
+            for (fn_, ftype) in &info.fields {
+                if fn_ == field_name {
+                    return matches!(ftype, Type::Ptr(_));
+                }
+            }
+        }
+        false
+    }
+
+    /// Emit a foreign function call with optional auto-meld.
     fn emit_frgn_call(
         &mut self,
         out: &mut String,
@@ -1108,8 +1151,10 @@ impl LlvmBackend {
                     let ret_llvm = self.llvm_type(&ret_type);
                     if ret_llvm == "ptr" {
                         writeln!(out, "{}  {} = inttoptr i64 0 to ptr", indent, v).ok();
+                    } else if ret_llvm == "float" {
+                        writeln!(out, "{}  {} = fadd float 0.0, 0.0", indent, v).ok();
                     } else {
-                        writeln!(out, "{}  {} = {} zeroinitializer", indent, v, ret_llvm).ok();
+                        writeln!(out, "{}  {} = add i64 0, 0", indent, v).ok();
                     }
                     TypedRegister { name: v.to_string(), ty: ret_type }
                 } else {

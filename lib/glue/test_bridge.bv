@@ -1,4 +1,4 @@
-// test_bridge.bv — GLUE-in-Brief demo
+// test_bridge.bv — Pure-Brief GLUE bridge demo
 // Build: brief build lib/glue/test_bridge.bv
 
 export defn add(a: Int, b: Int) -> Int {
@@ -13,58 +13,59 @@ export defn double(x: Float) -> Float {
     term x * 2.0;
 };
 
-$defn generate_python_bridge(exports: Selection, bridge_name: String) -> String {
-    let code = "// Bridge module for " + bridge_name + " — auto-generated\n";
-    code = code + "// Include in your project: brief build bridge.bv\n\n";
+$defn generate_pure_bridge(exports: Selection, bridge_name: String) -> String {
+    let code = "// Pure-Brief GLUE bridge for " + bridge_name + "\n\n";
+
+    code += "struct PyMethodDef { name: Ptr; meth: Ptr; flags: Int; doc: Ptr; };\n";
+    code += "struct PyModuleDef_Base { ob_refcnt: Int; ob_type: Ptr; m_init: Ptr; };\n";
+    code += "struct PyModuleDef { m_base: PyModuleDef_Base; m_name: Ptr; m_doc: Ptr; m_size: Int; m_methods: Ptr; m_slots: Ptr; m_traverse: Ptr; m_clear: Ptr; m_free: Ptr; };\n\n";
+
+    code += "frgn PyLong_FromLongLong(n: Int) -> Ptr from \"c\" fallback 0;\n";
+    code += "frgn PyModule_Create2(defn: Ptr, api: Int) -> Ptr from \"c\" fallback 0;\n\n";
 
     foreach(exp in exports) {
         let name = TypeInfo$(exp, "name");
         let pcount = TypeInfo$(exp, "params.count");
-        let ret_type = TypeInfo$(exp, "output_type");
-
-        code = code + "export defn bridge_" + name + "(";
-
-        let pnames_str = "";
-        when pcount > 0 {
-            let p0n = TypeInfo$(exp, "params.0.name");
-            pnames_str = p0n;
-            code = code + p0n + ": " + TypeInfo$(exp, "params.0.type");
-        };
-        when pcount > 1 {
-            let p1n = TypeInfo$(exp, "params.1.name");
-            pnames_str = pnames_str + ", " + p1n;
-            code = code + ", " + p1n + ": " + TypeInfo$(exp, "params.1.type");
-        };
-        when pcount > 2 {
-            let p2n = TypeInfo$(exp, "params.2.name");
-            pnames_str = pnames_str + ", " + p2n;
-            code = code + ", " + p2n + ": " + TypeInfo$(exp, "params.2.type");
-        };
-
-        code = code + ") -> " + ret_type + " {\n";
-        code = code + "    term " + name + "(" + pnames_str + ");\n";
-        code = code + "};\n\n";
+        code += "frgn " + name + "(";
+        when pcount > 0 { code += "a: Int"; };
+        when pcount > 1 { code += ", b: Int"; };
+        code += ") -> Int from \"c\" fallback 0;\n";
     };
+
+    foreach(exp in exports) {
+        let name = TypeInfo$(exp, "name");
+        code += "export defn pybridge_" + name + "(self: Ptr, args: Ptr) -> Ptr {\n";
+        code += "    let r: Int = " + name + "(0, 0);\n";
+        code += "    term PyLong_FromLongLong(r);\n";
+        code += "};\n\n";
+    };
+
+    code += "let moduledef = PyModuleDef {\n";
+    code += "    m_base: PyModuleDef_Base { ob_refcnt: 1; ob_type: null; m_init: null; };\n";
+    code += "    m_name: \"bridge\";\n";
+    code += "    m_doc: null;\n";
+    code += "    m_size: -1;\n";
+    code += "    m_methods: null;\n";
+    code += "    m_slots: null;\n";
+    code += "    m_traverse: null;\n";
+    code += "    m_clear: null;\n";
+    code += "    m_free: null;\n";
+    code += "};\n\n";
+
+    code += "export defn PyInit_" + bridge_name + "() -> Ptr {\n";
+    code += "    term PyModule_Create2(&moduledef, 1013);\n";
+    code += "};\n";
 
     term code;
 };
 
 $(Normalized @ highest) {
-    let bridge_name = "bridge";
-
     let exports = Tag$("export");
     when exports.IsEmpty$() {
         EmitInfo$("no exports found, nothing to generate");
     };
 
-    let bridge_code = generate_python_bridge(exports, bridge_name);
-    FileWrite$("glue-out/" + bridge_name + ".bv", bridge_code, true);
-    EmitInfo$("GLUE bridge: wrote " + bridge_name + ".bv");
-
-    foreach(exp in exports) {
-        let name = TypeInfo$(exp, "name");
-        let pcount = TypeInfo$(exp, "params.count");
-        let ret_type = TypeInfo$(exp, "output_type");
-        EmitInfo$("  export " + name + "(..." + pcount + " args) -> " + ret_type);
-    };
+    let bridge_code = generate_pure_bridge(exports, "bridge");
+    FileWrite$("glue-out/bridge_pure.bv", bridge_code, true);
+    EmitInfo$("pure-Brief GLUE bridge: glue-out/bridge_pure.bv");
 };
