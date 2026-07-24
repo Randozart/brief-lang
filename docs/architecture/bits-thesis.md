@@ -33,6 +33,55 @@ signatures, not through metadata tags. See `docs/architecture/casting-protocol.m
 and `docs/plans/2026-07-20-extensible-number-types-final.md` for the full
 architecture.
 
+## 2026-07-24 Update: Protocol-First Types
+
+Type declarations now use `: [Parent] [Protocol]` instead of `<: Bits`:
+
+```brief
+// Before:
+type Int <: Bits { bytes <~ 8; ... op Add(#Int, #Int); };
+
+// After:
+type Int: #Int;              // protocol-only (width inferred)
+type i64: Int { bits <~ 64; };  // derives from Int, explicit width
+type UInt: Int;               // derives from Int, inherits #Int protocol
+```
+
+Key changes:
+- **`Bits` is implicit** — no need to declare `<: Bits`. Every type has bits.
+- **Protocols drive dispatch** — `#Int` tells backends how to add, subtract, etc.
+  The backend knows the default ops for every protocol. User only writes `op`
+  overrides when deviating from the default.
+- **Width is inferred** unless `bits <~ N` is explicit.
+- **`x.#Property` replaces `x :> Property`** for accessing type properties
+  (Size, Capacity, Ptr, etc.). The `:>` operator is deprecated.
+- **`match` in `$defn`** — `match expr { pattern => body; _ => body; };`
+  supports integer, string, and wildcard patterns.
+- **`=>` token** added for match arm syntax.
+
+```brief
+// Protocol default — nothing to override:
+type Int: #Int;
+type String: #String;
+
+// Derives from parent, inherits protocol:
+type i64: Int { bits <~ 64; };
+
+// Override only what's different from the protocol default:
+type MyString: String {
+    op Add(#String) = weird_interaction(#L, #R);
+};
+```
+
+### Types Have No Fixed Layout
+
+A type `String` does not have a fixed `{i64, i64}` layout. It has whatever
+shape the optimizer selects for the program's actual usage. The protocol
+contract (`#String`) tells the backend what operations are valid; the backend
+picks the representation — inline SSO, heap-allocated, rope tree — based on
+the program's operation profile. This is what makes the type system
+**width-agnostic and layout-agnostic**.
+
 ---
 
 ## Preamble

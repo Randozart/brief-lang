@@ -58,14 +58,29 @@ list.#Size
 3. **Derived types inherit protocol.** `type i64: Int { bits <~ 64; };`
    inherits `#Int` from `Int`. Width is the only thing that changes.
 
-4. **Width is inferred unless explicit.** No `bytes <~` in metadata means
+4. **Width is inferred unless explicit.** No `bits <~` in metadata means
    the compiler uses value-range analysis to pick the narrowest safe width.
    Explicit `bits <~ 64` locks it to exactly 64 bits.
 
-5. **No `<:` in type declarations.** Use `:` for both derivation and protocol.
+5. **Types have no fixed layout.** A type like `String` does not have a
+   predetermined byte layout. The optimizer picks the representation (inline SSO,
+   heap-allocated, rope tree) based on the program's operation profile.
+   The protocol contract (`#String`) tells the backend what operations are valid.
+
+6. **No `<:` in type declarations.** Use `:` for both derivation and protocol.
    The right side is a protocol (`#HashWord`) or a type name (parent).
 
-6. **No `:>` in expressions.** Replaced by `.#`.
+7. **No `:>` in expressions.** Replaced by `.#`.
+
+8. **Difference-only op bodies.** The protocol body is optional. An empty body
+   means "all default ops apply." A non-empty body lists only the ops that
+   differ from the protocol default:
+   ```brief
+   type Int: #Int;                             // everything default
+   type MyString: String {                      // only override what differs
+       op Add(#String) = tree_concat(#L, #R);
+   };
+   ```
 
 ### Protocol flow
 

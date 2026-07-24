@@ -10,12 +10,17 @@
 > hashword op signatures instead of metadata tags:
 >
 > ```brief
-> type Int <: Bits {
+> type Int: #Int {
 >     op Add(#Int, #Int);      // not primitive <~ "Int" + llvm <~ "i64"
 >     op Parse(#Int);           // identity literal construction
 >     op Parse(Decimal);        // numeric literal construction
 > };
 > ```
+>
+> **2026-07-24:** The `<:` syntax is replaced by `: [Parent] [Protocol]`.
+> `type Int: #Int` declares Int as implementing the #Int protocol. Width is
+> inferred unless `bits <~ N` is explicit. The `.#` operator replaces `:>`
+> for property access: `x.#Size` not `x :> Size`.
 >
 > The primordial seed table still exists as a convenience — it pre-populates
 > the universe with well-known type names so `--disable-plugin prelude` works. But the

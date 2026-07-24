@@ -11,17 +11,32 @@ A protocol category (written as `#String`, `#Int`, `#Float`, `#Bits`) is not
 a type. It's a **contract** — a promise that "I support the operations of this
 category."
 
-A concrete Brief type like `Custom("String")` is an opaque `{i64, i64}` struct
-with SSO inline storage. A Python `str` is a C `PyObject*` with UCS-4 encoding.
-Neither has anything in common at the byte level. But both can declare:
+**A type has no fixed layout.** It has whatever shape the optimizer selects
+for the program's actual usage. `op Add(#String)` tells the backend "this type
+concatenates," and the backend picks the representation — inline SSO, heap-
+allocated, rope tree, packed array — whatever fits the operation profile.
+The protocol contract guarantees *behavior*, not *bytes*.
 
 ```brief
-// Brief String says: I know how to act like a #String
-op CastTo(#String);   // my data is already UTF-8, just expose it
-
-// Python str says: I know how to accept a #String
-op CastFrom(#String); // convert to UCS-4, I'll handle the detail
+type String: #String;   // "I can concatenate, compare, slice"
+                        // layout: whatever the optimizer picks
 ```
+
+### Difference-Only Overrides
+
+The protocol body is optional and **difference-only** — you write only what
+changes from the default:
+
+```brief
+type Int: #Int;                          // default ops, inferred width
+type i64: Int { bits <~ 64; };          // narrows width, inherits ops
+type MyString: String {                  // overrides one op
+    op Add(#String) = tree_concat(#L, #R);
+};
+```
+
+The backend knows all default ops for every protocol. An empty body means
+"everything is default." A non-empty body means "these specific ops differ."
 
 The protocol category `#String` IS the shared abstraction. The concrete types
 never need to know about each other — they only need to know how to relate
@@ -117,13 +132,13 @@ means the bridge never fails purely due to type layout differences.
 
 In `bootstrap.bv`, concrete types declare their protocol participation:
 
-```brief
-type String <: Bits {
-    op CastTo(#String);
-    op Add(#String);        // ++ operator on String
-    op Eq(#String);         // == comparison
-};
-```
+  ```brief
+  type String: #String {
+      op CastTo(#String);
+      op Add(#String);
+      op Eq(#String);
+  };
+  ```
 
 The TypeUniverse picks up these declarations and populates the `Cast.*`
 properties that the BFS walks. A custom type can participate in any protocol
