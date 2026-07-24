@@ -305,7 +305,8 @@ pub fn compile_source(file_path: &str, source: &str, opts: &BuildOptions) -> Res
     // ── Value-range Int narrowing ─────────────────────────────────────
     // 2026-07-24: Infer value ranges for Int-typed bindings and narrow
     // the type width where provably safe. On WASM this eliminates BigInt.
-    brief_compiler::optimizer::narrow_int::narrow_types(&mut items, &mut universe);
+    // Returns per-function binding → max_bits map used by LLVM codegen.
+    let narrow_bindings = brief_compiler::optimizer::narrow_int::narrow_types(&items);
 
     // ── Protocol round-trip verification ──────────────────────────────
     brief_compiler::protocol_verify::verify_roundtrips(&items, &universe)?;
@@ -392,7 +393,7 @@ pub fn compile_source(file_path: &str, source: &str, opts: &BuildOptions) -> Res
     // 2026-07-23: Check if any glue target requests native module init.
     let enable_module_init = glue_targets.values().any(|t| t.module_init);
 
-    let (codegen_output, ext) = codegen(&items, &mut universe, &pm, opts, alloc_strategies, resolved_frgns, enable_module_init)?;
+    let (codegen_output, ext) = codegen(&items, &mut universe, &pm, opts, alloc_strategies, resolved_frgns, enable_module_init, narrow_bindings)?;
 
     // BEAST/IR snapshot at Codegen stage
     emit_beast_snapshot(file_path, BeastStage::Codegen, BeastPosition::After, &items, &universe, opts)?;
@@ -576,6 +577,7 @@ fn codegen(
     alloc_strategies: std::collections::HashMap<usize, brief_compiler::backend::llvm::AllocStrategy>,
     resolved_frgns: std::collections::HashMap<String, brief_compiler::analysis::frgn_dispatch::ResolvedFrgn>,
     enable_module_init: bool,
+    narrow_bindings: std::collections::HashMap<String, std::collections::HashMap<String, u64>>,
 ) -> Result<(String, &'static str), String> {
     // 2026-07-20: Extract operator definitions from AST for backend dispatch.
     let mut operator_defs: std::collections::HashMap<String, Vec<brief_compiler::ast::top::OperatorDef>> = std::collections::HashMap::new();
@@ -601,7 +603,8 @@ fn codegen(
                 .with_operator_defs(operator_defs)
                 .with_resolved_frgns(resolved_frgns.clone())
                 .with_trg_unresolved_action(opts.trg_unresolved_action)
-                .with_module_init(enable_module_init);
+                .with_module_init(enable_module_init)
+                .with_narrow_bindings(narrow_bindings);
             if opts.gpu_offload {
                 b = b.with_gpu_offload(true);
                 b = b.with_svo(opts.feature_svo);
@@ -641,7 +644,8 @@ fn codegen(
                 .with_optimize_budget(opts.optimize_budget)
                 .with_type_universe(universe.clone())
                 .with_resolved_frgns(resolved_frgns)
-                .with_trg_unresolved_action(opts.trg_unresolved_action);
+                .with_trg_unresolved_action(opts.trg_unresolved_action)
+                .with_narrow_bindings(narrow_bindings);
             if opts.gpu_offload {
                 b = b.with_gpu_offload(true);
             }

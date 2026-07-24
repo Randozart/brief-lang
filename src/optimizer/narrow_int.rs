@@ -1,9 +1,9 @@
 // ── Narrow Int Pass ──────────────────────────────────────────
 // 2026-07-24: Value-range inference for Int types.
 //
-// After typechecking and normalizer, walks each function body tracking
-// (min, max) ranges through expression trees. Where the range fits in
-// a narrower width, updates ResolvedType.max_bits in the universe.
+// Returns a per-binding map: fn_name → { "ret" → bits, "let_x" → bits }
+// The LLVM backend reads this map when emitting function signatures
+// and local variables, using the narrowed width instead of 64-bit.
 //
 // On WASM this eliminates BigInt (i64 → i32) when values fit in 32 bits.
 // On all targets it produces tighter code.
@@ -11,9 +11,8 @@
 use std::collections::HashMap;
 
 use crate::ast::*;
-use crate::type_universe::{ResolvedType, TypeUniverse};
 
-/// Extends IntRange with arithmetic.
+/// Extended with arithmetic.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct IntRange {
     pub min: i128,
@@ -26,7 +25,6 @@ impl IntRange {
     pub fn is_unknown(&self) -> bool { self.min == i128::MIN && self.max == i128::MAX }
 
     /// Smallest power-of-two bit width that fits this range (signed).
-    /// Returns None for unknown range.
     pub fn bit_width(&self) -> Option<u64> {
         if self.is_unknown() { return None; }
         if self.min == 0 && self.max == 0 { return Some(1); }
@@ -71,104 +69,89 @@ fn infer_range(expr: &Expr, scope: &HashMap<String, IntRange>) -> IntRange {
 }
 
 fn add_range(a: IntRange, b: IntRange) -> IntRange {
-    IntRange {
-        min: a.min.saturating_add(b.min),
-        max: a.max.saturating_add(b.max),
-    }
+    IntRange { min: a.min.saturating_add(b.min), max: a.max.saturating_add(b.max) }
 }
-
 fn sub_range(a: IntRange, b: IntRange) -> IntRange {
-    IntRange {
-        min: a.min.saturating_sub(b.max),
-        max: a.max.saturating_sub(b.min),
-    }
+    IntRange { min: a.min.saturating_sub(b.max), max: a.max.saturating_sub(b.min) }
 }
-
 fn mul_range(a: IntRange, b: IntRange) -> IntRange {
     let products = [
-        a.min.saturating_mul(b.min),
-        a.min.saturating_mul(b.max),
-        a.max.saturating_mul(b.min),
-        a.max.saturating_mul(b.max),
+        a.min.saturating_mul(b.min), a.min.saturating_mul(b.max),
+        a.max.saturating_mul(b.min), a.max.saturating_mul(b.max),
     ];
-    IntRange {
-        min: *products.iter().min().unwrap(),
-        max: *products.iter().max().unwrap(),
-    }
+    IntRange { min: *products.iter().min().unwrap(), max: *products.iter().max().unwrap() }
 }
-
-fn and_range(a: IntRange, b: IntRange) -> IntRange {
-    IntRange { min: 0, max: a.max.min(b.max) }
-}
-
+fn and_range(a: IntRange, b: IntRange) -> IntRange { IntRange { min: 0, max: a.max.min(b.max) } }
 fn or_range(a: IntRange, b: IntRange) -> IntRange {
     let combined = (a.max | b.max) as u128;
     let pow2 = if combined == 0 { 0 } else { 1u128 << (128 - combined.leading_zeros()) };
     let max_val = pow2.saturating_sub(1) as i128;
     IntRange { min: 0, max: max_val.max(0) }
 }
-
 fn shl_range(a: IntRange, b: IntRange) -> IntRange {
     if b.min < 0 || b.max > 127 { return IntRange::UNKNOWN; }
-    let shift_min = b.min.min(127).max(0) as u32;
-    let shift_max = b.max.min(127).max(0) as u32;
     IntRange {
-        min: a.min.wrapping_shl(shift_min),
-        max: a.max.wrapping_shl(shift_max),
+        min: a.min.wrapping_shl(b.min.min(127).max(0) as u32),
+        max: a.max.wrapping_shl(b.max.min(127).max(0) as u32),
     }
 }
-
 fn shr_range(a: IntRange, b: IntRange) -> IntRange {
     if b.min < 0 || b.max > 127 { return IntRange::UNKNOWN; }
-    let shift_min = b.min.min(127).max(0) as u32;
-    let shift_max = b.max.min(127).max(0) as u32;
     IntRange {
-        min: a.min.wrapping_shr(shift_max),
-        max: a.max.wrapping_shr(shift_min),
+        min: a.min.wrapping_shr(b.max.min(127).max(0) as u32),
+        max: a.max.wrapping_shr(b.min.min(127).max(0) as u32),
     }
 }
 
 /// Infer ranges for all let-bindings and returns in a statement block.
-fn infer_ranges_in_body(body: &[Statement], scope: &mut HashMap<String, IntRange>) -> Option<IntRange> {
+/// Returns a map of binding_name → narrowed bit_width for bindings
+/// that can be narrowed below 64 bits.
+fn infer_ranges_in_body(body: &[Statement], scope: &mut HashMap<String, IntRange>) -> (Option<IntRange>, HashMap<String, u64>) {
     let mut return_range = None;
+    let mut narrowed_bindings = HashMap::new();
+
     for stmt in body {
         match stmt {
             Statement::Let { name, expr, .. } => {
                 if let Some(e) = expr {
                     let range = infer_range(e, scope);
                     scope.insert(name.clone(), range);
+                    if let Some(bits) = range.bit_width() {
+                        if bits < 64 {
+                            narrowed_bindings.insert(format!("let_{}", name), bits);
+                        }
+                    }
                 }
             }
             Statement::Assign(target, expr) => {
                 if let Expr::Identifier(name) = target {
                     let range = infer_range(expr, scope);
                     scope.insert(name.clone(), range);
+                    if let Some(bits) = range.bit_width() {
+                        if bits < 64 {
+                            narrowed_bindings.insert(format!("assign_{}", name), bits);
+                        }
+                    }
                 }
             }
             Statement::Guarded(cond, inner) => {
-                // When guard may constrain variable ranges
                 if let Expr::BinaryOp(BinaryOpKind::Lt, lhs, rhs) = cond {
                     if let Expr::Identifier(name) = lhs.as_ref() {
                         let bound = infer_range(rhs.as_ref(), scope);
                         if let Some(entry) = scope.get(name) {
-                            let narrowed = IntRange {
-                                min: entry.min,
-                                max: entry.max.min(bound.max - 1),
-                            };
+                            let narrowed = IntRange { min: entry.min, max: entry.max.min(bound.max - 1) };
                             let mut inner_scope = scope.clone();
                             inner_scope.insert(name.clone(), narrowed);
-                            if let Some(r) = infer_ranges_in_body(inner, &mut inner_scope) {
-                                return_range = Some(r);
-                            }
+                            let (ir, nb) = infer_ranges_in_body(inner, &mut inner_scope);
+                            narrowed_bindings.extend(nb);
+                            if ir.is_some() { return_range = ir; }
+                            continue;
                         }
                     }
                 }
-                // Default: evaluate body without narrowing
-                if return_range.is_none() {
-                    if let Some(r) = infer_ranges_in_body(inner, scope) {
-                        return_range = Some(r);
-                    }
-                }
+                let (ir, nb) = infer_ranges_in_body(inner, scope);
+                narrowed_bindings.extend(nb);
+                if ir.is_some() { return_range = ir; }
             }
             Statement::Term(Some(expr)) => {
                 return_range = Some(infer_range(expr, scope));
@@ -179,52 +162,50 @@ fn infer_ranges_in_body(body: &[Statement], scope: &mut HashMap<String, IntRange
             _ => {}
         }
     }
-    return_range
+    (return_range, narrowed_bindings)
 }
 
-/// Narrow Int types in a definition based on inferred value ranges.
-fn narrow_definition(d: &Definition, universe: &mut TypeUniverse) {
+/// Narrow a single definition/function — returns per-binding narrowed widths.
+fn narrow_body(name: &str, params: &[(String, Type)], body: &[Statement]) -> HashMap<String, u64> {
     let mut scope = HashMap::new();
-    // Initialize parameters as unknown
-    for (name, _ty) in &d.parameters {
-        scope.insert(name.clone(), IntRange::UNKNOWN);
+    for (pname, _ty) in params {
+        scope.insert(pname.clone(), IntRange::UNKNOWN);
     }
-    if let Some(return_range) = infer_ranges_in_body(&d.body, &mut scope) {
-        if let Some(bits) = return_range.bit_width() {
-            if let Some(rt) = universe.types.get_mut(&d.name) {
-                if rt.max_bits > bits && bits <= rt.max_bits {
-                    rt.max_bits = bits;
-                }
+    let (return_range, mut bindings) = infer_ranges_in_body(body, &mut scope);
+    if let Some(range) = return_range {
+        if let Some(bits) = range.bit_width() {
+            if bits < 64 {
+                bindings.insert("ret".to_string(), bits);
             }
         }
     }
+    bindings
 }
 
-/// Narrow Int types in a transaction based on inferred value ranges.
-fn narrow_transaction(t: &Transaction, universe: &mut TypeUniverse) {
-    let mut scope = HashMap::new();
-    for (name, _ty) in &t.parameters {
-        scope.insert(name.clone(), IntRange::UNKNOWN);
-    }
-    if let Some(return_range) = infer_ranges_in_body(&t.body, &mut scope) {
-        if let Some(bits) = return_range.bit_width() {
-            if let Some(rt) = universe.types.get_mut(&t.name) {
-                if rt.max_bits > bits && bits <= rt.max_bits {
-                    rt.max_bits = bits;
-                }
-            }
-        }
-    }
-}
-
-/// Main entry point: walk all TopLevel items and narrow Int types.
-/// Call after normalizer, before codegen.
-pub fn narrow_types(items: &mut [TopLevel], universe: &mut TypeUniverse) {
-    for item in items.iter() {
+/// Main entry point: walk all TopLevel items and infer Int width narrowing.
+/// Returns a map: fn_name → { binding_name → narrowed_bits }
+///
+/// The LLVM backend reads this map when emitting function signatures
+/// and local variable declarations. Narrowed bindings use smaller LLVM
+/// integer types (e.g., i32 instead of i64), eliminating WASM BigInt.
+pub fn narrow_types(items: &[TopLevel]) -> HashMap<String, HashMap<String, u64>> {
+    let mut all_bindings = HashMap::new();
+    for item in items {
         match item {
-            TopLevel::Definition(d) => narrow_definition(d, universe),
-            TopLevel::Transaction(t) => narrow_transaction(t, universe),
+            TopLevel::Definition(d) => {
+                let bindings = narrow_body(&d.name, &d.parameters, &d.body);
+                if !bindings.is_empty() {
+                    all_bindings.insert(d.name.clone(), bindings);
+                }
+            }
+            TopLevel::Transaction(t) => {
+                let bindings = narrow_body(&t.name, &t.parameters, &t.body);
+                if !bindings.is_empty() {
+                    all_bindings.insert(t.name.clone(), bindings);
+                }
+            }
             _ => {}
         }
     }
+    all_bindings
 }

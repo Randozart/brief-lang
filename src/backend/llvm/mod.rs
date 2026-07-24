@@ -977,6 +977,11 @@ impl LlvmBackend {
         self
     }
 
+    pub fn with_narrow_bindings(mut self, bindings: std::collections::HashMap<String, std::collections::HashMap<String, u64>>) -> Self {
+        self.ctx.narrow_bindings = bindings;
+        self
+    }
+
     pub fn with_trg_unresolved_action(mut self, action: TrgUnresolvedAction) -> Self {
         self.trg_unresolved_action = action;
         self

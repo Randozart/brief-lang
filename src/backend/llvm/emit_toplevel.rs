@@ -1148,6 +1148,9 @@ impl LlvmBackend {
         self.fun.is_static_bound = false;
         self.fun.ssa_old_int_regs.clear();
         self.fun.ssa_old_float_regs.clear();
+        // 2026-07-24: Load per-binding narrowed widths for this function.
+        self.fun.narrowed = self.ctx.narrow_bindings.get(&d.name)
+            .cloned().unwrap_or_default();
         // 2026-07-01: Use "i64" for all non-float returns instead of llvm_type().
         // The body always produces i64 values (via adapt_to_i64) and call.rs expects
         // i64 at the call site. Using llvm_type() gave "i8*" for String/Bool returns,
@@ -1165,6 +1168,15 @@ impl LlvmBackend {
                 })
                 .unwrap_or_else(|| "i64".to_string())
         };
+        // 2026-07-24: Override return type with narrowed width from
+        // value-range inference pass. On WASM this eliminates BigInt.
+        let ll_ret_ty = if let Some(&narrowed) = self.fun.narrowed.get("ret") {
+            if ll_ret_ty.starts_with('i') {
+                format!("i{}", narrowed)
+            } else {
+                ll_ret_ty.clone()
+            }
+        } else { ll_ret_ty.clone() };
         let is_float_fn = ll_ret_ty == "float" || ll_ret_ty == "double";
         self.fun.fn_ret_ty = ll_ret_ty.clone();
         self.fun.returns_i64 = has_ret;
@@ -1357,6 +1369,9 @@ impl LlvmBackend {
 
     pub(super) fn emit_transaction(&mut self, out: &mut String, txn: &crate::ast::Transaction, name: &str, range_meta: &mut Vec<String>) {
         let has_output = txn.output_type.is_some() || !txn.outputs.is_empty();
+        // 2026-07-24: Load per-binding narrowed widths for this transaction.
+        self.fun.narrowed = self.ctx.narrow_bindings.get(name)
+            .cloned().unwrap_or_default();
         if !txn.is_reactive && (!txn.parameters.is_empty() || has_output) {
             self.emit_callable_txn(out, txn, name);
             return;
@@ -1604,6 +1619,12 @@ impl LlvmBackend {
         } else {
             "void".to_string()
         };
+
+        // 2026-07-24: Override return type with narrowed width from
+        // value-range inference pass (if narrower than 64-bit).
+        let ret_llvm = if let Some(&narrowed) = self.fun.narrowed.get("ret") {
+            if ret_llvm.starts_with('i') { format!("i{}", narrowed) } else { ret_llvm.clone() }
+        } else { ret_llvm.clone() };
 
         // Resolve #inline / #?inline directives for callable txns.
         let inline_attr = {
