@@ -36,19 +36,25 @@ $defn gen_wasm_bridge(exports: Selection, bridge_name: String) -> String {
         let name = TypeInfo$(exp, "name");
         let pcount_str = TypeInfo$(exp, "params.count");
         let pcount = 0;
-        when pcount_str == "1" { pcount = 1; };
-        when pcount_str == "2" { pcount = 2; };
-        when pcount_str == "3" { pcount = 3; };
-        when pcount_str == "4" { pcount = 4; };
-        when pcount_str == "5" { pcount = 5; };
-        when pcount_str == "6" { pcount = 6; };
+        match pcount_str {
+            "1" => { pcount = 1; };
+            "2" => { pcount = 2; };
+            "3" => { pcount = 3; };
+            "4" => { pcount = 4; };
+            "5" => { pcount = 5; };
+            "6" => { pcount = 6; };
+            _ => {};
+        };
         let jsarg = "";
-        when pcount >= 1 { jsarg = "a0"; };
-        when pcount >= 2 { jsarg = jsarg + ", a1"; };
-        when pcount >= 3 { jsarg = jsarg + ", a2"; };
-        when pcount >= 4 { jsarg = jsarg + ", a3"; };
-        when pcount >= 5 { jsarg = jsarg + ", a4"; };
-        when pcount >= 6 { jsarg = jsarg + ", a5"; };
+        match pcount {
+            1 => { jsarg = "a0"; };
+            2 => { jsarg = "a0, a1"; };
+            3 => { jsarg = "a0, a1, a2"; };
+            4 => { jsarg = "a0, a1, a2, a3"; };
+            5 => { jsarg = "a0, a1, a2, a3, a4"; };
+            6 => { jsarg = "a0, a1, a2, a3, a4, a5"; };
+            _ => {};
+        };
 
         code = code + "export function " + name + "(" + jsarg + ") {\n";
         code = code + "    return _exports." + name + "(" + jsarg + ");\n";

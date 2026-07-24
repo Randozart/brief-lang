@@ -302,6 +302,11 @@ pub fn compile_source(file_path: &str, source: &str, opts: &BuildOptions) -> Res
     pm.run_ast(StageKind::Normalized, &mut items, &mut universe)?;
     emit_beast_snapshot(file_path, BeastStage::Normalize, BeastPosition::After, &items, &universe, opts)?;
 
+    // ── Value-range Int narrowing ─────────────────────────────────────
+    // 2026-07-24: Infer value ranges for Int-typed bindings and narrow
+    // the type width where provably safe. On WASM this eliminates BigInt.
+    brief_compiler::optimizer::narrow_int::narrow_types(&mut items, &mut universe);
+
     // ── Protocol round-trip verification ──────────────────────────────
     brief_compiler::protocol_verify::verify_roundtrips(&items, &universe)?;
 
