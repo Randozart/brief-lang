@@ -33,8 +33,15 @@ use logos::Logos;
 #[derive(Logos, Debug, PartialEq, Clone)]
 #[logos(skip r"[ \t\n\r]+")]
 #[logos(skip r"//[^\n]*")]
+#[logos(skip r"/\*[^*]*\*+(?:[^/*][^*]*\*+)*/")]
 pub enum Token {
-    // ── Keywords ──────────────────────────────────────────────
+    // ── Doc comments (defined before //-skip to win ties) ─────────────
+    #[regex(r"///[^\n]*", |lex| lex.slice()[3..].to_string())]
+    DocComment(String),
+    #[regex(r"//![^\n]*", |lex| lex.slice()[3..].to_string())]
+    DocCommentBang(String),
+
+    // ── Keywords ──────────────────────────────────────────────────────
     #[token("sig")]
     Sig,
 
@@ -275,6 +282,8 @@ pub enum Token {
     #[token("?")]
     Question,
 
+    #[token("-=")]
+    MinusEq,
     #[token("-")]
     Minus,
 
@@ -290,12 +299,19 @@ pub enum Token {
     #[token("++")]
     PlusPlus,
 
+    #[token("+=")]
+    PlusEq,
+
     #[token("+")]
     Plus,
 
+    #[token("*=")]
+    StarEq,
     #[token("*")]
     Star,
 
+    #[token("/=")]
+    SlashEq,
     #[token("/")]
     Slash,
 
@@ -598,13 +614,16 @@ impl std::fmt::Display for Token {
             Token::Not => write!(f, "!"),
             Token::Question => write!(f, "?"),
             Token::Minus => write!(f, "-"),
+            Token::MinusEq => write!(f, "-="),
             Token::TildeQuestion => write!(f, "~?"),
             Token::TildeSlash => write!(f, "~/"),
             Token::Tilde => write!(f, "~"),
             Token::PlusPlus => write!(f, "++"),
+            Token::PlusEq => write!(f, "+="),
             Token::Plus => write!(f, "+"),
+            Token::StarEq => write!(f, "*="),
             Token::Star => write!(f, "*"),
-            Token::Slash => write!(f, "/"),
+            Token::SlashEq => write!(f, "/="),
             Token::BitXor => write!(f, "^"),
             Token::Arrow => write!(f, "->"),
             Token::ArrowLeft => write!(f, "<-"),
@@ -653,6 +672,9 @@ impl std::fmt::Display for Token {
             Token::String(s) => write!(f, "\"{}\"", s),
             Token::Char(c) => write!(f, "'{}'", c),
             Token::Identifier(s) => write!(f, "{}", s),
+            Token::DocComment(s) => write!(f, "///{}", s),
+            Token::DocCommentBang(s) => write!(f, "//!{}", s),
+            Token::Slash => write!(f, "/"),
         }
     }
 }

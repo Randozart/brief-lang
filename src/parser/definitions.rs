@@ -61,6 +61,13 @@ impl<'a> Parser<'a> {
                 self.parse_frgn_decl().map(TopLevel::ForeignBinding)
             }
             _ => {
+                // 2026-07-24: Skip doc comments (/// and //!) — they will
+                // be processed by the full doc system. For now, silently
+                // discard them.
+                if let Some(&crate::lexer::Token::DocComment(_) | &crate::lexer::Token::DocCommentBang(_)) = self.peek() {
+                    self.pos += 1;
+                    return self.parse_top_level();
+                }
                 // 2026-07-23: $defn and $txn at top level (lexed as identifiers)
                 if self.check_identifier("$defn") {
                     return self.parse_compile_time_defn();

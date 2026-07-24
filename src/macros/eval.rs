@@ -335,6 +335,10 @@ pub fn eval_nav_chain(
                         _ => Err(format!("+ operator not supported for these operand types")),
                     }
                 }
+                BinaryOpKind::Sub => Ok(NavValue::Int(li - ri)),
+                BinaryOpKind::Mul => Ok(NavValue::Int(li * ri)),
+                BinaryOpKind::Div => Ok(NavValue::Int(li / ri)),
+                BinaryOpKind::Mod => Ok(NavValue::Int(li % ri)),
                 BinaryOpKind::Eq => Ok(NavValue::Bool(li == ri)),
                 BinaryOpKind::Neq => Ok(NavValue::Bool(li != ri)),
                 BinaryOpKind::Gt => Ok(NavValue::Bool(li > ri)),

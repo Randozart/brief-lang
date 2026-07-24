@@ -312,6 +312,25 @@ impl<'a> Parser<'a> {
             self.expect(Token::Semicolon)?;
             return Ok(Statement::Assign(lhs, rhs));
         }
+        // 2026-07-24: Compound assignment += and -=.
+        // x += 1 → Statement::Assign(id("x"), BinaryOp(Add, id("x"), 1))
+        let compound_kind = if self.eat(&Token::PlusEq) {
+            Some(crate::ast::BinaryOpKind::Add)
+        } else if self.eat(&Token::MinusEq) {
+            Some(crate::ast::BinaryOpKind::Sub)
+        } else if self.eat(&Token::StarEq) {
+            Some(crate::ast::BinaryOpKind::Mul)
+        } else if self.eat(&Token::SlashEq) {
+            Some(crate::ast::BinaryOpKind::Div)
+        } else {
+            None
+        };
+        if let Some(op) = compound_kind {
+            let rhs = self.parse_expression()?;
+            self.expect(Token::Semicolon)?;
+            let value = Expr::BinaryOp(op, Box::new(lhs.clone()), Box::new(rhs));
+            return Ok(Statement::Assign(lhs, value));
+        }
         self.expect(Token::Semicolon)?;
         // 2026-07-17: Detect assignment at statement level. The expression
         // parser treats both `=` and `==` as BinaryOpKind::Eq (lowest
