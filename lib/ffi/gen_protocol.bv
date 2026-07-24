@@ -16,19 +16,25 @@ $defn gen_protocol_shim(exports: Selection, bridge_name: String) -> String {
         let name = TypeInfo$(exp, "name");
         let pcount_str = TypeInfo$(exp, "params.count");
         let pcount = 0;
-        when pcount_str == "1" { pcount = 1; };
-        when pcount_str == "2" { pcount = 2; };
-        when pcount_str == "3" { pcount = 3; };
-        when pcount_str == "4" { pcount = 4; };
-        when pcount_str == "5" { pcount = 5; };
-        when pcount_str == "6" { pcount = 6; };
+        match pcount_str {
+            "1" => { pcount = 1; };
+                    "2" => { pcount = 2; };
+                    "3" => { pcount = 3; };
+                    "4" => { pcount = 4; };
+                    "5" => { pcount = 5; };
+                    "6" => { pcount = 6; };
+            _ => {};
+        };
         let params = "";
-        when pcount >= 1 { params = "int64_t"; };
-        when pcount >= 2 { params = params + ", int64_t"; };
-        when pcount >= 3 { params = params + ", int64_t"; };
-        when pcount >= 4 { params = params + ", int64_t"; };
-        when pcount >= 5 { params = params + ", int64_t"; };
-        when pcount >= 6 { params = params + ", int64_t"; };
+        match pcount {
+            1 => { params = "int64_t"; };
+                    2 => { params = "int64_t, int64_t"; };
+                    3 => { params = "int64_t, int64_t, int64_t"; };
+                    4 => { params = "int64_t, int64_t, int64_t, int64_t"; };
+                    5 => { params = "int64_t, int64_t, int64_t, int64_t, int64_t"; };
+                    6 => { params = "int64_t, int64_t, int64_t, int64_t, int64_t, int64ta"; };
+            _ => {};
+        };
         code = code + "typedef int64_t (*" + name + "_fn_t)(" + params + ");\n";
         code = code + "static " + name + "_fn_t " + name + "_fn = NULL;\n";
     };
@@ -57,12 +63,15 @@ $defn gen_protocol_shim(exports: Selection, bridge_name: String) -> String {
         let name = TypeInfo$(exp, "name");
         let pcount_str = TypeInfo$(exp, "params.count");
         let pcount = 0;
-        when pcount_str == "1" { pcount = 1; };
-        when pcount_str == "2" { pcount = 2; };
-        when pcount_str == "3" { pcount = 3; };
-        when pcount_str == "4" { pcount = 4; };
-        when pcount_str == "5" { pcount = 5; };
-        when pcount_str == "6" { pcount = 6; };
+        match pcount_str {
+            "1" => { pcount = 1; };
+                    "2" => { pcount = 2; };
+                    "3" => { pcount = 3; };
+                    "4" => { pcount = 4; };
+                    "5" => { pcount = 5; };
+                    "6" => { pcount = 6; };
+            _ => {};
+        };
 
         code = code + "        if (strcmp(fn, \"" + name + "\") == 0) { printf(\"%ld\\n\", " + name + "_fn(";
         when pcount >= 1 { code = code + "a"; };

@@ -42,22 +42,28 @@ $defn gen_python_bridge(exports: Selection, bridge_name: String) -> String {
         let name = TypeInfo$(exp, "name");
         let pcount_str = TypeInfo$(exp, "params.count");
         let pcount = 0;
-        when pcount_str == "1" { pcount = 1; };
-        when pcount_str == "2" { pcount = 2; };
-        when pcount_str == "3" { pcount = 3; };
-        when pcount_str == "4" { pcount = 4; };
-        when pcount_str == "5" { pcount = 5; };
-        when pcount_str == "6" { pcount = 6; };
+        match pcount_str {
+            "1" => { pcount = 1; };
+            "2" => { pcount = 2; };
+            "3" => { pcount = 3; };
+            "4" => { pcount = 4; };
+            "5" => { pcount = 5; };
+            "6" => { pcount = 6; };
+            _ => {};
+        };
         let ret = py_c_type(TypeInfo$(exp, "output_type"));
 
         let ctypes = "";
         let cargs = "";
-        when pcount >= 1 { ctypes = py_c_type(TypeInfo$(exp, "params.0.type")); cargs = "carg_0"; code = code + "static " + py_c_type(TypeInfo$(exp, "params.0.type")) + " carg_0;\n"; };
-        when pcount >= 2 { ctypes = ctypes + ", " + py_c_type(TypeInfo$(exp, "params.1.type")); cargs = cargs + ", carg_1"; code = code + "static " + py_c_type(TypeInfo$(exp, "params.1.type")) + " carg_1;\n"; };
-        when pcount >= 3 { ctypes = ctypes + ", " + py_c_type(TypeInfo$(exp, "params.2.type")); cargs = cargs + ", carg_2"; code = code + "static " + py_c_type(TypeInfo$(exp, "params.2.type")) + " carg_2;\n"; };
-        when pcount >= 4 { ctypes = ctypes + ", " + py_c_type(TypeInfo$(exp, "params.3.type")); cargs = cargs + ", carg_3"; code = code + "static " + py_c_type(TypeInfo$(exp, "params.3.type")) + " carg_3;\n"; };
-        when pcount >= 5 { ctypes = ctypes + ", " + py_c_type(TypeInfo$(exp, "params.4.type")); cargs = cargs + ", carg_4"; code = code + "static " + py_c_type(TypeInfo$(exp, "params.4.type")) + " carg_4;\n"; };
-        when pcount >= 6 { ctypes = ctypes + ", " + py_c_type(TypeInfo$(exp, "params.5.type")); cargs = cargs + ", carg_5"; code = code + "static " + py_c_type(TypeInfo$(exp, "params.5.type")) + " carg_5;\n"; };
+        match pcount {
+            1 => { ctypes = py_c_type(TypeInfo$(exp, "params.0.type")); cargs = "carg_0"; code = code + "static " + py_c_type(TypeInfo$(exp, "params.0.type")) + " carg_0;\n"; };
+            2 => { ctypes = py_c_type(TypeInfo$(exp, "params.0.type")) + ", " + py_c_type(TypeInfo$(exp, "params.1.type")); cargs = "carg_0, carg_1"; code = code + "static " + py_c_type(TypeInfo$(exp, "params.0.type")) + " carg_0;\n" + "static " + py_c_type(TypeInfo$(exp, "params.1.type")) + " carg_1;\n"; };
+            3 => { ctypes = py_c_type(TypeInfo$(exp, "params.0.type")) + ", " + py_c_type(TypeInfo$(exp, "params.1.type")) + ", " + py_c_type(TypeInfo$(exp, "params.2.type")); cargs = "carg_0, carg_1, carg_2"; code = code + "static " + py_c_type(TypeInfo$(exp, "params.0.type")) + " carg_0;\n" + "static " + py_c_type(TypeInfo$(exp, "params.1.type")) + " carg_1;\n" + "static " + py_c_type(TypeInfo$(exp, "params.2.type")) + " carg_2;\n"; };
+            4 => { ctypes = py_c_type(TypeInfo$(exp, "params.0.type")) + ", " + py_c_type(TypeInfo$(exp, "params.1.type")) + ", " + py_c_type(TypeInfo$(exp, "params.2.type")) + ", " + py_c_type(TypeInfo$(exp, "params.3.type")); cargs = "carg_0, carg_1, carg_2, carg_3"; code = code + "static " + py_c_type(TypeInfo$(exp, "params.0.type")) + " carg_0;\n" + "static " + py_c_type(TypeInfo$(exp, "params.1.type")) + " carg_1;\n" + "static " + py_c_type(TypeInfo$(exp, "params.2.type")) + " carg_2;\n" + "static " + py_c_type(TypeInfo$(exp, "params.3.type")) + " carg_3;\n"; };
+            5 => { ctypes = py_c_type(TypeInfo$(exp, "params.0.type")) + ", " + py_c_type(TypeInfo$(exp, "params.1.type")) + ", " + py_c_type(TypeInfo$(exp, "params.2.type")) + ", " + py_c_type(TypeInfo$(exp, "params.3.type")) + ", " + py_c_type(TypeInfo$(exp, "params.4.type")); cargs = "carg_0, carg_1, carg_2, carg_3, carg_4"; code = code + "static " + py_c_type(TypeInfo$(exp, "params.0.type")) + " carg_0;\n" + "static " + py_c_type(TypeInfo$(exp, "params.1.type")) + " carg_1;\n" + "static " + py_c_type(TypeInfo$(exp, "params.2.type")) + " carg_2;\n" + "static " + py_c_type(TypeInfo$(exp, "params.3.type")) + " carg_3;\n" + "static " + py_c_type(TypeInfo$(exp, "params.4.type")) + " carg_4;\n"; };
+            6 => { ctypes = py_c_type(TypeInfo$(exp, "params.0.type")) + ", " + py_c_type(TypeInfo$(exp, "params.1.type")) + ", " + py_c_type(TypeInfo$(exp, "params.2.type")) + ", " + py_c_type(TypeInfo$(exp, "params.3.type")) + ", " + py_c_type(TypeInfo$(exp, "params.4.type")) + ", " + py_c_type(TypeInfo$(exp, "params.5.type")); cargs = "carg_0, carg_1, carg_2, carg_3, carg_4, carg_5"; code = code + "static " + py_c_type(TypeInfo$(exp, "params.0.type")) + " carg_0;\n" + "static " + py_c_type(TypeInfo$(exp, "params.1.type")) + " carg_1;\n" + "static " + py_c_type(TypeInfo$(exp, "params.2.type")) + " carg_2;\n" + "static " + py_c_type(TypeInfo$(exp, "params.3.type")) + " carg_3;\n" + "static " + py_c_type(TypeInfo$(exp, "params.4.type")) + " carg_4;\n" + "static " + py_c_type(TypeInfo$(exp, "params.5.type")) + " carg_5;\n"; };
+            _ => {};
+        };
 
         // Function pointer typedef and declaration
         code = code + "\ntypedef " + ret + " (*" + name + "_fn_t)(" + ctypes + ");\n";
@@ -69,24 +75,24 @@ $defn gen_python_bridge(exports: Selection, bridge_name: String) -> String {
 
         let fmt = "";
         let pargs = "";
-        when pcount >= 1 { fmt = py_parse_fmt(TypeInfo$(exp, "params.0.type")); pargs = "&carg_0"; };
-        when pcount >= 2 { fmt = fmt + py_parse_fmt(TypeInfo$(exp, "params.1.type")); pargs = pargs + ", &carg_1"; };
-        when pcount >= 3 { fmt = fmt + py_parse_fmt(TypeInfo$(exp, "params.2.type")); pargs = pargs + ", &carg_2"; };
-        when pcount >= 4 { fmt = fmt + py_parse_fmt(TypeInfo$(exp, "params.3.type")); pargs = pargs + ", &carg_3"; };
-        when pcount >= 5 { fmt = fmt + py_parse_fmt(TypeInfo$(exp, "params.4.type")); pargs = pargs + ", &carg_4"; };
-        when pcount >= 6 { fmt = fmt + py_parse_fmt(TypeInfo$(exp, "params.5.type")); pargs = pargs + ", &carg_5"; };
-
-        when pcount > 0 {
-            code = code + "    if (!PyArg_ParseTuple(args, \"" + fmt + "\", " + pargs + ")) return NULL;\n";
+        match pcount {
+            1 => { fmt = py_parse_fmt(TypeInfo$(exp, "params.0.type")); pargs = "&carg_0"; };
+            2 => { fmt = py_parse_fmt(TypeInfo$(exp, "params.0.type")) + py_parse_fmt(TypeInfo$(exp, "params.1.type")); pargs = "&carg_0, &carg_1"; };
+            3 => { fmt = py_parse_fmt(TypeInfo$(exp, "params.0.type")) + py_parse_fmt(TypeInfo$(exp, "params.1.type")) + py_parse_fmt(TypeInfo$(exp, "params.2.type")); pargs = "&carg_0, &carg_1, &carg_2"; };
+            4 => { fmt = py_parse_fmt(TypeInfo$(exp, "params.0.type")) + py_parse_fmt(TypeInfo$(exp, "params.1.type")) + py_parse_fmt(TypeInfo$(exp, "params.2.type")) + py_parse_fmt(TypeInfo$(exp, "params.3.type")); pargs = "&carg_0, &carg_1, &carg_2, &carg_3"; };
+            5 => { fmt = py_parse_fmt(TypeInfo$(exp, "params.0.type")) + py_parse_fmt(TypeInfo$(exp, "params.1.type")) + py_parse_fmt(TypeInfo$(exp, "params.2.type")) + py_parse_fmt(TypeInfo$(exp, "params.3.type")) + py_parse_fmt(TypeInfo$(exp, "params.4.type")); pargs = "&carg_0, &carg_1, &carg_2, &carg_3, &carg_4"; };
+            6 => { fmt = py_parse_fmt(TypeInfo$(exp, "params.0.type")) + py_parse_fmt(TypeInfo$(exp, "params.1.type")) + py_parse_fmt(TypeInfo$(exp, "params.2.type")) + py_parse_fmt(TypeInfo$(exp, "params.3.type")) + py_parse_fmt(TypeInfo$(exp, "params.4.type")) + py_parse_fmt(TypeInfo$(exp, "params.5.type")); pargs = "&carg_0, &carg_1, &carg_2, &carg_3, &carg_4, &carg_5"; };
+            _ => {};
         };
 
-        when TypeInfo$(exp, "output_type") == "Void" {
-            code = code + "    " + name + "_fn(" + cargs + ");\n";
-            code = code + "    Py_RETURN_NONE;\n";
+        match pcount {
+            0 => {};
+            _ => { code = code + "    if (!PyArg_ParseTuple(args, \"" + fmt + "\", " + pargs + ")) return NULL;\n"; };
         };
-        when TypeInfo$(exp, "output_type") != "Void" {
-            code = code + "    " + ret + " result = " + name + "_fn(" + cargs + ");\n";
-            code = code + "    return " + py_to_python(TypeInfo$(exp, "output_type"), "result") + ";\n";
+
+        match TypeInfo$(exp, "output_type") {
+            "Void" => { code = code + "    " + name + "_fn(" + cargs + ");\n"; code = code + "    Py_RETURN_NONE;\n"; };
+            _ => { code = code + "    " + ret + " result = " + name + "_fn(" + cargs + ");\n"; code = code + "    return " + py_to_python(TypeInfo$(exp, "output_type"), "result") + ";\n"; };
         };
         code = code + "}\n";
     };
