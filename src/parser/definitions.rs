@@ -62,10 +62,15 @@ impl<'a> Parser<'a> {
                 self.parse_frgn_decl().map(TopLevel::ForeignBinding)
             }
             _ => {
-                // 2026-07-24: Skip doc comments (/// and //!) — they will
-                // be processed by the full doc system. For now, silently
-                // discard them.
-                if let Some(&crate::lexer::Token::DocComment(_) | &crate::lexer::Token::DocCommentBang(_)) = self.peek() {
+                // 2026-07-24: Capture doc comments (/// and //!) and attach
+                // to the next definition/transaction/cell/frgn.
+                if let Some(&crate::lexer::Token::DocComment(ref text)) = self.peek() {
+                    self.set_doc(text.clone());
+                    self.pos += 1;
+                    return self.parse_top_level();
+                }
+                if let Some(&crate::lexer::Token::DocCommentBang(ref text)) = self.peek() {
+                    self.set_doc(text.clone());
                     self.pos += 1;
                     return self.parse_top_level();
                 }
@@ -194,7 +199,7 @@ impl<'a> Parser<'a> {
             wasm_setup: None,
             fallback,
             span: None,
-            doc: None,
+            doc: self.take_doc(),
         })
     }
 
@@ -287,7 +292,7 @@ impl<'a> Parser<'a> {
             modifiers: vec![],
             annotations: vec![],
             span: None,
-            doc: None,
+            doc: self.take_doc(),
         })
     }
 
@@ -331,6 +336,7 @@ impl<'a> Parser<'a> {
         };
         let body = self.parse_block()?;
         let derivation = self.parse_derivation_block()?;
+        let doc = self.take_doc();
         Ok(Transaction {
             name,
             is_reactive,
@@ -345,7 +351,7 @@ impl<'a> Parser<'a> {
             derivation,
             modifiers: vec![],
             span: None,
-            doc: None,
+            doc,
         })
     }
 
@@ -377,7 +383,7 @@ impl<'a> Parser<'a> {
             derivation,
             modifiers: vec![],
             span: None,
-            doc: None,
+            doc: self.take_doc(),
         })
     }
 
@@ -409,7 +415,7 @@ impl<'a> Parser<'a> {
             is_persistent: false,
             metadata: std::collections::HashMap::new(),
             span: None,
-            doc: None,
+            doc: self.take_doc(),
         })
     }
 
@@ -1279,7 +1285,7 @@ impl<'a> Parser<'a> {
             output_type: output_type.clone(),
             outputs: vec![],
             contract, body, metadata,
-            derivation, modifiers: vec![], annotations: vec![], span: None, doc: None,
+            derivation, modifiers: vec![], annotations: vec![], span: None, doc: self.take_doc(),
         }))
     }
 
@@ -1307,7 +1313,7 @@ impl<'a> Parser<'a> {
             outputs: vec![],
             contract, body, metadata,
             is_reactive: true, is_async: false,
-            derivation, modifiers: vec![], span: None, doc: None,
+            derivation, modifiers: vec![], span: None, doc: self.take_doc(),
         }))
     }
 }

@@ -958,11 +958,12 @@ mod tests {
 /// 2026-07-15: Phase 2 — Added for system plugin discovery (plugin loader)
 /// and other programmatic use outside the compile pipeline.
 pub fn tokenize(source: &str) -> Result<Vec<(Token, std::ops::Range<usize>)>, String> {
-    let lexer = Token::lexer(source);
+    let mut lexer = Token::lexer(source);
     let mut tokens = Vec::new();
-    for result in lexer {
+    while let Some(result) = lexer.next() {
         let token = result.map_err(|_| "lex error".to_string())?;
-        tokens.push((token, 0..0));
+        let span = lexer.span();
+        tokens.push((token, span));
     }
     Ok(tokens)
 }
