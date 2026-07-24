@@ -1435,79 +1435,6 @@ impl LlvmBackend {
     /// PyModuleDef, and PyInit_<name>. The struct layouts are read from
     /// the type universe (injected by InjectTypeLayout$ at compile time).
     /// 2026-07-23: Config-driven, zero Rust per-language code.
-    pub(crate) fn emit_module_metadata(&self, out: &mut String, items: &[TopLevel]) {
-        // Collect export defn items
-        let exports: Vec<&crate::ast::Definition> = items.iter().filter_map(|item| {
-            if let TopLevel::Export(e) = item {
-                if let TopLevel::Definition(d) = e.inner.as_ref() {
-                    return Some(d);
-                }
-            }
-            None
-        }).collect();
-
-        if exports.is_empty() {
-            return;
-        }
-
-        // Determine bridge name — use "bridge" for now
-        let bridge_name = "bridge".to_string();
-
-        // ── String constants for function names and format strings ──
-        for d in &exports {
-            let escaped = d.name.replace('\\', "\\\\").replace('"', "\\22");
-            writeln!(out, "@str__{} = private unnamed_addr constant [{} x i8] c\"{}\\00\"",
-                d.name, d.name.len() + 1, escaped).ok();
-        }
-        writeln!(out, "@str_parse_LL = private unnamed_addr constant [3 x i8] c\"LL\\00\"").ok();
-
-        // ── Emit Python-callable bridge wrappers ───────────────────
-        writeln!(out, "declare ptr @PyLong_FromLongLong(i64)").ok();
-        writeln!(out, "declare i32 @PyArg_ParseTuple(ptr, ptr, ...)").ok();
-
-        for d in &exports {
-            let wrapper_name = format!("_pybridge_{}", d.name);
-            writeln!(out, "define dso_local ptr @{}(ptr %self, ptr %args) unnamed_addr #0 {{",
-                wrapper_name).ok();
-            if d.parameters.is_empty() {
-                writeln!(out, "  %r = call i64 @{}()", d.name).ok();
-            } else {
-                writeln!(out, "  %a = alloca i64, align 8").ok();
-                writeln!(out, "  %b = alloca i64, align 8").ok();
-                writeln!(out, "  %ok = call i32 @PyArg_ParseTuple(ptr %args, ptr @str_parse_LL, ptr %a, ptr %b)").ok();
-                writeln!(out, "  %av = load i64, ptr %a, align 8").ok();
-                writeln!(out, "  %bv = load i64, ptr %b, align 8").ok();
-                writeln!(out, "  %r = call i64 @{}(i64 %av, i64 %bv)", d.name).ok();
-            }
-            writeln!(out, "  %ret = call ptr @PyLong_FromLongLong(i64 %r)").ok();
-            writeln!(out, "  ret ptr %ret").ok();
-            writeln!(out, "}}").ok();
-        }
-
-        // ── Method table (PyMethodDef array) ───────────────────────
-        writeln!(out, "%PyMethodDef = type {{ ptr, ptr, i64, ptr }}").ok();
-        writeln!(out, "@methods = constant [{} x %PyMethodDef] [",
-            exports.len() + 1).ok();
-        for (i, d) in exports.iter().enumerate() {
-            writeln!(out, "  %PyMethodDef {{ ptr @str__{}, ptr @_pybridge_{}, i64 1, ptr null }},",
-                d.name, d.name).ok();
-        }
-        writeln!(out, "  %PyMethodDef {{ ptr null, ptr null, i64 0, ptr null }}").ok();
-        writeln!(out, "]").ok();
-
-        // ── String constant for module name (emit before moduledef) ──
-        let escaped = bridge_name.replace('\\', "\\\\").replace('"', "\\22");
-        writeln!(out, "@str._{} = private unnamed_addr constant [{} x i8] c\"{}\\00\"",
-            bridge_name, bridge_name.len() + 1, escaped).ok();
-
-        // ── Emit PyModuleDef ──────────────────────────────────────
-        // ── Emit PyModuleDef and PyInit_bridge ────────────────────
-        // These are emitted by a separate C file (py_module.c) that
-        // is compiled and linked via the extra_objects mechanism.
-        // The C file references @methods and @str__* constants emitted
-        // above. This avoids struct layout mismatches between LLVM and C.
-    }
-
     pub(crate) fn push_remark(&mut self, remark: crate::backend::llvm::directive::OptimizationRemark) {
         if self.ctx.emit_remarks {
             self.remarks.push(remark);
@@ -3469,12 +3396,6 @@ impl LlvmBackend {
         // Append any compiled SPIR-V kernel blobs to the output for embedding.
         if self.ctx.gpu_offload || !self.spirv_blobs.is_empty() {
             out.push_str(&self.emit_spirv_embeds());
-        }
-
-        // 2026-07-23: Emit native C extension module init metadata
-        // (PyMethodDef/PyModuleDef/PyInit_*) when module_init is requested.
-        if self.ctx.module_init {
-            self.emit_module_metadata(&mut out, items);
         }
 
         // Phase 4: --layout diagnostic flag — print field layout after generation

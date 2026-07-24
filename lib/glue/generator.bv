@@ -1,5 +1,5 @@
 // glue-generator.bv — Brief-written GLUE bridge generator
-// 2026-07-23: Generates native Brief bridge code.
+// 2026-07-23: All bridge generation in Brief, zero Rust per language.
 
 $defn generate_bridge(exports: Selection, bridge_name: String) -> String {
     let code = "// Bridge module for " + bridge_name + " — auto-generated\n";
@@ -36,54 +36,90 @@ $defn generate_bridge(exports: Selection, bridge_name: String) -> String {
     term code;
 };
 
-// ── ABI Probing ──────────────────────────────────────────────────────────
-// Probe foreign struct layout at compile time via C offsetof.
-// Requires --allow-run and --allow-write.
+// ── Python C Extension Bridge ─────────────────────────────────────────────
+// Generates a C file with PyCFunction wrappers, PyMethodDef[], PyModuleDef,
+// and PyInit_bridge. Compiles with ShellCmd$, injects .o via InsertObject$.
 
-$defn probe_struct_1field(name: String, f1: String, f1type: String, inc: String) {
-    let src = "#include <stddef.h>\n#include <stdio.h>\n#include \"" + inc + "\"\nint main(){\n";
-    src = src + "printf(\"%s:%s:%zu\\n\",\"" + f1 + "\",\"" + f1type + "\",offsetof(" + name + "," + f1 + "));\n";
-    src = src + "printf(\"_size_=%zu\\n\",sizeof(" + name + "));\nreturn 0;\n}";
-    FileWrite$("/tmp/_probe.c", src, true);
-    let out = ShellCmd$("gcc", "/tmp/_probe.c", "-o", "/tmp/_probe");
-    out = ShellCmd$("/tmp/_probe");
-    let lines = StrSplit$(out, "\n");
-    let size_str = "";
-    let fields_str = "";
-    foreach(line in lines) {
-        when line != "" {
-            let parts = StrSplit$(line, "=");
+$defn type_to_c(ty: String) -> String {
+    when ty == "Int" { term "int64_t"; };
+    when ty == "Float" { term "double"; };
+    term "void*";
+};
+
+$defn build_py_module(exports: Selection, bridge_name: String, python_inc: String) {
+    let mut c = "#include <Python.h>\n#include <stdint.h>\n\n";
+
+    // extern declarations
+    foreach(exp in exports) {
+        let name = TypeInfo$(exp, "name");
+        let ret_type = TypeInfo$(exp, "output_type");
+        c = c + "extern " + type_to_c(ret_type) + " " + name + "(";
+        let pcount = TypeInfo$(exp, "params.count");
+        when pcount > 0 {
+            let p0t = TypeInfo$(exp, "params.0.type");
+            c = c + type_to_c(p0t);
         };
+        when pcount > 1 {
+            let p1t = TypeInfo$(exp, "params.1.type");
+            c = c + ", " + type_to_c(p1t);
+        };
+        c = c + ");\n";
     };
-    // Simplified: just inject with known offset 0 for single field
-    InjectTypeLayout$(name, "8", f1 + ":" + f1type + ":0");
-    EmitInfo$("probed " + name + "." + f1);
+
+    // PyCFunction wrappers
+    let mut methods_init = "";
+    foreach(exp in exports) {
+        let name = TypeInfo$(exp, "name");
+        c = c + "static PyObject* _pybridge_" + name + "(PyObject* self, PyObject* args) {\n";
+        let pcount = TypeInfo$(exp, "params.count");
+        when pcount == 0 {
+            c = c + "    " + type_to_c(TypeInfo$(exp, "output_type")) + " r = " + name + "();\n";
+        };
+        when pcount == 2 {
+            c = c + "    int64_t a, b;\n";
+            c = c + "    PyArg_ParseTuple(args, \"LL\", &a, &b);\n";
+            c = c + "    int64_t r = " + name + "(a, b);\n";
+        };
+        c = c + "    return PyLong_FromLongLong(r);\n";
+        c = c + "}\n\n";
+        methods_init = methods_init + "    {\"" + name + "\", _pybridge_" + name + ", METH_VARARGS, NULL},\n";
+    };
+
+    // PyMethodDef[], PyModuleDef, PyInit_
+    c = c + "static PyMethodDef methods[] = {\n";
+    c = c + methods_init;
+    c = c + "    {NULL, NULL, 0, NULL}\n};\n\n";
+    c = c + "static PyModuleDef moduledef = {\n";
+    c = c + "    PyModuleDef_HEAD_INIT,\n";
+    c = c + "    \"" + bridge_name + "\", NULL, -1, methods,\n";
+    c = c + "    NULL, NULL, NULL, NULL\n};\n\n";
+    c = c + "PyObject* PyInit_" + bridge_name + "(void) {\n";
+    c = c + "    return PyModule_Create(&moduledef);\n";
+    c = c + "}\n";
+
+    FileWrite$("glue-out/" + bridge_name + "_wrap.c", c, true);
+    EmitInfo$("generated " + bridge_name + "_wrap.c");
+
+    let clang_out = ShellCmd$("clang", "-c", "-fPIC", "-O2",
+        "glue-out/" + bridge_name + "_wrap.c",
+        "-o", "glue-out/" + bridge_name + "_wrap.o",
+        "-I" + python_inc);
+    EmitInfo$("compiled " + bridge_name + "_wrap.o");
+
+    InsertObject$("glue-out/" + bridge_name + "_wrap.o");
+    EmitInfo$("injected " + bridge_name + "_wrap.o into link");
 };
 
-$defn probe_struct_2fields(name: String, f1: String, f1t: String,
-                           f2: String, f2t: String, inc: String) {
-    let src = "#include <stddef.h>\n#include <stdio.h>\n#include \"" + inc + "\"\nint main(){\n";
-    src = src + "printf(\"" + f1 + ":%s:%zu\\n\",\"" + f1t + "\",offsetof(" + name + "," + f1 + "));\n";
-    src = src + "printf(\"" + f2 + ":%s:%zu\\n\",\"" + f2t + "\",offsetof(" + name + "," + f2 + "));\n";
-    src = src + "printf(\"_size_=%zu\\n\",sizeof(" + name + "));\nreturn 0;\n}";
-    FileWrite$("/tmp/_probe.c", src, true);
-    let out = ShellCmd$("gcc", "/tmp/_probe.c", "-o", "/tmp/_probe");
-    out = ShellCmd$("/tmp/_probe");
-    // Parse output: each field line is "name:type:offset", last line is "_size_=N"
-    let lines = StrSplit$(out, "\n");
-    let line1 = StrSubstr$(lines, 0, 0);  // placeholder — needs real line-by-line
-    EmitInfo$("probed " + name + ": " + out);
-};
+$(Normalized @ highest) {
+    let exports = Tag$("export");
+    when exports.IsEmpty$() {
+        EmitInfo$("no exports found, nothing to generate");
+    };
 
-// Example:
-// $(Normalized @ highest) {
-//     InjectTypeLayout$("PyMethodDef", "32",
-//         "name:Ptr:0,meth:Ptr:8,flags:LongLong:16,doc:Ptr:24");
-//     InjectTypeLayout$("PyModuleDef", "104",
-//         "m_base:PyModuleDef_Base:0,m_name:Ptr:32,m_doc:Ptr:40,"
-//         + "m_size:LongLong:48,m_methods:Ptr:56,m_slots:Ptr:64,"
-//         + "m_traverse:Ptr:72,m_clear:Ptr:80,m_free:Ptr:88,"
-//         + "m_module:Ptr:96");
-//     let code = generate_bridge(Tag$("export"), "bridge");
-//     FileWrite$("glue-out/bridge.bv", code, true);
-// };
+    build_py_module(exports, "bridge", "/usr/include/python3.12");
+
+    foreach(exp in exports) {
+        let name = TypeInfo$(exp, "name");
+        EmitInfo$("  export " + name);
+    };
+};
