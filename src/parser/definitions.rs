@@ -33,7 +33,8 @@ impl<'a> Parser<'a> {
             // 2026-07-16: P2 — Check for extension group Type.[a,b,c] before single type
             Some(Token::Type) => self.parse_type_or_group().map(TopLevel::TypeDef),
             // 2026-07-14: Handle `struct Name { fields }` as TypeDef
-            Some(Token::Struct) => self.parse_struct_like().map(TopLevel::TypeDef),
+            Some(Token::Obj) => self.parse_obj_like().map(TopLevel::TypeDef),
+            Some(Token::Struct) => self.parse_struct_def().map(TopLevel::StaticStruct),
             // 2026-07-14: Handle `enum Name { variants }` as TypeDef (converted by normalizer)
             Some(Token::Enum) => self.parse_enum_like().map(TopLevel::TypeDef),
             // 2026-07-14: Top-level let — state variable declaration
@@ -1170,8 +1171,8 @@ impl<'a> Parser<'a> {
 
     /// 2026-07-14: Parse a `struct Name { fields }` declaration as a TypeDef.
     /// Consumes the `struct` keyword, then delegates to parse_type_definition
-    /// with the modified position already past the keyword.
-    fn parse_struct_like(&mut self) -> Result<Box<TypeDef>, SyntaxError> {
+    /// obj name { fields } — dynamic object definition.
+    fn parse_obj_like(&mut self) -> Result<Box<TypeDef>, SyntaxError> {
         // struct Name { slot: Type; ... }
         self.pos += 1; // consume struct
         let name = self.expect_identifier()?;
@@ -1195,6 +1196,31 @@ impl<'a> Parser<'a> {
                 projections: vec![], bindings: vec![], operators: vec![], constraints: vec![], span: None,
             },
         }))
+    }
+
+    /// struct Name { field: Type; } — static fixed-layout struct.
+    /// Pure data, C-compatible, no methods, no contracts.
+    /// 2026-07-24: Fields are space-separated, semicolon-terminated.
+    fn parse_struct_def(&mut self) -> Result<StructDef, SyntaxError> {
+        self.pos += 1; // consume struct
+        let name = self.expect_identifier()?;
+        let mut fields = Vec::new();
+        if self.eat(&Token::LBrace) {
+            while !self.check(&Token::RBrace) && !self.is_at_end() {
+                let field_name = self.expect_identifier()?;
+                self.expect(Token::Colon)?;
+                let field_type = self.parse_type()?;
+                self.eat(&Token::Semicolon);
+                fields.push((field_name, field_type));
+            }
+            self.expect(Token::RBrace)?;
+        }
+        self.eat(&Token::Semicolon);
+        Ok(StructDef {
+            name, fields,
+            metadata: std::collections::HashMap::new(),
+            span: None,
+        })
     }
 
     /// 2026-07-14: Parse an `enum Name { Variant, Variant(Type) }` declaration.

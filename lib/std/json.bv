@@ -18,7 +18,7 @@ enum JsonValue {
     Object(List<(String, JsonValue)>)
 };
 
-struct ParseFrame {
+obj ParseFrame {
     value: JsonValue,
     pos: Int,
 };

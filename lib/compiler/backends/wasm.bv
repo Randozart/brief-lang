@@ -42,7 +42,7 @@ enum SectionType {
 
 // ===== WASM MODULE STRUCTURE =====
 
-struct WasmModule {
+obj WasmModule {
     types: List<FunctionType>,
     functions: List<FunctionBody>,
     imports: List<Import>,
@@ -53,17 +53,17 @@ struct WasmModule {
     code: CodeSection
 }
 
-struct FunctionType {
+obj FunctionType {
     params: List<WasmValueType>,
     results: List<WasmValueType>
 }
 
-struct FunctionBody {
+obj FunctionBody {
     locals: List<WasmValueType>,
     code: List<u8>
 }
 
-struct Import {
+obj Import {
     module: String,
     name: String,
     kind: ImportKind
@@ -75,22 +75,22 @@ enum ImportKind {
     ImportGlobal(GlobalType)
 }
 
-struct Memory {
+obj Memory {
     min: u32,
     max: Option<u32>
 }
 
-struct Global {
+obj Global {
     global_type: GlobalType,
     init_expr: List<u8>
 }
 
-struct GlobalType {
+obj GlobalType {
     value_type: WasmValueType,
     mutable: Bool
 }
 
-struct Export {
+obj Export {
     name: String,
     kind: ExportKind
 }
@@ -101,7 +101,7 @@ enum ExportKind {
     ExportGlobal(u32)
 }
 
-struct DataSegment {
+obj DataSegment {
     memory_index: u32,
     offset_expr: List<u8>,
     data: List<u8>

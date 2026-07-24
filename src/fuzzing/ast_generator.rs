@@ -161,7 +161,7 @@ pub fn arb_struct_def(max_depth: usize) -> impl Strategy<Value = TopLevel> {
         arb_identifier(),
         proptest::collection::vec(arb_struct_field(max_depth), 1usize..=3usize),
     ).prop_map(|(name, fields)| {
-        TopLevel::Struct(StructDefinition {
+        TopLevel::Obj(StructDefinition {
             name,
             type_params: Vec::new(),
             parent: None,

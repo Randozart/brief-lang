@@ -3,7 +3,7 @@
 
 // ===== SHARED MEMORY REGIONS =====
 
-struct SharedRegion {
+obj SharedRegion {
     id: String,           // Unique identifier
     base_address: Int,    // Base memory address
     size: Int,            // Size in bytes
@@ -45,7 +45,7 @@ defn release_shared_region(region: SharedRegion) -> Result<Void, String> {
 // ===== MEMORY-MAPPED FFI =====
 
 // Map a foreign function to a shared memory region
-struct MappedFFI {
+obj MappedFFI {
     name: String,
     region: SharedRegion,
     input_offset: Int,
@@ -151,7 +151,7 @@ defn memory_barrier() {
 
 // ===== METROPOLITAN PROTOCOL =====
 
-struct MetropolitanChannel {
+obj MetropolitanChannel {
     id: String,
     request_region: SharedRegion,
     response_region: SharedRegion,

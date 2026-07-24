@@ -687,7 +687,7 @@ impl LspServer {
                 TopLevel::Transaction(_) => 6,    // Method
                 TopLevel::StateDecl(_) => 13,      // Variable
                 TopLevel::Trigger(_) => 25,        // Event
-                TopLevel::Struct(_) => 23,         // Struct
+                TopLevel::Obj(_) => 23,         // Struct
                 TopLevel::Enum(_) => 10,           // Module
                 TopLevel::ForeignBinding(_) => 24, // Operator
                 TopLevel::Definition(_) => 12,     // Function
@@ -774,7 +774,7 @@ fn item_span(item: &TopLevel) -> Option<Span> {
         TopLevel::Transaction(t) => t.span,
         TopLevel::StateDecl(s) => s.span,
         TopLevel::Trigger(t) => t.span,
-        TopLevel::Struct(s) => s.span,
+        TopLevel::Obj(s) => s.span,
         TopLevel::Enum(e) => e.span,
         TopLevel::ForeignBinding(fb) => fb.span,
         TopLevel::Definition(d) => d.contract.span,
@@ -790,7 +790,7 @@ fn item_name(item: &TopLevel) -> String {
         TopLevel::StateDecl(s) => s.name.clone(),
         TopLevel::Trigger(t) => t.name.clone(),
         TopLevel::Constant(c) => c.name.clone(),
-        TopLevel::Struct(s) => s.name.clone(),
+        TopLevel::Obj(s) => s.name.clone(),
         TopLevel::Enum(e) => e.name.clone(),
         TopLevel::ForeignBinding(fb) => fb.effective_brief_name().to_string(),
         _ => "unnamed".to_string(),
@@ -809,7 +809,7 @@ fn item_description(item: &TopLevel) -> String {
         TopLevel::Signature(_) => "function signature".to_string(),
         TopLevel::Definition(_) => "function definition".to_string(),
         TopLevel::Constant(_) => "constant".to_string(),
-        TopLevel::Struct(_) => "struct".to_string(),
+        TopLevel::Obj(_) => "struct".to_string(),
         TopLevel::Enum(_) => "enum".to_string(),
         TopLevel::ForeignBinding(_) => "foreign binding".to_string(),
         _ => "".to_string(),

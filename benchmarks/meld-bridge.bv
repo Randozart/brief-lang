@@ -1,6 +1,6 @@
 // meld-bridge — C ABI ↔ Rust ABI zero-cost bridge
 //
-// Two struct types with identical bit layouts, melded for zero-cost
+// Two obj types with identical bit layouts, melded for zero-cost
 // compatibility across language ABI boundaries.
 //
 // This benchmark validates the meld feature at the parser/typechecker/
@@ -17,8 +17,8 @@
 
 frgn consume_buffer(data: Int, size: Int) -> Int ;
 
-struct CBuffer { ptr: Int, len: Int };
-struct RSBuffer { data: Int, size: Int };
+obj CBuffer { ptr: Int, len: Int };
+obj RSBuffer { data: Int, size: Int };
 meld CBuffer <:> RSBuffer;
 
 let accum: Int = 0;

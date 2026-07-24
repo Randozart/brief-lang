@@ -1,8 +1,8 @@
 // Test: Struct definitions
 // Category: Core - Structs
-// Expected: Compiles with struct definition
+// Expected: Compiles with obj definition
 
-struct Point {
+obj Point {
     let x: Int = 0;
     let y: Int = 0;
 };

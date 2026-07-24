@@ -1815,7 +1815,7 @@ impl LlvmBackend {
                         self.ctx.frgn_map.insert(brief_name.to_string(), sig);
                     }
                 }
-                TopLevel::Struct(s) => {
+                TopLevel::Obj(s) => {
                     let fields: Vec<(String, Type)> = s.fields.iter()
                         .map(|f| (f.name.clone(), f.ty.clone()))
                         .collect();

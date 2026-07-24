@@ -19,6 +19,16 @@ Two of three discussion topics are **already implemented**:
 
 This plan covers the third topic: user-declarable protocol variants.
 
+## Cultural Note
+
+> *"Water bij de wijn doen"* — Dutch proverb for diluting wine with water.
+
+Every other language dilutes at the FFI boundary. C++ diluted OOP and template safety for C compat. Java, C#, JS locked into UTF-16. Rust pays a runtime translation tax at every FFI call. All of them mix water into their wine.
+
+Brief does not dilute. The protocol graph keeps the source experience pure wine and lets the compiler become perfect water at the boundary — zero runtime translation, zero compromise on either side. The architecture's job is to keep these two domains separate: the programmer writes pure wine, the compiler emits perfect water.
+
+Proost.
+
 ## Philosophy
 
 ### Protocols are a frontend abstraction — LLVM never sees them

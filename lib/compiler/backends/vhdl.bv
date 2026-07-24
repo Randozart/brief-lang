@@ -22,38 +22,38 @@ enum PortDirection {
 
 // ===== VHDL STRUCTS =====
 
-struct Entity {
+obj Entity {
     name: String,
     ports: List<Port>,
     generics: List<GenericParam>
 }
 
-struct Architecture {
+obj Architecture {
     entity_name: String,
     name: String,
     signals: List<Signal>,
     processes: List<Process>
 }
 
-struct Port {
+obj Port {
     name: String,
     direction: PortDirection,
     data_type: VhdlDataType
 }
 
-struct GenericParam {
+obj GenericParam {
     name: String,
     data_type: VhdlDataType,
     default_value: String
 }
 
-struct Signal {
+obj Signal {
     name: String,
     data_type: VhdlDataType,
     default_value: Option<String>
 }
 
-struct Process {
+obj Process {
     sensitivity_list: List<String>,
     statements: List<String>,
     name: String

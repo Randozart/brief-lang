@@ -6,13 +6,13 @@
 //   - acyclic: static dispatch, no recursion guards
 //   - cyclic:  dynamic dispatch, bounded execution
 
-struct CallGraph {
+obj CallGraph {
     graph: Map<String, List<String>>,
     txn_names: List<String>,
     cylist: List<List<String>>
 }
 
-struct CallGraphResult {
+obj CallGraphResult {
     has_cycle: Bool,
     cylist: List<List<String>>,
     node_count: Int,

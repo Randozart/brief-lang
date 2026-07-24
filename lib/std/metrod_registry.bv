@@ -3,7 +3,7 @@
 
 // ===== SERVICE ENTRY =====
 
-struct ServiceEntry {
+obj ServiceEntry {
     name: String,
     shm_name: String,
     addr: Int,
@@ -17,7 +17,7 @@ struct ServiceEntry {
 
 // ===== REGISTRATION REQUEST =====
 
-struct RegisterRequest {
+obj RegisterRequest {
     name: String,
     capacity: Int,
     input_fields: Int,
@@ -34,13 +34,13 @@ enum RegisterResult {
 
 // ===== LOOKUP REQUEST =====
 
-struct LookupRequest {
+obj LookupRequest {
     name: String
 }
 
 // ===== LOOKUP RESPONSE =====
 
-struct LookupResponse {
+obj LookupResponse {
     found: Bool,
     shm_name: String,
     addr: Int,
@@ -51,13 +51,13 @@ struct LookupResponse {
 
 // ===== DEREGISTER REQUEST =====
 
-struct DeregisterRequest {
+obj DeregisterRequest {
     name: String
 }
 
 // ===== DAEMON STATUS =====
 
-struct DaemonStatus {
+obj DaemonStatus {
     service_count: Int,
     total_memory: Int,
     uptime_ms: Int,
@@ -66,7 +66,7 @@ struct DaemonStatus {
 
 // ===== MEMORY SPEC JSON FIELDS =====
 
-struct MemorySpecChannel {
+obj MemorySpecChannel {
     address: String,
     header_offset: Int,
     payload_offset: Int,

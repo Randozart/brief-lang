@@ -217,7 +217,7 @@ fn schema_to_struct(schema: &SchemaDef) -> ast::TopLevel {
         })
         .collect();
 
-    ast::TopLevel::Struct(ast::StructDefinition {
+    ast::TopLevel::Obj(ast::StructDefinition {
         name: schema.name.clone(),
         type_params: Vec::new(),
         parent: None,
@@ -357,7 +357,7 @@ mod tests {
         // Schema-only document produces struct definition, no constant
         assert_eq!(items.len(), 1);
         match &items[0] {
-            ast::TopLevel::Struct(s) => {
+            ast::TopLevel::Obj(s) => {
                 assert_eq!(s.name, "Item");
             }
             _ => panic!("Expected Struct definition"),
@@ -479,7 +479,7 @@ as Item {
         // the data creates a Constant. Let me check.
         let has_struct = items
             .iter()
-            .any(|item| matches!(item, ast::TopLevel::Struct(s) if s.name == "Item"));
+            .any(|item| matches!(item, ast::TopLevel::Obj(s) if s.name == "Item"));
         let has_constant = items
             .iter()
             .any(|item| matches!(item, ast::TopLevel::Constant(c) if c.name == "data"));

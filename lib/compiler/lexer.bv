@@ -5,7 +5,7 @@ import "std/char";
 
 // ===== LEXER STATE =====
 
-struct LexerState {
+obj LexerState {
     source: String,
     position: Int,
     line: Int,
@@ -152,7 +152,7 @@ defn read_identifier(state: LexerState) -> (Token, LexerState) {
     [text == "defn"] { term (KeywordDefn, state); };
     [text == "sig"] { term (KeywordSig, state); };
     [text == "frgn"] { term (KeywordFrgn, state); };
-    [text == "struct"] { term (KeywordStruct, state); };
+    [text == "obj"] { term (KeywordStruct, state); };
     [text == "enum"] { term (KeywordEnum, state); };
     [text == "data"] { term (KeywordData, state); };
     [text == "import"] { term (KeywordImport, state); };

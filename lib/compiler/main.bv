@@ -18,7 +18,7 @@ import "backends/llvm";
 
 // ===== COMPILER STATE =====
 
-struct CompilerState {
+obj CompilerState {
     source: String,
     file_path: String,
     verbose: Bool,

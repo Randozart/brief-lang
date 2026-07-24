@@ -13,7 +13,7 @@ type Int <: Bits {
     alignment <~ 8;
 };
 
-struct CBuffer {
+obj CBuffer {
     ptr: Int;
     len: Int;
 };

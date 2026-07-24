@@ -1,7 +1,7 @@
 // LLVM Backend — Generates LLVM IR (.ll) from Brief AST
 // Definitive implementation, mirroring src/backend/llvm.rs
 
-struct CgResult {
+obj CgResult {
     node_count: Int,
     edge_count: Int,
     has_cycle: Bool

@@ -1,5 +1,5 @@
 // lib/glue/python.bv — Python C API bridge declarations
-// 2026-07-23: FFI functions and struct layouts for Python C extensions.
+// 2026-07-23: FFI functions and obj layouts for Python C extensions.
 // Used by generator.bv to emit Brief-native bridge wrappers.
 
 // ── Python C API frgn declarations ──────────────────────────────────────
@@ -9,5 +9,5 @@ frgn PyModule_Create2(Ptr, Int) -> Ptr from "c" fallback 0;
 
 // ── Struct layouts for C module metadata ────────────────────────────────
 // These are injected into the type universe so the backend can verify
-// layout compatibility. Actual struct emission is in the C file written
+// layout compatibility. Actual obj emission is in the C file written
 // by the generator's build_py_module.

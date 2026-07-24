@@ -426,7 +426,7 @@ fn test_enum_multi_variant_discriminants() {
 fn test_struct_type_registered() {
     let mut backend = LlvmBackend::new();
     let program = vec![
-        TopLevel::Struct(StructDefinition {
+        TopLevel::Obj(StructDefinition {
             name: "Point".to_string(),
             type_params: vec![],
             parent: None,
@@ -452,7 +452,7 @@ fn test_struct_type_registered() {
 fn test_struct_type_declaration_in_ir() {
     let mut backend = LlvmBackend::new();
     let program = vec![
-        TopLevel::Struct(StructDefinition {
+        TopLevel::Obj(StructDefinition {
             name: "Point".to_string(),
             type_params: vec![],
             parent: None,
@@ -476,7 +476,7 @@ fn test_struct_type_declaration_in_ir() {
 fn test_struct_type_declaration_empty_struct() {
     let mut backend = LlvmBackend::new();
     let program = vec![
-        TopLevel::Struct(StructDefinition {
+        TopLevel::Obj(StructDefinition {
             name: "Empty".to_string(),
             type_params: vec![],
             parent: None,
@@ -497,12 +497,12 @@ fn test_struct_type_declaration_empty_struct() {
 fn test_struct_type_declaration_sorted_order() {
     let mut backend = LlvmBackend::new();
     let program = vec![
-        TopLevel::Struct(StructDefinition {
+        TopLevel::Obj(StructDefinition {
             name: "Zebra".to_string(), type_params: vec![], parent: None,
             fields: vec![StructField { name: "s".to_string(), ty: Type::int(), default: None, visibility: Visibility::Public }],
             transactions: vec![], view_html: None, span: None, modifiers: vec![], variants: vec![],
         }),
-        TopLevel::Struct(StructDefinition {
+        TopLevel::Obj(StructDefinition {
             name: "Alpha".to_string(), type_params: vec![], parent: None,
             fields: vec![StructField { name: "s".to_string(), ty: Type::int(), default: None, visibility: Visibility::Public }],
             transactions: vec![], view_html: None, span: None, modifiers: vec![], variants: vec![],
@@ -550,7 +550,7 @@ fn test_type_with_slots_populates_struct_types() {
 #[test]
 fn test_struct_auto_registered_in_type_universe() {
     let program = vec![
-        TopLevel::Struct(StructDefinition {
+        TopLevel::Obj(StructDefinition {
             name: "Point".to_string(),
             type_params: vec![],
             parent: None,
@@ -581,7 +581,7 @@ fn test_struct_auto_registered_in_type_universe() {
 
 fn make_point_program(body: Vec<Statement>) -> Vec<TopLevel> {
     vec![
-        TopLevel::Struct(StructDefinition {
+        TopLevel::Obj(StructDefinition {
             name: "Point".to_string(),
             type_params: vec![],
             parent: None,
@@ -1906,7 +1906,7 @@ fn test_no_thread_pool_without_async_txns() {
 fn test_struct_param_uses_ptr_in_signature() {
     let mut backend = LlvmBackend::new();
     let program = vec![
-        TopLevel::Struct(StructDefinition {
+        TopLevel::Obj(StructDefinition {
             name: "Point".to_string(),
             type_params: vec![],
             parent: None,
@@ -1947,7 +1947,7 @@ fn test_struct_param_uses_ptr_in_signature() {
 fn test_struct_param_ptrtoint_at_entry() {
     let mut backend = LlvmBackend::new();
     let program = vec![
-        TopLevel::Struct(StructDefinition {
+        TopLevel::Obj(StructDefinition {
             name: "Point".to_string(),
             type_params: vec![],
             parent: None,
@@ -1988,7 +1988,7 @@ fn test_struct_param_ptrtoint_at_entry() {
 fn test_struct_param_field_access_works() {
     let mut backend = LlvmBackend::new();
     let program = vec![
-        TopLevel::Struct(StructDefinition {
+        TopLevel::Obj(StructDefinition {
             name: "Point".to_string(),
             type_params: vec![],
             parent: None,

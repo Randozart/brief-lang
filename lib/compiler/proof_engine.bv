@@ -17,7 +17,7 @@ enum SymbolicValue {
 
 // ===== SYMBOLIC STATE =====
 
-struct SymbolicState {
+obj SymbolicState {
     vars: HashMap<String, SymbolicValue>,  // Variable bindings
     path_constraints: List<SymbolicValue>,  // Path conditions
     visited: HashSet<String>  // Prevent infinite loops
@@ -227,7 +227,7 @@ defn constraints_satisfiable(constraints: List<SymbolicValue>) -> Bool {
 
 // ===== PATH EXPLORATION =====
 
-struct ExecutionPath {
+obj ExecutionPath {
     statements: List<Statement>,
     constraints: List<SymbolicValue>,
     final_state: SymbolicState,
@@ -353,13 +353,13 @@ defn execute_statement_symbolic(stmt: Statement, state: SymbolicState) -> Symbol
 
 // ===== CONTRACT VERIFICATION =====
 
-struct ProofResult {
+obj ProofResult {
     verified: Bool,
     counterexample: Option<CounterExample>,
     paths_explored: Int
 }
 
-struct CounterExample {
+obj CounterExample {
     inputs: HashMap<String, SymbolicValue>,
     path: ExecutionPath,
     violation: String
@@ -536,7 +536,7 @@ defn verify_postcondition(postcondition: Expr, state: SymbolicState, strict_mode
 
 // ===== MUTUAL EXCLUSION CHECKING =====
 
-struct ConflictResult {
+obj ConflictResult {
     has_conflict: Bool,
     conflicting_txns: List<String>,
     explanation: String
@@ -644,7 +644,7 @@ defn collect_writes(stmts: List<Statement>) -> List<String> {
 
 // ===== DEADLOCK DETECTION =====
 
-struct DeadlockResult {
+obj DeadlockResult {
     has_deadlock: Bool,
     cycle: List<String>,
     explanation: String
@@ -870,7 +870,7 @@ defn collect_reads(stmts: List<Statement>) -> List<String> {
 
 // ===== VERIFICATION CONDITIONS =====
 
-struct VerificationCondition {
+obj VerificationCondition {
     assumptions: List<SymbolicValue>,
     conclusion: SymbolicValue
 }
@@ -955,7 +955,7 @@ defn sym_to_string(sym: SymbolicValue) -> String {
 
 // ===== LIST SIMD LENGTH CHECKING =====
 
-struct SimdOp {
+obj SimdOp {
     left: String,
     right: String,
     context: String

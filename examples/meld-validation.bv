@@ -10,7 +10,7 @@
 // ── 128-bit types with 2 fields each ────────────────────────────
 
 // Type A: ptr at bits 0..63, size at bits 64..127.
-// 2026-07-16: Uses struct-format layout syntax { field: Type }
+// 2026-07-16: Uses obj-format layout syntax { field: Type }
 type A <: Bits {
     bytes <~ 16;
     layout <~ { ptr: Int, size: Int };

@@ -22,7 +22,7 @@ enum PortDirection {
 
 // ===== SV STRUCTS =====
 
-struct Module {
+obj Module {
     name: String,
     ports: List<Port>,
     wires: List<Wire>,
@@ -30,24 +30,24 @@ struct Module {
     always_blocks: List<AlwaysBlock>
 }
 
-struct Port {
+obj Port {
     name: String,
     direction: PortDirection,
     data_type: SvDataType
 }
 
-struct Wire {
+obj Wire {
     name: String,
     data_type: SvDataType
 }
 
-struct Reg {
+obj Reg {
     name: String,
     data_type: SvDataType,
     init_value: Option<String>
 }
 
-struct AlwaysBlock {
+obj AlwaysBlock {
     kind: String, // "always_ff", "always_comb", "always_latch"
     sensitivity: String,
     body: String

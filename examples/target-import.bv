@@ -23,7 +23,7 @@ import "std/types";
 
 import "target";
 
-// UART register addresses (flattened from uart1 struct)
+// UART register addresses (flattened from uart1 obj)
 // uart1_dr   = 0x40011000  — Data register
 // uart1_sr   = 0x40011001  — Status register
 // uart1_cr1  = 0x4001100C  — Control register 1

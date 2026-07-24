@@ -2,7 +2,7 @@
 //
 // Tests: compiler proves convergence via counter (`count < N`), while the
 // body exercises the collection drain analysis. The ring buffer starts with
-// a single element [0] allocated as a RingBuf heap struct (4 × i64 slots).
+// a single element [0] allocated as a RingBuf heap obj (4 × i64 slots).
 // Each tick: pop from head slot, push to tail slot — O(1) via head/tail
 // pointer arithmetic with bitwise wrap (mask = capacity - 1).
 //

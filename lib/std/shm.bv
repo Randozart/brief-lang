@@ -340,7 +340,7 @@ defn metro_atomic_release_lock(addr: Int) -> Result<Void, AtomicError> {
 
 // ===== METROPOLITAN CHANNEL STRUCT =====
 
-struct MetroChannel {
+obj MetroChannel {
     name: String,
     addr: Int,
     capacity: Int

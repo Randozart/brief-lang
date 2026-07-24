@@ -3,7 +3,7 @@
 
 // ===== STRUCT DEFINITION =====
 
-struct StringBuilder {
+obj StringBuilder {
     buffer: String
 };
 

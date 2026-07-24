@@ -7,14 +7,14 @@
 //   - Memory allocation sizes
 //   - Removing runtime bounds checks
 
-struct ParamRange {
+obj ParamRange {
     min: Option<Int>,
     max: Option<Int>,
     min_inclusive: Bool,
     max_inclusive: Bool
 }
 
-struct RangeResult {
+obj RangeResult {
     txn_name: String,
     param_name: String,
     min: Option<Int>,

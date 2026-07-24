@@ -117,7 +117,7 @@ $ slot(n) {
     }
 }
 
-// Example: a 3-field struct using slot(n)
+// Example: a 3-field obj using slot(n)
 type Point <: Bits @/0..191 {
     bytes <~ 24;
 

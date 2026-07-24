@@ -27,7 +27,7 @@ pub enum TopLevel {
     // ── Backend-compat variants (old AST) ─────────────────────────────
     Constant(Constant),
     ForeignBinding(ForeignBinding),
-    Struct(StructDefinition),
+    Obj(StructDefinition),
     Enum(EnumDefinition),
     TriggerBinding {
         name: String,
@@ -40,6 +40,9 @@ pub enum TopLevel {
     Signature(Signature),
     LinkDependency(LinkDependency),
     ResourceDecl(ResourceDeclaration),
+    /// Static struct: `struct Name { field: Type; }`. Fixed-layout, C-compatible.
+    /// 2026-07-24: Pure data, no methods. Offsets computed from platform ABI.
+    StaticStruct(StructDef),
     RStruct(RStructDefinition),
     TypeDef(Box<TypeDef>),
     Codec(CodecDeclaration),
@@ -756,6 +759,14 @@ pub enum LinkLanguage {
 pub struct ResourceDeclaration {
     pub name: String,
     pub ty: Type,
+    pub span: Option<Span>,
+}
+
+#[derive(Debug, Clone)]
+pub struct StructDef {
+    pub name: String,
+    pub fields: Vec<(String, Type)>,
+    pub metadata: HashMap<String, PropertyValue>,
     pub span: Option<Span>,
 }
 

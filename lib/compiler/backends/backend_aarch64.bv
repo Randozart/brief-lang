@@ -70,7 +70,7 @@ enum A64Instr {
 
 // ===== REGISTER ALLOCATION =====
 
-struct RegisterAllocator {
+obj RegisterAllocator {
     used_regs: HashSet<String>,
     var_to_reg: HashMap<String, String>,
     reg_to_var: HashMap<String, String>,
@@ -236,7 +236,7 @@ defn lookup_var_reg(alloc: RegisterAllocator, var_name: String) -> Option<String
 
 // ===== MEMORY LAYOUT PASS =====
 
-struct MemoryLayout {
+obj MemoryLayout {
     var_offsets: HashMap<String, Int>,      // Variable -> stack offset
     param_offsets: HashMap<String, Int>,    // Parameter -> stack offset
     total_stack_size: Int,                   // Total stack bytes needed
@@ -373,7 +373,7 @@ defn generate_epilogue(layout: MemoryLayout) -> List<A64Instr> {
 
 // ===== BIT-PACKED STRUCT LAYOUT =====
 
-struct BitFieldLayout {
+obj BitFieldLayout {
     field_name: String,
     bit_start: Int,
     bit_width: Int,
@@ -381,7 +381,7 @@ struct BitFieldLayout {
     mask: Int          // Mask to extract the field
 }
 
-struct PackedStructLayout {
+obj PackedStructLayout {
     fields: List<BitFieldLayout>,
     total_bits: Int,
     total_bytes: Int,
@@ -534,14 +534,14 @@ defn emit_store_bitfield(base_reg: String, field: BitFieldLayout, value_reg: Str
 
 // ===== MMIO REGISTER MAPPING =====
 
-struct MMIORegister {
+obj MMIORegister {
     name: String,
     address: Int,
     width: Int,  // in bits
     access: String  // "RO", "WO", "RW"
 }
 
-struct MMIORegion {
+obj MMIORegion {
     name: String,
     base_address: Int,
     size: Int,

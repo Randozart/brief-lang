@@ -185,7 +185,7 @@ defn validate_hashtags_in_program(program: Program, backend: String, strict: Boo
                 [j < len(struct_def.modifiers)] {
                     let result = validate_hashtag(struct_def.modifiers[j], backend);
                     uni result(Ok(msg)) = {
-                        &all_results = all_results.append("struct " + struct_def.name + ": " + msg);
+                        &all_results = all_results.append("obj " + struct_def.name + ": " + msg);
                     };
                     uni result(Err(e)) = {
                         [strict] { term Err(e); };

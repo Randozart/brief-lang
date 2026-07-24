@@ -1,6 +1,6 @@
 // 2026-07-15: Replaced inop with defn + SysConf#/SysCall#.
 // pagesize and cpu_count are sysconf() values, resolved at runtime.
-// uname: returns struct via buffer (Phase 2).
+// uname: returns obj via buffer (Phase 2).
 // hostname: can be read from uname result.
 
 defn uname() -> Int {

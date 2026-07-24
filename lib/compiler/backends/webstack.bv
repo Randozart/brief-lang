@@ -5,7 +5,7 @@ import "call_graph";
 //
 // The webstack pipeline:
 //   1. Collect signals (state variables) and transactions
-//   2. Generate Rust struct with state + reactive engine
+//   2. Generate Rust obj with state + reactive engine
 //   3. Generate wasm-bindgen JS glue
 //   4. Optionally compile via wasm-pack
 //
@@ -19,7 +19,7 @@ import "call_graph";
 // ============================================================================
 
 // Signal tracking for reactive dependency graph
-struct SignalInfo {
+obj SignalInfo {
     name: String,
     signal_type: String,
     initializer: String,
@@ -27,17 +27,17 @@ struct SignalInfo {
 }
 
 // Transaction tracking for reactive dispatch
-struct TransactionInfo {
+obj TransactionInfo {
     name: String,
     index: Int,
     guard: String,
 }
 
-// Generate the Rust state struct with all reactive signals
+// Generate the Rust state obj with all reactive signals
 defn generate_state_struct(signals: List<SignalInfo>) -> String {
     let output = new_builder();
     output = output.append_str("#[wasm_bindgen]\n");
-    output = output.append_str("pub struct State {\n");
+    output = output.append_str("pub obj State {\n");
     
     let i: Int = 0;
     [i < signals.len()] {
@@ -213,7 +213,7 @@ defn expr_to_string(expr: Expr) -> String {
 // Output Types
 // ============================================================================
 
-struct WebstackOutput {
+obj WebstackOutput {
     rust_code: String,
     js_glue: String,
     signal_count: Int,

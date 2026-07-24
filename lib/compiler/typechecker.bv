@@ -3,7 +3,7 @@
 
 // ===== TYPE CONTEXT =====
 
-struct TypeContext {
+obj TypeContext {
     scopes: Stack<HashMap<String, Type>>,
     functions: HashMap<String, Definition>,
     transactions: HashMap<String, Transaction>,
@@ -118,7 +118,7 @@ defn add_transaction(ctx: TypeContext, t: Transaction) -> TypeContext {
 
 // ===== SUBSTITUTION (for uni) =====
 
-struct Substitution {
+obj Substitution {
     bindings: HashMap<String, Type>
 }
 
@@ -239,7 +239,7 @@ defn occurs_check(name: String, ty: Type, subst: Substitution) -> Bool {
 
 // ===== TYPE INFERENCE =====
 
-struct InferResult {
+obj InferResult {
     ty: Type,
     subst: Substitution
 }

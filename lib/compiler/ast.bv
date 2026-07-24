@@ -54,7 +54,7 @@ enum Expr {
 
 // ===== HASHTAG MODIFIERS =====
 
-struct Hashtag {
+obj Hashtag {
     name: String,
     value: Option<String>,
     mandatory: Bool,
@@ -64,7 +64,7 @@ struct Hashtag {
 
 // ===== STATEMENTS =====
 
-struct AlkaBlock {
+obj AlkaBlock {
     dangerous: Bool,
     content: String
 }
@@ -106,20 +106,20 @@ enum Statement {
 
 // ===== CONTRACTS =====
 
-struct Contract {
+obj Contract {
     precondition: Expr,
     postcondition: Expr,
     watchdog: Option<Watchdog>
 }
 
-struct Watchdog {
+obj Watchdog {
     condition: Expr,
     is_required: Bool  // true = !, false = ?
 }
 
 // ===== DEFINITIONS =====
 
-struct Definition {
+obj Definition {
     name: String,
     type_params: List<String>,
     params: List<Param>,
@@ -129,7 +129,7 @@ struct Definition {
     modifiers: List<Hashtag>
 }
 
-struct Transaction {
+obj Transaction {
     name: String,
     is_async: Bool,
     is_reactive: Bool,
@@ -141,12 +141,12 @@ struct Transaction {
     dependencies: List<String>
 }
 
-struct Param {
+obj Param {
     name: String,
     param_type: Type
 }
 
-struct Signature {
+obj Signature {
     name: String,
     input_type: Type,
     output_type: Type,
@@ -156,7 +156,7 @@ struct Signature {
 
 // ===== TYPE DEFINITIONS =====
 
-struct Dimension {
+obj Dimension {
     name: Option<String>,
     size: Int
 }
@@ -186,21 +186,21 @@ enum Type {
     TypeConstrained(Type, BitRange)
 }
 
-struct BitRange {
+obj BitRange {
     start: Int,
     end: Int
 }
 
 // ===== STRUCTS AND ENUMS =====
 
-struct StructVariant {
+obj StructVariant {
     contract: Contract,
     fields: List<StructField>,
     additions: List<StructField>,
     removals: List<String>
 }
 
-struct StructDefinition {
+obj StructDefinition {
     name: String,
     fields: List<StructField>,
     methods: List<Transaction>,
@@ -208,20 +208,20 @@ struct StructDefinition {
     variants: List<StructVariant>
 }
 
-struct StructField {
+obj StructField {
     name: String,
     field_type: Type,
     default_value: Option<Expr>
 }
 
-struct RStructDefinition {
+obj RStructDefinition {
     name: String,
     fields: List<StructField>,
     methods: List<Transaction>,
     view: Option<ViewBody>
 }
 
-struct EnumDefinition {
+obj EnumDefinition {
     name: String,
     type_params: List<String>,
     variants: List<EnumVariant>
@@ -235,7 +235,7 @@ enum EnumVariant {
 
 // ===== VIEWS (Rendered Brief) =====
 
-struct ViewBody {
+obj ViewBody {
     elements: List<ViewElement>
 }
 
@@ -256,7 +256,7 @@ enum ViewAttr {
 
 // ===== IMPORTS =====
 
-struct Import {
+obj Import {
     path: String,
     items: List<ImportItem>,
     alias: Option<String>
@@ -269,19 +269,19 @@ enum ImportItem {
 
 // ===== CONSTANTS AND STATE =====
 
-struct Constant {
+obj Constant {
     name: String,
     const_type: Type,
     value: Expr
 }
 
-struct StateDecl {
+obj StateDecl {
     name: String,
     state_type: Type,
     initial_value: Option<Expr>
 }
 
-struct ForeignBinding {
+obj ForeignBinding {
     name: String,
     sig_type: Type,
     toml_path: Option<String>,
@@ -311,13 +311,13 @@ enum ResultType {
     ResOption
 }
 
-struct MemoryLayout {
+obj MemoryLayout {
     offset: Int,
     size: Int,
     alignment: Int
 }
 
-struct ForeignSignature {
+obj ForeignSignature {
     name: String,
     location: String,
     wasm_impl: Option<String>,
@@ -335,7 +335,7 @@ struct ForeignSignature {
     ffi_kind: Option<FfiKind>
 }
 
-struct FfiState {
+obj FfiState {
     bindings: List<ForeignSignature>,
     wasm_glue: Option<String>,
     profiles: Option<String>
@@ -362,7 +362,7 @@ enum TopLevel {
     TopForeign(ForeignSignature)
 }
 
-struct Program {
+obj Program {
     items: List<TopLevel>,
     strict_mode: StrictMode
 }

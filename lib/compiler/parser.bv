@@ -7,7 +7,7 @@ import "std/collections";
 
 // ===== PARSER STATE =====
 
-struct ParserState {
+obj ParserState {
     tokens: List<Token>,
     position: Int,
     current_token: Token,
@@ -1902,7 +1902,7 @@ defn parse_struct(state: ParserState) -> Result<(StructDefinition, ParserState),
     uni result(Err(e)) = { term Err(e); };
     
     let tok = current_token(state);
-    [!is_identifier(tok)] { term Err("Expected struct name"); };
+    [!is_identifier(tok)] { term Err("Expected obj name"); };
     let name = unwrap_identifier(tok);
     &state = advance(state);
     
@@ -2526,7 +2526,7 @@ defn parse_render(state: ParserState) -> Result<(String, ViewBody, ParserState),
     uni result(Err(e)) = { term Err(e); };
 
     let tok = current_token(state);
-    [!is_identifier(tok)] { term Err("Expected render target struct name"); };
+    [!is_identifier(tok)] { term Err("Expected render target obj name"); };
     let name = unwrap_identifier(tok);
     &state = advance(state);
 

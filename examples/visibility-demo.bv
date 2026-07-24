@@ -1,9 +1,9 @@
 // visibility-demo.bv — Visibility modifiers (pub, pvt, sed)
-// Demonstrates: struct field visibility, top-level sed items
+// Demonstrates: obj field visibility, top-level sed items
 
 // ===== STRUCT FIELD VISIBILITY =====
-struct Buffer<T> {
-    pvt  data: List<T>;          // struct-private — only accessible within this struct
+obj Buffer<T> {
+    pvt  data: List<T>;          // obj-private — only accessible within this obj
     sed  cache: HashMap<Int, T>; // file-private — only in this .bv file
     size: Int;                   // public (default) — accessible from anywhere
 };
@@ -29,13 +29,13 @@ defn create_buffer<T>() -> Buffer<T> {
     };
 };
 
-// pvt fields are accessible inside the struct's methods
+// pvt fields are accessible inside the obj's methods
 txn Buffer.resize(buf: Buffer<Int>) [true][buf.size == new_size] {
     buf.size = new_size;
     term;
 };
 
-// pvt fields are NOT accessible from outside the struct
+// pvt fields are NOT accessible from outside the obj
 // &buf.data = new_data;  // ERROR: field `data` is pvt
 
 // sed items are accessible within this file
@@ -43,7 +43,7 @@ let doubled: Int = helper(21);
 
 // ===== TOP-LEVEL sed WORKS ON: =====
 sed let config: String = "secret";
-sed struct InternalState { x: Int; y: Int; };
+sed obj InternalState { x: Int; y: Int; };
 sed txn internal_tick [true][x == @x + 1] { x = x + 1; term; };
 
 // ===== PUBLIC RE-EXPORT =====

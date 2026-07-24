@@ -59,7 +59,7 @@ defn crossword_alloc_string(ca: CrosswordArena, len: Int) -> Ptr<Byte> {
 };
 
 // List interface: push = alloc slot, store value
-// handle is ptrtoint of the CrosswordArena struct
+// handle is ptrtoint of the CrosswordArena obj
 defn crossword_push(handle: Int, val: Int) -> Int {
     let ca: Ptr<CrosswordArena> = handle as Ptr<CrosswordArena>;
     let slot: Ptr<Int> = crossword_alloc_slot(*ca, 8) as Ptr<Int>;

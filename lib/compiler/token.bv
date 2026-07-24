@@ -181,7 +181,7 @@ defn keyword_to_string(tok: Token) -> String {
     uni tok(KeywordSig) = "sig";
     uni tok(KeywordFrgn) = "frgn";
     uni tok(KeywordSyscall) = "syscall";
-    uni tok(KeywordStruct) = "struct";
+    uni tok(KeywordStruct) = "obj";
     uni tok(KeywordRstruct) = "rstruct";
     uni tok(KeywordEnum) = "enum";
     uni tok(KeywordType) = "type";
