@@ -124,9 +124,6 @@ pub struct PluginManager {
     /// definitions inside $(Stage) blocks. Called from eval_nav_chain for
     /// non-$ function calls.
     pub fn_registry: HashMap<String, FnDef>,
-    /// 2026-07-23: Extra object files to link into the final binary.
-    /// Populated by InsertObject$ intrinsic from stage blocks.
-    pub extra_objects: Vec<std::path::PathBuf>,
 }
 
 /// A compile-time function, defined via $defn or $txn inside a $(Stage) block.
@@ -149,7 +146,6 @@ impl PluginManager {
             tainted_indices: BTreeSet::new(),
             expansion_traces: HashMap::new(),
             fn_registry: HashMap::new(),
-            extra_objects: Vec::new(),
         }
     }
 

@@ -1027,15 +1027,6 @@ fn eval_nav_call(
             }
             Ok(NavValue::Void)
         }
-        // 2026-07-23: Insert an object file into the linker command.
-        // Used by generator.bv to inject Python C extension .o files.
-        "InsertObject$" => {
-            let path = expect_str_arg(args, 0, "InsertObject$", scope)?;
-            if let Some(pm_inner) = pm {
-                pm_inner.extra_objects.push(std::path::PathBuf::from(&path));
-            }
-            Ok(NavValue::Void)
-        }
         "FileRead$" => {
             sandbox.check(Capability::DiskRead, "FileRead$")?;
             let path = expect_str_arg(args, 0, "FileRead$", scope)?;

@@ -426,10 +426,9 @@ pub fn compile_source(file_path: &str, source: &str, opts: &BuildOptions) -> Res
         };
         if opts.backend == BackendKind::Llvm || opts.backend == BackendKind::Gpu {
             // Merge CLI-provided extra_objects with ones collected from frgn
-            // declarations and plugin-inserted objects (InsertObject$)
+            // declarations (frgn .c/.cpp sources are auto-compiled to .o)
             let mut all_objects = opts.extra_objects.clone();
             all_objects.extend(extra_objects);
-            all_objects.extend(pm.extra_objects.clone());
             compile_ll_to_binary(&out_path, &binary_path, &all_objects, opts.shared)?;
         }
 

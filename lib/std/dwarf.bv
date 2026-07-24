@@ -1,0 +1,77 @@
+// dwarf.bv — Struct layout discovery via C probe compilation
+// 2026-07-24: Generates a C probe that uses offsetof/sizeof to compute
+// struct field offsets at compile time. The probe is compiled and executed
+// via ShellCmd$, and results are formatted for InjectTypeLayout$.
+//
+// Supports up to 8 fields. To add more, extend the when-guard chain.
+//
+// Usage:
+//   import "std/dwarf";
+//
+//   $(Normalized @ highest) {
+//       let layout = probe_struct_layout("/tmp/my_header.h", "MyStruct",
+//           "x:double", "y:double", "label:int64_t");
+//       InjectTypeLayout$("MyStruct", layout);
+//   };
+
+$defn gen_probe_fields(header: String, struct_name: String,
+    f0: String, f1: String, f2: String, f3: String,
+    f4: String, f5: String, f6: String, f7: String) -> String
+{
+    let code = "#include <stdio.h>\n#include <stddef.h>\n#include <stdint.h>\n";
+    code += "#include \"" + header + "\"\n\n";
+    code += "int main(void) {\n";
+    code += "    printf(\"%zu\", sizeof(" + struct_name + "));\n";
+
+    // f0 is always present
+    when f0 != "" {
+        code = code + "    printf(\",%s:%zu:%zu\", \"" + f0 + "\", sizeof(((" + struct_name + "*)0)->" + f0 + "), offsetof(" + struct_name + ", " + f0 + "));\n";
+    };
+    when f1 != "" {
+        code = code + "    printf(\",%s:%zu:%zu\", \"" + f1 + "\", sizeof(((" + struct_name + "*)0)->" + f1 + "), offsetof(" + struct_name + ", " + f1 + "));\n";
+    };
+    when f2 != "" {
+        code = code + "    printf(\",%s:%zu:%zu\", \"" + f2 + "\", sizeof(((" + struct_name + "*)0)->" + f2 + "), offsetof(" + struct_name + ", " + f2 + "));\n";
+    };
+    when f3 != "" {
+        code = code + "    printf(\",%s:%zu:%zu\", \"" + f3 + "\", sizeof(((" + struct_name + "*)0)->" + f3 + "), offsetof(" + struct_name + ", " + f3 + "));\n";
+    };
+    when f4 != "" {
+        code = code + "    printf(\",%s:%zu:%zu\", \"" + f4 + "\", sizeof(((" + struct_name + "*)0)->" + f4 + "), offsetof(" + struct_name + ", " + f4 + "));\n";
+    };
+    when f5 != "" {
+        code = code + "    printf(\",%s:%zu:%zu\", \"" + f5 + "\", sizeof(((" + struct_name + "*)0)->" + f5 + "), offsetof(" + struct_name + ", " + f5 + "));\n";
+    };
+    when f6 != "" {
+        code = code + "    printf(\",%s:%zu:%zu\", \"" + f6 + "\", sizeof(((" + struct_name + "*)0)->" + f6 + "), offsetof(" + struct_name + ", " + f6 + "));\n";
+    };
+    when f7 != "" {
+        code = code + "    printf(\",%s:%zu:%zu\", \"" + f7 + "\", sizeof(((" + struct_name + "*)0)->" + f7 + "), offsetof(" + struct_name + ", " + f7 + "));\n";
+    };
+
+    code = code + "    printf(\"\\n\");\n";
+    code = code + "    return 0;\n";
+    code = code + "}\n";
+    term code;
+};
+
+$defn probe_struct_layout(header: String, struct_name: String,
+    f0: String, f1: String, f2: String, f3: String,
+    f4: String, f5: String, f6: String, f7: String) -> String
+{
+    let c_code = gen_probe_fields(header, struct_name, f0, f1, f2, f3, f4, f5, f6, f7);
+    FileWrite$("ffi-out/dwarf/probe.c", c_code, true);
+
+    let compile_out = ShellCmd$("gcc", "-O0", "-o", "ffi-out/dwarf/probe", "ffi-out/dwarf/probe.c");
+    when compile_out != "" {
+        EmitError$("dwarf: gcc failed: " + compile_out);
+    };
+
+    let probe_out = ShellCmd$("ffi-out/dwarf/probe");
+    when probe_out == "" {
+        EmitError$("dwarf: probe returned no output");
+        term "";
+    };
+
+    term probe_out;
+};
