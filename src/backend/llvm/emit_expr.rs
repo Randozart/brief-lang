@@ -1632,6 +1632,18 @@ impl LlvmBackend {
         }
     }
 
+    /// 2026-07-25: Return the integer type for binary operations based on
+    /// the function's narrowed max width, or "i64" if no narrowing applies.
+    fn binop_int_type(&self) -> String {
+        if let Some(&bits) = self.fun.narrowed.get("ret") {
+            if bits <= 32 {
+                let bits: u64 = if bits <= 8 { 8 } else if bits <= 16 { 16 } else { 32 };
+                return format!("i{}", bits);
+            }
+        }
+        "i64".to_string()
+    }
+
     /// 2026-07-18: Try to emit a binary operation from config/llvm-ops.toml.
     /// Returns Some(reg) if the config had a matching template, None to fall
     /// through to the hardcoded match arms in emit_binary_op.
@@ -1729,12 +1741,13 @@ impl LlvmBackend {
         // and "double" for Float64 (64-bit). The old code always used "double"
         // for all float operations, producing invalid IR when operands were
         // actually 32-bit float values loaded from constants or state fields.
+        let int_ty = self.binop_int_type();
         let ty_str = if is_double {
             "double"
         } else if is_float {
             "float"
         } else {
-            "i64"
+            &int_ty
         };
         let fast = if is_float { " fast" } else { "" };
         let mut ret_ty = if is_double {
@@ -1744,6 +1757,11 @@ impl LlvmBackend {
         } else {
             Type::int()
         };
+        // 2026-07-25: Override ret_ty with narrowed type if applicable.
+        if !is_float && !is_double && int_ty != "i64" {
+            let bits: u64 = int_ty[1..].parse().unwrap_or(64);
+            ret_ty = crate::ast::Type::from_bits(bits);
+        }
         // 2026-07-18: Phase 0 — try config-driven dispatch first.
         // The OP_CONFIG maps (op_name, type_name, bytes) → LLVM IR template.
         // If the config has an entry, fill the template and skip hardcoded matches.
@@ -1796,7 +1814,8 @@ impl LlvmBackend {
                     )
                     .ok();
                 } else {
-                    writeln!(out, "{}{} = add nuw nsw i64 {}, {}", indent, v, l.name, r.name).ok();
+                    let op_bits = self.binop_int_type();
+                    writeln!(out, "{}{} = add nuw nsw {} {}, {}", indent, v, op_bits, l.name, r.name).ok();
                 }
                 TypedRegister {
                     name: v.to_string(),

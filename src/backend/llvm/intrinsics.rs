@@ -136,7 +136,10 @@ pub(crate) fn template_for_op(op_name: &str, llvm_ty: &str, bytes: u64) -> Optio
         _ if bytes <= 4 => "float",
         _ => "double",
     };
-    let int_llvm = format!("i{}", bytes * 8);
+    // 2026-07-25: Use the passed llvm_ty for integer ops (may be narrowed
+    // from value-range inference), falling back to bytes*8 if llvm_ty
+    // doesn't look like an integer type (e.g., "ptr", "float").
+    let int_llvm = if llvm_ty.starts_with('i') { llvm_ty.to_string() } else { format!("i{}", bytes * 8) };
 
     match (op_name, is_float) {
         ("Add", true) => Some(format!("%v = fadd fast {} %a, %b", float_llvm)),

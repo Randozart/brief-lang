@@ -282,7 +282,7 @@ impl LlvmBackend {
             Type::Custom(__t) if __t == "Char" => "i32",
             Type::Custom(__t) if __t == "String" || __t == "Data" => "ptr",
             Type::Void => "void",
-            Type::Bits(w) => match w {
+            Type::Bits(bytes) => match bytes * 8 {
                 1 => "i1",
                 8 => "i8",
                 16 => "i16",
@@ -351,6 +351,24 @@ impl LlvmBackend {
                 }
             }
         }
+        // 2026-07-25: Narrowed Int check from value-range proof.
+        // If the narrowing pass proved this function's Int chain fits in
+        // ≤32 bits, emit the corresponding LLVM integer type directly
+        // (i8/i16/i32). On WASM, i32 avoids BigInt entirely.
+        if let Type::Custom(name) = ty {
+            if (name == "Int" || name == "UInt") && !self.fun.narrowed.is_empty() {
+                let max_bits = self.fun.narrowed.get("ret").copied()
+                    .or_else(|| self.fun.narrowed.values().max().copied())
+                    .unwrap_or(64);
+                if max_bits <= 32 {
+                    let bits: u64 = if max_bits <= 8 { 8 }
+                        else if max_bits <= 16 { 16 }
+                        else { 32 };
+                    return format!("i{}", bits);
+                }
+            }
+        }
+
         // 2026-07-14: Universe query with derive_llvm_type replaces
         // the removed ResolvedType.llvm_type field.
         self.ctx.type_universe.as_ref()
@@ -1168,14 +1186,6 @@ impl LlvmBackend {
                 })
                 .unwrap_or_else(|| "i64".to_string())
         };
-        // 2026-07-24: Override return type with narrowed width from
-        // value-range inference pass. Use i32 when ≤32 bits (WASM natural word),
-        // otherwise use the exact narrowed width (e.g. i33-i64 need BigInt).
-        let ll_ret_ty = if let Some(&n) = self.fun.narrowed.get("ret") {
-            if ll_ret_ty.starts_with('i') && n <= 32 { "i32".to_string() }
-            else if ll_ret_ty.starts_with('i') { format!("i{}", n) }
-            else { ll_ret_ty.clone() }
-        } else { ll_ret_ty.clone() };
         let is_float_fn = ll_ret_ty == "float" || ll_ret_ty == "double";
         self.fun.fn_ret_ty = ll_ret_ty.clone();
         self.fun.returns_i64 = has_ret;
@@ -1618,14 +1628,6 @@ impl LlvmBackend {
         } else {
             "void".to_string()
         };
-
-        // 2026-07-24: Override return type with narrowed width from
-        // value-range inference pass. Use i32 when ≤32 bits.
-        let ret_llvm = if let Some(&n) = self.fun.narrowed.get("ret") {
-            if ret_llvm.starts_with('i') && n <= 32 { "i32".to_string() }
-            else if ret_llvm.starts_with('i') { format!("i{}", n) }
-            else { ret_llvm.clone() }
-        } else { ret_llvm.clone() };
 
         // Resolve #inline / #?inline directives for callable txns.
         let inline_attr = {
