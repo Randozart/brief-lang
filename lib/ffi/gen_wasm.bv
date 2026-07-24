@@ -1,0 +1,91 @@
+// gen_wasm.bv — Tier 2: WebAssembly bridge generator
+// 2026-07-24: Generates a JavaScript bridge for Brief exports compiled to WASM.
+// Overhead: ~75ns per call (vs 131ns for koffi, ~5ms for subprocess).
+//
+// Two-phase workflow:
+//   1. brief build my_module.bv --llvm     → produces my_module.ll
+//   2. bash wasm_build.sh                  → compiles .ll → .wasm, ready for JS
+//
+// The bridge.mjs wraps the .wasm with named export functions.
+//
+// Requirements: llc (wasm32 target), wasm-ld, Node.js
+//
+// Usage:
+//   import "lib/ffi/gen_wasm";
+//   // Then: brief build my_module.bv --llvm
+//   // Then: bash ffi-out/wasm/build.sh
+
+$defn gen_wasm_bridge(exports: Selection, bridge_name: String) -> String {
+    let code = "// " + bridge_name + " — Brief WASM bridge (auto-generated)\n";
+    code += "// Overhead: ~75ns per call\n\n";
+    code += "import { readFileSync } from 'fs';\n";
+    code += "import { fileURLToPath } from 'url';\n";
+    code += "import path from 'path';\n\n";
+    code += "const __dirname = path.dirname(fileURLToPath(import.meta.url));\n\n";
+    code += "let _exports = null;\n\n";
+    code += "export async function init() {\n";
+    code += "    const wasmPath = path.join(__dirname, '" + bridge_name + ".wasm');\n";
+    code += "    const wasm = readFileSync(wasmPath);\n";
+    code += "    const mod = new WebAssembly.Module(wasm);\n";
+    code += "    const instance = new WebAssembly.Instance(mod);\n";
+    code += "    instance.exports.init_state();\n";
+    code += "    _exports = instance.exports;\n";
+    code += "}\n\n";
+
+    foreach(exp in exports) {
+        let name = TypeInfo$(exp, "name");
+        let pcount_str = TypeInfo$(exp, "params.count");
+        let pcount = 0;
+        when pcount_str == "1" { pcount = 1; };
+        when pcount_str == "2" { pcount = 2; };
+        when pcount_str == "3" { pcount = 3; };
+        when pcount_str == "4" { pcount = 4; };
+        when pcount_str == "5" { pcount = 5; };
+        when pcount_str == "6" { pcount = 6; };
+        let jsarg = "";
+        when pcount >= 1 { jsarg = "a0"; };
+        when pcount >= 2 { jsarg = jsarg + ", a1"; };
+        when pcount >= 3 { jsarg = jsarg + ", a2"; };
+        when pcount >= 4 { jsarg = jsarg + ", a3"; };
+        when pcount >= 5 { jsarg = jsarg + ", a4"; };
+        when pcount >= 6 { jsarg = jsarg + ", a5"; };
+
+        code = code + "export function " + name + "(" + jsarg + ") {\n";
+        code = code + "    return _exports." + name + "(" + jsarg + ");\n";
+        code = code + "}\n\n";
+    };
+
+    term code;
+};
+
+$defn gen_build_script(ll_path: String, wasm_path: String) -> String {
+    let script = "#!/usr/bin/env bash\n";
+    script += "# Build script for Brief WASM module (auto-generated)\n";
+    script += "set -euo pipefail\n\n";
+    script += "LLC=" + "$" + "{LLC:-llc}\n";
+    script += "LD=" + "$" + "{LD:-wasm-ld}\n";
+    script += "LL_PATH=" + "$" + "{1:-" + ll_path + "}\n";
+    script += "WASM_PATH=" + "$" + "{2:-" + wasm_path + "}\n\n";
+    script += "echo \"  llc: " + "$" + "LL_PATH\"\n";
+    script += "$" + "LLC -march=wasm32 -filetype=obj \"$" + "LL_PATH\" -o \"$" + "{LL_PATH%.ll}.o\"\n";
+    script += "$" + "LD --no-entry --export-all \"$" + "{LL_PATH%.ll}.o\" -o \"$" + "WASM_PATH\"\n";
+    script += "echo \"  wrote: $WASM_PATH\"\n";
+    term script;
+};
+
+$(Normalized @ highest) {
+    let exports = Tag$("export");
+    when exports.Count$() > 0 {
+        EmitInfo$("gen_wasm: generating bridge and build script");
+
+        let js_code = gen_wasm_bridge(exports, "brief_bridge");
+        FileWrite$("ffi-out/wasm/bridge.mjs", js_code, true);
+
+        let build_script = gen_build_script("module.ll", "module.wasm");
+        FileWrite$("ffi-out/wasm/build.sh", build_script, true);
+
+        EmitInfo$("gen_wasm: ffi-out/wasm/bridge.mjs");
+        EmitInfo$("gen_wasm: ffi-out/wasm/build.sh");
+        EmitInfo$("gen_wasm: run 'bash ffi-out/wasm/build.sh <path.ll>' to compile");
+    };
+};
