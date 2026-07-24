@@ -16,6 +16,12 @@
 > Full Brief code (`defn`/`let`/`if`/`match`) is evaluated at compile time inside
 > `$(Stage)` blocks (Level C). Plugins can inject other plugins via `Stage$.Insert$`.
 > Diagnostics via `EmitInfo$`/`EmitWarning$`/`EmitError$`.
+>
+> **2026-07-25:** Int width narrowing by proof. The compiler tracks value ranges
+> through each function, proving the maximum bits each code path needs. Contract
+> preconditions like `[a < 1000]` constrain parameter ranges. The LLVM type is
+> derived from the proven width: i8/i16/i32/i64. On WASM, ≤32 bits → no BigInt.
+> See `docs/architecture/narrowing-by-proof.md`.
 
 ## Pipeline
 
