@@ -22,6 +22,12 @@
 > preconditions like `[a < 1000]` constrain parameter ranges. The LLVM type is
 > derived from the proven width: i8/i16/i32/i64. On WASM, ≤32 bits → no BigInt.
 > See `docs/architecture/narrowing-by-proof.md`.
+>
+> **2026-07-25:** Conditional FFI — `frgn?`/`frgn!`/`frgn?!` for optional,
+> fire-and-forget, and delivery-checked foreign calls. `fn?` expression for
+> compile-time existence checks. `term expr?` for conditional return chains.
+> `from #POSIX`/`#Win32`/`#WASI` hashword sources replace `from "c"`.
+> See `docs/architecture/conditional-ffi.md`.
 
 ## Pipeline
 
