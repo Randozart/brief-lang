@@ -197,6 +197,100 @@ fn evaluate_stage_block_inner(
     Ok(())
 }
 
+/// 2026-07-25: Find a regular (non-$) defn in the program by name.
+fn find_defn_in_program<'a>(program: &'a [TopLevel], name: &str) -> Option<&'a Definition> {
+    program.iter().find_map(|item| {
+        if let TopLevel::Definition(d) = item {
+            if d.name == name { Some(d) } else { None }
+        } else { None }
+    })
+}
+
+/// 2026-07-25: Find a regular (non-$) txn in the program by name.
+fn find_txn_in_program<'a>(program: &'a [TopLevel], name: &str) -> Option<&'a Transaction> {
+    program.iter().find_map(|item| {
+        if let TopLevel::Transaction(t) = item {
+            if t.name == name { Some(t) } else { None }
+        } else { None }
+    })
+}
+
+/// 2026-07-25: Execute a regular defn at compile time.
+fn execute_defn_at_compile_time(
+    defn: &Definition,
+    args: &[Expr],
+    program: &mut Vec<TopLevel>,
+    universe: &mut TypeUniverse,
+    stage: StageKind,
+    scope: &Scope,
+    sandbox: &mut Sandbox,
+    pm: &mut Option<&mut PluginManager>,
+) -> Result<NavValue, String> {
+    let mut fn_scope = Scope::new();
+    for (i, (param_name, _param_type)) in defn.parameters.iter().enumerate() {
+        let arg_expr = args.get(i).ok_or_else(|| {
+            format!("{}: missing argument {} (expected {})", defn.name, i, param_name)
+        })?;
+        let arg_val = eval_nav_chain(arg_expr, program, universe, stage, scope, sandbox, pm)?;
+        fn_scope.insert(param_name.clone(), arg_val);
+    }
+    for stmt in &defn.body {
+        if let Some(val) = evaluate_stage_stmt(stmt, program, universe,
+            stage, &mut fn_scope, sandbox, pm)?
+        {
+            return Ok(val);
+        }
+    }
+    Ok(NavValue::Void)
+}
+
+/// 2026-07-25: Execute a regular txn at compile time.
+fn execute_txn_at_compile_time(
+    txn: &Transaction,
+    args: &[Expr],
+    program: &mut Vec<TopLevel>,
+    universe: &mut TypeUniverse,
+    stage: StageKind,
+    scope: &Scope,
+    sandbox: &mut Sandbox,
+    pm: &mut Option<&mut PluginManager>,
+) -> Result<NavValue, String> {
+    let mut fn_scope = Scope::new();
+    for (i, (param_name, _param_type)) in txn.parameters.iter().enumerate() {
+        let arg_expr = args.get(i).ok_or_else(|| {
+            format!("{}: missing argument {}", txn.name, i)
+        })?;
+        let arg_val = eval_nav_chain(arg_expr, program, universe, stage, scope, sandbox, pm)?;
+        fn_scope.insert(param_name.clone(), arg_val);
+    }
+    let max_iter = 1000;
+    let mut term_val = NavValue::Void;
+    let mut term_hit = false;
+    for _iter in 0..max_iter {
+        let pre_result = eval_nav_chain(
+            &txn.contract.pre_condition, program, universe, stage, &fn_scope, sandbox, pm
+        )?;
+        if !nav_is_truthy(&pre_result) {
+            break;
+        }
+        term_hit = false;
+        for stmt in &txn.body {
+            match evaluate_stage_stmt(stmt, program, universe, stage, &mut fn_scope, sandbox, pm) {
+                Ok(Some(val)) => { term_hit = true; term_val = val; break; }
+                Ok(None) => {}
+                Err(e) => return Err(format!("{}: {}", txn.name, e)),
+            }
+        }
+        let post_result = eval_nav_chain(
+            &txn.contract.post_condition, program, universe, stage, &fn_scope, sandbox, pm
+        )?;
+        if nav_is_truthy(&post_result) {
+            return if term_hit { Ok(term_val) } else { Ok(NavValue::Void) };
+        }
+    }
+    Err(format!("{}: exceeded max iterations ({}) without convergence", txn.name, max_iter))
+}
+
 /// Execute a compile-time function ($defn or $txn) with the given arguments.
 /// 2026-07-23: Creates a fresh scope, binds parameters, executes the body,
 /// and returns the term value. For $txn, loops with pre/post condition checks.
@@ -290,12 +384,26 @@ pub fn eval_nav_chain(
             eval_nav_call(name, args, program, universe, stage, scope, sandbox, pm)
         }
         // 2026-07-23: Non-$ function call — look up compile-time fn_registry.
+        // 2026-07-25: Fall back to program search for regular defn/txn.
         Expr::Call(name, args, _) => {
             let fn_def = pm.as_ref()
                 .and_then(|p| p.fn_registry.get(name))
                 .cloned();
             if let Some(fn_def) = fn_def {
                 return eval_compile_time_fn(&fn_def, args, program, universe,
+                    stage, scope, sandbox, pm);
+            }
+            // 2026-07-25: Search program for a regular defn.
+            // Clone to avoid borrow conflict with mutable program param.
+            let found_defn = find_defn_in_program(program, name).cloned();
+            if let Some(defn) = found_defn {
+                return execute_defn_at_compile_time(&defn, args, program, universe,
+                    stage, scope, sandbox, pm);
+            }
+            // 2026-07-25: Search program for a regular txn.
+            let found_txn = find_txn_in_program(program, name).cloned();
+            if let Some(txn) = found_txn {
+                return execute_txn_at_compile_time(&txn, args, program, universe,
                     stage, scope, sandbox, pm);
             }
             Err(format!("undefined compile-time function '{}'", name))
