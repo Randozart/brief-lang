@@ -355,6 +355,11 @@ pub fn compile_source(file_path: &str, source: &str, opts: &BuildOptions) -> Res
     // Returns per-function binding → max_bits map used by LLVM codegen.
     let narrow_bindings = brief_compiler::optimizer::narrow_int::narrow_types(&items);
 
+    // ── frgn? guard safety check ────────────────────────────────────
+    // 2026-07-25: Verify every frgn?/frgn!/frgn?! call is guarded by fn?.
+    brief_compiler::analysis::frgn_guard::check_frgn_guards(&items)
+        .map_err(|e| format!("frgn guard error:\n{}", e))?;
+
     // ── Protocol round-trip verification ──────────────────────────────
     brief_compiler::protocol_verify::verify_roundtrips(&items, &universe)?;
 

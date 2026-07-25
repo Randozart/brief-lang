@@ -20,6 +20,7 @@ pub mod watchdog;
 pub mod allocation;
 pub mod meld_validation;
 pub mod frgn_dispatch;
+pub mod frgn_guard;
 pub mod slp_isomorphism;
 pub mod layout_optimizer;
 pub mod protocol_graph;
