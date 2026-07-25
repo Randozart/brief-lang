@@ -44,18 +44,10 @@ impl LlvmBackend {
         match expr {
             // ── Literals ─────────────────────────────────────────────
             Expr::Decimal(n) => {
-                writeln!(out, "{}{} = add i64 0, {}", indent, v, n).ok();
-                TypedRegister {
-                    name: v.to_string(),
-                    ty: Type::int(),
-                }
+                self.emit_int(out, v, *n, indent)
             }
             Expr::TaggedLiteral(n, _) => {
-                writeln!(out, "{}{} = add i64 0, {}", indent, v, n).ok();
-                TypedRegister {
-                    name: v.to_string(),
-                    ty: Type::int(),
-                }
+                self.emit_int(out, v, *n, indent)
             }
             Expr::Float(f) => {
                 // 2026-07-17: Emit as float (32-bit) matching the typechecker.
@@ -967,6 +959,13 @@ impl LlvmBackend {
         }
     }
 
+    /// 2026-07-25: Emit an integer constant. All intermediate values use i64 —
+    /// narrowing is applied at the `ret` instruction.
+    fn emit_int(&mut self, out: &mut String, v: &str, imm: i64, indent: &str) -> TypedRegister {
+        writeln!(out, "{}{} = add i64 0, {}", indent, v, imm).ok();
+        TypedRegister { name: v.to_string(), ty: Type::int() }
+    }
+
     /// Emit a string literal as stack-allocated bytes + GEP.
     /// 2026-07-14: Use alloca instead of global constant to avoid placement
     /// issues (globals must be at module level, not inside functions).
@@ -1683,13 +1682,10 @@ impl LlvmBackend {
 
     /// 2026-07-25: Return the integer type for binary operations based on
     /// the function's narrowed max width, or "i64" if no narrowing applies.
+    /// 2026-07-25: Always return i64 for integer binary operations.
+    /// Narrowing affects the final `ret` (via trunc in emit_stmt.rs) but
+    /// intermediate SSA values remain i64 to match actual operand widths.
     fn binop_int_type(&self) -> String {
-        if let Some(&bits) = self.fun.narrowed.get("ret") {
-            if bits <= 32 {
-                let bits: u64 = if bits <= 8 { 8 } else if bits <= 16 { 16 } else { 32 };
-                return format!("i{}", bits);
-            }
-        }
         "i64".to_string()
     }
 

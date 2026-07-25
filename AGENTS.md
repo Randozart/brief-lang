@@ -801,9 +801,13 @@ it. The more LLVM knows, the more aggressively it can optimize.
     The parser accepts `let (name1, name2, ...) = expr;` for tuple return values.
     `_` may be used as a placeholder: `let (_, value) = result;`.
 
-20. **`Int` return type narrowing** — `defn f() -> Int` may emit LLVM `i8` for small
-    constants. This is intended — the type checker uses `Int` uniformly but the
-    LLVM backend narrows to the minimum required width.
+20. **`Int` narrowing is protocol-based** — `defn f() -> Int` may emit LLVM
+    `i8` for small constants. This is intended — the narrowing pass proves
+    value ranges through contracts, then propagates the narrowed width through
+    ALL SSA values consistently (`add i8 0, 42` rather than `add i64 0, 42`
+    with `trunc`). Fixed-width types (`Int8`/`Int16`/`Int32`/`Int64`) cap the
+    floor via `bits <~ N` metadata so `Int64` never narrows below 64 bits.
+    Narrowing operates on `#Int`/`#UInt` protocol membership, not type names.
 
 21. **Import resolution uses file-relative paths** — `import "foo.bv"` resolves
     relative to the **file's own directory**, not the parent directory.

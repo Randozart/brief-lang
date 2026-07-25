@@ -352,24 +352,6 @@ impl LlvmBackend {
                 }
             }
         }
-        // 2026-07-25: Narrowed Int check from value-range proof.
-        // If the narrowing pass proved this function's Int chain fits in
-        // ≤32 bits, emit the corresponding LLVM integer type directly
-        // (i8/i16/i32). On WASM, i32 avoids BigInt entirely.
-        if let Type::Custom(name) = ty {
-            if (name == "Int" || name == "UInt") && !self.fun.narrowed.is_empty() {
-                let max_bits = self.fun.narrowed.get("ret").copied()
-                    .or_else(|| self.fun.narrowed.values().max().copied())
-                    .unwrap_or(64);
-                if max_bits <= 32 {
-                    let bits: u64 = if max_bits <= 8 { 8 }
-                        else if max_bits <= 16 { 16 }
-                        else { 32 };
-                    return format!("i{}", bits);
-                }
-            }
-        }
-
         // 2026-07-25: #Int protocol default width from --int-bits.
         // Narrowing evidence (contracts) has priority — if we reach here,
         // no narrowing was proven. Fall back to target-configured default.
@@ -377,7 +359,27 @@ impl LlvmBackend {
         // requiring contract annotations. On native x86_64, default 64 keeps i64.
         if let Type::Custom(name) = ty {
             if name == "Int" || name == "UInt" {
-                return format!("i{}", self.ctx.int_bits);
+                let default_bits = self.ctx.int_bits;
+                // 2026-07-25: Respect bits <~ N floor (Int64 → never below 64).
+                let type_floor = self.ctx.type_universe.as_ref()
+                    .and_then(|u| ty.universe_key().and_then(|k| u.get(k)))
+                    .and_then(|rt| rt.properties.get("bits"))
+                    .and_then(|pv| if let crate::ast::PropertyValue::Int(n) = pv { Some(*n as u64) } else { None })
+                    .unwrap_or(0);
+                // 2026-07-25: Protocol-based narrowing from value-range proof.
+                // For types without bits <~ (plain Int), use narrowed width directly.
+                // For types with bits <~ N (Int64), cap floor at N.
+                let bits = if !self.fun.narrowed.is_empty() {
+                    let narrowed = self.fun.narrowed.get("ret").copied()
+                        .or_else(|| self.fun.narrowed.values().max().copied())
+                        .unwrap_or(default_bits);
+                    narrowed.max(type_floor)
+                } else {
+                    default_bits.max(type_floor)
+                };
+                let llvm_bits: u64 = if bits <= 8 { 8 } else if bits <= 16 { 16 }
+                    else if bits <= 32 { 32 } else { 64 };
+                return format!("i{}", llvm_bits);
             }
         }
 
