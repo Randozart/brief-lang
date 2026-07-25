@@ -15,7 +15,7 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use brief_compiler::backend::llvm::LlvmBackend;
-use brief_compiler::ast::{StageKind, TopLevel};
+use brief_compiler::ast::{Expr, StageKind, TopLevel};
 use brief_compiler::lexer::Token;
 use brief_compiler::plugin::loader::{discover_system_plugins, extract_inline_stage_blocks};
 use brief_compiler::plugin::PluginManager;
@@ -227,6 +227,45 @@ fn evaluate_pending_comptime(
     Ok(())
 }
 
+/// 2026-07-25: Resolve comptime variable references in const initializers and
+/// trg instance expressions. Replaces Expr::Identifier references to $let/$const
+/// names with their evaluated NavValue literals before type checking / codegen.
+fn resolve_comptime_refs(
+    pm: &PluginManager,
+    program: &mut Vec<TopLevel>,
+) -> Result<(), String> {
+    for item in program.iter_mut() {
+        match item {
+            TopLevel::Constant(c) => {
+                if let Expr::Identifier(name) = &c.expr {
+                    if let Some((val, _)) = pm.comptime_vars.get(name) {
+                        c.expr = nav_value_to_expr(val)?;
+                    }
+                }
+            }
+            TopLevel::Trigger(trg) => {
+                if let Expr::Identifier(name) = &trg.instance {
+                    if let Some((val, _)) = pm.comptime_vars.get(name) {
+                        trg.instance = nav_value_to_expr(val)?;
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+    Ok(())
+}
+
+/// 2026-07-25: Convert a NavValue to its corresponding Expr literal.
+fn nav_value_to_expr(val: &brief_compiler::macros::eval::NavValue) -> Result<Expr, String> {
+    match val {
+        brief_compiler::macros::eval::NavValue::Int(n) => Ok(Expr::Decimal(*n)),
+        brief_compiler::macros::eval::NavValue::Bool(b) => Ok(Expr::Bool(*b)),
+        brief_compiler::macros::eval::NavValue::Str(s) => Ok(Expr::Quoted(s.as_bytes().to_vec())),
+        _ => Err(format!("cannot convert {:?} to Expr literal", val)),
+    }
+}
+
 pub fn compile_source(file_path: &str, source: &str, opts: &BuildOptions) -> Result<(), String> {
     // ── Macro lockfile handling ────────────────────────────────────
     // 2026-07-23: If --update-lockfile, regenerate macro-lock.toml from
@@ -315,6 +354,9 @@ pub fn compile_source(file_path: &str, source: &str, opts: &BuildOptions) -> Res
     emit_beast_snapshot(file_path, BeastStage::Resolve, BeastPosition::After, &items, &TypeUniverse::new(), opts)?;
 
     // ── Type check ────────────────────────────────────────────────────
+    // 2026-07-25: Resolve comptime var references in const initializers
+    // and trg instance expressions before type checking.
+    resolve_comptime_refs(&pm, &mut items)?;
     let mut universe = TypeUniverse::new();
     check_types(&items, &universe)?;
 
