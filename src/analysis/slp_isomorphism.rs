@@ -553,13 +553,13 @@ mod tests {
 
     #[test]
     fn test_statement_isomorphic_let() {
-        let a = Statement::Let {
+        let a = Statement::Let { names: vec![], 
             name: "dx01".to_string(),
             ty: Some(Type::float()),
             expr: Some(sub_expr(ident("bx0"), ident("bx1"))),
             modifiers: vec![],
         };
-        let b = Statement::Let {
+        let b = Statement::Let { names: vec![], 
             name: "dx02".to_string(),
             ty: Some(Type::float()),
             expr: Some(sub_expr(ident("bx0"), ident("bx2"))),
@@ -573,19 +573,19 @@ mod tests {
     fn test_nbody_distance_pattern() {
         // Simulate nbody's dx01/dy01 pattern
         let body = vec![
-            Statement::Let {
+            Statement::Let { names: vec![], 
                 name: "dx01".to_string(),
                 ty: Some(Type::float()),
                 expr: Some(sub_expr(ident("bx0"), ident("bx1"))),
                 modifiers: vec![],
             },
-            Statement::Let {
+            Statement::Let { names: vec![], 
                 name: "dy01".to_string(),
                 ty: Some(Type::float()),
                 expr: Some(sub_expr(ident("by0"), ident("by1"))),
                 modifiers: vec![],
             },
-            Statement::Let {
+            Statement::Let { names: vec![], 
                 name: "dz01".to_string(),
                 ty: Some(Type::float()),
                 expr: Some(sub_expr(ident("bz0"), ident("bz1"))),

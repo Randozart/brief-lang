@@ -330,7 +330,7 @@ mod tests {
     fn test_let_is_skipped() {
         let mut program = vec![];
         let mut universe = TypeUniverse::new();
-        let stmt = Statement::Let {
+        let stmt = Statement::Let { names: vec![], 
             name: "x".to_string(),
             ty: None,
             expr: Some(Expr::Decimal(42)),

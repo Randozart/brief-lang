@@ -499,7 +499,7 @@ fn vars_match(a: &Expr, b: &Expr) -> bool {
 fn simplify_stmt(stmt: &Statement) -> Statement {
     match stmt {
         Statement::Assign(lhs, expr) => Statement::Assign(lhs.clone(), simplify_expr(expr)),
-        Statement::Let { name, expr, .. } => Statement::Let {
+        Statement::Let { name, expr, .. } => Statement::Let { names: vec![],  
             name: name.clone(),
             ty: None,
             expr: expr.as_ref().map(|e| simplify_expr(e)),

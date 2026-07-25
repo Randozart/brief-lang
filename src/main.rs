@@ -35,6 +35,7 @@ fn main() {
         "bounty" => run_bounty(&args[2..]),
         "register" => run_register(&args[2..]),
         "install-deps" => deps::install_all(),
+        "install-highlighter" => run_install_highlighter(&args[2..]),
         "help" | "--help" | "-h" => { print_usage(&args[0]); Ok(()) }
         _ => {
             // Default: compile the file
@@ -97,6 +98,7 @@ fn print_usage(program: &str) {
     eprintln!("  {} bounty <file.bv>              Package a .bounty for install-time compilation", name);
     eprintln!("  {} init <name>                   Create a new project", name);
     eprintln!("  {} install-deps                 Download optional deps (z3, dwarfdump)", name);
+    eprintln!("  {} install-highlighter [--vsix-only]  Build & install the syntax highlighter .vsix for VS Code / VSCodium", name);
     eprintln!("  {} help                          Show this help", name);
 }
 
@@ -629,5 +631,99 @@ fn run_init(name: Option<&str>) -> Result<(), String> {
     std::fs::write(dir.join("src").join("main.bv"), main_bv)
         .map_err(|e| format!("cannot write main.bv: {}", e))?;
     println!("Created project '{}'", name);
+    Ok(())
+}
+
+/// `brief install-highlighter [--vsix-only]`
+/// 2026-07-25: Build & install the VS Code / VSCodium syntax highlighter .vsix.
+/// Detects the highlighter directory relative to the executable or CWD.
+/// Detects `codium` or `code` CLI for automatic installation.
+/// --vsix-only: just build the .vsix, don't install.
+fn run_install_highlighter(args: &[String]) -> Result<(), String> {
+    let mut vsix_only = false;
+    for arg in args {
+        if arg == "--vsix-only" {
+            vsix_only = true;
+        }
+    }
+
+    // Find the syntax-highlighter directory.
+    // Strategy: check executable-relative first, then CWD, then parent of CWD.
+    let hl_dir = std::env::current_exe()
+        .ok()
+        .and_then(|exe| {
+            let mut p = exe.clone();
+            p.pop(); // target/release/ or target/debug/
+            p.pop(); // target/
+            p.pop(); // project root
+            p.push("syntax-highlighter");
+            if p.join("package.json").exists() { Some(p) } else { None }
+        })
+        .or_else(|| {
+            let cwd = std::env::current_dir().ok()?;
+            let candidates = vec![
+                cwd.join("syntax-highlighter"),
+                cwd.clone(),
+                cwd.parent()?.join("syntax-highlighter"),
+            ];
+            candidates.into_iter().find(|p| p.join("package.json").exists())
+        })
+        .ok_or_else(|| "cannot find syntax-highlighter/ directory (looked relative to executable and CWD)".to_string())?;
+
+    eprintln!("Building highlighter .vsix in: {}", hl_dir.display());
+
+    // Run `npx vsce package` (or plain `vsce` if on PATH)
+    let vsce_cmd = if std::process::Command::new("vsce").arg("--version").output().is_ok() {
+        "vsce"
+    } else {
+        "npx"
+    };
+    let mut cmd = std::process::Command::new(vsce_cmd);
+    if vsce_cmd == "npx" {
+        cmd.args(["--yes", "vsce", "package"]);
+    } else {
+        cmd.arg("package");
+    }
+    cmd.current_dir(&hl_dir);
+
+    let status = cmd.status()
+        .map_err(|e| format!("failed to run {}: {}", vsce_cmd, e))?;
+    if !status.success() {
+        return Err("vsce package failed — see output above".into());
+    }
+
+    // Find the generated .vsix
+    let vsix_path = std::fs::read_dir(&hl_dir)
+        .map_err(|e| format!("cannot read highlighter dir: {}", e))?
+        .filter_map(|e| e.ok())
+        .find(|e| e.path().extension().map(|x| x == "vsix").unwrap_or(false))
+        .map(|e| e.path())
+        .ok_or_else(|| "no .vsix file found after build".to_string())?;
+
+    eprintln!("Built: {}", vsix_path.display());
+
+    if vsix_only {
+        return Ok(());
+    }
+
+    // Detect editor CLI: prefer codium over code
+    let editor = ["codium", "code", "code-insiders"].into_iter()
+        .find(|bin| std::process::Command::new(bin).arg("--version").output().is_ok())
+        .ok_or_else(|| {
+            "no editor CLI found (tried: codium, code, code-insiders). "
+                .to_string() + "Install the .vsix manually or use --vsix-only"
+        })?;
+
+    let status = std::process::Command::new(&editor)
+        .args(["--install-extension", &vsix_path.to_string_lossy()])
+        .status()
+        .map_err(|e| format!("failed to run {}: {}", editor, e))?;
+
+    if status.success() {
+        eprintln!("Installed highlighter via {} — restart the editor to apply.", editor);
+    } else {
+        return Err(format!("{} --install-extension failed", editor));
+    }
+
     Ok(())
 }

@@ -3,7 +3,7 @@
 // Flat code: each function is max 2 levels of nesting.
 
 use super::helpers::Parser;
-use crate::ast::Type;
+use crate::ast::{Dimension, Type};
 use crate::errors::SyntaxError;
 use crate::lexer::Token;
 
@@ -32,7 +32,9 @@ impl<'a> Parser<'a> {
                         // Optional protocol variant: #String<utf8>, #Float<ieee754>
                         if self.eat(&Token::Lt) {
                             let variant = self.expect_identifier()?;
-                            self.expect(Token::Gt)?;
+                            if !self.eat_type_close() {
+                                return self.error_at_current("expected '>' or '>>' in hashword variant");
+                            }
                             return Ok(Type::HashWordVariant(name, variant));
                         }
                         // 2026-07-20: Bare hashwords resolve to their default variant.
@@ -67,6 +69,15 @@ impl<'a> Parser<'a> {
                 full = format!("{}.{}", full, next);
             }
             return Ok(Type::Custom(full));
+        }
+        // 2026-07-25: Array syntax: Int[1024] → Type::Vector
+        if self.eat(&Token::LBracket) {
+            let size = match self.peek() {
+                Some(&Token::Integer(n)) => { self.pos += 1; n as usize }
+                _ => { return self.error_at_current("expected array size (integer)"); }
+            };
+            self.expect(Token::RBracket)?;
+            return Ok(Type::Vector(Box::new(base.1), vec![Dimension::Anonymous(size)]));
         }
         Ok(base.1)
     }
@@ -104,7 +115,9 @@ impl<'a> Parser<'a> {
                     }
                     _ => return self.error_at_current("expected bit count (integer) in Bits<N>"),
                 };
-                self.expect(Token::Gt)?;
+                if !self.eat_type_close() {
+                    return self.error_at_current("expected '>' or '>>' in Bits<N>");
+                }
                 return Ok(Type::from_bits(bits));
             }
             return Ok(Type::Bits(0)); // flexible-width Bits
@@ -114,7 +127,9 @@ impl<'a> Parser<'a> {
         if name == "Ptr" || name == "Ptr!" {
             if self.eat(&Token::Lt) {
                 let inner = self.parse_type()?;
-                self.expect(Token::Gt)?;
+                if !self.eat_type_close() {
+                    return self.error_at_current("expected '>' or '>>' in Ptr<T>");
+                }
                 return Ok(Type::ptr(inner));
             }
             return Ok(Type::ptr(Type::bits(1)));
@@ -129,7 +144,9 @@ impl<'a> Parser<'a> {
                     break;
                 }
             }
-            self.expect(Token::Gt)?;
+            if !self.eat_type_close() {
+                return self.error_at_current("expected '>' or '>>' to close generic type");
+            }
             return Ok(Type::Applied(name.to_string(), args));
         }
 
@@ -141,6 +158,16 @@ impl<'a> Parser<'a> {
                 full = format!("{}.{}", full, next);
             }
             return Ok(Type::Custom(full));
+        }
+
+        // 2026-07-25: Array syntax for custom types: MyStruct[1024]
+        if self.eat(&Token::LBracket) {
+            let size = match self.peek() {
+                Some(&Token::Integer(n)) => { self.pos += 1; n as usize }
+                _ => { return self.error_at_current("expected array size (integer)"); }
+            };
+            self.expect(Token::RBracket)?;
+            return Ok(Type::Vector(Box::new(Type::Custom(name.to_string())), vec![Dimension::Anonymous(size)]));
         }
 
         Ok(Type::Custom(name.to_string()))

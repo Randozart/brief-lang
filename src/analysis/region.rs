@@ -1528,6 +1528,7 @@ fn substitute_stmt(stmt: &Statement, old_var: &str, new_expr: &Expr) -> Statemen
         }
         Statement::Let { name, expr, .. } => {
             Statement::Let {
+                names: vec![],
                 name: name.clone(),
                 ty: None,
                 expr: expr.as_ref().map(|e| substitute_expr(e, old_var, new_expr)),

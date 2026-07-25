@@ -31,6 +31,9 @@ pub struct TypecheckContext<'a> {
     /// Populated from AST TypeDef bodies in check_program.
     /// Key: type_name → Vec of Parse OperatorDefs.
     parse_ops: HashMap<String, Vec<crate::ast::top::OperatorDef>>,
+    /// 2026-07-25: Function return types for user-defined functions.
+    /// Populated by check_program before type-checking bodies.
+    fn_return_types: HashMap<String, Type>,
 }
 
 impl<'a> TypecheckContext<'a> {
@@ -40,6 +43,7 @@ impl<'a> TypecheckContext<'a> {
             state_keys: std::collections::HashSet::new(),
             universe,
             parse_ops: HashMap::new(),
+            fn_return_types: HashMap::new(),
         }
     }
 
@@ -351,10 +355,15 @@ fn infer_call(name: &str, args: &[Expr], ctx: &mut TypecheckContext) -> Result<T
         return infer_intrinsic_call(&sig, args, ctx);
     }
 
-    // User function call
+    // User function call — look up return type
     for arg in args {
         infer_type_only(arg, ctx)?;
     }
+    // 2026-07-25: Look up user-defined function return types.
+    if let Some(ty) = ctx.fn_return_types.get(name) {
+        return Ok(ty.clone());
+    }
+    // 2026-07-25: Fallback — bind all destructured names to Int.
     Ok(Type::int())
 }
 
@@ -537,11 +546,22 @@ fn infer_match(
 /// Infer the type of a statement.
 pub fn infer_statement(stmt: &Statement, ctx: &mut TypecheckContext) -> Result<(), TypeError> {
     match stmt {
-        Statement::Let { name, ty, expr, .. } => {
-            let inferred = if let Some(expr) = expr {
-                infer_type_only(expr, ctx)?
-            } else {
-                Type::int()
+        Statement::Let { name, names, ty, expr, .. } => {
+            // 2026-07-25: Tuple destructuring or single let.
+            if names.len() > 1 {
+                return check_let_destructure(names, expr, ctx);
+            }
+            if names.len() == 1 && names[0] == "_" {
+                // 2026-07-25: Discard binding — evaluate expr but don't bind.
+                if let Some(e) = expr {
+                    infer_type_only(e, ctx)?;
+                }
+                return Ok(());
+            }
+            // 2026-07-25: Single-name let: bind name or handle discard (_).
+            let inferred = match expr {
+                Some(e) => infer_type_only(e, ctx)?,
+                None => Type::int(),
             };
             let resolved = ty.clone().unwrap_or(inferred);
             ctx.bindings.insert(name.clone(), resolved);
@@ -627,6 +647,42 @@ pub fn infer_statement(stmt: &Statement, ctx: &mut TypecheckContext) -> Result<(
     }
 }
 
+/// 2026-07-25: Type-check tuple destructuring: let (a, b) = expr;
+/// Extracts each element type from the tuple and binds the names.
+fn check_let_destructure(
+    names: &[String],
+    expr: &Option<Expr>,
+    ctx: &mut TypecheckContext,
+) -> Result<(), TypeError> {
+    // 2026-07-25: Always bind destructured names — type is Int as fallback.
+    let elem_types = match expr {
+        Some(e) => match infer_type_only(e, ctx) {
+            Ok(Type::Tuple(types)) => types,
+            _ => vec![Type::int(); names.len()],
+        },
+        None => vec![Type::int(); names.len()],
+    };
+    let count = elem_types.len().min(names.len());
+    for i in 0..count {
+        ctx.bindings.insert(names[i].clone(), elem_types[i].clone());
+    }
+    Ok(())
+}
+
+/// 2026-07-25: Convert OutputType variants to Type.
+fn output_type_to_type(ot: &OutputType) -> Type {
+    match ot {
+        OutputType::Single(ty) => ty.clone(),
+        OutputType::Tuple(types) => {
+            Type::Tuple(types.iter().map(output_type_to_type).collect())
+        }
+        OutputType::Union(types) => {
+            Type::Union(types.iter().map(output_type_to_type).collect())
+        }
+        _ => Type::int(),
+    }
+}
+
 /// Type-check a complete program.
 pub fn check_program(items: &[TopLevel], universe: &TypeUniverse) -> Result<(), Vec<TypeError>> {
     // 2026-07-14: Pre-collect state variable bindings from top-level `let`
@@ -650,8 +706,34 @@ pub fn check_program(items: &[TopLevel], universe: &TypeUniverse) -> Result<(), 
         .collect();
 
     let mut errors = Vec::new();
+
+    // 2026-07-25: Pre-collect function return types for call inference.
+    let fn_return_types: HashMap<String, Type> = items.iter().filter_map(|item| {
+        // 2026-07-25: Extract return type from a Definition or exported Definition.
+        fn defn_return_type(d: &Definition) -> Option<Type> {
+            d.output_type.as_ref().and_then(|ot| match ot {
+                OutputType::Single(Type::Tuple(_)) => Some(ot.all_types().into_iter().next().unwrap_or(Type::int())),
+                OutputType::Single(ty) => Some(ty.clone()),
+                OutputType::Tuple(types) => {
+                    Some(Type::Tuple(types.iter().map(|t| output_type_to_type(t)).collect()))
+                }
+                _ => None,
+            })
+        }
+        match item {
+            TopLevel::Definition(d) => {
+                defn_return_type(d).map(|ty| (d.name.clone(), ty))
+            }
+            TopLevel::Export(e) => match &*e.inner {
+                TopLevel::Definition(d) => defn_return_type(d).map(|ty| (d.name.clone(), ty)),
+                _ => None,
+            },
+            _ => None,
+        }
+    }).collect();
+
     for item in items {
-        if let Err(e) = check_top_level(item, universe, &state_bindings) {
+        if let Err(e) = check_top_level(item, universe, &state_bindings, &fn_return_types) {
             errors.push(e);
         }
     }
@@ -667,12 +749,17 @@ fn check_top_level(
     item: &TopLevel,
     universe: &TypeUniverse,
     state_bindings: &HashMap<String, Type>,
+    fn_return_types: &HashMap<String, Type>,
 ) -> Result<(), TypeError> {
     let mut ctx = TypecheckContext::new(universe);
     // 2026-07-14: Inject state variable bindings so transactions/defns can reference them.
     for (name, ty) in state_bindings {
         ctx.bindings.insert(name.clone(), ty.clone());
         ctx.state_keys.insert(name.clone());
+    }
+    // 2026-07-25: Inject function return types for call inference.
+    for (name, ty) in fn_return_types {
+        ctx.fn_return_types.insert(name.clone(), ty.clone());
     }
     // 2026-07-18: Txn parameters are also mutable state locations (they hold
     // state field values within the txn body).
@@ -691,6 +778,8 @@ fn check_top_level(
             }
             Ok(())
         }
+        // 2026-07-25: Unwrap exports so exported defns are type-checked.
+        TopLevel::Export(e) => check_top_level(&e.inner, universe, state_bindings, fn_return_types),
         TopLevel::Transaction(txn) => {
             for (name, ty) in &txn.parameters {
                 ctx.bindings.insert(name.clone(), ty.clone());

@@ -1,0 +1,6 @@
+// 2026-07-25: Tamer FFI — system call wrappers and process spawning.
+// All I/O goes through SysCall# and SpawnWithOutput# — no custom C runtime.
+
+import "std/process";
+import "std/syscall";
+import "std/result";

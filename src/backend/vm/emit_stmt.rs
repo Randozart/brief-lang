@@ -8,7 +8,7 @@ use super::VmBackend;
 impl VmBackend {
     pub(crate) fn emit_stmt(&mut self, stmt: &Statement) {
         match stmt {
-            Statement::Let { name, ty: _, expr, modifiers: _ } => {
+            Statement::Let { name, ty: _, expr, modifiers: _, .. } => {
                 // Allocate a local slot for the variable
                 let slot = self.next_local_slot;
                 self.next_local_slot += 1;

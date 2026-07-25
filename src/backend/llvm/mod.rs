@@ -919,6 +919,21 @@ impl LlvmBackend {
                 return;
             }
         }
+        // 2026-07-25: Fixed-size array: Int[1024] → [1024 x i64].
+        // Emitted as a single LLVM array field. Index accesses become GEPs.
+        if let Type::Vector(inner, dims) = ty {
+            if dims.len() == 1 {
+                if let crate::ast::Dimension::Anonymous(n) = dims[0] {
+                    let inner_llvm = if **inner == Type::float64() { "double".to_string() }
+                        else if **inner == Type::float() { "float".to_string() }
+                        else { "i64".to_string() };
+                    let arr_ty = format!("[{} x {}]", n, inner_llvm);
+                    self.ctx.field_types.push(arr_ty);
+                    self.ctx.field_brief_types.push(ty.clone());
+                    return;
+                }
+            }
+        }
         // 2026-07-21: Float/float64 fields use native LLVM types in %State.
         // This eliminates trunc+bitcast overhead (7 insns per access) and lets
         // LLVM's SROA promote float phis to SSA registers directly. The phi

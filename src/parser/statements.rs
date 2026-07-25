@@ -56,7 +56,21 @@ impl<'a> Parser<'a> {
     /// let name: Type = expr;
     pub fn parse_let_statement(&mut self) -> Result<Statement, SyntaxError> {
         self.pos += 1;
-        let name = self.expect_identifier()?;
+        // 2026-07-25: Tuple destructuring: let (a, b) = expr;
+        // Also: let _ = expr; (discard binding)
+        let names = if self.eat(&Token::LParen) {
+            let mut names = Vec::new();
+            while !self.check(&Token::RParen) {
+                if !names.is_empty() {
+                    self.expect(Token::Comma)?;
+                }
+                names.push(self.expect_identifier()?);
+            }
+            self.expect(Token::RParen)?;
+            names
+        } else {
+            vec![self.expect_identifier()?]
+        };
         let ty = self.parse_optional_type()?;
         let expr = if self.eat(&Token::Eq) {
             Some(self.parse_expression()?)
@@ -64,8 +78,10 @@ impl<'a> Parser<'a> {
             None
         };
         self.expect(Token::Semicolon)?;
+        let first = names.first().cloned().unwrap_or_default();
         Ok(Statement::Let {
-            name,
+            name: first,
+            names,
             ty,
             expr,
             modifiers: Vec::new(),

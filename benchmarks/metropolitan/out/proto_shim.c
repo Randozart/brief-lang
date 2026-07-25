@@ -18,8 +18,8 @@ int main(int argc, char** argv) {
     (void)argc;
     char* slash = strrchr(argv[0], '/');
     char so_path[4096];
-    if (slash) { snprintf(so_path, sizeof(so_path), "%.*s/bench_add.so", (int)(slash - argv[0]), argv[0]); }
-    else { snprintf(so_path, sizeof(so_path), "./bench_add.so"); }
+    if (slash) { snprintf(so_path, sizeof(so_path), "%.*s/export_add.so", (int)(slash - argv[0]), argv[0]); }
+    else { snprintf(so_path, sizeof(so_path), "./export_add.so"); }
 
     lib_handle = dlopen(so_path, RTLD_LAZY | RTLD_LOCAL);
     if (!lib_handle) { fprintf(stderr, "dlopen: %s\n", dlerror()); return 1; }

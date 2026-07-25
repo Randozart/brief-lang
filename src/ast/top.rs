@@ -185,6 +185,7 @@ pub enum Statement {
     /// let name: Type = expr;
     Let {
         name: String,
+        names: Vec<String>,
         ty: Option<Type>,
         expr: Option<Expr>,
         modifiers: Vec<Annotation>,
@@ -272,8 +273,8 @@ impl PartialEq for Statement {
         match (self, other) {
             (Statement::InlineDefn(_), _) | (_, Statement::InlineDefn(_)) => false,
             (Statement::InlineTxn(_), _) | (_, Statement::InlineTxn(_)) => false,
-            (Statement::Let { name: n1, ty: t1, expr: e1, modifiers: m1 },
-             Statement::Let { name: n2, ty: t2, expr: e2, modifiers: m2 }) =>
+            (Statement::Let { name: n1, ty: t1, expr: e1, modifiers: m1, .. },
+             Statement::Let { name: n2, ty: t2, expr: e2, modifiers: m2, .. }) =>
                 n1 == n2 && t1 == t2 && e1 == e2 && m1 == m2,
             (Statement::Assign(l1, r1), Statement::Assign(l2, r2)) => l1 == l2 && r1 == r2,
             (Statement::Term(e1), Statement::Term(e2)) => e1 == e2,

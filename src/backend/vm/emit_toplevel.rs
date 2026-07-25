@@ -7,13 +7,16 @@ use super::VmBackend;
 
 impl VmBackend {
     pub(crate) fn emit_toplevel(&mut self, item: &TopLevel) {
-        match item {
+        // 2026-07-25: Unwrap export wrappers to compile exported defns.
+        let inner = match item {
+            TopLevel::Export(e) => &e.inner,
+            other => other,
+        };
+        match inner {
             TopLevel::Definition(d) => self.emit_definition(d),
             TopLevel::Transaction(t) => self.emit_transaction(t),
-            // Type declarations become no-ops (they define types, not code)
             TopLevel::TypeDef(_) => {}
             TopLevel::Constant(c) => self.emit_constant(c),
-            // Other items are skipped for MVP
             _ => {}
         }
     }

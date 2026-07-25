@@ -486,7 +486,7 @@ mod tests {
     }
 
     fn let_stmt(name: &str, expr: Expr) -> Statement {
-        Statement::Let {
+        Statement::Let { names: vec![], 
             name: name.to_string(),
             ty: Some(Type::float()),
             expr: Some(expr),

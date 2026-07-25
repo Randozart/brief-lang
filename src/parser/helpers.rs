@@ -15,6 +15,10 @@ pub struct Parser<'a> {
     pub pending_types: std::vec::IntoIter<TopLevel>,
     /// 2026-07-24: Pending doc comment to attach to the next definition.
     pub pending_doc: Option<String>,
+    /// 2026-07-25: Pending `>` split from `>>` in nested generics.
+    /// When the type parser consumes `>>` as a single `>`, it sets this flag
+    /// so the next `expect(Gt)` or `eat(Gt)` uses the pending token.
+    pub pending_gt: bool,
 }
 
 impl<'a> Parser<'a> {
@@ -26,6 +30,7 @@ impl<'a> Parser<'a> {
             strict_mode: false,
             pending_types: Vec::new().into_iter(),
             pending_doc: None,
+            pending_gt: false,
         }
     }
 
@@ -53,6 +58,11 @@ impl<'a> Parser<'a> {
 
     /// Expect a specific token, consume it, or return an error.
     pub fn expect(&mut self, kind: Token) -> Result<(), SyntaxError> {
+        // 2026-07-25: Check for pending `>` from `>>` splitting in nested generics.
+        if matches!(kind, Token::Gt) && self.pending_gt {
+            self.pending_gt = false;
+            return Ok(());
+        }
         let (cur, span) = self
             .peek_with_span()
             .ok_or_else(|| SyntaxError::UnexpectedEOF {
@@ -162,12 +172,31 @@ impl<'a> Parser<'a> {
 
     /// Consume a token if it matches, without error.
     pub fn eat(&mut self, kind: &Token) -> bool {
+        // 2026-07-25: Check for pending `>` from `>>` splitting in nested generics.
+        if matches!(kind, Token::Gt) && self.pending_gt {
+            self.pending_gt = false;
+            return true;
+        }
         if self.check(kind) {
             self.pos += 1;
             true
         } else {
             false
         }
+    }
+
+    /// 2026-07-25: Consume `>` or `>>` as a type close bracket.
+    /// `>>` in nested generics like `Foo<Bar<Int>>` is lexed as a single Shr token.
+    /// This method consumes it as one `>` and sets pending_gt for the second.
+    pub fn eat_type_close(&mut self) -> bool {
+        if self.eat(&Token::Gt) {
+            return true;
+        }
+        if self.eat(&Token::Shr) {
+            self.pending_gt = true;
+            return true;
+        }
+        false
     }
 
     /// Create a Span from a logos byte range.
@@ -259,6 +288,7 @@ impl<'a> Parser<'a> {
             Token::Foreach => "foreach".into(), Token::Pvt => "pvt".into(),
             Token::Sed => "sed".into(), Token::Sync => "sync".into(),
             Token::Some => "some".into(), Token::None => "none".into(),
+            Token::Underscore => "_".into(),
             Token::When => "when".into(), Token::Cycles => "cycles".into(),
             Token::Cyc => "cyc".into(), Token::Ms => "ms".into(),
             Token::Seconds => "seconds".into(), Token::Minute => "minute".into(),

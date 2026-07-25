@@ -336,12 +336,12 @@ mod tests {
         let alloc_expr = Expr::Call("Alloc#".into(), vec![Expr::Decimal(alloc_size)], None);
         let body = if let Some(var) = term_var {
             vec![
-                Statement::Let { name: "buf".into(), ty: None, expr: Some(alloc_expr), modifiers: vec![] },
+                Statement::Let { names: vec![],  name: "buf".into(), ty: None, expr: Some(alloc_expr), modifiers: vec![] },
                 Statement::Term(Some(Expr::Identifier(var.into()))),
             ]
         } else {
             vec![
-                Statement::Let { name: "buf".into(), ty: None, expr: Some(alloc_expr), modifiers: vec![] },
+                Statement::Let { names: vec![],  name: "buf".into(), ty: None, expr: Some(alloc_expr), modifiers: vec![] },
                 Statement::Term(None),
             ]
         };

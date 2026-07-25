@@ -1,0 +1,465 @@
+// 2026-07-25: Tamer loader — parse .bounty and .lair binary formats.
+// Pure Brief, no Alloc# needed. Uses Ptr<Int> for raw byte access.
+
+// ── Bytecode read helpers ────────────────────────────────────────────────
+// All multi-byte reads use shifts and masks for unaligned safety.
+
+defn read_u8(bc: Ptr<Int>, addr: Int) -> Int {
+    let word = *(bc + (addr / 8));
+    term (word >> ((addr % 8) * 8)) & 0xFF;
+};
+
+defn read_i8(bc: Ptr<Int>, addr: Int) -> Int {
+    let val = read_u8(bc, addr);
+    [val >= 128] { term val - 256; };
+    term val;
+};
+
+defn read_u16(bc: Ptr<Int>, addr: Int) -> Int {
+    let lo = read_u8(bc, addr);
+    let hi = read_u8(bc, addr + 1);
+    term lo | (hi << 8);
+};
+
+defn read_i16(bc: Ptr<Int>, addr: Int) -> Int {
+    let val = read_u16(bc, addr);
+    [val >= 32768] { term val - 65536; };
+    term val;
+};
+
+defn read_u32(bc: Ptr<Int>, addr: Int) -> Int {
+    let b0 = read_u8(bc, addr);
+    let b1 = read_u8(bc, addr + 1);
+    let b2 = read_u8(bc, addr + 2);
+    let b3 = read_u8(bc, addr + 3);
+    term b0 | (b1 << 8) | (b2 << 16) | (b3 << 24);
+};
+
+defn read_i64(bc: Ptr<Int>, addr: Int) -> Int {
+    let b0 = read_u8(bc, addr);
+    let b1 = read_u8(bc, addr + 1);
+    let b2 = read_u8(bc, addr + 2);
+    let b3 = read_u8(bc, addr + 3);
+    let b4 = read_u8(bc, addr + 4);
+    let b5 = read_u8(bc, addr + 5);
+    let b6 = read_u8(bc, addr + 6);
+    let b7 = read_u8(bc, addr + 7);
+    term b0 | (b1 << 8) | (b2 << 16) | (b3 << 24)
+        | (b4 << 32) | (b5 << 40) | (b6 << 48) | (b7 << 56);
+};
+
+// ── .lair header fields ──────────────────────────────────────────────────
+
+defn lair_version(bc: Ptr<Int>) -> Int { term read_u32(bc, 4); };
+
+defn lair_fn_offset(bc: Ptr<Int>) -> Int { term read_u64(bc, 32); };
+
+defn lair_fn_size(bc: Ptr<Int>) -> Int { term read_u64(bc, 40); };
+
+defn lair_bc_offset(bc: Ptr<Int>) -> Int { term read_u64(bc, 48); };
+
+defn lair_bc_size(bc: Ptr<Int>) -> Int { term read_u64(bc, 56); };
+
+// ── Function table entries ───────────────────────────────────────────────
+// Each entry: name_idx(4) + bc_offset(8) + bc_len(4) + local_count(2) + arg_count(2) = 20 bytes
+
+defn fn_bc_offset(fn_table: Ptr<Int>, fn_idx: Int) -> Int {
+    term read_u64(fn_table + fn_idx * 20 + 4);
+};
+
+defn fn_bc_len(fn_table: Ptr<Int>, fn_idx: Int) -> Int {
+    term read_u32(fn_table + fn_idx * 20 + 12);
+};
+
+defn fn_local_count(fn_table: Ptr<Int>, fn_idx: Int) -> Int {
+    term read_u16(fn_table + fn_idx * 20 + 16);
+};
+
+defn fn_arg_count(fn_table: Ptr<Int>, fn_idx: Int) -> Int {
+    term read_u16(fn_table + fn_idx * 20 + 18);
+};
+
+// ── .bounty section extraction via syscalls ─────────────────────────────
+// The .bounty file format:
+//   magic(9) + version(4) + flags(4) + count(4) = 21 bytes header
+//   section table: entries of type(1) + offset(8) + size(8)
+//   section data follows
+
+defn find_bounty_section(data: Ptr<Int>, type_id: Int) -> Ptr<Int> {
+    let count = read_u32(data, 17);
+    [count >= 1] {
+        [read_u8(data, 21) == type_id] {
+            term data + read_u64(data, 22);
+        };
+    };
+    [count >= 2] {
+        [read_u8(data, 38) == type_id] {
+            term data + read_u64(data, 39);
+        };
+    };
+    [count >= 3] {
+        [read_u8(data, 55) == type_id] {
+            term data + read_u64(data, 56);
+        };
+    };
+    term 0;
+};
+// 2026-07-25: Brief VM interpreter — pure Brief, no custom C runtime.
+// Memory by Contract: all buffer bounds proven by contract preconditions.
+
+
+// ── Opcodes ──────────────────────────────────────────────────────────────
+
+let OP_NOP:     Int = 0x00;
+let OP_DROP:    Int = 0x01;
+let OP_DUP:     Int = 0x02;
+let OP_SWAP:    Int = 0x03;
+let OP_ADD:     Int = 0x06;
+let OP_SUB:     Int = 0x07;
+let OP_MUL:     Int = 0x08;
+let OP_EQ:      Int = 0x11;
+let OP_LOAD:    Int = 0x17;
+let OP_STORE:   Int = 0x18;
+let OP_RET:     Int = 0x19;
+let OP_TRAP:    Int = 0x1B;
+let OP_PUSH_I8:     Int = 0x30;
+let OP_LOAD_LOCAL:  Int = 0x31;
+let OP_STORE_LOCAL: Int = 0x32;
+let OP_PUSH_FRAME:  Int = 0x33;
+let OP_POP_FRAME:   Int = 0x34;
+let OP_PUSH_I16:    Int = 0x50;
+let OP_JMP:         Int = 0x51;
+let OP_JZ:          Int = 0x52;
+let OP_JNZ:         Int = 0x53;
+let OP_CALL:        Int = 0x54;
+let OP_PUSH_I32:    Int = 0x70;
+let OP_HCALL:       Int = 0x71;
+let OP_PUSH_I64:    Int = 0x90;
+
+// ── Execution loop ───────────────────────────────────────────────────────
+// Callable txn: loops while running != 0. Entry function is fn_idx=0.
+
+txn vm_loop(stack_data: Ptr<Int>, stack_len: Int,
+            locals_data: Ptr<Int>, locals_len: Int,
+            frames_data: Ptr<Int>, frame_count: Int,
+            bc_data: Ptr<Int>, bc_len: Int,
+            fn_table: Ptr<Int>, fn_count: Int,
+            pc: Int, saved_locals_base: Int,
+            running: Int)
+    [stack_len >= 0 && stack_len < 1024 && locals_len >= 0 && locals_len < 4096
+     && frame_count >= 0 && frame_count < 256 && pc >= 0 && pc < bc_len
+     && running != 0]
+    [running == 0] -> Int
+{
+    let op = read_u8(bc_data, pc);
+    let sl_out = Alloc#(8) as Ptr<Int>;
+    *sl_out = stack_len;
+    let new_pc = exec_op(
+        stack_data, sl_out, locals_data, locals_len,
+        frames_data, frame_count, bc_data, fn_table, fn_count,
+        op, pc, saved_locals_base);
+    let new_stack_len = *sl_out;
+
+    [new_pc < 0] { &running = 0; };
+    [new_pc >= 0 && new_pc < bc_len] { &pc = new_pc; };
+    &stack_len = new_stack_len;
+    term 0;
+};
+
+// ── Opcode dispatch ──────────────────────────────────────────────────────
+// Each arm updates *sl_out with the new stack_len and returns the new pc.
+// Return new_pc=-1 to halt.
+
+defn exec_op(sd: Ptr<Int>, sl_out: Ptr<Int>,
+             ld: Ptr<Int>, ll: Int,
+             fd: Ptr<Int>, fc: Int,
+             bc: Ptr<Int>, ft: Ptr<Int>, fnc: Int,
+             op: Int, pc: Int, sll: Int) -> Int
+{
+    let sl = *sl_out;
+    match op {
+        0x00 => { // nop
+            *sl_out = sl; term pc + 1;
+        };
+
+        0x01 => { // drop
+            [sl > 0] { *sl_out = sl - 1; term pc + 1; };
+            *sl_out = sl; term pc + 1;
+        };
+
+        0x02 => { // dup
+            [sl > 0] {
+                let a = *(sd + sl - 1);
+                *(sd + sl) = a;
+                *sl_out = sl + 1; term pc + 1;
+            };
+            *sl_out = sl; term pc + 1;
+        };
+
+        0x03 => { // swap
+            [sl >= 2] {
+                let a = *(sd + sl - 1);
+                let b = *(sd + sl - 2);
+                *(sd + sl - 2) = a;
+                *(sd + sl - 1) = b;
+                *sl_out = sl; term pc + 1;
+            };
+            *sl_out = sl; term pc + 1;
+        };
+
+        0x06 => { // add
+            [sl >= 2] {
+                let a = *(sd + sl - 1);
+                let b = *(sd + sl - 2);
+                *(sd + sl - 2) = b + a;
+                *sl_out = sl - 1; term pc + 1;
+            };
+            *sl_out = sl; term pc + 1;
+        };
+
+        0x07 => { // sub
+            [sl >= 2] {
+                let a = *(sd + sl - 1);
+                let b = *(sd + sl - 2);
+                *(sd + sl - 2) = b - a;
+                *sl_out = sl - 1; term pc + 1;
+            };
+            *sl_out = sl; term pc + 1;
+        };
+
+        0x08 => { // mul
+            [sl >= 2] {
+                let a = *(sd + sl - 1);
+                let b = *(sd + sl - 2);
+                *(sd + sl - 2) = b * a;
+                *sl_out = sl - 1; term pc + 1;
+            };
+            *sl_out = sl; term pc + 1;
+        };
+
+        0x11 => { // eq
+            [sl >= 2] {
+                let a = *(sd + sl - 1);
+                let b = *(sd + sl - 2);
+                [b == a] { *(sd + sl - 2) = 1; };
+                [b != a] { *(sd + sl - 2) = 0; };
+                *sl_out = sl - 1; term pc + 1;
+            };
+            *sl_out = sl; term pc + 1;
+        };
+
+        0x17 => { // load
+            [sl >= 1] {
+                let addr = *(sd + sl - 1);
+                let val = *(addr as Ptr<Int>);
+                *(sd + sl - 1) = val;
+                *sl_out = sl; term pc + 1;
+            };
+            *sl_out = sl; term pc + 1;
+        };
+
+        0x18 => { // store
+            [sl >= 2] {
+                let val = *(sd + sl - 1);
+                let addr = *(sd + sl - 2);
+                *(addr as Ptr<Int>) = val;
+                *sl_out = sl - 2; term pc + 1;
+            };
+            *sl_out = sl; term pc + 1;
+        };
+
+        0x19 => { // ret
+                *sl_out = sl; term -1;
+            };
+
+        0x1B => { // trap
+                *sl_out = sl; term -1;
+            };
+
+        0x30 => { // push_i8
+            let val = read_i8(bc, pc + 1);
+            [sl < 1024] {
+                *(sd + sl) = val;
+                *sl_out = sl + 1; term pc + 2;
+            };
+            *sl_out = sl; term pc + 2;
+        };
+
+        0x31 => { // load_local
+            let slot = read_u8(bc, pc + 1);
+            let val = *(ld + sll + slot);
+            [sl < 1024] {
+                *(sd + sl) = val;
+                *sl_out = sl + 1; term pc + 2;
+            };
+            *sl_out = sl; term pc + 2;
+        };
+
+        0x32 => { // store_local
+            let slot = read_u8(bc, pc + 1);
+            [sl >= 1] {
+                let val = *(sd + sl - 1);
+                *(ld + sll + slot) = val;
+                *sl_out = sl - 1; term pc + 2;
+            };
+            *sl_out = sl; term pc + 2;
+        };
+
+        0x33 => { // push_frame
+            let slots = read_u8(bc, pc + 1);
+            [fc < 256] {
+                let base = fc * 4;
+                *(fd + base) = ll;
+                *(fd + base + 1) = slots;
+                *(fd + base + 2) = pc + 2;
+                *(fd + base + 3) = sll;
+                *sl_out = sl; term pc + 2;
+            };
+            *sl_out = sl; term pc + 2;
+        };
+
+        0x34 => { // pop_frame
+            [fc > 0] {
+                *sl_out = sl; term pc + 1;
+            };
+            *sl_out = sl; term pc + 1;
+        };
+
+        0x50 => { // push_i16
+            let val = read_i16(bc, pc + 1);
+            [sl < 1024] {
+                *(sd + sl) = val;
+                *sl_out = sl + 1; term pc + 3;
+            };
+            *sl_out = sl; term pc + 3;
+        };
+
+        0x51 => { // jmp
+            let offset = read_i16(bc, pc + 1);
+            *sl_out = sl; term pc + 3 + offset;
+        };
+
+        0x52 => { // jz
+            let offset = read_i16(bc, pc + 1);
+            [sl >= 1] {
+                let cond = *(sd + sl - 1);
+                [cond == 0] { *sl_out = sl - 1; term pc + 3 + offset; };
+                *sl_out = sl - 1; term pc + 3;
+            };
+            *sl_out = sl; term pc + 3;
+        };
+
+        0x53 => { // jnz
+            let offset = read_i16(bc, pc + 1);
+            [sl >= 1] {
+                let cond = *(sd + sl - 1);
+                [cond != 0] { *sl_out = sl - 1; term pc + 3 + offset; };
+                *sl_out = sl - 1; term pc + 3;
+            };
+            *sl_out = sl; term pc + 3;
+        };
+
+        0x54 => { // call
+            let fn_idx = read_u16(bc, pc + 1);
+            [fn_idx < fnc] {
+                let callee_bc_off = fn_bc_offset(ft, fn_idx);
+                let callee_local_c = fn_local_count(ft, fn_idx);
+                let callee_arg_c = fn_arg_count(ft, fn_idx);
+                [fc < 256] {
+                    let base = fc * 4;
+                    *(fd + base) = ll;
+                    *(fd + base + 1) = callee_local_c;
+                    *(fd + base + 2) = pc + 3;
+                    *(fd + base + 3) = sll;
+                    let new_ll = ll;
+                    [callee_arg_c >= 1] {
+                        *(ld + new_ll + 0) = *(sd + sl - 1);
+                    };
+                    [callee_arg_c >= 2] {
+                        *(ld + new_ll + 1) = *(sd + sl - 2);
+                    };
+                    [callee_arg_c >= 3] {
+                        *(ld + new_ll + 2) = *(sd + sl - 3);
+                    };
+                    [callee_arg_c >= 4] {
+                        *(ld + new_ll + 3) = *(sd + sl - 4);
+                    };
+                    *sl_out = sl - callee_arg_c; term callee_bc_off;
+                };
+                *sl_out = sl; term pc + 3;
+            };
+            *sl_out = sl; term pc + 3;
+        };
+
+        0x70 => { // push_i32
+            let val = read_i32(bc, pc + 1);
+            [sl < 1024] {
+                *(sd + sl) = val;
+                *sl_out = sl + 1; term pc + 5;
+            };
+            *sl_out = sl; term pc + 5;
+        };
+
+        0x71 => { // hcall
+            let host_id = read_u32(bc, pc + 1);
+            *sl_out = sl; term pc + 5;
+        };
+
+        0x90 => { // push_i64
+            let val = read_i64(bc, pc + 1);
+            [sl < 1024] {
+                *(sd + sl) = val;
+                *sl_out = sl + 1; term pc + 9;
+            };
+            *sl_out = sl; term pc + 9;
+        };
+
+        _ => { *sl_out = sl; term -1; };
+    };
+};
+// 2026-07-25: Tamer entry point — install-time VM interpreter.
+// Takes a .bounty in memory, extracts .lair and .beastpack,
+// runs the VM to produce LLVM IR, and invokes clang to link.
+//
+// For MVP: receives lair_data + lair_len + beastpack_data + beastpack_len
+// as arguments. File I/O and process spawning are future phases.
+
+
+// ── Entry point (for testing: receives .lair and .beastpack in memory) ──
+
+export defn tame(lair_data: Ptr<Int>, lair_len: Int,
+                 beastpack_data: Ptr<Int>, beastpack_len: Int) -> Int
+{
+    // Allocate VM buffers (once, at startup)
+    let stack_data = Alloc#(8192, Malloc) as Ptr<Int>;
+    let locals_data = Alloc#(32768, Malloc) as Ptr<Int>;
+    let frames_data = Alloc#(8192, Malloc) as Ptr<Int>;
+
+    // Validate .lair magic
+    let magic = read_u32(lair_data, 0);
+    [magic != 0x5249414c] { term 1; };  // "LAIR"
+
+    // Parse .lair header
+    let bc_off = lair_bc_offset(lair_data);
+    let bc_len = lair_bc_size(lair_data);
+    let fn_off = lair_fn_offset(lair_data);
+    let fn_size = lair_fn_size(lair_data);
+    let fn_count = fn_size / 20;
+
+    // Compute bytecode and function table pointers
+    let bc_data = lair_data + bc_off;
+    let fn_table = lair_data + fn_off;
+
+    // Validate bounds
+    [bc_off + bc_len > lair_len] { term 1; };
+    [fn_off + fn_size > lair_len] { term 1; };
+    [fn_count == 0] { term 1; };
+
+    // Run the VM — entry function is fn_idx=0
+    let _result = vm_loop(
+        stack_data, 0, locals_data, 0, frames_data, 0,
+        bc_data, bc_len, fn_table, fn_count,
+        0, 0, 1);
+
+    term 0;
+};

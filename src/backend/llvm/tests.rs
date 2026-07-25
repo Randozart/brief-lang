@@ -638,7 +638,7 @@ fn test_string_state_init_not_null() {
             outputs: vec![],
             contract: default_contract(),
             body: vec![
-                Statement::Let {
+                Statement::Let { names: vec![], 
                     name: "_".to_string(),
                     ty: None,
                     expr: Some(Expr::Identifier("s".to_string())),
@@ -1286,7 +1286,7 @@ fn test_unimported_alias_not_mmio() {
             outputs: vec![],
             contract: default_contract(),
             body: vec![
-                Statement::Let {
+                Statement::Let { names: vec![], 
                     name: "_".to_string(),
                     ty: None,
                     expr: Some(Expr::Identifier("led_0".to_string())),
@@ -1322,7 +1322,7 @@ fn make_intrinsic_program(intrinsic: Expr) -> Vec<TopLevel> {
             outputs: vec![],
             contract: default_contract(),
             body: vec![
-                Statement::Let {
+                Statement::Let { names: vec![], 
                     name: "r".to_string(),
                     ty: Some(Type::int()),
                     expr: Some(intrinsic),
@@ -1351,7 +1351,7 @@ fn make_float_intrinsic_program(intrinsic: Expr) -> Vec<TopLevel> {
             outputs: vec![],
             contract: default_contract(),
             body: vec![
-                Statement::Let {
+                Statement::Let { names: vec![], 
                     name: "r".to_string(),
                     ty: Some(Type::float()),
                     expr: Some(intrinsic),
@@ -1382,7 +1382,7 @@ fn test_emit_cast_int_to_string() {
             outputs: vec![],
             contract: default_contract(),
             body: vec![
-                Statement::Let {
+                Statement::Let { names: vec![], 
                     name: "r".to_string(),
                     ty: Some(Type::string()),
                     expr: Some(Expr::Cast(Box::new(Expr::Decimal(42)), Type::string())),
@@ -1416,7 +1416,7 @@ fn test_emit_cast_string_to_int() {
             outputs: vec![],
             contract: default_contract(),
             body: vec![
-                Statement::Let {
+                Statement::Let { names: vec![], 
                     name: "r".to_string(),
                     ty: Some(Type::int()),
                     expr: Some(Expr::Cast(Box::new(Expr::Quoted("42".into())), Type::int())),
@@ -2228,7 +2228,7 @@ fn test_struct_literal_field_offsets() {
             output_type: None,
             contract: default_contract(),
             body: vec![
-                Statement::Let {
+                Statement::Let { names: vec![], 
                     name: "x".to_string(),
                     ty: None,
                     expr: Some(Expr::StructLiteral {
@@ -2306,7 +2306,7 @@ fn test_addr_of_struct_literal() {
             output_type: None,
             contract: default_contract(),
             body: vec![
-                Statement::Let {
+                Statement::Let { names: vec![], 
                     name: "pt".to_string(),
                     ty: None,
                     expr: Some(Expr::StructLiteral {
@@ -2391,7 +2391,7 @@ fn test_frgn_ptr_param_inttoptr() {
             output_type: None,
             contract: default_contract(),
             body: vec![
-                Statement::Let {
+                Statement::Let { names: vec![], 
                     name: "pt".to_string(),
                     ty: None,
                     expr: Some(Expr::StructLiteral {
@@ -2548,7 +2548,7 @@ fn test_struct_array_list_literal() {
             output_type: None,
             contract: default_contract(),
             body: vec![
-                Statement::Let {
+                Statement::Let { names: vec![], 
                     name: "pts".to_string(),
                     ty: None,
                     expr: Some(Expr::List(vec![
@@ -2642,7 +2642,7 @@ fn test_struct_array_addr_of_and_frgn_call() {
             output_type: None,
             contract: default_contract(),
             body: vec![
-                Statement::Let {
+                Statement::Let { names: vec![], 
                     name: "methods".to_string(),
                     ty: None,
                     expr: Some(Expr::List(vec![

@@ -509,7 +509,7 @@ mod tests {
     #[test]
     fn test_validate_nodes_for_stage_rejects_untyped_after_typed() {
         let nodes = vec![
-            TopLevel::Statement(Box::new(Statement::Let {
+            TopLevel::Statement(Box::new(Statement::Let { names: vec![], 
                 name: "x".into(),
                 ty: None,
                 expr: Some(Expr::Decimal(42)),

@@ -402,8 +402,36 @@ impl LlvmBackend {
                 if field.starts_with('#') {
                     return self.emit_layout_field_read(out, v, &obj_reg, field, indent);
                 }
-                // Struct field access via extractvalue (numeric index required)
+                // 2026-07-25: Array field access — GEP into struct for Int[N] fields.
+                // Check if the field type is an array (Type::Vector with dimension).
                 let field_idx = self.resolve_field_index(&obj_reg.ty, field);
+                let field_ty = self.resolve_field_type(&obj_reg.ty, field);
+                if let Some(Type::Vector(inner, dims)) = &field_ty {
+                    if dims.len() == 1 && matches!(dims[0], crate::ast::Dimension::Anonymous(_)) {
+                        // Emit GEP to get a pointer to the array field.
+                        // First get the struct's address from let_bindings if available.
+                        let struct_ptr = if let Expr::Identifier(name) = obj.as_ref() {
+                            self.get_local(name)
+                        } else {
+                            None
+                        };
+                        if let Some(slot) = struct_ptr {
+                            let gep = self.fun.gen_reg();
+                            writeln!(
+                                out,
+                                "{}{} = getelementptr inbounds {}, ptr {}, i32 0, i32 {}",
+                                indent, gep, self.llvm_type(&obj_reg.ty), slot, field_idx
+                            ).ok();
+                            let result = self.fun.gen_reg();
+                            writeln!(out, "{}{} = ptrtoint ptr {} to i64", indent, result, gep).ok();
+                            return TypedRegister {
+                                name: result,
+                                ty: Type::ptr(*inner.clone()),
+                            };
+                        }
+                    }
+                }
+                // Struct field access via extractvalue (numeric index required)
                 writeln!(
                     out,
                     "{}{} = extractvalue {} {}, {}",
@@ -2149,6 +2177,19 @@ impl LlvmBackend {
             }
         }
         self.ctx.field_index_map.get(field).copied().unwrap_or(0)
+    }
+
+    /// 2026-07-25: Resolve struct field type.
+    fn resolve_field_type(&self, ty: &Type, field: &str) -> Option<Type> {
+        let universe = self.ctx.type_universe.as_ref()?;
+        let key = ty.universe_key()?;
+        let rt = universe.get(key)?;
+        for (f, ft) in &rt.fields {
+            if f == field {
+                return Some(ft.clone());
+            }
+        }
+        None
     }
 
     fn get_local(&self, name: &str) -> Option<String> {

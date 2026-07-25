@@ -339,7 +339,7 @@ fn parse_statement(expr: &SExpr) -> Result<Statement, String> {
         "let" => {
             let name = sexpr_str(&parts[1])?.to_string();
             let expr = if parts.len() > 2 { Some(parse_expr(&parts[2])?) } else { None };
-            Ok(Statement::Let { name, ty: None, expr, modifiers: vec![] })
+             Ok(Statement::Let { names: vec![], name, ty: None, expr, modifiers: vec![] })
         }
         "term" => {
             let e = if parts.len() > 1 { Some(parse_expr(&parts[1])?) } else { None };

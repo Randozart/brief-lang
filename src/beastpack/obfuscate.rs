@@ -270,7 +270,7 @@ fn rename_toplevel(item: &TopLevel, map: &HashMap<String, String>) -> TopLevel {
 
 fn rename_stmt(stmt: &Statement, map: &HashMap<String, String>) -> Statement {
     match stmt {
-        Statement::Let { name, ty, expr, modifiers } => Statement::Let {
+        Statement::Let { name, ty, expr, modifiers, .. } => Statement::Let { names: vec![], 
             name: rename_string(name, map),
             ty: ty.clone(),
             expr: expr.as_ref().map(|e| rename_expr(e, map)),

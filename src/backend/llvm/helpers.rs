@@ -236,12 +236,8 @@ impl LlvmBackend {
             Statement::Expression(e) => {
                 Statement::Expression(Self::rewrite_cell_identifiers(e, cell_name))
             }
-            Statement::Let {
-                name,
-                ty,
-                expr,
-                modifiers,
-            } => Statement::Let {
+            Statement::Let { name, ty, expr, modifiers, .. } => Statement::Let {
+                names: vec![],
                 name: name.clone(),
                 ty: ty.clone(),
                 expr: expr

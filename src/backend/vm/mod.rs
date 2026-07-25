@@ -60,7 +60,12 @@ impl VmBackend {
     /// First pass: collect function names and host function declarations.
     fn collect_declarations(&mut self, items: &[crate::ast::TopLevel]) {
         for item in items {
-            match item {
+            // 2026-07-25: Unwrap export wrappers to register exported defns.
+            let inner = match item {
+                crate::ast::TopLevel::Export(e) => &e.inner,
+                other => other,
+            };
+            match inner {
                 crate::ast::TopLevel::Definition(d) => {
                     let idx = self.fn_index_counter;
                     self.fn_index_counter += 1;

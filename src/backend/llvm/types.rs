@@ -57,6 +57,15 @@ pub fn type_size(ty: &Type) -> u64 {
         Type::Bits(n) => *n,
         Type::Ptr(_) => 8,
         Type::Void => 0,
+        // 2026-07-25: Fixed-size array: Int[1024] → 1024 * element_size.
+        Type::Vector(inner, dims) => {
+            let elem_size = type_size(inner);
+            let count: u64 = dims.iter().map(|d| match d {
+                crate::ast::Dimension::Anonymous(n) => *n as u64,
+                crate::ast::Dimension::Named(_, n) => *n as u64,
+            }).product();
+            elem_size * count
+        }
         _ => 8,
     }
 }

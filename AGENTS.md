@@ -780,15 +780,77 @@ it. The more LLVM knows, the more aggressively it can optimize.
     `as` gives the Brief name. `from` is required. Example:
     `frgn XXH64(data_ptr: Int, len: Int, seed: Int) -> Int as frgn__xxh64 from "link/xxhash/xxhash.c" fallback 0;`
 
+14. **`>>` in nested generics** — `Ptr<Ptr<Int>>` triggers the shift-right token.
+    Always add a space: `Ptr<Ptr<Int> >`. This is a lexer limitation.
+
+15. **No `_` discard binding** — `let _ = expr;` is not valid.
+    Use a named binding like `let _discard = expr;` instead.
+
+16. **Post-body loops `{ body; &i = i + 1; } [condition];` only work in `txn`/`node`** —
+    NOT in `defn`. Use `txn` for iteration; `defn` is straight-line.
+
+17. **One precondition, one postcondition** — A txn contract has exactly
+    `[pre][post]` with one block each. Combine multiple conditions with `&&`:
+    `[a < N && b < M && running != 0][running == 0]`.
+
+18. **Flat import namespace** — Imports bring names directly into scope.
+    No `::` module path syntax. `loader::read_u8(x)` is invalid; use `read_u8(x)`.
+
+19. **No tuple destructuring in `let`** — `let (a, b) = expr;` is not supported.
+    Store the tuple and use `uni` pattern matching to extract fields.
+
+20. **`Int` return type narrowing** — `defn f() -> Int` may emit LLVM `i8` for small
+    constants. This is intended — the type checker uses `Int` uniformly but the
+    LLVM backend narrows to the minimum required width.
+
+21. **Import resolution uses file-relative paths** — `import "foo.bv"` resolves
+    relative to the **file's own directory**, not the parent directory.
+    `"<foo>"` (angle brackets) is a registry lookup, not a file path.
+
+22. **Tuples are heap-allocated** — `(1, 2)` calls `@malloc`. LLVM SROA should
+    promote small tuples to SSA registers in optimized builds.
+
 ### Type System
 
-13. **`type Foo <: List { ... }` creates a TypeDef** — but `Foo<Int>`
+23. **`type Foo <: List { ... }` creates a TypeDef** — but `Foo<Int>`
     is NOT automatically assignable to `List<Int>` in the type checker.
     Projections like `:> Size` and index `foo[i]` may fail on `Foo<Int>`
     even though the runtime representation is identical.
 
-14. **No implicit `Copy` on enums with `String`** — `InsertStrategy::Custom(String)`
+24. **No implicit `Copy` on enums with `String`** — `InsertStrategy::Custom(String)`
     requires removing `Copy` and adjusting comparison code.
+
+### Control Flow
+
+25. **No `if`/`else`** — Brief has no `if` keyword. Use `[guard] { body }` (one-shot
+    conditional) and `when` for conditional branching within `txn`/`node` bodies.
+    Guard blocks can appear in sequence: `[cond1] { ... }; [cond2] { ... };`.
+    Each guard is checked in order; the first matching guard executes its body.
+    A trailing `{ body }` without `[guard]` serves as the else clause.
+
+26. **`type` is for protocols, `struct` is for data** — The keywords have distinct
+    roles:
+    - `type`: Protocol definitions, operator bindings (`#Int`, `#Float`),
+      type system extensibility. `type Int: #Int { op Add(#Int); };`
+    - `struct`: Pure data, fixed layout, C-compatible, no methods, no contracts.
+      `struct VMStack { data: Int[1024]; len: Int; };` The `struct` keyword
+      receives fixed-size array types and the bracket syntax for SIMD operations.
+    - `obj`: Full-featured types with methods, contracts, type parameters,
+      visibility modifiers.
+    Migrating `type { field: T }` patterns to `struct { field: T }` is in progress.
+
+27. **Bracket array syntax with SIMD** — `Int[1024]` declares a fixed-size array
+    known at compile time. The compiler embeds it as `[1024 x i64]` in LLVM IR.
+    Planned extensions include:
+    - Slicing: `arr[0:1024:2]` — strided view with compile-time bounds
+    - SIMD operations: `arr1 + arr2`, `arr.map(f)` → auto-vectorized over `[N x T]`
+    - Contract-bound safety: `[idx < arr.len]` proves every access in bounds
+
+28. **`[[post]` = `[true][post]`** — postcondition-only.
+    **`[pre]]` = `[pre][true]`** — precondition-only.
+
+29. **`[true][true]` is rejected** — parser enforces at least one
+    meaningful constraint. Use `[[post]` or `[pre]]` sugar instead.
 
 ## Commenting Mandate (Backend Updates)
 

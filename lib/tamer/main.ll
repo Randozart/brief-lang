@@ -3,6 +3,11 @@ source_filename = "program.bv"
 target datalayout = "e-m:e-p270:32:32-p271:32:32-p272:64:64-i64:64-i128:128-f80:128-n8:16:32:64-S128"
 target triple = "x86_64-unknown-linux-gnu"
 
+%SmallString64 = type { i64, i64, i64, i64, i64, i64, i64, i64, i64 }
+%StaticString = type { i64, i64 }
+%String = type { i64, i64 }
+%Utf8View = type { i64, i64 }
+
 declare void @llvm.assume(i1) #1
 declare void @llvm.trap() noreturn
 declare float @llvm.sqrt.f32(float) #1
@@ -87,12 +92,12 @@ declare i64 @__dlopen__(i64)
 declare i64 @__dlsym__(i64, i64)
 declare i64 @__dlclose__(i64)
 declare i64 @__ttyname__(i64)
-declare i64 @__getenv_int(ptr) #6
+declare ptr @__getenv_brief(ptr) #6
+declare void @__print_str(ptr) #6
+declare i64 @__print_int(i64) #6
 declare i64 @__print_float(float) #6
 declare i64 @__print_char(i64) #6
-declare void @__print_str(ptr) #6
-declare ptr @__getenv_brief(ptr) #6
-declare i64 @__print_int(i64) #6
+declare i64 @__getenv_int(ptr) #6
 declare i8* @__chr_to_str(i32) #1
 declare i64 @__int_to_str__(i64) #1
 declare i64 @__str_bytes__(i64) #1
@@ -277,11 +282,11 @@ define i64 @file_fcntl(ptr noalias nocapture align 8 %state, i64 %arg0, i64 %arg
   ret i64 %t0
 }
 
-define i64 @close(ptr noalias nocapture align 8 %state, i64 %arg0) local_unnamed_addr #8 {
+define i8 @close(ptr noalias nocapture align 8 %state, i8 %arg0) local_unnamed_addr #8 {
   entry:
-  %t0 = call i64 @file_close(ptr %state, i64 %arg0)
+  %t0 = call i8 @file_close(ptr %state, i8 %arg0)
   %t2 = add i64 0, 0
-  ret i64 %t2
+  ret i8 %t2
 }
 
 define i64 @socket(ptr noalias nocapture align 8 %state, i64 %arg0, i64 %arg1, i64 %arg2) local_unnamed_addr #8 {
@@ -454,7 +459,7 @@ define i64 @sem_post(ptr noalias nocapture align 8 %state, ptr %arg0) local_unna
   ret i64 %t0
 }
 
-define i64 @thread_create(ptr noalias nocapture align 8 %state, i64 %arg0, i64 %arg1) local_unnamed_addr #8 {
+define i32 @thread_create(ptr noalias nocapture align 8 %state, i32 %arg0, i32 %arg1) local_unnamed_addr #8 {
   entry:
   %t1 = add i64 0, 0
   %t2 = add i64 0, 65536
@@ -466,12 +471,12 @@ define i64 @thread_create(ptr noalias nocapture align 8 %state, i64 %arg0, i64 %
   %t0 = call i64 @brief_syscall(i64 9, i64 %t1, i64 %t2, i64 %t3, i64 %t4, i64 %t5, i64 %t7)
   %t8 = add i64 0, 0
   %t11 = add i64 0, 65536
-  %t9 = add nsw i64 %t0, %t11
+  %t9 = add nsw i32 %t0, %t11
   %t12 = add i64 0, 4001536
   %t18 = add i64 0, 0
   %t19 = add i64 0, 0
   %t13 = call i64 @brief_syscall(i64 56, i64 %t12, i64 %t9, i64 %arg0, i64 %arg1, i64 %t18, i64 %t19)
-  ret i64 %t13
+  ret i32 %t13
 }
 
 define i64 @thread_join(ptr noalias nocapture align 8 %state, i64 %arg0) local_unnamed_addr #8 {
@@ -658,14 +663,14 @@ define i64 @atomic_load(ptr noalias nocapture align 8 %state, ptr %arg0) local_u
   ret i64 %t0
 }
 
-define i64 @atomic_store(ptr noalias nocapture align 8 %state, ptr %arg0, i64 %arg1) local_unnamed_addr #8 {
+define i8 @atomic_store(ptr noalias nocapture align 8 %state, ptr %arg0, i8 %arg1) local_unnamed_addr #8 {
   entry:
   %ac0 = ptrtoint ptr %arg0 to i64
   %t2 = inttoptr i64 %ac0 to ptr
   store atomic i64 %arg1, ptr %t2 seq_cst, align 8
   %t0 = add i64 0, 0
   %t4 = add i64 0, 0
-  ret i64 %t4
+  ret i8 %t4
 }
 
 define i64 @atomic_cas(ptr noalias nocapture align 8 %state, ptr %arg0, i64 %arg1, i64 %arg2) local_unnamed_addr #8 {
@@ -693,12 +698,12 @@ define i64 @atomic_add(ptr noalias nocapture align 8 %state, ptr %arg0, i64 %arg
   ret i64 %t0
 }
 
-define i64 @fence(ptr noalias nocapture align 8 %state) local_unnamed_addr #8 {
+define i8 @fence(ptr noalias nocapture align 8 %state) local_unnamed_addr #8 {
   entry:
   fence seq_cst
   %t0 = add i64 0, 0
   %t1 = add i64 0, 0
-  ret i64 %t1
+  ret i8 %t1
 }
 
 define i64 @futex(ptr noalias nocapture align 8 %state, ptr %arg0, i64 %arg1, i64 %arg2, ptr %arg3, ptr %arg4, i64 %arg5) local_unnamed_addr #8 {
@@ -724,16 +729,84 @@ define i64 @get_env_int(ptr noalias nocapture align 8 %state, ptr %arg0) local_u
   ret i64 %t0
 }
 
-define i64 @add(i64 %arg0, i64 %arg1) local_unnamed_addr #8 {
+define i8 @tame(ptr %arg0, i8 %arg1, ptr %arg2, i8 %arg3) local_unnamed_addr #8 {
   entry:
-  %t0 = add nsw i64 %arg0, %arg1
-  ret i64 %t0
-}
-
-define i64 @mul(i64 %arg0, i64 %arg1) local_unnamed_addr #8 {
-  entry:
-  %t0 = mul nsw i64 %arg0, %arg1
-  ret i64 %t0
+  %ac0 = ptrtoint ptr %arg0 to i64
+  %ac2 = ptrtoint ptr %arg2 to i64
+  %t2 = add i64 0, 8192
+  %t1_p = call ptr @malloc(i64 %t2)
+  %t1 = ptrtoint ptr %t1_p to i64
+   %t3 = add i64 %t2, 0
+  %t0 = inttoptr i64 %t1 to ptr
+  %t6 = add i64 0, 32768
+  %t5_p = call ptr @malloc(i64 %t6)
+  %t5 = ptrtoint ptr %t5_p to i64
+   %t7 = add i64 %t6, 0
+  %t4 = inttoptr i64 %t5 to ptr
+  %t10 = add i64 0, 8192
+  %t9_p = call ptr @malloc(i64 %t10)
+  %t9 = ptrtoint ptr %t9_p to i64
+   %t11 = add i64 %t10, 0
+  %t8 = inttoptr i64 %t9 to ptr
+  %t14 = add i64 0, 0
+  %t12 = call i8 @read_u32(ptr %ac0, i8 %t14)
+  %t17 = add i64 0, 1380532556
+  %t18 = icmp ne i8 %t12, %t17
+  %t15 = zext i1 %t18 to i8
+  %t20 = trunc i8 %t15 to i1
+  br i1 %t20, label %guard.then19, label %guard.end19
+  guard.then19:
+  %t21 = add i64 0, 1
+  ret i8 %t21
+  br label %guard.end19
+  guard.end19:
+  %t24 = call i8 @lair_bc_offset(ptr %ac0)
+  %t26 = call i8 @lair_bc_size(ptr %ac0)
+  %t28 = call i8 @lair_fn_offset(ptr %ac0)
+  %t30 = call i8 @lair_fn_size(ptr %ac0)
+  %t34 = add i64 0, 20
+  %t32 = sdiv i8 %t30, %t34
+  %t35 = add nsw i64 %ac0, %t24
+  %t38 = add nsw i64 %ac0, %t28
+  %t42 = add nsw i8 %t24, %t26
+  %t46 = icmp sgt i8 %t42, %arg1
+  %t41 = zext i1 %t46 to i8
+  %t48 = trunc i8 %t41 to i1
+  br i1 %t48, label %guard.then47, label %guard.end47
+  guard.then47:
+  %t49 = add i64 0, 1
+  ret i8 %t49
+  br label %guard.end47
+  guard.end47:
+  %t53 = add nsw i8 %t28, %t30
+  %t57 = icmp sgt i8 %t53, %arg1
+  %t52 = zext i1 %t57 to i8
+  %t59 = trunc i8 %t52 to i1
+  br i1 %t59, label %guard.then58, label %guard.end58
+  guard.then58:
+  %t60 = add i64 0, 1
+  ret i8 %t60
+  br label %guard.end58
+  guard.end58:
+  %t65 = add i64 0, 0
+  %t66 = icmp eq i8 %t32, %t65
+  %t63 = zext i1 %t66 to i8
+  %t68 = trunc i8 %t63 to i1
+  br i1 %t68, label %guard.then67, label %guard.end67
+  guard.then67:
+  %t69 = add i64 0, 1
+  ret i8 %t69
+  br label %guard.end67
+  guard.end67:
+  %t74 = add i64 0, 0
+  %t76 = add i64 0, 0
+  %t78 = add i64 0, 0
+  %t83 = add i64 0, 0
+  %t84 = add i64 0, 0
+  %t85 = add i64 0, 1
+  %t72 = call i8 @vm_loop(ptr %t0, i8 %t74, ptr %t4, i8 %t76, ptr %t8, i8 %t78, i8 %t35, i8 %t26, i8 %t38, i8 %t32, i8 %t83, i8 %t84, i8 %t85)
+  %t86 = add i64 0, 0
+  ret i8 %t86
 }
 
 define void @init_state(ptr noalias nocapture align 8 %state) local_unnamed_addr #0 {
@@ -810,11 +883,14 @@ attributes #10 = {
 !10 = !{!"Int32", !0}
 !11 = !{!"Int64", !0}
 !12 = !{!"Int8", !0}
-!13 = !{!"String", !0}
-!14 = !{!"UInt", !0}
-!15 = !{!"UInt16", !0}
-!16 = !{!"UInt32", !0}
-!17 = !{!"UInt64", !0}
-!18 = !{!"UInt8", !0}
-!19 = !{!"Void", !0}
+!13 = !{!"SmallString64", !0}
+!14 = !{!"StaticString", !0}
+!15 = !{!"String", !0}
+!16 = !{!"UInt", !0}
+!17 = !{!"UInt16", !0}
+!18 = !{!"UInt32", !0}
+!19 = !{!"UInt64", !0}
+!20 = !{!"UInt8", !0}
+!21 = !{!"Utf8View", !0}
+!22 = !{!"Void", !0}
 !99 = distinct !{} ; StateAliasScope

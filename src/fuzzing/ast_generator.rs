@@ -236,7 +236,7 @@ fn arb_let_statement(max_depth: usize) -> impl Strategy<Value = Statement> {
         arb_type(),
         arb_expr(max_depth).prop_map(Some),
     ).prop_map(|(name, ty, expr)| {
-        Statement::Let {
+        Statement::Let { names: vec![], 
             name,
             ty: Some(ty),
             expr,
