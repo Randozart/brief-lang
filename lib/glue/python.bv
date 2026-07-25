@@ -3,9 +3,9 @@
 // Used by generator.bv to emit Brief-native bridge wrappers.
 
 // ── Python C API frgn declarations ──────────────────────────────────────
-frgn PyArg_ParseTuple(Ptr, Ptr, ...) -> Int from "c" fallback 0;
-frgn PyLong_FromLongLong(Int) -> Ptr from "c" fallback 0;
-frgn PyModule_Create2(Ptr, Int) -> Ptr from "c" fallback 0;
+frgn PyArg_ParseTuple(Ptr, Ptr, ...) -> Int from #POSIX fallback 0;
+frgn PyLong_FromLongLong(Int) -> Ptr from #POSIX fallback 0;
+frgn PyModule_Create2(Ptr, Int) -> Ptr from #POSIX fallback 0;
 
 // ── Struct layouts for C module metadata ────────────────────────────────
 // These are injected into the type universe so the backend can verify
