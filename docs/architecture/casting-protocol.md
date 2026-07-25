@@ -95,46 +95,54 @@ changed silently between file extensions, the same function would produce
 different results on different targets.
 
 Explicit protocols at crossing boundaries prevent this. The programmer
-must acknowledge the encoding difference and write (or accept) the
-appropriate `Cast` between variants.
+must acknowledge the encoding difference and declare the transformation
+via a `proto` declaration:
+
+```brief
+proto ascii: #String {
+    CastTo(#String<utf8>) = ascii_to_utf8(#L);
+    CastFrom(#String<utf8>) = utf8_to_ascii(#L);
+};
+```
+
+The binding defines HOW the layouts differ. The compiler proves round-trip
+identity to ensure the transformation is consistent.
 
 ---
 
 ## The Protocol Graph
 
 Every `Cast(#Category)` declaration is a directed edge. The compiler finds
-the shortest path from source to target at compile time.
+the shortest path from source to target at compile time via BFS.
 
-### Root: `#Bits`
+### Edges from `proto` Declarations
 
-`Cast(#Bits)` is **implicit on every type**. Because `Bits` is the implicit
-base of all types (the Bits thesis), every type can reinterpret itself as
-raw bytes. This guarantees that the protocol graph is always connected.
-
-```
-SourceType --[implicit Cast(#Bits)]--> #Bits --[implicit Cast(TargetType)]--> TargetType
-```
-
-The implicit `Cast(#Bits)` produces raw bytes of the source type's width.
-The implicit `Cast(TargetType) from #Bits` constructs the target type from
-raw bytes. These are the "last resort" path — always correct, always available.
-
-### Edges from declarations
+Protocol variants are declared via `proto` with required bindings:
 
 ```brief
-type Float {
-    data: Bits<32>;
-    op Cast(#Int) = float_to_int(#L);     // edge: Float → #Int
-    op Cast(#Bits) = float_to_bits(#L);   // edge: Float → #Bits (explicit)
-};
-
-type ASCIIString <: String {
-    op Cast(#String<utf8>) = ascii_to_utf8(#L);  // edge: ASCIIString → #String<utf8>
+proto ascii: #String {
+    CastTo(#String<utf8>) = ascii_to_utf8(#L);      // edge: ascii → utf8
+    CastFrom(#String<utf8>) = utf8_to_ascii(#L);     // edge: utf8 → ascii
 };
 ```
 
-Each `op Cast(#Category<variant>)` adds an edge from the declaring type to
-the specific protocol variant.
+The binding IS the transformation function. Without a binding, the edge
+cannot be compiled — the compiler doesn't know HOW to convert between
+the two layouts.
+
+### Edges from Type Declarations
+
+Types can also declare edges via `op CastTo`/`op CastFrom`:
+
+```brief
+type Latin1String {
+    op CastTo(#String) = latin1_to_utf8(#L);      // edge: Latin1String → #String
+    op CastFrom(#String) = utf8_to_latin1(#L);     // edge: #String → Latin1String
+};
+```
+
+Both feed the same BFS. Protocol-level edges are inherited by participating
+types; type-level edges override them.
 
 ---
 
@@ -303,11 +311,14 @@ fn cross(a: #String<utf8>, b: #String<ascii>) { ... };
 ### Adding new protocols
 
 Adding a new protocol variant is additive:
-1. Add it to the protocol list in `config/targets.toml`
-2. Add a match arm in the backend's protocol handler
-3. Add the conversion function in stdlib (or inline defn)
 
-No changes to the type system, typechecker, or normalizer.
+1. Declare the variant via `proto` with CastTo/CastFrom bindings
+2. Optionally add a match arm in the backend's protocol handler for optimizations
+3. Optionally add it to `config/targets.toml` for GLUE export
+
+The `proto` declaration is always the minimal requirement — it defines the
+transformation functions that let the compiler discover paths through the
+protocol graph without backend changes.
 
 ---
 
@@ -514,20 +525,34 @@ are superseded by `op Parse`:
 
 ## Round-Trip Verification
 
-For every type that declares both a Parse op and a produce op (`CastTo` or
-`Cast(#Category)`), the compiler performs symbolic execution at compile time:
+For every protocol that declares matching `CastTo`/`CastFrom` pairs, the
+compiler proves round-trip identity via symbolic execution and SMT:
 
 ```brief
-// Parse: "FF00FF" → HexColor via parse_hex_color
-// Cast: HexColor → #String via hex_color_to_string
-// Round-trip: hex_color_to_string(parse_hex_color("FF00FF")) == "FF00FF"
+proto ascii: #String {
+    CastTo(#String<utf8>) = ascii_to_utf8(#L);
+    CastFrom(#String<utf8>) = utf8_to_ascii(#L);
+};
+
+// Proved: utf8_to_ascii(ascii_to_utf8(x)) == x
 ```
 
-If the round-trip fails, the compiler emits a warning with the exact input
-and output shown. Verification is:
-- **Structural**: the protocol's `Eq` op confirms identity, not literal bytes
-- **Cached**: by type name + SHA-256 of the op implementation
-- **Graceful**: non-invertible types (hashes) emit a warning, not an error
+For every cross-variant `op` declaration, the compiler proves equivalence
+to the default round-trip path:
+
+```brief
+protocol ascii: #String {
+    CastTo(#String<utf8>) = ascii_to_utf8(#L);
+    CastFrom(#String<utf8>) = utf8_to_ascii(#L);
+    op Add(#String<utf8>) = ascii_add_with_utf8(#L, #R);
+};
+
+// Proved: ascii_add_with_utf8(x, y) == utf8_to_ascii(ascii_to_utf8(x) + y)
+```
+
+If either proof fails, compilation is denied. The existing pipeline in
+`src/analysis/meld_validation.rs` handles both cases — Layer 4 (symbolic)
+for value-level proofs and Layer 5 (SMT) for full formal verification.
 
 ---
 

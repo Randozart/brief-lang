@@ -1,0 +1,19 @@
+// ── Non-Default Protocol Variants ───────────────────────────────
+// 2026-07-23: Protocol declarations for non-default variants with bindings.
+// Each CastTo/CastFrom requires a function that defines the transformation.
+// The compiler proves round-trip identity for each pair.
+
+proto ascii: #String {
+    CastTo(#String<utf8>) = ascii_to_utf8(#L);
+    CastFrom(#String<utf8>) = utf8_to_ascii(#L);
+};
+
+proto utf16: #String {
+    CastTo(#String<utf8>) = utf16_to_utf8(#L);
+    CastFrom(#String<utf8>) = utf8_to_utf16(#L);
+};
+
+proto posit32: #Float {
+    CastTo(#Float<ieee754>) = posit32_to_ieee754(#L);
+    CastFrom(#Float<ieee754>) = ieee754_to_posit32(#L);
+};

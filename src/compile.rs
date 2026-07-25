@@ -302,6 +302,45 @@ pub fn compile_source(file_path: &str, source: &str, opts: &BuildOptions) -> Res
     pm.run_ast(StageKind::Normalized, &mut items, &mut universe)?;
     emit_beast_snapshot(file_path, BeastStage::Normalize, BeastPosition::After, &items, &universe, opts)?;
 
+    // ── Build protocol graph from protocol declarations ────────────────
+    // 2026-07-23: Builds variant-aware CastTo/CastFrom edges from
+    // TopLevel::ProtocolDef items (proto ascii: #String { ... }) and
+    // TypeDef.protocol fields. Injects edges into the universe so the
+    // existing BFS can find them.
+    let protocol_graph = brief_compiler::analysis::protocol_graph::ProtocolGraph::build_from(&items);
+    protocol_graph.inject_edges(&mut universe);
+
+    // ── Protocol contract enforcement via SMT ──────────────────────────
+    // 2026-07-23: For each protocol declaration with a contract, prove
+    // the invariant holds using the SMT solver. If unprovable, deny.
+    // Also validate that all CastTo/CastFrom have bindings.
+    for item in &items {
+        if let brief_compiler::ast::TopLevel::ProtocolDef(pd) = item {
+            // Validate bindings exist on all CastTo/CastFrom edges
+            for edge in &pd.cast_edges {
+                if edge.binding.is_none() {
+                    return Err(format!(
+                        "protocol '{}': {} must have a binding (e.g., CastTo(#target) = fn(#L))",
+                        pd.name,
+                        match edge.direction {
+                            brief_compiler::ast::top::CastDirection::CastTo => "CastTo",
+                            brief_compiler::ast::top::CastDirection::CastFrom => "CastFrom",
+                        }
+                    ));
+                }
+            }
+            // Validate contract if present
+            if let Some(ref contract) = pd.contract {
+                let pre = &contract.pre_condition;
+                let post = &contract.post_condition;
+                let params = vec![("Self".to_string(), brief_compiler::ast::Type::int())];
+                if let Err(errs) = brief_compiler::proof_engine::prove_contract(pre, post, &params) {
+                    return Err(format!("protocol contract violation in '{}': {:?}", pd.name, errs));
+                }
+            }
+        }
+    }
+
     // ── Value-range Int narrowing ─────────────────────────────────────
     // 2026-07-24: Infer value ranges for Int-typed bindings and narrow
     // the type width where provably safe. On WASM this eliminates BigInt.

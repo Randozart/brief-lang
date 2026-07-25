@@ -366,6 +366,11 @@ pub enum Token {
     #[token("#T")]
     HashT,
 
+    // 2026-07-23: #Self — self-reference hashword for protocol contracts.
+    // Reserved for this use case. Matched before the identifier regex.
+    #[token("#Self")]
+    HashSelf,
+
     // ── Punctuation ───────────────────────────────────────────
     #[token(";")]
     Semicolon,
@@ -648,6 +653,7 @@ impl std::fmt::Display for Token {
             Token::HashL => write!(f, "#L"),
             Token::HashR => write!(f, "#R"),
             Token::HashT => write!(f, "#T"),
+            Token::HashSelf => write!(f, "#Self"),
             Token::Semicolon => write!(f, ";"),
             Token::LtColon => write!(f, "<:"),
             Token::ColonGreaterThan => write!(f, ":>"),

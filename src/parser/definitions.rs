@@ -81,6 +81,10 @@ impl<'a> Parser<'a> {
                 if self.check_identifier("$txn") {
                     return self.parse_compile_time_txn();
                 }
+                // 2026-07-23: proto variant: #Category { ... } — protocol declaration
+                if self.check_identifier("proto") {
+                    return self.parse_protocol_def().map(TopLevel::ProtocolDef);
+                }
                 let name = self.expect_identifier()?;
                 self.error_at_current(&format!("unexpected top-level item '{}'", name))
             }
@@ -1339,12 +1343,149 @@ impl<'a> Parser<'a> {
             derivation, modifiers: vec![], span: None, doc: self.take_doc(),
         }))
     }
+
+    // ── Protocol Declaration: proto name: #Category [contract] { ... } ──
+    // 2026-07-23: Declares a protocol variant with CastTo/CastFrom edges
+    // and optional cross-variant op overrides.
+    fn parse_protocol_def(&mut self) -> Result<ProtocolDef, SyntaxError> {
+        self.pos += 1; // consume "proto" identifier
+        let name = self.expect_identifier()?;
+        self.expect(Token::Colon)?;
+
+        // Parse the category hashword: #String, #Float, etc.
+        let category_type = self.parse_type()?;
+        let category = match &category_type {
+            Type::HashWord(cat) => cat.strip_prefix('#').unwrap_or(cat).to_string(),
+            Type::HashWordVariant(cat, _) => cat.strip_prefix('#').unwrap_or(cat).to_string(),
+            _ => return self.error_at_current(&format!(
+                "expected protocol category hashword like '#String', got '{}'", category_type
+            )),
+        };
+
+        // Parse optional contract [expr]
+        let contract = self.parse_optional_protocol_contract();
+
+        // Parse body: { CastTo(...); CastFrom(...); op ...; }
+        let mut cast_edges = Vec::new();
+        let mut cross_ops = Vec::new();
+
+        if self.eat(&Token::LBrace) {
+            while !self.check(&Token::RBrace) && !self.is_at_end() {
+                let item_name = self.expect_identifier()?;
+                if item_name == "CastTo" || item_name == "CastFrom" {
+                    let direction = if item_name == "CastTo" {
+                        CastDirection::CastTo
+                    } else {
+                        CastDirection::CastFrom
+                    };
+                    self.expect(Token::LParen)?;
+                    let target_type = self.parse_type()?;
+                    let (target_category, target_variant) = match &target_type {
+                        Type::HashWordVariant(cat, var) => (
+                            cat.strip_prefix('#').unwrap_or(cat).to_string(),
+                            var.clone(),
+                        ),
+                        Type::HashWord(cat) => (
+                            cat.strip_prefix('#').unwrap_or(cat).to_string(),
+                            String::new(),
+                        ),
+                        _ => return self.error_at_current(&format!(
+                            "expected protocol variant like '#String<utf8>', got '{}'", target_type
+                        )),
+                    };
+                    self.expect(Token::RParen)?;
+                    // Check for binding: = fn_name(#L)
+                    let binding = if self.eat(&Token::Eq) {
+                        let impl_args = self.parse_metadata_value_standalone()?;
+                        let fn_name = match &impl_args {
+                            PropertyValue::List(items) => {
+                                if let Some(PropertyValue::Identifier(name)) = items.first() {
+                                    name.clone()
+                                } else { format!("{:?}", impl_args) }
+                            }
+                            PropertyValue::Identifier(name) => name.clone(),
+                            _ => format!("{:?}", impl_args),
+                        };
+                        Some(CastBinding { fn_name, param: "L".to_string() })
+                    } else {
+                        None
+                    };
+                    self.eat(&Token::Semicolon);
+                    cast_edges.push(CastEdge { direction, target_category, target_variant, binding });
+                } else if item_name == "op" {
+                    let op_name = self.expect_identifier()?;
+                    self.expect(Token::LParen)?;
+                    let params = if !self.check(&Token::RParen) {
+                        let mut p = Vec::new();
+                        loop {
+                            p.push(self.parse_type()?);
+                            if !self.eat(&Token::Comma) { break; }
+                        }
+                        p
+                    } else {
+                        vec![]
+                    };
+                    self.expect(Token::RParen)?;
+                    // Optional return type: -> Type
+                    if self.eat(&Token::Arrow) {
+                        let _ret = self.parse_type()?;
+                    }
+                    // Optional binding: = fn(#L, #R)
+                    let impl_args = if self.eat(&Token::Eq) {
+                        Some(self.parse_metadata_value_standalone()?)
+                    } else {
+                        None
+                    };
+                    self.eat(&Token::Semicolon);
+                    cross_ops.push(OperatorDef {
+                        op: op_name,
+                        params,
+                        pre: None,
+                        suf: None,
+                        impl_args,
+                        impl_name: String::new(),
+                        span: None,
+                    });
+                } else {
+                    return self.error_at_current(&format!(
+                        "expected 'CastTo', 'CastFrom', or 'op' in protocol body, got '{}'", item_name
+                    ));
+                }
+            }
+            self.expect(Token::RBrace)?;
+        }
+
+        Ok(ProtocolDef {
+            name,
+            category,
+            contract,
+            cast_edges,
+            cross_ops,
+            span: None,
+        })
+    }
+
+    /// Parse optional contract in a protocol declaration.
+    /// Returns None if no contract is present.
+    fn parse_optional_protocol_contract(&mut self) -> Option<Contract> {
+        if self.check(&Token::LBracket) {
+            let saved = self.pos;
+            // Check if this looks like a contract bracket, not something else
+            // parse_contract handles [pre][post] pairs. For protocol, we want
+            // just [pre] — a single invariant.
+            let contract = self.parse_contract().ok()?;
+            Some(contract)
+        } else {
+            None
+        }
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use crate::lexer::tokenize;
     use crate::parser::Parser;
+    use crate::ast::top::{CastDirection, ProtocolDef};
 
     fn parse_type(src: &str) -> Result<crate::ast::Type, crate::errors::SyntaxError> {
         let tokens = tokenize(src).unwrap();
@@ -1520,5 +1661,80 @@ mod tests {
         assert_eq!(ops[0].op, "InsertAt");
         assert_eq!(ops[0].params.len(), 1);
         assert!(ops[0].impl_args.is_some());
+    }
+
+    // ── Protocol declaration parsing ──────────────────────────────
+
+    fn parse_protocol(src: &str) -> ProtocolDef {
+        let tokens = crate::lexer::tokenize(src).unwrap();
+        let mut p = Parser::new(tokens, src);
+        match p.parse_top_level() {
+            Ok(crate::ast::TopLevel::ProtocolDef(pd)) => pd,
+            Ok(other) => panic!("expected ProtocolDef, got {:?}", other),
+            Err(e) => panic!("parse error: {}", e),
+        }
+    }
+
+    #[test]
+    fn test_protocol_def_edges_only() {
+        let pd = parse_protocol("proto ascii: #String { CastTo(#String<utf8>); };");
+        assert_eq!(pd.name, "ascii");
+        assert_eq!(pd.category, "String");
+        assert_eq!(pd.cast_edges.len(), 1);
+        assert_eq!(pd.cast_edges[0].direction, CastDirection::CastTo);
+        assert_eq!(pd.cast_edges[0].target_category, "String");
+        assert_eq!(pd.cast_edges[0].target_variant, "utf8");
+        assert!(pd.cross_ops.is_empty());
+        assert!(pd.contract.is_none());
+    }
+
+    #[test]
+    fn test_protocol_def_cross_op() {
+        let pd = parse_protocol(
+            "proto ascii: #String { CastTo(#String<utf8>); op Add(#String<utf8>) = add_utf8_to_ascii(#L, #R); };"
+        );
+        assert_eq!(pd.name, "ascii");
+        assert_eq!(pd.cast_edges.len(), 1);
+        assert_eq!(pd.cross_ops.len(), 1);
+        assert_eq!(pd.cross_ops[0].op, "Add");
+        assert!(pd.cross_ops[0].impl_args.is_some());
+    }
+
+    #[test]
+    fn test_protocol_def_with_contract() {
+        let pd = parse_protocol(
+            "proto ascii: #String [#Self < 128] { CastTo(#String<utf8>); };"
+        );
+        assert_eq!(pd.name, "ascii");
+        assert!(pd.contract.is_some(), "contract should be parsed");
+        assert_eq!(pd.cast_edges.len(), 1);
+    }
+
+    #[test]
+    fn test_protocol_def_empty_body() {
+        let pd = parse_protocol("proto ascii: #String {};");
+        assert_eq!(pd.name, "ascii");
+        assert_eq!(pd.cast_edges.len(), 0);
+        assert_eq!(pd.cross_ops.len(), 0);
+    }
+
+    #[test]
+    fn test_protocol_def_both_edges() {
+        let pd = parse_protocol(
+            "proto ascii: #String { CastTo(#String<utf8>); CastFrom(#String<utf8>); };"
+        );
+        assert_eq!(pd.cast_edges.len(), 2);
+        assert_eq!(pd.cast_edges[0].direction, CastDirection::CastTo);
+        assert_eq!(pd.cast_edges[1].direction, CastDirection::CastFrom);
+    }
+
+    #[test]
+    fn test_protocol_def_multiple_edges() {
+        let pd = parse_protocol(
+            "proto multi: #String { CastTo(#String<utf8>); CastTo(#String<utf16>); };"
+        );
+        assert_eq!(pd.cast_edges.len(), 2);
+        assert_eq!(pd.cast_edges[0].target_variant, "utf8");
+        assert_eq!(pd.cast_edges[1].target_variant, "utf16");
     }
 }

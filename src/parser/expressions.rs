@@ -333,6 +333,9 @@ impl<'a> Parser<'a> {
                 self.parse_identifier_or_special(name)
             }
 
+            // 2026-07-23: #Self hashword for protocol contract self-reference.
+            Some((Token::HashSelf, _)) => Ok(Expr::Identifier("#Self".to_string())),
+
             // ── Grouping: (expr) ────────────────────────────────────
             Some((Token::LParen, _)) => self.parse_grouping(),
 

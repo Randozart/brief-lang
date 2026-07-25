@@ -110,6 +110,7 @@ fn build_smt_query(expr: &Expr) -> String {
 
 /// Encode a Brief expression as an SMT-LIB term.
 /// Only supports a subset of Expr — the Boolean constraint subset.
+/// Sanitizes #Self → self_var for SMT-LIB compatibility.
 fn encode_expr_smt(expr: &Expr) -> String {
     match expr {
         Expr::Bool(true) => "(= #b1 #b1)".into(),
@@ -117,7 +118,7 @@ fn encode_expr_smt(expr: &Expr) -> String {
         Expr::Decimal(n) => {
             format!("#x{:016x}", *n as u64)
         }
-        Expr::Identifier(name) => name.clone(),
+        Expr::Identifier(name) => sanitize_name(name),
         Expr::BinaryOp(kind, lhs, rhs) => {
             let l = encode_expr_smt(lhs);
             let r = encode_expr_smt(rhs);
@@ -146,6 +147,57 @@ fn encode_expr_smt(expr: &Expr) -> String {
         }
         _ => "(= #b0 #b0)".into(),
     }
+}
+
+/// 2026-07-23: Build an SMT-LIB query to prove a contract condition.
+/// Declares free variables for `#Self` and all named params,
+/// then asserts `(not condition)` — proving UNSAT means the
+/// condition always holds.
+pub fn build_contract_query(expr: &Expr, params: &[(String, Type)]) -> String {
+    let mut q = String::new();
+    q.push_str("(set-option :produce-models true)\n");
+    q.push_str("(set-logic QF_BV)\n");
+
+    // Declare #Self as a free variable (for protocol contracts)
+    q.push_str("(declare-const self_var (_ BitVec 64))\n");
+
+    // Declare named parameters as free variables
+    for (name, _ty) in params {
+        let var = sanitize_name(name);
+        q.push_str(&format!("(declare-const {} (_ BitVec 64))\n", var));
+    }
+
+    // Assert the negation: if UNSAT, the condition always holds
+    q.push_str("(assert (not ");
+    q.push_str(&encode_expr_smt(expr));
+    q.push_str("))\n");
+
+    q.push_str("(check-sat)\n");
+    q
+}
+
+/// Sanitize a Brief identifier for SMT-LIB.
+/// #Self → self_var (SMT-LIB doesn't allow # in simple symbols).
+fn sanitize_name(name: &str) -> String {
+    if name == "#Self" || name == "#self" {
+        "self_var".to_string()
+    } else if name.starts_with('#') {
+        format!("hash_{}", &name[1..])
+    } else {
+        name.to_string()
+    }
+}
+
+/// 2026-07-23: Quick check if z3 is on PATH by spawning with --version.
+pub fn is_z3_available() -> bool {
+    std::process::Command::new("z3")
+        .arg("--version")
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .spawn()
+        .and_then(|mut c| c.wait())
+        .map(|s| s.success())
+        .unwrap_or(false)
 }
 
 #[cfg(test)]

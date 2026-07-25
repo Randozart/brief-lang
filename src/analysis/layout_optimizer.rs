@@ -261,10 +261,10 @@ fn is_identity_meld(meld: &crate::ast::top::MeldDeclaration) -> bool {
 /// a shared protocol like #Bits). If no path exists, adopting the foreign
 /// layout would make the Brief type incompatible.
 fn has_safe_cast_path(universe: &TypeUniverse, foreign_type: &str, original_type: &str) -> bool {
-    if find_cast_path(universe, foreign_type, original_type).is_some() {
+    if find_cast_path(universe, foreign_type, original_type, None).is_some() {
         return true;
     }
-    find_cast_path(universe, foreign_type, "#Bits").is_some()
+    find_cast_path(universe, foreign_type, "#Bits", None).is_some()
 }
 
 /// BFS shortest path through the protocol graph.
@@ -273,7 +273,14 @@ fn has_safe_cast_path(universe: &TypeUniverse, foreign_type: &str, original_type
 /// Uses the type universe's property map, scanning for keys with the "Cast."
 /// prefix (e.g., "Cast.#Int", "Cast.#String"). #Bits is always reachable
 /// from every type (implicit Cast(#Bits)).
-pub(crate) fn find_cast_path(universe: &TypeUniverse, source_type: &str, target_type: &str) -> Option<Vec<String>> {
+///
+/// 2026-07-23: Optional protocol_graph parameter for variant-aware edges.
+pub(crate) fn find_cast_path(
+    universe: &TypeUniverse,
+    source_type: &str,
+    target_type: &str,
+    protocol_graph: Option<&crate::analysis::protocol_graph::ProtocolGraph>,
+) -> Option<Vec<String>> {
     use std::collections::VecDeque;
 
     let mut visited = std::collections::HashSet::new();
@@ -305,9 +312,41 @@ pub(crate) fn find_cast_path(universe: &TypeUniverse, source_type: &str, target_
                 }
             }
         }
+
+        // 2026-07-23: Also query protocol graph for variant-aware edges
+        if let Some(pg) = protocol_graph {
+            if let Some((cat, var)) = parse_protocol_node(&current) {
+                if let Some(edges) = pg.edges_for(&cat, &var) {
+                    for edge in edges {
+                        let neighbor = format!(
+                            "#{}<{}>", edge.target_category, edge.target_variant
+                        );
+                        if visited.insert(neighbor.clone()) {
+                            let mut new_path = path.clone();
+                            new_path.push(neighbor.clone());
+                            queue.push_back((neighbor, new_path));
+                        }
+                    }
+                }
+            }
+        }
     }
 
     None
+}
+
+/// Parse a node string into (category, variant) for protocol graph lookup.
+/// Supports formats: "#String<utf8>", "String", "#String".
+fn parse_protocol_node(node: &str) -> Option<(String, String)> {
+    let node = node.strip_prefix('#').unwrap_or(node);
+    if let Some(bracket) = node.find('<') {
+        let cat = node[..bracket].to_string();
+        let var = node[bracket + 1..node.len() - 1].to_string();
+        Some((cat, var))
+    } else {
+        // Bare name; use as category with empty variant
+        Some((node.to_string(), String::new()))
+    }
 }
 
 #[cfg(test)]
@@ -571,7 +610,7 @@ mod tests {
         if let Some(ref mut rt) = universe.types.get_mut("A") {
             rt.properties.insert("Cast.#B".to_string(), PropertyValue::Bool(true));
         }
-        let path = find_cast_path(&universe, "A", "B");
+        let path = find_cast_path(&universe, "A", "B", None);
         assert!(path.is_some(), "expected path A → B");
         let p = path.unwrap();
         assert!(p.contains(&"#B".to_string()), "expected path through #B, got {:?}", p);
@@ -581,7 +620,7 @@ mod tests {
     fn test_find_cast_path_through_bits() {
         let universe = TypeUniverse::new();
         // Every type can reach #Bits
-        let path = find_cast_path(&universe, "Int", "#Bits");
+        let path = find_cast_path(&universe, "Int", "#Bits", None);
         assert!(path.is_some(), "expected Int → #Bits path");
     }
 

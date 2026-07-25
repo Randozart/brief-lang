@@ -74,6 +74,8 @@ pub enum TopLevel {
         item: Box<TopLevel>,
     },
     Cfg(CfgGuard),
+    // 2026-07-23: Protocol variant declaration: proto name: #Category { ... }
+    ProtocolDef(ProtocolDef),
 }
 
 // ── Definition ─────────────────────────────────────────────────────────
@@ -909,6 +911,42 @@ pub struct OperatorDef {
     /// Old-style implementation name string (from `op Add ~> "string"`).
     pub impl_name: String,
     pub span: Option<Span>,
+}
+
+// 2026-07-23: Protocol variant declaration: proto name: #Category { ... }
+// Defines a protocol variant with CastTo/CastFrom edges and optional contract.
+#[derive(Debug, Clone)]
+pub struct ProtocolDef {
+    pub name: String,
+    pub category: String,
+    pub contract: Option<Contract>,
+    pub cast_edges: Vec<CastEdge>,
+    pub cross_ops: Vec<OperatorDef>,
+    pub span: Option<Span>,
+}
+
+#[derive(Debug, Clone)]
+pub struct CastEdge {
+    pub direction: CastDirection,
+    pub target_category: String,
+    pub target_variant: String,
+    /// 2026-07-23: Required binding — the transformation function.
+    /// e.g., CastTo(#String<utf8>) = ascii_to_utf8(#L);
+    pub binding: Option<CastBinding>,
+}
+
+#[derive(Debug, Clone)]
+pub struct CastBinding {
+    /// The function name or expression defining the transform.
+    pub fn_name: String,
+    /// The parameter slot (#L for self, #R for target).
+    pub param: String,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CastDirection {
+    CastTo,
+    CastFrom,
 }
 
 #[derive(Debug, Clone)]

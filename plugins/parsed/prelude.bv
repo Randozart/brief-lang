@@ -4,11 +4,12 @@
 // Runs at $(Parsed) with highest priority so imports are available
 // before type checking.
 
-$(Parsed @ highest) {
+    $(Parsed @ highest) {
     let anchor = Tag$("import").First$();
     when anchor.Count$() > 0 {
         anchor.Before$().Insert$(
             Import$("std/types/bootstrap.bv"),
+            Import$("std/protocols.bv"),
             Import$("std/os/fs.bv"),
             Import$("std/os/net.bv"),
             Import$("std/os/signal.bv"),
@@ -28,6 +29,7 @@ $(Parsed @ highest) {
         when txn_anchor.Count$() > 0 {
             txn_anchor.Before$().Insert$(
                 Import$("std/types/bootstrap.bv"),
+                Import$("std/protocols.bv"),
                 Import$("std/os/fs.bv"),
                 Import$("std/os/net.bv"),
                 Import$("std/os/signal.bv"),

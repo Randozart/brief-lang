@@ -1,6 +1,6 @@
-# Protocol Types — How Brief Types Speak Across Languages
+# Protocol Types — Operation-First Compilation
 
-**Date:** 2026-07-22
+**Date:** 2026-07-23
 **Status:** Architecture documentation
 
 ---
@@ -8,39 +8,187 @@
 ## The Core Idea
 
 A protocol category (written as `#String`, `#Int`, `#Float`, `#Bits`) is not
-a type. It's a **contract** — a promise that "I support the operations of this
-category."
+a type. It's a **compile-time operational assumption** — a promise that "I
+support the operations of this category."
 
 **A type has no fixed layout.** It has whatever shape the optimizer selects
-for the program's actual usage. `op Add(#String)` tells the backend "this type
-concatenates," and the backend picks the representation — inline SSO, heap-
-allocated, rope tree, packed array — whatever fits the operation profile.
-The protocol contract guarantees *behavior*, not *bytes*.
+for the program's actual usage. The protocol contract guarantees *behavior*,
+not *bytes*.
 
 ```brief
 type String: #String;   // "I can concatenate, compare, slice"
                         // layout: whatever the optimizer picks
 ```
 
-### Difference-Only Overrides
+## Protocols Are a Frontend-Only Abstraction
 
-The protocol body is optional and **difference-only** — you write only what
-changes from the default:
+The compiler resolves all protocol assumptions to concrete types and operations
+before LLVM ever sees the IR. LLVM never knows about `#String`, `CastTo`,
+or protocol variants.
+
+```
+Source:  #String, op Add, op Length
+             │
+             ▼
+    Protocol Graph ─── BFS CastTo/CastFrom edges
+    (frontend only)    (bindings = transformation functions)
+             │
+             ▼
+    Concrete types + ops chosen per target
+    (backend: struct { ptr, i64 }, native add)
+             │
+             ▼
+    LLVM IR: concrete types, concrete ops, never knows protocols
+```
+
+## Protocol Declarations: `proto`
+
+A protocol variant is declared with `proto` — a new top-level form:
 
 ```brief
-type Int: #Int;                          // default ops, inferred width
-type i64: Int { bits <~ 64; };          // narrows width, inherits ops
-type MyString: String {                  // overrides one op
-    op Add(#String) = tree_concat(#L, #R);
+proto ascii: #String {
+    CastTo(#String<utf8>) = ascii_to_utf8(#L);
+    CastFrom(#String<utf8>) = utf8_to_ascii(#L);
 };
 ```
 
-The backend knows all default ops for every protocol. An empty body means
-"everything is default." A non-empty body means "these specific ops differ."
+### Rules
 
-The protocol category `#String` IS the shared abstraction. The concrete types
-never need to know about each other — they only need to know how to relate
-to the protocol.
+| Item | Requirement | Why |
+|---|---|---|
+| `CastTo`/`CastFrom` | MUST have a binding `= fn(#L)` | The binding defines HOW the layouts differ |
+| Round-trip parity | Compiler proves `inverse(forward(x)) == x` | Inconsistent transforms are bugs |
+| Cross-op equivalence | Proved equivalent to CastTo→default→CastFrom | Custom path must match round-trip |
+| `#L`, `#R` | `#L` = self, `#R` = target | Convention, enforced by type checker |
+
+The body is **difference-only** — you write only what differs from the default.
+
+### Defaults Are Primordial
+
+`#String` resolves to `#String<utf8>` by default. The defaults are hardcoded
+in the parser and always available, even with `--no-stdlib`. Non-default
+variants (ascii, utf16, posit32) are provided by the prelude plugin.
+
+| Bare hashword | Resolves to | Source |
+|:---|---:|---:|
+| `#String` | `#String<utf8>` | Primordial (parser) |
+| `#Float` | `#Float<ieee754>` | Primordial (parser) |
+| `#Char` | `#Char<unicode>` | Primordial (parser) |
+| `#Int` | `#Int` (no variant) | Primordial |
+
+### Three-Layer Model
+
+| Layer | Declares | Example | Purpose |
+|---|---|---|---|
+| Protocol edge | Compatibility direction + transform | `CastTo(#String<utf8>) = fn(#L);` | Defines HOW two variants relate |
+| Protocol op | Optimization hint | `op Add(#String<utf8>) = fn(#L, #R);` | Skip CastTo→default→CastFrom round-trip |
+| Type override | Different method | `op CastTo(#String<utf8>) = my_way(#L);` | Override protocol-level default |
+
+### Prelude Declarations
+
+Non-default variants are declared in `lib/std/protocols.bv`, auto-loaded by
+the prelude:
+
+```brief
+proto ascii: #String {
+    CastTo(#String<utf8>) = ascii_to_utf8(#L);
+    CastFrom(#String<utf8>) = utf8_to_ascii(#L);
+};
+proto utf16: #String {
+    CastTo(#String<utf8>) = utf16_to_utf8(#L);
+    CastFrom(#String<utf8>) = utf8_to_utf16(#L);
+};
+```
+
+## Protocol Graph
+
+Every `CastTo`/`CastFrom` with a binding is a directed edge. The binding
+IS the transformation. The compiler finds the shortest path from source
+to target at compile time via BFS.
+
+### Root: `#Bits`
+
+`Cast(#Bits)` is implicit on every type. Because `Bits` is the implicit
+base of all types, every type can reinterpret itself as raw bytes. This
+guarantees the protocol graph is always connected.
+
+```
+SourceType --[implicit Cast(#Bits)]--> #Bits --[CastFrom(TargetType)]--> TargetType
+```
+
+### Fewer Hops = Less Conversion
+
+Declaring a variant closer to the target means fewer BFS hops:
+- `#String<utf16>` on Windows → identity path, zero conversion code
+- `#String` → resolves through `utf8 → utf16` → one conversion edge
+- Both compile correctly; the pinned variant gives the optimizer less work
+
+## Inheritance
+
+When a type declares `type MyString: #String`, it automatically inherits
+all edges from the `#String` category's protocol graph. A type only writes
+`op CastTo(...) = fn(...)` to **override** the protocol-level default.
+
+```brief
+type MyString: #String;   // inherits CastTo(#String<utf8>), CastFrom, all ops
+
+type MySpecialString: #String {
+    op CastTo(#String<utf8>) = my_custom_way(#L);  // override
+};
+```
+
+## Compiler Proofs
+
+For every protocol declaration, the compiler runs two proofs:
+
+### Proof 1: Round-Trip Identity
+
+```brief
+CastTo(#String<utf8>) = ascii_to_utf8(#L);
+CastFrom(#String<utf8>) = utf8_to_ascii(#L);
+// Proved: utf8_to_ascii(ascii_to_utf8(x)) == x
+```
+
+This uses the existing symbolic evaluation and SMT solver pipeline
+(`src/analysis/meld_validation.rs`). If the proof fails, compilation is
+denied — inconsistent transformations are bugs.
+
+### Proof 2: Cross-Op Equivalence
+
+```brief
+op Add(#String<utf8>) = ascii_add_with_utf8(#L, #R);
+// Proved: ascii_add_with_utf8(x, y) == utf8_to_ascii(ascii_to_utf8(x) + y)
+```
+
+The cross-op is an optimization hint — it says "skip the round-trip, I
+already know how to do this directly." The compiler proves the hint is
+correct.
+
+### Proof 3: Protocol Contract (Optional)
+
+If a protocol declares a contract `[expr]`, the compiler proves it at
+every boundary crossing via SMT:
+
+```brief
+proto ascii: #String [#Self[i] < 128] {
+    CastTo(#String<utf8>) = ascii_to_utf8(#L);
+};
+// Every value entering or exiting this protocol must satisfy the contract
+```
+
+## `#L` and `#R` Convention
+
+In protocol declarations, `#L` is always the protocol's own variant (self)
+and `#R` is the target variant parameter:
+
+```brief
+// #L = self (ascii), #R = target (utf8)
+CastTo(#String<utf8>) = ascii_to_utf8(#L);
+op Add(#String<utf8>) = ascii_add_with_utf8(#L, #R);
+```
+
+This follows the same `#L`/`#R` convention used in type-level `op` bindings,
+where Add maps to `+` and `#L + #R` is natural.
 
 ## Protocol Categories Are Fictional, Not Abstract
 
@@ -48,106 +196,6 @@ A protocol category has **no implementation**. There is no "string struct"
 for `#String`. It's a hypothetical — "this is what a thing WOULD look like
 if it were a string, but I don't care what it needs to be."
 
-The compiler uses the TypeUniverse to discover CastTo/CastFrom relationships:
-
-```
-TypeUniverse:
-  "String"  → properties: { "Cast.#String": "", "bytes": 16 }
-  "str"     → properties: { "Cast.#String": "", "bytes": 16 }
-  "#String" → properties: { "bytes": 0 }  // fictional, no size
-```
-
-Both `"String"` and `"str"` have `Cast.#String` — they both speak the protocol.
-The BFS (breadth-first search) in `find_cast_path()` finds:
-
-```
-Path: [String → #String → str]
-  Step 1: String.CastTo(#String) — cost 0 (identity — SSO inline is already UTF-8)
-  Step 2: str.CastFrom(#String) — cost 0 (identity — both are {ptr, len} UTF-8)
-  
-Total cost: 0 → zero instructions at the boundary.
-```
-
-If the path has non-zero cost, the transforms are emitted as real instructions:
-- `Bitcast`: LLVM `bitcast` instruction (same byte width, different type)
-- `MeldShuffle`: `extractvalue`/`insertvalue` for field reordering
-- `ProtocolTransform(#category)`: call `_CastTo_#category` intrinsic
-
-## Protocol Resolution at the Boundary
-
-When a frgn or export crosses a language boundary, the GLUE bridge:
-
-1. **Queries the universe** — for the Brief type, finds which protocol categories
-   it participates in via `Cast.#Category` properties
-2. **Looks up the protocol** in the target language's TOML config —
-   `lib/glue.toml` has `protocols` sections like:
-   ```toml
-   [rust.protocols]
-   "#String" = { native = "str", c_abi = "i64" }
-   "#Int" = { native = "i64", c_abi = "i64" }
-   ```
-3. **Computes the path** — BFS finds the cheapest transform chain between
-   the Brief type's representation and the target language's representation
-4. **Emits the transforms** — `emit_protocol_chain()` in `src/glue/bridge.rs`
-   generates the LLVM IR for each step in the path
-5. **If the path is empty or identity, the boundary compiles to zero instructions**
-   at LTO time
-
-## The TOML Config Sees Only Protocols, Not Types
-
-The `lib/glue.toml` file maps **protocol categories**, not Brief types:
-
-```toml
-# This is all the TOML knows. No Brief type names, no language-specific logic.
-[rust.protocols]
-"#String" = { native = "str", c_abi = "i64" }
-"#Int" = { native = "i64", c_abi = "i64" }
-"#Float" = { native = "f64", c_abi = "double" }
-```
-
-A Brief `String`, Rust's `str`, a Python `str`, and a Node `string` all speak
-`#String`. The TOML only needs to say "if you encounter `#String`, use this
-native type and this C ABI type." Zero knowledge of Brief-internal types leaks
-into the config.
-
-## Why `#Bits` Always Works
-
-Every type in Brief IS bits. `#Bits` is the universal protocol — any type can
-declare `op CastTo(#Bits)` at zero cost because the type's underlying memory
-IS just bits.
-
-The BFS always has `#Bits` as a fallback path. If no higher protocol path
-exists between two languages, the bridge emits a plain bitcast:
-
-```
-Path: [Custom("MyOpaqueStruct") → #Bits → Ptr<u8>]
-  Cost: 2 bitcasts (one to #Bits, one from #Bits)
-```
-
-This works for any pair of types with the same byte width. The protocol
-system's job is to find SHORTER paths that preserve meaning — but `#Bits`
-means the bridge never fails purely due to type layout differences.
-
-## Relationship to `op` Declarations
-
-In `bootstrap.bv`, concrete types declare their protocol participation:
-
-  ```brief
-  type String: #String {
-      op CastTo(#String);
-      op Add(#String);
-      op Eq(#String);
-  };
-  ```
-
-The TypeUniverse picks up these declarations and populates the `Cast.*`
-properties that the BFS walks. A custom type can participate in any protocol
-by declaring `op CastTo(#Category)` and optionally `op CastFrom(#Category)`:
-
-```brief
-type MyString <: Bits {
-    op CastTo(#String);    // MyString can be used wherever #String is expected
-};
-```
-
-See `learn-brief/15-custom-types.md` for a tutorial on this.
+The compiler uses the protocol graph to discover CastTo/CastFrom relationships.
+The graph edges are the edges from `proto` declarations AND from type-level
+`op CastTo`/`op CastFrom` declarations. Both feed the same BFS.

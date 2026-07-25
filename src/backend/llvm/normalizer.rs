@@ -114,7 +114,7 @@ pub fn normalize(items: &mut Vec<TopLevel>, universe: &mut TypeUniverse) -> Resu
             "llvm_type", "disamb",
         ].iter().map(|s| s.to_string()).collect();
         for rt in universe.types.values_mut() {
-            rt.properties.retain(|k, _| keep.contains(k));
+            rt.properties.retain(|k, _| keep.contains(k) || k.starts_with("Cast."));
         }
 
     Ok(())
@@ -263,6 +263,40 @@ fn register_typedefs(items: &[TopLevel], universe: &mut TypeUniverse) {
         // Hashword op signatures replace these properties entirely.
 
         universe.register(rt);
+    }
+
+    // 2026-07-23: Inject Cast.# properties from operator_defs and TypeDef.protocol.
+    // This makes protocol edges visible to find_cast_path BFS.
+    for item in items {
+        let td = match item {
+            TopLevel::TypeDef(td) => td,
+            _ => continue,
+        };
+        let type_name = &td.name;
+
+        // Implicit CastTo from TypeDef.protocol field (e.g., type Int: #Int)
+        if let Some(ref proto) = td.protocol {
+            let cat = proto.strip_prefix('#').unwrap_or(proto).to_string();
+            if let Some(rt) = universe.types.get_mut(type_name) {
+                rt.properties.insert(format!("Cast.#{}", cat), PropertyValue::Bool(true));
+            }
+        }
+
+        // Explicit CastTo/CastFrom from operator definitions
+        for op in &td.body.operators {
+            if op.op == "CastTo" || op.op == "CastFrom" {
+                for param in &op.params {
+                    let cat = match param {
+                        Type::HashWord(name) | Type::HashWordVariant(name, _)
+                            => name.strip_prefix('#').unwrap_or(name).to_string(),
+                        _ => continue,
+                    };
+                    if let Some(rt) = universe.types.get_mut(type_name) {
+                        rt.properties.insert(format!("Cast.#{}", cat), PropertyValue::Bool(true));
+                    }
+                }
+            }
+        }
     }
 }
 

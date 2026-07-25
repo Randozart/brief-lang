@@ -6,7 +6,7 @@
 
 ## Summary
 
-Add user-declarable protocol variants (`#String ascii { CastTo(#String<utf8>); };`) so programmers can define custom bit-layout assumptions and their compatibility edges — without modifying the compiler. Protocols remain a frontend-only abstraction; the compiler resolves them to concrete types before LLVM ever sees them.
+Add user-declarable protocol variants (`proto ascii: #String { CastTo(#String<utf8>); };`) so programmers can define custom bit-layout assumptions and their compatibility edges — without modifying the compiler. Protocols remain a frontend-only abstraction; the compiler resolves them to concrete types before LLVM ever sees them.
 
 ## Context
 
@@ -69,19 +69,19 @@ Defaults (utf8, ieee754, unicode) are hardcoded in the parser — they work with
 
 ```brief
 // Minimal — just edges, no contract
-#String ascii {
+proto ascii: #String {
     CastTo(#String<utf8>);
     CastFrom(#String<utf8>);
 };
 
 // With optional contract (recommended) using #Self hashword
-#String ascii [forall(i in 0..#Self:>Size, #Self[i] < 128)] {
+proto ascii: #String [forall(i in 0..#Self:>Size, #Self[i] < 128)] {
     CastTo(#String<utf8>);
     CastFrom(#String<utf8>);
 };
 
 // With an optional cross-variant op override
-#String ascii {
+proto ascii: #String {
     CastTo(#String<utf8>);
     CastFrom(#String<utf8>);
     op Add(#String<utf8>) = add_utf8_to_ascii(#L, #R);
@@ -90,7 +90,7 @@ Defaults (utf8, ieee754, unicode) are hardcoded in the parser — they work with
 
 A protocol declaration is primarily about **edges**. Self-referencing ops (e.g. adding `ascii` to `ascii`) are never declared — they fall through to the default protocol via CastTo. Ops are only declared for **cross-variant overrides**: `op Add(#String<utf8>) = fn(#L, #R)` means "if you ever need to add utf8 directly to me, no need to walk the graph — this is the way." The self-variant is implicit (the protocol's own variant).
 
-- `#Category variant { ... }` — new top-level form, disambiguated from `type` by the initial `#`
+- `proto variant: #Category { ... }` — new top-level form using `proto` keyword. Follows the same `: #Category` pattern as `type Name: #Protocol { ... }`. The `proto` keyword is contextual (like `type`, `fn`, `node`), not reserved.
 - `CastTo(#Other<Variant>)` / `CastFrom(#Other<Variant>)` — edges in the protocol graph
 - `op Name(#TargetCategory<target_variant>) = fn(#L, #R)` — *optional* cross-variant override. Add maps to `+`, so `#L` is the left operand (the protocol's own variant) and `#R` is the right operand (the target variant). No self-referencing ops — those delegate to default.
 - `[contract]` before the body — *optional* contract, recommended. Uses Brief expression syntax with `#Self` as a hashword referencing the value at the protocol boundary. `#Self` follows the PascalCase hashword convention (`#Int`, `#String`, `#Self`). Contracts are not required — a protocol without one trusts the programmer.
@@ -128,7 +128,7 @@ When a protocol has an optional contract `[expr]`, the proof engine checks it at
 The `#Self` hashword in the contract refers to the value at the boundary crossing. For example:
 
 ```brief
-#String ascii [forall(i in 0..#Self:>Size, #Self[i] < 128)] { ... }
+proto ascii: #String [forall(i in 0..#Self:>Size, #Self[i] < 128)] { ... }
 ```
 
 The compiler does not need to know what "ascii" means. It only knows: "data in this protocol must satisfy `forall(... < 128)`."
@@ -188,7 +188,7 @@ The LLVM normalizer at `src/backend/llvm/normalizer.rs:116-118` retains only `ll
 
 Before protocol declarations can work, fix the four gaps above:
 
-1. **Inject `Cast.#` properties into the universe** — After operator_defs are collected (`compile.rs:576`), walk each type's operators. For each `op CastTo(#Category)` or `op CastFrom(#Category)`, set `rt.properties.insert(format!("Cast.#{}", cat), PropertyValue::Bool(true))` on the type's `ResolvedType` in the universe.
+1. **Inject `Cast.#` properties into the universe** — After operator_defs are collected (`compile.rs:576`), walk each type's operators. For each `op CastTo(#Category)` or `op CastFrom(#Category)`, set `rt.properties.insert(format!("Cast.#{}", cat), PropertyValue::Bool(true))` on the type's `ResolvedType` in the universe. Additionally, `TypeDef.protocol: Some("#Int")` implicitly implies `CastTo(#Int)` — register this edge too.
 
 2. **Wire the proof engine** — In `prove_contract()` (`proof_engine/mod.rs:14`), replace the stub with actual symbolic evaluation via `symbolic.rs`. For simple cases (known values, simple predicates), use `eval_symbolic_expr()`. For complex cases, call `prove_smt_formula()`. Give it authority to return `Err("contract unprovable")`.
 
@@ -229,12 +229,9 @@ Add `#Self` as a recognized multi-character hash token before the general identi
 
 **Parser (`src/parser/definitions.rs`):**
 
-New arm in `parse_top_level()`: when `peek()` is `Identifier(name)` where `name` starts with `#` (and isn't one of the reserved multi-char tokens `#[`, `#!`, `#?`, `#L`, `#R`, `#T`, `#Self`):
-1. Consume `#Category` identifier
-2. Expect `identifier` for variant name
-3. Parse optional contract `[expr]` using the existing contract parser (`parse_contract`)
-4. Parse `{ CastTo(...); CastFrom(...); op Name(#Target<Variant>) = fn(#L, #R); }` body
-5. Return `TopLevel::ProtocolDef(...)`
+New arm in `parse_top_level()`: when `peek()` is `Token::Identifier("proto")`, consume `proto`, expect `identifier` for variant name, expect `Token::Colon`, parse optional category hashword `#Category`, parse optional contract `[expr]` using the existing contract parser (`parse_contract`), then parse `{ CastTo(...); CastFrom(...); op Name(#Target<Variant>) = fn(#L, #R); }` body. Return `TopLevel::ProtocolDef(...)`.
+
+The `proto` keyword is contextual (like `type`, `fn`, `node`) — it's only special in top-level position. No reserved word needed.
 
 Default primordial resolution in `src/parser/types.rs:40-48` is unchanged:
 - `#String` → `HashWordVariant("#String", "utf8")`
@@ -285,17 +282,17 @@ In `plugins/parsed/prelude.bv` (or a companion file discovered by the same plugi
 // Defaults (utf8, ieee754, unicode) are primordial — no declaration needed.
 // These only declare Cast edges; self-ops implicitly delegate to defaults.
 
-#String ascii {
+proto ascii: #String {
     CastTo(#String<utf8>);
     CastFrom(#String<utf8>);
 };
 
-#String utf16 {
+proto utf16: #String {
     CastTo(#String<utf8>);
     CastFrom(#String<utf8>);
 };
 
-#Float posit32 {
+proto posit32: #Float {
     CastTo(#Float<ieee754>);
     CastFrom(#Float<ieee754>);
 };
@@ -373,10 +370,10 @@ Existing 4-step pipeline, unchanged in structure. Step 2 (protocol path via `try
 - `test_bfs_consolidated`: verify single BFS finds edges from both universe and protocol graph
 
 ### Phase 1 (Parser)
-- `test_protocol_def_edges_only`: `#String ascii { CastTo(#String<utf8>); };` parses with empty cross_ops
-- `test_protocol_def_cross_op`: `#String ascii { CastTo(#String<utf8>); op Add(#String<utf8>) = fn(#L, #R); };`
-- `test_protocol_def_with_contract`: `#String ascii [forall(...)] { CastTo(...); };`
-- `test_protocol_def_empty_body`: `#String ascii {};` — valid, just no edges
+- `test_protocol_def_edges_only`: `proto ascii: #String { CastTo(#String<utf8>); };` parses with empty cross_ops
+- `test_protocol_def_cross_op`: `proto ascii: #String { CastTo(#String<utf8>); op Add(#String<utf8>) = fn(#L, #R); };`
+- `test_protocol_def_with_contract`: `proto ascii: #String [forall(...)] { CastTo(...); };`
+- `test_protocol_def_empty_body`: `proto ascii: #String {};` — valid, just no edges
 - `test_protocol_def_no_self_ops`: verify self-referencing ops like `op Length(#String<ascii>)` are rejected (self-ops delegate to default, never declared)
 - `test_hash_self_token`: verify `#Self` is lexed as `Token::HashSelf`, not `Identifier("#Self")`
 

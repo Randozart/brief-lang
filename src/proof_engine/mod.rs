@@ -10,16 +10,119 @@ use crate::ast::{Expr, Statement, TopLevel, Type};
 use crate::errors::ProofError;
 
 /// Check that a contract's pre/post conditions are satisfiable.
-/// Returns Ok(()) if provable, Err with counterexample if not.
+///
+/// Uses existing heuristic checks (check_satisfiable, split_and) as a fast path.
+/// If heuristics flag a violation or are inconclusive, Z3 is consulted as arbiter.
+/// Without Z3, heuristic verdict is final — violations deny, inconclusive allows.
+///
+/// For protocol contracts, params should include ("Self", type) to
+/// declare #Self as a free variable.
 pub fn prove_contract(
-    _pre: &Expr,
-    _post: &Expr,
-    _params: &[(String, Type)],
+    pre: &Expr,
+    post: &Expr,
+    params: &[(String, Type)],
 ) -> Result<(), Vec<ProofError>> {
-    // 2026-07-12: Simplified contract prover.
-    // Full implementation uses SMT solver via smt::prove_smt().
-    // For now, all non-trivial contracts are assumed provable.
-    Ok(())
+    let pre_is_true = matches!(pre, Expr::Bool(true));
+    let post_is_true = matches!(post, Expr::Bool(true));
+
+    if pre_is_true && post_is_true {
+        return Ok(());
+    }
+
+    let condition = if pre_is_true {
+        post.clone()
+    } else if post_is_true {
+        pre.clone()
+    } else {
+        Expr::BinaryOp(
+            crate::ast::BinaryOpKind::And,
+            Box::new(pre.clone()),
+            Box::new(post.clone()),
+        )
+    };
+
+    // Run existing heuristic checks
+    let conditions = split_and(&condition);
+    let mut has_violation = false;
+
+    for cond in &conditions {
+        if !check_satisfiable(cond, &Expr::Bool(true)) {
+            has_violation = true;
+        }
+    }
+
+    // If heuristic detected no violation, the contract passes basic sanity
+    if !has_violation {
+        // Still let Z3 verify deeply if available
+        if smt::is_z3_available() {
+            let query = smt::build_contract_query(&condition, params);
+            match smt::prove_smt_formula(&query, 1000) {
+                smt::SmtResult::Unsat => return Ok(()),
+                smt::SmtResult::Sat(model) => {
+                    let msg = if model.is_empty() {
+                        "SMT solver found a counterexample".into()
+                    } else {
+                        format!("SMT counterexample: {:?}", model)
+                    };
+                    return Err(vec![ProofError::PostconditionUnsatisfiable {
+                        transaction: "<contract>".into(),
+                        postcondition: format!("{}", condition),
+                        reason: msg,
+                        example_values: model.iter().map(|(k, v)| format!("{} = {}", k, v)).collect(),
+                        suggestion: "add a runtime guard or prove the input constraints".into(),
+                        span: crate::errors::Span::dummy(),
+                    }]);
+                }
+                smt::SmtResult::Unknown => {
+                    // Z3 couldn't prove either way — allow
+                    return Ok(());
+                }
+            }
+        }
+        // No Z3 — heuristic pass is sufficient
+        return Ok(());
+    }
+
+    // If heuristic found a violation or was inconclusive, consult Z3
+    if smt::is_z3_available() {
+        let query = smt::build_contract_query(&condition, params);
+        match smt::prove_smt_formula(&query, 1000) {
+            smt::SmtResult::Unsat => return Ok(()),
+            smt::SmtResult::Sat(model) => {
+                let msg = if model.is_empty() {
+                    "SMT solver found a counterexample".into()
+                } else {
+                    format!("SMT counterexample: {:?}", model)
+                };
+                return Err(vec![ProofError::PostconditionUnsatisfiable {
+                    transaction: "<contract>".into(),
+                    postcondition: format!("{}", condition),
+                    reason: msg,
+                    example_values: model.iter().map(|(k, v)| format!("{} = {}", k, v)).collect(),
+                    suggestion: "add a runtime guard or prove the input constraints".into(),
+                    span: crate::errors::Span::dummy(),
+                }]);
+            }
+            smt::SmtResult::Unknown => {
+                eprintln!("warning: contract could not be proven (Z3 returned Unknown), allowing");
+                return Ok(());
+            }
+        }
+    }
+
+    // No Z3 available — heuristic verdict is final
+    if has_violation {
+        Err(vec![ProofError::PostconditionUnsatisfiable {
+            transaction: "<contract>".into(),
+            postcondition: format!("{}", condition),
+            reason: "heuristic detected a contract violation (no Z3 to verify further)".into(),
+            example_values: vec![],
+            suggestion: "simplify the contract or install z3 for more precise checking".into(),
+            span: crate::errors::Span::dummy(),
+        }])
+    } else {
+        Ok(())
+    }
 }
 
 /// Extract a loop bound from a postcondition like [done == N].

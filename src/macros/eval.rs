@@ -1144,7 +1144,7 @@ fn eval_nav_call(
         "CastPath$" => {
             let src = expect_str_arg(args, 0, "CastPath$", scope)?;
             let tgt = expect_str_arg(args, 1, "CastPath$", scope)?;
-            let path = crate::analysis::layout_optimizer::find_cast_path(universe, &src, &tgt);
+            let path = crate::analysis::layout_optimizer::find_cast_path(universe, &src, &tgt, None);
             match path {
                 Some(types) => {
                     let steps: Vec<NavValue> = types.into_iter()
@@ -2058,7 +2058,7 @@ fn resolve_dollar_refs_in_toplevel(tl: &mut TopLevel, scope: &Scope) -> Result<(
         | TopLevel::Assertion { .. } | TopLevel::Fuzzed { .. }
         | TopLevel::RenderBlock(_) | TopLevel::Stylesheet(_)
         | TopLevel::SvgComponent { .. } | TopLevel::SyncGroup { .. }
-        | TopLevel::Cfg(_) => Ok(()),
+        | TopLevel::Cfg(_) | TopLevel::ProtocolDef(_) => Ok(()),
         TopLevel::CompileTimeDefn(d) => {
             for stmt in &mut d.body {
                 resolve_dollar_refs_in_stmt(stmt, scope)?;
