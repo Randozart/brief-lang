@@ -21,7 +21,8 @@ pub fn to_beast(items: &[TopLevel], universe: &TypeUniverse) -> String {
 
 fn emit_universe(rt: &ResolvedType) -> SExpr {
     let mut children: Vec<SExpr> = vec![atom(&rt.name)];
-    children.push(list(&[atom("bytes"), atom(&rt.bytes.to_string())]));
+    let maxbits = rt.bytes * 8;
+    children.push(list(&[atom("maxbits"), atom(&maxbits.to_string())]));
     children.push(list(&[atom("alignment"), atom(&rt.alignment.to_string())]));
     if !rt.properties.is_empty() {
         let mut props: Vec<SExpr> = vec![atom("properties")];

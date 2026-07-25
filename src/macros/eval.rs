@@ -1270,7 +1270,8 @@ fn eval_nav_call(
                     let props: Vec<String> = rt.properties.keys().cloned().collect();
                     Ok(NavValue::Names(props))
                 }
-                "bytes" => Ok(NavValue::Int(rt.bytes as i64)),
+                // 2026-07-25: "bytes" query returns max_bits / 8 for backward compat.
+                "bytes" => Ok(NavValue::Int((rt.max_bits / 8) as i64)),
                 "fields" => {
                     let field_names: Vec<String> = rt.fields.iter().map(|(n, _)| n.clone()).collect();
                     Ok(NavValue::Names(field_names))

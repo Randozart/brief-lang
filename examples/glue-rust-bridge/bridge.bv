@@ -9,7 +9,7 @@
 //   cargo build                                            # build.rs llc + link
 
 type Int: #Int {
-    bytes <~ 8;
+    maxbits <~ 64;
     alignment <~ 8;
 };
 

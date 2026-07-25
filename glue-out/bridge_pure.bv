@@ -1,0 +1,28 @@
+// Bridge module for bridge — auto-generated
+
+struct PyMethodDef { name: Ptr; meth: Ptr; flags: Int; doc: Ptr; };
+struct PyModuleDef_Base { ob_refcnt: Int; ob_type: Ptr; m_init: Ptr; };
+struct PyModuleDef { m_base: PyModuleDef_Base; m_name: Ptr; m_doc: Ptr; m_size: Int; m_methods: Ptr; m_slots: Ptr; m_traverse: Ptr; m_clear: Ptr; m_free: Ptr; };
+
+frgn PyLong_FromLongLong(n: Int) -> Ptr from "c" fallback 0;
+frgn PyModule_Create2(defn: Ptr, api: Int) -> Ptr from "c" fallback 0;
+
+let methods = [
+
+];
+
+let moduledef = PyModuleDef {
+    m_base: PyModuleDef_Base { ob_refcnt: 1; ob_type: null; m_init: null; };
+    m_name: "bridge";
+    m_doc: null;
+    m_size: -1;
+    m_methods: &methods;
+    m_slots: null;
+    m_traverse: null;
+    m_clear: null;
+    m_free: null;
+};
+
+export defn PyInit_bridge() -> Ptr {
+    term PyModule_Create2(&moduledef, 1013);
+};

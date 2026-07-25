@@ -159,9 +159,10 @@ fn register_typedefs(items: &[TopLevel], universe: &mut TypeUniverse) {
             TopLevel::TypeDef(td) => td,
             _ => continue,
         };
-        let bytes = td.body.metadata.get("bytes")
+        // 2026-07-25: Read "maxbits" from type metadata (bits), convert to bytes.
+        let bytes = td.body.metadata.get("maxbits")
             .and_then(|pv| {
-                if let PropertyValue::Int(n) = pv { Some(*n as u64) } else { None }
+                if let PropertyValue::Int(n) = pv { Some(*n as u64 / 8) } else { None }
             })
             .or_else(|| {
                 if td.body.slots.is_empty() { return None; }

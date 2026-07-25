@@ -24,7 +24,7 @@ use crate::type_universe::TypeUniverse;
 /// to apply before codegen.
 ///
 /// 2026-07-22: Each change targets a TypeDef in the AST, modifying its
-/// `bytes <~ N` and `alignment <~ N` metadata to match the foreign type's
+/// `maxbits <~ N` and `alignment <~ N` metadata to match the foreign type's
 /// layout. The backend emits whatever layout it receives.
 pub struct LayoutChange {
     /// The name of the type to modify (e.g., "Int")
@@ -157,9 +157,10 @@ pub fn apply_layout_change(items: &mut [TopLevel], change: &LayoutChange) -> Res
             _ => continue,
         };
 
+        // 2026-07-25: Use maxbits (bits) instead of bytes.
         td.body.metadata.insert(
-            "bytes".to_string(),
-            PropertyValue::Int(change.new_bytes as i64),
+            "maxbits".to_string(),
+            PropertyValue::Int(change.new_bytes as i64 * 8),
         );
 
         td.body.metadata.insert(
@@ -424,7 +425,7 @@ mod tests {
 
     fn make_type_def(name: &str, bytes: u64, alignment: u64) -> TopLevel {
         let mut metadata = std::collections::HashMap::new();
-        metadata.insert("bytes".to_string(), PropertyValue::Int(bytes as i64));
+        metadata.insert("maxbits".to_string(), PropertyValue::Int(bytes as i64 * 8));
         metadata.insert("alignment".to_string(), PropertyValue::Int(alignment as i64));
         TopLevel::TypeDef(Box::new(TypeDef {
             name: name.to_string(),
@@ -544,9 +545,9 @@ mod tests {
 
         // Verify metadata was updated
         if let TopLevel::TypeDef(td) = &items[0] {
-            let bytes = td.body.metadata.get("bytes").unwrap();
+            let maxbits = td.body.metadata.get("maxbits").unwrap();
             let alignment = td.body.metadata.get("alignment").unwrap();
-            assert_eq!(*bytes, PropertyValue::Int(16));
+            assert_eq!(*maxbits, PropertyValue::Int(128));  // 16 bytes * 8
             assert_eq!(*alignment, PropertyValue::Int(8));
         } else {
             panic!("expected TypeDef");

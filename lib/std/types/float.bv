@@ -9,7 +9,7 @@
 
 // 16-bit half-precision float (hardware on some GPUs)
 type Float16 <: Bits {
-    bytes <~ 2;
+    maxbits <~ 16;
     alignment <~ 2;
     tbaa <~ "FloatNode";
 
@@ -20,7 +20,7 @@ type Float16 <: Bits {
 
 // 4-lane SIMD float vector
 type Float4 <: Bits {
-    bytes <~ 16;
+    maxbits <~ 128;
     alignment <~ 16;
     tbaa <~ "FloatNode";
 

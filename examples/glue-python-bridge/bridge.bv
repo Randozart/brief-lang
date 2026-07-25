@@ -10,7 +10,7 @@
 //   python3 gluerun.py
 
 type Int <: Bits {
-    bytes <~ 8;
+    maxbits <~ 64;
     alignment <~ 8;
 };
 

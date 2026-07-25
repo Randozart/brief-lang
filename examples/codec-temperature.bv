@@ -39,7 +39,7 @@ codec ReactionTemp {
 };
 
 type ReactorTemp <: Float {
-    bytes  <~ 8;
+    maxbits  <~ 64;
     codec  <~ ReactionTemp;
 };
 

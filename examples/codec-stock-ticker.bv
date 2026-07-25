@@ -12,7 +12,7 @@ codec StockPrice {
 };
 
 type Price <: Float {
-    bytes  <~ 8;
+    maxbits  <~ 64;
     codec  <~ StockPrice;
 };
 
@@ -31,7 +31,7 @@ codec TickerSymbol {
 };
 
 type Symbol <: String {
-    bytes  <~ 8;
+    maxbits  <~ 64;
     codec  <~ TickerSymbol;
 };
 

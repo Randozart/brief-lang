@@ -110,7 +110,7 @@ fn parse_universe(parts: &[SExpr]) -> Result<ResolvedType, String> {
     while i < parts.len() {
         let key = tag(parts, i)?;
         match key {
-            "bytes" => { rt.bytes = sexpr_int(&parts[i + 1])? as u64; i += 2; }
+            "maxbits" => { rt.bytes = sexpr_int(&parts[i + 1])? as u64 / 8; i += 2; }
             "alignment" => { rt.alignment = sexpr_int(&parts[i + 1])? as u64; i += 2; }
             "properties" => {
                 let mut j = i + 1;

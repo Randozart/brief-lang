@@ -14,7 +14,7 @@ codec HexColor {
 };
 
 type Color <: Int {
-    bytes  <~ 4;
+    maxbits  <~ 32;
     codec  <~ HexColor;
 };
 

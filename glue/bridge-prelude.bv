@@ -9,21 +9,21 @@
 //   brief build --disable-plugin prelude --library bridge.bv --out .
 
 type Int <: Bits {
-    bytes <~ 8;
+    maxbits <~ 64;
     alignment <~ 8;
 };
 
 type Float <: Bits {
-    bytes <~ 4;
+    maxbits <~ 32;
     alignment <~ 4;
 };
 
 type Bool <: Bits {
-    bytes <~ 1;
+    maxbits <~ 8;
     alignment <~ 1;
 };
 
 type Char <: Bits {
-    bytes <~ 4;
+    maxbits <~ 32;
     alignment <~ 4;
 };
