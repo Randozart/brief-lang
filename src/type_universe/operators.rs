@@ -5,9 +5,6 @@
 
 use crate::ast::{OpBinding, Type};
 use crate::type_universe::TypeUniverse;
-use std::collections::HashMap;
-use std::collections::HashSet;
-use std::collections::VecDeque;
 
 /// The rune-to-op-name mapping. These are the same across all types.
 fn rune_to_op_name(rune: &str) -> Option<&'static str> {
@@ -122,65 +119,6 @@ pub fn builtin_operator_binding(rune: &str, ty: &Type) -> Option<OpBinding> {
     }
 }
 
-/// 2026-07-20: BFS shortest path through the protocol graph.
-/// Finds a sequence of Cast ops from source_type to target_category.
-/// #Bits is always reachable from every type (implicit Cast(#Bits)).
-///
-/// Returns Vec of category/type names from source to target (inclusive).
-/// Returns None if no path exists.
-pub fn find_cast_path(universe: &TypeUniverse, source_type: &str, target_category: &str) -> Option<Vec<String>> {
-    use std::collections::VecDeque;
-
-    let mut visited: HashSet<String> = HashSet::new();
-    let mut queue: VecDeque<(String, Vec<String>)> = VecDeque::new();
-    queue.push_back((source_type.to_string(), vec![source_type.to_string()]));
-    visited.insert(source_type.to_string());
-
-    while let Some((current, path)) = queue.pop_front() {
-        // Check if current node matches target (as category or type name)
-        if current == target_category {
-            return Some(path);
-        }
-        // Check if this type has category "Bits" — always reachable
-        let rt = universe.get(&current);
-        let properties = rt.map(|r| &r.properties);
-        // Implicit edge to #Bits for every type
-        if current != "#Bits" && !visited.contains("#Bits") {
-            visited.insert("#Bits".to_string());
-            let mut new_path = path.clone();
-            new_path.push("#Bits".to_string());
-            queue.push_back(("#Bits".to_string(), new_path));
-        }
-        // Scan for Cast ops on this type
-        if let Some(Some(rt)) = Some(universe.get(&current)) {
-            // Check properties for Cast ops
-            for (key, val) in &rt.properties {
-                if key.starts_with("Cast.") {
-                    let target_name = key.strip_prefix("Cast.").unwrap_or("");
-                    if !target_name.is_empty() && !visited.contains(target_name) {
-                        visited.insert(target_name.to_string());
-                        let mut new_path = path.clone();
-                        new_path.push(target_name.to_string());
-                        queue.push_back((target_name.to_string(), new_path));
-                    }
-                }
-                // Also check op.Cast properties
-                if key == "op.Cast" {
-                    if let crate::ast::PropertyValue::String(s) = val {
-                        if !s.is_empty() && !visited.contains(s.as_str()) {
-                            visited.insert(s.clone());
-                            let mut new_path = path.clone();
-                            new_path.push(s.clone());
-                            queue.push_back((s.clone(), new_path));
-                        }
-                    }
-                }
-            }
-        }
-    }
-    None
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -220,20 +158,6 @@ mod tests {
     fn test_builtin_string_concat() {
         let binding = builtin_operator_binding("++", &Type::string());
         assert_eq!(binding, Some(OpBinding::Intrinsic("StringConcat#".into())));
-    }
-
-    #[test]
-    fn test_cast_path_int_to_bits() {
-        let uni = empty_universe();
-        let path = find_cast_path(&uni, "Int", "#Bits");
-        assert!(path.is_some());
-    }
-
-    #[test]
-    fn test_cast_path_string_to_bits() {
-        let uni = empty_universe();
-        let path = find_cast_path(&uni, "String", "#Bits");
-        assert!(path.is_some());
     }
 
     #[test]
