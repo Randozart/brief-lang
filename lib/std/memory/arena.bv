@@ -8,7 +8,9 @@
 //   3. arena_reset(a) — rewind offset to 0 (reuse memory)
 //   4. arena_free(a) — free backing buffer via Free#
 // The [pre][post] contract on arena_alloc prevents overflow.
-type Arena {
+// 2026-07-25: Arena is pure data — no protocols, no contracts.
+// Migrated from `type` to `struct` as part of the type/struct/obj split.
+struct Arena {
     base: Ptr<Byte>;
     offset: Int;
     capacity: Int;

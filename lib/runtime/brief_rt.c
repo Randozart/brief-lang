@@ -417,6 +417,48 @@ int64_t brief_ttyname(int64_t fd) {
     return (int64_t)(uintptr_t)ttyname((int)fd);
 }
 
+// 2026-07-25: ShellCmd# runtime implementation.
+// Runs a shell command via popen() and returns stdout as a Brief String.
+// Expected LLVM signature: call i64 @ShellCmd(i64 %cmd_bstr)
+int64_t ShellCmd(int64_t cmd_bstr) {
+    // Extract C string from Brief String handle
+    int64_t handle = cmd_bstr & ~3ULL;  // strip tag bits
+    int64_t len = *(int64_t*)(uintptr_t)handle;  // read length prefix
+    char* cstr = (char*)(uintptr_t)(handle + 8);  // data starts after length
+    char* buf = (char*)calloc(len + 32, 1);
+    if (!buf) return 0;
+    memcpy(buf, cstr, len);
+    
+    // Run command via popen
+    FILE* f = popen(buf, "r");
+    free(buf);
+    if (!f) return 0;
+    
+    // Read output into a growing buffer
+    size_t out_cap = 4096;
+    size_t out_len = 0;
+    char* out = (char*)malloc(out_cap);
+    if (!out) { pclose(f); return 0; }
+    while (fgets(out + out_len, out_cap - out_len, f) != NULL) {
+        out_len = strlen(out);
+        if (out_len + 1024 > out_cap) {
+            out_cap *= 2;
+            out = (char*)realloc(out, out_cap);
+            if (!out) { pclose(f); return 0; }
+        }
+    }
+    pclose(f);
+    
+    // Pack as Brief String: {i64 length, i8 data[]}
+    int64_t total = 8 + out_len;
+    int64_t* result = (int64_t*)malloc(total + 8);  // extra padding
+    if (!result) { free(out); return 0; }
+    result[0] = out_len;
+    memcpy(result + 1, out, out_len);
+    free(out);
+    return (int64_t)(uintptr_t)result;
+}
+
 // 2026-07-18: All __utf8_* functions now implemented as pure Brief in utf8view.bv
 // (uses Load# + convergent txn). Find byte substring in byte string.
 // Returns offset or -1.

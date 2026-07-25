@@ -199,6 +199,7 @@ impl LlvmBackend {
         // the bump-allocated buffer is exhausted (emit_arena_alloc in mod.rs).
         writeln!(out, "declare ptr @realloc(ptr, i64) nounwind").ok();
         writeln!(out, "declare i64 @__read_file__(i64)").ok();
+        writeln!(out, "declare i64 @ShellCmd(i64)").ok();
         writeln!(out, "declare i64 @__write_file__(i64, i64)").ok();
         writeln!(out, "declare i64 @__readln__()").ok();
         writeln!(out, "declare i64 @__sort_list__(i64)").ok();

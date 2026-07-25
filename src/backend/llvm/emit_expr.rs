@@ -429,6 +429,25 @@ impl LlvmBackend {
                                 ty: Type::ptr(*inner.clone()),
                             };
                         }
+                        // 2026-07-25: Struct not in let_bindings — spill to alloca + GEP.
+                        // The struct value is in an SSA register; we need a pointer to GEP.
+                        // Spill via alloca + store, then GEP into the alloca.
+                        // LLVM mem2reg should eliminate the alloca in opt builds.
+                        let alloca = self.fun.gen_reg();
+                        writeln!(out, "{}{} = alloca {}, align 8", indent, alloca, self.llvm_type(&obj_reg.ty)).ok();
+                        writeln!(out, "store {} {}, ptr {}, align 8", self.llvm_type(&obj_reg.ty), obj_reg.name, alloca).ok();
+                        let gep = self.fun.gen_reg();
+                        writeln!(
+                            out,
+                            "{}{} = getelementptr inbounds {}, ptr {}, i32 0, i32 {}",
+                            indent, gep, self.llvm_type(&obj_reg.ty), alloca, field_idx
+                        ).ok();
+                        let result = self.fun.gen_reg();
+                        writeln!(out, "{}{} = ptrtoint ptr {} to i64", indent, result, gep).ok();
+                        return TypedRegister {
+                            name: result,
+                            ty: Type::ptr(*inner.clone()),
+                        };
                     }
                 }
                 // Struct field access via extractvalue (numeric index required)

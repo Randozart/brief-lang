@@ -1117,9 +1117,12 @@ fn emit_external_call(
     let typed_regs: Vec<BTypedRegister> = args.iter()
         .map(|a| backend.emit_expr(out, a, indent))
         .collect();
-    let arg_strs: Vec<String> = typed_regs.iter()
-        .map(|reg| format!("{} {}", backend.llvm_type(&reg.ty), reg.name))
-        .collect();
+    // 2026-07-25: External calls expect i64 arguments. Always pass as i64
+    // to match the C ABI. The type checker may narrow to i8/i16/i32, but
+    // the actual SSA value is already i64 from ptrtoint.
+    let arg_strs: Vec<String> = typed_regs.iter().map(|reg| {
+        format!("i64 {}", reg.name)
+    }).collect();
     let clean_name = name.trim_end_matches('#');
     writeln!(out, "{}{} = call i64 @{}({})", indent, v, clean_name, arg_strs.join(", ")).ok();
     BTypedRegister { name: v.to_string(), ty: Type::int() }
