@@ -306,7 +306,10 @@ pub fn eval_nav_chain(
         }
         // Fix 1: Resolve identifiers from the compile-time scope
         Expr::Identifier(name) => {
+            // 2026-07-25: Check local scope first, then comptime_vars.
             if let Some(val) = scope.get(name) {
+                Ok(val.clone())
+            } else if let Some((val, _)) = pm.as_ref().and_then(|p| p.comptime_vars.get(name)) {
                 Ok(val.clone())
             } else {
                 Err(format!("undefined compile-time variable '{}'", name))
@@ -494,12 +497,22 @@ fn evaluate_stage_stmt(
             Ok(None)
         }
         // 2026-07-23: Assignment — evaluate the RHS and update scope.
+        // 2026-07-25: Also writes to comptime_vars for mutable $let targets.
         Statement::Assign(target, value) => {
             let name = match target {
                 Expr::Identifier(n) => n.clone(),
                 other => return Err(format!("assignment target must be an identifier, got {:?}", other)),
             };
             let result = eval_nav_chain(value, program, universe, stage, scope, sandbox, pm)?;
+            // 2026-07-25: If name is a comptime_var, update it (mutation for $let).
+            if let Some(pm_inner) = pm.as_mut() {
+                if let Some(entry) = pm_inner.comptime_vars.get_mut(&name) {
+                    if entry.1 {
+                        return Err(format!("cannot reassign $const '{}'", name));
+                    }
+                    entry.0 = result.clone();
+                }
+            }
             scope.insert(name, result);
             Ok(None)
         }
