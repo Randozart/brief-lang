@@ -12,7 +12,7 @@ This section walks through the Layout DSL from simple to complex. You can read i
 
 ```brief
 type FourBytes <: Bits {
-    bytes <~ 4;
+    maxbits <~ 32;
     layout <~ [first: 16, second: 16];
 }
 ```
@@ -25,7 +25,7 @@ Reading `x.first` returns bits 0-15 as an integer. Writing to `x.first` changes 
 
 ```brief
 type Float32 <: Bits {
-    bytes <~ 4;
+    maxbits <~ 32;
     primitive <~ Float;
     layout <~ le: [sign: 1, exp: 8, mant: 23];
 }
@@ -41,7 +41,7 @@ The fields are read-only (no `!` prefix). The compiler generates getters for all
 
 ```brief
 type PngChunk <: Bits {
-    bytes <~ 12;
+    maxbits <~ 96;
     layout <~ be: [$length: 32, kind: 32, data: {$length}, !crc: 32];
 }
 ```
@@ -55,7 +55,7 @@ type PngChunk <: Bits {
 
 ```brief
 type String <: Bits {
-    bytes <~ 8;
+    maxbits <~ 64;
     primitive <~ String;
     layout <~ be: (@codepoint: (
         0x00..0x7F |
@@ -84,7 +84,7 @@ The compiler's DFA engine validates every string literal against this pattern at
 
 ```brief
 type List<T> <: Bits {
-    bytes <~ 16;
+    maxbits <~ 128;
     layout <~ le: [$length: 64, data_ptr: 64, elements: {$length, $T}];
 }
 ```
@@ -100,7 +100,7 @@ Accessing `list[5]` generates: bounds check `5 < $length`, GEP into `data_ptr` a
 
 ```brief
 type HashMap<K, V> <: Bits {
-    bytes <~ 24;
+    maxbits <~ 192;
     layout <~ le: [$capacity: 64, $length: 64, seed: 64,
                    slots: {$capacity, ($K, $V)}];
 }
@@ -156,7 +156,7 @@ list.#halve(arg)     // custom layout operation
 
 ```brief
 type HashMap<K, V> <: Bits {
-    bytes <~ 24;
+    maxbits <~ 192;
     layout <~ le: [$capacity: 64, $length: 64, seed: 64,
                    slots: {$capacity, ($K, $V)}];
 
@@ -177,7 +177,7 @@ map.#set("user:42", user) // inserts via bound op
 
 ```brief
 type SecurePacket <: Bits {
-    bytes <~ 12;   // header size: magic + version + flags + payload_len + crc
+    maxbits <~ 96;   // header size: magic + version + flags + payload_len + crc
     layout <~ be: [
         magic: 16,
         $version: 8,
@@ -206,7 +206,7 @@ packet.#crc = checksum   // write the CRC — only touches last 32 bits
 packet.#payload_len      // read the structural payload length field
 ```
 
-The variable-width `payload` field is inline — it follows directly after the header fields. `bytes <~ 12` is the header size (magic + version + flags + payload_len + crc). The total runtime footprint is `12 + payload_byte_count`.
+The variable-width `payload` field is inline — it follows directly after the header fields. `maxbits <~ 96` is the header size (magic + version + flags + payload_len + crc). The total runtime footprint is `12 + payload_byte_count`.
 
 ## Two Pattern Forms, One Concept
 
@@ -460,7 +460,7 @@ Layout describes structure. `op` bindings describe behavior. The same `op` synta
 
 ```brief
 type HashMap<K, V> <: Bits {
-    bytes <~ 24;
+    maxbits <~ 192;
     layout <~ le: [$capacity: 64, $length: 64, seed: 64,
                    slots: {$capacity, ($K, $V)}];
 
@@ -470,7 +470,7 @@ type HashMap<K, V> <: Bits {
 }
 
 type List<T> <: Bits {
-    bytes <~ 16;
+    maxbits <~ 128;
     layout <~ le: [$length: 64, data_ptr: *elements, elements: {$length, $T}];
 
     // Auto-synthesizable from layout alone
@@ -492,7 +492,7 @@ Anonymous fields `_: N` for padding:
 
 ```brief
 type AlignedStruct <: Bits {
-    bytes <~ 8;
+    maxbits <~ 64;
     layout <~ le: [a: 8, _: 24, b: 32];
 }
 ```
@@ -503,7 +503,7 @@ Bitfield read-modify-write is non-atomic. The `atomic:` prefix on a `!` field ge
 
 ```brief
 type SharedFlags <: Bits {
-    bytes <~ 4;
+    maxbits <~ 32;
     layout <~ le: [atomic: !flag: 1, _: 31];
 }
 ```

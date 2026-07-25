@@ -69,6 +69,12 @@
     },
     {
       "include": "#macro-words"
+    },
+    {
+      "include": "#compiletime-keywords"
+    },
+    {
+      "include": "#metadata-properties"
     }
   ],
   "repository": {
@@ -116,10 +122,6 @@
           "match": "\\b(txn|TXN)\\b"
         },
         {
-          "name": "keyword.control.reactive.brief",
-          "match": "\\b(rct|RCT)\\b"
-        },
-        {
           "name": "keyword.control.async.brief",
           "match": "\\b(async|ASYNC)\\b"
         },
@@ -129,7 +131,7 @@
         },
         {
           "name": "keyword.declaration.brief",
-          "match": "\\b(sig|defn|let|const|trg|txn|rct|SIG|DEFN|LET|CONST|TRG|TXN|RCT|struct|rstruct|enum|STRUCT|RSTRUCT|ENUM|inop|INOP|bild|BILD|type|TYPE|fallback|FALLBACK)\\b"
+          "match": "\\b(sig|defn|let|const|trg|txn|SIG|DEFN|LET|CONST|TRG|TXN|struct|enum|STRUCT|ENUM|type|TYPE|fallback|FALLBACK|node|NODE)\\b"
         },
         {
           "name": "keyword.declaration.ffi.brief",
@@ -499,7 +501,7 @@
       "patterns": [
         {
           "name": "support.function.navigation.brief",
-          "match": "\\b(All|Tag|Named|WithKey|WithAttr|And|Or|Not|First|Last|Nth|Children|Descendants|Parent|Ancestors|Closest|Next|Prev|Before|After|Replace|Inside|AppendTo|Insert|Delete|ReplaceWith|Set|Wrap|Rename|Count|IsEmpty|Names|Find|Prepend|Append|Lines|Run|ForEach|Bound|Text|Path|Size|ReadBytes|List|Remove)\\$"
+          "match": "\\b(All|Tag|Named|WithKey|WithAttr|And|Or|Not|First|Last|Nth|Children|Descendants|Parent|Ancestors|Closest|Next|Prev|Before|After|Replace|Inside|AppendTo|Insert|Delete|ReplaceWith|Set|Wrap|Rename|Count|IsEmpty|Names|Find|Prepend|Append|Lines|Run|ForEach|Bound|Text|Path|Size|ReadBytes|List|Remove|StrSplit|StrReplace|StrJoin|EnvGet|SysQuery|TimeNow|HttpFetch|ShellCmd|FileRead|FileWrite|ConfigGet|TypeInfo|CastPath|InjectTypeLayout|DocRead|EmitInfo|EmitWarning|EmitError|Quote)\\$"
         }
       ]
     },
@@ -532,6 +534,22 @@
         {
           "name": "entity.name.function.macro.brief",
           "match": "\\b[a-zA-Z_][a-zA-Z0-9_]*!"
+        }
+      ]
+    },
+    "compiletime-keywords": {
+      "patterns": [
+        {
+          "name": "keyword.declaration.compiletime.brief",
+          "match": "\\$(let|const|defn|txn)\\b"
+        }
+      ]
+    },
+    "metadata-properties": {
+      "patterns": [
+        {
+          "name": "keyword.other.property.brief",
+          "match": "\\b(maxbits|observable|alignment|primitive|ctd|alu|llvm_type|layout)\\b"
         }
       ]
     }

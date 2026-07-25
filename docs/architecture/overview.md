@@ -188,7 +188,7 @@ Expr::BinaryOp(Add, lhs, rhs)
 ```brief
 // Same-type: inside type definition
 type Int <: Bits {
-    bytes <~ 8;
+    maxbits <~ 64;
     primitive <~ Int;
     op Add <~ add_int_int(#L, #R);   // Int + Int → custom function
 }
@@ -205,7 +205,7 @@ Type metadata declared in **source** drives all backend emission decisions.
 
 ```
 Source type definition:
-  type Int <: Bits { bytes <~ 8; primitive <~ Int; }
+  type Int <: Bits { maxbits <~ 64; primitive <~ Int; }
 
 Flow:
   parser ──► TypeDefBody.metadata["primitive"] = "Int"

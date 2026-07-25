@@ -374,6 +374,46 @@ finds all compile-time definitions instantly.
 
 ---
 
+## Compile-Time Variables (`$let` / `$const`)
+
+Compile-time variables store values in `PluginManager.comptime_vars` and are
+accessible in `$(Stage)` blocks by bare name.
+
+### Syntax
+
+```brief
+$let name = expr;     // mutable compile-time variable
+$const name = expr;   // immutable compile-time constant
+```
+
+### Semantics
+
+| Construct | Semantics |
+|-----------|-----------|
+| `$let name = expr;` | Evaluates `expr` at compile time, stores result. Can be reassigned later. |
+| `$const name = expr;` | Evaluates `expr` at compile time, stores result. Immutable — reassignment is an error. |
+
+### Storage
+
+`$let` and `$const` variables are stored in `PluginManager.comptime_vars`
+(a `HashMap<String, NavValue>`). Runtime rebinding is explicit via `= expr;`
+in a stage block (without `$let`/`$const` prefix). The `resolve_comptime_refs()`
+pass resolves bare-name references in `const X = name;` and `trg @ name.#port`
+declarations by looking up `comptime_vars`.
+
+### Example
+
+```brief
+$(Parsed @ highest) {
+    $let target_name = "linux";
+    $const debug_mode = true;
+    EmitInfo$("Building for: " + target_name);
+    target_name = "linux_x86_64";  // rebind mutable
+};
+```
+
+---
+
 ## Macro DSL Expression Support
 
 Inside `$(Stage)` blocks, the following expression types are evaluated:

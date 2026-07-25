@@ -25,12 +25,12 @@ no guesswork. The programmer defines their own types, or loads the prelude.
 Every type is `Bits(N)` at minimum:
 
 ```brief
-type Int <: Bits { bytes <~ 8; ctd <~ Int; alu <~ Int; op Add ~> "int.add"; }
-type Float <: Bits { bytes <~ 4; ctd <~ Float; alu <~ Float; op Add ~> "float.add"; }
+type Int <: Bits { maxbits <~ 64; ctd <~ Int; alu <~ Int; op Add ~> "int.add"; }
+type Float <: Bits { maxbits <~ 32; ctd <~ Float; alu <~ Float; op Add ~> "float.add"; }
 type String { data: Int; len: Int; encoding <~ "UTF-8"; tbaa <~ "String"; };
 ```
 
-- **`bytes <~ N`** — Every backend reads this. `Bits(8)` = 64-bit storage. For struct types with `fields`, bytes is derived from field type sizes (summed). Explicit `bytes <~ N` overrides the derivation.
+- **`maxbits <~ N`** — Every backend reads this. `maxbits=64` = 64-bit storage. For struct types with `fields`, maxbits is derived from field type sizes (summed). Explicit `maxbits <~ N` overrides the derivation.
 - **`ctd <~ PascalCase`** — Common Type Definition. What the type *is* semantically (exhaustive closed set: `Int`, `UInt`, `Float`, `Double`, `Bool`, `Char`, `String`, `Data`, `Ptr`, `Void`). The normalizer maps CTD to backend-specific types. Inherited from the primordial when not set in source.
 - **`alu <~ PascalCase` or `alu <~ "quoted"`** — What hardware computes with values of this type. PascalCase for known ALUs (`Int`, `Float`, `Bool`), lowercase-quoted for backend/plugin-specific hardware.
 - **`fields: Vec<(String, Type)>`** — Struct field declarations on `ResolvedType`. Populated from `TypeDef.body.slots` by the normalizer. Drives LLVM struct type lowering, state slot width, and `is_string_like()` detection. Example: String with `data: Int; len: Int;` → `fields = [("data", Int), ("len", Int)]`.
@@ -57,14 +57,14 @@ A metadata slot added to a type definition in source is automatically visible to
 No Rust changes needed. No recompilation. Example:
 
 ```brief
-type HalfFloat <: Bits { bytes <~ 2; ctd <~ Float; alu <~ Float; }
+type HalfFloat <: Bits { maxbits <~ 16; ctd <~ Float; alu <~ Float; }
 ```
 
 The parser stores `ctd <~ Float` in `TypeDefBody.metadata["ctd"]`.
 The universe reads it into `ResolvedType.properties["ctd"] = PropertyValue::Identifier("Float")`.
 The LLVM normalizer maps CTD `"Float"` → LLVM type `"half"` via `ctd_to_llvm()`.
 The LLVM backend reads `properties["llvm_type"]` — no recomputation needed.
-The CIRCT backend ignores CTD, reads `bytes=2` → emits 16 wires.
+The CIRCT backend ignores CTD, reads `maxbits=16` → emits 16 wires.
 
 **Zero Rust changes across the entire pipeline.**
 
@@ -148,7 +148,7 @@ Adding a new metadata field to a type definition:
 
 ```brief
 type MyColor <: Bits {
-    bytes <~ 4;
+    maxbits <~ 32;
     ctd <~ UInt;
     alu <~ Int;
     gamma <~ "sRGB";         // new metadata — no Rust changes

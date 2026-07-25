@@ -460,6 +460,32 @@ rstruct Dashboard {
 }
 ```
 
+## 10. Compile-Time Metaprogramming
+
+Compile-time metaprogramming uses `$(Stage)` blocks with `$let` variables
+and `$defn` helper functions:
+
+```brief
+// compile_time_meta.bv
+$let factor = 1000;
+
+$defn scale(x: Int) -> Int {
+    term x * factor;
+};
+
+$(Normalized) {
+    let val = scale(42);
+    EmitInfo$("scaled: " + val);
+};
+```
+
+`$let` creates mutable compile-time variables; `$const` creates immutable
+compile-time constants. `$defn` creates compile-time functions accessible
+inside `$(Stage)` blocks. See [16-plugins.md](16-plugins.md) for the full
+reference.
+
+---
+
 ## Exercises
 
 1. Build a chat application with reactive message updates

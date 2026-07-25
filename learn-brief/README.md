@@ -110,13 +110,9 @@
     - `<:` subtype projections (FILTER, MAP, SORT, GROUP, aggregates)
     - String match via `<:[...]`
 
-14. **[14-bild.md](14-bild.md)** - BILD: Brief's Low-Level Escape Hatch
-    - When to use inop/BILD vs frgn vs pure Brief
-    - Writing BILD bodies with LLVM IR and inline assembly
-    - Type mapping, term lowering, side effect flags
-    - Compiling, debugging, and optimizing
-
 ---
+
+
 
 ## Quick Reference
 

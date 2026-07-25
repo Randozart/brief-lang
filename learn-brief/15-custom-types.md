@@ -24,7 +24,7 @@ type MyInt {
 - **Parse ops**: `Parse(#Int)` — identity literal construction (zero-cost)
 - **Parse ops**: `Parse(Decimal) = fn(#L)` — custom literal construction
 
-No `bytes <~`, `alignment <~`, `llvm <~`, `storage <~`, `default_width`,
+No `maxbits <~`, `alignment <~`, `llvm <~`, `storage <~`, `default_width`,
 `commuting`, or LLVM opcode strings needed.
 
 ## 2. Protocol-Centric Ops

@@ -202,3 +202,23 @@ txn compute [count < N][count == N] {
     };
 };
 ```
+
+---
+
+## `observable <~ true` — Dead Code Elimination Guard
+
+Side-effecting intrinsics (like `PrintInt#`, `Malloc#`, `Memcpy#`) must
+not be eliminated by the compiler's dead code elimination pass. Use the
+`observable <~ true` metadata to mark a function or intrinsic as having
+external side effects:
+
+```brief
+defn print_hello() {
+    observable <~ true;
+    PrintInt#(42);
+};
+```
+
+Intrinsics declared with `observable <~ true` in their metadata will
+always be emitted, even if their return value is unused. This is the
+compile-time equivalent of C's `__attribute__((used))`.

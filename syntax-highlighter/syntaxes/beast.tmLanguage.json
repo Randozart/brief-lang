@@ -74,7 +74,7 @@
     "attribute-tags": {
       "patterns": [{
         "name": "entity.other.attribute-name.beast",
-        "match": "\\b(entry|pre|post|bytes|alignment|properties|params|body|reactive|watchdog|is_entry|mmio)\\b"
+        "match": "\\b(entry|pre|post|maxbits|alignment|properties|params|body|reactive|watchdog|is_entry|mmio)\\b"
       }]
     },
     "punctuation": {

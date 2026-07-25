@@ -228,7 +228,32 @@ Metropipe provides:
 
 ---
 
-## 6. Summary
+## 6. Target Integer Width (`--int-bits`)
+
+The `--int-bits <N>` CLI flag controls the target integer width for compiled
+output. Supported values:
+
+| Value | Effect |
+|-------|--------|
+| `64` (default) | All `Int` values are i64. Best performance on 64-bit hosts. |
+| `32` | All `Int` values are i32. Required for WASM targets (avoids BigInt). |
+| `16` | All `Int` values are i16. For embedded targets. |
+| `8` | All `Int` values are i8. For tiny embedded targets. |
+
+The narrowing pass (contracts) can prove narrower widths — the declared
+`--int-bits` is the maximum integer width the backend will use.
+
+**Example for WASM:**
+```bash
+briefc build myfile.bv --llvm --int-bits 32
+```
+
+This emits i32 for all `Int` values, avoiding JavaScript BigInt
+interop issues.
+
+---
+
+## 7. Summary
 
 | Task | Syntax | Tool |
 |------|--------|------|

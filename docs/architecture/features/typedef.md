@@ -23,7 +23,7 @@ The old `TypeDefBody.bindings` field is retained as a migration compat field (du
 
 ```brief
 type MyInt <: Int {
-    bytes <~ 8;                    // known metadata → PropertyValue::Int(8)
+    maxbits <~ 64;                    // known metadata → PropertyValue::Int(64)
     alignment <~ 8;                // known metadata → PropertyValue::Int(8)
     IsPositive(x) = x > 0;         // user-defined projection → projections["IsPositive"]
 };
@@ -112,7 +112,7 @@ type SkipList<T> <: List<T> {
 
 inop sl_insert<T>(list: SkipList<T>, val: T) -> SkipList<T>
     [[term :> Size == list :> Size + 1]
-{ ... BILD body ... } fallback sl_append(list, val);
+{ ... body ... } fallback sl_append(list, val);
 ```
 
 The strategy system also fixes **interpreter variable-name vs type-name lookup**:

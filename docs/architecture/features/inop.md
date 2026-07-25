@@ -7,10 +7,9 @@
 ## Purpose
 
 `inop`/`inop!` allows the standard library and systems programmers to implement
-high-performance low-level primitives in **BILD** (Brief's Inop LLVM Dialect)
-without modifying compiler source code. BILD is a subset of LLVM IR with
-Brief-flavored syntax — see `docs/architecture/features/bild.md` for the
-full dialect reference.
+high-performance low-level primitives in LLVM IR directly,
+without modifying compiler source code. The body uses raw LLVM IR with
+Brief-flavored syntax.
 
 This is the user-facing counterpart of the builtin `#`-intrinsic system.
 
@@ -28,7 +27,7 @@ inop sadd(a: Int, b: Int) -> Int { %res = add i64 %a, %b; term %res; } fallback 
 // Generic type parameter:
 inop sl_insert<T>(list: SkipList<T>, val: T) -> SkipList<T>
     [[term :> Size == list :> Size + 1]
-{ ... BILD body ... } fallback sl_append(list, val);
+{ ... body ... } fallback sl_append(list, val);
 
 // Side-effecting (not reorderable/eliminable):
 inop! write_buf(ptr: Ptr<Int>, len: Int) -> Int { %res = call i32 @write(i32 1, i8* %ptr, i64 %len); term %res; } fallback 0;
@@ -48,7 +47,7 @@ must come AFTER the contract: `inop! foo() -> Int [pre][post] (%state) { ... }`.
 
 Inops support type parameters `<T, U, ...>` for type-level polymorphism.
 The type variables are resolved at compile time from the call-site argument
-types. The BILD body uses concrete LLVM types (all Brief values are `i64` at
+types. The body uses concrete LLVM types (all Brief values are `i64` at
 the LLVM level), so generics are a type-checker-only abstraction:
 
 ```brief
@@ -75,12 +74,9 @@ Direct calls (`sl_insert(list, val)`) work when the inop is imported by name.
 The typechecker resolves `Expr::Call` against inop_decls before falling through
 to `Type::Custom(name)`.
 
-### BILD body
+### Body
 
-The body uses **BILD** (Brief's Inop LLVM Dialect), a subset of LLVM IR with
-Brief-flavored syntax. See `docs/architecture/features/bild.md` for the full
-dialect reference, including inline assembly support, type mapping, and
-`term` lowering rules.
+The body uses raw LLVM IR with Brief-flavored syntax.
 
 Key rules:
 - Statements are separated by `;`
@@ -119,7 +115,7 @@ If no fallback exists, a `RuntimeError::MissingInopFallback(name)` is raised.
 
 ### LLVM backend
 
-- Declaration: `emit_inop()` emits the BILD body as `define i64 @name(%State* %state, <native ty> %param1, ...)`
+- Declaration: `emit_inop()` emits the body as `define i64 @name(%State* %state, <native ty> %param1, ...)`
 - Call site: pre-evaluates args, emits `call <native_ty> @name(%State* %state, <native_ty> arg1, ...)`
 - `term %res` → `ret i64 %res`
 - `term %v, %lh;` (multi-output) → `insertvalue { i64, i64 } ...` / `ret { i64, i64 } ...`
@@ -129,7 +125,6 @@ If no fallback exists, a `RuntimeError::MissingInopFallback(name)` is raised.
 ### Webstack / CIRCT
 
 Both fall through to the fallback expression on `Intrinsic::UserDefined`.
-No BILD codegen is attempted.
 
 ### Custom strategy binding
 
@@ -168,14 +163,13 @@ and `compute_effectively_pure`.
 | `src/import_resolver.rs` | Track `Inop` in visibility maps |
 | `src/lsp.rs` | Symbol completion for inop declarations |
 | `lib/std/skiplist.bv` | SkipList stdlib with Custom strategy bindings |
-| `lib/std/atomic.bv` | Atomic operations via inop BILD |
+| `lib/std/atomic.bv` | Atomic operations via inop |
 | `lib/std/state.bv` | Stateful `(%state)` inop pattern |
 
 ## See also
 
-- `docs/architecture/features/bild.md` — BILD dialect reference (grammar, type mapping, inline asm, lowering)
 - `docs/architecture/features/typedef.md` — `InsertAt`/`ExtractFrom` Custom strategy for `<-` dispatch
-- `examples/inop-sadd.bv` — basic inop with BILD
+- `examples/inop-sadd.bv` — basic inop example
 - `examples/inop-skiplist-dispatch.bv` — SkipList Custom strategy dispatch
 - `examples/inop-ring-buffer.bv` — ring buffer demo
 - `examples/inop-syscall-io.bv` — syscall wrapper inops

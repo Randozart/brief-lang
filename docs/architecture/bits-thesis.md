@@ -39,7 +39,7 @@ Type declarations now use `: [Parent] [Protocol]` instead of `<: Bits`:
 
 ```brief
 // Before:
-type Int <: Bits { bytes <~ 8; ... op Add(#Int, #Int); };
+type Int <: Bits { maxbits <~ 64; ... op Add(#Int, #Int); };
 
 // After:
 type Int: #Int;              // protocol-only (width inferred)
@@ -114,7 +114,7 @@ bytes. It is the only type the compiler knows about axiomatically.
 
 ```
 type Bits {
-    bytes <~ N;      // width in bytes
+    maxbits <~ N;      // width in bits
 };
 ```
 
@@ -123,15 +123,15 @@ type Bits {
 or transitively:
 
 ```
-type Int      <: Bits { bytes <~ 8;  ... }
-type Float    <: Bits { bytes <~ 8;  ... }
-type Bool     <: Bits { bytes <~ 1;  ... }
-type Char     <: Bits { bytes <~ 4;  ... }
-type String   <: Bits { bytes <~ 24; ... }
-type Void     <: Bits { bytes <~ 0;  ... }   // zero-width => void
+type Int      <: Bits { maxbits <~ 64;  ... }
+type Float    <: Bits { maxbits <~ 64;  ... }
+type Bool     <: Bits { maxbits <~ 8;  ... }
+type Char     <: Bits { maxbits <~ 32;  ... }
+type String   <: Bits { maxbits <~ 192; ... }
+type Void     <: Bits { maxbits <~ 0;  ... }   // zero-width => void
 ```
 
-The only property the frontend hardcodes at the type level is `bytes`. It must
+The only property the frontend hardcodes at the type level is `maxbits`. It must
 know the width of every type to compute struct field offsets, allocate
 interpreter storage, and emit LLVM struct layouts.
 
@@ -179,7 +179,7 @@ compiler intrinsic (identified by a trailing `#`) or a standard Brief function
 
 ```brief
 type Int: Bits {
-    bytes <~ 8;
+    maxbits <~ 64;
     llvm  <~ "i64";
     op Add(Int, Int) -> Int  = __add_i64#;     // compiler intrinsic
 };
@@ -283,13 +283,13 @@ The `Void` type is not a base type. It is a zero‑width specialization of
 
 ```brief
 type Void: Bits {
-    bytes <~ 0;
+    maxbits <~ 0;
     alignment <~ 1;
     llvm  <~ "void";
 };
 ```
 
-Because `bytes <~ 0`, the type resolver allocates zero bytes for any slot of
+Because `maxbits <~ 0`, the type resolver allocates zero bytes for any slot of
 type `Void`. The LLVM backend reads the `llvm` property and emits `void`. The
 compiler's frontend has zero hardcoded knowledge of "Void" as a concept.
 
@@ -337,7 +337,7 @@ The frontend recognizes a fixed set of metadata properties for its own use:
 
 | Property | Purpose | Hardcoded? |
 |----------|---------|------------|
-| `bytes` | Byte width of the type | Yes (Axiom 1) |
+| `maxbits` | Bit width of the type | Yes (Axiom 1) |
 | `alignment` | Memory alignment | Yes (layout engine) |
 | `op X` | Operator binding | Yes (Axiom 3 — rune→op, not op→intrinsic) |
 | `alu` | ALU routing tag (PascalCase, exhaustive set) | **No** — backend-specific |
@@ -576,7 +576,7 @@ The frontend recognizes a fixed set of metadata properties for its own use:
 
 | Property | Purpose | Hardcoded? |
 |----------|---------|------------|
-| `bytes` | Byte width of the type | Yes (Axiom 1) |
+| `maxbits` | Bit width of the type | Yes (Axiom 1) |
 | `alignment` | Memory alignment | Yes (layout engine) |
 | `op X` | Operator binding | Yes (Axiom 3 — rune→op, not op→intrinsic) |
 | `llvm` | LLVM type representation | **No** — opaque to frontend |
@@ -715,9 +715,9 @@ the backend's interpretation of `#Int` changes. The `bytes` metadata on
 `Int` would be set per-target:
 
 ```brief
-// x86_64 backend: bytes <~ 8 → i64
-// ARM32 backend:  bytes <~ 4 → i32
-type Int <~ Bits { bytes <~ TARGET_PTR_SIZE; ... };
+// x86_64 backend: maxbits <~ 64 → i64
+// ARM32 backend:  maxbits <~ 32 → i32
+type Int <~ Bits { maxbits <~ TARGET_PTR_SIZE; ... };
 ```
 
 All algebraic operations on `Int` automatically use the right width because
@@ -759,7 +759,7 @@ explicitly maps Brief types to C types with layout guarantees:
 
 ```brief
 meld type FileHandle <~ C "int" {
-    bytes <~ 4;
+    maxbits <~ 32;
     signed <~ true;
 };
 ```
