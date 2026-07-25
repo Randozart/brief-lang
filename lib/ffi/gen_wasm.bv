@@ -2,6 +2,12 @@
 // 2026-07-24: Generates a JavaScript bridge for Brief exports compiled to WASM.
 // Overhead: ~75ns per call (vs 131ns for koffi, ~5ms for subprocess).
 //
+// 2026-07-25: With --int-bits 32, WASM exports i32 functions that return plain
+// JS numbers (no BigInt). The generated bridge passes arguments straight through
+// — the caller provides numbers, WASM receives i32, returns i32. No BigInt
+// wrapping needed. Remove (a, b) => add(BigInt(a), BigInt(b)) wrappers.
+// For native (--int-bits 64), WASM exports i64 and JS must use BigInt.
+//
 // Two-phase workflow:
 //   1. brief build my_module.bv --llvm     → produces my_module.ll
 //   2. bash wasm_build.sh                  → compiles .ll → .wasm, ready for JS

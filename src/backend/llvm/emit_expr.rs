@@ -1834,7 +1834,10 @@ impl LlvmBackend {
                     )
                     .ok();
                 } else {
-                    writeln!(out, "{}{} = sub nsw i64 {}, {}", indent, v, l.name, r.name).ok();
+                    // 2026-07-25: Use binop_int_type() so narrowing pass controls width.
+                    // Was hardcoded i64 — broke WASM i32 by emitting sub nsw i64 on i32 registers.
+                    let op_bits = self.binop_int_type();
+                    writeln!(out, "{}{} = sub nsw {} {}, {}", indent, v, op_bits, l.name, r.name).ok();
                 }
                 TypedRegister {
                     name: v.to_string(),
@@ -1851,7 +1854,9 @@ impl LlvmBackend {
                     )
                     .ok();
                 } else {
-                    writeln!(out, "{}{} = mul nsw i64 {}, {}", indent, v, l.name, r.name).ok();
+                    // 2026-07-25: Use binop_int_type() so narrowing pass controls width.
+                    let op_bits = self.binop_int_type();
+                    writeln!(out, "{}{} = mul nsw {} {}, {}", indent, v, op_bits, l.name, r.name).ok();
                 }
                 TypedRegister {
                     name: v.to_string(),
@@ -1867,7 +1872,9 @@ impl LlvmBackend {
                     )
                     .ok();
                 } else {
-                    writeln!(out, "{}{} = sdiv i64 {}, {}", indent, v, l.name, r.name).ok();
+                    // 2026-07-25: Use binop_int_type() so narrowing pass controls width.
+                    let op_bits = self.binop_int_type();
+                    writeln!(out, "{}{} = sdiv {} {}, {}", indent, v, op_bits, l.name, r.name).ok();
                 }
                 TypedRegister {
                     name: v.to_string(),
@@ -1875,10 +1882,12 @@ impl LlvmBackend {
                 }
             }
             crate::ast::BinaryOpKind::Mod => {
-                writeln!(out, "{}{} = srem i64 {}, {}", indent, v, l.name, r.name).ok();
+                // 2026-07-25: Use binop_int_type() so narrowing pass controls width.
+                let op_bits = self.binop_int_type();
+                writeln!(out, "{}{} = srem {} {}, {}", indent, v, op_bits, l.name, r.name).ok();
                 TypedRegister {
                     name: v.to_string(),
-                    ty: Type::int(),
+                    ty: ret_ty.clone(),
                 }
             }
             crate::ast::BinaryOpKind::Eq => {

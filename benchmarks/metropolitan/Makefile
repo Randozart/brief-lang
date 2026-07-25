@@ -9,20 +9,22 @@ BRIEFC ?= $(PROJECT_ROOT)/target/release/brief-compiler
 CC ?= gcc
 LLC ?= llc
 LD ?= wasm-ld
-BV_SRC = bench_add.bv
+BV_SRC = $(abspath $(dir $(firstword $(MAKEFILE_LIST)))/bench_add.bv)
 
 .PHONY: all clean run generate
 
-all: $(OUT_DIR)/bench_c $(OUT_DIR)/proto_shim $(OUT_DIR)/brief_bridge.so $(OUT_DIR)/bench_add.wasm $(OUT_DIR)/bench_rust
+all: $(OUT_DIR)/bench_c $(OUT_DIR)/proto_shim $(OUT_DIR)/bench_rust $(OUT_DIR)/bench_add.ll
 
 $(OUT_DIR):
 	mkdir -p $@
 
 # ── Generate: Build .so + all bridge files via metropolitan plugin ─────
 generate: $(OUT_DIR)/bench_add.so
-	cd $(PROJECT_ROOT) && echo 'import "lib/ffi/metropolitan";' > $(OUT_DIR)/_metro.bv && cat $(BV_SRC) >> $(OUT_DIR)/_metro.bv
-	cd $(PROJECT_ROOT) && $(BRIEFC) build $(OUT_DIR)/_metro.bv --llvm --out $(OUT_DIR) --allow-write --allow-run 2>&1
-	cd $(PROJECT_ROOT) && $(BRIEFC) build $(BV_SRC) --llvm --out $(OUT_DIR) 2>&1
+	cd $(PROJECT_ROOT) && echo 'import "lib/ffi/metropolitan";' > _metro.bv && cat $(BV_SRC) >> _metro.bv
+	cd $(PROJECT_ROOT) && $(BRIEFC) build _metro.bv --llvm --out $(OUT_DIR) --allow-write --allow-run 2>&1
+	rm -f $(PROJECT_ROOT)/_metro.bv
+	cd $(PROJECT_ROOT) && $(BRIEFC) build $(BV_SRC) --llvm --out $(OUT_DIR) --int-bits 32 2>&1
+	mv $(OUT_DIR)/bench_add.ll $(OUT_DIR)/bench_add_wasm.ll
 
 $(OUT_DIR)/bench_add.so: $(BV_SRC) $(BRIEFC) | $(OUT_DIR)
 	cd $(PROJECT_ROOT) && $(BRIEFC) build $(BV_SRC) --shared --out $(OUT_DIR) 2>&1
@@ -41,13 +43,21 @@ $(OUT_DIR)/brief_bridge.so: $(OUT_DIR)/bridge.c
 $(OUT_DIR)/proto_shim: $(OUT_DIR)/proto_shim.c
 	$(CC) -O2 -o $@ $(OUT_DIR)/proto_shim.c -ldl
 
+$(OUT_DIR)/proto_shim.c: $(BV_SRC) $(BRIEFC) | $(OUT_DIR)
+	cd $(PROJECT_ROOT) && echo 'import "lib/ffi/gen_protocol";' > _metro_proto.bv && cat $(BV_SRC) >> _metro_proto.bv
+	cd $(PROJECT_ROOT) && $(BRIEFC) build _metro_proto.bv --llvm --out $(OUT_DIR) --allow-write --allow-run 2>&1
+	rm -f $(PROJECT_ROOT)/_metro_proto.bv
+	mkdir -p $(PROJECT_ROOT)/ffi-out/protocol
+	cp $(PROJECT_ROOT)/ffi-out/protocol/proto_shim.c $(OUT_DIR)/proto_shim.c 2>/dev/null || touch $(OUT_DIR)/proto_shim.c
+
 # ── Tier 2: WASM ───────────────────────────────────────────────────────
-$(OUT_DIR)/bench_add.wasm: $(OUT_DIR)/bench_add.ll
+$(OUT_DIR)/bench_add.wasm: $(OUT_DIR)/bench_add_wasm.ll
 	$(LLC) -march=wasm32 -filetype=obj $< -o $(OUT_DIR)/bench_add.o
 	$(LD) --no-entry --export-all $(OUT_DIR)/bench_add.o -o $@
 
-$(OUT_DIR)/bench_add.ll: $(BV_SRC) $(BRIEFC) | $(OUT_DIR)
-	cd $(PROJECT_ROOT) && $(BRIEFC) build $(BV_SRC) --llvm --out $(OUT_DIR) 2>&1
+$(OUT_DIR)/bench_add_wasm.ll: $(BV_SRC) $(BRIEFC) | $(OUT_DIR)
+	cd $(PROJECT_ROOT) && $(BRIEFC) build $(BV_SRC) --llvm --out $(OUT_DIR) --int-bits 32 2>&1
+	mv $(OUT_DIR)/bench_add.ll $(OUT_DIR)/bench_add_wasm.ll
 
 # ── Tier 1: Rust (direct extern C) ─────────────────────────────────────
 $(OUT_DIR)/bench_rust: bench_rust.rs $(OUT_DIR)/bench_add.so

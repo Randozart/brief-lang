@@ -18,8 +18,8 @@ instance.exports.init_state();
 const add = instance.exports.add;
 
 // Warmup
-let warm = add(3n, 4n);
-if (warm !== 7n) { console.error('wrong result:', warm); process.exit(1); }
+let warm = add(3, 4);
+if (warm !== 7) { console.error('wrong result:', warm); process.exit(1); }
 
 // Native baseline
 function native_add(a, b) { return a + b; }
@@ -46,14 +46,12 @@ console.log("\n[Pure Node.js]");
 run("native add", native_add, 100000, 3, 4);
 
 console.log("\n[WASM (gen_wasm)]");
-run("wasm add", (a, b) => add(BigInt(a), BigInt(b)), 50000, 3, 4);
+run("wasm add", add, 50000, 3, 4);
 
 console.log("\n[Correctness]");
 let n = native_add(3, 4);
-let w = add(3n, 4n);
-console.log(`  native:  ${n}`);
-console.log(`  wasm:    ${w}`);
-if (n === Number(w)) {
+let w = add(3, 4);
+if (n === w) {
     console.log("  ✅ All match");
 } else {
     console.log("  ❌ MISMATCH");

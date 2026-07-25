@@ -369,6 +369,17 @@ impl LlvmBackend {
             }
         }
 
+        // 2026-07-25: #Int protocol default width from --int-bits.
+        // Narrowing evidence (contracts) has priority — if we reach here,
+        // no narrowing was proven. Fall back to target-configured default.
+        // On WASM with --int-bits 32, this emits i32 instead of i64 without
+        // requiring contract annotations. On native x86_64, default 64 keeps i64.
+        if let Type::Custom(name) = ty {
+            if name == "Int" || name == "UInt" {
+                return format!("i{}", self.ctx.int_bits);
+            }
+        }
+
         // 2026-07-14: Universe query with derive_llvm_type replaces
         // the removed ResolvedType.llvm_type field.
         self.ctx.type_universe.as_ref()

@@ -984,6 +984,13 @@ impl LlvmBackend {
         self
     }
 
+    /// 2026-07-25: Set the native integer width for #Int protocol.
+    /// WASM should use 32 to emit i32 instead of i64 (avoid BigInt).
+    pub fn with_int_bits(mut self, bits: u64) -> Self {
+        self.ctx.int_bits = bits;
+        self
+    }
+
     pub fn with_trg_unresolved_action(mut self, action: TrgUnresolvedAction) -> Self {
         self.trg_unresolved_action = action;
         self

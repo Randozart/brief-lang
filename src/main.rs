@@ -136,6 +136,7 @@ fn parse_build_args(args: &[String]) -> Result<compile::BuildOptions, String> {
     let mut target_name: Option<String> = None;
     let mut sysquery_pairs: Vec<(String, String)> = Vec::new();
     let mut sysquery_files: Vec<String> = Vec::new();
+    let mut int_bits = 64u64;
 
     let mut i = 0;
     while i < args.len() {
@@ -195,6 +196,16 @@ fn parse_build_args(args: &[String]) -> Result<compile::BuildOptions, String> {
         } else if arg == "--stdlib-path" {
             let val = args.get(i + 1).ok_or("--stdlib-path requires a path argument")?;
             stdlib_path = Some(val.clone());
+            i += 2;
+        // 2026-07-25: Target #Int protocol width. WASM uses 32 to emit
+        // i32 instead of i64, eliminating BigInt overhead in JavaScript.
+        } else if arg == "--int-bits" {
+            let val = args.get(i + 1).ok_or("--int-bits requires a number argument (8, 16, 32, or 64)")?;
+            int_bits = val.parse()
+                .map_err(|_| format!("invalid --int-bits value: '{}'", val))?;
+            if int_bits != 8 && int_bits != 16 && int_bits != 32 && int_bits != 64 {
+                return Err(format!("--int-bits must be 8, 16, 32, or 64, got: {}", int_bits));
+            }
             i += 2;
         } else if arg == "--disable-plugin" {
             let name = args.get(i + 1).ok_or("--disable-plugin requires a plugin name argument")?;
@@ -303,6 +314,7 @@ fn parse_build_args(args: &[String]) -> Result<compile::BuildOptions, String> {
         feature_svo: false,
         glue_config: None,
         stack_threshold: 4096,
+        int_bits,
         allow_read,
         allow_write,
         allow_run,

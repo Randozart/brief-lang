@@ -131,6 +131,11 @@ pub struct CompilerContext {
     // "ret" = return value, "param_0" = param, "let_x" = let binding.
     pub narrow_bindings: HashMap<String, HashMap<String, u64>>,
 
+    // 2026-07-25: Native integer width for #Int protocol (default 64).
+    // Controls i32 vs i64 emission for Int/UInt types.
+    // WASM targets set to 32 to avoid BigInt in JavaScript.
+    pub int_bits: u64,
+
     // Target triple config (Phase 6 — WASM support)
     /// LLVM target triple (e.g. "x86_64-unknown-linux-gnu", "wasm32-unknown-wasi").
     /// 2026-07-11: Phase 6 — read by emit_header() for dynamic target configuration.
@@ -236,6 +241,7 @@ impl CompilerContext {
             has_cycles: false,
             slp_hazard_fns: HashSet::new(),
             narrow_bindings: HashMap::new(),
+            int_bits: 64,
             target_triple: "x86_64-unknown-linux-gnu".to_string(),
             data_layout: Some(
                 "e-m:e-p270:32:32-p271:32:32-p272:64:64-i64:64-i128:128-f80:128-n8:16:32:64-S128"

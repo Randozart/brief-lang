@@ -162,6 +162,9 @@ pub struct BuildOptions {
     /// Used by the runtime fallback check in emit_dynamic_alloc.
     /// Default 4096 (4KB) — safe for most stack frames.
     pub stack_threshold: u64,
+    /// 2026-07-25: Native integer width for #Int protocol (default 64).
+    /// WASM targets should set to 32 to avoid BigInt in JavaScript.
+    pub int_bits: u64,
     /// 2026-07-23: Allow macros to read files (FileRead$).
     pub allow_read: bool,
     /// 2026-07-23: Allow macros to write files (FileWrite$).
@@ -629,6 +632,7 @@ pub fn check_source(file_path: &str, source: &str) -> Result<(), String> {
         trg_unresolved_action: TrgUnresolvedAction::Warn,
         extra_objects: vec![],
         shared: false,
+        int_bits: 64,
         feature_sso_strings: false,
         feature_svo: false,
         glue_config: None,
@@ -728,6 +732,7 @@ fn codegen(
     let ext: &str = match opts.backend {
         BackendKind::Llvm => {
             let mut b = LlvmBackend::new()
+                .with_int_bits(opts.int_bits)
                 .with_alloc_strategies(alloc_strategies)
                 .with_sso_strings(opts.feature_sso_strings)
                 .with_svo(opts.feature_svo)
@@ -771,6 +776,7 @@ fn codegen(
         }
         BackendKind::Gpu => {
             let mut b = LlvmBackend::new()
+                .with_int_bits(opts.int_bits)
                 .with_alloc_strategies(alloc_strategies)
                 .with_sso_strings(opts.feature_sso_strings)
                 .with_svo(opts.feature_svo)
