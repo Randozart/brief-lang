@@ -135,20 +135,8 @@
       "settings": { "foreground": "#795E26" }
     },
     {
-      "scope": "support.function.intrinsic.brief",
-      "settings": { "foreground": "#0000FF" }
-    },
-    {
-      "scope": "keyword.hashword.brief",
-      "settings": { "foreground": "#D04CA0" }
-    },
-    {
       "scope": "entity.name.function.stage-block.brief",
       "settings": { "foreground": "#A31515" }
-    },
-    {
-      "scope": "entity.name.function.macro.brief",
-      "settings": { "foreground": "#267F99", "fontStyle": "italic" }
     },
     {
       "scope": "keyword.operator.property.brief",

@@ -302,14 +302,14 @@
         }
       ]
     },
-        "hash-words": {
-          "patterns": [
-            {
-              "name": "keyword.hashword.brief",
-              "match": "#L|#R|#T"
-            }
-          ]
-        },
+    "hash-words": {
+      "patterns": [
+        {
+          "name": "support.type.property-name.hashword.brief",
+          "match": "#L|#R|#T"
+        }
+      ]
+    },
         "booleans": {
       "patterns": [
         {
@@ -333,7 +333,7 @@
     "intrinsics": {
       "patterns": [
         {
-          "name": "support.function.intrinsic.brief",
+          "name": "support.type.property-name.intrinsic.brief",
           "match": "\\b[a-zA-Z_][a-zA-Z0-9_]*#"
         }
       ]
@@ -532,7 +532,7 @@
     "macro-words": {
       "patterns": [
         {
-          "name": "entity.name.function.macro.brief",
+          "name": "entity.name.tag.macro-call.brief",
           "match": "\\b[a-zA-Z_][a-zA-Z0-9_]*!"
         }
       ]
