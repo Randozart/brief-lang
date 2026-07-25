@@ -30,6 +30,7 @@ pub mod analysis;
 pub mod archive;
 pub mod backend;
 pub mod beast;
+pub mod beastpack;
 pub mod config;
 pub mod config_resolver;
 pub mod target;

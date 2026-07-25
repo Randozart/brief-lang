@@ -194,14 +194,14 @@ fn parse_definition(parts: &[SExpr]) -> Result<Definition, String> {
             "outputs" => { outputs = parse_outputs(&parts[i])?; i += 1; }
             "contract" => { contract = parse_contract(&parts[i])?; i += 1; }
             "metadata" => {
-                if let SExpr::List(pair) = &parts[i + 1] {
-                    if pair.len() == 2 {
-                        let k = sexpr_str(&pair[0])?.to_string();
-                        let v = sexpr_to_pv(&pair[1])?;
+                if let SExpr::List(pair) = &parts[i] {
+                    if pair.len() >= 3 {
+                        let k = sexpr_str(&pair[1])?.to_string();
+                        let v = sexpr_to_pv(&pair[2])?;
                         metadata.insert(k, v);
                     }
                 }
-                i += 2;
+                i += 1;
             }
             "body" => { i += 1; }
             _ => {
@@ -221,6 +221,7 @@ fn parse_transaction(parts: &[SExpr]) -> Result<Transaction, String> {
     let mut contract = Contract { pre_condition: Expr::Bool(true), post_condition: Expr::Bool(true),
         is_entry: false, watchdog: None, span: None };
     let mut body = Vec::new();
+    let mut metadata = HashMap::new();
     let mut is_reactive = false;
     let mut is_async = false;
     let mut i = 2;
@@ -232,6 +233,16 @@ fn parse_transaction(parts: &[SExpr]) -> Result<Transaction, String> {
             ":async" => { is_async = true; i += 1; }
             "params" => { params = parse_params(&parts[i])?; i += 1; }
             "contract" => { contract = parse_contract(&parts[i])?; i += 1; }
+            "metadata" => {
+                if let SExpr::List(pair) = &parts[i] {
+                    if pair.len() >= 3 {
+                        let k = sexpr_str(&pair[1])?.to_string();
+                        let v = sexpr_to_pv(&pair[2])?;
+                        metadata.insert(k, v);
+                    }
+                }
+                i += 1;
+            }
             "body" => { i += 1; }
             _ => {
                 body.push(parse_statement(&parts[i])?);
@@ -240,7 +251,7 @@ fn parse_transaction(parts: &[SExpr]) -> Result<Transaction, String> {
         }
     }
     Ok(Transaction { name, parameters: params, type_params: vec![], is_reactive, is_async,
-        contract, body, outputs: vec![], output_type: None, metadata: HashMap::new(),
+        contract, body, outputs: vec![], output_type: None, metadata,
         derivation: None, modifiers: vec![], span: None, doc: None })
 }
 
