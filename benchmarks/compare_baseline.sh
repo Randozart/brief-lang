@@ -36,7 +36,7 @@ if [ ! -f "$BASELINE_DIR/benchmarks/$NAME" ]; then
 fi
 if [ ! -f "benchmarks/$NAME" ]; then
     echo "Building current binary..."
-    BOUND=50000000 ./target/release/brief-compiler build "benchmarks/${NAME}.bv" --out benchmarks 2>&1 | tail -1
+    BOUND=50000000 ./target/release/briefc build "benchmarks/${NAME}.bv" --out benchmarks 2>&1 | tail -1
 fi
 
 time_binary() {

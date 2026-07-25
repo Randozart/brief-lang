@@ -13,7 +13,7 @@ kani = []
 kani_full = []
 
 [[bin]]
-name = "brief-compiler"
+name = "briefc"
 path = "src/main.rs"
 
 [dependencies]

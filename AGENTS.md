@@ -461,7 +461,7 @@ and the warning comment at `src/backend/llvm/context.rs:223`.
 - **Build**: `cargo build`
 - **Test**: `cargo test --lib`
 - **Test backend registry**: `cargo test --lib -- backend::tests`
-- **Compile RBV**: `./target/release/brief-compiler rbv <file.rbv>`
+- **Compile RBV**: `./target/release/briefc rbv <file.rbv>`
 - **Benchmark**: `bash benchmarks/build_and_bench.sh` — always use this harness.
   Ad-hoc timing produces false hangs and imprecise numbers.
 - **Compare against baseline**: `bash benchmarks/compare_baseline.sh <name>` —

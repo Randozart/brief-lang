@@ -154,7 +154,7 @@ build_bench() {
     # Without this, benchmarks using getenv_int#("BOUND") get N=0 and all loops
     # are dead code (zero iterations → output "0" instead of correct checksum).
     # 2026-07-14: --llvm removed — compiler now produces binary by default.
-    BOUND=50000000 ./target/release/brief-compiler build "benchmarks/${name}.bv" \
+    BOUND=50000000 ./target/release/briefc build "benchmarks/${name}.bv" \
         --out benchmarks --optimize-budget "$budget" $gpu_flag 2>&1
 
     if [ ! -f "$bin" ]; then
@@ -509,10 +509,10 @@ filter_name() {
 
 # ── MAIN ──────────────────────────────────────────────────────────────
 
-# 2026-07-01: Pre-build disabled — run `cargo build --release --bin brief-compiler`
+# 2026-07-01: Pre-build disabled — run `cargo build --release --bin briefc`
 # manually before executing this script to avoid the long build hiding benchmark output.
 #echo "=== Building Brief compiler (release) ==="
-#cargo build --release --bin brief-compiler 2>&1
+#cargo build --release --bin briefc 2>&1
 #echo ""
 
 for name in "${BENCHMARKS[@]}"; do
