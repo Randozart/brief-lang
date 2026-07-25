@@ -25,7 +25,7 @@ Brief's symbols are not arbitrary ASCII choices. Each symbol's **visual shape** 
 | **`!`** | A vertical line with a dot | An exclamation, a warning | Control flow anomaly / boundary — "pay attention." | — |
 | **`~`** | A wavy line | Oscillation, flipping | Boolean toggle — flip back and forth like a waveform. | — |
 | **`?`** | A hook | A question, a check | Watchdog / timeout — "is this still OK?" | — |
-| **`_`** | A small horizontal line | A gap, a placeholder | Ignored / unused value. | — |
+| **`_`** | A small horizontal line | A gap, a placeholder | Ignored / unused value. Works in destructuring: `let (_, value) = pair;` — |
 
 ### The Principle: Syntactic Radical Honesty
 
@@ -402,6 +402,31 @@ txn do_something [true][true] {
 ```
 
 A strong contract tells you what changed. A weak one is a red flag.
+
+### `[[post]` and `[pre]]` — Contract Sugar
+
+A txn has exactly one precondition and one postcondition: `[pre][post]`. To write
+only one side, use sugar that fills the omitted side as `[true]`:
+
+| Form | Meaning |
+|------|---------|
+| `[[post]` | Postcondition-only: `[true][post]` |
+| `[pre]]` | Precondition-only: `[pre][true]` |
+
+`[true][true]` is rejected by the parser — at least one side must be meaningful.
+
+### `struct` and `T[N]` — Data Declarations
+
+Brief distinguishes three declaration keywords:
+
+- **`type`** — Protocols, operator bindings, type system extensibility
+  (`type Int: #Int { op Add(#Int); };`)
+- **`struct`** — Pure data, fixed layout, C-compatible, no methods
+  (`struct Point { x: Int; y: Int; };`)
+- **`obj`** — Full-featured types with methods, contracts, generics
+
+Fixed-size arrays use bracket syntax: `Int[1024]` declares a compile-time-known
+size, embedded as `[1024 x i64]` in LLVM IR and auto-vectorized.
 
 ---
 

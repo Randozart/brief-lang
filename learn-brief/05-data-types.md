@@ -284,7 +284,54 @@ defn build_csv(rows: List<List<String>>) -> String {
 };
 ```
 
-## 6. Complete Example: Contact Manager
+## 6. Structs: Pure Data Containers
+
+`struct` declares pure data with fixed layout, C-compatible, no methods or contracts:
+
+```brief
+struct Point {
+    x: Int;
+    y: Int;
+};
+
+struct Contact {
+    name: String;
+    phone: String;
+    email: String;
+};
+
+let p = Point { x: 10, y: 20 };
+let name = p.name;  // field access
+```
+
+### Fixed-Size Arrays: `Int[N]`
+
+Arrays of compile-time-known size are declared inline:
+
+```brief
+struct VMStack {
+    data: Int[1024];   // [1024 x i64] in LLVM IR
+    len: Int;
+};
+
+struct Matrix3x3 {
+    cells: Float[9];   // fixed-size, auto-vectorized
+};
+```
+
+LLVM auto-vectorizes operations over `[N x T]` arrays. Bounds are proven by contract: `[stack.len >= 0 && stack.len < 1024]`.
+
+### `type` vs `struct` vs `obj`
+
+| Keyword | Purpose | Example |
+|---------|---------|---------|
+| `type` | Protocols, operator bindings, type system extensibility | `type Int: #Int { op Add(#Int); };` |
+| `struct` | Pure data, fixed layout, C-compatible, no methods | `struct Point { x: Int; y: Int; };` |
+| `obj` | Full-featured types with methods, contracts, generics | `obj Channel<T> { ... };` |
+
+`type { field: T }` patterns are being migrated to `struct { field: T }`.
+
+## 8. Complete Example: Contact Manager
 
 ```brief
 // contacts.bv
@@ -352,7 +399,7 @@ txn list_all() [true][true] {
 
 ---
 
-## 7. Vectors: Multidimensional Arrays
+## 9. Vectors: Multidimensional Arrays
 
 Vectors are fixed-size, contiguous memory arrays optimized for hardware and SIMD operations.
 
@@ -492,7 +539,7 @@ frame[width::4, height::4].r = frame[width::4, height::4].r / 2;
 
 ---
 
-## 7. Pointer Types (`Ptr<T>`)
+## 10. Pointer Types (`Ptr<T>`)
 
 `Ptr<T>` is a verified pointer whose safety is proven at compile time.
 Creation requires the `:>` projection operator — there is no way to forge a
@@ -561,7 +608,7 @@ with a `ProofError`.
 
 ---
 
-## 8. Type/Metadata Checks: `is`, `from`, `like`
+## 11. Type/Metadata Checks: `is`, `from`, `like`
 
 Brief provides three infix operators for inspecting types and structure at runtime.
 

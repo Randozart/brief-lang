@@ -28,6 +28,14 @@
 > compile-time existence checks. `term expr?` for conditional return chains.
 > `from #POSIX`/`#Win32`/`#WASI` hashword sources replace `from "c"`.
 > See `docs/architecture/conditional-ffi.md`.
+>
+> **2026-07-25:** Bounty install-time compilation pipeline. `briefc bounty`
+> serializes the typed AST to `.beastpack` (with noise-pairing obfuscation),
+> compiles the tamer to `.lair` VM bytecode via `BackendKind::Vm`, and bundles
+> them into a portable `.bounty` data file. The `tamer` system tool (written
+> in Brief, compiled natively via LLVM) reads `.bounty` files, interprets the
+> `.lair` bytecode, and produces a native binary on the customer's machine.
+> See `docs/plans/2026-07-25-phase6-tamer-in-brief.md`.
 
 ## Pipeline
 
@@ -249,6 +257,16 @@ A backend can start with just `bytes` and be fully correct. It then opts into `p
 | `beast/pattern.rs` | Pattern compiler for `.beast` query syntax (retained for `Pattern$`) |
 | `beast/layout.rs` | Layout DSL parser for metadata annotations |
 
+### Distribution — Bounty + Beastpack (`src/bounty/`, `src/beastpack/`)
+
+| Module | Purpose |
+|--------|---------|
+| `bounty/mod.rs` | `.bounty` file format: write/read/extract sections |
+| `beastpack/serialize.rs` | Typed AST → `.beastpack` binary (gzip + blake3) |
+| `beastpack/deserialize.rs` | `.beastpack` → `Vec<TopLevel>` + `TypeUniverse` |
+| `beastpack/obfuscate.rs` | Noise pairing — identifier permutation for IP protection |
+| `beastpack/strip.rs` | Strip `Source$`/`Comment$` metadata before packaging |
+
 ### AST Navigation Macros (`src/macros/`)
 
 | Module | Purpose |
@@ -304,6 +322,11 @@ A backend can start with just `bytes` and be fully correct. It then opts into `p
 | `llvm/emit_toplevel.rs` | Top-level → LLVM IR, `llvm_type()` |
 | `llvm/helpers.rs` | `emit_async_phase()`, `type_is()`, casts |
 | `llvm/types.rs` | `lower_type()`, `type_size()` |
+| `vm/mod.rs` | `VmBackend` — emits `.lair` bytecode (stack-based VM) |
+| `vm/assembler.rs` | `.lair` format assembly (header, string/function tables) |
+| `vm/emit_expr.rs` | Expression → VM bytecode instructions |
+| `vm/emit_stmt.rs` | Statement → VM bytecode instructions |
+| `vm/emit_toplevel.rs` | Top-level → VM function table entries |
 | `circt.rs` | `CirctBackend` — MLIR emission |
 | `webstack.rs` | `WebstackGenerator` — TypeScript + WASM |
 

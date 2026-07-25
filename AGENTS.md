@@ -783,8 +783,9 @@ it. The more LLVM knows, the more aggressively it can optimize.
 14. **`>>` in nested generics** — `Ptr<Ptr<Int>>` triggers the shift-right token.
     Always add a space: `Ptr<Ptr<Int> >`. This is a lexer limitation.
 
-15. **No `_` discard binding** — `let _ = expr;` is not valid.
-    Use a named binding like `let _discard = expr;` instead.
+15. **`_` discard binding** — `let _ = expr;` discards the value. The
+    `_` identifier binds nothing. Also works in tuple destructuring:
+    `let (_, value) = get_pair();` ignores the first element.
 
 16. **Post-body loops `{ body; &i = i + 1; } [condition];` only work in `txn`/`node`** —
     NOT in `defn`. Use `txn` for iteration; `defn` is straight-line.
@@ -796,8 +797,9 @@ it. The more LLVM knows, the more aggressively it can optimize.
 18. **Flat import namespace** — Imports bring names directly into scope.
     No `::` module path syntax. `loader::read_u8(x)` is invalid; use `read_u8(x)`.
 
-19. **No tuple destructuring in `let`** — `let (a, b) = expr;` is not supported.
-    Store the tuple and use `uni` pattern matching to extract fields.
+19. **No tuple destructuring in `let`** — `let (a, b) = expr;` IS supported.
+    The parser accepts `let (name1, name2, ...) = expr;` for tuple return values.
+    `_` may be used as a placeholder: `let (_, value) = result;`.
 
 20. **`Int` return type narrowing** — `defn f() -> Int` may emit LLVM `i8` for small
     constants. This is intended — the type checker uses `Int` uniformly but the
@@ -1134,6 +1136,8 @@ for current benchmark results and architecture decisions.
 | **Hash words** | `docs/architecture/hash-words.md` |
 | **Kani harnesses** | `docs/architecture/kani-harnesses.md` |
 | **Plan documents** | `docs/plans/` |
+| **Bounty architecture** | `docs/plans/2026-07-25-phase6-tamer-in-brief.md` |
+| **Memory by Contract** | `docs/plans/2026-07-25-memory-by-contract.md` |
 | **Ptr Level 3 plan** | `docs/plans/2026-07-09-ptr-level3-borrow-checking.md` |
 | **Granular pipeline + AST navigation DSL** | `docs/plans/2026-07-21-granular-pipeline-and-ast-navigation.md` |
 | **Compile-time meta + plugin architecture** | `docs/plans/2026-07-15-compiletime-meta-and-plugin-architecture.md` |

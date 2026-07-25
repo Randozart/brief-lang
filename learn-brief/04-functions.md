@@ -52,9 +52,15 @@ defn get_coords() -> (x: Int, y: Int) {
 
 // Usage
 let (q, r) = div_mod(10, 3);  // q = 3, r = 1
+let (_, remainder) = div_mod(42, 5);  // _ discards the quotient
 let coords = get_coords();
 let x = coords.0;
 let y = coords.1;
+```
+
+**Note:** Tuple destructuring works with `_` as a discard placeholder.
+For nested generics like `Ptr<Ptr<Int>>`, add a space: `Ptr<Ptr<Int> >`
+to avoid the `>>` shift-right token.
 ```
 
 ## 4. Named Return Values
@@ -140,9 +146,12 @@ defn swap<T, U>(a: T, b: U) [true][result.0 == b && result.1 == a] -> (U, T) {
     term (b, a);
 };
 
-defn first<T, U>(pair: (T, U)) [true][true] -> T {
+defn first<T, U>(pair: (T, U)) [[true] -> T {
     term pair.0;
 };
+
+// Note: `[true][true]` is rejected. Use `[[true]` (post-only) or `[true]]` (pre-only).
+// The `[[post]` and `[pre]]` sugar fill the omitted side as `[true]`.
 ```
 
 ## 8. Complete Example
@@ -170,7 +179,7 @@ defn power(base: Int, exp: Int)
 
 defn is_prime(n: Int) 
     [n >= 0]
-    [result == true || result == false]
+    [[true]
     -> Bool 
 {
     [n < 2] {
@@ -202,7 +211,7 @@ defn sum_range(start: Int, end: Int)
     term (start + end) * n / 2;
 };
 
-txn main() [true][true] {
+txn main() [[true] {
     let p = power(2, 10);  // 1024
     let prime = is_prime(17);  // true
     let sum = sum_range(1, 100);  // 5050
