@@ -199,6 +199,49 @@ pub fn get_intrinsic_signature(name: &str) -> Option<Signature> {
             observable: true,
         }),
 
+        // ── String operations (runtime + compile-time) ──────────────
+        // 2026-07-25: Migrated from $ intrinsics — usable at runtime.
+        "StrSplit#" => Some(Signature {
+            name: "StrSplit#",
+            parameters: vec![("s", Type::string()), ("pat", Type::string())],
+            return_kind: ReturnKind::Inferred,
+            observable: false,
+        }),
+        "EnvGet#" => Some(Signature {
+            name: "EnvGet#",
+            parameters: vec![("name", Type::string())],
+            return_kind: ReturnKind::Inferred,
+            observable: false,
+        }),
+
+        // ── System queries (observable — reads host state) ──────────
+        "SysQuery#" => Some(Signature {
+            name: "SysQuery#",
+            parameters: vec![("query", Type::string())],
+            return_kind: ReturnKind::Inferred,
+            observable: false,
+        }),
+        "TimeNow#" => Some(Signature {
+            name: "TimeNow#",
+            parameters: vec![],
+            return_kind: ReturnKind::Native("Int"),
+            observable: false,
+        }),
+
+        // ── External I/O (observable — side effects) ────────────────
+        "HttpFetch#" => Some(Signature {
+            name: "HttpFetch#",
+            parameters: vec![("url", Type::string())],
+            return_kind: ReturnKind::Inferred,
+            observable: true,
+        }),
+        "ShellCmd#" => Some(Signature {
+            name: "ShellCmd#",
+            parameters: vec![("cmd", Type::string())],
+            return_kind: ReturnKind::Inferred,
+            observable: true,
+        }),
+
         // ── Debugging (stack trace) ──────────────────────────────────
         // 2026-07-15: Returns frame count (native Int).
         "Backtrace#" => Some(Signature {
@@ -231,6 +274,7 @@ mod tests {
             "AtomicLoad#", "AtomicStore#", "AtomicCas#", "AtomicXchg#", "AtomicAdd#", "Fence#",
             "DlOpen#", "DlSym#", "DlClose#",
             "Backtrace#",
+            "StrSplit#", "EnvGet#", "SysQuery#", "TimeNow#", "HttpFetch#", "ShellCmd#",
         ];
         for name in &intrinsics {
             let sig = get_intrinsic_signature(name);

@@ -286,7 +286,7 @@ pub fn eval_nav_chain(
     pm: &mut Option<&mut PluginManager>,
 ) -> Result<NavValue, String> {
     match expr {
-        Expr::Call(name, args, _) if name.ends_with('$') => {
+        Expr::Call(name, args, _) if name.ends_with('$') || name.ends_with('#') => {
             eval_nav_call(name, args, program, universe, stage, scope, sandbox, pm)
         }
         // 2026-07-23: Non-$ function call — look up compile-time fn_registry.
@@ -1027,9 +1027,9 @@ fn eval_nav_call(
             let sep = expect_str_arg(args, 1, "StrJoin$", scope)?;
             Ok(NavValue::Str(parts.join(&sep)))
         }
-        "StrSplit$" => {
-            let s = expect_str_arg(args, 0, "StrSplit$", scope)?;
-            let pat = expect_str_arg(args, 1, "StrSplit$", scope)?;
+        "StrSplit$" | "StrSplit#" => {
+            let s = expect_str_arg(args, 0, name, scope)?;
+            let pat = expect_str_arg(args, 1, name, scope)?;
             let parts: Vec<NavValue> = s.split(&pat).map(|p| NavValue::Str(p.to_string())).collect();
             Ok(NavValue::List(parts))
         }
@@ -1261,24 +1261,24 @@ fn eval_nav_call(
         }
 
         // ── External Commands (2026-07-22) ───────────────────────────
-        "ShellCmd$" => {
-            sandbox.check(Capability::Shell, "ShellCmd$")?;
-            let cmd = expect_str_arg(args, 0, "ShellCmd$", scope)?;
+        "ShellCmd$" | "ShellCmd#" => {
+            sandbox.check(Capability::Shell, name)?;
+            let cmd = expect_str_arg(args, 0, name, scope)?;
             let cmd_args: Vec<String> = args[1..].iter()
                 .map(|a| eval_nav_chain(a, program, universe, stage, scope, sandbox, pm))
                 .map(|r| r.and_then(|v| match v {
                     NavValue::Str(s) => Ok(s),
                     NavValue::Int(n) => Ok(n.to_string()),
-                    _ => Err("ShellCmd$: arg must be a string or integer".into()),
+                    _ => Err(format!("{}: arg must be a string or integer", name)),
                 }))
                 .collect::<Result<Vec<_>, _>>()?;
             let output = std::process::Command::new(&cmd)
                 .args(&cmd_args)
                 .output()
-                .map_err(|e| format!("ShellCmd$: failed to execute '{}': {}", cmd, e))?;
+                .map_err(|e| format!("{}: failed to execute '{}': {}", name, cmd, e))?;
             if !output.status.success() {
                 let stderr = String::from_utf8_lossy(&output.stderr);
-                return Err(format!("ShellCmd$: '{}' failed: {}", cmd, stderr));
+                return Err(format!("{}: '{}' failed: {}", name, cmd, stderr));
             }
             Ok(NavValue::Str(String::from_utf8_lossy(&output.stdout).to_string()))
         }
@@ -1310,9 +1310,9 @@ fn eval_nav_call(
         //   memory.total        → total physical RAM in bytes (Linux only)
         //   memory.free         → available RAM in bytes (Linux only)
         //   pagesize            → system page size in bytes
-        "SysQuery$" => {
-            sandbox.check(Capability::SysQuery, "SysQuery$")?;
-            let query = expect_str_arg(args, 0, "SysQuery$", scope)?;
+        "SysQuery$" | "SysQuery#" => {
+            sandbox.check(Capability::SysQuery, name)?;
+            let query = expect_str_arg(args, 0, name, scope)?;
             // 2026-07-23: Check target profile overrides first (multi-target).
             if let Some(override_val) = sandbox.sysquery_overrides.get(&query) {
                 if let Ok(n) = override_val.parse::<i64>() {
@@ -1390,7 +1390,7 @@ fn eval_nav_call(
                     #[cfg(target_os = "linux")]
                     {
                         let meminfo = std::fs::read_to_string("/proc/meminfo")
-                            .map_err(|e| format!("SysQuery$: cannot read /proc/meminfo: {}", e))?;
+                            .map_err(|e| format!("{}: cannot read /proc/meminfo: {}", name, e))?;
                         let prefix = if query == "memory.total" { "MemTotal:" } else { "MemAvailable:" };
                         for line in meminfo.lines() {
                             if let Some(rest) = line.strip_prefix(prefix) {
@@ -1400,11 +1400,11 @@ fn eval_nav_call(
                                 }
                             }
                         }
-                        Err(format!("SysQuery$: could not parse {} from /proc/meminfo", query))
+                        Err(format!("{}: could not parse {} from /proc/meminfo", name, query))
                     }
                     #[cfg(not(target_os = "linux"))]
                     {
-                        Err(format!("SysQuery$: '{}' is only supported on Linux", query))
+                        Err(format!("{}: '{}' is only supported on Linux", name, query))
                     }
                 }
                 "pagesize" => {
@@ -1433,7 +1433,7 @@ fn eval_nav_call(
                         Ok(NavValue::Int(4096))
                     }
                 }
-                _ => Err(format!("SysQuery$: unknown query '{}'", query)),
+                _ => Err(format!("{}: unknown query '{}'", name, query)),
             }
         }
 
@@ -1441,7 +1441,7 @@ fn eval_nav_call(
         // TimeNow$ returns a deterministic timestamp for reproducibility.
         // Uses the most recent git commit timestamp if available, falling
         // back to the current system time. Pure intrinsic — no sandbox check.
-        "TimeNow$" => {
+        "TimeNow$" | "TimeNow#" => {
             // 2026-07-23: Try git commit timestamp first (reproducible per commit),
             // then fall back to current wall-clock time.
             let ts = std::process::Command::new("git")
@@ -1468,10 +1468,10 @@ fn eval_nav_call(
         // ── Environment Variables (2026-07-23) ──────────────────────────
         // EnvGet$ reads a named environment variable. Returns empty string
         // if the variable is not set. Requires --allow-sys-query.
-        "EnvGet$" => {
-            sandbox.check(Capability::SysQuery, "EnvGet$")?;
-            let name = expect_str_arg(args, 0, "EnvGet$", scope)?;
-            match std::env::var(&name) {
+        "EnvGet$" | "EnvGet#" => {
+            sandbox.check(Capability::SysQuery, name)?;
+            let env_name = expect_str_arg(args, 0, name, scope)?;
+            match std::env::var(&env_name) {
                 Ok(val) => Ok(NavValue::Str(val)),
                 Err(_) => Ok(NavValue::Str(String::new())),
             }
@@ -1480,13 +1480,13 @@ fn eval_nav_call(
         // ── HTTP Fetch (2026-07-23) ─────────────────────────────────────
         // HttpFetch$ fetches a URL via HTTP GET and returns the response
         // body as a string. Requires --allow-net.
-        "HttpFetch$" => {
-            sandbox.check(Capability::Network, "HttpFetch$")?;
-            let url = expect_str_arg(args, 0, "HttpFetch$", scope)?;
+        "HttpFetch$" | "HttpFetch#" => {
+            sandbox.check(Capability::Network, name)?;
+            let url = expect_str_arg(args, 0, name, scope)?;
             let resp = ureq::get(&url).call()
-                .map_err(|e| format!("HttpFetch$: failed to fetch '{}': {}", url, e))?;
+                .map_err(|e| format!("{}: failed to fetch '{}': {}", name, url, e))?;
             let body = resp.into_string()
-                .map_err(|e| format!("HttpFetch$: failed to read body from '{}': {}", url, e))?;
+                .map_err(|e| format!("{}: failed to read body from '{}': {}", name, url, e))?;
             Ok(NavValue::Str(body))
         }
 

@@ -350,6 +350,137 @@ pub fn execute_intrinsic(
             Ok(i64_to_bits(0))
         }
 
+        // ── Runtime string operations (2026-07-25) ─────────────────────
+        // In check mode these execute host calls directly.
+        "StrSplit#" => {
+            // Runtime: return first segment as string (list representation TBD).
+            let s = arg_as_string(args, 0)?;
+            let pat = arg_as_string(args, 1)?;
+            let first = s.split(&pat).next().unwrap_or("").to_string();
+            let bytes = first.into_bytes();
+            let len = bytes.len() as i64;
+            let mut header = len.to_le_bytes().to_vec();
+            header.extend_from_slice(&bytes);
+            let addr = heap.allocate(header.len());
+            if heap.write(addr as u64, &header).is_ok() {
+                Ok(i64_to_bits(addr as i64))
+            } else {
+                Ok(i64_to_bits(0))
+            }
+        }
+        "EnvGet#" => {
+            let name = arg_as_string(args, 0)?;
+            let val = std::env::var(&name).unwrap_or_default();
+            let bytes = val.into_bytes();
+            let len = bytes.len() as i64;
+            let mut header = len.to_le_bytes().to_vec();
+            header.extend_from_slice(&bytes);
+            let addr = heap.allocate(header.len());
+            if heap.write(addr as u64, &header).is_ok() {
+                Ok(i64_to_bits(addr as i64))
+            } else {
+                Ok(i64_to_bits(0))
+            }
+        }
+
+        // ── System query intrinsics (2026-07-25) ────────────────────────
+        "SysQuery#" => {
+            let query = arg_as_string(args, 0)?;
+            // Return the same format as eval_nav_call SysQuery$ does,
+            // but via the Value interface.
+            match query.as_str() {
+                "cpu.cores" => {
+                    let cores = std::thread::available_parallelism()
+                        .map(|n| n.get() as i64).unwrap_or(1);
+                    Ok(i64_to_bits(cores))
+                }
+                "cpu.arch" => {
+                    let s = std::env::consts::ARCH.to_string();
+                    let bytes = s.into_bytes();
+                    let len = bytes.len() as i64;
+                    let mut header = len.to_le_bytes().to_vec();
+                    header.extend_from_slice(&bytes);
+                    let addr = heap.allocate(header.len());
+                    heap.write(addr as u64, &header).ok();
+                    Ok(i64_to_bits(addr as i64))
+                }
+                "os" => {
+                    let s = std::env::consts::OS.to_string();
+                    let bytes = s.into_bytes();
+                    let len = bytes.len() as i64;
+                    let mut header = len.to_le_bytes().to_vec();
+                    header.extend_from_slice(&bytes);
+                    let addr = heap.allocate(header.len());
+                    heap.write(addr as u64, &header).ok();
+                    Ok(i64_to_bits(addr as i64))
+                }
+                _ => Ok(i64_to_bits(0))
+            }
+        }
+        "TimeNow#" => {
+            let ts = std::process::Command::new("git")
+                .args(["log", "-1", "--format=%ct"])
+                .output()
+                .ok()
+                .and_then(|o| {
+                    if o.status.success() {
+                        String::from_utf8_lossy(&o.stdout).trim().parse::<i64>().ok()
+                    } else { None }
+                })
+                .unwrap_or_else(|| {
+                    std::time::SystemTime::now()
+                        .duration_since(std::time::UNIX_EPOCH)
+                        .unwrap_or_default()
+                        .as_secs() as i64
+                });
+            Ok(i64_to_bits(ts))
+        }
+
+        // ── External I/O intrinsics (observable, 2026-07-25) ────────────
+        "HttpFetch#" => {
+            let url = arg_as_string(args, 0)?;
+            let resp = ureq::get(&url).call()
+                .map_err(|e| RuntimeError::HeapError(format!("HttpFetch#: {}", e)))?;
+            let body = resp.into_string()
+                .map_err(|e| RuntimeError::HeapError(format!("HttpFetch#: {}", e)))?;
+            let bytes = body.into_bytes();
+            let len = bytes.len() as i64;
+            let mut header = len.to_le_bytes().to_vec();
+            header.extend_from_slice(&bytes);
+            let addr = heap.allocate(header.len());
+            if heap.write(addr as u64, &header).is_ok() {
+                Ok(i64_to_bits(addr as i64))
+            } else {
+                Ok(i64_to_bits(0))
+            }
+        }
+        "ShellCmd#" => {
+            let cmd = arg_as_string(args, 0)?;
+            let cmd_args: Vec<String> = args[1..].iter()
+                .filter_map(|a| a.as_i64())
+                .map(|n| n.to_string())
+                .collect();
+            let output = std::process::Command::new(&cmd)
+                .args(&cmd_args)
+                .output()
+                .map_err(|e| RuntimeError::HeapError(format!("ShellCmd#: {}", e)))?;
+            if !output.status.success() {
+                let stderr = String::from_utf8_lossy(&output.stderr);
+                return Err(RuntimeError::HeapError(format!("ShellCmd#: '{}' failed: {}", cmd, stderr)));
+            }
+            let body = String::from_utf8_lossy(&output.stdout).to_string();
+            let bytes = body.into_bytes();
+            let len = bytes.len() as i64;
+            let mut header = len.to_le_bytes().to_vec();
+            header.extend_from_slice(&bytes);
+            let addr = heap.allocate(header.len());
+            if heap.write(addr as u64, &header).is_ok() {
+                Ok(i64_to_bits(addr as i64))
+            } else {
+                Ok(i64_to_bits(0))
+            }
+        }
+
         _ => Err(RuntimeError::UnsupportedIntrinsic(name.to_string())),
     }
 }
