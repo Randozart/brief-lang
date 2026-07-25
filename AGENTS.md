@@ -1076,3 +1076,16 @@ for current benchmark results and architecture decisions.
 | **Granular pipeline + AST navigation DSL** | `docs/plans/2026-07-21-granular-pipeline-and-ast-navigation.md` |
 | **Compile-time meta + plugin architecture** | `docs/plans/2026-07-15-compiletime-meta-and-plugin-architecture.md` |
 | **Layout DSL** | `docs/architecture/layout-dsl.md` |
+
+## Hypothesised Features
+
+These are architectural ideas that have been discussed but not yet designed or
+implemented. Each links to a document capturing the current design questions.
+They are NOT commitments — they become active plans only when a
+`docs/plans/YYYY-MM-DD-<topic>.md` is written.
+
+| Feature | Document | Core Idea |
+|---------|----------|-----------|
+| **Target-Aware Protocol Resolution** | `docs/architecture/future/target-aware-protocols.md` | `#String` resolves to `#String<utf16>` on Windows, `#String<utf8>` on Linux — default variant depends on target. |
+| **Operation Marshalling** | `docs/architecture/future/operation-marshalling.md` | Marshal operations at compile time instead of marshalling data at runtime — adapt to target ABI without source changes. |
+| **Memory Management by Proof** | `docs/architecture/future/memory-management-by-proof.md` | Automatically select stack arena vs heap based on compile-time proof of pointer escape. Extends provenance analysis. |
