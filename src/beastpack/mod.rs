@@ -12,6 +12,7 @@
 pub mod serialize;
 pub mod deserialize;
 pub mod strip;
+pub mod obfuscate;
 
 #[cfg(test)]
 mod tests;
