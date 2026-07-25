@@ -382,6 +382,9 @@ pub fn compile_source(file_path: &str, source: &str, opts: &BuildOptions) -> Res
         BackendKind::Spirv => {
             brief_compiler::backend::spirv::normalizer::normalize(&mut items, &mut universe)?;
         }
+        BackendKind::Vm => {
+            // VM backend is target-agnostic — no normalization needed.
+        }
     }
 
     emit_beast_snapshot(file_path, BeastStage::Normalize, BeastPosition::Before, &items, &universe, opts)?;
@@ -545,7 +548,8 @@ pub fn compile_source(file_path: &str, source: &str, opts: &BuildOptions) -> Res
     let out_path = out_path.replace(".ll", ext);
 
     // 2026-07-15: SPIR-V writes inside codegen (binary format), skip outer write
-    if opts.backend != BackendKind::Spirv {
+    // 2026-07-25: Vm backend also writes inside codegen (.lair is binary)
+    if opts.backend != BackendKind::Spirv && opts.backend != BackendKind::Vm {
         if let Some(parent) = std::path::Path::new(&out_path).parent() {
             if !parent.as_os_str().is_empty() {
                 std::fs::create_dir_all(parent)
@@ -814,6 +818,18 @@ fn codegen(
             println!("wrote {}", out_path);
             output = String::new();
             ".spv"
+        }
+        BackendKind::Vm => {
+            // 2026-07-25: VM backend emits .lair bytecode
+            let mut b = brief_compiler::backend::vm::VmBackend::new();
+            let lair_data = b.generate(items, universe);
+            let out = determine_out_path(&opts.file_path, opts.out_dir.as_deref())?;
+            let out_path = out.replace(".ll", ".lair");
+            std::fs::write(&out_path, &lair_data)
+                .map_err(|e| format!("cannot write '{}': {}", out_path, e))?;
+            println!("wrote {}", out_path);
+            output = String::new();
+            ".lair"
         }
     };
 

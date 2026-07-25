@@ -13,6 +13,7 @@ pub enum BackendKind {
     Webstack,
     Gpu,
     Spirv,
+    Vm,
 }
 
 /// One entry from config/targets.toml.
@@ -66,7 +67,8 @@ impl TargetConfig {
             "webstack" => Ok(BackendKind::Webstack),
             "gpu" => Ok(BackendKind::Gpu),
             "spirv" => Ok(BackendKind::Spirv),
-            _ => Err(format!("unknown backend '{}'. Supported: llvm, circt, webstack", name)),
+            "vm" => Ok(BackendKind::Vm),
+            _ => Err(format!("unknown backend '{}'. Supported: llvm, circt, webstack, vm", name)),
         }
     }
 }

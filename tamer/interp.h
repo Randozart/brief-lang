@@ -99,8 +99,8 @@
 #define LAIR_FLAG_DEBUG      (1u << 0)
 #define LAIR_FLAG_INVERSE    (1u << 1)
 
-// ── Function table entry (12 bytes each) ─────────────────────────────────
-typedef struct {
+// ── Function table entry (20 bytes each, packed) ─────────────────────────
+typedef struct __attribute__((packed)) {
     uint32_t name_idx;          // index into string table
     uint64_t bytecode_offset;   // offset from bytecode section start
     uint32_t bytecode_len;      // length in bytes

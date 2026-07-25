@@ -164,6 +164,7 @@ pub fn resolve_single_frgn(
             BackendKind::Webstack => "Webstack",
             BackendKind::Gpu => "GPU",
             BackendKind::Spirv => "SPIR-V",
+            BackendKind::Vm => "VM",
         }
     )))
 }
