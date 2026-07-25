@@ -64,6 +64,7 @@ fn infer_range(expr: &Expr, scope: &HashMap<String, IntRange>) -> IntRange {
                 _ => IntRange::UNKNOWN,
             }
         }
+        Expr::Exists(_) => IntRange { min: 0, max: 1 },
         _ => IntRange::UNKNOWN,
     }
 }

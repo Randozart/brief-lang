@@ -373,6 +373,10 @@ impl<'a> Parser<'a> {
             let body = self.parse_expression()?;
             return Ok(Expr::Lambda(vec![name], Box::new(body)));
         }
+        // 2026-07-25: fn? — compile-time existence check
+        if self.eat(&Token::Question) {
+            return Ok(Expr::Exists(name));
+        }
         Ok(Expr::Identifier(name))
     }
 

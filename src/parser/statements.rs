@@ -82,6 +82,19 @@ impl<'a> Parser<'a> {
         } else {
             None
         };
+        // 2026-07-25: term expr? — conditional term (desugars to when-guard).
+        // Check for ? AFTER the expression (before semicolon).
+        if let Some(ref expr) = val {
+            if let Expr::Exists(name) = expr {
+                // term fn? → when fn? { term fn; };
+                self.expect(Token::Semicolon)?;
+                let call = Expr::Call(name.clone(), vec![], None);
+                return Ok(Statement::Guarded(
+                    expr.clone(),
+                    vec![Statement::Term(Some(call))],
+                ));
+            }
+        }
         self.expect(Token::Semicolon)?;
         if bang {
             Ok(Statement::TermBang(val))

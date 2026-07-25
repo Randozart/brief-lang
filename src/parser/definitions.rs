@@ -58,8 +58,22 @@ impl<'a> Parser<'a> {
             }
             // 2026-07-16: P3 — Parse `frgn` and `frgn!` declarations
             Some(Token::Frgn) | Some(Token::FrgnBang) => {
+                let is_bang = matches!(self.peek(), Some(Token::FrgnBang));
                 self.advance();
-                self.parse_frgn_decl().map(TopLevel::ForeignBinding)
+                // 2026-07-25: frgn? / frgn! / frgn?! modifiers
+                // frgn? → optional. frgn! → fire-and-forget (via FrgnBang token).
+                // frgn?! → frgn! + immediate question check for delivery.
+                let is_optional = !is_bang && self.eat(&Token::Question);
+                let is_fire_forget = is_bang;
+                let mut is_delivery = false;
+                if is_fire_forget && self.eat(&Token::Question) {
+                    is_delivery = true;
+                }
+                let mut fb = self.parse_frgn_decl()?;
+                fb.is_optional = is_optional;
+                fb.is_fire_forget = is_fire_forget;
+                fb.is_delivery = is_delivery;
+                Ok(TopLevel::ForeignBinding(fb))
             }
             _ => {
                 // 2026-07-24: Capture doc comments (/// and //!) and attach
@@ -213,6 +227,14 @@ impl<'a> Parser<'a> {
     /// 2026-07-16: P3 — Parse `from "path"` or `from <name>` after `from` token is consumed.
     /// 2026-07-16: P3 — Parse `from "path"` or `from <name>` after `from` token is consumed.
     fn parse_from_spec(&mut self) -> Result<FromSpec, SyntaxError> {
+        // 2026-07-25: from #POSIX / #Win32 / #WASI — protocol-based linking.
+        if let Some(Token::Identifier(name)) = self.peek() {
+            if name.starts_with('#') {
+                let proto = name.clone();
+                self.advance();
+                return Ok(FromSpec::Protocol(proto));
+            }
+        }
         if self.eat(&Token::Lt) {
             // Consume all tokens until `>`, building the name string.
             // Supports: <xxhash.c>, <std/io.c>, <a.b.c>

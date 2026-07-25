@@ -315,6 +315,25 @@ pub fn eval_nav_chain(
         Expr::Decimal(n) => Ok(NavValue::Int(*n)),
         Expr::Float(n) => Ok(NavValue::Int(*n as i64)),
         Expr::Bool(b) => Ok(NavValue::Bool(*b)),
+        Expr::Exists(name) => {
+            // 2026-07-25: fn? — compile-time existence check.
+            // For frgn?/frgn!/frgn?!, check if the binding is optional.
+            // For regular frgn/defn, always exists (true).
+            let exists = program.iter().any(|item| {
+                if let TopLevel::ForeignBinding(fb) = item {
+                    let bname = fb.brief_name.as_deref().unwrap_or(&fb.foreign_name);
+                    bname == name && !fb.is_optional
+                } else {
+                    false
+                }
+            });
+            // Also check if it's a regular defn/txn (always exists)
+            let exists = exists || program.iter().any(|item| {
+                matches!(item, TopLevel::Definition(d) if d.name == *name)
+                    || matches!(item, TopLevel::Transaction(t) if t.name == *name)
+            });
+            Ok(NavValue::Bool(exists))
+        }
         // 2026-07-23: String literal (Quoted) in macro DSL.
         Expr::Quoted(bytes) => String::from_utf8(bytes.clone())
             .map(NavValue::Str)
