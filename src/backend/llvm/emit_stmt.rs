@@ -167,8 +167,14 @@ pub fn emit_statement(backend: &mut LlvmBackend, out: &mut String, stmt: &Statem
                     // 2026-07-18: In a callable txn, term stores to %result and
                     // branches to post (convergence loop). The 'ret' is at done:.
                     let val_ty = backend.llvm_type(&reg.ty);
-                    let store_name = if val_ty != backend.fun.fn_ret_ty {
-                        if val_ty == "i64" && backend.fun.fn_ret_ty == "ptr" {
+                    // 2026-07-25: Actual SSA width is always i64 for integer values.
+                    let actual_val_ty: String = if reg.ty == Type::float() || reg.ty == Type::float64() {
+                        val_ty.clone()
+                    } else {
+                        "i64".to_string()
+                    };
+                    let store_name = if actual_val_ty != backend.fun.fn_ret_ty {
+                        if actual_val_ty == "i64" && backend.fun.fn_ret_ty == "ptr" {
                             let c = backend.fun.gen_reg();
                             writeln!(out, "{}{} = inttoptr i64 {} to ptr", indent, c, reg.name).ok();
                             c
@@ -190,8 +196,16 @@ pub fn emit_statement(backend: &mut LlvmBackend, out: &mut String, stmt: &Statem
                     }
                     backend.fun.terminated = true;
                 } else if backend.fun.fn_ret_ty != "void" {
+                    // 2026-07-25: Determine actual SSA value width. Narrowing may have
+                    // set llvm_type to i8/i16/i32, but all integer SSA values from
+                    // emit_expr are i64. The actual width is i64 unless it's float.
                     let val_ty = backend.llvm_type(&reg.ty);
-                    let final_name = if val_ty != backend.fun.fn_ret_ty {
+                    let actual_val_ty: String = if reg.ty == Type::float() || reg.ty == Type::float64() {
+                        val_ty.clone() /* float or double */
+                    } else {
+                        "i64".to_string() /* all integer values are i64 */
+                    };
+                    let final_name = if actual_val_ty != backend.fun.fn_ret_ty {
                         // 2026-07-20: Insert type conversion when the expression type doesn't
                         // match the function's declared return type (e.g., SysCall# returns i64
                         // but function returns ptr → need inttoptr).
@@ -203,11 +217,10 @@ pub fn emit_statement(backend: &mut LlvmBackend, out: &mut String, stmt: &Statem
                             let c = backend.fun.gen_reg();
                             writeln!(out, "{}{} = ptrtoint ptr {} to i64", indent, c, reg.name).ok();
                             c
-                        } else if val_ty.starts_with('i') && backend.fun.fn_ret_ty.starts_with('i') && val_ty != backend.fun.fn_ret_ty {
-                            // 2026-07-24: Truncate/zext from computed width to declared return type
-                            // (narrowed by value-range inference pass).
+                        } else if actual_val_ty == "i64" && backend.fun.fn_ret_ty.starts_with('i') {
+                            // 2026-07-25: Truncate from actual i64 to narrower return type.
                             let c = backend.fun.gen_reg();
-                            writeln!(out, "{}{} = trunc {} {} to {}", indent, c, val_ty, reg.name, backend.fun.fn_ret_ty).ok();
+                            writeln!(out, "{}{} = trunc i64 {} to {}", indent, c, reg.name, backend.fun.fn_ret_ty).ok();
                             c
                         } else {
                             reg.name
