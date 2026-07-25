@@ -219,22 +219,144 @@ narrowing pass sets the range to exactly `[0,0]` (false) or `[1,1]` (true).
 The guard `when optional_fn? { ... }` is const-folded: if false, the branch
 is eliminated; if true, the guard is eliminated.
 
+## Lexer Details
+
+**`?` and `!`** are standalone tokens, already defined in the lexer:
+
+```rust
+// src/lexer.rs — existing:
+#[token("?")]
+Question,
+
+#[token("!")]
+Exclamation,
+```
+
+These are NOT absorbed into identifiers. `fn?` is lexed as
+`Identifier("fn")` + `Question`. The parser detects the `?` after an
+identifier and combines them.
+
+**`from #POSIX`:** `#POSIX` is lexed as `Token::Identifier("#POSIX")`.
+The identifier regex `[a-zA-Z_#$][a-zA-Z0-9_#$]*` allows `#` as a starting
+character. The parser checks the identifier's string for the `#` prefix.
+
+## Parser Grammar
+
+### `frgn` Declaration Variants
+
+```rust
+// In parse_frgn_decl:
+fn parse_frgn_decl(&mut self) -> Result<TopLevel, SyntaxError> {
+    self.pos += 1; // consume 'frgn'
+    let is_optional = self.eat(&Token::Question);   // frgn? — optional
+    let is_fire_forget = self.eat(&Token::Exclamation); // frgn! — fire-forget
+    let needs_delivery = if is_fire_forget && self.eat(&Token::Question) {
+        true  // frgn?! — fire-forget with delivery
+    } else {
+        false // frgn! — just fire-forget
+    };
+    // Error: frgn?? is invalid (can't have optional + fire-forget both)
+    if is_optional && is_fire_forget {
+        return self.error("cannot combine frgn? with frgn! or frgn?!");
+    }
+    // ...rest of parsing...
+}
+```
+
+The `ForeignBinding` struct gains three bool flags:
+
+```rust
+pub struct ForeignBinding {
+    // ... existing fields ...
+    pub is_optional: bool,      // frgn? — check fn? before calling
+    pub is_fire_forget: bool,   // frgn!/frgn?! — non-blocking, void or Bool return
+    pub is_delivery: bool,      // frgn?! — frgn! + delivery status returned
+}
+```
+
+### `fn?` Expression
+
+```rust
+// In parse_primary or parse_postfix:
+// After parsing an identifier as an expression (e.g., "glCompileShader"),
+// check if the next token is ? — if so, wrap in Expr::Exists.
+fn parse_primary(&mut self) -> Result<Expr, SyntaxError> {
+    // ...existing code...
+    if let Some(name) = self.expect_identifier_opt() {
+        if self.eat(&Token::Question) {
+            return Ok(Expr::Exists(name));
+        }
+        // ...rest of identifier handling...
+    }
+    // ...rest of primary...
+}
+```
+
+`Expr::Exists("glCompileShader")` evaluates to `NavValue::Bool(true)` if
+the function linked, `NavValue::Bool(false)` if it didn't.
+
+### `term expr?` — Conditional Term
+
+```rust
+// In parse_term_statement:
+fn parse_term_statement(&mut self) -> Result<Statement, SyntaxError> {
+    self.pos += 1; // consume 'term'
+    let expr = self.parse_expression()?;
+    let is_conditional = self.eat(&Token::Question);  // term expr?
+    self.expect(Token::Semicolon)?;
+    // ...store is_conditional on the Term statement...
+}
+```
+
+Desugared in the stage evaluator to:
+
+```rust
+// When is_conditional is true:
+// term expr? → when expr? { term expr; };
+```
+
+The `Statement::Term` variant gains an `is_conditional: bool` flag.
+
+### `from #POSIX` — Hashword Source
+
+```rust
+// In parse_frgn_decl, after parsing the from keyword:
+fn parse_frgn_source(&mut self) -> Result<ProtoSource, SyntaxError> {
+    match self.peek() {
+        // from #POSIX, from #Win32, from #WASI
+        Some(Token::Identifier(s)) if s.starts_with('#') => {
+            let name = self.expect_identifier()?;
+            match name.as_str() {
+                "#POSIX" => Ok(ProtoSource::Posix),
+                "#Win32" => Ok(ProtoSource::Win32),
+                "#WASI" => Ok(ProtoSource::Wasi),
+                _ => self.error(&format!("unknown protocol source '{}'", name))
+            }
+        }
+        // from "path/to/file.c"
+        Some(Token::String(_)) => {
+            let path = self.expect(Token::String)?;
+            Ok(ProtoSource::Path(path))
+        }
+        _ => self.error("expected protocol source (#POSIX, #Win32, #WASI) or string path")
+    }
+}
+```
+
 ## Implementation Order
 
 | Step | What | Files |
 |------|------|-------|
-| 1 | Lexer: add `?` suffix handling for `fn?` expressions | `src/lexer.rs` |
-| 2 | AST: `Expr::Exists(String)`, update `ForeignBinding` flags | `src/ast/expr.rs`, `src/ast/top.rs` |
-| 3 | AST: `ProtoSource` enum for `from #Protocol` | `src/ast/top.rs` |
-| 4 | Parser: `frgn?`/`frgn!`/`frgn?!`, `fn?`, `term?` | `src/parser/definitions.rs`, `src/parser/statements.rs`, `src/parser/expressions.rs` |
-| 5 | Parser: `from #POSIX` → `ProtoSource::Posix` | `src/parser/definitions.rs` |
-| 6 | Eval: `Expr::Exists` handler in `eval_nav_chain` | `src/macros/eval.rs` |
-| 7 | Eval: `term expr?` handler in `evaluate_stage_stmt` | `src/macros/eval.rs` |
-| 8 | Safety pass: check `frgn?` is guarded by `fn?` | New file: `src/analysis/frgn_guard.rs` |
-| 9 | Narrowing: const-fold `fn?` for `frgn?` bindings | `src/optimizer/narrow_int.rs` |
-| 10 | Migrate `from "c"` → `from #POSIX` across all `.bv` files | `lib/std/*.bv`, `lib/glue/*.bv` |
-
-Steps 1-5 (lexer, AST, parser) must be done first. Steps 6-10 depend on them.
+| 1 | AST: `Expr::Exists(String)`, `ProtoSource` enum, `ForeignBinding` flags | `src/ast/expr.rs`, `src/ast/top.rs` |
+| 2 | Parser: `frgn?`/`frgn!`/`frgn?!` modifiers in `parse_frgn_decl` | `src/parser/definitions.rs` |
+| 3 | Parser: `fn?` expression in `parse_primary` | `src/parser/expressions.rs` |
+| 4 | Parser: `from #POSIX` → `ProtoSource::Posix` | `src/parser/definitions.rs` |
+| 5 | Parser: `term expr?` in `parse_term_statement` | `src/parser/statements.rs` |
+| 6 | Eval: `Expr::Exists` handler | `src/macros/eval.rs` |
+| 7 | Eval: `term?` conditional skip | `src/macros/eval.rs` |
+| 8 | Safety pass: `frgn?` guard check | New: `src/analysis/frgn_guard.rs` |
+| 9 | Narrowing: const-fold `fn?` | `src/optimizer/narrow_int.rs` |
+| 10 | Migrate `from "c"` → `from #POSIX` | `lib/std/*.bv`, `lib/glue/*.bv` |
 
 ## Files Changed
 
