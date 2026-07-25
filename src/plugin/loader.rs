@@ -268,6 +268,26 @@ pub fn extract_inline_stage_blocks(
     for i in fn_indices.into_iter().rev() {
         program.remove(i);
     }
+
+    // 2026-07-25: Extract $let/$const compile-time variables.
+    // Stored in pending_comptime — evaluated in compile.rs before stage execution.
+    let mut comptime_indices: Vec<usize> = Vec::new();
+    for (i, item) in program.iter().enumerate() {
+        match item {
+            TopLevel::CompileTimeLet(name, expr) => {
+                mgr.pending_comptime.insert(name.clone(), (expr.clone(), false));
+                comptime_indices.push(i);
+            }
+            TopLevel::CompileTimeConst(name, expr) => {
+                mgr.pending_comptime.insert(name.clone(), (expr.clone(), true));
+                comptime_indices.push(i);
+            }
+            _ => {}
+        }
+    }
+    for i in comptime_indices.into_iter().rev() {
+        program.remove(i);
+    }
 }
 
 // ── ValidationPlugin (kept from Phase 7) ──────────────────────────────

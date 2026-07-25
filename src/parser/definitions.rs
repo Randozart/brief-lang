@@ -95,6 +95,13 @@ impl<'a> Parser<'a> {
                 if self.check_identifier("$txn") {
                     return self.parse_compile_time_txn();
                 }
+                // 2026-07-25: $let and $const — compile-time variables
+                if self.check_identifier("$let") {
+                    return self.parse_compile_time_let(false);
+                }
+                if self.check_identifier("$const") {
+                    return self.parse_compile_time_let(true);
+                }
                 // 2026-07-23: proto variant: #Category { ... } — protocol declaration
                 if self.check_identifier("proto") {
                     return self.parse_protocol_def().map(TopLevel::ProtocolDef);
@@ -1367,6 +1374,21 @@ impl<'a> Parser<'a> {
             is_reactive: true, is_async: false,
             derivation, modifiers: vec![], span: None, doc: self.take_doc(),
         }))
+    }
+
+    /// $let name = expr; / $const name = expr; — compile-time variable.
+    /// 2026-07-25: Mutable ($let) or immutable ($const). Removed before codegen.
+    fn parse_compile_time_let(&mut self, is_const: bool) -> Result<TopLevel, SyntaxError> {
+        self.pos += 1; // consume $let or $const identifier
+        let name = self.expect_identifier()?;
+        self.expect(Token::Eq)?;
+        let expr = self.parse_expression()?;
+        self.expect(Token::Semicolon)?;
+        if is_const {
+            Ok(TopLevel::CompileTimeConst(name, expr))
+        } else {
+            Ok(TopLevel::CompileTimeLet(name, expr))
+        }
     }
 
     // ── Protocol Declaration: proto name: #Category [contract] { ... } ──

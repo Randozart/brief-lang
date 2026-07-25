@@ -15,9 +15,9 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use brief_compiler::backend::llvm::LlvmBackend;
+use brief_compiler::ast::{StageKind, TopLevel};
 use brief_compiler::lexer::Token;
 use brief_compiler::plugin::loader::{discover_system_plugins, extract_inline_stage_blocks};
-use brief_compiler::ast::StageKind;
 use brief_compiler::plugin::PluginManager;
 use brief_compiler::target::{BackendKind, TargetConfig, get_extension};
 use brief_compiler::type_universe::TypeUniverse;
@@ -198,6 +198,35 @@ pub struct BuildOptions {
 }
 
 /// Compile a Brief source file: produce an executable binary (or `.ll` with `--llvm`).
+/// 2026-07-25: Evaluate pending $let/$const compile-time variable initializers.
+/// Called after both extract_inline_stage_blocks calls, before any stage blocks
+/// execute. This ensures $let/$const values are available to all stage blocks.
+fn evaluate_pending_comptime(
+    pm: &mut PluginManager,
+    program: &mut Vec<TopLevel>,
+    universe: &mut TypeUniverse,
+) -> Result<(), String> {
+    let pending: Vec<(String, brief_compiler::ast::Expr, bool)> = pm.pending_comptime.drain()
+        .map(|(k, (e, c))| (k, e, c))
+        .collect();
+    // 2026-07-25: Use a fresh sandbox cloned from pm for evaluation, then
+    // merge back to preserve capability tracking.
+    let mut sandbox = pm.sandbox.clone();
+    for (name, expr, is_const) in pending {
+        let val = {
+            let mut pm_opt: Option<&mut PluginManager> = Some(pm);
+            brief_compiler::macros::eval::eval_nav_chain(
+                &expr, program, universe, StageKind::Parsed,
+                &std::collections::HashMap::new(),
+                &mut sandbox, &mut pm_opt,
+            )?
+        };
+        pm.comptime_vars.insert(name, (val, is_const));
+    }
+    pm.sandbox = sandbox;
+    Ok(())
+}
+
 pub fn compile_source(file_path: &str, source: &str, opts: &BuildOptions) -> Result<(), String> {
     // ── Macro lockfile handling ────────────────────────────────────
     // 2026-07-23: If --update-lockfile, regenerate macro-lock.toml from
@@ -235,6 +264,12 @@ pub fn compile_source(file_path: &str, source: &str, opts: &BuildOptions) -> Res
     // not runtime code.
     extract_inline_stage_blocks(&mut items, &mut pm);
 
+    // 2026-07-25: Evaluate $let/$const initializers before Parsed stage.
+    {
+        let mut eval_universe = TypeUniverse::new();
+        evaluate_pending_comptime(&mut pm, &mut items, &mut eval_universe)?;
+    }
+
     // 2026-07-23: Snapshot the program before any macro evaluation for --diff.
     let pre_macro_items = if opts.diff_mode {
         Some(items.clone())
@@ -266,6 +301,12 @@ pub fn compile_source(file_path: &str, source: &str, opts: &BuildOptions) -> Res
     // extract_inline_stage_blocks ran before import resolution, so stage
     // blocks in imported modules were not captured.
     extract_inline_stage_blocks(&mut items, &mut pm);
+
+    // 2026-07-25: Evaluate any new $let/$const from imported modules.
+    {
+        let mut eval_universe = TypeUniverse::new();
+        evaluate_pending_comptime(&mut pm, &mut items, &mut eval_universe)?;
+    }
 
     {
         emit_beast_snapshot(file_path, BeastStage::Resolve, BeastPosition::Before, &items, &TypeUniverse::new(), opts)?;

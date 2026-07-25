@@ -76,6 +76,12 @@ pub enum TopLevel {
     Cfg(CfgGuard),
     // 2026-07-23: Protocol variant declaration: proto name: #Category { ... }
     ProtocolDef(ProtocolDef),
+    /// $let name = expr; — compile-time mutable variable.
+    /// 2026-07-25: Persists across stage blocks, removed before codegen.
+    CompileTimeLet(String, Expr),
+    /// $const name = expr; — compile-time immutable constant.
+    /// 2026-07-25: Same lifetime, error on reassignment.
+    CompileTimeConst(String, Expr),
 }
 
 // ── Definition ─────────────────────────────────────────────────────────

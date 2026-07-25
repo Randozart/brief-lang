@@ -626,7 +626,7 @@ impl ImportResolver {
                 }
                 // 2026-07-24: Keep stage blocks and compile-time defns from
                 // imported files so plugins in library modules can auto-execute.
-                if matches!(item, TopLevel::StageBlock(_) | TopLevel::CompileTimeDefn(_) | TopLevel::CompileTimeTxn(_)) {
+                if matches!(item, TopLevel::StageBlock(_) | TopLevel::CompileTimeDefn(_) | TopLevel::CompileTimeTxn(_) | TopLevel::CompileTimeLet(_, _) | TopLevel::CompileTimeConst(_, _)) {
                     return true;
                 }
                 let name = match item {

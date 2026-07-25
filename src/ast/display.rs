@@ -411,6 +411,12 @@ impl fmt::Display for TopLevel {
             TopLevel::Trigger(trg) => {
                 write!(f, "trg {} @ {}.{};", trg.name, trg.instance, trg.port)
             }
+            TopLevel::CompileTimeLet(name, expr) => {
+                write!(f, "$let {} = {};", name, expr)
+            }
+            TopLevel::CompileTimeConst(name, expr) => {
+                write!(f, "$const {} = {};", name, expr)
+            }
             _ => write!(f, "<definition>"),
         }
     }

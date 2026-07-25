@@ -48,6 +48,8 @@ fn item_key(tl: &TopLevel) -> String {
         }
         CompileTimeDefn(d) => format!("$defn:{}", d.name),
         CompileTimeTxn(t) => format!("$txn:{}", t.name),
+        CompileTimeLet(name, _) => format!("$let:{}", name),
+        CompileTimeConst(name, _) => format!("$const:{}", name),
         ProtocolDef(p) => format!("protocol:{}", p.name),
     }
 }
@@ -87,6 +89,8 @@ pub fn item_summary(tl: &TopLevel) -> String {
         Cfg(_) => "cfg".into(),
         CompileTimeDefn(d) => format!("$defn {}", d.name),
         CompileTimeTxn(t) => format!("$txn {}", t.name),
+        CompileTimeLet(name, _) => format!("$let {}", name),
+        CompileTimeConst(name, _) => format!("$const {}", name),
         ProtocolDef(p) => format!("proto {}: #{}", p.name, p.category),
     }
 }

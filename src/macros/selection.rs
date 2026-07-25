@@ -377,6 +377,8 @@ pub fn top_level_tag(item: &TopLevel) -> Option<&str> {
         TopLevel::SvgComponent { .. } => Some("svg"),
         TopLevel::SyncGroup { .. } => Some("sync"),
         TopLevel::Cfg(_) => Some("cfg"),
+        TopLevel::CompileTimeLet(..) => Some("compile_time_let"),
+        TopLevel::CompileTimeConst(..) => Some("compile_time_const"),
         _ => None,
     }
 }
@@ -402,6 +404,8 @@ pub fn top_level_name(item: &TopLevel) -> Option<&str> {
         TopLevel::TypeDef(t) => Some(&t.name),
         TopLevel::Codec(c) => Some(&c.name),
         TopLevel::SvgComponent { name, .. } => Some(name),
+        TopLevel::CompileTimeLet(name, _) => Some(name),
+        TopLevel::CompileTimeConst(name, _) => Some(name),
         _ => None,
     }
 }

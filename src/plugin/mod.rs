@@ -124,6 +124,13 @@ pub struct PluginManager {
     /// definitions inside $(Stage) blocks. Called from eval_nav_chain for
     /// non-$ function calls.
     pub fn_registry: HashMap<String, FnDef>,
+    /// 2026-07-25: Evaluated compile-time variables ($let/$const). Values stored
+    /// after initializer evaluation. The bool indicates `is_const`.
+    pub comptime_vars: HashMap<String, (crate::macros::eval::NavValue, bool)>,
+    /// 2026-07-25: Pending $let/$const entries whose initializer expressions
+    /// have not yet been evaluated. Keyed by name, stores (expr, is_const).
+    /// Evaluated in compile.rs after extraction, before stage block execution.
+    pub pending_comptime: HashMap<String, (crate::ast::Expr, bool)>,
 }
 
 /// A compile-time function, defined via $defn or $txn inside a $(Stage) block.
@@ -146,6 +153,8 @@ impl PluginManager {
             tainted_indices: BTreeSet::new(),
             expansion_traces: HashMap::new(),
             fn_registry: HashMap::new(),
+            comptime_vars: HashMap::new(),
+            pending_comptime: HashMap::new(),
         }
     }
 
