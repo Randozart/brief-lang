@@ -20,7 +20,7 @@ export defn tame(lair_data: Ptr<Int>, lair_len: Int,
 
     // Validate .lair magic
     let magic = read_u32(lair_data, 0);
-    [magic != 0x5249414c] { term 1; };  // "LAIR"
+    [magic != 0x5249414c] { term magic; };  // "LAIR"
 
     // Parse .lair header
     let bc_off = lair_bc_offset(lair_data);

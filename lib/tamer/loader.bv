@@ -5,8 +5,14 @@
 // All multi-byte reads use shifts and masks for unaligned safety.
 
 defn read_u8(bc: Ptr<Int>, addr: Int) -> Int {
-    let word = *(bc + (addr / 8));
-    term (word >> ((addr % 8) * 8)) & 0xFF;
+    // Avoid Ptr<Int> arithmetic (VM + is unscaled). Cast to Int for
+    // raw byte address computation, then cast back to Ptr for load.
+    let word_idx = addr / 8;
+    let base: Int = bc as Int;
+    let byte_addr: Int = base + word_idx * 8;
+    let byte_off = addr % 8;
+    let word = *(byte_addr as Ptr<Int>);
+    term (word >> (byte_off * 8)) & 0xFF;
 };
 
 defn read_i8(bc: Ptr<Int>, addr: Int) -> Int {

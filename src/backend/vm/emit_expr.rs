@@ -65,21 +65,17 @@ impl VmBackend {
                     BinaryOpKind::Div    => self.asm.emit_div_s(),
                     BinaryOpKind::Mod    => self.asm.emit_rem_s(),
                     BinaryOpKind::Eq     => self.asm.emit_eq(),
-                    BinaryOpKind::Neq    => self.asm.emit_ne(),
+                    BinaryOpKind::Neq    => { self.asm.emit_eq(); self.asm.emit_not(); },
                     BinaryOpKind::Lt     => self.asm.emit_lt_s(),
                     BinaryOpKind::Gt     => self.asm.emit_gt_s(),
                     BinaryOpKind::Le     => self.asm.emit_le_s(),
                     BinaryOpKind::Ge     => self.asm.emit_ge_s(),
-                    BinaryOpKind::And    | BinaryOpKind::BitAnd => self.asm.emit_and(),
-                    BinaryOpKind::Or     | BinaryOpKind::BitOr  => self.asm.emit_or(),
+                    BinaryOpKind::And | BinaryOpKind::BitAnd => self.asm.emit_and(),
+                    BinaryOpKind::Or  | BinaryOpKind::BitOr  => self.asm.emit_or(),
                     BinaryOpKind::BitXor => self.asm.emit_xor(),
                     BinaryOpKind::Shl    => self.asm.emit_shl(),
                     BinaryOpKind::Shr    => self.asm.emit_shr_s(),
-                    BinaryOpKind::Concat => {
-                        // String concat: for MVP, trap.
-                        // In the full tamer, this calls host_strcat.
-                        self.asm.emit_trap();
-                    }
+                    BinaryOpKind::Concat => self.asm.emit_trap(),
                 }
             }
 
@@ -161,7 +157,29 @@ impl VmBackend {
             // ── Function calls ─────────────────────────────────────────
             Expr::Call(name, args, _analysis_id) => {
                 // Check if this is a host function (frgn call)
-                if let Some(&host_id) = self.host_fn_ids.get(name.as_str()) {
+                // 2026-07-25: Check intrinsic (#) BEFORE host_fn_ids, so that
+                // Alloc#/SysCall# etc. always take the PascalCase-skip path
+                // even after being registered in host_fn_ids by a prior call.
+                if name.ends_with('#') {
+                    // 2026-07-25: Intrinsic calls (Alloc#, SysCall#, ShellCmd#, etc.)
+                    // are handled as host calls.
+                    if !self.host_fn_ids.contains_key(name.as_str()) {
+                        let id = self.host_fn_ids.len() as u32;
+                        self.asm.register_host_fn(name, id);
+                        self.host_fn_ids.insert(name.clone(), id);
+                    }
+                    let host_id = self.host_fn_ids[name.as_str()];
+                    // Emit only Int arguments (skip PascalCase strategy identifiers
+                    // like Malloc that the VM backend can't resolve).
+                    for arg in args.iter().rev() {
+                        if matches!(arg, Expr::Identifier(_)) {
+                            // 2026-07-25: Skip PascalCase identifiers (strategy tags)
+                            continue;
+                        }
+                        self.emit_expr(arg);
+                    }
+                    self.asm.emit_hcall(host_id);
+                } else if let Some(&host_id) = self.host_fn_ids.get(name.as_str()) {
                     // Emit arguments right-to-left
                     for arg in args.iter().rev() {
                         self.emit_expr(arg);
@@ -201,6 +219,21 @@ impl VmBackend {
             Expr::Cast(inner, _target_type) => {
                 // For MVP: no-op (cast is a type system annotation).
                 // The VM is untyped, so casts are identity.
+                self.emit_expr(inner);
+            }
+
+            // ── Pointer dereference ──────────────────────────────────
+            Expr::Deref(inner) => {
+                // Emit the pointer expression, then LOAD from that address.
+                // *(bc + index) → emit ptr, load
+                self.emit_expr(inner);
+                self.asm.emit_load();
+            }
+
+            // ── Address-of ────────────────────────────────────────────
+            Expr::AddrOf(inner) => {
+                // For MVP: no-op. AddrOf in the VM is just the value itself
+                // (the VM is untyped, all values are Int handles).
                 self.emit_expr(inner);
             }
 

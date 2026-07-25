@@ -380,9 +380,11 @@ uint64_t vm_execute(VmState* vm, uint32_t fn_idx) {
             // ── Memory operations ───────────────────────────────────────
             case OP_LOAD: {
                 uint64_t addr = stack_pop(vm);
-                if (!vm->has_error) {
+                if (!vm->has_error && addr != 0) {
                     uint64_t val; memcpy(&val, (void*)(uintptr_t)addr, 8);
                     stack_push(vm, val);
+                } else if (!vm->has_error) {
+                    stack_push(vm, 0);
                 }
                 pc += 1; break;
             }

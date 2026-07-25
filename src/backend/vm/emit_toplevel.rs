@@ -29,6 +29,9 @@ impl VmBackend {
             self.local_slots.insert(name.clone(), self.next_local_slot);
             self.next_local_slot += 1;
         }
+        // 2026-07-25: Count total needed locals (params + let bindings in body)
+        // by pre-scanning the body.
+        let total_locals = count_let_bindings(&d.body) as u16 + d.parameters.len() as u16;
 
         // Also register the function name in fn_indices for call resolution
         self.fn_index_counter += 1;
@@ -36,7 +39,7 @@ impl VmBackend {
 
         self.asm.define_function(
             &d.name,
-            self.next_local_slot as u16,  // local_count
+            total_locals,  // local_count (params + let bindings)
             d.parameters.len() as u16,  // arg_count
         );
 
@@ -82,4 +85,10 @@ impl VmBackend {
         self.emit_expr(&c.expr);
         self.asm.emit_ret();
     }
+}
+
+/// 2026-07-25: Count the number of let bindings in a statement body.
+/// Used to pre-allocate sufficient local slots for functions.
+fn count_let_bindings(body: &[crate::ast::top::Statement]) -> usize {
+    body.iter().filter(|s| matches!(s, crate::ast::top::Statement::Let { .. })).count()
 }
