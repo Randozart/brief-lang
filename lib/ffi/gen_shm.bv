@@ -17,7 +17,8 @@
 //      48    16   padding
 // Total: 64 bytes
 
-$defn gen_shm_shim(exports: Selection, bridge_name: String) -> String {
+$defn gen_shm_shim(exports: Selection, bridge_name: String, so_name: String) -> String {
+    let idx = 0;
     let code = "// " + bridge_name + " — Shared memory bridge shim (auto-generated)\n";
     code += "// Compile: gcc -O2 -o " + bridge_name + " " + bridge_name + ".c -ldl -lrt\n\n";
     code += "#include <stdio.h>\n#include <stdint.h>\n#include <stdlib.h>\n#include <string.h>\n";
@@ -55,8 +56,8 @@ $defn gen_shm_shim(exports: Selection, bridge_name: String) -> String {
     code = code + "    (void)argc; (void)argv;\n";
     code = code + "    char* slash = strrchr(argv[0], '/');\n";
     code = code + "    char so_path[4096];\n";
-    code = code + "    if (slash) { snprintf(so_path, sizeof(so_path), \"%.*s/export_add.so\", (int)(slash - argv[0]), argv[0]); }\n";
-    code = code + "    else { snprintf(so_path, sizeof(so_path), \"./export_add.so\"); }\n\n";
+    code = code + "    if (slash) { snprintf(so_path, sizeof(so_path), \"%.*s/" + so_name + "\", (int)(slash - argv[0]), argv[0]); }\n";
+    code = code + "    else { snprintf(so_path, sizeof(so_path), \"./" + so_name + "\"); }\n\n";
     code = code + "    lib_handle = dlopen(so_path, RTLD_LAZY | RTLD_LOCAL);\n";
     code = code + "    if (!lib_handle) { fprintf(stderr, \"dlopen: %s\\n\", dlerror()); return 1; }\n\n";
 
@@ -89,7 +90,6 @@ $defn gen_shm_shim(exports: Selection, bridge_name: String) -> String {
 
     foreach(exp in exports) {
         let name = TypeInfo$(exp, "name");
-        let idx = TypeInfo$(exp, "index");
         code = code + "        if (fn_idx == " + idx + ") { result = " + name + "_fn(";
         let pcount_str = TypeInfo$(exp, "params.count");
         let pcount = 0;
@@ -105,6 +105,7 @@ $defn gen_shm_shim(exports: Selection, bridge_name: String) -> String {
         when pcount >= 3 { code = code + ", a2"; };
         when pcount >= 4 { code = code + ", a3"; };
         code = code + "); }\n";
+        idx = idx + 1;
     };
 
     code = code + "        *(int64_t*)(shm + 40) = result;\n";
@@ -122,7 +123,7 @@ $defn gen_shm_shim(exports: Selection, bridge_name: String) -> String {
 $(Normalized @ highest) {
     let exports = Tag$("export");
     when exports.Count$() > 0 {
-        let code = gen_shm_shim(exports, "proto_shm");
+        let code = gen_shm_shim(exports, "proto_shm", "bench_add.so");
         FileWrite$("ffi-out/shm/proto_shm.c", code, true);
         EmitInfo$("gen_shm: ffi-out/shm/proto_shm.c");
     };
