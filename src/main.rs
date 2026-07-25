@@ -32,6 +32,7 @@ fn main() {
         "audit" => run_audit_cmd(&args[2..]),
         "config" => run_config(&args[2..]),
         "init" => run_init(args.get(2).map(|s| s.as_str())),
+        "bounty" => run_bounty(&args[2..]),
         "register" => run_register(&args[2..]),
         "install-deps" => deps::install_all(),
         "help" | "--help" | "-h" => { print_usage(&args[0]); Ok(()) }
@@ -93,6 +94,7 @@ fn print_usage(program: &str) {
     eprintln!("  {} config show                   Show active config profile", name);
     eprintln!("  {} config set <name>             Switch to a config profile", name);
     eprintln!("  {} config init <name>            Create a new config profile", name);
+    eprintln!("  {} bounty <file.bv>              Package a .bounty for install-time compilation", name);
     eprintln!("  {} init <name>                   Create a new project", name);
     eprintln!("  {} install-deps                 Download optional deps (z3, dwarfdump)", name);
     eprintln!("  {} help                          Show this help", name);
@@ -330,6 +332,85 @@ fn parse_build_args(args: &[String]) -> Result<compile::BuildOptions, String> {
         sysquery_pairs,
         sysquery_files,
     })
+}
+
+/// `briefc bounty <file.bv>` — package a .bounty for install-time compilation.
+fn run_bounty(args: &[String]) -> Result<(), String> {
+    let file_path = args.first().ok_or("usage: briefc bounty <file.bv>")?;
+    let source = std::fs::read_to_string(file_path)
+        .map_err(|e| format!("cannot read '{}': {}", file_path, e))?;
+
+    let opts = compile::BuildOptions {
+        config_dir: None,
+        file_path: file_path.clone(),
+        emit_ir_only: false,
+        out_dir: None,
+        optimize_budget: 256,
+        gpu_offload: false,
+        emit_beast_stages: vec![],
+        backend: brief_compiler::target::BackendKind::Vm,
+        no_stdlib: false,
+        stdlib_path: None,
+        disable_plugins: vec![],
+        enable_plugins: vec![],
+        trg_unresolved_action: brief_compiler::backend::llvm::TrgUnresolvedAction::Warn,
+        extra_objects: vec![],
+        shared: false,
+        feature_sso_strings: false,
+        feature_svo: false,
+        glue_config: None,
+        stack_threshold: 4096,
+        int_bits: 64,
+        allow_read: false,
+        allow_write: false,
+        allow_run: false,
+        allow_sys_query: false,
+        allow_net: false,
+        macro_budget: 256,
+        dump_vfs: false,
+        update_lockfile: false,
+        dump_traces: false,
+        diff_mode: false,
+        sysquery_overrides: std::collections::HashMap::new(),
+        target: None,
+        sysquery_pairs: vec![],
+        sysquery_files: vec![],
+    };
+
+    // 1. Compile to Typed stage
+    eprintln!("[bounty] Compiling to Typed stage...");
+    let (items, universe) = compile::compile_to_typed(file_path, &source, &opts)?;
+
+    // 2. Generate obfuscation seed and obfuscate
+    let noise_seed = 0xDEADBEEF; // MVP: fixed seed. Future: random.
+    eprintln!("[bounty] Obfuscating identifiers...");
+    let (obfuscated_items, _inverse_map) =
+        brief_compiler::beastpack::obfuscate::obfuscate(&items, noise_seed);
+
+    // 3. Serialize beastpack
+    eprintln!("[bounty] Serializing .beastpack...");
+    let beastpack = brief_compiler::beastpack::serialize(&obfuscated_items, &universe, noise_seed);
+    eprintln!("[bounty]   .beastpack: {} bytes", beastpack.len());
+
+    // 4. Compile the tamer per-program .lair bytecode
+    eprintln!("[bounty] Compiling tamer to .lair bytecode...");
+    let mut vm = brief_compiler::backend::vm::VmBackend::new();
+    let lair = vm.generate(&obfuscated_items, &universe);
+    eprintln!("[bounty]   .lair bytecode: {} bytes", lair.len());
+
+    // 5. Assemble .bounty
+    let manifest = format!(r#"{{"version":1,"entry_point":"main","noise_seed":{}}}"#, noise_seed);
+    let bounty = brief_compiler::bounty::write_bounty(&lair, &beastpack, &manifest);
+
+    // 6. Write .bounty file
+    let output_path = file_path.replace(".bv", ".bounty");
+    std::fs::write(&output_path, &bounty)
+        .map_err(|e| format!("cannot write '{}': {}", output_path, e))?;
+    eprintln!("[bounty] Written: {} ({} bytes)", output_path, bounty.len());
+    eprintln!("[bounty] Distribute to any platform.");
+    eprintln!("[bounty] Customer runs: `tamer {}`", output_path);
+
+    Ok(())
 }
 
 fn run_build(args: &[String]) -> Result<(), String> {

@@ -874,6 +874,55 @@ fn emit_beast_snapshot(
     Ok(())
 }
 
+/// Compile a source file up to the $(Typed) stage.
+/// Returns items and universe at the Typed stage, ready for beastpack serialization.
+/// Used by `briefc bounty` — additive new function, no existing paths modified.
+pub fn compile_to_typed(file_path: &str, source: &str, opts: &BuildOptions) -> Result<(Vec<TopLevel>, TypeUniverse), String> {
+    let mut pm = build_plugin_manager(file_path, opts);
+    let project_root = std::env::current_dir()
+        .map_err(|e| format!("cannot determine project root: {}", e))?;
+    let project_root_str = project_root.to_string_lossy().to_string();
+    if opts.update_lockfile {
+        let granted = brief_compiler::macros::lockfile::cli_granted_set(
+            opts.allow_read, opts.allow_write, opts.allow_run,
+            opts.allow_sys_query, opts.allow_net,
+        );
+        let lock = brief_compiler::macros::lockfile::generate_lockfile(&granted, None)?;
+        brief_compiler::macros::lockfile::save_lockfile(&project_root_str, &lock)?;
+    } else if let Some(lock) = brief_compiler::macros::lockfile::load_lockfile(&project_root_str)? {
+        brief_compiler::macros::lockfile::validate_and_apply(&lock, &mut pm, None)?;
+    }
+    let mut source = source.to_string();
+    pm.run_source(StageKind::PreLex, &mut source)?;
+    let tokens = lex(&source)?;
+    let mut items = parse(file_path, &tokens, &source)?;
+    extract_inline_stage_blocks(&mut items, &mut pm);
+    {
+        let mut eval_universe = TypeUniverse::new();
+        evaluate_pending_comptime(&mut pm, &mut items, &mut eval_universe)?;
+    }
+    {
+        let mut parsed_universe = TypeUniverse::new();
+        pm.run_ast(StageKind::Parsed, &mut items, &mut parsed_universe)?;
+    }
+    let mut resolver = brief_compiler::import_resolver::ImportResolver::new();
+    if let Some(ref stdlib_path) = opts.stdlib_path {
+        resolver = resolver.with_stdlib_path(Some(std::path::PathBuf::from(stdlib_path)));
+    }
+    items = resolver.resolve_imports(items, &std::path::PathBuf::from(file_path))?;
+    extract_inline_stage_blocks(&mut items, &mut pm);
+    {
+        let mut eval_universe = TypeUniverse::new();
+        evaluate_pending_comptime(&mut pm, &mut items, &mut eval_universe)?;
+    }
+    pm.run_ast(StageKind::Resolved, &mut items, &mut TypeUniverse::new())?;
+    resolve_comptime_refs(&pm, &mut items)?;
+    let mut universe = TypeUniverse::new();
+    check_types(&items, &universe)?;
+    pm.run_ast(StageKind::Typed, &mut items, &mut universe)?;
+    Ok((items, universe))
+}
+
 /// Determine the output `.ll` file path from the input path and optional output directory.
 fn determine_out_path(file_path: &str, out_dir: Option<&str>) -> Result<String, String> {
     let p = Path::new(file_path);
