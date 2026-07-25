@@ -13,7 +13,7 @@ BV_SRC = bench_add.bv
 
 .PHONY: all clean run generate
 
-all: $(OUT_DIR)/bench_c $(OUT_DIR)/proto_shim $(OUT_DIR)/brief_bridge.so $(OUT_DIR)/bench_add.wasm
+all: $(OUT_DIR)/bench_c $(OUT_DIR)/proto_shim $(OUT_DIR)/brief_bridge.so $(OUT_DIR)/bench_add.wasm $(OUT_DIR)/bench_rust
 
 $(OUT_DIR):
 	mkdir -p $@
@@ -26,6 +26,7 @@ generate: $(OUT_DIR)/bench_add.so
 
 $(OUT_DIR)/bench_add.so: $(BV_SRC) $(BRIEFC) | $(OUT_DIR)
 	cd $(PROJECT_ROOT) && $(BRIEFC) build $(BV_SRC) --shared --out $(OUT_DIR) 2>&1
+	ln -sf bench_add.so $(OUT_DIR)/libbench_add.so
 
 # ── Tier 1: C (dlopen dlsym) ───────────────────────────────────────────
 $(OUT_DIR)/bench_c: bench_c.c $(OUT_DIR)/bench_add.so
@@ -48,6 +49,10 @@ $(OUT_DIR)/bench_add.wasm: $(OUT_DIR)/bench_add.ll
 $(OUT_DIR)/bench_add.ll: $(BV_SRC) $(BRIEFC) | $(OUT_DIR)
 	cd $(PROJECT_ROOT) && $(BRIEFC) build $(BV_SRC) --llvm --out $(OUT_DIR) 2>&1
 
+# ── Tier 1: Rust (direct extern C) ─────────────────────────────────────
+$(OUT_DIR)/bench_rust: bench_rust.rs $(OUT_DIR)/bench_add.so
+	rustc -O $< -o $@ -L $(OUT_DIR) -l bench_add
+
 # ── Run all benchmarks ─────────────────────────────────────────────────
 run: all
 	@echo ""
@@ -58,6 +63,9 @@ run: all
 	@echo ""
 	@echo "--- Node.js ---"
 	cd $(PROJECT_ROOT)/benchmarks/metropolitan && node bench_node.mjs
+	@echo ""
+	@echo "--- Rust ---"
+	cd $(PROJECT_ROOT)/benchmarks/metropolitan && LD_LIBRARY_PATH=out ./out/bench_rust
 	@echo ""
 	@echo "--- WASM ---"
 	cd $(PROJECT_ROOT)/benchmarks/metropolitan && node bench_wasm.mjs
