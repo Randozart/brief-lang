@@ -338,6 +338,14 @@ pub fn compile_source(file_path: &str, source: &str, opts: &BuildOptions) -> Res
                     return Err(format!("protocol contract violation in '{}': {:?}", pd.name, errs));
                 }
             }
+            // 2026-07-23: Round-trip proof — CastFrom(CastTo(x)) == x
+            if let Err(msg) = brief_compiler::analysis::protocol_graph::verify_protocol_roundtrip(pd, &items) {
+                return Err(msg);
+            }
+            // 2026-07-23: Cross-op equivalence proof
+            if let Err(msg) = brief_compiler::analysis::protocol_graph::verify_crossop_equivalence(pd, &items) {
+                return Err(msg);
+            }
         }
     }
 

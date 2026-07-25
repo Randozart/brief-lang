@@ -3,7 +3,7 @@
 // Core verification logic for pre/post condition contracts.
 // Uses # intrinsics for SMT theory mapping (BitVec for all values).
 
-mod smt;
+pub(crate) mod smt;
 pub use smt::*;
 
 use crate::ast::{Expr, Statement, TopLevel, Type};

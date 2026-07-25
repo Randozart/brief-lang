@@ -200,6 +200,13 @@ pub fn is_z3_available() -> bool {
         .unwrap_or(false)
 }
 
+/// 2026-07-23: Public SMT encoding for proof use.
+/// Same as encode_expr_smt but exposed for external callers
+/// (protocol_graph round-trip verification needs it).
+pub fn encode_expr_smt_for_proof(expr: &Expr) -> String {
+    encode_expr_smt(expr)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

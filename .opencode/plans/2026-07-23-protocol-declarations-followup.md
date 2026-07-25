@@ -29,6 +29,30 @@ proto ascii: #String {
 | Cross-op equivalence | Compiler proves custom op == CastTo→default→CastFrom | Compilation denied |
 | `#L`, `#R` | `#L` = self (protocol's own variant), `#R` = target variant | Convention, enforced by type checking |
 
+### Transformations Are `defn`
+
+The binding functions are `defn` declarations with bodies the compiler can inline:
+
+```brief
+defn ascii_to_utf8(x: #String<ascii>) -> #String<utf8> {
+    // Bitwise ops — defines how the ascii layout maps to utf8
+    // The compiler inlines this body for proof purposes
+};
+
+defn utf8_to_ascii(x: #String<utf8>) -> #String<ascii> {
+    // Inverse — compiler proves round-trip identity
+};
+
+proto ascii: #String {
+    CastTo(#String<utf8>) = ascii_to_utf8(#L);
+    CastFrom(#String<utf8>) = utf8_to_ascii(#L);
+};
+```
+
+The compiler finds the `defn` body by searching items for a matching function name. If the body is available, it inlines forward + inverse, builds the composition, and proves via symbolic eval or SMT. If the body is not available (`frgn` or external), the proof is skipped with a warning.
+
+The `#String<ascii>` parameter types in the `defn` are elegant — they declare the protocol variant as the parameter type, making the relationship explicit and typed.
+
 ### What gets proven
 
 ```brief
@@ -90,24 +114,29 @@ for item in &items {
 
 ### Part C: Round-trip proof
 
-**Existing infrastructure:** `src/analysis/meld_validation.rs` already proves `inverse(forward(x)) == x` via Layer 4 (symbolic) and Layer 5 (SMT). The same pipeline applies here:
+**Existing infrastructure:** `src/analysis/meld_validation.rs` — Layers 4 (symbolic) and 5 (SMT) prove
+`inverse(forward(x)) == x`. Reuse the same pipeline.
 
-1. Register each `CastTo` + `CastFrom` pair as a meld-like round-trip
-2. Call existing `validate_symbolic()` and `validate_smt()` on the pair
-3. Deny compilation if proof fails
+**New function:** `verify_protocol_roundtrip(pd, items) → Result`
+- Find matching CastTo/CastFrom pair with the same target
+- Find `defn` body for each binding function via `find_defn_body()`
+- If both bodies available:
+  - Build composition: `CastFrom(CastTo(x))`
+  - Run symbolic evaluation via `eval_symbolic_expr()`
+  - If symbolic passes → return Ok
+  - If symbolic inconclusive → build SMT formula, call Z3
+- If bodies unavailable → warn and skip (functions are external/frgn)
 
-**New function:** `verify_protocol_roundtrip(pd: &ProtocolDef) -> Result<(), String>`
-- Extract matching `CastTo`/`CastFrom` pairs by target
-- For each pair, run `validate_symbolic()` then `validate_smt()`
-- Return Err if either proof fails
+**Helper:** `find_defn_body(name, items) → Option<Expr>` — scans `TopLevel::Definition` items for matching function name, returns its body expression.
 
 ### Part D: Cross-op equivalence proof
 
-**New function:** `verify_crossop_equivalence(pd: &ProtocolDef) -> Result<(), String>`
+**New function:** `verify_crossop_equivalence(pd, items) → Result`
 - For each cross-op (e.g., `op Add(#String<utf8>) = ascii_add_with_utf8(#L, #R)`)
-- Build the round-trip path: `CastFrom(ascii_to_utf8(x) + y)`
-- Compare with the custom implementation: `ascii_add_with_utf8(x, y)`
-- Run symbolic evaluation to check equality
+- Build default round-trip path: `CastFrom(CastTo(x) + y)` — inlines both binding defns and the default Add
+- Build custom path: `ascii_add_with_utf8(x, y)` — inlines the cross-op defn
+- Compare both paths via symbolic/SMT
+- If not equivalent → compilation denied
 
 ### Part E: Follow-up plan update
 
