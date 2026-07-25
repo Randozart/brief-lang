@@ -279,6 +279,8 @@ fn collect_expr_ids_inner(expr: &Expr, ids: &mut Vec<String>) {
         Expr::PluginIntercept { args, .. } => {
             for a in args { collect_expr_ids_inner(a, ids); }
         }
+        Expr::Exists(_) => { unreachable!("fn? only in stage eval") },
+
     }
 }
 

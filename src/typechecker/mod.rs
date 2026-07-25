@@ -299,6 +299,8 @@ pub fn infer_expression(
         // stage plugins. The typechecker passes them through with Void return;
         // the plugin is responsible for final dispatch.
         Expr::PluginIntercept { .. } => Ok((Type::void(), Provenance::Unknown)),
+        Expr::Exists(_) => { unreachable!("fn? only in stage eval") },
+
     }
 }
 

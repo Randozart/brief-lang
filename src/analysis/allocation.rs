@@ -290,6 +290,8 @@ impl<'a> DagBuilder<'a> {
             Expr::PluginIntercept { args, .. } => {
                 for a in args { self.walk_expr(a); }
             }
+            Expr::Exists(_) => { unreachable!("fn? only in stage eval") },
+
         }
     }
 }

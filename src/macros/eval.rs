@@ -1887,6 +1887,8 @@ fn resolve_dollar_refs_in_expr(expr: &mut Expr, scope: &Scope) -> Result<(), Str
         Expr::Quoted(_) | Expr::Decimal(_) | Expr::Float(_) | Expr::Bool(_)
         | Expr::TaggedLiteral(_, _) | Expr::PropertyGet(_)
         | Expr::FormattingAnnotation(_) | Expr::StructLiteral { .. } => Ok(()),
+        Expr::Exists(_) => { unreachable!("fn? only in stage eval") },
+
     }
 }
 

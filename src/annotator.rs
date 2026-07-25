@@ -111,6 +111,7 @@ impl Annotator {
 
     fn collect_calls_from_expr(&self, expr: &Expr, calls: &mut Vec<String>) {
         match expr {
+            Expr::Exists(_) => {},
             Expr::Call(name, args, _) => {
                 calls.push(name.clone());
                 for arg in args {
@@ -577,6 +578,8 @@ impl Annotator {
                 format!("{}!({})", name, args_str.join(", "))
             }
             Expr::StructLiteral { type_name, .. } => format!("{} {{ ... }}", type_name),
+            Expr::Exists(_) => { unreachable!("fn? only in stage eval") },
+
         }
     }
 }

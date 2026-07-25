@@ -123,6 +123,8 @@ pub fn eval_expr(
             "plugin-intercept {}",
             name
         ))),
+        Expr::Exists(_) => { unreachable!("fn? only in stage eval") },
+
     }
 }
 

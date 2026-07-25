@@ -71,6 +71,10 @@ pub enum Expr {
     // ── Metadata ────────────────────────────────────────────────
     PropertyGet(String),
     FormattingAnnotation(super::Formatting),
+    /// 2026-07-25: fn? — compile-time existence check. Evaluates to
+    /// Bool(true) if the function linked, Bool(false) otherwise.
+    /// Used for guarding frgn?/frgn!/frgn?! calls.
+    Exists(String),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

@@ -35,6 +35,7 @@ impl fmt::Display for Expr {
             }
             Expr::Field(obj, name) => write!(f, "{}.{}", obj, name),
             Expr::Index(obj, index) => write!(f, "{}[{}]", obj, index),
+            Expr::Exists(name) => write!(f, "{}?", name),
             Expr::Block(stmts) => {
                 write!(f, "{{ ")?;
                 for stmt in stmts {

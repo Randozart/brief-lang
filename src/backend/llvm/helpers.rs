@@ -160,6 +160,8 @@ impl LlvmBackend {
                     .collect(),
                 type_args: vec![],
             },
+            Expr::Exists(_) => { unreachable!("fn? only in stage eval") },
+
         }
     }
 

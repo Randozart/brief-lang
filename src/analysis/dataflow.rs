@@ -146,6 +146,8 @@ impl<'a> DataflowAnalyzer<'a> {
             Expr::PluginIntercept { args, .. } => {
                 for a in args { self.extract_ids_recursive(a, ids); }
             }
+            Expr::Exists(_) => { unreachable!("fn? only in stage eval") },
+
         }
     }
 

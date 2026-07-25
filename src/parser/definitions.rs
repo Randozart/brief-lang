@@ -204,6 +204,9 @@ impl<'a> Parser<'a> {
             fallback,
             span: None,
             doc: self.take_doc(),
+            is_optional: false,
+            is_fire_forget: false,
+            is_delivery: false,
         })
     }
 

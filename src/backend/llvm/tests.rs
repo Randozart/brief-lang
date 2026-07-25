@@ -2161,6 +2161,9 @@ fn test_frgn_ptr_declare() {
             wasm_setup: None,
             fallback: Fallback::None,
             span: None,
+            is_optional: false,
+            is_fire_forget: false,
+            is_delivery: false,
             doc: None,
         }),
     ];
@@ -2192,6 +2195,9 @@ fn test_frgn_ptr_return() {
             wasm_setup: None,
             fallback: Fallback::None,
             span: None,
+            is_optional: false,
+            is_fire_forget: false,
+            is_delivery: false,
             doc: None,
         }),
     ];
@@ -2287,6 +2293,9 @@ fn test_addr_of_struct_literal() {
             wasm_setup: None,
             fallback: Fallback::None,
             span: None,
+            is_optional: false,
+            is_fire_forget: false,
+            is_delivery: false,
             doc: None,
         }),
         TopLevel::Definition(Definition {
@@ -2369,6 +2378,9 @@ fn test_frgn_ptr_param_inttoptr() {
             wasm_setup: None,
             fallback: Fallback::None,
             span: None,
+            is_optional: false,
+            is_fire_forget: false,
+            is_delivery: false,
             doc: None,
         }),
         TopLevel::Definition(Definition {
@@ -2617,6 +2629,9 @@ fn test_struct_array_addr_of_and_frgn_call() {
             wasm_setup: None,
             fallback: Fallback::None,
             span: None,
+            is_optional: false,
+            is_fire_forget: false,
+            is_delivery: false,
             doc: None,
         }),
         TopLevel::Definition(Definition {

@@ -204,6 +204,8 @@ fn walk_expr(expr: &mut Expr) {
         | Expr::Identifier(_) | Expr::PropertyGet(_)
         | Expr::FormattingAnnotation(_) => {}
         Expr::StructLiteral { .. } => {}
+        Expr::Exists(_) => { unreachable!("fn? only in stage eval") },
+
     }
 }
 

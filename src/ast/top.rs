@@ -584,6 +584,8 @@ pub enum FromSpec {
     Literal(PathBuf),
     /// from <name> — compiler-relative lookup (same pattern as import <name>).
     CompilerRegistry(String),
+    /// 2026-07-25: from #POSIX / #Win32 / #WASI — protocol-based linking.
+    Protocol(String),
 }
 
 impl Default for FromSpec {
@@ -598,6 +600,7 @@ impl FromSpec {
         match self {
             Self::Literal(p) => p.extension().and_then(|s| s.to_str()).map(|s| s.to_string()),
             Self::CompilerRegistry(name) => name.rsplit('.').next().map(|s| s.to_string()),
+            Self::Protocol(_) => None,
         }
     }
 
@@ -606,6 +609,7 @@ impl FromSpec {
         match self {
             Self::Literal(p) => p.to_string_lossy().to_string(),
             Self::CompilerRegistry(n) => n.clone(),
+            Self::Protocol(n) => n.clone(),
         }
     }
 }
@@ -679,11 +683,16 @@ pub struct ForeignBinding {
     pub span: Option<Span>,
     /// 2026-07-24: Doc comment text.
     pub doc: Option<String>,
+    /// 2026-07-25: frgn? — optional, must check fn? before calling.
+    pub is_optional: bool,
+    /// 2026-07-25: frgn! — fire-and-forget, non-blocking, void return.
+    pub is_fire_forget: bool,
+    /// 2026-07-25: frgn?! — fire-and-forget with Bool(delivered) return.
+    pub is_delivery: bool,
 }
 
 impl ForeignBinding {
     /// 2026-07-22: Construct a ForeignBinding.
-    /// `foreign_name` is the C symbol; `brief_name` is the optional Brief-side alias.
     pub fn new(
         foreign_name: String,
         brief_name: Option<String>,
@@ -696,10 +705,10 @@ impl ForeignBinding {
             brief_name,
             from,
             target,
-            inputs: Vec::new(),
-            success_output: Vec::new(),
+            inputs: vec![],
+            success_output: vec![],
             error_type: "Error".to_string(),
-            error_fields: Vec::new(),
+            error_fields: vec![],
             input_layout: None,
             output_layout: None,
             precondition: None,
@@ -711,6 +720,9 @@ impl ForeignBinding {
             fallback,
             span: None,
             doc: None,
+            is_optional: false,
+            is_fire_forget: false,
+            is_delivery: false,
         }
     }
 

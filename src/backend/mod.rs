@@ -257,6 +257,8 @@ pub fn collect_expr_identifiers(expr: &Expr, ids: &mut std::collections::HashSet
         Expr::PluginIntercept { args, .. } => {
             for a in args { collect_expr_identifiers(a, ids); }
         }
+        Expr::Exists(_) => { unreachable!("fn? only in stage eval") },
+
     }
 }
 
