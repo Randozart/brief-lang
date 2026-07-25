@@ -4,6 +4,7 @@
 // 2026-07-14: Add --llvm, --out, --optimize-budget, --gpu-offload flags to build.
 
 mod compile;
+mod deps;
 
 use std::collections::HashMap;
 use std::env;
@@ -32,6 +33,7 @@ fn main() {
         "config" => run_config(&args[2..]),
         "init" => run_init(args.get(2).map(|s| s.as_str())),
         "register" => run_register(&args[2..]),
+        "install-deps" => deps::install_all(),
         "help" | "--help" | "-h" => { print_usage(&args[0]); Ok(()) }
         _ => {
             // Default: compile the file
@@ -92,6 +94,7 @@ fn print_usage(program: &str) {
     eprintln!("  {} config set <name>             Switch to a config profile", name);
     eprintln!("  {} config init <name>            Create a new config profile", name);
     eprintln!("  {} init <name>                   Create a new project", name);
+    eprintln!("  {} install-deps                 Download optional deps (z3, dwarfdump)", name);
     eprintln!("  {} help                          Show this help", name);
 }
 

@@ -189,8 +189,10 @@ fn sanitize_name(name: &str) -> String {
 }
 
 /// 2026-07-23: Quick check if z3 is on PATH by spawning with --version.
+/// Also checks the managed binary directory (~/.local/share/brief-compiler/bin/).
 pub fn is_z3_available() -> bool {
-    std::process::Command::new("z3")
+    // Check PATH first
+    if std::process::Command::new("z3")
         .arg("--version")
         .stdout(std::process::Stdio::null())
         .stderr(std::process::Stdio::null())
@@ -198,6 +200,22 @@ pub fn is_z3_available() -> bool {
         .and_then(|mut c| c.wait())
         .map(|s| s.success())
         .unwrap_or(false)
+    {
+        return true;
+    }
+    // Check managed directory (installed via `briefc install-deps`)
+    managed_z3_path().map_or(false, |p| p.exists())
+}
+
+/// Path to z3 in the managed binary directory.
+fn managed_z3_path() -> Option<std::path::PathBuf> {
+    let base = if let Ok(dir) = std::env::var("XDG_DATA_HOME") {
+        std::path::PathBuf::from(dir)
+    } else {
+        let home = std::env::var("HOME").ok()?;
+        std::path::PathBuf::from(home).join(".local").join("share")
+    };
+    Some(base.join("brief-compiler").join("bin").join("z3"))
 }
 
 /// 2026-07-23: Public SMT encoding for proof use.
