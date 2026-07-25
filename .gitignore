@@ -253,3 +253,5 @@ src/backend/x86_64.rs
 
 # Binaries
 ptr-demo
+/benchmarks/metropolitan/out/
+/ffi-out/
