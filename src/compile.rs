@@ -165,6 +165,12 @@ pub struct BuildOptions {
     /// 2026-07-25: Native integer width for #Int protocol (default 64).
     /// WASM targets should set to 32 to avoid BigInt in JavaScript.
     pub int_bits: u64,
+    /// 2026-07-26: Phase 6b — CSS content from <style> block in .rbv files.
+    /// Written as app.css alongside the compiled output for webstack backend.
+    pub style_css: Option<String>,
+    /// 2026-07-26: Phase 6b — View bindings from processed <html> template.
+    /// Passed to GlueWebGenerator for DOM binding table generation.
+    pub view_bindings: Vec<brief_compiler::view_compiler::Binding>,
     /// 2026-07-23: Allow macros to read files (FileRead$).
     pub allow_read: bool,
     /// 2026-07-23: Allow macros to write files (FileWrite$).
@@ -599,6 +605,62 @@ pub fn compile_source(file_path: &str, source: &str, opts: &BuildOptions) -> Res
         if opts.backend == BackendKind::Webstack {
             let wasm_path = format!("{}.wasm", binary_base);
             compile_wasm(&out_path, &wasm_path)?;
+
+            // 2026-07-26: Phase 6b — Write app.css from <style> block content.
+            if let Some(ref css) = opts.style_css {
+                let css_path = format!("{}.css", binary_base);
+                std::fs::write(&css_path, css)
+                    .map_err(|e| format!("cannot write '{}': {}", css_path, e))?;
+                println!("wrote {}", css_path);
+            }
+
+            // 2026-07-26: Phase 6c — Generate dom-shim.mjs + .d.ts from frgn decls.
+            let frgn_decls: Vec<brief_compiler::ast::ForeignBinding> = items.iter()
+                .filter_map(|item| {
+                    if let brief_compiler::ast::TopLevel::ForeignBinding(fb) = item {
+                        if matches!(fb.from, brief_compiler::ast::FromSpec::Protocol(ref p) if p == "#Web") {
+                            Some(fb.clone())
+                        } else {
+                            None
+                        }
+                    } else {
+                        None
+                    }
+                })
+                .collect();
+            if !frgn_decls.is_empty() || !opts.view_bindings.is_empty() {
+                // Build a StateLayout matching what the LLVM backend emits
+                // (generation at offset 0, flush buffer at 64, max 16 entries).
+                let state_layout = brief_compiler::glue::web_generator::StateLayout {
+                    app_name: binary_base.to_string(),
+                    generation_offset: 0,
+                    flush_buffer_offset: 64,
+                    max_flush_entries: 16,
+                    fields: vec![],
+                };
+                let web_gen = brief_compiler::glue::web_generator::GlueWebGenerator::new(
+                    Vec::new(), // wasm bytes not needed for stub generation
+                    opts.view_bindings.clone(),
+                    state_layout,
+                    HashMap::new(),
+                    frgn_decls,
+                );
+                match web_gen.generate() {
+                    Ok(output) => {
+                        let mjs_path = format!("{}.mjs", binary_base);
+                        std::fs::write(&mjs_path, &output.dom_shim)
+                            .map_err(|e| format!("cannot write '{}': {}", mjs_path, e))?;
+                        println!("wrote {}", mjs_path);
+                        let dts_path = format!("{}.d.ts", binary_base);
+                        std::fs::write(&dts_path, &output.dts)
+                            .map_err(|e| format!("cannot write '{}': {}", dts_path, e))?;
+                        println!("wrote {}", dts_path);
+                    }
+                    Err(e) => {
+                        return Err(format!("GlueWebGenerator failed: {}", e));
+                    }
+                }
+            }
         }
 
         // ── Linked stage: binary processing ───────────────────────────
@@ -676,6 +738,8 @@ pub fn check_source(file_path: &str, source: &str) -> Result<(), String> {
         target: None,
         sysquery_pairs: vec![],
         sysquery_files: vec![],
+        style_css: None,
+        view_bindings: vec![],
     };
     let (_items, _universe) = parse_and_check(file_path, source, &default_opts)?;
     println!("OK");

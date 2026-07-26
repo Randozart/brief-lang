@@ -334,6 +334,8 @@ fn parse_build_args(args: &[String]) -> Result<compile::BuildOptions, String> {
         target: target_name,
         sysquery_pairs,
         sysquery_files,
+        style_css: None,
+        view_bindings: vec![],
     })
 }
 
@@ -378,7 +380,11 @@ fn run_bounty(args: &[String]) -> Result<(), String> {
         target: None,
         sysquery_pairs: vec![],
         sysquery_files: vec![],
+        style_css: None,
+        view_bindings: vec![],
     };
+    let source = std::fs::read_to_string(file_path)
+        .map_err(|e| format!("cannot read '{}': {}", file_path, e))?;
 
     // 1. Compile to Typed stage
     eprintln!("[bounty] Compiling to Typed stage...");
