@@ -27,3 +27,4 @@ pub mod dbvl_reader;
 pub mod dbvs_validator;
 pub mod export;
 pub mod link;
+pub mod web_generator;
