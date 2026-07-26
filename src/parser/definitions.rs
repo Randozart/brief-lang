@@ -1304,20 +1304,38 @@ impl<'a> Parser<'a> {
         self.pos += 1; // consume struct
         let name = self.expect_identifier()?;
         let mut fields = Vec::new();
+        let mut annotations: std::collections::HashMap<String, Vec<String>> = std::collections::HashMap::new();
         if self.eat(&Token::LBrace) {
             while !self.check(&Token::RBrace) && !self.is_at_end() {
+                // 2026-07-26: Parse optional hashword annotations (#Stack, #Heap, #Scalar)
+                let mut field_annotations = Vec::new();
+                while let Some(&Token::Identifier(ref s)) = self.peek() {
+                    if s.starts_with('#') {
+                        field_annotations.push(s.clone());
+                        self.pos += 1;
+                    } else {
+                        break;
+                    }
+                }
                 let field_name = self.expect_identifier()?;
                 self.expect(Token::Colon)?;
                 let field_type = self.parse_type()?;
                 self.eat(&Token::Semicolon);
-                fields.push((field_name, field_type));
+                fields.push((field_name.clone(), field_type));
+                if !field_annotations.is_empty() {
+                    annotations.insert(field_name, field_annotations);
+                }
             }
             self.expect(Token::RBrace)?;
         }
         self.eat(&Token::Semicolon);
+        let mut metadata = std::collections::HashMap::new();
+        if !annotations.is_empty() {
+            metadata.insert("annotations".to_string(), crate::ast::PropertyValue::String(format!("{:?}", annotations)));
+        }
         Ok(StructDef {
             name, fields,
-            metadata: std::collections::HashMap::new(),
+            metadata,
             span: None,
         })
     }

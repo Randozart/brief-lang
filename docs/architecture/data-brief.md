@@ -49,8 +49,7 @@ standalone schema-only `.dbv` files).
 | `;` | Field terminator and entry terminator |
 | `:` | Key-value binder (entry level and map level) |
 | `{ }` | Groups a nested sub-record or map |
-| `@` | Marks a positional entry inside `as` block (`.dbv` only) |
-| `#` | Directive prefix (`.dbvl` only, line-start) |
+| `>` | **Line-start**: directive prefix (`.dbvl`) / **Block-scoped**: marks a positional entry (`.dbv`) |
 | `" "` | Quoted string (opt-in via parser flag) |
 
 ### 3.2 Whitespace
@@ -68,7 +67,7 @@ distinguish between one space and ten.
 ### 3.3 Bare Tokens
 
 By default, all values are unquoted bare tokens. A bare token is any sequence
-of bytes that does not contain `;`, `}`, or `#` (at line start in `.dbvl`).
+of bytes that does not contain `;`, `}`, or `>` (at line start in `.dbvl`).
 
 ```
 alice: Alice Smith; 30; Main St;
@@ -285,19 +284,19 @@ as Person {
 
 #### Positional Entry
 
-When the key is omitted, the entry starts with `@`:
+When the key is omitted, the entry starts with `>`:
 
 ```
-@ field; field; { nested; }; field;
+> field; field; { nested; }; field;
 ```
 
-The `@` signals "positional entry" — the parser does not expect a key. The
+The `>` signals "positional entry" — the parser does not expect a key. The
 entry is indexed by its line position within the block.
 
 ```
 as Person {
-    @ Alice Smith; 30; { Main St; Springfield; };
-    @ Bob; 25; { Oak Ave; Portland; };
+    > Alice Smith; 30; { Main St; Springfield; };
+    > Bob; 25; { Oak Ave; Portland; };
 };
 ```
 
@@ -410,10 +409,10 @@ This applies at every nesting depth.
 ### 7.1 Structure
 
 A `.dbvl` file is one entry per line. Fields are positional, separated by `;`.
-Schema is linked via `#` directives at the top of the file.
+Schema is linked via `>` directives at the top of the file.
 
 ```
-#schema Person from "person.dbv"
+>schema Person from "person.dbv"
 Alice Smith; 30; Main St; Springfield;
 Bob; 25; Oak Ave; Portland;
 Charlie; 40; Elm St; Denver;
