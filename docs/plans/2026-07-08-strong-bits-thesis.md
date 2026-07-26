@@ -189,7 +189,7 @@ Per design decision, endianness is a per-value annotation using `<~`:
 
 ```brief
 // In type definition: default endianness for the type
-type NetworkPacket <: Bits<1024> {
+type NetworkPacket : Bits<1024> {
     endian <~ "big";
 };
 
@@ -211,7 +211,7 @@ pub enum Projection {
     // Existing
     Index(usize),         // tuple :> 0
     Field(String),        // struct :> field_name
-    Size,                 // list :> Size
+    Size,                 // list .#Size
 
     // NEW — metadata projections
     Width,                // Int<8> :> width → 8
@@ -228,7 +228,7 @@ Metadata projections are constant-folded at compile time — they produce `Expr:
 The `bootstrap.bv` file gains operator annotations for each numeric type:
 
 ```brief
-type Int <: Bits {
+type Int : Bits {
     bytes <~ 8;
     alignment <~ 8;
     llvm <~ "i64";
@@ -352,7 +352,7 @@ Never delete existing rationale comments. Rewrite them to explain the new struct
 - `Type::Bits { width, interpretation }` and `Type::Width(u64)` — added in Phase 2a (committed)
 - Parser accepts `Int<N>` syntax → `Applied("Int", [Width(N)])` → resolved to Bits — Phase 2b (committed)
 - TypeUniverse with `ResolvedType`, `build()`, `get()`, `llvm_type`, `storage`, `box_op`, `unbox_op` — fully operational
-- `bootstrap.bv` declares Int, UInt, Int8..UInt32, Float, Float64, Bool, Char, String, Data — all `<: Bits`
+- `bootstrap.bv` declares Int, UInt, Int8..UInt32, Float, Float64, Bool, Char, String, Data — all `: Bits`
 - `to_bits()`, `bit_width()`, `is_signed()`, `universe_key()` — all normalize to Bits form
 - Codegen: `emit_binop` matches `Type::Float`, `Type::Float64`, `is_integral()` — hardcoded
 - Codegen: `emit_neg` matches `Type::Float`, `Type::Float64` — hardcoded
@@ -521,7 +521,7 @@ pub fn llvm_type_for_width(&self, base_name: &str, width: u64) -> Option<Cow<'st
 Add operator annotations, `default_width`, and `commuting` to every numeric type:
 
 ```brief
-type Int <: Bits {
+type Int : Bits {
     bytes <~ 8;
     alignment <~ 8;
     llvm <~ "i64";
@@ -537,7 +537,7 @@ type Int <: Bits {
     commuting <~ true;
 };
 
-type String <: Bits {
+type String : Bits {
     bytes <~ 8;
     alignment <~ 8;
     llvm <~ "{ i8*, i64, i8 }";
@@ -878,7 +878,7 @@ fn fold_projection(expr: &Expr, universe: &TypeUniverse) -> Option<Expr> {
 let x: Bits<32> <~ (endian: big);
 
 // In type definition (default):
-type NetworkInt16 <: Bits<16> {
+type NetworkInt16 : Bits<16> {
     endian <~ "big";
 };
 

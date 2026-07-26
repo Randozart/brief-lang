@@ -13,7 +13,7 @@ codec HexColor {
     format <~ format_hex_color;
 };
 
-type Color <: Int {
+type Color : Int {
     maxbits  <~ 32;
     codec  <~ HexColor;
 };

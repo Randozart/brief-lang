@@ -48,13 +48,13 @@ Each primordial gets `min_bits` and `max_bits` instead of `bytes`:
 
 ```brief
 // New: maxbits is an upper bound, not an exact size
-type Int <: Bits {
+type Int : Bits {
     maxbits <~ 64;
     alignment <~ 8;
 };
 
 // Explicit bytes means exact width (backward compat and frgn bindings)
-type Int32 <: Bits {
+type Int32 : Bits {
     bytes <~ 4;        // exactly 32 bits
     alignment <~ 4;
 };

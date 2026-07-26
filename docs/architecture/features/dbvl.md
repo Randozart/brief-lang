@@ -41,7 +41,7 @@ schema Config {
     version: String required,
     debug: Bool default(false),
     optimization: {
-        budget: Int <: [0..1000000],
+        budget: Int : [0..1000000],
         simplify: Bool default(true)
     }
 }
@@ -67,7 +67,7 @@ Dbvl tables support O(1) key lookup when accessed with a `FILTER(_field_0 == "ke
 ```brief
 // In .bv:
 let table = import "adapters.dbvl";
-let entry <: table { FILTER(_field_0 == "rust"); };
+let entry : table { FILTER(_field_0 == "rust"); };
 ```
 
 ## Import
@@ -82,7 +82,7 @@ let config = import "config.dbv";
 let adapters = import "adapters.dbvl";
 
 // Access with subtype projections
-let entry <: adapters { FILTER(_field_0 == "python"); };
+let entry : adapters { FILTER(_field_0 == "python"); };
 ```
 
 ## Common Uses

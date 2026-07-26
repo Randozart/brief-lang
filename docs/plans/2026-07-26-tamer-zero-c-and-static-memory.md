@@ -1,4 +1,4 @@
-# Zero-C Tamer with Static Memory by Contract
+# Zero-C Tamer with Static Memory by Proof
 ## 2026-07-26
 
 ## Overview
@@ -10,15 +10,15 @@ own LLVM backend, using `SysCall#` with inline assembly for OS interaction and
 `struct` with `Int[N]` fields for all buffers. No `malloc`, no `brief_rt.c`,
 no `tamer/*.c` — zero C.
 
-**Five phases, executed sequentially:**
-
 | Phase | Title | Dependencies | Outcome |
 |-------|-------|-------------|---------|
 | 0 | Foundation Fixes | None | CALL bug, `not` instruction, loader.bv cleanup work |
 | 1 | `#System` Protocol Wire-up | Phase 0 | `from #System` resolves end-to-end per target |
 | 1.5 | Guard/When Syntax Convergence Gates | Phase 1 | Clean syntax across all `.bv` files; `[cond]{body}` replaced with `when cond { body }` |
-| 2 | `SysCall#` Inline Asm + Runtime Port | Phase 1.5 | No `brief_rt.c` — all runtime in Brief using syscall asm |
-| 3 | Tamer in Brief | Phase 2 | No `tamer/*.c` — pure Brief tamer with struct arrays, no `Alloc#` |
+| 1.6 | DotHash, Type Inheritance, and Syntax Cleanup | Phase 1.5 | `:>` → `.#`, `<:` → `type X: Y`, Memory by Proof rename, hashword annotations |
+| 2 | `SysCall#` Inline Asm + Runtime Port | Phase 1.6 | No `brief_rt.c` — all runtime in Brief using syscall asm |
+| 2.5 | Array Slice, Stride, and SIMD Operations | Phase 2 | Slice syntax `arr[start:end:stride]`, SIMD operators on Vector/Slice types |
+| 3 | Tamer in Brief | Phase 2.5 | No `tamer/*.c` — pure Brief tamer with struct arrays, no `Alloc#` |
 | 4 | DAG-Based Size Inference | Phase 3 | Max buffer sizes proven by DAG, not guessed |
 
 ---
@@ -622,7 +622,179 @@ constructs with different semantics and AST representations:
 
 ---
 
-## Phase 2 — `SysCall#` Inline Asm + Runtime Port
+## Phase 1.6 — DotHash, Type Inheritance, and Syntax Cleanup
+
+### 1.6a. Overview
+
+Replace the `:>` projection operator with `.#` (DotHash) for property access,
+the `<:` derivation syntax with `type X: Y #Proto` for type inheritance, and
+rename "Memory by Proof" to "Memory by Proof". Unify hashwords with pragma-
+style annotations for struct/obj field metadata.
+
+### 1.6b. `.#` DotHash Operator
+
+**Replace `:>` with `.#`** across the entire language. The `:>` token is
+removed from the lexer. `arr .#Size` becomes `arr .#Size`.
+
+**Parser:** No new token — `.` is the existing dot operator and `#Size` is a
+hashword expression. The parser adds one arm in the dot-expression handler:
+
+```rust
+// expr .#Size — DotHash property projection
+match rhs {
+    Expr::HashWord(name) => Expr::HashProjection(Box::new(lhs), name),
+    _ => // existing field access
+}
+```
+
+**Type system:** `.#Size` resolves to the element count for arrays/vectors
+(`Vector<T, N>` → `N`), the stride-divided length for slices, etc.
+Same behavior as `.#Size` — just different syntax.
+
+**All projections migrate:**
+
+| Old | New |
+|-----|-----|
+| `arr .#Size` | `arr .#Size` |
+| `s .#Bytes` | `s .#Bytes` |
+| `val .#Ptr` | `val .#Ptr` |
+| `val .#Alignment` | `val .#Alignment` |
+| `val .#Range` | `val .#Range` |
+
+### 1.6c. Type Inheritance Syntax (`type X: Y #Proto`)
+
+**Replace `<:` with `:`** for type inheritance. The `<:` token is removed
+from the lexer.
+
+```brief
+// Old:
+type String : Bits { ... };
+
+// New:
+type String: Bits #String { ... };
+
+// Without protocol override — inherits parent's protocol:
+type MyString: String { ... };
+
+// Protocol-only — implicit Bits parent:
+type ASCII: #String<ASCII> { ... };
+```
+
+**Rule:** `:` introduces the immediate parent. `#Proto` sets the protocol
+hashword. If `#Proto` is omitted, the child inherits the parent's protocol.
+
+The `<:` Derivation lens (which also served as `observable <~ true` in
+contract declarations) is removed entirely. `observable` becomes a standalone
+keyword or hashword annotation.
+
+### 1.6d. Hashword Annotations for Struct/Obj Fields
+
+Hashwords placed before struct/obj fields or declarations act as compiler
+directives:
+
+```brief
+struct Buffer {
+    #Stack data: Int[1024];       // proven stack allocation
+    #Heap metadata: Ptr<Byte>;    // forced heap allocation
+    #Scalar flags: Int[4];        // disable auto-vectorization
+};
+
+#Heap obj ManagedPool<T> {         // entire obj fields default to heap
+    items: Ptr<T>;
+    len: Int;
+};
+```
+
+**Recognized annotation hashwords:**
+
+| Hashword | Semantics |
+|----------|-----------|
+| `#Stack` | Proven stack allocation — alloca, non-escaping |
+| `#Heap` | Forced heap allocation — malloc even if proof could prove stack |
+| `#Scalar` | Disable auto-vectorization for this field — deterministic timing |
+| `#GPU` | GPU memory space (future) |
+
+The parser recognizes hashwords in annotation position and attaches them as
+field/property metadata. The LLVM backend uses `#Stack` → alloca (or no-op
+when already proven), `#Heap` → malloc, `#Scalar` → `!llvm.loop.disable_nonforced`.
+
+### 1.6e. Memory by Proof → Memory by Proof
+
+Rename `docs/plans/2026-07-25-memory-by-proof.md` to
+`docs/plans/2026-07-25-memory-by-proof.md`. Update all internal cross-references
+across the codebase.
+
+### 1.6f. Remove Built-in Collection Types from Compiler Knowledge
+
+`List<T>`, `HashMap<K, V>`, `RingBuffer<T>` are no longer known to the compiler.
+They become user-defined `obj` declarations in stdlib. The type checker removes
+special-cased match arms for these types. The `Vec<T>` runtime type abstraction
+in the type system is removed.
+
+The `<-` operator operates purely through protocol binding:
+
+```brief
+obj List<T> {
+    InsertAt <~ push(#L, #R);
+    ExtractFrom <~ pop(#L);
+    ...
+};
+```
+
+The compiler sees `InsertAt <~ fn(#L, #R)` and emits a call to `fn(collection,
+value)` when `<-` is used. No type names are hardcoded.
+
+### 1.6g. Files Changed
+
+| File | Change |
+|------|--------|
+| `src/lexer/tokens.rs` | Remove `:>` and `<:` tokens |
+| `src/parser/types.rs` | Remove `<:` derivation syntax, add `type X: Y #Proto` |
+| `src/parser/expressions.rs` | Add `.#` DotHash arm in dot-expression handler |
+| `src/ast/expr.rs` | Add `Expr::HashProjection` variant |
+| `src/ast/display.rs` | Display `expr.#prop` |
+| `src/typechecker/mod.rs` | Handle `Expr::HashProjection`, remove special collection types |
+| `src/typechecker/type_universe.rs` | Remove `Vec<T>` and collection variants |
+| `src/typechecker/normalize.rs` | Resolve `.#Size` for Vector/Slice types |
+| `src/backend/llvm/emit_expr.rs` | Codegen for `Expr::HashProjection` |
+| `src/backend/llvm/emit_toplevel.rs` | Handle `#Stack`/`#Heap`/`#Scalar` annotations in struct emission |
+| `src/analysis/dataflow.rs` | Walk `Expr::HashProjection` |
+| `src/interpreter/eval.rs` | Evaluate `Expr::HashProjection` |
+| `src/beast/serialize.rs` | Serialize `Expr::HashProjection` |
+| `src/beast/deserialize.rs` | Deserialize `Expr::HashProjection` |
+| `src/fuzzing/ast_generator.rs` | Generate random hash projections |
+| All `*.bv` files (33+17) | Migrate `:>` → `.#`, `<:` → `:` |
+| `docs/plans/2026-07-25-memory-by-proof.md` | Rename + update content |
+| `AGENTS.md` | Remove `<:`, update items, add DotHash rule |
+| `spec/SPEC.md` | Replace `:>` throughout, update type syntax section |
+| `learn-brief/05-data-types.md` | `:>` → `.#` in examples |
+| `learn-brief/13-projections.md` | Rewrite for `.#` |
+| `docs/architecture/overview.md` | Note Phase 1.6 |
+
+### 1.6h. Risks
+
+| Risk | Likelihood | Impact | Mitigation |
+|------|-----------|--------|------------|
+| `:>` migration misses some occurrences | Medium | Low | Script catches structural cases; compile errors catch remaining |
+| `.#` conflicts with existing `.` field access patterns | Low | Medium | `.` followed by `#HashWord` is unambiguous — `#` never starts a field name |
+| `<:` removal breaks existing benchmarks | Medium | Low | 17 files to migrate, each is a mechanical `s/: /: /` |
+| Special collection type removal in typechecker is risky | Medium | High | Keep dead match arms with `_ =>` for now; remove in dedicated clean-up pass |
+
+### 1.6i. Documentation
+
+| Document | Phase | What to update |
+|----------|-------|----------------|
+| `AGENTS.md` | 1.6 | Remove `<:` references, add DotHash rule (item 11), update items 24-26, rename Memory by Proof |
+| `spec/SPEC.md` | 1.6 | Replace `:>` with `.#` throughout, update type syntax |
+| `learn-brief/05-data-types.md` | 1.6 | `:>` → `.#` in examples |
+| `learn-brief/13-projections.md` | 1.6 | Rewrite projections section for `.#` syntax |
+| `docs/architecture/overview.md` | 1.6 | Add Phase 1.6 entry |
+| `docs/plans/2026-07-25-memory-by-proof.md` | 1.6 | Rename + update |
+| `src/ast/expr.rs` (doc comment) | 1.6 | Add `///` for `Expr::HashProjection` |
+
+---
+
+---
 
 ### 2a. Change `SysCall#` to Emit Inline Assembly
 
@@ -954,7 +1126,7 @@ For each C function ported to Brief in Step 2b:
 
 ### 3a. Implement `Int[N]` Array Syntax
 
-Follow `docs/plans/2026-07-25-memory-by-contract.md` steps 1-7. The full
+Follow `docs/plans/2026-07-25-memory-by-proof.md` steps 1-7. The full
 implementation details are in that document; this section summarizes.
 
 **Parser** (`src/parser/types.rs`): After parsing the base type, check for `[N]`:
@@ -1395,7 +1567,7 @@ to the next phase with failing tests.
 | `src/parser/types.rs` | 3a | Parse `Int[N]` syntax |
 | `src/backend/llvm/mod.rs` | 3a | Normalize `Type::Vector` → `[N x T]` |
 | `src/backend/llvm/emit_expr.rs` | 3a | GEP codegen for array index |
-| `docs/plans/2026-07-25-memory-by-contract.md` | 3a | Reference for array syntax implementation |
+| `docs/plans/2026-07-25-memory-by-proof.md` | 3a | Reference for array syntax implementation |
 | `docs/architecture/conditional-ffi.md` | 1 | Update with completed protocol_map resolution |
 
 ---
@@ -1420,7 +1592,7 @@ table specifies which documents change in which phase:
 | `src/ast/top.rs` (doc comment) | 1.5 | Add `///` doc comment for `Statement::Gate` variant. |
 | `src/backend/llvm/context.rs` (doc comment) | 1.5 | Add `///` doc comment for `convergence_target` field. |
 | `src/features/stmt/gate.rs` (doc comment) | 1.5 | Module-level doc comment explaining GateStmt. |
-| `docs/plans/2026-07-25-memory-by-contract.md` | 3a | Update implementation status; note which steps are complete. |
+| `docs/plans/2026-07-25-memory-by-proof.md` | 3a | Update implementation status; note which steps are complete. |
 | `docs/architecture/features/backend-dispatch.md` | 2a | Document `SysCall#` inline asm dispatch by target triple. |
 | `docs/architecture/bounty-architecture.md` | 3b | Document the pure-Brief tamer's architecture. |
 | `AGENTS_HISTORY.md` | End | Major session milestones for each phase. |
@@ -1455,7 +1627,7 @@ table specifies which documents change in which phase:
 | Document | Relationship |
 |----------|-------------|
 | `docs/plans/2026-07-26-tamer-completion-and-bugfixes.md` | Phase 0 fixes items 1, 2, 4, 5, 6 from this plan |
-| `docs/plans/2026-07-25-memory-by-contract.md` | Phase 3a implements steps 1-7: `Int[N]` syntax |
+| `docs/plans/2026-07-25-memory-by-proof.md` | Phase 3a implements steps 1-7: `Int[N]` syntax |
 | `docs/architecture/conditional-ffi.md` | Phase 1 completes the `from #System` design |
 | `docs/architecture/casting-protocol.md` | Protocol infrastructure for `#System` |
 | `docs/plans/2026-07-15-compiletime-meta-and-plugin-architecture.md` | Target config and protocol_map |

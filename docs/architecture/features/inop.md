@@ -26,7 +26,7 @@ inop sadd(a: Int, b: Int) -> Int { %res = add i64 %a, %b; term %res; } fallback 
 
 // Generic type parameter:
 inop sl_insert<T>(list: SkipList<T>, val: T) -> SkipList<T>
-    [[term :> Size == list :> Size + 1]
+    [[term .#Size == list .#Size + 1]
 { ... body ... } fallback sl_append(list, val);
 
 // Side-effecting (not reorderable/eliminable):

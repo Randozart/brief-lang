@@ -283,7 +283,7 @@ Added `root_path: PathBuf` to `ImportResolver`, set on first call from the compi
 
 **Root cause**: Twofold:
 1. **Desugarer** (`desugarer.rs:238-244`): `extract_vars_from_expr` extracted variable names from transaction postconditions (e.g., `found`, `N`, `i` from `found == true || i == N`), then `infer_type_from_expr` always returned `Type::Bool` for `And`/`Or` without recursing into children. This created global `StateDecl{ name: "N", ty: Bool, ... }` for variables that were actually transaction parameters (in `find_expanded`, `N: Int`). The parameter check was missing — the desugarer created state for ANY postcondition variable, even if it was a parameter.
-2. **Typechecker** (`typechecker.rs:1120-1133`): When `toggle_record` did `&N = expanded_ids :> Size;`, the assignment handler looked up `N` and found the `Bool` global, causing type mismatch with the `Int` RHS.
+2. **Typechecker** (`typechecker.rs:1120-1133`): When `toggle_record` did `&N = expanded_ids .#Size;`, the assignment handler looked up `N` and found the `Bool` global, causing type mismatch with the `Int` RHS.
 
 **Fix**:
 1. **Desugarer**: Added `&& !txn.parameters.iter().any(|(n, _)| n == &var_name)` to skip postcondition variables that are already transaction parameters (line 240).

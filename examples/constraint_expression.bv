@@ -1,12 +1,12 @@
 // Constraint Expression Example
-// Demonstrates <: [_ > 0 && _ < 100] arbitrary expression constraints
+// Demonstrates : [_ > 0 && _ < 100] arbitrary expression constraints
 
 let value: Int = 42;
 
 node check_constraint {
-  let positive: Int <: [_ > 0] = value;
-  let even: Int <: [_ % 2 == 0] = value;
-  let in_range: Int <: [_ > 0 && _ < 100] = value;
+  let positive: Int : [_ > 0] = value;
+  let even: Int : [_ % 2 == 0] = value;
+  let in_range: Int : [_ > 0 && _ < 100] = value;
   term Print#(even);
 };
 

@@ -11,8 +11,8 @@
 | **StmtDispatch** | Handle for recursive sub-statement dispatch. |
 | **Type-Universe** | Pass 1: collects/resolves/freezes type declarations. |
 | **Lens Operator** | A collective term for `<:` (Derivation) and `:>` (Projection). These operators establish the relationship between a raw bit layout and its high-level meaning. `<:` restricts what can conform to a type (derivation); `:>` reveals meaning through a semantic lens (projection). |
-| **Derivation Operator (`<:`)** | Defines a type as a structural subset of another: `type Email <: String`. Constrains the value space — only valid bit patterns are accepted. A Lens Operator. |
-| **Projection Operator (`:>`)** | Extracts compile-time-known metadata or applies a type-defined lens: `list :> Size`. Reveals meaning from a bit layout. A Lens Operator. |
+| **Derivation Operator (`<:`)** | Defines a type as a structural subset of another: `type Email : String`. Constrains the value space — only valid bit patterns are accepted. A Lens Operator. |
+| **Projection Operator (`:>`)** | Extracts compile-time-known metadata or applies a type-defined lens: `list .#Size`. Reveals meaning from a bit layout. A Lens Operator. |
 | **Partition Operator** | Bracket syntax `[]` and bit-anchor `@/` that partition a memory layout into addressable sub-ranges. `list[3]` selects the 4th element; `bits @/0..3` selects bits 0-3. |
 | **Transfer Operator** | The arrow syntax `<-` for directional data movement — pushes, pops, and transfers values across layout boundaries. `&list <- x` pushes x into list. |
 | **Anchor (`@`)** | The universal symbol of spatial/temporal location. Anchors a value to a position: `@"..."` (string literal to memory slot), `@/N..M` (field to bit position), `@ link` (timer to hardware resource), `@x` (prior-state reference). |
@@ -44,14 +44,14 @@
 | **Event-driven trigger** | `trg name: Type @ link <ffi_fn>` — FFI-backed trigger. When the linked FFI function returns a non-void value, the trigger variable is marked dirty and convergence runs. |
 | **`pvt`** | Struct-private visibility keyword. Fields marked `pvt` are accessible only from within the struct's own transactions and definitions. Enforcement stubbed (needs `current_struct` tracking). |
 | **`sed`** | File-private visibility keyword. Top-level `sed` items cannot be imported from other files. Struct fields marked `sed` trigger a `TypeMismatch` error when accessed from a different file. |
-| **`<:`** (struct derivation) | Single-inheritance syntax: `struct Child <: Parent { extra_field; };`. Parent fields are flattened into the child at the desugarer level. Upcast (child → parent) is implicitly allowed by the typechecker. |
+| **`<:`** (struct derivation) | Single-inheritance syntax: `struct Child : Parent { extra_field; };`. Parent fields are flattened into the child at the desugarer level. Upcast (child → parent) is implicitly allowed by the typechecker. |
 | **Struct derivation** | The mechanism by which a struct inherits fields from a parent struct. Resolved recursively (chain inheritance supported). Field name collisions produce a compile error. |
 | **Upcast** | Implicit type conversion from a derived struct to its parent type. Validated by `is_derived_from()` which walks the parent chain. |
 | **Call argument type checking** | Phase 1 feature. `check_call_argument_types()` validates argument types against parameter types at call sites for `defn`/`txn`/`sig`/`frgn` targets. Unknown functions are silently skipped. |
 | **Bits Thesis** | The core language philosophy: every type is a lens over `Bits`. Type operators (`<:`, `:>`, `@/`, `[]`, `<-`) are spatial layout operations, not nominal abstractions. See `lib/std/from-bits.bv`. |
 | **Fast Path** | Compile-time shape recognition that bypasses generic projection evaluation. When a `UserDefinedWithArg("Add", rhs)` matches a known (type, operator) pair, the backend emits native `add i64` instead of interpreting the binding expression. |
 | **Silent Defaults** | Metadata properties like `Bytes`, `Alignment`, `Endian` that the compiler infers from the `@/` bit range. Users don't need to write them for standard types. |
-| **Lazy Projection** | A projection whose cost is deferred until explicitly queried. E.g., `CString :> Size` runs `strlen` only when `Size` is queried; `CString :> At(i)` never calls strlen. |
+| **Lazy Projection** | A projection whose cost is deferred until explicitly queried. E.g., `CString .#Size` runs `strlen` only when `Size` is queried; `CString :> At(i)` never calls strlen. |
 | **#export** | Sig modifier that marks a transaction for cross-language export. The backend emits a globally-visible symbol with the target language's calling convention and name mangling. |
 | **Autogenous Binding** | Auto-generated FFI headers (`.h`, Rust crate, Python stub) produced by the compiler alongside the `.o` library, derived from `ResolvedType` layout info. |
 

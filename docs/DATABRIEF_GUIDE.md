@@ -374,7 +374,7 @@ txn main() [true][true] {
     println("Building " + app_name + " v" + version);
     
     let i: Int = 0;
-    [i < deps :> Size] {
+    [i < deps .#Size] {
         [deps[i].optional] {
             println("  Optional: " + deps[i].name);
         };

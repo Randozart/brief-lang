@@ -500,10 +500,10 @@ defn arena_free(a: Arena) {
 //   slot_offset ->
 //                                    <- string_offset
 //
-// CrosswordArena<T> <: List<T> — supports the same <- push/pop
+// CrosswordArena<T> : List<T> — supports the same <- push/pop
 // interface as List and RingBuffer, via InsertAt/ExtractFrom
 // property bindings.
-type CrosswordArena<T> <: List<T> {
+type CrosswordArena<T> : List<T> {
     InsertAt <~ crossword_push;
     ExtractFrom <~ crossword_pop;
 };

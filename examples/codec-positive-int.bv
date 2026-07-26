@@ -8,7 +8,7 @@ codec PositiveInt {
     [value > 0];
 };
 
-type PositiveInt <: Int {
+type PositiveInt : Int {
     codec <~ PositiveInt;
 };
 
@@ -19,7 +19,7 @@ codec SmallInt {
     [value < 100];
 };
 
-type Age <: Int {
+type Age : Int {
     codec <~ SmallInt;
 };
 

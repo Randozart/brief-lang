@@ -35,11 +35,11 @@ architecture.
 
 ## 2026-07-24 Update: Protocol-First Types
 
-Type declarations now use `: [Parent] [Protocol]` instead of `<: Bits`:
+Type declarations now use `: [Parent] [Protocol]` instead of `: Bits`:
 
 ```brief
 // Before:
-type Int <: Bits { maxbits <~ 64; ... op Add(#Int, #Int); };
+type Int : Bits { maxbits <~ 64; ... op Add(#Int, #Int); };
 
 // After:
 type Int: #Int;              // protocol-only (width inferred)
@@ -48,7 +48,7 @@ type UInt: Int;               // derives from Int, inherits #Int protocol
 ```
 
 Key changes:
-- **`Bits` is implicit** — no need to declare `<: Bits`. Every type has bits.
+- **`Bits` is implicit** — no need to declare `: Bits`. Every type has bits.
 - **Protocols drive dispatch** — `#Int` tells backends how to add, subtract, etc.
   The backend knows the default ops for every protocol. User only writes `op`
   overrides when deviating from the default.
@@ -123,12 +123,12 @@ type Bits {
 or transitively:
 
 ```
-type Int      <: Bits { maxbits <~ 64;  ... }
-type Float    <: Bits { maxbits <~ 64;  ... }
-type Bool     <: Bits { maxbits <~ 8;  ... }
-type Char     <: Bits { maxbits <~ 32;  ... }
-type String   <: Bits { maxbits <~ 192; ... }
-type Void     <: Bits { maxbits <~ 0;  ... }   // zero-width => void
+type Int      : Bits { maxbits <~ 64;  ... }
+type Float    : Bits { maxbits <~ 64;  ... }
+type Bool     : Bits { maxbits <~ 8;  ... }
+type Char     : Bits { maxbits <~ 32;  ... }
+type String   : Bits { maxbits <~ 192; ... }
+type Void     : Bits { maxbits <~ 0;  ... }   // zero-width => void
 ```
 
 The only property the frontend hardcodes at the type level is `maxbits`. It must

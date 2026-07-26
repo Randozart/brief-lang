@@ -106,7 +106,7 @@ None of them communicate. The property bag strings are dead code. The typechecke
 **bootstrap.bv** uses generic backend-agnostic op identifiers:
 
 ```brief
-type Int <: Bits {
+type Int : Bits {
     op Add(Int) -> Int = "int.add";
     op Sub(Int) -> Int = "int.sub";
     op Eq(Int) -> Bool = "int.eq";
@@ -324,7 +324,7 @@ type String {
 ```
 
 Removed:
-- `<: Bits` (default)
+- `: Bits` (default)
 - `ptr: Ptr<UInt8>` → `data: Int`
 - `codec: UInt8` (encoding registry)
 - `llvm <~ "%String"` (derived from fields)

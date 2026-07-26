@@ -23,7 +23,7 @@ export defn add_and_print(a: Int, b: Int) -> Int {
 export defn compute_dot(x: List<Float>, y: List<Float>) -> Float {
     let dot: Float = 0.0;
     let i: Int = 0;
-    let n: Int = x :> Size;
+    let n: Int = x .#Size;
     txn dot_loop [i < n][i == n] -> Float {
         dot = dot + (x[i] * y[i]);
         i = i + 1;

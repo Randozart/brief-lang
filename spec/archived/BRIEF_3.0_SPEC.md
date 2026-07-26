@@ -6,7 +6,7 @@
 
 > **2026-06-09 Addendum — Phase 1.5: Type Derivation System**
 > 
-> Brief now supports `Type Name <: Base { ... }` declarations. See §10 below.
+> Brief now supports `Type Name : Base { ... }` declarations. See §10 below.
 
 ---
 
@@ -79,7 +79,7 @@ The dot `.` uses a strict two-tier priority:
 1. **Internal**: If `subject` has a field or internal `defn` defined in its struct body, access it directly.
 2. **UFCS fallback**: `subject.method(args)` desugars at parse time to `method(subject, args)`.
 
-`list.len()` becomes `len(list)`, which resolves to the standard library definition using `list :> Size`. The compiler has zero hardcoded knowledge of the name `len`.
+`list.len()` becomes `len(list)`, which resolves to the standard library definition using `list .#Size`. The compiler has zero hardcoded knowledge of the name `len`.
 
 #### `->` / `<-` — Directional Dataflow
 - `&list <- x`: Push x into list.
@@ -105,10 +105,10 @@ trg button: Bool @ 0x1000;
 #### `:>` — Metadata Projection (The Metadata Lens)
 Projects compiler-held metadata about an entity at compile time with zero runtime overhead:
 ```brief
-list :> Size     → element count
-str :> Bytes     → byte footprint
-list :> Ptr      → base memory address
-x :> Range       → SMT-proven value boundaries
+list .#Size     → element count
+str .#Bytes     → byte footprint
+list .#Ptr      → base memory address
+x .#Range       → SMT-proven value boundaries
 x :> Popcount    → population count
 x :> LeadingZeros → leading zero bits
 x :> TrailingZeros → trailing zero bits
@@ -231,8 +231,8 @@ txn withdraw(amount: Int)
 
 ```brief
 node fill_buffer()
-    [buffer :> Size < 100]
-    [buffer :> Size == 100]
+    [buffer .#Size < 100]
+    [buffer .#Size == 100]
 {
     &buffer = buffer + [new_item];
     term;
@@ -267,7 +267,7 @@ let items: List<Int> = [1, 2, 3];
 &items <- 4;                     // push
 let x <- &items;                 // pop
 items[0]                         // index access
-items :> Size                    // length (compiler projection)
+items .#Size                    // length (compiler projection)
 ```
 
 ### 5.2 Vector<T, dims...>
@@ -396,7 +396,7 @@ Vector operations synthesize using SystemVerilog `generate` blocks: N elements =
 
 > **Added 2026-06-09 (Phase 1.5)**
 
-Brief types are defined using the `Type Name <: Base { ... }` declaration. The `<:` operator (read as "derives from" or "is a refinement of") connects a new type to its base type. Properties and constraints within the `{ }` body define how the new type differs from the base.
+Brief types are defined using the `Type Name : Base { ... }` declaration. The `<:` operator (read as "derives from" or "is a refinement of") connects a new type to its base type. Properties and constraints within the `{ }` body define how the new type differs from the base.
 
 ### 10.1 Primitive Kernel
 
@@ -425,40 +425,40 @@ The compiler natively understands a small set of ~13 type properties. These are 
 | Expression | Strategy | Example |
 |---|---|---|
 | `0` | Constant front, head-pointer advance | Queue pop |
-| `:> Size` | Append position, pointer increments | List/Queue push |
-| `:> Size - N` | Offset from end, pointer decrements | Stack pop |
-| `<: { MIN(.key) }` | Maintain heap by key | Priority queue |
-| `<: { MAX(.key) }` | Maintain heap by key | Priority queue |
+| `.#Size` | Append position, pointer increments | List/Queue push |
+| `.#Size - N` | Offset from end, pointer decrements | Stack pop |
+| `: { MIN(.key) }` | Maintain heap by key | Priority queue |
+| `: { MAX(.key) }` | Maintain heap by key | Priority queue |
 
 Any unrecognized expression form is a compile-time error.
 
 ### 10.3 Example: Scalar Type Derivation
 
 ```brief
-Type U8  <: Bits { Bytes = 1; Alignment = 1; };
-Type U16 <: Bits { Bytes = 2; Alignment = 2; };
-Type U32 <: Bits { Bytes = 4; Alignment = 4; };
-Type U64 <: Bits { Bytes = 8; Alignment = 8; };
-Type Int <: U64;
-Type Float <: Bits { Bytes = 8; Alignment = 8; };
-Type MmioReg <: U32 { Volatile = true; };
+Type U8  : Bits { Bytes = 1; Alignment = 1; };
+Type U16 : Bits { Bytes = 2; Alignment = 2; };
+Type U32 : Bits { Bytes = 4; Alignment = 4; };
+Type U64 : Bits { Bytes = 8; Alignment = 8; };
+Type Int : U64;
+Type Float : Bits { Bytes = 8; Alignment = 8; };
+Type MmioReg : U32 { Volatile = true; };
 ```
 
 ### 10.4 Example: Collection Type Derivation
 
 ```brief
-Type List<T> <: Bits {
+Type List<T> : Bits {
     ElementType = T;
     FixedSize = false;
-    InsertAt = :> Size;
-    ExtractFrom = :> Size - 1;
+    InsertAt = .#Size;
+    ExtractFrom = .#Size - 1;
 };
 
-Type Stack<T> <: List<T> {
+Type Stack<T> : List<T> {
     AllowIndex = false;
 };
 
-Type Queue<T> <: List<T> {
+Type Queue<T> : List<T> {
     ExtractFrom = 0;
     AllowIndex = false;
 };
@@ -473,7 +473,7 @@ Codecs are imported structs with `encode`/`decode` signatures, validated in Pass
 ```brief
 import { UTF8 } from "std/UTF8.bv";
 
-Type String <: List<U8> {
+Type String : List<U8> {
     Codec = UTF8;
 };
 ```
@@ -485,7 +485,7 @@ The compiler uses the codec to translate string literals at compile time — `"H
 Inline constraints with implicit `_` subject can appear in the type body:
 
 ```brief
-Type PositiveInt <: Int {
+Type PositiveInt : Int {
     [ > 0 && < 100 ]
 };
 ```
@@ -496,7 +496,7 @@ Pass 1 validates literals against these constraints. The backend synthesizes run
 
 ```
 PASS 1: Type-Universe Pass
-  - Collect all Type Name <: Base { ... } declarations
+  - Collect all Type Name : Base { ... } declarations
   - Resolve derivation chain to Bits
   - Inherit + override metadata properties
   - Validate Bytes required on all Bits-derived types
@@ -522,7 +522,7 @@ PASS 2: Executable Pass
 | **Rust** | `struct`, `enum + impl` | Trait implementations, no layout control |
 | **Ada** | `subtype`, representation clauses | Layout control, no programmable codecs |
 | **Zig** | `comptime` + struct generation | Powerful but no formal refinement |
-| **Brief** | `Type ... <: ... { ... }` | Layout, codecs, access gates, all in user-space |
+| **Brief** | `Type ... : ... { ... }` | Layout, codecs, access gates, all in user-space |
 
 ## 11. Type/Metadata Check Expressions: `is`, `from`, `like`
 
@@ -566,7 +566,7 @@ The RHS of `is` can be:
 
 ```brief
 struct Foo { x: Int; }
-struct Bar <: Foo { y: Int; }
+struct Bar : Foo { y: Int; }
 
 let obj = Bar { x: 1, y: 2 };
 let is_from_foo = obj from Foo;   // → true

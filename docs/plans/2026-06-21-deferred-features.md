@@ -26,12 +26,12 @@ injects the binding.
 
 **Scope**: Small — ~20 lines of resolution logic + ~3 tests.
 
-### D-5: `:> Size` Uniformity for Scalars
+### D-5: `.#Size` Uniformity for Scalars
 
-**What**: `Int :> Size` currently errors with "requires List or
+**What**: `Int .#Size` currently errors with "requires List or
 collection type". For scalars, `Size` should return 1 (a single
-element). `Bool :> Size` → 1, `Char :> Size` → 1, `Float :> Size` → 1.
-`String :> Size` returns byte count (kept as-is for now — codec-
+element). `Bool .#Size` → 1, `Char .#Size` → 1, `Float .#Size` → 1.
+`String .#Size` returns byte count (kept as-is for now — codec-
 defined projections like `:> Runes` / `:> Graphemes` are deferred).
 
 **Files**:

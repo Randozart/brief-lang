@@ -95,7 +95,7 @@ operations like `sqrt#(9.0)` while preserving observable I/O.
 The `@/N`, `@/M..N`, `@/xN` syntax declares bit-precise type layouts:
 
 ```brief
-type Header <: Bits @/0..31 {
+type Header : Bits @/0..31 {
     Version = _ @/0..3;            // bits 0-3
     Type    = _ @/4..7;            // bits 4-7
     Length  = _ @/8..31;           // bits 8-31
@@ -181,7 +181,7 @@ progressive disclosure, honest abstractions).
 | Metadata (`:>` Size, Bytes, Type, Ptr, Alignment, Range, IsEmpty) | Bare `Bits` | **Every** type |
 | Bit introspection (`:>` Popcount, LeadingZeros, TrailingZeros, Absolute, BitReverse) | Bare `Bits` | **Every** type |
 | Index/slice (`[n]`, `[m..n]`) | Bare `Bits` | **Every** type — decomposes to bits |
-| Address (`:> Ptr`) | Bare `Bits` (binding-slot address) | **Every** type, overridable |
+| Address (`.#Ptr`) | Bare `Bits` (binding-slot address) | **Every** type, overridable |
 | Arithmetic (`+`, `-`, `*`, `/`, `%`) | Type binding (`Add`, `Sub`, `Mul`, ...) | Opt-in per type |
 | Ordering (`<`, `>`, `<=`, `>=`) | Type binding (`Lt`, `Gt`, `Le`, `Ge`) | Opt-in per type |
 | Boolean (`&&`, `||`, `!`) | Type binding (`And`, `Or`, `Not`) | Opt-in per type |
@@ -252,7 +252,7 @@ the bit representation itself.
 Types override these defaults by defining a binding with the same name:
 
 ```brief
-type String <: Bits @/0..127 {
+type String : Bits @/0..127 {
     Bytes = 16;
     Size = _ @/64..127;        // bits 64-127 = length (byte offset 8-15)
     Ptr  = _ @/0..63;          // bits 0-63  = data pointer (byte offset 0-7)
@@ -283,7 +283,7 @@ The default is "same bit pattern." A type like `Float` overrides `Eq` to impleme
 IEEE 754 NaN semantics:
 
 ```brief
-type Float <: Bits @/0..63 {
+type Float : Bits @/0..63 {
     Bytes = 8;
     Eq(rhs) = _ :> fcmp_oeq#(rhs);   // ordered equality — NaN != NaN
 };
@@ -412,7 +412,7 @@ recognitions, but is always optional — the generic fallback handles anything.
 
 #### The Problem
 
-When `T` is a generic type parameter (`T <: Bits`), operator projections
+When `T` is a generic type parameter (`T : Bits`), operator projections
 cannot be resolved at declaration time. The binding `Add` on `T` is
 unknown until `T` is concretely instantiated:
 
@@ -547,7 +547,7 @@ pub struct TypeBinding {
 ```
 
 ```rust
-/// Body of a `Type Name <: Base { ... }` declaration.
+/// Body of a `Type Name : Base { ... }` declaration.
 pub struct TypeDefBody {
     pub bindings: Vec<TypeBinding>,
     pub constraints: Vec<Expr>,
@@ -589,7 +589,7 @@ pub struct ResolvedType {
 ### 6.4 Parsing Example
 
 ```brief
-type Int <: Bits @/0..63 {
+type Int : Bits @/0..63 {
     Bytes = 8;                  // No `_` → static property
     Alignment = 8;              // No `_` → static property
     Size = 1;                   // No `_` → static property
@@ -598,7 +598,7 @@ type Int <: Bits @/0..63 {
     Popcount = _ :> ctpop#;     // Has `_`, no param → runtime projection
 };
 
-type Matrix4x4 <: Float[16] {
+type Matrix4x4 : Float[16] {
     Bytes = 64;
     Determinant = ...;           // Unknown name → user-defined projection
     Transpose = ...;             // Unknown name → user-defined projection
@@ -832,7 +832,7 @@ definition is still valid — the tier simply doesn't use that information:
 ```brief
 // In .cbv (Circuit Brief), this type is valid but `Codec` is ignored.
 // The 16 bytes remain opaque Bits. No codec operations are emitted.
-type String <: Bits {
+type String : Bits {
     Bytes = 16;
     Codec = UTF8Codec;    // ← ignored by CBV
     Size = _ @/64..127;
@@ -865,7 +865,7 @@ The `&` sigil marks the mutation target. This is unchanged from the current desi
 All arrow operations are ❌ on bare `Bits`. A type must define them:
 
 ```brief
-type List<T> <: Bits @/0..191 {
+type List<T> : Bits @/0..191 {
     Bytes = 24;  // ptr + len + cap
     ArrowPush(v) = ...;    // grow buffer, append v
     ArrowPop() = ...;      // pop last element
@@ -922,7 +922,7 @@ index `n`. This replaces `ProjectionTarget::Index(n)`.
 Within a TypeDef body, `@/` declares bit-precise sub-fields:
 
 ```brief
-type RISC_V_Instruction <: Bits @/0..31 {
+type RISC_V_Instruction : Bits @/0..31 {
     Opcode = _ @/0..6;
     Rd     = _ @/7..11;
     Funct3 = _ @/12..14;
@@ -973,15 +973,15 @@ $ slot(n) {
 
 ```brief
 // A 24-byte List: ptr at slot 0, len at slot 1, cap at slot 2
-type List<T> <: Bits @/0..191 {
+type List<T> : Bits @/0..191 {
     Size = slot(1);       // → _ @/8..15      → GEP + load i64 at offset 8
     Ptr  = slot(0);       // → _ @/0..7       → GEP + load i64 at offset 0
     Cap  = slot(2);       // → _ @/16..23     → GEP + load i64 at offset 16
-    At(i) = _ :> Ptr[i];
+    At(i) = _ .#Ptr[i];
 };
 
 // A 16-byte String: ptr at slot 0, len at slot 1
-type String <: Bits @/0..127 {
+type String : Bits @/0..127 {
     Size = slot(1);       // → _ @/8..15
     Ptr  = slot(0);       // → _ @/0..7
 };
@@ -1008,7 +1008,7 @@ $ bit(n) {
 }
 
 // Usage: RISC-V instruction decode
-type RISC_V_Instruction <: Bits @/0..31 {
+type RISC_V_Instruction : Bits @/0..31 {
     Opcode = bit(0);       // not useful alone — shows the pattern
     // Better: named fields with @/ inline
     Opcode = _ @/0..6;
@@ -1045,7 +1045,7 @@ flexibility of the system.
 ### 12.2 Option A: Directly from `Bits`
 
 ```brief
-type HashMap<K, V> <: Bits {
+type HashMap<K, V> : Bits {
     // Layout: ptr to slot array + length + capacity
     // Each slot: key | value | occupancy flag (1 bit)
     Bytes = 24;
@@ -1064,7 +1064,7 @@ is conceptually:
 
 ```brief
 // Each slot in the array:
-type Slot<K, V> <: Bits @/0..(KBitWidth + VBitWidth) {
+type Slot<K, V> : Bits @/0..(KBitWidth + VBitWidth) {
     Occupied = _ @/(KBitWidth + VBitWidth)..(KBitWidth + VBitWidth);  // 1-bit flag
     Key   = _ @/0..(KBitWidth - 1);
     Value = _ @/KBitWidth..(KBitWidth + VBitWidth - 1);
@@ -1074,7 +1074,7 @@ type Slot<K, V> <: Bits @/0..(KBitWidth + VBitWidth) {
 ### 12.3 Option B: Inherited from `List<(K, V)>`
 
 ```brief
-type HashMap<K, V> <: List<(K, V)> {
+type HashMap<K, V> : List<(K, V)> {
     AllowIndex = false;            // raw bracket access would bypass hash
     Contains(key) = ...;           // hash-based lookup
     Get(key) = ...;                // hash-based lookup, returns Option<V>
@@ -1155,7 +1155,7 @@ BriefString = { ptr: i8*, length: u64 }
 Under the Bits Thesis, define `RustString` to match Rust's ABI:
 
 ```brief
-type RustString <: Bits @/0..191 {
+type RustString : Bits @/0..191 {
     Bytes = 24;
     Ptr  = _ @/0..63;
     Cap  = _ @/64..127;
@@ -1234,7 +1234,7 @@ happens to match another language's ABI.
 ```brief
 // C++ std::string on x86_64 libstdc++:
 // { pointer: i8*, length: u64, capacity: u64 }
-type CppString <: Bits @/0..191 {
+type CppString : Bits @/0..191 {
     Bytes = 24;
 
     // Raw field access — matches C++ ABI exactly
@@ -1244,7 +1244,7 @@ type CppString <: Bits @/0..191 {
 
     // Native projections — same interface as Brief String
     Size  = _ :> Len;
-    At(i) = _ :> Ptr :> load_u8#(i);
+    At(i) = _ .#Ptr :> load_u8#(i);
 };
 ```
 
@@ -1256,7 +1256,7 @@ frgn get_message() -> CppString from "rust" with "cpp_bridge";
 
 let msg: CppString = get_message();
 let first: Char = msg[0];    // O(1) — GEP + load
-let len: Int = msg :> Size;  // O(1) — load from offset 64
+let len: Int = msg .#Size;  // O(1) — load from offset 64
 ```
 
 #### What LLVM Sees
@@ -1282,7 +1282,7 @@ underlying allocation was created by a C++ allocator.
 |--------|--------------------------------------|-------------------------------|
 | Representation | `void*` or `size_t` handle | Full struct layout as `Bits @/` |
 | Element access | Call `cpp_string_at(idx)` helper function | `msg[idx]` native bracket syntax |
-| Field access | Call `cpp_string_size()` | `msg :> Size` native projection |
+| Field access | Call `cpp_string_size()` | `msg .#Size` native projection |
 | Optimization | Opaque to LLVM — calls are black boxes | Direct GEP + load — LLVM sees all |
 | Safety | Manual — user must call correct helpers | Proof-engine checked — layout verified |
 | Extensibility | Per-library wrapper code | Define the layout once, use everywhere |
@@ -1306,16 +1306,16 @@ actual work.
 A `CString` is defined as a single 8-byte pointer with lazy projections:
 
 ```brief
-type CString <: Bits @/0..63 {
+type CString : Bits @/0..63 {
     Bytes = 8;
     // The raw char* pointer — zero-cost to capture
     Ptr = _ @/0..63;
 
     // Zero-cost indexing — no strlen needed
-    At(i) = _ :> Ptr :> load_u8#(i);
+    At(i) = _ .#Ptr :> load_u8#(i);
 
     // Deferred length calculation — only if explicitly requested
-    Size = _ :> Ptr :> strlen#;
+    Size = _ .#Ptr :> strlen#;
 
     // Conversion to native Brief String — materializes on demand
     ToString() = _ :> rebuild#(Size, Ptr);
@@ -1329,7 +1329,7 @@ type CString <: Bits @/0..63 {
 | Capture C `char*` as `CString` | **0 instructions** — pure metadata change | At FFI boundary |
 | Index `cstr[0]` | **1 load** — GEP + load `i8` | Immediate |
 | Slice `cstr[0..5]` | **5 loads** — no `strlen` needed | Immediate |
-| Call `cstr :> Size` | **O(N)** — `strlen` on first call, cached | On explicit request |
+| Call `cstr .#Size` | **O(N)** — `strlen` on first call, cached | On explicit request |
 | Convert to `String` | **O(N)** — `strlen` + allocation, cached | On explicit request |
 
 #### Why the Lazy Pattern Matters
@@ -1344,7 +1344,7 @@ frgn getenv(name: CString) -> CString from "c";
 let path: CString = getenv("PATH");
 let first_char: Char = path[0];    // 1 load — strlen never runs
 // strlen runs only if we explicitly ask:
-let len: Int = path :> Size;       // O(N) — first and only scan
+let len: Int = path .#Size;       // O(N) — first and only scan
 ```
 
 #### The Reverse Direction: Brief String → C `char*`
@@ -1365,7 +1365,7 @@ valid C string.
 **Dynamic strings:**
 ```brief
 let s: String = read_file("input.txt")?;
-let result = puts(s :> Ptr as CString);  // Zero-cost
+let result = puts(s .#Ptr as CString);  // Zero-cost
 ```
 
 If the dynamic string allocator reserves one extra byte and writes `\0`
@@ -1418,7 +1418,7 @@ defn safe_read(c: CString) -> Char {
 
 defn safe_read2(c: CString) -> Char {
     // The engine can prove: c[5] reads within bounds if Size was checked
-    [c :> Size > 5] {
+    [c .#Size > 5] {
         term c[5];  // Safe — bounded by precondition
     };
     term '\0';
@@ -1432,7 +1432,7 @@ out-of-bounds access when Size is unknown.
 | Check | How | Verified |
 |-------|-----|----------|
 | Index without size | Projection dependency analysis | Warn: "Size not queried — out-of-bounds possible" |
-| Index after size check | Contract precondition `[i < :> Size]` | Safe — bounded |
+| Index after size check | Contract precondition `[i < .#Size]` | Safe — bounded |
 | Double-free | Ownership tracking on `ToString()` | Prevented by linearity |
 | Null pointer deref | `Ptr` projection is typed as non-null or `Option` | Enforced by type |
 
@@ -1490,7 +1490,7 @@ or double-frees result.
 **The pattern:**
 
 ```brief
-type RustVec <: Bits @/0..191 {
+type RustVec : Bits @/0..191 {
     Ptr  = _ @/0..63;  // data pointer
     Len  = _ @/64..127; // length
     Cap  = _ @/128..191; // capacity
@@ -1502,7 +1502,7 @@ The compiler associates a foreign destructor with the type via an
 `OnExit` binding:
 
 ```brief
-type RustVec <: Bits {
+type RustVec : Bits {
     Bytes = 24;
     OnExit = __rust_vec_drop#;   // called when value goes out of scope
 };
@@ -1924,7 +1924,7 @@ operators transparently. No migration needed.
 ### Int
 
 ```brief
-type Int <: Bits @/0..63 {
+type Int : Bits @/0..63 {
     Bytes = 8;
     Alignment = 8;
     Size = 1;
@@ -1948,7 +1948,7 @@ type Int <: Bits @/0..63 {
 ### Float
 
 ```brief
-type Float <: Bits @/0..63 {
+type Float : Bits @/0..63 {
     Bytes = 8;
     Alignment = 8;
     Size = 1;
@@ -1967,13 +1967,13 @@ type Float <: Bits @/0..63 {
 ### String
 
 ```brief
-type String <: Bits @/0..127 {
+type String : Bits @/0..127 {
     Bytes = 16;
     Alignment = 8;
     Codec = UTF8Codec;
     Size = _ @/64..127;           // bits 64-127 = length field
     Ptr  = _ @/0..63;             // bits 0-63  = data pointer
-    At(i) = _ :> Ptr :> load_u8#(i);  // char at byte index
+    At(i) = _ .#Ptr :> load_u8#(i);  // char at byte index
     Concat(rhs) = ...;
 };
 ```
@@ -1981,7 +1981,7 @@ type String <: Bits @/0..127 {
 ### List<T>
 
 ```brief
-type List<T> <: Bits @/0..191 {
+type List<T> : Bits @/0..191 {
     Bytes = 24;
     Alignment = 8;
     ElementType = T;
@@ -1989,7 +1989,7 @@ type List<T> <: Bits @/0..191 {
     Size = _ @/64..127;           // bits 64-127 = length field
     Ptr  = _ @/0..63;             // bits 0-63  = data pointer
     Cap  = _ @/128..191;          // bits 128-191 = capacity
-    At(i)   = _ :> Ptr[i];       // element via bracket on pointer
+    At(i)   = _ .#Ptr[i];       // element via bracket on pointer
     ArrowPush(v) = ...;          // grow + append
     ArrowPop() = ...;            // load + shrink
     ArrowDiscard() = ...;        // shrink only
@@ -1999,12 +1999,12 @@ type List<T> <: Bits @/0..191 {
 ### User-defined: Matrix4x4
 
 ```brief
-type Float <: Bits @/0..63 {
+type Float : Bits @/0..63 {
     Bytes = 8;
     // Float projections as above...
 };
 
-type Matrix4x4 <: Float[16] {
+type Matrix4x4 : Float[16] {
     Bytes = 64;
     Alignment = 8;
     Add(rhs) = ...;               // element-wise add
@@ -2023,7 +2023,7 @@ directly decodable to GEP + mask in software or wire slicing in
 Verilog/CIRCT:
 
 ```brief
-type RISC_V_Instruction <: Bits @/0..31 {
+type RISC_V_Instruction : Bits @/0..31 {
     Bytes = 4;
     Opcode = _ @/0..6;
     Rd     = _ @/7..11;
@@ -2107,7 +2107,7 @@ fast-path codegen, regardless of the type name:
 | `Size` | `1` (constant) | Constant-fold | Inlined |
 | `Size` | `_ @/64..127` (load offset, byte-aligned) | GEP + load | SROA, mem2reg |
 | `Popcount` | `_ :> ctpop#` | `call llvm.ctpop.i64` | → `POPCNT` instr |
-| `At(i)` | `_ :> Ptr[i]` (load at index) | GEP + load at index | LICM, CSE |
+| `At(i)` | `_ .#Ptr[i]` (load at index) | GEP + load at index | LICM, CSE |
 | `Eq(rhs)` | `_ :> icmp_eq#(rhs)` | `icmp eq i64` | Fold to `select` |
 | `+` desugared | `a :> Add(b)` → see Add | (same as Add) | — |
 

@@ -10,7 +10,7 @@
 
 The Bits thesis (docs/architecture/bits-thesis.md) states that `Bits` is the
 sole compiler primitive — every other type (`Int`, `Float`, `String`, etc.) is
-a stdlib-defined `type Foo <: Bits { ... }` with metadata overlays.
+a stdlib-defined `type Foo : Bits { ... }` with metadata overlays.
 
 In practice, this created a circular dependency: `meld Int -> Float` needs
 `Int` and `Float` in the `TypeUniverse`, but those types only arrive via
@@ -20,7 +20,7 @@ fails or the prelude doesn't fire, the program panics at `universe.get("Int")`.
 **Primordial types** resolve this by seeding the `TypeUniverse` with a fixed
 set of well-known type names on construction. Each carries default metadata
 (bytes, alignment, primitive, llvm_type) matching what the stdlib would
-provide. A user `type Int <: Bits { bytes <~ 4; }` in source code
+provide. A user `type Int : Bits { bytes <~ 4; }` in source code
 **replaces** the primordial entry — HashMap insert wins.
 
 The primordial type table is a pragmatic companion to the Bits thesis, not a
@@ -59,7 +59,7 @@ All primordial types have `base = "Bits"`.
 
 ## Override Rule
 
-A user `type Int <: Bits { bytes <~ 4; }` in source produces a
+A user `type Int : Bits { bytes <~ 4; }` in source produces a
 `TopLevel::TypeDef`. `register_typedefs` in the normalizer calls
 `universe.register(rt)` which does `HashMap::insert`. The user's
 `ResolvedType` **replaces** the primordial entry by name.

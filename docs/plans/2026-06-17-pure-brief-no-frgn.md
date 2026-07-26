@@ -178,7 +178,7 @@ Async runtime infrastructure. Keep in a small C file.
 
 ### Step 3a: String helpers (24 `frgn __*`)
 
-Implementable in pure Brief using string slicing, `s :> Size`, and character
+Implementable in pure Brief using string slicing, `s .#Size`, and character
 comparison. `__to_lower`, `__is_alpha`, `__replace_all`, `__splitn`, etc.
 
 ### Step 3b: Encoding helpers (27 `frgn __*`)

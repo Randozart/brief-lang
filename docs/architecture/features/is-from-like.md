@@ -36,7 +36,7 @@ New types in `src/ast.rs`:
 
 ```rust
 pub enum IsTarget {
-    Type(Type),      // Int, Option<Int>, Foo, <: derived type
+    Type(Type),      // Int, Option<Int>, Foo, : derived type
     Variant(String), // Some, None, Ok, Err — resolved against LHS enum type
 }
 ```
@@ -223,9 +223,9 @@ defn process(x: Int) -> String {
 
 ## Key Notes
 
-- **`from` is a check, not a declaration**: The derivation declaration syntax is `struct Bar <: Foo { ... }` using `<:`. The word `from` is now exclusively an infix check operator in expressions.
+- **`from` is a check, not a declaration**: The derivation declaration syntax is `struct Bar : Foo { ... }` using `<:`. The word `from` is now exclusively an infix check operator in expressions.
 - **Variant name resolution**: For `x is Some`, the compiler resolves `Some` against the enum type of `x`'s type. If `x: Option<Int>`, then `Some` resolves to the first variant of `Option`. Error if no match.
-- **`like` is structural, not nominal**: Two types can be `like` each other even if they have different names, as long as their field layout matches. Pointer-to-value derivation (`Int :> Ptr`) can be checked via `derived_ptr like parent_int`.
+- **`like` is structural, not nominal**: Two types can be `like` each other even if they have different names, as long as their field layout matches. Pointer-to-value derivation (`Int .#Ptr`) can be checked via `derived_ptr like parent_int`.
 - **Lexer capitalization**: `Is` and `Like` tokens are case-insensitive. `Some`/`None` variant tokens are only `some`/`SOME`/`none`/`NONE` (lowercase). `Ok` and `Err` support capitalized forms as well (`Ok`/`OK`/`Err`/`ERR`). Tests must use the exact case the lexer tokenizer recognizes.
 
 ## Implementation Status

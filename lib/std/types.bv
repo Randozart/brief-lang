@@ -1,7 +1,7 @@
 // Additional built-in types derived from Bits.
 // These are low-level types that the compiler can cast to/from Int.
 
-type Byte <: Bits @/0..7 {
+type Byte : Bits @/0..7 {
     IsZero <~ _ == 0;
     IsOne  <~ _ == 1;
 };

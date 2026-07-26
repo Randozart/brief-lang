@@ -6,9 +6,9 @@
 ## Syntax
 
 ```brief
-struct Point3D <: Pair2D { z: Int; };             // single inheritance
-struct BoundedList <: Container<Int> { limit: Int; }; // generic parent
-struct DeepDerived <: Point3D { w: Int; };         // chain inheritance
+struct Point3D : Pair2D { z: Int; };             // single inheritance
+struct BoundedList : Container<Int> { limit: Int; }; // generic parent
+struct DeepDerived : Point3D { w: Int; };         // chain inheritance
 ```
 
 ## Rules

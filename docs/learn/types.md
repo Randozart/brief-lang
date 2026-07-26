@@ -9,7 +9,7 @@ Brief's type system is built on a small primitive kernel (~13 properties) that t
 The syntax for defining a type:
 
 ```brief
-Type Name <: Base {
+Type Name : Base {
     Property = Value;
     [ Constraint ];
 };
@@ -18,9 +18,9 @@ Type Name <: Base {
 ### Scalars
 
 ```brief
-Type U8  <: Bits { Bytes = 1; Alignment = 1; };
-Type U32 <: Bits { Bytes = 4; Alignment = 4; };
-Type Int <: U64;
+Type U8  : Bits { Bytes = 1; Alignment = 1; };
+Type U32 : Bits { Bytes = 4; Alignment = 4; };
+Type Int : U64;
 ```
 
 `Bits` is the only truly built-in type. `Bytes` and `Alignment` describe physical layout.
@@ -33,11 +33,11 @@ instructions. See [Operator Declarations](#operator-declarations) below.
 Collections are defined with element type and access pattern metadata:
 
 ```brief
-Type List<T> <: Bits {
+Type List<T> : Bits {
     ElementType = T;
     FixedSize = false;
-    InsertAt = :> Size;
-    ExtractFrom = :> Size - 1;
+    InsertAt = .#Size;
+    ExtractFrom = .#Size - 1;
 };
 ```
 
@@ -74,8 +74,8 @@ In the LLVM backend, Tuples share the same memory layout as Lists: `[data_ptr, l
 Override to restrict access:
 
 ```brief
-Type Stack<T> <: List<T> { AllowIndex = false; };
-Type Queue<T> <: List<T> { ExtractFrom = 0; AllowIndex = false; };
+Type Stack<T> : List<T> { AllowIndex = false; };
+Type Queue<T> : List<T> { ExtractFrom = 0; AllowIndex = false; };
 ```
 
 These say: "Stack is like List but you can't index into it." The compiler synthesizes the correct memory operations based on the metadata.
@@ -86,7 +86,7 @@ Codecs define how literals are translated to bytes at compile time:
 
 ```brief
 import { UTF8 } from "std/UTF8.bv";
-Type String <: List<U8> { Codec = UTF8; };
+Type String : List<U8> { Codec = UTF8; };
 ```
 
 When you write `"Hello"`, the compiler calls `UTF8::encode("Hello")` during compilation and embeds the result directly in the binary.
@@ -94,7 +94,7 @@ When you write `"Hello"`, the compiler calls `UTF8::encode("Hello")` during comp
 ### Refinement Constraints
 
 ```brief
-Type PositiveInt <: Int {
+Type PositiveInt : Int {
     [ > 0 ]
 };
 ```
@@ -107,7 +107,7 @@ The projection operator `:>` extracts metadata from any value without mutation:
 
 | Expression | Returns | Works on |
 |---|---|---|
-| `val :> Size` | `Int` — number of elements/bytes | List, Tuple, String, HashMap, HashSet |
+| `val .#Size` | `Int` — number of elements/bytes | List, Tuple, String, HashMap, HashSet |
 | `val :> IsEmpty` | `Bool` — `true` if zero elements | List, Tuple, String, HashMap, HashSet |
 | `val :> Type` | `Int` — type discriminant | Any value |
 | `val :> Keys` | `List<K>` — all keys | HashMap |
@@ -126,7 +126,7 @@ Types declare their operations in the type definition body using `op` annotation
 These tell the compiler which LLVM instruction to emit for each operator:
 
 ```brief
-type Int <: Bits {
+type Int : Bits {
     bytes <~ 8;
     storage <~ "Boxed";
     llvm <~ "i64";
@@ -186,7 +186,7 @@ and user-defined types all resolve through the universe.
 `String` is a struct with three fields, defined in the TypeUniverse:
 
 ```brief
-type String <: Bits {
+type String : Bits {
     struct ptr: Ptr<Byte>;      // pointer to UTF-8 data
     struct len: Int;            // byte length
     struct codec: Int;          // encoding tag (0 = UTF-8)
@@ -212,10 +212,10 @@ These two properties define where elements go when pushing and where they come f
 | Expression | Example use |
 |---|---|
 | `0` | Front (Queue pop) |
-| `:> Size` | Append (push to end) |
-| `:> Size - 1` | Last (Stack pop) |
-| `<: { MAX(.k) }` | Max-heap ordered |
-| `<: { MIN(.k) }` | Min-heap ordered |
+| `.#Size` | Append (push to end) |
+| `.#Size - 1` | Last (Stack pop) |
+| `: { MAX(.k) }` | Max-heap ordered |
+| `: { MIN(.k) }` | Min-heap ordered |
 
 #### Custom strategy dispatch
 
@@ -225,7 +225,7 @@ user-defined function (typically an `inop` or `defn`). The `<-` arrow
 operator dispatches to that function instead of using the default behavior:
 
 ```brief
-type SkipList<T> <: List<T> {
+type SkipList<T> : List<T> {
     InsertAt = sl_insert;     // &sl <- val → sl_insert#(sl, val)
     ExtractFrom = sl_remove;  // val <- &sl → sl_remove#(sl)
 };
@@ -347,11 +347,11 @@ let dst: Ptr64 = malloc(8);
 block_copy(dst, src, 8);
 ```
 
-Function pointers via `:> Ptr`:
+Function pointers via `.#Ptr`:
 
 ```brief
 defn cmp(a: Int, b: Int) -> Bool { term a == b; };
-let fn_ptr = cmp :> Ptr;
+let fn_ptr = cmp .#Ptr;
 let eq = fn_ptr(3, 5);
 ```
 

@@ -9,19 +9,19 @@ let ch: Char = 'A';
 let text: String = "Hello";
 
 // Size — length/size of collections and strings
-let len: Int = text :> Size;
+let len: Int = text .#Size;
 
 // Bytes — byte representation size
-let b: Int = val :> Bytes;
+let b: Int = val .#Bytes;
 
 // Ptr — raw pointer to the value's storage
-let p: Int = val :> Ptr;
+let p: Int = val .#Ptr;
 
 // Alignment — memory alignment requirement
-let a: Int = val :> Alignment;
+let a: Int = val .#Alignment;
 
 // Range — [lo..hi] range constraint access
-let r: Int = val :> Range;
+let r: Int = val .#Range;
 
 // Bit manipulation projections on Int
 let pop: Int = val :> Popcount;       // count of set bits

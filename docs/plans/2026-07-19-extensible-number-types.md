@@ -604,7 +604,7 @@ No Rust code changes beyond Phase 1.
 
 ```brief
 // lib/std/types/float.bv
-type Bfloat16 <: Bits {
+type Bfloat16 : Bits {
     bytes <~ 2; alignment <~ 2;
     alu <~ "Float";
     tbaa_parent <~ "Float";
@@ -672,7 +672,7 @@ In the normalizer, after all types and functions are registered:
 #### Posit32 demonstration
 
 ```brief
-type Posit32 <: Bits {
+type Posit32 : Bits {
     bytes <~ 4; alignment <~ 4;
     op Add ~> "Posit32_add";
     op Mul ~> "Posit32_mul";

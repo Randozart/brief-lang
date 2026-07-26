@@ -508,7 +508,7 @@ type Stack<T>: Bits {
 // Queue: FIFO
 type Queue<T>: Bits {
     inner: List<T>;
-    op InsertAt(self, inner:> Size, val: T) = queue_enqueue;  // push at end
+    op InsertAt(self, inner.#Size, val: T) = queue_enqueue;  // push at end
     op ExtractFrom(self, 0) -> T = queue_dequeue;             // pop from front
 };
 ```
@@ -700,7 +700,7 @@ The three recognized identifiers are `Quoted`, `Bare`, and `Decimal` — one
 for each compiler-intrinsic token form. A type can accept multiple forms:
 
 ```brief
-type FlexibleInt <: Int {
+type FlexibleInt : Int {
     codec <~ FlexibleCodec;
 };
 
@@ -734,9 +734,9 @@ codec DefaultBare {
 The standard types reference these:
 
 ```brief
-type Int    <: Bits { codec <~ DefaultDecimal; bytes <~ 8; llvm <~ "i64"; };
-type Float  <: Bits { codec <~ DefaultDecimal; bytes <~ 8; llvm <~ "double"; };
-type String <: Bits { codec <~ DefaultQuoted; bytes <~ 24; llvm <~ "%String"; };
+type Int    : Bits { codec <~ DefaultDecimal; bytes <~ 8; llvm <~ "i64"; };
+type Float  : Bits { codec <~ DefaultDecimal; bytes <~ 8; llvm <~ "double"; };
+type String : Bits { codec <~ DefaultQuoted; bytes <~ 24; llvm <~ "%String"; };
 ```
 
 No name-based magic. `String` accepts `"..."` because `DefaultQuoted` says
@@ -745,7 +745,7 @@ No name-based magic. `String` accepts `"..."` because `DefaultQuoted` says
 ### Custom Token Handler Example
 
 ```brief
-type HexColor <: Int {
+type HexColor : Int {
     codec <~ HexCodec;
 };
 
@@ -754,7 +754,7 @@ codec HexCodec {
     parse      <~ parse_hex;
 };
 
-type CustomFloat <: Float {
+type CustomFloat : Float {
     codec <~ CFPrefixCodec;
 };
 

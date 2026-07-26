@@ -25,7 +25,7 @@ contracts proven at compile time, not `unsafe` blocks.
 
 ### 1. Safety Is an Optimization Enabler
 
-Every contract — `[i < list :> Size]`, `[ptr + offset < end]`,
+Every contract — `[i < list .#Size]`, `[ptr + offset < end]`,
 `[result != null]` — is a fact the compiler can prove at compile time and
 emit as LLVM metadata. C++ `restrict` is a programmer promise; Brief
 `[!aliased]` is a machine-checked guarantee. The optimizer can rely on it

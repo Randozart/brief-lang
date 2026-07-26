@@ -1,6 +1,6 @@
 // ── TopLevel::TypeDef — Type Derivation System ──────────────────────
 //
-// Phase 1.5: Introduces `Type Name <: Base { ... }` syntax with a
+// Phase 1.5: Introduces `Type Name : Base { ... }` syntax with a
 // primitive kernel of ~10 compiler-known properties (Bytes, Alignment,
 // Endian, Volatile, Atomic, ElementType, FixedSize, InsertAt,
 // ExtractFrom, AllowIndex, AllowSlice, AllowArrow, Codec).

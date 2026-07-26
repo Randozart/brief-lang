@@ -24,7 +24,7 @@ The two paths converge at `LayoutPattern` and produce identical
 ## Syntax
 
 ```brief
-type MyType <: Bits {
+type MyType : Bits {
     bytes <~ 16;
     layout <~ { ptr: Int, size: Int };
 };

@@ -11,7 +11,7 @@ This section walks through the Layout DSL from simple to complex. You can read i
 ### 1. The simplest layout — a named slice
 
 ```brief
-type FourBytes <: Bits {
+type FourBytes : Bits {
     maxbits <~ 32;
     layout <~ [first: 16, second: 16];
 }
@@ -24,7 +24,7 @@ Reading `x.first` returns bits 0-15 as an integer. Writing to `x.first` changes 
 ### 2. Float32 — standard IEEE 754 layout
 
 ```brief
-type Float32 <: Bits {
+type Float32 : Bits {
     maxbits <~ 32;
     primitive <~ Float;
     layout <~ le: [sign: 1, exp: 8, mant: 23];
@@ -40,7 +40,7 @@ The fields are read-only (no `!` prefix). The compiler generates getters for all
 ### 3. Mutable fields with `!`
 
 ```brief
-type PngChunk <: Bits {
+type PngChunk : Bits {
     maxbits <~ 96;
     layout <~ be: [$length: 32, kind: 32, data: {$length}, !crc: 32];
 }
@@ -54,7 +54,7 @@ type PngChunk <: Bits {
 ### 4. String — variable-width UTF-8 pattern
 
 ```brief
-type String <: Bits {
+type String : Bits {
     maxbits <~ 64;
     primitive <~ String;
     layout <~ be: (@codepoint: (
@@ -83,7 +83,7 @@ The compiler's DFA engine validates every string literal against this pattern at
 ### 5. List<T> — generic collection with typed reference
 
 ```brief
-type List<T> <: Bits {
+type List<T> : Bits {
     maxbits <~ 128;
     layout <~ le: [$length: 64, data_ptr: 64, elements: {$length, $T}];
 }
@@ -99,7 +99,7 @@ Accessing `list[5]` generates: bounds check `5 < $length`, GEP into `data_ptr` a
 ### 6. HashMap<K,V> — typed pair array
 
 ```brief
-type HashMap<K, V> <: Bits {
+type HashMap<K, V> : Bits {
     maxbits <~ 192;
     layout <~ le: [$capacity: 64, $length: 64, seed: 64,
                    slots: {$capacity, ($K, $V)}];
@@ -126,7 +126,7 @@ This declares that `Float32` and `MyCustomFloat` are structurally equivalent at 
 
 ```brief
 // ERROR: $length is structural, cannot be marked mutable
-type Bad <: Bits { layout <~ be: [$length: 32, !$length: 32]; }
+type Bad : Bits { layout <~ be: [$length: 32, !$length: 32]; }
 
 chunk.$length = 42;        // ERROR: $ prefix fields are structural
 chunk.data = something;    // ERROR: data is length-dependent, not writeable
@@ -155,7 +155,7 @@ list.#halve(arg)     // custom layout operation
 ### HashMap<K, V> with operation bindings
 
 ```brief
-type HashMap<K, V> <: Bits {
+type HashMap<K, V> : Bits {
     maxbits <~ 192;
     layout <~ le: [$capacity: 64, $length: 64, seed: 64,
                    slots: {$capacity, ($K, $V)}];
@@ -176,7 +176,7 @@ map.#set("user:42", user) // inserts via bound op
 ### SecurePacket with inline variable-width payload
 
 ```brief
-type SecurePacket <: Bits {
+type SecurePacket : Bits {
     maxbits <~ 96;   // header size: magic + version + flags + payload_len + crc
     layout <~ be: [
         magic: 16,
@@ -442,12 +442,12 @@ The `*` operator distinguishes inline variable-width fields from heap-allocated 
 
 ```brief
 // Inline: data follows directly after the header fields
-type PngChunk <: Bits {
+type PngChunk : Bits {
     layout <~ be: [$length: 32, kind: 32, data: {$length}, !crc: 32];
 }
 
 // Heap: data_ptr points to the elements region on the heap
-type List<T> <: Bits {
+type List<T> : Bits {
     layout <~ le: [$length: 64, data_ptr: *elements, elements: {$length, $T}];
 }
 ```
@@ -459,7 +459,7 @@ Without `*`, a variable-width field is inline. With `*`, the preceding field is 
 Layout describes structure. `op` bindings describe behavior. The same `op` syntax used for arithmetic operations extends to collection operations:
 
 ```brief
-type HashMap<K, V> <: Bits {
+type HashMap<K, V> : Bits {
     maxbits <~ 192;
     layout <~ le: [$capacity: 64, $length: 64, seed: 64,
                    slots: {$capacity, ($K, $V)}];
@@ -469,7 +469,7 @@ type HashMap<K, V> <: Bits {
     op len()       <~ field_read(#self.$length);
 }
 
-type List<T> <: Bits {
+type List<T> : Bits {
     maxbits <~ 128;
     layout <~ le: [$length: 64, data_ptr: *elements, elements: {$length, $T}];
 
@@ -491,7 +491,7 @@ User-defined functions (`hashmap_lookup`, `hashmap_insert`) are provided by the 
 Anonymous fields `_: N` for padding:
 
 ```brief
-type AlignedStruct <: Bits {
+type AlignedStruct : Bits {
     maxbits <~ 64;
     layout <~ le: [a: 8, _: 24, b: 32];
 }
@@ -502,7 +502,7 @@ type AlignedStruct <: Bits {
 Bitfield read-modify-write is non-atomic. The `atomic:` prefix on a `!` field generates atomic CAS loops:
 
 ```brief
-type SharedFlags <: Bits {
+type SharedFlags : Bits {
     maxbits <~ 32;
     layout <~ le: [atomic: !flag: 1, _: 31];
 }

@@ -11,13 +11,13 @@
 
 // Type A: ptr at bits 0..63, size at bits 64..127.
 // 2026-07-16: Uses obj-format layout syntax { field: Type }
-type A <: Bits {
+type A : Bits {
     maxbits <~ 128;
     layout <~ { ptr: Int, size: Int };
 };
 
 // Type B: same layout, same field order. Identity meld.
-type B <: Bits {
+type B : Bits {
     maxbits <~ 128;
     layout <~ <le: [ptr: 64, size: 64]>;
 };
@@ -32,7 +32,7 @@ meld A -> B {
 // ── Reordered fields ────────────────────────────────────────────
 
 // Type C: size at bits 0..63, ptr at bits 64..127 (reversed).
-type C <: Bits {
+type C : Bits {
     maxbits <~ 128;
     layout <~ <le: [size: 64, ptr: 64]>;
 };
@@ -46,12 +46,12 @@ meld A -> C {
 
 // ── 96-bit type (3 fields) ─────────────────────────────────────
 
-type D <: Bits {
+type D : Bits {
     maxbits <~ 96;
     layout <~ <le: [x: 32, y: 32, z: 32]>;
 };
 
-type E <: Bits {
+type E : Bits {
     maxbits <~ 96;
     layout <~ <le: [z: 32, y: 32, x: 32]>;
 };
@@ -66,12 +66,12 @@ meld D -> E {
 
 // ── Padding fields are exempt from gap checks ───────────────────
 
-type F <: Bits {
+type F : Bits {
     maxbits <~ 128;
     layout <~ <le: [data: 64, pad0: 32, pad1: 32]>;
 };
 
-type G <: Bits {
+type G : Bits {
     maxbits <~ 128;
     layout <~ <le: [data: 64, pad0: 32, pad1: 32]>;
 };

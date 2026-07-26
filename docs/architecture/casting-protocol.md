@@ -160,7 +160,7 @@ backends must be able to produce and consume:
 | `#Bool` | *(none)* | `i1` (stored i8) | And, Or, Not |
 | `#Char` | `unicode` | `i32` code point 0–0x10FFFF | `Cast(#Int)`, Eq, Lt |
 | `#Char` | `ASCII` | `i8` code point 0–127 | `Cast(#Int)`, Eq, Lt |
-| `#String` | `UTF8` | UTF-8 byte sequence | Extract(`#Char`), InsertAt(`#Char`), Concat(`#String`), `:> Size`, `Cast(#Bits)` |
+| `#String` | `UTF8` | UTF-8 byte sequence | Extract(`#Char`), InsertAt(`#Char`), Concat(`#String`), `.#Size`, `Cast(#Bits)` |
 | `#String` | `ASCII` | ASCII byte sequence (0–127 per byte) | Same as UTF8 — protocol ops are encoding-agnostic |
 | `#String` | `hex` | Hex-encoded bytes (`0-9a-f` pairs) | Same as UTF8 |
 | `#String` | `base64` | Base64-encoded bytes | Same as UTF8 |
@@ -360,7 +360,7 @@ op CastFrom(#String) = fn(#L);       // consume UTF-8 bytes
 op Extract(#Char) = fn(#L, #R);     // extract char at index
 op InsertAt(#Char) = fn(#L, #R);    // insert char at index
 op Concat(#String) = fn(#L, #R);    // append another string-type
-:> Size                              // get length in characters
+.#Size                              // get length in characters
 CastTo(#Bits)                        // raw bytes
 CastFrom(#Bits)                      // from raw bytes
 ```
@@ -428,7 +428,7 @@ type HashMap<K: #String, V> {
 
 `K: #String` is a **protocol satisfaction check**. The compiler verifies:
 does `K` implement the `#String` protocol ops (`Extract(#Char)`,
-`InsertAt(#Char)`, `Concat(#String)`, `:> Size`, `Cast(#Bits)`)?
+`InsertAt(#Char)`, `Concat(#String)`, `.#Size`, `Cast(#Bits)`)?
 If yes, `K` satisfies `#String` regardless of its concrete name or layout.
 
 Protocol variant constraints are also valid:

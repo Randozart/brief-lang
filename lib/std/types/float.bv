@@ -8,7 +8,7 @@
 // pipeline is fully wired through the typechecker.
 
 // 16-bit half-precision float (hardware on some GPUs)
-type Float16 <: Bits {
+type Float16 : Bits {
     maxbits <~ 16;
     alignment <~ 2;
     tbaa <~ "FloatNode";
@@ -19,7 +19,7 @@ type Float16 <: Bits {
 };
 
 // 4-lane SIMD float vector
-type Float4 <: Bits {
+type Float4 : Bits {
     maxbits <~ 128;
     alignment <~ 16;
     tbaa <~ "FloatNode";

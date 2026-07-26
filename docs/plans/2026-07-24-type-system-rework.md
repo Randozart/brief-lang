@@ -9,7 +9,7 @@ The current type system has three architectural problems:
    implementation detail. The user should think in protocols (`#Int`, `#String`),
    not byte layouts.
 
-2. **`<:` and `:>` are confusing** — `<: Bits` on type declarations reads
+2. **`<:` and `:>` are confusing** — `: Bits` on type declarations reads
    backwards from how protocols work. `:>` for property access is opaque.
 
 3. **Width is declared, not inferred** — `bytes <~ 8` forces 64-bit even when
@@ -21,8 +21,8 @@ The current type system has three architectural problems:
 
 ```brief
 // Before:
-type Int <: Bits { bytes <~ 8; alignment <~ 8; op Add(#Int, #Int); };
-type String <: Bits { bytes <~ 16; alignment <~ 8; };
+type Int : Bits { bytes <~ 8; alignment <~ 8; op Add(#Int, #Int); };
+type String : Bits { bytes <~ 16; alignment <~ 8; };
 
 // After:
 type Int: #Int;
@@ -37,8 +37,8 @@ type MyCustom: #String;    // implements #String protocol
 
 ```brief
 // Before:
-x :> Size
-list :> Size
+x .#Size
+list .#Size
 
 // After:
 x.#Size
@@ -48,7 +48,7 @@ list.#Size
 ### Rules
 
 1. **`Bits` is implicit.** Every type is backed by bits. You can't declare
-   `type Foo <: Bits` or `type Foo: Bits`. Bits is the universal base and
+   `type Foo : Bits` or `type Foo: Bits`. Bits is the universal base and
    does not appear in user syntax.
 
 2. **Protocol is the primary classifier.** `type Int: #Int;` means "Int

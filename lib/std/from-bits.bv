@@ -71,7 +71,7 @@ type Float: #Float {
 // slot(n) is a macro defined below using $ template syntax.
 // ─────────────────────────────────────────────────────────────
 
-type String <: Bits @/0..127 {
+type String : Bits @/0..127 {
     maxbits <~ 128;
 
     //    field         offset    width
@@ -87,7 +87,7 @@ type String <: Bits @/0..127 {
 // 4. List<T> — Dynamic array
 // ─────────────────────────────────────────────────────────────
 
-type List <: Bits @/0..191 {
+type List : Bits @/0..191 {
     maxbits <~ 192;
 
     //    field         offset    width
@@ -118,7 +118,7 @@ $ slot(n) {
 }
 
 // Example: a 3-field obj using slot(n)
-type Point <: Bits @/0..191 {
+type Point : Bits @/0..191 {
     maxbits <~ 192;
 
     X <~ slot(0);   // _ @/0..7
@@ -133,7 +133,7 @@ type Point <: Bits @/0..191 {
 // The hash table is an array of (hash, key, value) slots.
 // ─────────────────────────────────────────────────────────────
 
-type HashMap_KV <: Bits @/0..(BUCKETS * ENTRY_SIZE * 8) {
+type HashMap_KV : Bits @/0..(BUCKETS * ENTRY_SIZE * 8) {
     maxbits      <~ (BUCKETS * ENTRY_SIZE as Int) * 8;
     fixedsize  <~ true;
 
@@ -147,7 +147,7 @@ type HashMap_KV <: Bits @/0..(BUCKETS * ENTRY_SIZE * 8) {
 // Inherits all List operations, adds hash-based lookup.
 // Both views compile to the same LLVM IR for matching shapes.
 
-type HashMap <: List {
+type HashMap : List {
     elementtype <~ (K, V);
     Contains(k)  = _.# Lookup#(k) > -1;
     Get(k)       = _.# Lookup#(k) :> At;
@@ -161,7 +161,7 @@ type HashMap <: List {
 // to the named function instead of using default list append.
 // ─────────────────────────────────────────────────────────────
 
-type SkipList<T> <: List<T> {
+type SkipList<T> : List<T> {
     insertat <~ _sl_insert;
     extractfrom <~ _sl_remove;
     Contains(v) = _.# sl_contains(v);
@@ -171,7 +171,7 @@ type SkipList<T> <: List<T> {
 // 8. User-Defined: Matrix4x4 with Custom Projections
 // ─────────────────────────────────────────────────────────────
 
-type Matrix4x4 <: Bits @/0..(16 * 8 - 1) {
+type Matrix4x4 : Bits @/0..(16 * 8 - 1) {
     maxbits <~ 512;   // 16 floats × 4 bytes
 
     // Column-major access
@@ -189,7 +189,7 @@ type Matrix4x4 <: Bits @/0..(16 * 8 - 1) {
 // Demonstrates @/ bit-fields for real hardware decoding.
 // ─────────────────────────────────────────────────────────────
 
-type RV32I <: Bits @/0..31 {
+type RV32I : Bits @/0..31 {
     maxbits <~ 32;
 
     // RISC-V R-type instruction layout:
@@ -213,7 +213,7 @@ type RV32I <: Bits @/0..31 {
 // have no meaning in hardware.
 // ─────────────────────────────────────────────────────────────
 
-type Counter <: Bits @/0..7 {
+type Counter : Bits @/0..7 {
     maxbits <~ 8;
     // These bindings have no effect in CBV:
     codec        <~ "binary";     // Ignored by CBV
@@ -231,7 +231,7 @@ type Counter <: Bits @/0..7 {
 // explicit Size query, not on character access.
 // ─────────────────────────────────────────────────────────────
 
-type CString <: Bits @/0..63 {
+type CString : Bits @/0..63 {
     maxbits <~ 64;       // Just a pointer
 
     // Zero-cost: reads char via pointer arithmetic, no strlen

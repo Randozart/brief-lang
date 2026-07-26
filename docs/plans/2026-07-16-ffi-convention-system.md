@@ -122,7 +122,7 @@ impl TypeUniverse {
     /// Priority:
     ///   1. Direct meld T <:> T.ext  (exact match)
     ///   2. Direct meld T <:> Any.ext  (custom → standard extension)
-    ///   3. T.ext exists with auto-generated identity meld (via <: inheritance)
+    ///   3. T.ext exists with auto-generated identity meld (via : inheritance)
     ///   4. None — no meld possible
     pub fn find_meld_to_extension(&self, ty: &str, ext: &str) -> Option<(String, MeldDeclaration)> {
         // Priority 1: T <:> T.ext
@@ -139,7 +139,7 @@ impl TypeUniverse {
                 return Some((a.clone(), decl.clone()));
             }
         }
-        // Priority 3: T.ext exists — implicit identity meld via <: inheritance.
+        // Priority 3: T.ext exists — implicit identity meld via : inheritance.
         // Same bit layout assumed; no explicit routes needed.
         if self.types.contains_key(&exact) {
             return Some((exact, MeldDeclaration {
@@ -167,7 +167,7 @@ fn test_parse_dotted_type_name() {
 }
 #[test]
 fn test_parse_extension_group() {
-    // "type String.[c,cpp,cs] <: String { ... }" → 3 TypeDef items
+    // "type String.[c,cpp,cs] : String { ... }" → 3 TypeDef items
 }
 #[test]
 fn test_find_meld_to_extension_priority() {

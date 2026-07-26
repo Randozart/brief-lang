@@ -6,7 +6,7 @@
 
 ## Design
 
-`Type Name <: Base { ... }` — a top-level declaration that defines a new type by deriving from an existing one using the **Derivation lens** (`<:`). The compiler natively recognizes well-known metadata names (~13); everything else is a user-defined projection stored in `ResolvedType::projections`.
+`Type Name : Base { ... }` — a top-level declaration that defines a new type by deriving from an existing one using the **Derivation lens** (`<:`). The compiler natively recognizes well-known metadata names (~13); everything else is a user-defined projection stored in `ResolvedType::projections`.
 
 The type body supports four kinds of entries:
 
@@ -22,7 +22,7 @@ The old `TypeDefBody.bindings` field is retained as a migration compat field (du
 ## Syntax
 
 ```brief
-type MyInt <: Int {
+type MyInt : Int {
     maxbits <~ 64;                    // known metadata → PropertyValue::Int(64)
     alignment <~ 8;                // known metadata → PropertyValue::Int(8)
     IsPositive(x) = x > 0;         // user-defined projection → projections["IsPositive"]
@@ -82,7 +82,7 @@ Marked `DEFERRED` in code:
 | D-1 | Topological sort for forward references | Current single-pass requires declaration order |
 | D-2 | Full codec signature validation | Minimal check sufficient for now |
 | D-3 | ~~InsertAt/ExtractFrom strategy synthesis~~ | **Implemented** — Custom(String) variant dispatches to named inops |
-| D-5 | `:> Size` uniformity across scalars | Not blocking current use |
+| D-5 | `.#Size` uniformity across scalars | Not blocking current use |
 | D-7 | Runtime guard synthesis for constraints | Backend work deferred |
 | D-8 | User-defined projection typecheck/codegen | Needs TypeUniverse wired into typechecker and LLVM backend |
 
@@ -105,13 +105,13 @@ then as a `defn` (executes body).
 
 Example:
 ```brief
-type SkipList<T> <: List<T> {
+type SkipList<T> : List<T> {
     InsertAt <~ sl_insert;
     ExtractFrom <~ sl_remove;
 };
 
 inop sl_insert<T>(list: SkipList<T>, val: T) -> SkipList<T>
-    [[term :> Size == list :> Size + 1]
+    [[term .#Size == list .#Size + 1]
 { ... body ... } fallback sl_append(list, val);
 ```
 
@@ -123,7 +123,7 @@ correctly maps `sl` to `SkipList` for strategy resolution.
 ### InsertAt/ExtractFrom binding format
 
 ```brief
-type MyCollection <: List {
+type MyCollection : List {
     InsertAt <~ sl_insert;       // Custom(strategy) → calls sl_insert#(list, val)
     ExtractFrom <~ sl_remove;    // Custom(strategy) → calls sl_remove#(list)
 };

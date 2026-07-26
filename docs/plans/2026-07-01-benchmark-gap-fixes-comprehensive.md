@@ -103,7 +103,7 @@ the txn only fires when count < total, and each push preceeds the next pop).
 #### Layer 2: Standard library type (`lib/std/ring_buffer.bv`)
 
 ```brief
-type RingBuffer<T> <: List<T> {
+type RingBuffer<T> : List<T> {
     InsertAt = "ring_push";
     ExtractFrom = "ring_pop";
 }
@@ -161,7 +161,7 @@ When all criteria hold, the optimizer:
 - Extensible: new strategies are new intrinsics + new stdlib types
 - No hardcoding: `Custom(String)` dispatch already exists
 - Context-aware: the optimizer decides, not the user
-- No expectation breakage: `RingBuffer <: List` — same interface
+- No expectation breakage: `RingBuffer : List` — same interface
 
 ### Files to change
 

@@ -26,7 +26,7 @@ txn countdown(n: Int) [n > 0][n == @n - 1] -> Int {
 // When the fuel runs out, the handler restores the pre-state
 ?# sum_list[items: List<Int>, i: Int] -> Int [handler: rollback]
 defn sum_list(items: List<Int>) -> Int [true][term >= 0] {
-    let len: Int = items :> Size;
+    let len: Int = items .#Size;
     txn sum_loop [i < len][i == len] -> Int {
         result = result + items[i];
         i = i + 1;

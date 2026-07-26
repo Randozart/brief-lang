@@ -973,7 +973,7 @@ for binding in &body.projections {
 
 **Tests**: Existing tests implicitly test this. Add one explicit test:
 `test_property_map_populated_for_known_binding` — verify that after
-`resolve_type_def("type F <: Bits { bytes <~ 8; }")`, `rt.properties`
+`resolve_type_def("type F : Bits { bytes <~ 8; }")`, `rt.properties`
 contains `("bytes", Int(8))`.
 
 ### Step 1B.3 — Update all `ResolvedType` constructors
@@ -1184,7 +1184,7 @@ to `%String*`.
 
 **Before**:
 ```brief
-type String <: Bits {
+type String : Bits {
     bytes <~ 8;
     alignment <~ 8;
     llvm <~ "i8*";

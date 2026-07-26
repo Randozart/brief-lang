@@ -1,10 +1,10 @@
 // Constraint Range Example
-// Demonstrates <: [lo..hi] range sugar which desugars to _ >= lo && _ <= hi
+// Demonstrates : [lo..hi] range sugar which desugars to _ >= lo && _ <= hi
 
 let score: Int = 0;
 
 node process_score {
-  let valid: Int <: [0..100] = score;
+  let valid: Int : [0..100] = score;
   term Print#(valid);
 };
 

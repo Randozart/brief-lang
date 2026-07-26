@@ -98,7 +98,7 @@ Ptr without checking whether the projection makes sense.
 **Fix:** Add a `TypeError::TypeMismatch` diagnostic when the source type
 is not a pointer, list, string, or struct:
 ```
-":> Ptr projection requires Ptr, List, String, or struct, got <type>"
+".#Ptr projection requires Ptr, List, String, or struct, got <type>"
 ```
 
 ## Part 2: Highlighter Updates

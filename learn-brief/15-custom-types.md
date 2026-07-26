@@ -158,7 +158,7 @@ type HashMap<K: #String, V> {
 
 `K: #String` checks that `K` implements the `#String` protocol ops
 (`CastTo(#String)`, `CastFrom(#String)`, `Extract(#Char)`, `InsertAt(#Char)`,
-`Concat(#String)`, `:> Size`). At instantiation, the concrete type is
+`Concat(#String)`, `.#Size`). At instantiation, the concrete type is
 verified against the protocol.
 
 ## 8. Protocol Participation and GLUE Bridge

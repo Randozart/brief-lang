@@ -538,7 +538,7 @@ the provenance map to compute write sets.
 | `Expr::OwnedRef(String)` | Full — parser, typechecker, interpreter, LLVM | `ast.rs:1639`, `parser.rs:7282` |
 | `&name = value` assignment | Full — parser, typechecker, LLVM codegen | `parser.rs:6366` |
 | `&list <- value` arrow ops | Full — parser, arrow handler | `parser.rs:6377-6426` |
-| `:> Ptr` projection | Full — typechecker, codegen | `typechecker.rs:2414` |
+| `.#Ptr` projection | Full — typechecker, codegen | `typechecker.rs:2414` |
 | Ptr + Int arithmetic | Full — typechecker | `typechecker.rs:3085` |
 | Ptr ↔ Int cast | Full — typechecker | `typechecker.rs:3278` |
 | Webstack backend | **NOT** handled — `OwnedRef` would crash | `webstack.rs` |

@@ -725,7 +725,7 @@ instead of primitive:
 - The exhaustive CTD list
 - How to add a new CTD (frontend change + normalizer change for each backend)
 - Validation rules and error messages
-- Interaction with user-defined types (`ctd ~> ...;` in `type X <: Bits { }`)
+- Interaction with user-defined types (`ctd ~> ...;` in `type X : Bits { }`)
 
 ---
 

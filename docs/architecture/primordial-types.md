@@ -20,7 +20,7 @@
 > **2026-07-24:** The `<:` syntax is replaced by `: [Parent] [Protocol]`.
 > `type Int: #Int` declares Int as implementing the #Int protocol. Width is
 > inferred unless `bits <~ N` is explicit. The `.#` operator replaces `:>`
-> for property access: `x.#Size` not `x :> Size`.
+> for property access: `x.#Size` not `x .#Size`.
 >
 > The primordial seed table still exists as a convenience — it pre-populates
 > the universe with well-known type names so `--disable-plugin prelude` works. But the
@@ -38,13 +38,13 @@
 ## Motivation
 
 The Bits thesis (see [bits-thesis.md](bits-thesis.md)) defines `Bits` as the
-sole compiler primitive. Every other type is a user-defined `type Foo <: Bits`
+sole compiler primitive. Every other type is a user-defined `type Foo : Bits`
 with metadata. This is the ideal: a compiler that knows nothing about
 integers, floats, or strings — only about uninterpreted bit vectors.
 
 In practice, the strict interpretation creates a bootstrap problem. The
 stdlib file `lib/std/types/bootstrap.bv` defines `Int`, `Float`, `Bool`,
-`String`, etc. as `type X <: Bits { ... }` declarations with metadata. These
+`String`, etc. as `type X : Bits { ... }` declarations with metadata. These
 arrive in the compilation pipeline via the prelude plugin + import resolver.
 If either step fails or is absent, a "bare" type reference like
 `meld Int -> Float` panics: the `TypeUniverse` has no `Int` entry.
@@ -67,7 +67,7 @@ dispatch. The following remain true:
 | Lexer | 33 `Token::Type*` variants | All identifiers |
 | Parser `parse_type()` | Token variant match | Identifier string dispatch |
 | Backend type dispatch | Name string matching (`"Int" → i64`) | Metadata-driven (`primitive`, `llvm_type`) |
-| User override | Not possible without stdlib | `type Int <: Bits { ... }` replaces primordial |
+| User override | Not possible without stdlib | `type Int : Bits { ... }` replaces primordial |
 | Semantics | Hardcoded in compiler | Defined by metadata properties |
 
 The primordial table is a **convenience seed**, not a privileged type system.
@@ -83,7 +83,7 @@ three axioms:
    `base = "Bits"`.
 2. **All semantic meaning is metadata** — upheld. Primordial types are
    metadata bundles (`bytes`, `alignment`, `primitive`, `llvm_type`).
-3. **Any type can be redefined** — upheld. A user `type Int <: Bits { ... }`
+3. **Any type can be redefined** — upheld. A user `type Int : Bits { ... }`
    replaces the primordial entry via `HashMap::insert`.
 
 Primordial types are an appendix to the Bits thesis, not a contradiction.
@@ -148,7 +148,7 @@ struct type lowering, state slot width, and `is_string_like` detection.
 
 ## Override Semantics
 
-When a source file defines `type Int <: Bits { data: Bits<32>; ... }`, the
+When a source file defines `type Int : Bits { data: Bits<32>; ... }`, the
 normalizer's `register_typedefs` function calls `universe.register(rt)`,
 which does `self.types.insert("Int", rt)`. This **replaces** the primordial
 `Int` entry. The replacement is complete — all primordial ops and layout

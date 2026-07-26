@@ -56,8 +56,8 @@ cell! Console -> line: String {
     // Backspace → trim last char
     node backspace [raw != '\0' && raw == '\x7f']] {
         &prev_key = raw;
-        [buffer :> Size > 0] {
-            &buffer = buffer :> Slice(0, buffer :> Size - 1);
+        [buffer .#Size > 0] {
+            &buffer = buffer :> Slice(0, buffer .#Size - 1);
         };
         term;
     };

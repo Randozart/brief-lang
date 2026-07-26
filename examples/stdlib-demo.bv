@@ -12,7 +12,7 @@ import { contains, starts_with, split, join } from "std/string";
 
 // HashMap usage
 let scores: HashMap<String, Int> = new_map();
-txn add_score [true][scores :> Size == @scores :> Size + 1] {
+txn add_score [true][scores .#Size == @scores .#Size + 1] {
     &scores <- ("alice", 95);
     term;
 };
@@ -23,7 +23,7 @@ let all_keys: List<String> = scores :> Keys;
 
 // HashSet usage
 let seen: HashSet<Int> = new_set();
-txn mark_seen [true][seen :> Size == @seen :> Size + 1] {
+txn mark_seen [true][seen .#Size == @seen .#Size + 1] {
     &seen <- 42;
     term;
 };
@@ -32,21 +32,21 @@ let has_42: Bool = seen :> Contains(42);
 
 // Stack usage
 let stack: Stack<String> = new_stack();
-txn push_item [true][stack :> Size == @stack :> Size + 1] {
+txn push_item [true][stack .#Size == @stack .#Size + 1] {
     &stack <- "brief";
     term;
 };
 
 // Queue usage
 let queue: Queue<Int> = new_queue();
-txn enqueue_item [true][queue :> Size == @queue :> Size + 1] {
+txn enqueue_item [true][queue .#Size == @queue .#Size + 1] {
     &queue <- 100;
     term;
 };
 
 // StringBuilder usage
 let builder: StringBuilder = new_builder();
-txn build_string [true][builder :> Size > 0] {
+txn build_string [true][builder .#Size > 0] {
     let _ = append_str(builder, "Hello ");
     let _ = append_str(builder, "World!");
     let result: String = to_string(builder);

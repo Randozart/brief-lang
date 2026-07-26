@@ -622,7 +622,7 @@ Write tests that verify:
 - `let x: UInt<8> = 42u8;` is valid
 - `let x: Float<32> = 1.0f32;` is valid
 - `Bits<64>` is valid as a raw data type
-- `type MyWord <: Int<8>;` type derivation works
+- `type MyWord : Int<8>;` type derivation works
 
 These tests are committed BEFORE any code changes.
 

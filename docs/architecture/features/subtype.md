@@ -11,7 +11,7 @@ Subtype projections (`<:` syntax) are Brief's built-in collection query pipeline
 ## Syntax
 
 ```brief
-let result <: source { OP1(args); OP2(args); ... };
+let result : source { OP1(args); OP2(args); ... };
 ```
 
 The source is evaluated, then each operation is applied in sequence. Each item in the pipeline is bound to `_` for expression arguments.
@@ -41,30 +41,30 @@ The source is evaluated, then each operation is applied in sequence. Each item i
 
 ```brief
 // Filter and map
-let result <: items { FILTER(active); MAP(x * 2); };
+let result : items { FILTER(active); MAP(x * 2); };
 
 // Sort by a field and take top 5
-let top5 <: scores { SORT(_.value); LIMIT(5); };
+let top5 : scores { SORT(_.value); LIMIT(5); };
 
 // Unique values
-let unique <: tags { UNIQUE; };
+let unique : tags { UNIQUE; };
 
 // String regex match
-let match <: email["^(.+)@(.+)$"];
+let match : email["^(.+)@(.+)$"];
 
 // Aggregate
-let count <: items { FILTER(active); COUNT; };
-let sum <: items { SUM(_.price); };
-let avg <: items { AVG(_.score); };
+let count : items { FILTER(active); COUNT; };
+let sum : items { SUM(_.price); };
+let avg : items { AVG(_.score); };
 
 // Join two collections on a key
-let joined <: left { JOIN(right, _[0]); };
+let joined : left { JOIN(right, _[0]); };
 
 // Group by key
-let groups <: items { GROUP(_.category); };
+let groups : items { GROUP(_.category); };
 
 // Chained pipeline
-let result <: orders {
+let result : orders {
     FILTER(status == "paid");
     SORT(date);
     MAP(order_total);

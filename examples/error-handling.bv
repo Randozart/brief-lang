@@ -27,7 +27,7 @@ defn safe_divide(a: Int, b: Int) -> Int {
 // Option type usage
 defn find_first_even(items: List<Int>) -> Option<Int> {
     let i: Int = 0;
-    let len: Int = items :> Size;
+    let len: Int = items .#Size;
     txn search_loop [i < len][i == len || found] -> Option<Int> {
         when items[i] % 2 == 0 {
             term some(items[i]);

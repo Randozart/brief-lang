@@ -174,7 +174,7 @@ The `<~` token attaches declarative metadata inside body blocks. Unlike `#`
 **Type bodies**: `name <~ value;` declares a type property:
 
 ```brief
-type Foo <: Bits {
+type Foo : Bits {
     bytes <~ 8;
     alignment <~ 4;
     storage <~ Native;

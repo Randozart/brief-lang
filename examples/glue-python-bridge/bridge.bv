@@ -9,7 +9,7 @@
 //   cc -shared bridge.o -o libbridge.so   (Linux)
 //   python3 gluerun.py
 
-type Int <: Bits {
+type Int : Bits {
     maxbits <~ 64;
     alignment <~ 8;
 };

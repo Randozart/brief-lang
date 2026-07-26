@@ -652,7 +652,7 @@ Map `Expr` variants to CIRCT `comb` dialect ops:
 | `a \| b` | `comb.or %a, %b` |
 | `cond ? a : b` | `comb.mux %cond, %a, %b` |
 | `a as UInt[32]` | `comb.extract` or bitcast |
-| `a :> Size` | `comb.extract` (top bit) |
+| `a .#Size` | `comb.extract` (top bit) |
 
 ### 4.3 — Transaction body → FSM with `cf` dialect
 

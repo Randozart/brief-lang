@@ -29,7 +29,7 @@ impl<'a> Parser<'a> {
             Some(Token::Import) => self.parse_import().map(TopLevel::Import),
             Some(Token::Meld) => self.parse_meld().map(TopLevel::Meld),
             Some(Token::Trg) => self.parse_top_level_trg().map(TopLevel::Trigger),
-            // 2026-07-14: Handle `type Name <: Parent { slots }` definitions
+            // 2026-07-14: Handle `type Name : Parent { slots }` definitions
             // 2026-07-16: P2 — Check for extension group Type.[a,b,c] before single type
             Some(Token::Type) => self.parse_type_or_group().map(TopLevel::TypeDef),
             // 2026-07-14: Handle `struct Name { fields }` as TypeDef
@@ -895,7 +895,7 @@ impl<'a> Parser<'a> {
         // Placeholder: full implementation in Phase 16E
     }
 
-    /// 2026-07-14: Parse: type Name <: Parent { slot; slot; }
+    /// 2026-07-14: Parse: type Name : Parent { slot; slot; }
     /// 2026-07-16: P2 — Parse `type Name` or `type Name.[a,b,c]` (extension group).
     /// For groups, stores extra TypeDefs in self.pending_types for subsequent drain.
     fn parse_type_or_group(&mut self) -> Result<Box<TypeDef>, SyntaxError> {

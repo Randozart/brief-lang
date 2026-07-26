@@ -133,7 +133,7 @@ No `meld` declaration required for simple layout compatibility. The type system 
 | `Type::Applied("Ptr", vec![T])` in 133 match sites | T is purely documentation | `Bits @/N` with real bit-width semantics |
 | `Int as Ptr<Int>` round-trip in examples | Cast through Int | Direct `Ptr` literal with `@/N` width |
 | `ptrtoint`/`inttoptr` for list/string headers | Boxing/unboxing handles | Native struct pointers |
-| `data :> Ptr :> Ptr` double projection | Double escape to raw Int | Single sized-pointer projection |
+| `data .#Ptr .#Ptr` double projection | Double escape to raw Int | Single sized-pointer projection |
 | `volatile_load#` Ptr<T> type extraction | Must extract T from Ptr<T> at compile time | Ptr carries width natively |
 | `atomic.bv` with `Ptr<Int>` only | Comment: "cast through Ptr<Int>" | Generic over `Ptr<Bits @/N>` |
 
@@ -143,7 +143,7 @@ No `meld` declaration required for simple layout compatibility. The type system 
 |---------|--------|
 | `volatile_load#`/`volatile_store#` | MMIO semantics orthogonal to pointer typing |
 | `inttoptr` in BILD inline asm | Inherently low-level, keep explicit |
-| `:> Ptr` / `:> Ptr!` projections | Field extraction from compound types still useful |
+| `.#Ptr` / `.#Ptr!` projections | Field extraction from compound types still useful |
 | `address<T>(p) -> Int` | Raw address escape for FFI is legitimate |
 | `@llvm.memcpy` for list reallocation | Internal data movement, not language feature |
 
@@ -471,16 +471,16 @@ fn validate_ptr_cast(
 ### 9.1 Design Decision
 
 Instead of `&f` (which conflicts with Brief's mutable `&` operator) or a new
-AST variant, function references use the existing `:> Ptr` projection:
+AST variant, function references use the existing `.#Ptr` projection:
 
 ```brief
-let cmp: Ptr<fn(Int, Int) -> Bool> = my_cmp :> Ptr;
+let cmp: Ptr<fn(Int, Int) -> Bool> = my_cmp .#Ptr;
 let result = cmp(ptr_a, ptr_b);  // indirect call via Expr::Call on fn-ptr variable
 ```
 
 ### 9.2 Why No New AST Variants
 
-- `:> Ptr` already parses to `Expr::Projection { target: Ptr }`
+- `.#Ptr` already parses to `Expr::Projection { target: Ptr }`
 - `call(args)` already parses to `Expr::Call(name, args)`
 - The typechecker resolves indirect calls: when `Call("cmp", args)` finds a
   variable `cmp` with a function pointer type, it validates args and returns
@@ -497,7 +497,7 @@ This is already produced by the parser for `(Int) -> Bool` syntax.
 ### 9.4 LLVM Codegen
 
 ```llvm
-; my_cmp :> Ptr → ptrtoint @my_cmp to i64
+; my_cmp .#Ptr → ptrtoint @my_cmp to i64
 %addr = ptrtoint i64 @my_cmp, i64
 
 ; cmp(a, b) indirect call through function pointer variable

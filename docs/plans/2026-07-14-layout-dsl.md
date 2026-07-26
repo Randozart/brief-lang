@@ -12,14 +12,14 @@ A `layout <~ <pattern>` metadata key on any type. The `< >` wrapper gives the fr
 
 ```brief
 // Fixed-width slicing — bits are known at compile time
-type Float32 <: Bits {
+type Float32 : Bits {
     bytes <~ 4;
     primitive <~ Float;
     layout <~ <le: [sign: 1, exp: 8, mant: 23]>;
 }
 
 // Variable-width pattern — binary regex for strings, protocols
-type String <: Bits {
+type String : Bits {
     bytes <~ 8;
     primitive <~ String;
     layout <~ <be: (@codepoint: (
@@ -30,7 +30,7 @@ type String <: Bits {
 }
 
 // Typed reference — list, hashmap, etc.
-type List<T> <: Bits {
+type List<T> : Bits {
     bytes <~ 16;
     layout <~ <le: [$length: 64, data_ptr: *elements, elements: {$length, $T}]>;
 }

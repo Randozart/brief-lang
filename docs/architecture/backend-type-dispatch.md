@@ -25,8 +25,8 @@ no guesswork. The programmer defines their own types, or loads the prelude.
 Every type is `Bits(N)` at minimum:
 
 ```brief
-type Int <: Bits { maxbits <~ 64; ctd <~ Int; alu <~ Int; op Add ~> "int.add"; }
-type Float <: Bits { maxbits <~ 32; ctd <~ Float; alu <~ Float; op Add ~> "float.add"; }
+type Int : Bits { maxbits <~ 64; ctd <~ Int; alu <~ Int; op Add ~> "int.add"; }
+type Float : Bits { maxbits <~ 32; ctd <~ Float; alu <~ Float; op Add ~> "float.add"; }
 type String { data: Int; len: Int; encoding <~ "UTF-8"; tbaa <~ "String"; };
 ```
 
@@ -57,7 +57,7 @@ A metadata slot added to a type definition in source is automatically visible to
 No Rust changes needed. No recompilation. Example:
 
 ```brief
-type HalfFloat <: Bits { maxbits <~ 16; ctd <~ Float; alu <~ Float; }
+type HalfFloat : Bits { maxbits <~ 16; ctd <~ Float; alu <~ Float; }
 ```
 
 The parser stores `ctd <~ Float` in `TypeDefBody.metadata["ctd"]`.
@@ -147,7 +147,7 @@ The backend OWNS:   CompilerContext, TypedRegister, LLVM IR output string
 Adding a new metadata field to a type definition:
 
 ```brief
-type MyColor <: Bits {
+type MyColor : Bits {
     maxbits <~ 32;
     ctd <~ UInt;
     alu <~ Int;

@@ -81,7 +81,7 @@ can compile.
 Types declare operations using hashword categories as backend directives:
 
 ```brief
-type Int <: Bits {
+type Int : Bits {
     op Add(#Int, #Int);       // backend emits its native integer add
     op Sub(#Int, #Int);
 };
@@ -855,9 +855,9 @@ it. The more LLVM knows, the more aggressively it can optimize.
 
 ### Type System
 
-24. **`type Foo <: List { ... }` creates a TypeDef** — but `Foo<Int>`
+24. **`type Foo: List { ... }` declares a type inheriting from List** — but `Foo<Int>`
     is NOT automatically assignable to `List<Int>` in the type checker.
-    Projections like `:> Size` and index `foo[i]` may fail on `Foo<Int>`
+    Projections like `.#Size` and index `foo[i]` may fail on `Foo<Int>`
     even though the runtime representation is identical.
 
 25. **No implicit `Copy` on enums with `String`** — `InsertStrategy::Custom(String)`
@@ -1215,7 +1215,7 @@ for current benchmark results and architecture decisions.
 | **Kani harnesses** | `docs/architecture/kani-harnesses.md` |
 | **Plan documents** | `docs/plans/` |
 | **Bounty architecture** | `docs/plans/2026-07-25-phase6-tamer-in-brief.md` |
-| **Memory by Contract** | `docs/plans/2026-07-25-memory-by-contract.md` |
+| **Memory by Proof** | `docs/plans/2026-07-25-memory-by-proof.md` |
 | **Ptr Level 3 plan** | `docs/plans/2026-07-09-ptr-level3-borrow-checking.md` |
 | **Granular pipeline + AST navigation DSL** | `docs/plans/2026-07-21-granular-pipeline-and-ast-navigation.md` |
 | **Compile-time meta + plugin architecture** | `docs/plans/2026-07-15-compiletime-meta-and-plugin-architecture.md` |

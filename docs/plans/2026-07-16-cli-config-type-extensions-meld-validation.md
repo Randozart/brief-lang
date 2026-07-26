@@ -223,19 +223,19 @@ Currently, `CString` must be defined as a separate type with explicit `meld` to 
 
 ```brief
 // Base type (already exists)
-type String <: Bits { bytes <~ 8; primitive <~ String; };
+type String : Bits { bytes <~ 8; primitive <~ String; };
 
 // Extension type: C view of String. Inherits properties from String.
-type String.c <: String { bytes <~ 8; primitive <~ String; };
+type String.c : String { bytes <~ 8; primitive <~ String; };
 
 // Extension group: defines for all C-family languages at once.
-type String.[c,cpp,cs] <: String { bytes <~ 8; primitive <~ String; };
+type String.[c,cpp,cs] : String { bytes <~ 8; primitive <~ String; };
 
 // Melds define how to convert between Brief and foreign representations.
-meld String <:> String.c { Ptr -> String.c.ptr; Size -> String.c :> Size; };
+meld String <:> String.c { Ptr -> String.c.ptr; Size -> String.c .#Size; };
 
 // Custom types can meld directly to standard extension types:
-type MyCustomEmbeddedString <: String { ... };
+type MyCustomEmbeddedString : String { ... };
 meld MyCustomEmbeddedString <:> String.c { ... };
 ```
 
@@ -269,7 +269,7 @@ fn parse_type_identifier(&mut self) -> Result<String, SyntaxError> {
 #### 2b. Parser: extension groups `Type.[a,b,c]`
 
 ```brief
-type String.[c,cpp,cs] <: String { bytes <~ 8; };
+type String.[c,cpp,cs] : String { bytes <~ 8; };
 ```
 
 Detection in `parse_top_level()`: after `Token::Type` and the type name is parsed, check for `Token::Dot` + `Token::LBracket`.
@@ -301,7 +301,7 @@ fn parse_type_extension_group(&mut self, base_name: String) -> Result<Vec<TopLev
 
 Each emitted `TypeDef`:
 - Name: `"String.c"`, `"String.cpp"`, `"String.cs"`
-- Base: `<: String` (inherits all of `String`'s properties)
+- Base: `: String` (inherits all of `String`'s properties)
 - Body: shared `{ bytes <~ 8; primitive <~ String; }`
 
 #### 2c. Type universe: extension queries
@@ -449,20 +449,20 @@ New file: `lib/std/types/ffi.bv`:
 // Imported as part of the prelude when frgn is used.
 
 // C ABI type mappings
-type Int.c <: Int { bytes <~ 4; primitive <~ Int; };
-type Float.c <: Float { bytes <~ 4; primitive <~ Float; };
-type String.c <: String { bytes <~ 8; primitive <~ String; };
+type Int.c : Int { bytes <~ 4; primitive <~ Int; };
+type Float.c : Float { bytes <~ 4; primitive <~ Float; };
+type String.c : String { bytes <~ 8; primitive <~ String; };
 
 // C++ and C# ABI type mappings
-type String.cpp <: String { bytes <~ 8; primitive <~ String; };
-type String.cs <: String { bytes <~ 8; primitive <~ String; };
+type String.cpp : String { bytes <~ 8; primitive <~ String; };
+type String.cs : String { bytes <~ 8; primitive <~ String; };
 
 // Melds — ABI conversion between Brief and foreign representations
 meld Int <:> Int.c;
 meld Float <:> Float.c;
-meld String <:> String.c { Ptr -> String.c.ptr; Size -> String.c :> Size; };
-meld String <:> String.cpp { Ptr -> String.cpp.ptr; Size -> String.cpp :> Size; };
-meld String <:> String.cs { Ptr -> String.cs.ptr; Size -> String.cs :> Size; };
+meld String <:> String.c { Ptr -> String.c.ptr; Size -> String.c .#Size; };
+meld String <:> String.cpp { Ptr -> String.cpp.ptr; Size -> String.cpp .#Size; };
+meld String <:> String.cs { Ptr -> String.cs.ptr; Size -> String.cs .#Size; };
 ```
 
 Auto-imported as part of the prelude (or lazily on first `frgn from`).
@@ -1196,7 +1196,7 @@ fn validate_meld_layout(meld: &Meld, universe: &mut TypeUniverse) -> Result<(), 
 error: meld round-trip validation failed for String <:> String.c
   ┌─ lib/std/types/ffi.bv:5:1
   │
-5 │ meld String <:> String.c { Ptr -> String.c.ptr; Size -> String.c :> Size; };
+5 │ meld String <:> String.c { Ptr -> String.c.ptr; Size -> String.c .#Size; };
   │                                           ^^^^
   │                                           │
   │                                           Size field width mismatch

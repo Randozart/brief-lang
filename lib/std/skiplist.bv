@@ -9,7 +9,7 @@
 // layout. The Custom strategy in InsertAt/ExtractFrom redirects `<-` to
 // the defn declarations below.
 
-type SkipList<T> <: List<T> {
+type SkipList<T> : List<T> {
     InsertAt <~ sl_insert;
     ExtractFrom <~ sl_remove;
 };
@@ -17,7 +17,7 @@ type SkipList<T> <: List<T> {
 // -- Defn wrappers (replacing former inop declarations) --
 
 defn sl_insert<T>(list: SkipList<T>, val: T) -> SkipList<T>
-    [[term :> Size == list :> Size + 1]
+    [[term .#Size == list .#Size + 1]
 {
     term sl_append(list, val);
 };
@@ -28,13 +28,13 @@ defn sl_append(list: List<Int>, val: Int) -> List<Int> {
 };
 
 defn sl_remove<T>(list: SkipList<T>) -> (T, SkipList<T>)
-    [list :> Size > 0]]
+    [list .#Size > 0]]
 {
     term sl_remove_fallback(list);
 };
 
 defn sl_remove_fallback(list: List<Int>) -> (Int, List<Int>) {
-    let len: Int = list :> Size;
+    let len: Int = list .#Size;
     let last: Int = list[len - 1];
     let ahead: List<Int> = list[0..len - 1];
     term (last, ahead);
@@ -43,7 +43,7 @@ defn sl_remove_fallback(list: List<Int>) -> (Int, List<Int>) {
 // -- Public API (all types are List<Int> for type checker compatibility) --
 
 txn sl_contains_loop(list: List<Int>, val: Int, i: Int)
-    [i < list :> Size][i == list :> Size] -> Bool
+    [i < list .#Size][i == list .#Size] -> Bool
 {
     when list[i] == val { term true; };
     &i = i + 1;
@@ -55,5 +55,5 @@ defn sl_contains(list: List<Int>, val: Int) -> Bool {
 };
 
 defn sl_to_list(list: List<Int>) -> List<Int> { term list; };
-defn sl_len(list: List<Int>) -> Int { term list :> Size; };
-defn sl_is_empty(list: List<Int>) -> Bool { term (list :> Size) == 0; };
+defn sl_len(list: List<Int>) -> Int { term list .#Size; };
+defn sl_is_empty(list: List<Int>) -> Bool { term (list .#Size) == 0; };

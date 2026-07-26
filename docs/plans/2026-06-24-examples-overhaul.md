@@ -21,7 +21,7 @@
 | `wasm-import.rbv:32` | `[true][true]` | `[result != @result \|\| tick_count < 1][tick_count == @tick_count + 1]` |
 | `shopping_cart.rbv` | 8× `[true]` | Guard against invalid state transitions (already in shop vs checkout, etc.) |
 | `rbv-no-script-tags.rbv` | 2× `[true]` | `[count < MAX]` / `[count > 0]` |
-| `todo.rbv` | 2× `[true]` | `[new_task != ""]` / `[items :> Size > 0]` |
+| `todo.rbv` | 2× `[true]` | `[new_task != ""]` / `[items .#Size > 0]` |
 | `timeout_test.ebv` | `[true]` post | Meaningful postcondition |
 | `stdlib_usage.bv` | Tautology | Remove placeholder, rewrite with real stdlib calls |
 | `main.bv` | `[true][true]` | `[source != ""][term >= 0]` |
@@ -43,7 +43,7 @@
 - **`inop-sadd.bv`**: Remove dead code after `term!` (lines 23-24)
 - **`wasm-import.rbv`**: Remove deprecated `import "link/default.toml"`, declare `data`/`count` state variables, fix `[true][true]`
 - **`test_ffi.bv`**: Replace TOML-binding `frgn from "std/bindings/string.toml"` with GLUE-style `frgn` declarations
-- **`todo.rbv`**: Replace `items.len()` with `items :> Size` projection operator
+- **`todo.rbv`**: Replace `items.len()` with `items .#Size` projection operator
 - **`test_ffi_minimal.bv`**: Fix typo `test_ff` → `test_ffi`
 
 ### 1.3 Rewrite Placeholder/Broken Files

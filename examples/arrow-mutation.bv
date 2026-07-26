@@ -6,19 +6,19 @@
 let list: List<Int> = [];
 
 // Push: append an element
-txn list_push [true][list :> Size == @list :> Size + 1] {
+txn list_push [true][list .#Size == @list .#Size + 1] {
     &list <- 42;         // push 42 onto list
     term;
 };
 
 // Pop: remove and return the last element
-txn list_pop [list :> Size > 0][list :> Size == @list :> Size - 1] {
+txn list_pop [list .#Size > 0][list .#Size == @list .#Size - 1] {
     let val: Int = &list <- ;  // pop from list
     term;
 };
 
 // Discard: remove element at index without returning
-txn list_discard [list :> Size > 0][list :> Size == @list :> Size - 1] {
+txn list_discard [list .#Size > 0][list .#Size == @list .#Size - 1] {
     &list <- [0] !;      // discard element at index 0
     term;
 };
@@ -27,7 +27,7 @@ txn list_discard [list :> Size > 0][list :> Size == @list :> Size - 1] {
 let source: List<Int> = [1, 2, 3];
 let dest: List<Int> = [];
 
-txn list_transfer [source :> Size > 0][source :> Size == 0] {
+txn list_transfer [source .#Size > 0][source .#Size == 0] {
     &dest <- &source;    // transfer all elements
     term;
 };
@@ -35,13 +35,13 @@ txn list_transfer [source :> Size > 0][source :> Size == 0] {
 // HashMap insert via <-
 let map: HashMap<String, Int> = {};
 
-txn map_insert [true][map :> Size == @map :> Size + 1] {
+txn map_insert [true][map .#Size == @map .#Size + 1] {
     &map <- ("key", 42);  // insert key-value pair
     term;
 };
 
 // HashMap remove via discard
-txn map_remove [map :> Size > 0][map :> Size == @map :> Size - 1] {
+txn map_remove [map .#Size > 0][map .#Size == @map .#Size - 1] {
     &map <- "key" !;       // discard entry by key
     term;
 };
@@ -49,12 +49,12 @@ txn map_remove [map :> Size > 0][map :> Size == @map :> Size - 1] {
 // Stack operations
 let stack: Stack<Int> = [] :> AsStack;
 
-txn stack_push [true][stack :> Size == @stack :> Size + 1] {
+txn stack_push [true][stack .#Size == @stack .#Size + 1] {
     &stack <- 7;
     term;
 };
 
-txn stack_pop [stack :> Size > 0][stack :> Size == @stack :> Size - 1] {
+txn stack_pop [stack .#Size > 0][stack .#Size == @stack .#Size - 1] {
     let top: Int = &stack <- ;
     term;
 };
@@ -62,12 +62,12 @@ txn stack_pop [stack :> Size > 0][stack :> Size == @stack :> Size - 1] {
 // Queue operations
 let queue: Queue<Int> = [] :> AsQueue;
 
-txn queue_enqueue [true][queue :> Size == @queue :> Size + 1] {
+txn queue_enqueue [true][queue .#Size == @queue .#Size + 1] {
     &queue <- 3;
     term;
 };
 
-txn queue_dequeue [queue :> Size > 0][queue :> Size == @queue :> Size - 1] {
+txn queue_dequeue [queue .#Size > 0][queue .#Size == @queue .#Size - 1] {
     let front: Int = &queue <- ;
     term;
 };

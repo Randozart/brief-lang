@@ -138,7 +138,7 @@ After the compiler changes, the skip list is defined using:
 import option from "std/option.bv";
 
 // ---- Type definition --------------------------------
-type SkipList<T> <: List<T> {
+type SkipList<T> : List<T> {
     InsertAt = _sl_insert;
     ExtractFrom = _sl_remove;
 };

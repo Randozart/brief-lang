@@ -11,7 +11,7 @@ codec StockPrice {
     format <~ format_price;
 };
 
-type Price <: Float {
+type Price : Float {
     maxbits  <~ 64;
     codec  <~ StockPrice;
 };
@@ -30,7 +30,7 @@ codec TickerSymbol {
     parse <~ parse_ticker;
 };
 
-type Symbol <: String {
+type Symbol : String {
     maxbits  <~ 64;
     codec  <~ TickerSymbol;
 };

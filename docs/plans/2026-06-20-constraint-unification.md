@@ -1,4 +1,4 @@
-# Constraint Unification — Let-Bound and Type-Level Constraints via `<: [expr]`
+# Constraint Unification — Let-Bound and Type-Level Constraints via `: [expr]`
 
 **Date:** 2026-06-20  
 **Status:** Plan (ready for implementation)  
@@ -13,15 +13,15 @@ The codebase has **four separate constraint mechanisms** that all do the same th
 
 | # | Mechanism | Syntax | Location | Status |
 |---|-----------|--------|----------|--------|
-| 1 | `RangeConstraint` | `let x: Int <: [0..100]` | `src/ast.rs:116` — `enum RangeConstraint` | ✅ parser, ❌ none enforce |
-| 2 | `TypeDefBody.constraints` | `type Foo <: Int { [ > 0 ]; }` | `src/ast.rs:376` — `constraints: Vec<Expr>` | ✅ parser stored as `ResolvedType.guards`, ❌ never evaluated |
+| 1 | `RangeConstraint` | `let x: Int : [0..100]` | `src/ast.rs:116` — `enum RangeConstraint` | ✅ parser, ❌ none enforce |
+| 2 | `TypeDefBody.constraints` | `type Foo : Int { [ > 0 ]; }` | `src/ast.rs:376` — `constraints: Vec<Expr>` | ✅ parser stored as `ResolvedType.guards`, ❌ never evaluated |
 | 3 | `Type::ContractBound` | `Int[product > 0]` | `src/ast.rs:148` — `Type::ContractBound` | ✅ parser, ❌ never enforced |
-| 4 | (missing) | `let x: Int <: [0..100] = 50;` | doesn't exist | ❌ not implemented, not parseable |
+| 4 | (missing) | `let x: Int : [0..100] = 50;` | doesn't exist | ❌ not implemented, not parseable |
 
 The primary goals of this plan:
-1. **Unify** all four into one mechanism: `<: [expr]` where `_` is the value placeholder
+1. **Unify** all four into one mechanism: `: [expr]` where `_` is the value placeholder
 2. **Enforce** at runtime in both interpreter and LLVM
-3. **Add** the `let x: Type <: [expr] = val;` syntax
+3. **Add** the `let x: Type : [expr] = val;` syntax
 4. **Add** range sugar: `[lo..hi]` → `_ >= lo && _ <= hi`
 5. **Add** CamelCase aliases for subtype query ops (`Filter`, `Map`, etc.)
 
@@ -82,7 +82,7 @@ Every constraint is a boolean expression with `_` bound to the constrained value
 - `src/analysis/*.rs` — analysis arms
 - `src/symbolic.rs` — symbolic evaluation arms
 
-**Replacement:** `Type[expr]` in source can be desugared at the parser level to a reference to a compiler-synthesized TypeDef with the constraint, or simply produce an error suggesting `<: [expr]` syntax instead.
+**Replacement:** `Type[expr]` in source can be desugared at the parser level to a reference to a compiler-synthesized TypeDef with the constraint, or simply produce an error suggesting `: [expr]` syntax instead.
 
 #### A3. Keep `TypeDefBody.constraints` as the canonical form
 
@@ -146,7 +146,7 @@ When a value is typed as a type with `ResolvedType.guards` non-empty:
 
 ---
 
-### Phase C — `let x: Type <: [expr] = val;` syntax
+### Phase C — `let x: Type : [expr] = val;` syntax
 
 **Goal:** Parse and store inline constraints on let statements.
 
@@ -168,7 +168,7 @@ If `Statement::Let` directly carries fields (instead of a sub-struct), add it di
 
 In `parse_let_statement()` (find around line 4390-4480):
 
-After parsing optional `: Type`, check for `<: [expr]`:
+After parsing optional `: Type`, check for `: [expr]`:
 
 ```rust
 // After: let x: Type
@@ -211,10 +211,10 @@ All four parts are independent. Valid forms:
 
 ```brief
 let x: Int = 5;                  // existing — type annotation only
-let x: Int <: [0..100];          // new — type + constraint, no initializer
+let x: Int : [0..100];          // new — type + constraint, no initializer
 let x = 50;                      // existing — initializer only
-let x: Int <: [0..100] = 50;     // new — type + constraint + initializer
-let x <: [0..100];               // new — constraint only (type inferred)
+let x: Int : [0..100] = 50;     // new — type + constraint + initializer
+let x : [0..100];               // new — constraint only (type inferred)
 ```
 
 ---
@@ -290,7 +290,7 @@ Full list of 14 ops (from `src/ast.rs:1493-1524`):
 | `src/ast.rs` | C | Add `constraint: Option<Box<Expr>>` to let-binding struct | ~3 |
 | `src/parser.rs` | A | Remove `RangeConstraint` parse paths in state/struct decl | ~20 |
 | `src/parser.rs` | A | Redirect `Type[expr]` parsing | ~10 |
-| `src/parser.rs` | C | Add `<: [expr]` parsing in `parse_let_statement` | ~20 |
+| `src/parser.rs` | C | Add `: [expr]` parsing in `parse_let_statement` | ~20 |
 | `src/parser.rs` | D | Add `parse_constraint_expr()` with `lo..hi` sugar | ~25 |
 | `src/parser.rs` | E | Add CamelCase aliases in `parse_single_subtype_op()` | ~14 |
 | `src/typechecker.rs` | A | Remove `RangeConstraint`/`ContractBound` handling | ~10 |
@@ -312,10 +312,10 @@ Full list of 14 ops (from `src/ast.rs:1493-1524`):
 
 | Test | What it verifies | Phase |
 |------|-----------------|-------|
-| `test_let_constraint_range_sugar` | `let x: Int <: [0..100] = 50;` parses and evaluates | C+D |
-| `test_let_constraint_regex` | `let e: String <: [@"@"];` parses | C |
-| `test_let_constraint_explicit` | `let x: Int <: [_ > 0] = 5;` parses and eval | C |
-| `test_let_constraint_violation` | `let x: Int <: [0..100] = 200;` → RuntimeError | B+C |
+| `test_let_constraint_range_sugar` | `let x: Int : [0..100] = 50;` parses and evaluates | C+D |
+| `test_let_constraint_regex` | `let e: String : [@"@"];` parses | C |
+| `test_let_constraint_explicit` | `let x: Int : [_ > 0] = 5;` parses and eval | C |
+| `test_let_constraint_violation` | `let x: Int : [0..100] = 200;` → RuntimeError | B+C |
 | `test_camelcase_subtype_ops` | `Filter(` works same as `FILTER(` | E |
 | `test_typedef_constraint_enforced` | TypeDef with constraint fails on invalid runtime value | B3 |
 | `test_range_constraint_removed` | No `RangeConstraint` match sites remain | A |
@@ -347,11 +347,11 @@ All existing tests must pass after each phase. No commit should break the build.
 
 2. **Multiple constraints on one let**: A single constraint expression with `&&` covers multiple conditions. No need for `Vec<Expr>`.
 
-3. **Type inference without annotation**: `let x <: [0..100]` — the type is inferred from the constraint's expected type (Int for range, String for regex). This requires the typechecker to walk `_`'s usage.
+3. **Type inference without annotation**: `let x : [0..100]` — the type is inferred from the constraint's expected type (Int for range, String for regex). This requires the typechecker to walk `_`'s usage.
 
-4. **RegEx on non-String types**: `let x: Int <: [@"123"]` — `@"123"` evaluates to `Value::Regex`. In constraint context, a `Value::Regex` should auto-match against the stringified `_`. Desugaring: `_ :> Str :> Match pattern`. This may require a new helper or explicit desugaring at parse time.
+4. **RegEx on non-String types**: `let x: Int : [@"123"]` — `@"123"` evaluates to `Value::Regex`. In constraint context, a `Value::Regex` should auto-match against the stringified `_`. Desugaring: `_ :> Str :> Match pattern`. This may require a new helper or explicit desugaring at parse time.
 
-5. **`ContractBound` replacement**: `Int[product > 0]` should either produce an error (suggesting `type T <: Int { [product > 0]; }`) or desugar to a synthesized TypeDef. For simplicity, **produce a clear error message**.
+5. **`ContractBound` replacement**: `Int[product > 0]` should either produce an error (suggesting `type T : Int { [product > 0]; }`) or desugar to a synthesized TypeDef. For simplicity, **produce a clear error message**.
 
 ---
 
@@ -361,5 +361,5 @@ After all phases:
 - `cargo test --lib` — all existing + new tests pass
 - `cargo build --release` — not required for functionality but good to verify
 - All match sites for removed AST variants (`RangeConstraint`, `Type::ContractBound`) are eliminated
-- `let x: Type <: [expr] = val;` works in both interpreter and LLVM
+- `let x: Type : [expr] = val;` works in both interpreter and LLVM
 - TypeDef body constraints enforce at runtime

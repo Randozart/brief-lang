@@ -33,7 +33,7 @@ txn coordinated_work [state >= 0][done == true] {
     let temp: Int = 0;
 
     sync(critical) {
-        temp = data :> Size;
+        temp = data .#Size;
         shared = shared + temp;
     };
 

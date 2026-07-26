@@ -374,7 +374,7 @@ The `&` prefix marks the target collection. Without `&`, the expression
 is a read — with `&`, it is a mutation. This rule also applies to state
 fields: `x = expr` writes to `x`, `x = expr` shadows it locally.
 
-Length queries use the `:>` operator — `items :> Size` returns the element
+Length queries use the `:>` operator — `items .#Size` returns the element
 count. `len()` is available as a stdlib convenience function.
 
 ## Part 7: Foreign Functions (FFI)
@@ -427,7 +427,7 @@ frgn read_file(path: String) -> Result<String, IoError> from "lib/std/io.toml";
 ```brief
 frgn read_file(path: String) -> Result<String, IoError> from "lib/std/io.toml";
 
-defn load_config() -> String [true][result :> Size >= 0] {
+defn load_config() -> String [true][result .#Size >= 0] {
     let result = read_file("config.txt");
     term "default";
 };
@@ -1245,8 +1245,8 @@ math.cos(n)
 
 **String:**
 ```brief
-s :> Size                // Length via projection operator
-string.len(s)            // Convenience wrapper for s :> Size
+s .#Size                // Length via projection operator
+string.len(s)            // Convenience wrapper for s .#Size
 string.concat(a, b)
 string.find(s, needle)
 string.split(s, delim)
@@ -1256,7 +1256,7 @@ string.trim(s)
 
 **Collections:**
 ```brief
-list :> Size
+list .#Size
 list.contains(x)
 list.find(x)
 list[i]
@@ -1347,7 +1347,7 @@ let subject_value: Int = 0;
 
 defn notify_observers() -> Bool {
     let i: Int = 0;
-    [i < observers :> Size] {
+    [i < observers .#Size] {
         notify(observers[i], subject_value);
         i = i + 1;
     };

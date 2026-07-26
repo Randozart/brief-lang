@@ -304,7 +304,7 @@ the result fits and the transformation is invertible.
 | `#Float` | IEEE 754 binary32/64 | Add, Sub, Mul, Div, Sqrt, CastTo(Float64), CastFrom(Float64), CastTo(#Bits), CastFrom(#Bits) |
 | `#Bool` | `i1` (stored i8) | And, Or, Not, CastTo(#Bits), CastFrom(#Bits) |
 | `#Char` | Unicode scalar (i32) | CastTo(#Int), CastFrom(#Int), Eq, Lt |
-| `#String` | UTF-8 byte sequence | CastTo(#Char), CastFrom(#Char), Extract(#Char), InsertAt(#Char), Concat(#String), :> Size, CastTo(#Bits), CastFrom(#Bits) |
+| `#String` | UTF-8 byte sequence | CastTo(#Char), CastFrom(#Char), Extract(#Char), InsertAt(#Char), Concat(#String), .#Size, CastTo(#Bits), CastFrom(#Bits) |
 | `#Bits` | Raw `iN` | And, Or, Xor, Not, Shl, Shr, CastTo(iN), CastFrom(iN) |
 
 Every backend MUST be able to translate these protocol shapes. A backend that
@@ -327,7 +327,7 @@ type HashMap<K: #String, V> {
 
 `K: #String` is a **protocol satisfaction check**. The typechecker verifies
 that `K` implements the `#String` protocol ops (`Extract(#Char)`,
-`InsertAt(#Char)`, `Concat(#String)`, `:> Size`, `Cast(#Bits)`).
+`InsertAt(#Char)`, `Concat(#String)`, `.#Size`, `Cast(#Bits)`).
 If yes, the constraint is satisfied.
 
 At instantiation `HashMap<ASCIIString, Int>`:
@@ -342,7 +342,7 @@ Types declare how they are constructed from source text at compile time
 using `op Parse` declarations:
 
 ```brief
-type Int <: Bits {
+type Int : Bits {
     op Add(#Int, #Int);
     op Parse(#Int);           // compile-time identity — literal IS an Int
     op Parse(Decimal);        // "42" constructs an Int via conversion fn
@@ -539,10 +539,10 @@ The round-trip test simply doesn't run for directions that aren't declared.
 Useful for opaque handles, capabilities, or types that exist only
 temporarily within a computation.
 
-### Q7: Parse inheritance — does `<: pass Parse ops?
+### Q7: Parse inheritance — does `: pass Parse ops?
 
 Yes. Parse ops follow the same inheritance rules as other ops.
-If `ASCIIString <: String` and `String` declares `op Parse(#String)`,
+If `ASCIIString : String` and `String` declares `op Parse(#String)`,
 `ASCIIString` inherits it — correct because ASCII IS valid UTF-8.
 A subtype may override with its own `op Parse(Form) = fn(#L)`.
 

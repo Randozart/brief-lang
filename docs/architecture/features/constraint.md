@@ -1,4 +1,4 @@
-# Constraint Unification — `<: [expr]` Runtime Enforcement
+# Constraint Unification — `: [expr]` Runtime Enforcement
 
 **Date:** 2026-06-21  
 **Phase:** B1/B2/B3  
@@ -12,23 +12,23 @@ variable `_` is bound to the value at runtime. Constraints come from two sources
 
 | Source | Syntax | Storage | Enforcement |
 |--------|--------|---------|-------------|
-| **Inline** | `let x <: [expr]` | `Statement::Let.constraint` | `eval_constraint()` / `emit_guard_check()` |
-| **TypeDef guard** | `type Foo <: Int { [expr]; }` | `ResolvedType.guards` | `check_type_guards()` / guard iteration |
+| **Inline** | `let x : [expr]` | `Statement::Let.constraint` | `eval_constraint()` / `emit_guard_check()` |
+| **TypeDef guard** | `type Foo : Int { [expr]; }` | `ResolvedType.guards` | `check_type_guards()` / guard iteration |
 
 ## Syntax
 
 ```brief
 // Inline constraint on let binding (no type annotation required)
-let x <: [_ > 0] = expr;
+let x : [_ > 0] = expr;
 
 // Inline constraint with type annotation
-let x: Int <: [_ > 0] = expr;
+let x: Int : [_ > 0] = expr;
 
 // Range sugar (desugars to _ >= lo && _ <= hi)
-let x <: [0..100] = expr;
+let x : [0..100] = expr;
 
 // TypeDef body guard (enforced on all variables of that type)
-type Positive <: Int {
+type Positive : Int {
   [_ > 0];
 };
 let p: Positive = 42;

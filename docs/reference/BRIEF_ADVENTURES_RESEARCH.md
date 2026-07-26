@@ -120,14 +120,14 @@ node look [true][message == current_desc] {
     message = @rooms[current_room].desc
     
     // List visible items
-    [inventory :> Size > 0] {
+    [inventory .#Size > 0] {
         message += "\n\nYou are carrying: "
         message += inventory.join(", ")
     }
     
     // List visible items in room
     let visible_items = @items->FILTER location == current_room
-    [visible_items :> Size > 0] {
+    [visible_items .#Size > 0] {
         message += "\n\nYou see: "
         message += visible_items.map(name).join(", ")
     }

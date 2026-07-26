@@ -5,17 +5,17 @@
 
 ## Design
 
-Function pointers use the existing `:> Ptr` projection syntax rather than a
+Function pointers use the existing `.#Ptr` projection syntax rather than a
 new `&f` address-of operator (which would conflict with Brief's mutable `&`
 syntax).
 
 ### Getting a Function Pointer
 
 ```brief
-let cmp_fn = my_compare :> Ptr;  // produces fn pointer
+let cmp_fn = my_compare .#Ptr;  // produces fn pointer
 ```
 
-The `:> Ptr` projection on a function identifier emits `ptrtoint @fn_name to i64`
+The `.#Ptr` projection on a function identifier emits `ptrtoint @fn_name to i64`
 in the LLVM backend. The typechecker returns `Applied("Fn", vec![params, ret])`
 for the projection result.
 
@@ -43,7 +43,7 @@ This is consistent with the existing parser output for `(Int) -> Bool` syntax.
 
 | Component | File | Change |
 |-----------|------|--------|
-| Typechecker | `typechecker.rs` | `:> Ptr` on fn returns Applied("Fn", ...); `Expr::Call` on fn-ptr var validates args |
+| Typechecker | `typechecker.rs` | `.#Ptr` on fn returns Applied("Fn", ...); `Expr::Call` on fn-ptr var validates args |
 | LLVM projection | `projection.rs` | `ProjectionTarget::Ptr` on fn identifier emits `ptrtoint` |
 | LLVM call | `call.rs` | `try_fn_ptr_call` emits indirect call through fn-ptr variable |
 | Architecture | `fn-ptr.md` | This document |

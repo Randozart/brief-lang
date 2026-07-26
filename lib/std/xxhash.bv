@@ -30,13 +30,13 @@ import "link/xxhash/xxhash.c";
 // ===== CONVENIENCE WRAPPERS =====
 
 defn xxh64(data: String, seed: Int) -> Int {
-    let addr: Int = data :> Ptr :> Ptr;
-    let len: Int = data :> Size;
+    let addr: Int = data .#Ptr .#Ptr;
+    let len: Int = data .#Size;
     term XXH64(addr, len, seed);
 };
 
 defn xxh32(data: String, seed: Int) -> Int {
-    let addr: Int = data :> Ptr :> Ptr;
-    let len: Int = data :> Size;
+    let addr: Int = data .#Ptr .#Ptr;
+    let len: Int = data .#Size;
     term XXH32(addr, len, seed);
 };

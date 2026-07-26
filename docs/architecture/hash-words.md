@@ -9,7 +9,7 @@ Hashwords now serve an additional role as **backend category directives** in
 op signatures:
 
 ```brief
-type Int <: Bits {
+type Int : Bits {
     op Add(#Int, #Int);       // "backend, emit whatever i64 add means to you"
     op Sub(#Int, #Int);
     op Mul(#Int, #Int);

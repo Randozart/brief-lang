@@ -15,7 +15,7 @@ meld Float <:> CFloat;
 // Tier 2 — Partially inferred: user provides explicit routes
 meld String <:> CString {
     Ptr -> CString.ptr;
-    Size -> CString :> Size;
+    Size -> CString .#Size;
 };
 
 // Tier 3 — Fully explicit with router body
@@ -57,7 +57,7 @@ New token `LtColonGt` for `<:>` syntax. New keyword `Meld` for `meld`.
 
 `parse_meld_decl()` handles:
 - `meld A <:> B;`
-- `meld A <:> B { Ptr -> B.ptr; Size -> B :> Size; };`
+- `meld A <:> B { Ptr -> B.ptr; Size -> B .#Size; };`
 
 Routes use `accessor -> dest_expr;` syntax within `{ }`.
 

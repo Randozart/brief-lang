@@ -1,4 +1,4 @@
-# Memory by Contract — Fixed-Size Array Types
+# Memory by Proof — Fixed-Size Array Types
 ## 2026-07-25
 
 ## Overview

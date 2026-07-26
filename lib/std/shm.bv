@@ -153,7 +153,7 @@ defn mmap_free(addr: Int, size: Int) -> Result<Void, MmapError> {
 }
 
 defn mmap_write_bytes(addr: Int, offset: Int, data: List<Int>) -> Result<Void, MmapError> {
-    let len = data :> Size;
+    let len = data .#Size;
     term frgn__mmap_write(addr, offset, data, len);
 }
 
@@ -365,7 +365,7 @@ defn metro_channel_destroy(channel: MetroChannel) -> Result<Void, String> {
 }
 
 defn metro_channel_send(channel: MetroChannel, data: List<Int>) -> Result<Void, String> {
-    let len = data :> Size;
+    let len = data .#Size;
     when len <= channel.capacity {
         metro_wait_idle(channel.addr, 5000)?;
         mmap_write_bytes(channel.addr, METRO_OFFSET_PAYLOAD, data)?;

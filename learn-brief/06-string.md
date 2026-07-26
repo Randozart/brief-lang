@@ -8,7 +8,7 @@ Brief provides comprehensive string operations, all implemented natively (no FFI
 let s: String = "Hello, World!";
 
 // Length (method syntax)
-let len = s :> Size;  // 13
+let len = s .#Size;  // 13
 
 // Concatenation
 let combined = "Hello" + "World";  // "HelloWorld"
@@ -175,13 +175,13 @@ defn analyze_text(text: String) -> TextStats {
     let words = text.split(" ");
     let lines = text.split("\n");
     
-    &stats.char_count = text :> Size;
-    &stats.word_count = words :> Size;
-    &stats.line_count = lines :> Size;
+    &stats.char_count = text .#Size;
+    &stats.word_count = words .#Size;
+    &stats.line_count = lines .#Size;
     
     // Count spaces
     let i: Int = 0;
-    [i < text :> Size] {
+    [i < text .#Size] {
         let c = text.char_at(i);
         [c == ' '] {
             &stats.space_count = stats.space_count + 1;
@@ -202,7 +202,7 @@ defn reverse_words(text: String) -> String {
     let words = text.split(" ");
     let reversed: List<String> = [];
     
-    let i: Int = words :> Size - 1;
+    let i: Int = words .#Size - 1;
     [i >= 0] {
         reversed = reversed.append(words[i]);
         &i = i - 1;

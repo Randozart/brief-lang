@@ -10,7 +10,7 @@
 
 Functions are first-class citizens in Brief's contract system, but there is no way to
 query their metadata at runtime. This plan extends the `:>` projection/lens system
-(already used for `list :> Size`, `map :> Keys`, etc.) to work on callable declarations:
+(already used for `list .#Size`, `map :> Keys`, etc.) to work on callable declarations:
 `defn`, `inop!`, and `txn`.
 
 A programmer writes:
@@ -71,7 +71,7 @@ Add to `ProjectionTarget` in `src/ast.rs`:
 ### 2. ProjectionTarget Name Convention
 
 All function metadata variants use the `Fn` prefix to avoid ambiguity with
-value-type projections. A function variable `f :> Ptr` extracts the Ptr property
+value-type projections. A function variable `f .#Ptr` extracts the Ptr property
 of `f`'s value (existing behavior) whereas `f :> Address` extracts the function
 entry address.
 
@@ -126,7 +126,7 @@ that checks whether `name` is registered in:
   emit a diagnostic: "`Address` projection requires a function, transaction, or
   inop declaration name"
 - If `name` IS callable but the projection target is NOT `Fn*`, fall through
-  to the existing projection logic (the function returns an Int, so `f :> Size`
+  to the existing projection logic (the function returns an Int, so `f .#Size`
   is the Size of the return value, not the function)
 
 **How function return types currently resolve:**

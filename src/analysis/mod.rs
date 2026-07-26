@@ -32,7 +32,7 @@ pub mod protocol_graph;
 pub enum FieldMode {
     /// Field is used and accessed directly — always present in %State.
     Always,
-    /// Field has deferred projections (e.g. `strlen#` for CString :> Size)
+    /// Field has deferred projections (e.g. `strlen#` for CString .#Size)
     /// that are cached. Only used when both lenses are active in a hot loop.
     LazyCached {
         /// Index into the cache slot area appended after regular fields.

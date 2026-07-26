@@ -28,7 +28,7 @@ Parse skiplist.bv from source, call sl_contains through interpreter.
 
 ## Fix 5: Remove unprovable contracts from StringBuilder defns
 
-`term :> Size` on struct returns falls through to `SymbolicValue::Unknown`.
+`term .#Size` on struct returns falls through to `SymbolicValue::Unknown`.
 Since defns don't require contracts, remove them.
 
 ## Verify

@@ -474,11 +474,11 @@ defn explore_paths(stmts: List<Statement>, initial: SymbolicState) -> List<Execu
     let paths: List<ExecutionPath> = [];
     let work_queue = [(stmts, initial, [])];
     
-    [work_queue :> Size > 0] {
+    [work_queue .#Size > 0] {
         let (remaining, state, constraints) = work_queue[0];
         work_queue = work_queue.drop(1);
         
-        [remaining :> Size == 0] {
+        [remaining .#Size == 0] {
             // Complete path
             paths = paths.append(ExecutionPath {
                 statements: stmts,
@@ -556,9 +556,9 @@ defn verify(source: String) -> Result<VerificationReport, String> {
     // Check mutual exclusion
     let async_txns = collect_async_txns(typed_program);
     let i: Int = 0;
-    [i < async_txns :> Size] {
+    [i < async_txns .#Size] {
         let j: Int = i + 1;
-        [j < async_txns :> Size] {
+        [j < async_txns .#Size] {
             let conflict = check_mutual_exclusion(async_txns[i], async_txns[j]);
             report.add_conflict(conflict);
             &j = j + 1;

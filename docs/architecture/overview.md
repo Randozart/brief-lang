@@ -36,6 +36,12 @@
 > in Brief, compiled natively via LLVM) reads `.bounty` files, interprets the
 > `.lair` bytecode, and produces a native binary on the customer's machine.
 > See `docs/plans/2026-07-25-phase6-tamer-in-brief.md`.
+>
+> **2026-07-26:** DotHash `.#` replaces `:>` for property projections
+> (`arr .#Size`, `s .#Bytes`). Type inheritance uses `:` instead of `<:`
+> (`type X: Y #Proto`). Hashword annotations (`#Stack`, `#Heap`, `#Scalar`)
+> on struct/obj fields. "Memory by Contract" renamed to "Memory by Proof".
+> See `docs/plans/2026-07-26-tamer-zero-c-and-static-memory.md` §Phase 1.6.
 
 ## Pipeline
 
@@ -195,7 +201,7 @@ Expr::BinaryOp(Add, lhs, rhs)
 
 ```brief
 // Same-type: inside type definition
-type Int <: Bits {
+type Int : Bits {
     maxbits <~ 64;
     primitive <~ Int;
     op Add <~ add_int_int(#L, #R);   // Int + Int → custom function
@@ -213,7 +219,7 @@ Type metadata declared in **source** drives all backend emission decisions.
 
 ```
 Source type definition:
-  type Int <: Bits { maxbits <~ 64; primitive <~ Int; }
+  type Int : Bits { maxbits <~ 64; primitive <~ Int; }
 
 Flow:
   parser ──► TypeDefBody.metadata["primitive"] = "Int"

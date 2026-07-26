@@ -1148,7 +1148,7 @@ cell! Console -> buffer: String {
         };
 
         [raw == '\x7f' && buffer != ""] {
-            &buffer = buffer :> Slice(0, buffer :> Size - 1);
+            &buffer = buffer :> Slice(0, buffer .#Size - 1);
         };
 
         [raw != '\n' && raw != '\x7f' && raw >= ' '] {

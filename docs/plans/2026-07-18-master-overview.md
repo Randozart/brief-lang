@@ -384,7 +384,7 @@ defn arena_free(a: Arena) { Free#(a.base as Int); };
 // 2026-07-18: CrosswordArena — dual-direction arena allocator.
 // Slots grow from base upward, variable-length data grows from
 // (base + capacity) downward. The two regions meet in the middle.
-type CrosswordArena<T> <: List<T> {
+type CrosswordArena<T> : List<T> {
     InsertAt <~ crossword_push;
     ExtractFrom <~ crossword_pop;
 };

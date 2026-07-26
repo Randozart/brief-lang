@@ -863,7 +863,7 @@ fn initialize_entry_state(state: &mut State, universe: &TypeUniverse) {
 4. **Interpreter mock** — compile-time evaluation provides dummy values
    (`argc=0`, empty `argv`). Full evaluation happens at runtime.
 5. **Extensible by inheritance** — projects define
-   `cell MyCli <: cli { ... }` to override flag parsing for custom types.
+   `cell MyCli : cli { ... }` to override flag parsing for custom types.
 
 ### When to use which
 

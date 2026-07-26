@@ -866,7 +866,7 @@ Brief's overall contract philosophy: contracts are verified, never assumed.
 #### Example: Hot-swappable Input Device
 
 ```brief
-type GamepadInput <: InputPort {
+type GamepadInput : InputPort {
     // fields: button_a, button_b, dpad_x, dpad_y
 };
 

@@ -165,7 +165,7 @@ defn test_withdraw_insufficient_funds() -> Bool {
 ```brief
 defn test_empty_list() -> Bool {
     let list: List<Int> = [];
-    term list :> Size == 0;
+    term list .#Size == 0;
 };
 
 defn test_zero_division() -> Bool {
@@ -255,9 +255,9 @@ txn process() {
 
 ```brief
 txn create_user(username: String, email: String, password: String)
-    [username :> Size >= 3 && username :> Size <= 20]
+    [username .#Size >= 3 && username .#Size <= 20]
     [email.contains("@") && email.contains(".")]
-    [password :> Size >= 8]
+    [password .#Size >= 8]
     [user_created == true]
 {
     // All inputs validated by preconditions
@@ -296,7 +296,7 @@ txn check_permission(resource: String, action: String)
 defn sanitize_html(input: String) -> String {
     let mut sb = new_builder();
     let i: Int = 0;
-    [i < input :> Size] {
+    [i < input .#Size] {
         let c = input.char_at(i);
         [c == '<'] {
             sb = sb.append_str("&lt;");

@@ -31,7 +31,7 @@ op Shl(#Bits, #Bits);
 op Shr(#Bits, #Bits);
 ```
 
-Every type implicitly inherits from Bits. No explicit `<: Bits` needed.
+Every type implicitly inherits from Bits. No explicit `: Bits` needed.
 
 ### Layer 1: Structure (fields determine layout)
 
@@ -102,7 +102,7 @@ explicit bindings to `defn` functions, which are auto-`alwaysinline`.
 | `#String.#fields.1` | length field | `extractvalue {i64, i64} %reg, 1` |
 | `#String.#Fields(0,1)` | both fields | `extractvalue` pair |
 
-The `:>` projection system already exists (`list :> Size`, `val :> Bytes`).
+The `:>` projection system already exists (`list .#Size`, `val .#Bytes`).
 `#Category.#property` extends it: the source is a hashword category, not a value.
 
 ### Layer 5: Protocol Ops (Category Universal Currency)
@@ -113,7 +113,7 @@ consume the protocol shape — no intermediate currency needed.
 
 | Category | Protocol ops | Protocol shape |
 |---|---|---|
-| `#String` | `CastTo(#Char)`, `CastFrom(#Char)`, `Extract(#Char)`, `InsertAt(#Char)`, `Concat(#String)`, `:> Size`, `CastTo(#Bits)`, `CastFrom(#Bits)` | UTF-8 byte sequence |
+| `#String` | `CastTo(#Char)`, `CastFrom(#Char)`, `Extract(#Char)`, `InsertAt(#Char)`, `Concat(#String)`, `.#Size`, `CastTo(#Bits)`, `CastFrom(#Bits)` | UTF-8 byte sequence |
 | `#Char` | `CastTo(#Int)`, `CastFrom(#Int)`, `Eq(#Char)`, `Lt(#Char)` | Unicode scalar (i32) |
 | `#Int` | `CastTo(#Bits)`, `CastFrom(#Bits)`, `Add(#Int)`, `Sub(#Int)`, `Mul(#Int)`, `Div(#Int)`, `And(#Bits)`, `Not(#Bits)` | Two's complement i64 |
 | `#Float` | `CastTo(Float64)`, `CastFrom(Float64)`, `Add(#Float)`, `Mul(#Float)`, `Sqrt(#Float)`, `CastTo(#Bits)`, `CastFrom(#Bits)` | IEEE 754 binary32/64 |
@@ -125,7 +125,7 @@ boundary, hiding the internal encoding.
 
 ```brief
 inline defn any_string_to_ASCII(source: #String) -> ASCIIString {
-    let len = source :> Size;
+    let len = source .#Size;
     let result = ASCIIString::alloc(len);
     let mut i = 0;
     do {
@@ -149,7 +149,7 @@ inline defn any_float_to_posit(source: #Float) -> Posit32 {
 ### Layer 6: Inheritance (`<:`)
 
 ```brief
-type ASCIIString <: String {
+type ASCIIString : String {
     op Add(ASCIIString) = ASCII_add(#L, #R);  // override String::Add
 };
 ```
@@ -164,7 +164,7 @@ type that exists by default — the user overwrites it by redeclaring.
 ### From stdlib .bv files
 
 ```diff
- type Int <: Bits {
+ type Int : Bits {
 -    bytes <~ 8;
 -    alignment <~ 8;
 -    llvm <~ "i64";
@@ -345,7 +345,7 @@ determines the default (`.bv` → UTF8/unicode, `.ebv` → ASCII).
 | `#Float` | `IEEE754`, `bin32`, `bin64` | `IEEE754` | `IEEE754` | Add, Sub, Mul, Div, Sqrt, FMA, Cast(Float64) |
 | `#Bool` | *(none)* | — | — | And, Or, Not |
 | `#Char` | `unicode`, `ASCII` | `unicode` | `ASCII` | Cast(#Int), Eq, Lt |
-| `#String` | `UTF8`, `ASCII`, `hex`, `base64` | `UTF8` | `ASCII` | Extract(#Char), InsertAt(#Char), Concat(#String), `:> Size` |
+| `#String` | `UTF8`, `ASCII`, `hex`, `base64` | `UTF8` | `ASCII` | Extract(#Char), InsertAt(#Char), Concat(#String), `.#Size` |
 | `#Bits` | *(none)* | — | — | And, Or, Xor, Not, Shl, Shr, Cast(N) |
 
 **Cross-variant calls require explicit protocol:**
@@ -480,7 +480,7 @@ structure + bytes + `#Category` ops are insufficient to determine the concrete
 representation. Currently only needed for 2-byte floats:
 
 ```brief
-type Bfloat16 <: Bits {
+type Bfloat16 : Bits {
     bytes <~ 2;
     alignment <~ 2;
     tbaa <~ "Float";

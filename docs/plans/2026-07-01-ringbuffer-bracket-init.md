@@ -28,7 +28,7 @@ No mechanism exists for TypeDefs to redefine what bracket syntax produces.
 
 Add an OR branch to the `(Applied(an, _), Applied(bn, _))` match arm: when `an != bn`, look up `an` in the type universe. If `an`'s resolved base type equals `bn`, accept the assignment (with type parameter matching).
 
-This makes `RingBuffer<Int>` ← `List<Int>` valid because `RingBuffer <: List`.
+This makes `RingBuffer<Int>` ← `List<Int>` valid because `RingBuffer : List`.
 
 ### Part 2: Codegen — `emit_ringbuf_init` Helper
 

@@ -240,14 +240,14 @@ calling_convention = "lto"
 // Types are defined against protocol haswords (#String<UTF8>, #Int, etc.)
 // so GLUE can find CastTo/CastFrom paths.
 
-type PyBytes <: Bits {
+type PyBytes : Bits {
     bytes <~ 8;
     alignment <~ 8;
     op CastTo(#Bits) = identity(#L);
     op CastFrom(#Bits) = identity(#L);
 };
 
-type PyString <: Bits {
+type PyString : Bits {
     bytes <~ 16;
     alignment <~ 8;
     op CastTo(#String<UTF8>) = ucs4_to_UTF8(#L);
@@ -256,7 +256,7 @@ type PyString <: Bits {
     op CastFrom(#String<ASCII>) = ASCII_to_ucs4(#L);
 };
 
-type PyInt <: Bits {
+type PyInt : Bits {
     bytes <~ 8;
     alignment <~ 8;
     op CastTo(#Int) = pylong_to_i64(#L);
@@ -277,21 +277,21 @@ meld PyBytes -> CBuffer {
 ```brief
 // 2026-07-22: Node.js type declarations for Brief's type universe.
 
-type JsBuffer <: Bits {
+type JsBuffer : Bits {
     bytes <~ 8;
     alignment <~ 8;
     op CastTo(#Bits) = identity(#L);
     op CastFrom(#Bits) = identity(#L);
 };
 
-type JsString <: Bits {
+type JsString : Bits {
     bytes <~ 8;
     alignment <~ 8;
     op CastTo(#String<UTF8>) = jsstring_to_UTF8(#L);
     op CastFrom(#String<UTF8>) = UTF8_to_jsstring(#L);
 };
 
-type JsNumber <: Bits {
+type JsNumber : Bits {
     bytes <~ 8;
     alignment <~ 8;
     op CastTo(#Float<IEEE754>) = jsnumber_to_f64(#L);
@@ -310,14 +310,14 @@ type JsNumber <: Bits {
 // Rust uses LLVM LTO for interop — no C ABI boundary for scalars.
 // Types are defined for documentation and meld compatibility.
 
-type RstI64 <: Bits {
+type RstI64 : Bits {
     bytes <~ 8;
     alignment <~ 8;
     op CastTo(#Int) = identity(#L);
     op CastFrom(#Int) = identity(#L);
 };
 
-type RstF64 <: Bits {
+type RstF64 : Bits {
     bytes <~ 8;
     alignment <~ 8;
     op CastTo(#Float<IEEE754>) = identity(#L);

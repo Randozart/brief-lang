@@ -17,8 +17,8 @@ A Brief program writes:
 import "target";  // resolves to board spec
 
 // Board provides: uart, gpio, timer, etc. as typed constants
-uart :> Ptr;      // Int — base address of UART peripheral
-uart_dr :> Ptr;   // Ptr<Byte> — UART data register at UART_BASE+0x00
+uart .#Ptr;      // Int — base address of UART peripheral
+uart_dr .#Ptr;   // Ptr<Byte> — UART data register at UART_BASE+0x00
 ```
 
 ## Design
@@ -117,7 +117,7 @@ const uart_sr : Ptr<Byte> = (0x40011000 + 0x01) as Ptr<Byte>;
 const uart_cr1 : Ptr<Byte> = (0x40011000 + 0x0C) as Ptr<Byte>;
 ```
 
-The contracts from `Ptr<T> :> Ptr` ensure address ranges are verified at
+The contracts from `Ptr<T> .#Ptr` ensure address ranges are verified at
 compile time.
 
 ## Implementation

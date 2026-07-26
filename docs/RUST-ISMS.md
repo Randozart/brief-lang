@@ -90,7 +90,7 @@ defn compile_file(path: String) -> Result<String, String> [true][true]
 
 ```brief
 // RIGHT - Meaningful contracts
-defn compile_file(path: String) [path :> Size > 0][result.is_ok() || result.is_err()] -> Result<String, String>
+defn compile_file(path: String) [path .#Size > 0][result.is_ok() || result.is_err()] -> Result<String, String>
 ```
 
 ---
@@ -196,7 +196,7 @@ defn compile_file(path: String) -> Result<String, String> [true][true]
 
 ```brief
 // RIGHT - Meaningful contracts
-defn compile_file(path: String) [path :> Size > 0][result.is_ok() || result.is_err()] -> Result<String, String>
+defn compile_file(path: String) [path .#Size > 0][result.is_ok() || result.is_err()] -> Result<String, String>
 ```
 
 ---

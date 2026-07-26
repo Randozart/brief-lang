@@ -387,9 +387,9 @@ codec DefaultQuoted { formatting <~ Quoted; parse <~ identity; };
 codec DefaultDecimal { formatting <~ Decimal; parse <~ parse_decimal; };
 codec DefaultBare { formatting <~ Bare; parse <~ parse_bare; };
 
-type Int    <: Bits { codec <~ DefaultDecimal; bytes <~ 8; llvm <~ "i64"; };
-type Float  <: Bits { codec <~ DefaultDecimal; bytes <~ 8; llvm <~ "double"; };
-type String <: Bits { codec <~ DefaultQuoted; bytes <~ 24; llvm <~ "%String"; };
+type Int    : Bits { codec <~ DefaultDecimal; bytes <~ 8; llvm <~ "i64"; };
+type Float  : Bits { codec <~ DefaultDecimal; bytes <~ 8; llvm <~ "double"; };
+type String : Bits { codec <~ DefaultQuoted; bytes <~ 24; llvm <~ "%String"; };
 ```
 
 No name-based magic. `String` accepts `"..."` because `DefaultQuoted`

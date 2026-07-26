@@ -67,7 +67,7 @@ but cannot display, causing every P008 error to show `<expr>`.
 New file `lib/std/types.bv`:
 
 ```brief
-type Byte <: Bits @/0..7 {
+type Byte : Bits @/0..7 {
     IsZero = self == 0;
     IsOne  = self == 1;
 };
@@ -94,7 +94,7 @@ cast support so that `as Ptr<Byte>` and `as Byte` compile.
 
 | File | Change |
 |------|--------|
-| `lib/std/skiplist.bv` | Remove trivial `[true]` from defns; use `[[term :> Size > list :> Size]` for inop post; `[i < list :> Size][i == list :> Size]` for txn convergence |
+| `lib/std/skiplist.bv` | Remove trivial `[true]` from defns; use `[[term .#Size > list .#Size]` for inop post; `[i < list .#Size][i == list .#Size]` for txn convergence |
 | `lib/std/atomic.bv` | `[ptr as Int >= 0]]` for pre-only contracts |
 | `lib/std/state.bv` | `[[term > 0]` for post-only |
 | `examples/inop-uart-mmap.bv` | `[in_range(...)]]` syntax; fix txn convergence |

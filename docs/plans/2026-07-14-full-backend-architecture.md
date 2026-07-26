@@ -176,7 +176,7 @@ Template variables: `%v` = result register, `%a` = first operand, `%b` = second,
 Inside a type body (same-type override):
 
 ```brief
-type Int <: Bits {
+type Int : Bits {
     bytes <~ 8;
     primitive <~ Int;
     op Add <~ add_int_int(#L, #R);
@@ -291,7 +291,7 @@ fn resolve_type_info(rt: &ResolvedType) -> TypeInfo {
 
 Declared in source:
 ```brief
-type Int <: Bits { bytes <~ 8; primitive <~ Int; }
+type Int : Bits { bytes <~ 8; primitive <~ Int; }
 ```
 
 Stored in `ResolvedType.properties["primitive"]` as `PropertyValue::Identifier("Int")`.

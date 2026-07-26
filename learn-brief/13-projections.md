@@ -30,65 +30,65 @@ projection_target ::= "Size" | "Bytes" | "Ptr" | "Alignment" | "Range"
 
 ## Metadata Projections
 
-### `:> Size`
+### `.#Size`
 
 Returns the number of elements in a collection (List, String, HashMap, etc.).
 
 ```brief
 let items: List<Int> = [10, 20, 30];
-let n = items :> Size;             // 3
+let n = items .#Size;             // 3
 
 let s = "hello";
-let len = s :> Size;              // 5
+let len = s .#Size;              // 5
 ```
 
 **LLVM:** Load length from 2-slot header slot 1.
 
-### `:> Bytes`
+### `.#Bytes`
 
 Returns the byte size of a value at compile time.
 
 ```brief
 let x: Int = 42;
-let sz = x :> Bytes;               // 8
+let sz = x .#Bytes;               // 8
 
 let s: String = "hello";
-let byte_len = s :> Bytes;        // 5
+let byte_len = s .#Bytes;        // 5
 ```
 
 **LLVM:** Compile-time constant.
 
-### `:> Ptr`
+### `.#Ptr`
 
 Creates a `Ptr<T>` — a verified pointer with compile-time bounds tracking.
 The compiler guarantees non-null and bounds-safety.
 
 ```brief
-let p: Ptr<Int> = &my_var :> Ptr;    // Pointer to a state variable
-let lp: Ptr<Int> = my_list :> Ptr;   // Pointer to list data
-let raw: Int = p :> Ptr;             // Escape hatch: raw Int address
+let p: Ptr<Int> = &my_var .#Ptr;    // Pointer to a state variable
+let lp: Ptr<Int> = my_list .#Ptr;   // Pointer to list data
+let raw: Int = p .#Ptr;             // Escape hatch: raw Int address
 ```
 
 See `05-data-types.md §7` for the full `Ptr<T>` reference.
 
-### `:> Alignment`
+### `.#Alignment`
 
 Returns the memory alignment of a value.
 
 ```brief
 let x: Int = 42;
-let align = x :> Alignment;        // 8 (Int alignment)
+let align = x .#Alignment;        // 8 (Int alignment)
 ```
 
 **LLVM:** Compile-time constant.
 
-### `:> Range`
+### `.#Range`
 
 Returns `(min, max)` bounds of a value. Useful in contracts and assertions.
 
 ```brief
 // In a contract:
-[i >= 0 && i < buffer :> Range]
+[i >= 0 && i < buffer .#Range]
 ```
 
 **LLVM:** Compile-time constant pair.
@@ -177,20 +177,20 @@ let ftag = f :> Type;              // 2 (Float)
 
 **LLVM:** Compile-time constant.
 
-### `:> Ptr!`
+### `.#Ptr!`
 
 Returns the raw memory address as an `Int`. **No safety envelope** — you are
 responsible for all bounds, null, and alignment checks.
 
 ```brief
-let raw_addr = my_var :> Ptr!;     // Raw Int address
+let raw_addr = my_var .#Ptr!;     // Raw Int address
 
 // You can do anything with raw addresses:
 let shifted = raw_addr + 8;        // Arithmetic
 let masked = raw_addr & 0xFF;      // Bit ops
 ```
 
-Use `:> Ptr!` when you need absolute control. Use `:> Ptr` when you want the
+Use `.#Ptr!` when you need absolute control. Use `.#Ptr` when you want the
 compiler to verify safety.
 
 ---
@@ -206,7 +206,7 @@ For `List<T>`, `HashMap<K,V>`, or other collections, `<:` applies a sequence of
 relational operations in a single fused pass with zero intermediate allocations:
 
 ```brief
-let regional_stats <: transactions {
+let regional_stats : transactions {
     FILTER(.is_active);
     GROUP(.region);
     COUNT;
@@ -242,11 +242,11 @@ time and captures groups in a single O(n) scan:
 
 ```brief
 // Multiple capture groups return a Tuple
-let (user, domain) <: email["^([a-z]+)@(.+)$"];
+let (user, domain) : email["^([a-z]+)@(.+)$"];
 
 // Patterns can be a const variable:
 const pat = "^([a-z]+)@(.+)$";
-let (user, domain) <: email[pat];
+let (user, domain) : email[pat];
 ```
 
 **Return types:** 0 groups → Bool, 1 group → String, N groups → Tuple.

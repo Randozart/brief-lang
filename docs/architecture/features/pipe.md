@@ -129,7 +129,7 @@ Files modified:
 Pipe chains work with `<:` subtype projections via the two-statement pattern:
 
 ```brief
-let result <: database { FILTER(.active); };
+let result : database { FILTER(.active); };
 result |> print_rows();
 ```
 
@@ -138,7 +138,7 @@ No special parser support is needed.
 
 ## Future Work
 
-- Inline `let x <: db { ... } |> f()` syntax would require changes to
+- Inline `let x : db { ... } |> f()` syntax would require changes to
   the let-statement parser.
 - `_`/`_1`/`_2` placeholders for explicit argument routing in pipe
   targets.

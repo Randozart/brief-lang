@@ -72,17 +72,17 @@ The transfer with filter uses a subtype projection (`<:` syntax) as the filter â
 
 ## Insert/Extract Strategies
 
-The `TypeUniverse` can configure custom strategies via `type ... <: List { InsertAt = ... }`.
+The `TypeUniverse` can configure custom strategies via `type ... : List { InsertAt = ... }`.
 The strategy system resolves the binding string to an `InsertStrategy` or `ExtractStrategy`
 variant:
 
 ```brief
 // Built-in strategies:
-type Fifo <: List { InsertAt = prepend; ExtractFrom = shift; };
-type Mapped <: List { InsertAt = hash; };
+type Fifo : List { InsertAt = prepend; ExtractFrom = shift; };
+type Mapped : List { InsertAt = hash; };
 
 // Custom function strategy:
-type SkipList<T> <: List<T> {
+type SkipList<T> : List<T> {
   InsertAt = sl_insert;  // dispatches to sl_insert#(list, val)
   ExtractFrom = sl_remove; // dispatches to sl_remove#(list)
 };

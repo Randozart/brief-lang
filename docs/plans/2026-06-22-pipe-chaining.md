@@ -86,7 +86,7 @@ a |> f() |> g() .|> h()
 
 ```brief
 // Step 1: query produces a filtered subset
-let result <: database { FILTER(.active); };
+let result : database { FILTER(.active); };
 // Step 2: pipe the subset to a print function
 result |> print_rows();
 ```
@@ -244,19 +244,19 @@ in statement bodies, contracts, and initializers.
 
 ## 6. `<:` Query Compatibility
 
-The `let x <: database { FILTER(.active); }` syntax is a special form in the
+The `let x : database { FILTER(.active); }` syntax is a special form in the
 parser that produces `Expr::SubtypeProjection` as the let-binding's value.
 Pipe chaining adds zero additional complexity here because:
 
 ```
-let result <: database { FILTER(.active); };
+let result : database { FILTER(.active); };
 result |> print_rows();
 ```
 
 The `|>` operator works on any expression — including an identifier bound to
 a subtype projection result. The two-statement form is idiomatic and clear.
 
-**Inline form** (`let x <: db { ... } |> f()`) is NOT implemented in this phase.
+**Inline form** (`let x : db { ... } |> f()`) is NOT implemented in this phase.
 It would require changes to the let-statement parser to optionally consume `|>`
 after the subtype projection block. Future work if needed.
 
@@ -324,7 +324,7 @@ struct Record { id: Int, active: Bool };
 defn print_count(n: Int) -> Bool { term print_int#(n); };
 
 txn main() [true][true] -> Bool {
-    let result <: database { FILTER(.active); };
+    let result : database { FILTER(.active); };
     result |> print_count();
     term;
 };

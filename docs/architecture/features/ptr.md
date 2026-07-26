@@ -130,12 +130,12 @@ available for compiler plugins to opt into.
 
 ### Function pointers (Phase 5, 2026-07-03)
 
-Functions can be referenced via `:> Ptr` and called indirectly:
+Functions can be referenced via `.#Ptr` and called indirectly:
 
 ```brief
 defn my_cmp(a: Int, b: Int) -> Bool { term a == b; };
 
-let cmp_fn = my_cmp :> Ptr;        // function pointer via :> Ptr
+let cmp_fn = my_cmp .#Ptr;        // function pointer via .#Ptr
 let result = cmp_fn(3, 5);          // indirect call through fn pointer
 ```
 
@@ -213,7 +213,7 @@ See `docs/plans/2026-07-03-safe-void-star.md` for the full design.
 | `lib/std/spatial.bv` | 3 | ✅ |
 | Layout-compatible `Ptr<A> as Ptr<B>` | 2 | ✅ |
 | Opaque handle pattern | 4 | ✅ |
-| Function pointers (`:> Ptr`) | 5 | ✅ |
+| Function pointers (`.#Ptr`) | 5 | ✅ |
 | EOR optimization | 6 | ✅ |
 | Module boundary enforcement | 4 | ✅ (`defining_module` field) |
 | Layout shape caching | 3 | 🚧 (deferred; spatial intrinsics are direct) |

@@ -165,12 +165,12 @@ When a TypeDef defines `InsertAt = "strategy"` or `ExtractFrom = "strategy"`, th
 ### Defining Custom Strategies
 
 ```brief
-type Queue <: List {
+type Queue : List {
     InsertAt    = "append";
     ExtractFrom = "shift";
 };
 
-type Stack <: List {
+type Stack : List {
     InsertAt    = "prepend";
     ExtractFrom = "pop";
 };

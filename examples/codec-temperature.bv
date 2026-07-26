@@ -14,11 +14,11 @@ codec Fahrenheit {
     [value <= 9000];
 };
 
-type TempC <: Float {
+type TempC : Float {
     codec <~ Celsius;
 };
 
-type TempF <: Float {
+type TempF : Float {
     codec <~ Fahrenheit;
 };
 
@@ -27,7 +27,7 @@ codec WaterLiquid {
     [value <= 100];     // Boiling point of water
 };
 
-type WaterTempC <: Float {
+type WaterTempC : Float {
     codec <~ WaterLiquid;
 };
 
@@ -38,7 +38,7 @@ codec ReactionTemp {
     [value <= 450];
 };
 
-type ReactorTemp <: Float {
+type ReactorTemp : Float {
     maxbits  <~ 64;
     codec  <~ ReactionTemp;
 };

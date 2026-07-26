@@ -130,7 +130,7 @@ list.len()           // UFCS: desugars to len(list)
 result.value         // Result unwrapping
 ```
 
-**UFCS (Uniform Function Call Syntax):** `subject.method(args)` is desugared at parse time to `method(subject, args)`. There is zero magic — the compiler has no hardcoded knowledge of `.len()` or any method name. `list.len()` becomes `len(list)`, which calls the standard library function that uses `list :> Size`.
+**UFCS (Uniform Function Call Syntax):** `subject.method(args)` is desugared at parse time to `method(subject, args)`. There is zero magic — the compiler has no hardcoded knowledge of `.len()` or any method name. `list.len()` becomes `len(list)`, which calls the standard library function that uses `list .#Size`.
 
 **Priority hierarchy:**
 1. **Internal struct field/defn** — if `subject` has a field or internal `defn` defined in its struct body, it compiles as a direct access
@@ -146,13 +146,13 @@ result.value         // Result unwrapping
 compiler for a property of this thing":
 
 ```brief
-list :> Size;       // How many elements?
-str :> Bytes;       // How many bytes does this occupy?
-&x :> Ptr;          // Get a verified pointer to x
+list .#Size;       // How many elements?
+str .#Bytes;       // How many bytes does this occupy?
+&x .#Ptr;          // Get a verified pointer to x
 val :> Popcount;    // How many set bits (via @llvm.ctpop)?
 val :> Absolute;    // Absolute value (via @llvm.fabs)
 val :> Type;        // What type is this at compile time?
-x :> Ptr!;          // Raw address — dangerous, no safety envelope
+x .#Ptr!;          // Raw address — dangerous, no safety envelope
 map :> Keys;        // List of keys from a HashMap
 set :> Contains(v); // Check membership in a HashSet
 pair :> Index(0);   // Access first element of a tuple
@@ -194,7 +194,7 @@ txn withdraw(amount: Int)
 let nibble = word @/0..3;
 
 // String anchor — compile-time memory slot
-@"hello world" :> Size   // 11
+@"hello world" .#Size   // 11
 ```
 
 ---
@@ -457,7 +457,7 @@ And `escape` means "Rollback everything - pretend this never happened." Not "bre
 `node` can self-verify when to end:
 
 ```brief
-node fill_buffer() [buffer :> Size < 100][buffer :> Size == 100] {
+node fill_buffer() [buffer .#Size < 100][buffer .#Size == 100] {
     &buffer = buffer + [new_item];
     term;
 };

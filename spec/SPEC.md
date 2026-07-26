@@ -165,7 +165,7 @@ top_level ::= definition
             | struct_def
             | rstruct_def
             | enum_def
-            | type_def       (* NEW 2026-06-09: Type Name <: Base { ... } *)
+            | type_def       (* NEW 2026-06-09: Type Name : Base { ... } *)
             | signature
             | resource_decl
             | render_block
@@ -1351,9 +1351,9 @@ let ones   = v :> Popcount;       // 32 — single @llvm.ctpop call
 let lz     = v :> LeadingZeros;   // 4 — single @llvm.ctlz call
 let abs_v  = (-42) :> Absolute;   // 42 — single @llvm.abs call
 let rev    = v :> BitReverse;     // bit-reversed — single @llvm.bitreverse call
-let len    = list :> Size;        // list length — header load
-let addr   = &x :> Ptr;           // Ptr<Int> — verified pointer
-let raw    = x :> Ptr!;           // Int — raw unchecked address
+let len    = list .#Size;        // list length — header load
+let addr   = &x .#Ptr;           // Ptr<Int> — verified pointer
+let raw    = x .#Ptr!;           // Int — raw unchecked address
 ```
 
 ### 3.16 Ptr\<T\> Type and Safe Pointer Operations
@@ -1366,10 +1366,10 @@ tracks provenance.
 
 | Expression | Result type | Provenance |
 |------------|-------------|------------|
-| `&x :> Ptr` | `Ptr<Int>` | Bound = sizeof(x), non-null guaranteed |
-| `list :> Ptr` | `Ptr<T>` | Bound = list :> Bytes, non-null guaranteed |
-| `ptr :> Ptr` (on Ptr\<T\>) | `Int` | Escape hatch — raw address |
-| `x :> Ptr!` | `Int` | Raw unchecked address (no safety envelope) |
+| `&x .#Ptr` | `Ptr<Int>` | Bound = sizeof(x), non-null guaranteed |
+| `list .#Ptr` | `Ptr<T>` | Bound = list .#Bytes, non-null guaranteed |
+| `ptr .#Ptr` (on Ptr\<T\>) | `Int` | Escape hatch — raw address |
+| `x .#Ptr!` | `Int` | Raw unchecked address (no safety envelope) |
 
 **Dereferencing:**
 
@@ -1378,7 +1378,7 @@ When a `Ptr<T>` variable is indexed with `ptr[i]`, the compiler emits a direct
 access — but only after verifying the access is within bounds.
 
 ```brief
-let p: Ptr<Int> = &x :> Ptr;
+let p: Ptr<Int> = &x .#Ptr;
 let val = p[0];                   // Read — compiler verifies 0 < sizeof(x)
 &p[0] = 42;                       // Write — compiler verifies bounds
 ```
@@ -1387,10 +1387,10 @@ let val = p[0];                   // Read — compiler verifies 0 < sizeof(x)
 
 The `PointerVerifier` pass checks every `ptr[i]` access at compile time:
 1. `i >= 0` — must be proven or specified as a precondition
-2. `(i + 1) * sizeof(T) <= ptr :> Bytes` — must be proven
+2. `(i + 1) * sizeof(T) <= ptr .#Bytes` — must be proven
 3. Unprovable → `ProofError(P200)` "out of bounds access"
 
-For raw unchecked access, use `x :> Ptr!` (returns `Int`) — no compiler
+For raw unchecked access, use `x .#Ptr!` (returns `Int`) — no compiler
 verification, no safety envelope, full programmer control.
 
 **Standard library:** `std/ptr.bv` provides `read_i64`, `write_i64`,
@@ -1455,13 +1455,13 @@ These emit direct `@llvm.memcpy` / `@memcmp` / `@llvm.memset` calls with
 no intermediate wrappers. Available via `lib/std/spatial.bv`:
 `block_copy`, `block_compare`, `block_fill`, `block_hash`.
 
-#### 3.16.4 Function Pointers via `:> Ptr` (2026-07-03)
+#### 3.16.4 Function Pointers via `.#Ptr` (2026-07-03)
 
 A function reference can be converted to a function pointer:
 
 ```brief
 defn my_cmp(a: Int, b: Int) -> Bool { term a == b; };
-let cmp_fn = my_cmp :> Ptr;   // fn pointer type: Fn(Int, Int) -> Bool
+let cmp_fn = my_cmp .#Ptr;   // fn pointer type: Fn(Int, Int) -> Bool
 let eq = cmp_fn(3, 5);        // indirect call through fn pointer
 ```
 
@@ -1500,7 +1500,7 @@ For `List<T>`, `HashMap<K,V>`, or other collections, `<:` applies a sequence of
 relational operations in a single fused pass with zero intermediate allocations:
 
 ```brief
-let regional_stats <: transactions {
+let regional_stats : transactions {
     FILTER(.is_active);
     GROUP(.region);
     COUNT;
@@ -1535,14 +1535,14 @@ For `String` sources, `<:` compiles a regular expression into a DFA at compile
 time and captures groups in a single O(n) scan:
 
 ```brief
-let (user, domain) <: email["^([a-z]+)@(.+)$"];
+let (user, domain) : email["^([a-z]+)@(.+)$"];
 ```
 
 Patterns can be a string literal or a `const` variable:
 
 ```brief
 const pat = "^([a-z]+)@(.+)$";
-let (user, domain) <: email[pat];
+let (user, domain) : email[pat];
 ```
 
 **Return type inference:**
@@ -1662,7 +1662,7 @@ let vowel: Regex = @"[aeiou]";
 let clean = str["[a-z]+"];     // Desugars to str[;@"[a-z]+"]
 
 // As a constraint
-let email: String <: [@"\A[^@]+@[^@]+\z"];
+let email: String : [@"\A[^@]+@[^@]+\z"];
 ```
 
 `@"..."` literals known at compile time are compiled to a DFA via the existing
@@ -1749,7 +1749,7 @@ binding    ::= ("parse" | "format") "<~" ident ";"
 4. A type references a codec via the `codec <~` property binding in its body:
 
 ```brief
-type MyInt <: Int {
+type MyInt : Int {
     codec <~ PositiveInt;
 };
 ```
@@ -1767,7 +1767,7 @@ codec HexColor {
     parse <~ parse_hex_color;
 };
 
-type Color <: Int {
+type Color : Int {
     codec <~ HexColor;
 };
 
@@ -2091,7 +2091,7 @@ let list: List<Int> = [1, 2, 3];
 let empty: List<String> = [];
 
 // Operations
-list :> Size;           // Length
+list .#Size;           // Length
 list[i];              // Index access
 list[i..j];           // Slice
 list + [4];           // Concatenation
@@ -2105,7 +2105,7 @@ let matrix: Float[3][3];  // 3x3 matrix
 
 // Operations
 vec[i];             // Index access (bounds-checked)
-vec :> Size;          // Size (compile-time constant)
+vec .#Size;          // Size (compile-time constant)
 ```
 
 **Options (nullable types):**
@@ -2132,7 +2132,7 @@ result.is_err();    // true if Err
 result.unwrap();    // Extract Ok value
 result.unwrap_err(); // Extract Err value
 result.map(|x| x * 2);  // Transform Ok
-result.map_err(|e| e :> Size); // Transform Err
+result.map_err(|e| e .#Size); // Transform Err
 result.and_then(|x| Ok(x * 2)); // Chain operations
 ```
 
@@ -2153,7 +2153,7 @@ let value: Int Union String Union Bool = 42;
 
 // Pattern matching
 unification value(Int(n)) = n;
-unification value(String(s)) = s :> Size;
+unification value(String(s)) = s .#Size;
 unification value(Bool(b)) = if b { 1 } else { 0 };
 ```
 
@@ -2290,7 +2290,7 @@ let p = make_pair(1, 2);  // Inferred: (Int, Int)
 
 > **Added 2026-06-09 (Phase 1.5)**
 
-Brief types can be defined via `Type Name <: Base { ... }` declarations. The `<:`
+Brief types can be defined via `Type Name : Base { ... }` declarations. The `<:`
 operator (read as "derives from") connects a new type to its base type. Properties
 and constraints within the `{ }` body define how the new type differs from the base.
 
@@ -2317,10 +2317,10 @@ and constraints within the `{ }` body define how the new type differs from the b
 | Expression | Strategy | Example |
 |---|---|---|
 | `0` | Constant front, head-pointer advance | Queue pop |
-| `:> Size` | Append position, pointer increments | List/Queue push |
-| `:> Size - N` | Offset from end, pointer decrements | Stack pop |
-| `<: { MIN(.key) }` | Maintain heap by key | Priority queue |
-| `<: { MAX(.key) }` | Maintain heap by key | Priority queue |
+| `.#Size` | Append position, pointer increments | List/Queue push |
+| `.#Size - N` | Offset from end, pointer decrements | Stack pop |
+| `: { MIN(.key) }` | Maintain heap by key | Priority queue |
+| `: { MAX(.key) }` | Maintain heap by key | Priority queue |
 
 Unrecognized expression forms produce a compile-time error in Pass 1.
 
@@ -2328,28 +2328,28 @@ Unrecognized expression forms produce a compile-time error in Pass 1.
 
 ```brief
 // Scalar derivation
-Type U8  <: Bits { Bytes <~ 1; Alignment <~ 1; };
-Type U32 <: Bits { Bytes <~ 4; Alignment <~ 4; };
-Type Int <: U64;
-Type MmioReg <: U32 { Volatile <~ true; };
+Type U8  : Bits { Bytes <~ 1; Alignment <~ 1; };
+Type U32 : Bits { Bytes <~ 4; Alignment <~ 4; };
+Type Int : U64;
+Type MmioReg : U32 { Volatile <~ true; };
 
 // Collection derivation
-Type List<T> <: Bits {
+Type List<T> : Bits {
     ElementType <~ T;
     FixedSize <~ false;
-    InsertAt <~ :> Size;
-    ExtractFrom <~ :> Size - 1;
+    InsertAt <~ .#Size;
+    ExtractFrom <~ .#Size - 1;
 };
 
-Type Stack<T> <: List<T> { AllowIndex = false; };
-Type Queue<T> <: List<T> { ExtractFrom = 0; AllowIndex = false; };
+Type Stack<T> : List<T> { AllowIndex = false; };
+Type Queue<T> : List<T> { ExtractFrom = 0; AllowIndex = false; };
 
 // Codec-bearing type
 import { UTF8 } from "std/UTF8.bv";
-Type String <: List<U8> { Codec = UTF8; };
+Type String : List<U8> { Codec = UTF8; };
 
 // Refinement constraint
-Type PositiveInt <: Int {
+Type PositiveInt : Int {
     [ > 0 && < 100 ]
 };
 ```
@@ -2607,7 +2607,7 @@ declarative data — they describe properties of the annotated item.
 
 **Inside type bodies**, `<~` declares type properties:
 ```brief
-type UInt32 <: Bits {
+type UInt32 : Bits {
     bytes <~ 4;
     alignment <~ 4;
     storage <~ Native;
@@ -2678,7 +2678,7 @@ Resources are declared and managed:
 rsrc file: File("data.txt", "read");
 
 // Use in transaction
-txn read_data() [file.exists()][data :> Size > 0] {
+txn read_data() [file.exists()][data .#Size > 0] {
     let result = file.read();
     [result.is_ok()] {
         data = result.value;
@@ -2850,7 +2850,7 @@ import "std/collections";
 
 // Lists
 let list = [1, 2, 3];
-let len = list :> Size;                  // 3
+let len = list .#Size;                  // 3
 let appended = list + [4];             // [1, 2, 3, 4]
 let contains = list.contains(2);       // true
 let idx = list.find(2);                // 1
@@ -2948,7 +2948,7 @@ compiled during parsing using Thompson construction → subset construction.
 The transition table is embedded as a constant; the scan loop is O(n) linear.
 
 ```brief
-let found <: "hello@example.com"["^[a-z]+@[a-z]+\\.[a-z]+$"];
+let found : "hello@example.com"["^[a-z]+@[a-z]+\\.[a-z]+$"];
 ```
 
 ### 6.11 RooflineAnalyzer
