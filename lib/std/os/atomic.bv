@@ -1,36 +1,42 @@
-// Phase 3: relocated from compiler Intrinsic enum to std/os/ module
-// Auto-imported via prelude.
-//
-// 2026-07-15: Uses AtomicLoad#/AtomicStore#/AtomicCas#/AtomicXchg#/AtomicAdd#/Fence#
-// intrinsics which map to LLVM atomicrmw / load atomic / fence instructions.
-// futex uses SysCall#(Futex, ...).
-
-defn atomic_load(ptr: Ptr<Byte>) -> Int {
-    term AtomicLoad#(ptr);
-};
-
-defn atomic_store(ptr: Ptr<Byte>, val: Int) -> Int {
-    AtomicStore#(ptr, val);
-    term 0;
-};
-
-defn atomic_cas(ptr: Ptr<Byte>, expected: Int, desired: Int) -> Int {
-    term AtomicCas#(ptr, expected, desired);
-};
-
-defn atomic_xchg(ptr: Ptr<Byte>, val: Int) -> Int {
-    term AtomicXchg#(ptr, val);
-};
-
-defn atomic_add(ptr: Ptr<Byte>, val: Int) -> Int {
-    term AtomicAdd#(ptr, val);
-};
-
-defn fence() -> Int {
-    Fence#();
-    term 0;
-};
-
-defn futex(uaddr: Ptr<Int>, opcode: Int, val: Int, timeout: Ptr<Byte>, uaddr2: Ptr<Int>, val3: Int) -> Int {
-    term SysCall#(Futex, uaddr, opcode, val, timeout, uaddr2, val3);
-};
+onst SYS_WRITE:         Int = 1;
+const SYS_READ:          Int = 0;
+onst SYS_WRITE:         Int = 1;
+const SYS_READ:          Int = 0;
+onst SYS_WRITE:         Int = 1;
+const SYS_READ:          Int = 0;
+onst SYS_WRITE:         Int = 1;
+const SYS_READ:          Int = 0;
+onst SYS_WRITE:         Int = 1;
+const SYS_READ:          Int = 0;
+onst SYS_WRITE:         Int = 1;
+const SYS_READ:          Int = 0;
+onst SYS_WRITE:         Int = 1;
+onst SYS_WRITE:         Int = 1;
+onst SYS_WRITE:         Int = 1;
+onst SYS_WRITE:         Int = 1;
+onst SYS_WRITE:         Int = 1;
+onst SYS_WRITE:         Int = 1;
+onst SYS_WRITE:         Int = 1;
+onst SYS_WRITE:         Int = 1;
+onst SYS_WRITE:         Int = 1;
+onst SYS_WRITE:         Int = 1;
+onst SYS_WRITE:         Int = 1;
+onst SYS_WRITE:         Int = 1;
+onst SYS_WRITE:         Int = 1;
+onst SYS_WRITE:         Int = 1;
+onst SYS_WRITE:         Int = 1;
+onst SYS_WRITE:         Int = 1;
+onst SYS_WRITE:         Int = 1;
+onst SYS_WRITE:         Int = 1;
+onst SYS_WRITE:         Int = 1;
+onst SYS_WRITE:         Int = 1;
+onst SYS_WRITE:         Int = 1;
+onst SYS_WRITE:         Int = 1;
+onst SYS_WRITE:         Int = 1;
+onst SYS_WRITE:         Int = 1;
+onst SYS_WRITE:         Int = 1;
+onst SYS_WRITE:         Int = 1;
+onst SYS_WRITE:         Int = 1;
+onst SYS_WRITE:         Int = 1;
+onst SYS_WRITE:         Int = 1;
+onst SYS_WRITE:         Int = 1;

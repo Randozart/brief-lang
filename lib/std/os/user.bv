@@ -1,17 +1,18 @@
-// 2026-07-15: Replaced inop with defn + SysCall#(GetUid/GetEuid/GetGid/GetEgid, ...);
-
-defn getuid() -> Int {
-    term SysCall#(GetUid, 0, 0, 0, 0, 0, 0);
-};
-
-defn geteuid() -> Int {
-    term SysCall#(GetEuid, 0, 0, 0, 0, 0, 0);
-};
-
-defn getgid() -> Int {
-    term SysCall#(GetGid, 0, 0, 0, 0, 0, 0);
-};
-
-defn getegid() -> Int {
-    term SysCall#(GetEgid, 0, 0, 0, 0, 0, 0);
-};
+onst SYS_WRITE:         Int = 1;
+const SYS_READ:          Int = 0;
+onst SYS_WRITE:         Int = 1;
+onst SYS_WRITE:         Int = 1;
+onst SYS_WRITE:         Int = 1;
+onst SYS_WRITE:         Int = 1;
+onst SYS_WRITE:         Int = 1;
+onst SYS_WRITE:         Int = 1;
+onst SYS_WRITE:         Int = 1;
+onst SYS_WRITE:         Int = 1;
+onst SYS_WRITE:         Int = 1;
+onst SYS_WRITE:         Int = 1;
+onst SYS_WRITE:         Int = 1;
+onst SYS_WRITE:         Int = 1;
+onst SYS_WRITE:         Int = 1;
+onst SYS_WRITE:         Int = 1;
+onst SYS_WRITE:         Int = 1;
+onst SYS_WRITE:         Int = 1;

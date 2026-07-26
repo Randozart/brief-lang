@@ -1148,6 +1148,39 @@ For each C function ported to Brief in Step 2b:
 7. `cargo test --lib` passes
 8. `bash benchmarks/build_and_bench.sh --correctness` passes
 
+### 2.5l. View Casts — `Type-Punned and Strided Array Views`
+
+Extend the `as` cast mechanism for Vector types to produce zero-copy views:
+
+**Type-punned view** — reinterpret the same bytes as a different element type:
+
+```brief
+let raw: Int[1024];
+let bytes = raw as Byte[8192];   // 1024 * 8 = 8192 bytes
+let frames = raw as Frame[256];  // if sizeof(Frame) == 32
+let bad = raw as Byte[1000];     // ❌ byte size mismatch
+```
+
+The type checker validates: `N * sizeof(T) == M * sizeof(U)` at compile time.
+LLVM IR: `bitcast [1024 x i64] to [8192 x i8]` or `bitcast [1024 x i64] to [256 x %Frame]`.
+
+**Strided view** — recast a slice onto a sized array:
+
+```brief
+let evens = raw[0:1024:2] as Int[512];  // stride 2, 1024/2 = 512 elements
+let subset = raw[2:10] as Int[8];        // contiguous, 8 elements
+```
+
+The type checker validates the slice's computed element count matches the
+target: `ceil((end - start) / stride) == N`.
+
+Both are zero-copy — no allocation, no memcpy. The existing `as` operator
+handles the syntax; the type checker adds the Vector-to-Vector cast logic.
+
+**Files changed:** `src/typechecker/mod.rs` (add Vector-as-Vector cast
+validation), `src/backend/llvm/emit_expr.rs` (emit bitcast for matching
+byte-size vectors).
+
 ---
 
 ## Phase 3 — Tamer in Pure Brief (No `Alloc#`, No C)

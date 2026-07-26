@@ -362,8 +362,12 @@ impl<'a> Parser<'a> {
                 // uppercase (PascalCase type names). This prevents `!first { ... }`
                 // from being parsed as a struct literal — `{` must remain for
                 // `when`/`foreach` block bodies.
+                // 2026-07-26: Must also verify content after { looks like a struct
+                // field (identifier: expr) to avoid consuming guard/block braces.
                 if self.peek() == Some(&Token::LBrace) && name.starts_with(|c: char| c.is_uppercase()) {
-                    return self.parse_struct_literal(name);
+                    if self.lookahead_is_struct_literal() {
+                        return self.parse_struct_literal(name);
+                    }
                 }
                 self.parse_identifier_or_special(name)
             }
@@ -540,7 +544,23 @@ impl<'a> Parser<'a> {
         Ok(Expr::StructLiteral { type_name, fields })
     }
 
-    /// Parse a block of statements (used by both Block and function bodies).
+    /// 2026-07-26: Peek ahead after PascalCaseName { to check if the content
+    /// looks like struct fields (identifier: expr) rather than guard/block
+    /// bodies. Prevents `when TOTAL { let x ...` from being parsed as a
+    /// struct literal when TOTAL is a PascalCase variable, not a type.
+    fn lookahead_is_struct_literal(&self) -> bool {
+        // Look at the token after the current position (which is {)
+        let after_brace = self.pos + 1;
+        if after_brace >= self.tokens.len() { return false; }
+        let next_tok = &self.tokens[after_brace].0;
+        let next_is_ident = matches!(next_tok, Token::Identifier(_));
+        if !next_is_ident { return false; }
+        // Check the token after the identifier — must be ':' for struct field
+        let after_ident = after_brace + 1;
+        if after_ident >= self.tokens.len() { return false; }
+        matches!(&self.tokens[after_ident].0, Token::Colon)
+    }
+
     pub fn parse_block(&mut self) -> Result<Vec<crate::ast::Statement>, SyntaxError> {
         self.expect(Token::LBrace)?;
         let mut stmts = Vec::new();

@@ -304,22 +304,81 @@ let p = Point { x: 10, y: 20 };
 let name = p.name;  // field access
 ```
 
-### Fixed-Size Arrays: `Int[N]`
+### Fixed-Size Arrays: `Type[N]` and Slice Views
 
-Arrays of compile-time-known size are declared inline:
+Arrays of compile-time-known size are declared inline. Works for any type:
 
 ```brief
 struct VMStack {
-    data: Int[1024];   // [1024 x i64] in LLVM IR
+    data: Int[1024];    // [1024 x i64] in LLVM IR
     len: Int;
 };
 
-struct Matrix3x3 {
-    cells: Float[9];   // fixed-size, auto-vectorized
+struct Cache {
+    cells: Float[9];    // fixed-size, auto-vectorized
 };
 ```
 
-LLVM auto-vectorizes operations over `[N x T]` arrays. Bounds are proven by contract: `[stack.len >= 0 && stack.len < 1024]`.
+`Int[1024]` → `[1024 x i64]`, `Frame[256]` → `[256 x %Frame]`.
+Bounds proven by contract: `[i >= 0 && i < stack .#Size]`.
+
+#### Array Slices: `arr[start:end:stride]`
+
+A slice is a **zero-copy view** into an existing array:
+
+```brief
+arr[:]         // Full view
+arr[4:]        // From index 4 to end
+arr[:8]        // From start to index 8
+arr[2:8]       // Range [2, 8), stride 1
+arr[2:8:2]     // Every other element
+arr[i:j:k]     // Dynamic bounds
+```
+
+All components are optional: start defaults to 0, end to array length, stride to 1.
+
+#### SIMD Operations
+
+Element-wise arithmetic on array and slice types:
+
+```brief
+let a: Int[4] = ...;
+let b: Int[4] = ...;
+let sum = a + b;       // <4 x i64> vector add
+let doubled = a * 2;   // Scalar broadcast
+```
+
+#### View Casts
+
+The `as` operator produces zero-copy views between compatible array types:
+
+```brief
+let raw: Int[1024];
+let bytes = raw as Byte[8192];  // type-punned: same bytes, different type
+let evens = raw[0:1024:2] as Int[512];  // strided: slice recast as sized array
+```
+
+**Type-punned view:** `N * sizeof(T) == M * sizeof(U)` enforced at compile time.
+Emits LLVM `bitcast`. **Strided view:** slice bounds compute element count,
+validated against target size. Both are zero-copy.
+
+#### Stdlib, Not Magic
+
+`map`, `filter`, `fold` are regular txn functions in `lib/std/array.bv`:
+
+```brief
+txn array_map<T, U>(arr: Vector<T, N>, f: T -> U, i: Int)
+    -> Vector<U, N>
+    [i < N][i == N]
+{
+    result[i] = f(arr[i]);
+    i = i + 1;
+    term result;
+};
+```
+
+The LLVM auto-vectorizer recognizes the `[i < N]` convergence contract and
+vectorizes the load-apply-store loop without compiler magic.
 
 ### `type` vs `struct` vs `obj`
 

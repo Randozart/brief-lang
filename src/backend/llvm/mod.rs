@@ -347,6 +347,13 @@ fn collect_strings_tl(tl: &TopLevel, seen: &mut std::collections::HashSet<String
             for d in &c.definitions { for s in &d.body { collect_strings_stmt(s, seen, out); } }
             for trg in &c.internal_triggers { collect_strings_expr(&Expr::Identifier(trg.name.clone()), seen, out); }
         }
+        // 2026-07-26: TopLevel::Statement wraps top-level let bindings
+        // that contain string literals (e.g. GetEnvInt!("BOUND")).
+        // Without this arm, the string is never collected and @str.N is
+        // referenced but undefined, causing clang to fail.
+        TopLevel::Statement(stmt) => {
+            collect_strings_stmt(stmt, seen, out);
+        }
         _ => {}
     }
 }
@@ -474,18 +481,50 @@ fn collect_strings_expr(expr: &Expr, seen: &mut std::collections::HashSet<String
 /// aware IR directly (TBAA, !range, noalias), we avoid the need for an
 /// expensive LLVM analysis pass to rediscover what the contracts already state.
 
-/// LLVM storage type for an `@ link` trigger global.
+/// Protocol-driven LLVM type for a given Brief type.
+/// Uses type protocol metadata (maxbits, SSO config, etc.) instead of
+/// hardcoded name matches.
+///
+/// Defaults:
+///   #Int         → i64  (narrowed later by narrow_int pass)
+///   #Float       → float (default; maxbits:32→float, maxbits:64→double)
+///   #Bool        → i8
+///   #Char        → i32
+///   #String/#Data→ ptr  (C ABI for frgn declare; internal is {i64,i64})  
+///   #Ptr<T>      → ptr
+///   #UInt        → i64
+pub fn protocol_llvm_type(ty: &Type) -> &str {
+    match ty {
+        Type::Vector(inner, _) => {
+            let inner_ll = protocol_llvm_type(inner);
+            // Vector types use pointer to element for frgn ABI
+            "ptr"
+        }
+        Type::Ptr(_) => "ptr",
+        Type::Custom(s) => match s.as_str() {
+            "Int" | "Int64" => "i64",
+            "Int32" => "i32",
+            "Int16" => "i16",
+            "Int8" => "i8",
+            "UInt" | "UInt64" => "i64",
+            "UInt32" => "i32",
+            "UInt16" => "i16",
+            "UInt8" => "i8",
+            "Bool" => "i8",
+            "Char" => "i32",
+            "Float" => "float",
+            "Float64" => "double",
+            "String" | "Data" => "ptr",
+            "Ptr" => "ptr",
+            _ => "i64",
+        },
+        _ => "i64",
+    }
+}
 /// The C runtime provides `char` (Bool→i8), `int64_t` (Int→i64),
 /// and `char*` (String→i8*).
 pub(super) fn trg_llvm_storage_ty(ty: &Type) -> &str {
-    match ty {
-        Type::Custom(__t) if __t == "Bool" => "i8",
-        Type::Custom(__t) if __t == "Int" || __t == "UInt" => "i64",
-        Type::Custom(__t) if __t == "Float" => "float",
-        Type::Custom(__t) if __t == "Char" => "i32",
-        Type::Custom(__t) if __t == "String" || __t == "Data" => "i8*",
-        _ => "i8", // fallback for unsupported types
-    }
+    protocol_llvm_type(ty)
 }
 
 /// Map a field's LLVM storage type string to its TBAA metadata node index.
@@ -2040,20 +2079,16 @@ impl LlvmBackend {
                 crate::ast::ResultType::VoidType | crate::ast::ResultType::TrueAssertion => "void",
                 crate::ast::ResultType::Projection(ref ts) => {
                     if ts.is_empty() || ts.iter().any(|t| matches!(t, Type::Void)) { "void" }
-                    else if ts.iter().any(|t| matches!(t, Type::Custom(__t) if __t == "Float")) { "float" }
-                    else if ts.iter().any(|t| matches!(t, Type::Custom(__t) if __t == "String" || __t == "Data")) { "ptr" }
-                    else if ts.iter().any(|t| matches!(t, Type::Ptr(_))) { "ptr" }
-                    else { "i64" }
+                    else {
+                        // 2026-07-26: Use protocol-driven LLVM type.
+                        let first_ret = &ts[0];
+                        protocol_llvm_type(first_ret)
+                    }
                 }
             };
-            let param_tys: Vec<&str> = sig.inputs.iter().map(|(_, t)| match t {
-                Type::Custom(__t) if __t == "Int" || __t == "UInt" => "i64",
-                Type::Custom(__t) if __t == "Bool" => "i32",
-                Type::Custom(__t) if __t == "Char" => "i32",
-                Type::Custom(__t) if __t == "Float" => "float",
-                Type::Custom(__t) if __t == "String" || __t == "Data" => "ptr",
-                Type::Ptr(_) => "ptr",
-                _ => "i64",
+            let param_tys: Vec<&str> = sig.inputs.iter().map(|(_, t)| {
+                // 2026-07-26: Use protocol-driven LLVM type.
+                protocol_llvm_type(t)
             }).collect();
             write!(out, "declare {} @{}(", ret_ty, sig.name).ok();
             for (pi, pt) in param_tys.iter().enumerate() {

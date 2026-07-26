@@ -154,18 +154,19 @@ build_bench() {
     # Without this, benchmarks using getenv_int#("BOUND") get N=0 and all loops
     # are dead code (zero iterations → output "0" instead of correct checksum).
     # 2026-07-14: --llvm removed — compiler now produces binary by default.
+    # 2026-07-26: Clear FFI cache + temp objects to avoid duplicate symbols.
+    # The one-step `clang .ll lib/runtime/brief_rt.c` avoids cached .o conflicts.
+    rm -f ~/.cache/brief-compiler/ffi/*.o /tmp/brief_rt*.o 2>/dev/null || true
     BOUND=50000000 ./target/release/briefc build "benchmarks/${name}.bv" \
         --out benchmarks --optimize-budget "$budget" $gpu_flag 2>&1
 
     if [ ! -f "$bin" ]; then
-        # 2026-07-21: Compile brief_rt.c with -flto so LTO can inline
-        # __print_char into main() (saves ~5-8 cycles/character at 50M iter).
-        clang -O3 -flto -c "lib/runtime/brief_rt.c" -o "/tmp/brief_rt.o" 2>&1
-        if [ -f "benchmarks/${name}.o" ]; then
-            cc -O2 -flto -no-pie -o "$bin" "benchmarks/${name}.o" "/tmp/brief_rt.o" -lm 2>&1 || echo "  (link failed — try manual link)"
-        else
-            clang -O3 -flto -march=native -ffast-math -fdata-sections -ffunction-sections -Wl,--gc-sections "benchmarks/${name}.ll" "/tmp/brief_rt.o" -o "$bin" -lm 2>&1 || echo "  (clang linking skipped — possibly linked by compiler)"
-        fi
+        # 2026-07-26: One-step link with brief_rt.c (no pre-compiled .o files).
+        # This avoids duplicate symbol conflicts between FFI cache objects
+        # and the harness's separate brief_rt.o.
+        clang -O3 -flto -march=native -ffast-math -fdata-sections -ffunction-sections \
+            -Wl,--gc-sections "benchmarks/${name}.ll" "lib/runtime/brief_rt.c" \
+            -o "$bin" -lm 2>&1
     fi
     if [ -f "$bin" ]; then
         echo "  Brief binary ready."

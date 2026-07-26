@@ -190,10 +190,9 @@ pub fn emit_statement(backend: &mut LlvmBackend, out: &mut String, stmt: &Statem
                     }
                     backend.fun.terminated = true;
                 } else if backend.fun.fn_ret_ty != "void" {
-                    // 2026-07-25: Use i64 as the actual SSA width for integer values.
-                    // All emit_expr for integers produces i64; narrowing only affects
-                    // the function header type. Insert trunc if fn_ret_ty is narrower.
-                    let val_ty = "i64";
+                    // 2026-07-26: Use actual expression LLVM type, not hardcoded "i64".
+                    // Frgn calls may return ptr (for String/Data in C ABI).
+                    let val_ty = backend.llvm_type(&reg.ty);
                     let final_name = if val_ty != backend.fun.fn_ret_ty {
                         // 2026-07-20: Insert type conversion when the expression type doesn't
                         // match the function's declared return type (e.g., SysCall# returns i64

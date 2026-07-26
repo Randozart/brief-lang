@@ -896,6 +896,8 @@ pub struct TypeDefBody {
     pub projections: Vec<ProjectionDef>,
     pub bindings: Vec<TypeBinding>,
     pub operators: Vec<OperatorDef>,
+    /// 2026-07-26: Metaproperty declarations: prop Name = expr;
+    pub props: Vec<PropDef>,
     pub constraints: Vec<Expr>,
     pub span: Option<Span>,
 }
@@ -937,6 +939,15 @@ pub struct OperatorDef {
     pub impl_args: Option<PropertyValue>,
     /// Old-style implementation name string (from `op Add ~> "string"`).
     pub impl_name: String,
+    pub span: Option<Span>,
+}
+
+/// 2026-07-26: Metaproperty declaration: prop Name = expr;
+/// Declares a protocol metaproperty accessible via expr .#Name.
+#[derive(Debug, Clone)]
+pub struct PropDef {
+    pub name: String,
+    pub expr: Expr,
     pub span: Option<Span>,
 }
 

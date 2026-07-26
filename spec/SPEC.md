@@ -1161,35 +1161,164 @@ let packed: Int = p;  // Automatically packed
 - `start..end` - Bit range (end-exclusive)
 - Compiler auto-packs fields into minimal storage
 
-### 3.12 Vector Types (Embedded)
+### 3.12 Vector and Slice Types
 
-Fixed-size vectors for SIMD/embedded:
+Fixed-size arrays (`Vector<T, N>`) and runtime slice views (`Slice<T>`) for
+contiguous and strided element access across all Brief source variants.
+
+#### 3.12a Vector Declaration (`Type[N]`)
+
+`Type[N]` declares a fixed-size array of N elements. The compiler embeds it
+as `[N x T]` in LLVM IR, enabling SROA decomposition and auto-vectorization.
 
 ```brief
-// Vector declaration
-let data: Float[64] @ 0x40000000;  // 64 floats at address
-let ints: Int[16];  // 16 integers
+let data: Float[64];   // 64 floats
+let ints: Int[1024];   // 1024 integers
+let frames: Frame[256]; // 256 frames (struct type)
+```
 
-// Vector operations (via FFI or native)
-defn dot_product(a: Float[4], b: Float[4]) -> Float {
-    let result: Float = 0.0;
-    let i: Int = 0;
-    [i < 4] {
-        &result = result + a[i] * b[i];
-        &i = i + 1;
-    };
+`Int[1024]` → `[1024 x i64]` in LLVM. `Frame[256]` → `[256 x %Frame]`.
+
+Embedded variants (`.ebv`) additionally support memory-mapped vectors:
+
+```brief
+let sensor: Float[8] @ 0x40000000;  // 8 floats at address 0x40000000
+```
+
+#### 3.12b Element Access (`v[i]`)
+
+Index access with contract-proven bounds:
+
+```brief
+v[i]        // Single element access
+v[i] = val; // Single element assignment
+```
+
+Contracts prove bounds at compile time:
+
+```brief
+[i >= 0 && i < arr :#Size] {  // Guarded access
+    let x = arr[i];
+};
+```
+
+#### 3.12c Slice View (`arr[start:end:stride]`)
+
+A slice is a zero-copy view into an existing array. It produces a `Vector<T, M>`
+when all bounds are compile-time constants, or a `Slice<T>` runtime descriptor
+when any bound is a variable.
+
+```brief
+arr[:]         // Full view — same as arr but typed as slice
+arr[4:]        // Index 4 to end
+arr[:8]        // Start to index 8
+arr[2:8]       // Range [2, 8), stride 1
+arr[2:8:2]     // Strided range — every other element
+arr[i:j]       // Dynamic bounds — runtime start and end
+arr[i:j:k]     // Dynamic stride — runtime step
+```
+
+All components are optional:
+- `start = None` → `0`
+- `end = None` → `arr .#Size` (array length)
+- `stride = None` → `1`
+
+**Type rules:**
+
+| Bounds | Result type | Codegen |
+|--------|-------------|---------|
+| All constants: `arr[0:16:2]` | `Vector<T, 8>` | Direct GEP, LLVM auto-vectorizes |
+| Any variable: `arr[i:j:k]` | `Slice<T>` (runtime descriptor) | Runtime loop, contract-proven bounds |
+| Mixed: `arr[i:j:2]` | `Slice<T>` (stride folded to constant) | Partially unrolled loop |
+
+A `Slice<T>` at runtime is a descriptor `{ base_ptr: Ptr<T>, start: Int,
+length: Int, stride: Int }`, or inlined as direct GEP when used immediately.
+
+#### 3.12d SIMD Operators on Vector/Slice
+
+Element-wise arithmetic operators on `Vector<T, N>` and `Slice<T>` types:
+
+```brief
+let a: Int[4] = ...;
+let b: Int[4] = ...;
+let sum = a + b;       // <4 x i64> vector add
+let prod = a * b;      // <4 x i64> vector mul
+let doubled = a * 2;   // Scalar broadcast + vector mul
+```
+
+**Supported operators:** `+`, `-`, `*`, `/` (element-wise on matching types).
+
+**Scalar broadcast:** `arr * 2` broadcasts the scalar across all elements
+via `insertelement` + `shufflevector`.
+
+**Mixed Vector/Slice:** `Vector<T, N>` + `Slice<T>` where both lengths are
+proven equal by contract → same vectorized codegen.
+
+#### 3.12e Slice as Lvalue
+
+Slices can appear on the left of assignment:
+
+```brief
+arr[2:8] = src[4:10];    // Contiguous memcpy (stride 1:1)
+arr[0:N:2] = src[0:N];   // Strided dest, contiguous src — gather/scatter loop
+```
+
+- Contiguous same-stride (1:1): emits `@llvm.memcpy`
+- Different strides: per-element load/store loop, LLVM loop vectorizer handles it
+- Contract system proves source and destination don't overlap (or semantics of
+  overlapping slices are defined)
+
+#### 3.12f View Casts (Type-Punned and Strided)
+
+The `as` operator produces zero-copy views between compatible array types:
+
+**Type-punned view** — reinterpret the same bytes with a different element type:
+
+```brief
+let raw: Int[1024];
+let bytes = raw as Byte[8192];   // 1024 * 8 = 8192 bytes
+let frames = raw as Frame[256];  // if sizeof(Frame) == 32
+let bad = raw as Byte[1000];     // ❌ byte size mismatch
+```
+
+Compile-time validation: `N * sizeof(T) == M * sizeof(U)`. Emits `bitcast`.
+
+**Strided view** — recast a slice onto a sized array:
+
+```brief
+let evens = raw[0:1024:2] as Int[512];  // stride 2 → 512 elements
+let subset = raw[2:10] as Int[8];        // contiguous, 8 elements
+```
+
+The type checker computes: `ceil((end - start) / stride) == N`.
+
+Both are zero-copy — no allocation, no memcpy. The compiler emits `bitcast`
+for matching byte-size vectors.
+
+#### 3.12g Stdlib Iterators (Not Magic)
+
+`map`, `filter`, `fold`, `any`, `all`, `sum`, `product` are regular txn functions
+in `lib/std/array.bv`, not compiler intrinsics:
+
+```brief
+txn array_map<T, U>(arr: Vector<T, N>, f: T -> U, i: Int)
+    -> Vector<U, N>
+    [i < N][i == N]
+{
+    result[i] = f(arr[i]);
+    &i = i + 1;
     term result;
 };
 ```
 
-**Vector syntax:**
-- `Type[N]` - Vector of N elements
-- `v[i]` - Element access
-- Memory-mapped with `@ address`
+The LLVM auto-vectorizer recognizes the `[i < N]` convergence contract and
+vectorizes the load-apply-store loop automatically. No compiler magic needed.
 
 ---
 
-\[Added 2026-05-29\]
+\[Updated 2026-07-26: Generalized from Embedded-only to core. Added slice
+syntax `arr[start:end:stride]`, SIMD operators, slice as lvalue, view casts,
+stdlib iterator pattern.\]
 
 ### 3.13 Match Expression
 

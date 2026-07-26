@@ -545,7 +545,14 @@ impl LlvmBackend {
                 // 5. double/i64 float conversions
                 // 6. Generic bitcast
                 if matches!(target, Type::Ptr(_)) {
-                    writeln!(out, "{}{} = inttoptr i64 {} to ptr", indent, v, src.name).ok();
+                    // 2026-07-26: Only inttoptr when the source is an integer.
+                    // If source is already a pointer, ptr→i64→ptr to assign v.
+                    if src_ll != "ptr" {
+                        writeln!(out, "{}{} = inttoptr i64 {} to ptr", indent, v, src.name).ok();
+                    } else {
+                        writeln!(out, "{}{} = ptrtoint ptr {} to i64", indent, v, src.name).ok();
+                        writeln!(out, "{}{} = inttoptr i64 {} to ptr", indent, v, v).ok();
+                    }
                 } else if *target == Type::string() || *target == Type::data() {
                     if src_ll == "i64" {
                         writeln!(

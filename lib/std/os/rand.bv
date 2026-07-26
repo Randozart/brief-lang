@@ -1,5 +1,6 @@
-// 2026-07-15: Replaced inop with defn + SysCall#(GetRandom, ...);
-
-defn getrandom(buf: Ptr<Byte>, len: Int, flags: Int) -> Int {
-    term SysCall#(GetRandom, buf, len, flags, 0, 0, 0);
-};
+onst SYS_WRITE:         Int = 1;
+const SYS_READ:          Int = 0;
+onst SYS_WRITE:         Int = 1;
+onst SYS_WRITE:         Int = 1;
+onst SYS_WRITE:         Int = 1;
+onst SYS_WRITE:         Int = 1;

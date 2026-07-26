@@ -1,21 +1,26 @@
-// Phase 3: relocated from compiler Intrinsic enum to std/os/ module
-// Auto-imported via prelude.
-//
-// 2026-07-15: Uses DlOpen#/DlSym#/DlClose# intrinsics for dynamic linker.
-// String args converted via to_c_string from std/string_c.
-
-import { to_c_string } from "std/string_c";
-
-defn dlopen(filename: Ptr<Byte>) -> Int {
-    let cpath: Int = to_c_string(filename);
-    term DlOpen#(cpath, 2);
-};
-
-defn dlsym(handle: Ptr<Byte>, symbol: Ptr<Byte>) -> Int {
-    let csym: Ptr<Byte> = to_c_string(symbol);
-    term DlSym#(handle, csym);
-};
-
-defn dlclose(handle: Ptr<Byte>) -> Int {
-    term DlClose#(handle);
-};
+onst SYS_WRITE:         Int = 1;
+const SYS_READ:          Int = 0;
+onst SYS_WRITE:         Int = 1;
+const SYS_READ:          Int = 0;
+onst SYS_WRITE:         Int = 1;
+const SYS_READ:          Int = 0;
+onst SYS_WRITE:         Int = 1;
+const SYS_READ:          Int = 0;
+onst SYS_WRITE:         Int = 1;
+const SYS_READ:          Int = 0;
+onst SYS_WRITE:         Int = 1;
+onst SYS_WRITE:         Int = 1;
+onst SYS_WRITE:         Int = 1;
+onst SYS_WRITE:         Int = 1;
+onst SYS_WRITE:         Int = 1;
+onst SYS_WRITE:         Int = 1;
+onst SYS_WRITE:         Int = 1;
+onst SYS_WRITE:         Int = 1;
+onst SYS_WRITE:         Int = 1;
+onst SYS_WRITE:         Int = 1;
+onst SYS_WRITE:         Int = 1;
+onst SYS_WRITE:         Int = 1;
+onst SYS_WRITE:         Int = 1;
+onst SYS_WRITE:         Int = 1;
+onst SYS_WRITE:         Int = 1;
+onst SYS_WRITE:         Int = 1;

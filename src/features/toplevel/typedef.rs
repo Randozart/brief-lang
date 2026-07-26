@@ -142,7 +142,8 @@ mod tests {
                 make_binding("Bytes", Expr::Decimal(8)),
                 make_binding("Alignment", Expr::Decimal(8)),
             ],
-            operators: vec![], constraints: vec![],
+            operators: vec![],
+            props: vec![], constraints: vec![],
             span: None,
         };
         assert_eq!(body.bindings.len(), 2);

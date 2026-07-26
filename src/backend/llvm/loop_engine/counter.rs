@@ -383,10 +383,11 @@ impl LlvmBackend {
                 .cloned().unwrap_or_else(|| format!("%be_{}", fname));
             let init_f = phi_field_init.get(fname.as_str())
                 .cloned().unwrap_or_else(|| "0".to_string());
-            // 2026-07-21: Use native LLVM type for float fields.
-            let phi_ty = self.ctx.field_types.get(
-                *self.ctx.field_index_map.get(fname.as_str()).unwrap_or(&0)
-            ).cloned().unwrap_or_else(|| "i64".to_string());
+            // 2026-07-26: Always use i64 for phi type — exit condition
+            // evaluation produces i64 for all types (Bool loads zext to i64,
+            // Int is already i64). The trunc/pack to native width happens
+            // during state field storage after the convergence loop.
+            let phi_ty = "i64".to_string();
             writeln!(out, "  {} = phi {} [ {}, %entry ], [ {}, %.cm_latch ]",
                 phi_f, phi_ty, init_f, be_f).ok();
             self.fun.phi_field_regs.insert((*fname).clone(), phi_f);
@@ -459,7 +460,7 @@ impl LlvmBackend {
                     .and_then(|idx| self.ctx.field_types.get(*idx))
                     .cloned().unwrap_or_else(|| "i64".to_string());
                 if field_ty == "float" || field_ty == "double" {
-                    writeln!(out, "  {} = add {} 0, {}", be_f, field_ty, val).ok();
+                    writeln!(out, "  {} = fadd {} 0.0, {}", be_f, field_ty, val).ok();
                 } else {
                     writeln!(out, "  {} = add i64 0, {}", be_f, val).ok();
                 }

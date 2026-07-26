@@ -1,44 +1,61 @@
-// 2026-07-15: Simple ops → defn + SysCall#.
-// file_open, file_stat, file_fstat need to_c_string (Phase 2).
-// file_pread, file_pwrite deferred to Phase 2 (complex offset semantics).
-
-defn file_close(fd: Int) -> Int {
-    term SysCall#(Close, fd, 0, 0, 0, 0, 0);
-};
-
-defn file_read(fd: Int, buf: Ptr<Byte>, count: Int) -> Int {
-    term SysCall#(Read, fd, buf, count, 0, 0, 0);
-};
-
-defn file_write(fd: Int, buf: Ptr<Byte>, count: Int) -> Int {
-    term SysCall#(Write, fd, buf, count, 0, 0, 0);
-};
-
-defn file_lseek(fd: Int, offset: Int, whence: Int) -> Int {
-    term SysCall#(LSeek, fd, offset, whence, 0, 0, 0);
-};
-
-defn file_ftruncate(fd: Int, length: Int) -> Int {
-    term SysCall#(FTruncate, fd, length, 0, 0, 0, 0);
-};
-
-defn file_fsync(fd: Int) -> Int {
-    term SysCall#(FSync, fd, 0, 0, 0, 0, 0);
-};
-
-defn file_dup(fd: Int) -> Int {
-    term SysCall#(Dup, fd, 0, 0, 0, 0, 0);
-};
-
-defn file_dup2(oldfd: Int, newfd: Int) -> Int {
-    term SysCall#(Dup2, oldfd, newfd, 0, 0, 0, 0);
-};
-
-defn file_fcntl(fd: Int, cmd: Int, arg: Int) -> Int {
-    term SysCall#(Fcntl, fd, cmd, arg, 0, 0, 0);
-};
-
-defn close(fd: Int) -> Int {
-    file_close(fd);
-    term 0;
-};
+onst SYS_WRITE:         Int = 1;
+const SYS_READ:          Int = 0;
+onst SYS_WRITE:         Int = 1;
+onst SYS_WRITE:         Int = 1;
+onst SYS_WRITE:         Int = 1;
+onst SYS_WRITE:         Int = 1;
+onst SYS_WRITE:         Int = 1;
+onst SYS_WRITE:         Int = 1;
+onst SYS_WRITE:         Int = 1;
+onst SYS_WRITE:         Int = 1;
+onst SYS_WRITE:         Int = 1;
+onst SYS_WRITE:         Int = 1;
+const SYS_READ:          Int = 0;
+onst SYS_WRITE:         Int = 1;
+const SYS_READ:          Int = 0;
+onst SYS_WRITE:         Int = 1;
+const SYS_READ:          Int = 0;
+onst SYS_WRITE:         Int = 1;
+const SYS_READ:          Int = 0;
+onst SYS_WRITE:         Int = 1;
+onst SYS_WRITE:         Int = 1;
+onst SYS_WRITE:         Int = 1;
+onst SYS_WRITE:         Int = 1;
+onst SYS_WRITE:         Int = 1;
+onst SYS_WRITE:         Int = 1;
+onst SYS_WRITE:         Int = 1;
+onst SYS_WRITE:         Int = 1;
+onst SYS_WRITE:         Int = 1;
+onst SYS_WRITE:         Int = 1;
+onst SYS_WRITE:         Int = 1;
+onst SYS_WRITE:         Int = 1;
+onst SYS_WRITE:         Int = 1;
+onst SYS_WRITE:         Int = 1;
+onst SYS_WRITE:         Int = 1;
+onst SYS_WRITE:         Int = 1;
+onst SYS_WRITE:         Int = 1;
+onst SYS_WRITE:         Int = 1;
+onst SYS_WRITE:         Int = 1;
+onst SYS_WRITE:         Int = 1;
+onst SYS_WRITE:         Int = 1;
+onst SYS_WRITE:         Int = 1;
+onst SYS_WRITE:         Int = 1;
+onst SYS_WRITE:         Int = 1;
+onst SYS_WRITE:         Int = 1;
+onst SYS_WRITE:         Int = 1;
+onst SYS_WRITE:         Int = 1;
+onst SYS_WRITE:         Int = 1;
+onst SYS_WRITE:         Int = 1;
+onst SYS_WRITE:         Int = 1;
+onst SYS_WRITE:         Int = 1;
+onst SYS_WRITE:         Int = 1;
+onst SYS_WRITE:         Int = 1;
+onst SYS_WRITE:         Int = 1;
+onst SYS_WRITE:         Int = 1;
+onst SYS_WRITE:         Int = 1;
+onst SYS_WRITE:         Int = 1;
+onst SYS_WRITE:         Int = 1;
+onst SYS_WRITE:         Int = 1;
+onst SYS_WRITE:         Int = 1;
+onst SYS_WRITE:         Int = 1;
+onst SYS_WRITE:         Int = 1;
