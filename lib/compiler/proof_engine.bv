@@ -220,7 +220,7 @@ defn constraints_satisfiable(constraints: List<SymbolicValue>) -> Bool {
         [!check_constraint(constraints[i])] {
             term false;
         };
-        &i = i + 1;
+        i = i + 1;
     };
     term true;
 }
@@ -262,7 +262,7 @@ defn explore_paths(stmts: List<Statement>, initial: SymbolicState) -> List<Execu
             // Handle guarded statements (branching)
             let was_guarded: Bool = false;
             uni stmt(StmtGuarded(condition, body)) = {
-                &was_guarded = true;
+                was_guarded = true;
                 // Evaluate condition symbolically
                 let cond_sym = eval_symbolic(condition, state);
                 let cond_simp = simplify(cond_sym);
@@ -302,7 +302,7 @@ defn explore_paths(stmts: List<Statement>, initial: SymbolicState) -> List<Execu
             };
         };
         
-        &iterations = iterations + 1;
+        iterations = iterations + 1;
     };
     
     term paths;
@@ -332,8 +332,8 @@ defn execute_statement_symbolic(stmt: Statement, state: SymbolicState) -> Symbol
         let i: Int = 0;
         let st = state;
         [i < body.len()] {
-            &st = execute_statement_symbolic(body[i], st);
-            &i = i + 1;
+            st = execute_statement_symbolic(body[i], st);
+            i = i + 1;
         };
         term st;
     };
@@ -375,7 +375,7 @@ defn verify_contract(txn: Transaction) -> ProofResult {
     [i < txn.params.len()] {
         let param = txn.params[i];
         initial = state_assign(initial, "@" + param.name, SymVar("@old_" + param.name));
-        &i = i + 1;
+        i = i + 1;
     };
 
     // For state variables referenced in the contract, also track @prior values.
@@ -416,8 +416,8 @@ defn verify_contract(txn: Transaction) -> ProofResult {
                     
                     [!left_str == right_str && !left_expanded == right_expanded &&
                      !left_expanded == right_str && !right_expanded == left_str] {
-                        &all_verified = false;
-                        &counterexample = Some(CounterExample {
+                        all_verified = false;
+                        counterexample = Some(CounterExample {
                             inputs: path.final_state.vars,
                             path: path,
                             violation: "Postcondition not satisfied"
@@ -427,7 +427,7 @@ defn verify_contract(txn: Transaction) -> ProofResult {
             };
         };
         
-        &i = i + 1;
+        i = i + 1;
     };
     
     term ProofResult {
@@ -492,11 +492,11 @@ defn str_replace(s: String, from: String, to: String) -> String {
     [i < s.len()] {
         [s[i..i + from.len()] == from] {
             result = result + to;
-            &i = i + from.len();
+            i = i + from.len();
         };
         [!s[i..i + from.len()] == from] {
             result = result + s[i];
-            &i = i + 1;
+            i = i + 1;
         };
     };
     term result;
@@ -575,9 +575,9 @@ defn check_mutual_exclusion(txn1: Transaction, txn2: Transaction) -> ConflictRes
                     explanation: "Both transactions write to variable: " + writes1[i]
                 };
             };
-            &j = j + 1;
+            j = j + 1;
         };
-        &i = i + 1;
+        i = i + 1;
     };
     
     term ConflictResult {
@@ -636,7 +636,7 @@ defn collect_writes(stmts: List<Statement>) -> List<String> {
             writes = writes.append_all(then_writes);
             writes = writes.append_all(else_writes);
         };
-        &i = i + 1;
+        i = i + 1;
     };
     
     term writes;
@@ -673,16 +673,16 @@ defn detect_deadlock(txns: List<Transaction>) -> DeadlockResult {
                         [reads[k] == other_writes[l]] {
                             txn_deps = txn_deps.append(txns[j].name);
                         };
-                        &l = l + 1;
+                        l = l + 1;
                     };
-                    &k = k + 1;
+                    k = k + 1;
                 };
             };
-            &j = j + 1;
+            j = j + 1;
         };
         
         deps = deps.insert(cur_txn.name, txn_deps);
-        &i = i + 1;
+        i = i + 1;
     };
     
     // Check for cycles using DFS
@@ -701,7 +701,7 @@ defn detect_deadlock(txns: List<Transaction>) -> DeadlockResult {
                 };
             };
         };
-        &i = i + 1;
+        i = i + 1;
     };
     
     term DeadlockResult {
@@ -737,7 +737,7 @@ defn dfs_cycle(node: String, deps: HashMap<String, List<String>>,
                 // Found cycle
                 term (true, path.append(neighbor));
             };
-            &i = i + 1;
+            i = i + 1;
         };
     };
     
@@ -783,7 +783,7 @@ defn collect_reads_expr(expr: Expr) -> List<String> {
         let i: Int = 0;
         [i < args.len()] {
             reads = reads.append_all(collect_reads_expr(args[i]));
-            &i = i + 1;
+            i = i + 1;
         };
         term reads;
     };
@@ -793,7 +793,7 @@ defn collect_reads_expr(expr: Expr) -> List<String> {
         let i: Int = 0;
         [i < items.len()] {
             reads = reads.append_all(collect_reads_expr(items[i]));
-            &i = i + 1;
+            i = i + 1;
         };
         term reads;
     };
@@ -803,7 +803,7 @@ defn collect_reads_expr(expr: Expr) -> List<String> {
         let i: Int = 0;
         [i < fields.len()] {
             reads = reads.append_all(collect_reads_expr(fields[i].1));
-            &i = i + 1;
+            i = i + 1;
         };
         term reads;
     };
@@ -833,7 +833,7 @@ defn collect_reads(stmts: List<Statement>) -> List<String> {
                 [values[j].is_some()] {
                     reads = reads.append_all(collect_reads_expr(values[j].unwrap()));
                 };
-                &j = j + 1;
+                j = j + 1;
             };
         };
         uni stmts[i](StmtGuarded(condition, body)) = {
@@ -862,7 +862,7 @@ defn collect_reads(stmts: List<Statement>) -> List<String> {
         uni stmts[i](StmtExpr(expr)) = {
             reads = reads.append_all(collect_reads_expr(expr));
         };
-        &i = i + 1;
+        i = i + 1;
     };
     
     term reads;
@@ -894,7 +894,7 @@ defn check_vc(vc: VerificationCondition) -> Bool {
     let i: Int = 0;
     [i < vc.assumptions.len()] {
         state = state_add_constraint(state, vc.assumptions[i]);
-        &i = i + 1;
+        i = i + 1;
     };
     
     // Check if conclusion holds
@@ -980,20 +980,20 @@ defn collect_simd_ops(body: List<Statement>) -> List<SimdOp> {
     [i < len(body)] {
         uni body[i](StmtExpr(expr)) = {
             let result = collect_simd_ops_in_expr(expr, "expr");
-            &ops = ops.append_all(result);
+            ops = ops.append_all(result);
         };
         uni body[i](StmtAssign(lhs, rhs, _)) = {
             let result = collect_simd_ops_in_expr(rhs, "assign");
-            &ops = ops.append_all(result);
+            ops = ops.append_all(result);
         };
         uni body[i](StmtLet(_, _, init_opt, _, _)) = {
             [is_some(init_opt)] {
                 let init = unwrap(init_opt);
                 let result = collect_simd_ops_in_expr(init, "let");
-                &ops = ops.append_all(result);
+                ops = ops.append_all(result);
             };
         };
-        &i = i + 1;
+        i = i + 1;
     };
     term ops;
 }
@@ -1020,8 +1020,8 @@ defn check_list_simd_lengths(program: Program) -> List<String> {
             let j: Int = 0;
             [j < len(ops)] {
                 let msg = "SIMD op: " + ops[j].left + " " + ops[j].right + " in " + ops[j].context;
-                &errors = errors.append(msg);
-                &j = j + 1;
+                errors = errors.append(msg);
+                j = j + 1;
             };
         };
         uni program.items[i](TopDefn(defn)) = {
@@ -1029,11 +1029,11 @@ defn check_list_simd_lengths(program: Program) -> List<String> {
             let j: Int = 0;
             [j < len(ops)] {
                 let msg = "SIMD op: " + ops[j].left + " " + ops[j].right + " in " + ops[j].context;
-                &errors = errors.append(msg);
-                &j = j + 1;
+                errors = errors.append(msg);
+                j = j + 1;
             };
         };
-        &i = i + 1;
+        i = i + 1;
     };
     term errors;
 }

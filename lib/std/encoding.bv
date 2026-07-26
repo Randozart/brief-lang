@@ -76,11 +76,11 @@ txn url_encode_loop(s: String, result: String, i: Int)
 {
   let c: String = s[i..i+1];
   when c == " " {
-    &result = result + "%20";
+    result = result + "%20";
   } {
-    &result = result + c;
+    result = result + c;
   };
-  &i = i + 1;
+  i = i + 1;
   term result;
 };
 
@@ -93,11 +93,11 @@ txn url_decode_loop(s: String, result: String, i: Int)
     [i < s .#Size][i == s .#Size] -> String
 {
   when i + 2 < s .#Size && s[i..i+1] == "%" && s[i+1..i+3] == "20" {
-    &result = result + " ";
-    &i = i + 3;
+    result = result + " ";
+    i = i + 3;
   } {
-    &result = result + s[i..i+1];
-    &i = i + 1;
+    result = result + s[i..i+1];
+    i = i + 1;
   };
   term result;
 };
@@ -113,7 +113,7 @@ txn is_hex_loop(s: String, i: Int)
   when !is_hex_digit(s[i..i+1]) {
     term false;
   };
-  &i = i + 1;
+  i = i + 1;
   term true;
 };
 
@@ -126,8 +126,8 @@ defn is_hex_string(s: String) [true][term == true || term == false] -> Bool {
 txn reverse_string_loop(s: String, result: String, i: Int)
     [i >= 0][i < 0] -> String
 {
-  &result = result + s[i..i+1];
-  &i = i - 1;
+  result = result + s[i..i+1];
+  i = i - 1;
   term result;
 };
 
@@ -141,16 +141,16 @@ txn count_char_loop(s: String, c: String, count: Int, i: Int)
     [i < s .#Size][i == s .#Size] -> Int
 {
   when s[i..i+1] == c {
-    &count = count + 1;
+    count = count + 1;
   };
-  &i = i + 1;
+  i = i + 1;
   term count;
 };
 
 defn count_char(s: String, c: String) [c .#Size == 1][term >= 0] -> Int {
   term count_char_loop(s, c, 0, 0);
 };
-    &i = i + 1;
+    i = i + 1;
   };
   term result;
 };
@@ -161,11 +161,11 @@ defn url_decode_simple(s: String) [true][term .#Size <= s .#Size] -> String {
   let i: Int = 0;
   when i < s .#Size {
     when i + 2 < s .#Size && s[i..i+1] == "%" && s[i+1..i+3] == "20" {
-      &result = result + " ";
-      &i = i + 3;
+      result = result + " ";
+      i = i + 3;
     } {
-      &result = result + s[i..i+1];
-      &i = i + 1;
+      result = result + s[i..i+1];
+      i = i + 1;
     };
   };
   term result;
@@ -186,11 +186,11 @@ defn is_hex_string(s: String) [true][term == true || term == false] -> Bool {
   let valid: Bool = true;
   when i < s .#Size && valid {
     when is_hex_digit(s[i..i+1]) {
-      &valid = true;
+      valid = true;
     } {
-      &valid = false;
+      valid = false;
     };
-    &i = i + 1;
+    i = i + 1;
   };
   term valid;
 };
@@ -201,8 +201,8 @@ defn reverse_string(s: String) [true][term .#Size == s .#Size] -> String {
   let result: String = "";
   let i: Int = s .#Size - 1;
   when i >= 0 {
-    &result = result + s[i..i+1];
-    &i = i - 1;
+    result = result + s[i..i+1];
+    i = i - 1;
   };
   term result;
 };
@@ -213,9 +213,9 @@ defn count_char(s: String, c: String) [c .#Size == 1][term >= 0] -> Int {
   let i: Int = 0;
   when i < s .#Size {
     when s[i..i+1] == c {
-      &count = count + 1;
+      count = count + 1;
     };
-    &i = i + 1;
+    i = i + 1;
   };
   term count;
 };

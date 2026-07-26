@@ -30,7 +30,7 @@ defn to_list<T>(queue: Queue<T>) -> List<T> {
     let q: Queue<T> = queue;
     when !q.is_empty() {
         let v: T = <- &q;
-        &result = result + [v];
+        result = result + [v];
     };
     term result;
 };
@@ -38,7 +38,7 @@ txn from_list_loop<T>(items: List<T>, result: Queue<T>, i: Int)
     [i < items .#Size][i == items .#Size] -> Queue<T>
 {
     &result <- items[i];
-    &i = i + 1;
+    i = i + 1;
     term result;
 };
 defn from_list<T>(items: List<T>) -> Queue<T> {

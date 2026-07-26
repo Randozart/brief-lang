@@ -112,7 +112,7 @@ defn generate_entity(name: String, ports: List<Port>, generics: List<GenericPara
             };
             [i < generics.len() - 1] { sb = sb.append_str(";"); };
             sb = sb.append_str("\n");
-            &i = i + 1;
+            i = i + 1;
         };
         sb = sb.append_str("  );\n");
     };
@@ -128,7 +128,7 @@ defn generate_entity(name: String, ports: List<Port>, generics: List<GenericPara
         sb = sb.append_str(vhdl_type_str(ports[i].data_type));
         [i < ports.len() - 1] { sb = sb.append_str(";"); };
         sb = sb.append_str("\n");
-        &i = i + 1;
+        i = i + 1;
     };
     sb = sb.append_str("  );\n");
     sb = sb.append_str("end entity ");
@@ -160,7 +160,7 @@ defn generate_architecture(entity_name: String, signals: List<Signal>, processes
                 };
             };
             sb = sb.append_str(";\n");
-            &i = i + 1;
+            i = i + 1;
         };
     };
 
@@ -176,7 +176,7 @@ defn generate_architecture(entity_name: String, signals: List<Signal>, processes
         [j < processes[i].sensitivity_list.len()] {
             sb = sb.append_str(processes[i].sensitivity_list[j]);
             [j < processes[i].sensitivity_list.len() - 1] { sb = sb.append_str(", "); };
-            &j = j + 1;
+            j = j + 1;
         };
         sb = sb.append_str(") is\n");
         sb = sb.append_str("  begin\n");
@@ -186,13 +186,13 @@ defn generate_architecture(entity_name: String, signals: List<Signal>, processes
             sb = sb.append_str("    ");
             sb = sb.append_str(processes[i].statements[j]);
             sb = sb.append_str("\n");
-            &j = j + 1;
+            j = j + 1;
         };
 
         sb = sb.append_str("  end process ");
         sb = sb.append_str(processes[i].name);
         sb = sb.append_str(";\n");
-        &i = i + 1;
+        i = i + 1;
     };
 
     sb = sb.append_str("end behavioral;\n");
@@ -210,7 +210,7 @@ defn transaction_to_vhdl(txn: Transaction, state_names: List<String>) -> Process
     let i: Int = 0;
     [i < txn.body.len()] {
         stmts = append(stmts, statement_to_vhdl(txn.body[i]));
-        &i = i + 1;
+        i = i + 1;
     };
 
     // Sensitivity: clock and reset
@@ -232,7 +232,7 @@ defn statement_to_vhdl(stmt: Statement) -> String {
         let i: Int = 0;
         [i < body.len()] {
             result = result + "      " + statement_to_vhdl(body[i]) + "\n";
-            &i = i + 1;
+            i = i + 1;
         };
         term result + "    end if;";
     };
@@ -304,7 +304,7 @@ defn generate_vhdl(program: Program, cg: CallGraphResult) -> (String, String) {
                 default_value: None
             });
         };
-        &i = i + 1;
+        i = i + 1;
     };
 
     // Add clock and reset ports
@@ -317,7 +317,7 @@ defn generate_vhdl(program: Program, cg: CallGraphResult) -> (String, String) {
         uni program.items[i](TopTxn(txn)) = {
             processes = append(processes, transaction_to_vhdl(txn, state_names));
         };
-        &i = i + 1;
+        i = i + 1;
     };
 
     // Determine entity name from file or default

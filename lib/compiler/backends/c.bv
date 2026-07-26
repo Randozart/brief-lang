@@ -35,7 +35,7 @@ defn generate_c(program: Program, cg: CallGraphResult) -> String {
             };
             output = output.append_str(";\n");
         };
-        &i = i + 1;
+        i = i + 1;
     };
     
     output = output.append_str("\n");
@@ -47,7 +47,7 @@ defn generate_c(program: Program, cg: CallGraphResult) -> String {
             output = output.append_str(generate_c_transaction(txn));
             output = output.append_str("\n");
         };
-        &j = j + 1;
+        j = j + 1;
     };
     
     // Generate reactor
@@ -99,7 +99,7 @@ defn generate_c_block(stmts: List<Statement>) -> String {
     let i: Int = 0;
     [i < stmts.len()] {
         output = output.append_str(generate_c_statement(stmts[i]));
-        &i = i + 1;
+        i = i + 1;
     };
     
     term output.to_string();
@@ -169,7 +169,7 @@ defn generate_c_statement(stmt: Statement) -> String {
         let output = new_builder();
         output = output.append_str("/* ");
         let prefix = "alka: ";
-        [block.dangerous] { &prefix = "alka! "; };
+        [block.dangerous] { prefix = "alka! "; };
         output = output.append_str(prefix);
         output = output.append_str(block.content);
         output = output.append_str(" */\n");
@@ -244,7 +244,7 @@ defn generate_c_reactor(program: Program, cg: CallGraphResult) -> String {
                 output = output.append_str(txn.name);
                 output = output.append_str("();\n");
             };
-            &i = i + 1;
+            i = i + 1;
         };
     };
     [cg.has_cycle] {
@@ -256,7 +256,7 @@ defn generate_c_reactor(program: Program, cg: CallGraphResult) -> String {
                 output = output.append_str(txn.name);
                 output = output.append_str("();\n");
             };
-            &i = i + 1;
+            i = i + 1;
         };
     };
     

@@ -24,7 +24,7 @@ import {
 let stdin_buffer: List<String> = [];
 
 node read_stdin_line [sigint == false && stdin_ready == true]] {
-    &stdin_buffer = stdin_buffer + [stdin_line];
+    stdin_buffer = stdin_buffer + [stdin_line];
     term;
 };
 
@@ -32,7 +32,7 @@ node read_stdin_line [sigint == false && stdin_ready == true]] {
 let shutting_down: Bool = false;
 
 node handle_sigint [sigint == true]] {
-    &shutting_down = true;
+    shutting_down = true;
     term;
 };
 
@@ -40,6 +40,6 @@ node handle_sigint [sigint == true]] {
 let tick_count: Int = 0;
 
 node count_ticks [clock_tick_1hz > 0]] {
-    &tick_count = tick_count + 1;
+    tick_count = tick_count + 1;
     term;
 };

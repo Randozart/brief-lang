@@ -47,7 +47,7 @@ defn analyze_call_graph(program: Program) -> CallGraphResult [
             &cg.txn_names = append(cg.txn_names, t.name);
             &cg.graph = map_insert(cg.graph, t.name, []);
         };
-        &i = i + 1;
+        i = i + 1;
     };
     
     // Second pass: extract called transactions
@@ -61,14 +61,14 @@ defn analyze_call_graph(program: Program) -> CallGraphResult [
                 &cg.graph = map_insert(cg.graph, t.name, merged);
             };
         };
-        &j = j + 1;
+        j = j + 1;
     };
     
     // Detect cycles
     let has_cycle_result: Bool = has_cycles(cg.graph, cg.txn_names);
     let found_cylist: List<List<String>> = [];
     [has_cycle_result] {
-        &found_cylist = find_cycles(cg.graph, cg.txn_names);
+        found_cylist = find_cycles(cg.graph, cg.txn_names);
     };
     
     let edge_count: Int = count_edges(cg.graph, cg.txn_names);
@@ -91,18 +91,18 @@ defn extract_calls_from_body(body: List<Statement>) -> List<String> [
     let i: Int = 0;
     [i < len(body)] {
         uni body[i](StmtAssign(assign_expr, _, _)) = {
-            &called = called + collect_call_names(assign_expr);
+            called = called + collect_call_names(assign_expr);
         };
         uni body[i](StmtLet(_, _, opt_expr, _, _)) = {
-            [!opt_expr == None] { &called = called + collect_call_names(opt_expr); };
+            [!opt_expr == None] { called = called + collect_call_names(opt_expr); };
         };
         uni body[i](StmtExpr(stmt_expr)) = {
-            &called = called + collect_call_names(stmt_expr);
+            called = called + collect_call_names(stmt_expr);
         };
         uni body[i](StmtGuarded(_, stmts)) = {
-            &called = called + extract_calls_from_body(stmts);
+            called = called + extract_calls_from_body(stmts);
         };
-        &i = i + 1;
+        i = i + 1;
     };
     term called;
 }
@@ -117,8 +117,8 @@ defn collect_call_names(expr: Expr) -> List<String> [
         let names: List<String> = [name];
         let i: Int = 0;
         [i < len(args)] {
-            &names = names + collect_call_names(args[i]);
-            &i = i + 1;
+            names = names + collect_call_names(args[i]);
+            i = i + 1;
         };
         term names;
     };
@@ -135,8 +135,8 @@ defn collect_call_names(expr: Expr) -> List<String> [
         let names: List<String> = [];
         let i: Int = 0;
         [i < len(elems)] {
-            &names = names + collect_call_names(elems[i]);
-            &i = i + 1;
+            names = names + collect_call_names(elems[i]);
+            i = i + 1;
         };
         term names;
     };
@@ -154,9 +154,9 @@ defn count_edges(graph: Map<String, List<String>>, names: List<String>) -> Int [
     [i < len(names)] {
         let edge_result = map_get(graph, names[i]);
         uni edge_result(Some(edges)) = {
-            &total = total + len(edges);
+            total = total + len(edges);
         };
-        &i = i + 1;
+        i = i + 1;
     };
     term total;
 }
@@ -174,7 +174,7 @@ defn has_cycles(graph: Map<String, List<String>>, names: List<String>) [
         [detect_cycle(names[i], graph, visited, path)] {
             term true;
         };
-        &i = i + 1;
+        i = i + 1;
     };
     term false;
 }
@@ -191,9 +191,9 @@ defn find_cycles(graph: Map<String, List<String>>, names: List<String>) [
         let visited: List<String> = [];
         let path: List<String> = [];
         [detect_cycle(names[i], graph, visited, path)] {
-            &found = append(found, path);
+            found = append(found, path);
         };
-        &i = i + 1;
+        i = i + 1;
     };
     term found;
 }
@@ -215,9 +215,9 @@ defn detect_cycle(
     let pi: Int = 0;
     [pi < len(path)] {
         [path[pi] == node] {
-            &in_path = true;
+            in_path = true;
         };
-        &pi = pi + 1;
+        pi = pi + 1;
     };
     [in_path] {
         term true;
@@ -228,9 +228,9 @@ defn detect_cycle(
     let vi: Int = 0;
     [vi < len(visited)] {
         [visited[vi] == node] {
-            &in_visited = true;
+            in_visited = true;
         };
-        &vi = vi + 1;
+        vi = vi + 1;
     };
     [in_visited] {
         term false;
@@ -247,7 +247,7 @@ defn detect_cycle(
             [detect_cycle(edges[ei], graph, new_visited, new_path)] {
                 term true;
             };
-            &ei = ei + 1;
+            ei = ei + 1;
         };
     };
     
@@ -259,8 +259,8 @@ defn append_all(a: List<String>, b: List<String>) -> List<String> {
     let result = a;
     let i: Int = 0;
     [i < len(b)] {
-        &result = append(result, b[i]);
-        &i = i + 1;
+        result = append(result, b[i]);
+        i = i + 1;
     };
     term result;
 }

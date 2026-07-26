@@ -83,7 +83,7 @@ defn lookup_type(ctx: TypeContext, name: String) -> Option<Type> {
         [contains_key(scope, name)] {
             term get(scope, name);
         };
-        &i = i + 1;
+        i = i + 1;
     };
     term None;
 }
@@ -138,8 +138,8 @@ defn apply_subst(ty: Type, subst: Substitution) -> Type {
             let new_args: List<Type> = [];
             let i: Int = 0;
             [i < len(args)] {
-                &new_args = append(new_args, apply_subst(args[i], subst));
-                &i = i + 1;
+                new_args = append(new_args, apply_subst(args[i], subst));
+                i = i + 1;
             };
             term TypeNamed(name, new_args);
         };
@@ -182,12 +182,12 @@ defn unify(t1: Type, t2: Type, subst: Substitution) -> Result<Substitution, Stri
                     [i < len(args1)] {
                         let result = unify(args1[i], args2[i], new_subst);
                         uni result(Ok(s)) = {
-                            &new_subst = s;
+                            new_subst = s;
                         };
                         uni result(Err(e)) = {
                             term Err(e);
                         };
-                        &i = i + 1;
+                        i = i + 1;
                     };
                     term Ok(new_subst);
                 };
@@ -221,7 +221,7 @@ defn occurs_check(name: String, ty: Type, subst: Substitution) -> Bool {
             [occurs_check(name, args[i], subst)] {
                 term true;
             };
-            &i = i + 1;
+            i = i + 1;
         };
         term false;
     };
@@ -354,7 +354,7 @@ defn infer_expr(expr: Expr, ctx: TypeContext) -> Result<InferResult, String> {
                 uni arg_result(Ok(ar)) = {
                     let result = unify(ar.ty, d.params[i].param_type, subst);
                     uni result(Ok(s)) = {
-                        &subst = s;
+                        subst = s;
                     };
                     uni result(Err(e)) = {
                         term Err(e);
@@ -363,7 +363,7 @@ defn infer_expr(expr: Expr, ctx: TypeContext) -> Result<InferResult, String> {
                 uni arg_result(Err(e)) = {
                     term Err(e);
                 };
-                &i = i + 1;
+                i = i + 1;
             };
             
             let output = d.output_type;
@@ -389,8 +389,8 @@ defn infer_expr(expr: Expr, ctx: TypeContext) -> Result<InferResult, String> {
             uni result(Ok(ir)) = {
             let res_ty = ir.ty;
             let res_subst = ir.subst;
-                &types = append(types, res_ty);
-                &i = i + 1;
+                types = append(types, res_ty);
+                i = i + 1;
             };
             uni result(Err(e)) = { term Err(e); };
         };
@@ -423,7 +423,7 @@ defn check_program(program: Program, strict_mode: Bool) -> Result<TypedProgram, 
         };
         uni program.items[i](TopEnum(enum_def)) = {
         };
-        &i = i + 1;
+        i = i + 1;
     };
     
     let i: Int = 0;
@@ -444,7 +444,7 @@ defn check_program(program: Program, strict_mode: Bool) -> Result<TypedProgram, 
             uni result(Ok(_)) = {
             };
         };
-        &i = i + 1;
+        i = i + 1;
     };
     
     term Ok(program);
@@ -457,18 +457,18 @@ defn check_definition(d: Definition, ctx: TypeContext, strict_mode: Bool) -> Res
     [i < len(d.params)] {
         let result = add_binding(ctx, d.params[i].name, d.params[i].param_type);
         uni result(Ok(c)) = {
-            &ctx = c;
+            ctx = c;
         };
         uni result(Err(e)) = {
             term Err(e);
         };
-        &i = i + 1;
+        i = i + 1;
     };
     
     let return_ty = d.output_type;
     [is_some(return_ty)] {
         let result = add_binding(ctx, "term", unwrap(return_ty));
-        uni result(Ok(c)) = { &ctx = c; };
+        uni result(Ok(c)) = { ctx = c; };
         uni result(Err(_)) = {};
     };
 
@@ -518,16 +518,16 @@ defn check_transaction(t: Transaction, ctx: TypeContext, strict_mode: Bool) -> R
     [i < len(t.params)] {
         let result = add_binding(ctx, t.params[i].name, t.params[i].param_type);
         uni result(Ok(c)) = {
-            &ctx = c;
+            ctx = c;
         };
         uni result(Err(e)) = {
             term Err(e);
         };
-        &i = i + 1;
+        i = i + 1;
     };
     
     let result = add_binding(ctx, "term", TypeInt);
-    uni result(Ok(c)) = { &ctx = c; };
+    uni result(Ok(c)) = { ctx = c; };
     uni result(Err(_)) = {};
 
     let result = infer_expr(t.contract.precondition, ctx);
@@ -592,13 +592,13 @@ defn check_block(stmts: List<Statement>, ctx: TypeContext) -> Result<(Type, Type
     [i < len(stmts)] {
         let result = check_statement(stmts[i], ctx);
         uni result(Ok((stmt_ty, new_ctx))) = {
-            &last_ty = stmt_ty;
-            &ctx = new_ctx;
+            last_ty = stmt_ty;
+            ctx = new_ctx;
         };
         uni result(Err(e)) = {
             term Err(e);
         };
-        &i = i + 1;
+        i = i + 1;
     };
     
     term (last_ty, ctx);
@@ -619,8 +619,8 @@ let result = infer_expr(source_expr, ctx);
                         [types.len() == names.len()] {
                             let i: Int = 0;
                             [i < types.len()] {
-                                &ctx = declare_variable(ctx, names[i], types[i]);
-                                &i = i + 1;
+                                ctx = declare_variable(ctx, names[i], types[i]);
+                                i = i + 1;
                             };
                             term (TypeVoid, ctx);
                         };
@@ -637,14 +637,14 @@ let result = infer_expr(source_expr, ctx);
                     let subst = empty_subst();
                     let result = unify(init_ty, unwrap(var_type), subst);
                     uni result(Ok(_)) = {
-                        &ty = unwrap(var_type);
+                        ty = unwrap(var_type);
                     };
                     uni result(Err(e)) = {
                         term Err(e);
                     };
                 };
                 [!is_some(var_type)] {
-                    &ty = init_ty;
+                    ty = init_ty;
                 };
             };
             uni result(Err(e)) = {
@@ -652,12 +652,12 @@ let result = infer_expr(source_expr, ctx);
             };
         };
         [is_some(var_type) && is_none(init)] {
-            &ty = unwrap(var_type);
+            ty = unwrap(var_type);
         };
         
         let result = add_binding(ctx, name, ty);
         uni result(Ok(c)) = {
-            &ctx = c;
+            ctx = c;
         };
         uni result(Err(e)) = {
             term Err(e);
@@ -782,7 +782,7 @@ let result = infer_expr(source_expr, ctx);
             };
             uni result(Err(e)) = { term Err(e); };
         };
-        &ctx = declare_variable(ctx, name, ty);
+        ctx = declare_variable(ctx, name, ty);
         term (TypeVoid, ctx);
     };
     
@@ -811,7 +811,7 @@ defn type_to_string(ty: Type) -> String {
                     let sb = append_str(sb, ", ");
                 };
                 let sb = append_str(sb, type_to_string(args[i]));
-                &i = i + 1;
+                i = i + 1;
             };
             let sb = append_char(sb, '>');
         };

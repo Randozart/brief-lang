@@ -49,7 +49,7 @@ defn validate_hashtag(tag: Hashtag, backend: String) -> Result<String, String> {
         [supported[i] == name] {
             term Ok("supported");
         };
-        &i = i + 1;
+        i = i + 1;
     };
     
     // Check fallback chain (syntax: #!primary|fallback1|fallback2)
@@ -61,9 +61,9 @@ defn validate_hashtag(tag: Hashtag, backend: String) -> Result<String, String> {
                 [supported[k] == tag.fallback[j]] {
                     term Ok("supported (via fallback: " + tag.fallback[j] + ")");
                 };
-                &k = k + 1;
+                k = k + 1;
             };
-            &j = j + 1;
+            j = j + 1;
         };
     };
     
@@ -92,12 +92,12 @@ defn validate_hashtags_in_stmts(stmts: List<Statement>, backend: String) -> Resu
             [j < len(modifiers)] {
                 let result = validate_hashtag(modifiers[j], backend);
                 uni result(Ok(msg)) = {
-                    &results = results.append("modifier " + modifiers[j].name + ": " + msg);
+                    results = results.append("modifier " + modifiers[j].name + ": " + msg);
                 };
                 uni result(Err(e)) = {
                     term Err(e);
                 };
-                &j = j + 1;
+                j = j + 1;
             };
         };
         uni stmts[i](StmtAssign(_, _, modifiers)) = {
@@ -105,12 +105,12 @@ defn validate_hashtags_in_stmts(stmts: List<Statement>, backend: String) -> Resu
             [j < len(modifiers)] {
                 let result = validate_hashtag(modifiers[j], backend);
                 uni result(Ok(msg)) = {
-                    &results = results.append("modifier " + modifiers[j].name + ": " + msg);
+                    results = results.append("modifier " + modifiers[j].name + ": " + msg);
                 };
                 uni result(Err(e)) = {
                     term Err(e);
                 };
-                &j = j + 1;
+                j = j + 1;
             };
         };
         uni stmts[i](StmtTerm(_, modifiers)) = {
@@ -118,15 +118,15 @@ defn validate_hashtags_in_stmts(stmts: List<Statement>, backend: String) -> Resu
             [j < len(modifiers)] {
                 let result = validate_hashtag(modifiers[j], backend);
                 uni result(Ok(msg)) = {
-                    &results = results.append("modifier " + modifiers[j].name + ": " + msg);
+                    results = results.append("modifier " + modifiers[j].name + ": " + msg);
                 };
                 uni result(Err(e)) = {
                     term Err(e);
                 };
-                &j = j + 1;
+                j = j + 1;
             };
         };
-        &i = i + 1;
+        i = i + 1;
     };
     term Ok(results);
 }
@@ -138,7 +138,7 @@ defn validate_hashtags_in_program(program: Program, backend: String, strict: Boo
         uni program.items[i](TopTxn(txn)) = {
             let result = validate_hashtags_in_stmts(txn.body, backend);
             uni result(Ok(msgs)) = {
-                &all_results = all_results.append_all(msgs);
+                all_results = all_results.append_all(msgs);
             };
             uni result(Err(e)) = {
                 [strict] { term Err(e); };
@@ -148,19 +148,19 @@ defn validate_hashtags_in_program(program: Program, backend: String, strict: Boo
                 [j < len(txn.modifiers)] {
                     let result = validate_hashtag(txn.modifiers[j], backend);
                     uni result(Ok(msg)) = {
-                        &all_results = all_results.append("txn " + txn.name + ": " + msg);
+                        all_results = all_results.append("txn " + txn.name + ": " + msg);
                     };
                     uni result(Err(e)) = {
                         [strict] { term Err(e); };
                     };
-                    &j = j + 1;
+                    j = j + 1;
                 };
             };
         };
         uni program.items[i](TopDefn(defn)) = {
             let result = validate_hashtags_in_stmts(defn.body, backend);
             uni result(Ok(msgs)) = {
-                &all_results = all_results.append_all(msgs);
+                all_results = all_results.append_all(msgs);
             };
             uni result(Err(e)) = {
                 [strict] { term Err(e); };
@@ -170,12 +170,12 @@ defn validate_hashtags_in_program(program: Program, backend: String, strict: Boo
                 [j < len(defn.modifiers)] {
                     let result = validate_hashtag(defn.modifiers[j], backend);
                     uni result(Ok(msg)) = {
-                        &all_results = all_results.append("defn " + defn.name + ": " + msg);
+                        all_results = all_results.append("defn " + defn.name + ": " + msg);
                     };
                     uni result(Err(e)) = {
                         [strict] { term Err(e); };
                     };
-                    &j = j + 1;
+                    j = j + 1;
                 };
             };
         };
@@ -185,16 +185,16 @@ defn validate_hashtags_in_program(program: Program, backend: String, strict: Boo
                 [j < len(struct_def.modifiers)] {
                     let result = validate_hashtag(struct_def.modifiers[j], backend);
                     uni result(Ok(msg)) = {
-                        &all_results = all_results.append("obj " + struct_def.name + ": " + msg);
+                        all_results = all_results.append("obj " + struct_def.name + ": " + msg);
                     };
                     uni result(Err(e)) = {
                         [strict] { term Err(e); };
                     };
-                    &j = j + 1;
+                    j = j + 1;
                 };
             };
         };
-        &i = i + 1;
+        i = i + 1;
     };
     term Ok(all_results);
 }

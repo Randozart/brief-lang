@@ -12,8 +12,8 @@
 txn iter_map_loop<T, U>(list: List<T>, f: T -> U, result: List<U>, i: Int)
     [i < list .#Size][i == list .#Size] -> List<U>
 {
-    &result = result.append(f(list[i]));
-    &i = i + 1;
+    result = result.append(f(list[i]));
+    i = i + 1;
     term result;
 };
 
@@ -26,9 +26,9 @@ txn iter_filter_loop<T>(list: List<T>, pred: T -> Bool, result: List<T>, i: Int)
     [i < list .#Size][i == list .#Size] -> List<T>
 {
     when pred(list[i]) {
-        &result = result.append(list[i]);
+        result = result.append(list[i]);
     };
-    &i = i + 1;
+    i = i + 1;
     term result;
 };
 
@@ -40,8 +40,8 @@ defn iter_filter<T>(list: List<T>, pred: T -> Bool) -> List<T> [true][term .#Siz
 txn iter_fold_loop<T, U>(list: List<T>, f: (U, T) -> U, acc: U, i: Int)
     [i < list .#Size][i == list .#Size] -> U
 {
-    &acc = f(acc, list[i]);
-    &i = i + 1;
+    acc = f(acc, list[i]);
+    i = i + 1;
     term acc;
 };
 
@@ -53,8 +53,8 @@ defn iter_fold<T, U>(list: List<T>, initial: U, f: (U, T) -> U) -> U [f != null]
 txn iter_take_loop<T>(list: List<T>, n: Int, result: List<T>, i: Int)
     [i < n && i < list .#Size][i == n || i == list .#Size] -> List<T>
 {
-    &result = result.append(list[i]);
-    &i = i + 1;
+    result = result.append(list[i]);
+    i = i + 1;
     term result;
 };
 
@@ -66,8 +66,8 @@ defn iter_take<T>(list: List<T>, n: Int) -> List<T> [n >= 0][term .#Size == n.mi
 txn iter_skip_loop<T>(list: List<T>, n: Int, result: List<T>, i: Int)
     [i < list .#Size][i == list .#Size] -> List<T>
 {
-    &result = result.append(list[i]);
-    &i = i + 1;
+    result = result.append(list[i]);
+    i = i + 1;
     term result;
 };
 
@@ -79,8 +79,8 @@ defn iter_skip<T>(list: List<T>, n: Int) -> List<T> [n >= 0][term .#Size == (lis
 txn iter_enumerate_loop<T>(list: List<T>, result: List<(Int, T)>, i: Int)
     [i < list .#Size][i == list .#Size] -> List<(Int, T)>
 {
-    &result = result.append((i, list[i]));
-    &i = i + 1;
+    result = result.append((i, list[i]));
+    i = i + 1;
     term result;
 };
 
@@ -95,7 +95,7 @@ txn iter_find_loop<T>(list: List<T>, pred: T -> Bool, i: Int)
     when pred(list[i]) {
         term Some(list[i]);
     };
-    &i = i + 1;
+    i = i + 1;
     term None;
 };
 
@@ -110,7 +110,7 @@ txn iter_any_loop<T>(list: List<T>, pred: T -> Bool, i: Int)
     when pred(list[i]) {
         term true;
     };
-    &i = i + 1;
+    i = i + 1;
     term false;
 };
 
@@ -125,7 +125,7 @@ txn iter_all_loop<T>(list: List<T>, pred: T -> Bool, i: Int)
     when !pred(list[i]) {
         term false;
     };
-    &i = i + 1;
+    i = i + 1;
     term true;
 };
 
@@ -149,10 +149,10 @@ txn iter_flatmap_loop<T, U>(list: List<T>, f: T -> List<U>, result: List<U>, i: 
 {
     let mapped = f(list[i]);
     when j < mapped .#Size {
-        &result = result.append(mapped[j]);
-        &j = j + 1;
+        result = result.append(mapped[j]);
+        j = j + 1;
     };
-    &i = i + 1;
+    i = i + 1;
     term result;
 };
 
@@ -165,12 +165,12 @@ txn iter_partition_loop<T>(list: List<T>, pred: T -> Bool, trues: List<T>, false
     [i < list .#Size][i == list .#Size] -> (List<T>, List<T>)
 {
     when pred(list[i]) {
-        &trues = trues.append(list[i]);
+        trues = trues.append(list[i]);
     };
     when !pred(list[i]) {
-        &falses = falses.append(list[i]);
+        falses = falses.append(list[i]);
     };
-    &i = i + 1;
+    i = i + 1;
     term (trues, falses);
 };
 
@@ -182,8 +182,8 @@ defn iter_partition<T>(list: List<T>, pred: T -> Bool) -> (List<T>, List<T>) [pr
 txn iter_zip_loop<T, U>(a: List<T>, b: List<U>, result: List<(T, U)>, i: Int)
     [i < a .#Size && i < b .#Size][i == a .#Size || i == b .#Size] -> List<(T, U)>
 {
-    &result = result.append((a[i], b[i]));
-    &i = i + 1;
+    result = result.append((a[i], b[i]));
+    i = i + 1;
     term result;
 };
 
@@ -206,9 +206,9 @@ txn iter_max_loop<T>(list: List<T>, max_val: T, i: Int)
     [i < list .#Size][i == list .#Size] -> Option<T>
 {
     when list[i] > max_val {
-        &max_val = list[i];
+        max_val = list[i];
     };
-    &i = i + 1;
+    i = i + 1;
     term Some(max_val);
 };
 
@@ -221,9 +221,9 @@ txn iter_min_loop<T>(list: List<T>, min_val: T, i: Int)
     [i < list .#Size][i == list .#Size] -> Option<T>
 {
     when list[i] < min_val {
-        &min_val = list[i];
+        min_val = list[i];
     };
-    &i = i + 1;
+    i = i + 1;
     term Some(min_val);
 };
 

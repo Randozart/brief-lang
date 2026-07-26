@@ -53,16 +53,16 @@ defn analyze_parameter_ranges(program: Program) -> Map<String, Map<String, Param
             [pi < len(t.parameters)] {
                 let param_pair = t.parameters[pi];
             let pname = param_pair.0;
-                &param_ranges = map_insert(param_ranges, pname, new_param_range());
-                &pi = pi + 1;
+                param_ranges = map_insert(param_ranges, pname, new_param_range());
+                pi = pi + 1;
             };
             
             // Extract bounds from precondition
-            &param_ranges = extract_bounds_from_expr(t.contract.pre_condition, param_ranges);
+            param_ranges = extract_bounds_from_expr(t.contract.pre_condition, param_ranges);
             
-            &ranges = map_insert(ranges, t.name, param_ranges);
+            ranges = map_insert(ranges, t.name, param_ranges);
         };
-        &i = i + 1;
+        i = i + 1;
     };
     
     term ranges;
@@ -146,7 +146,7 @@ defn set_lower_bound(
     uni range_entry(Some(range)) = {
         let actual_val = val;
         [!inclusive] {
-            &actual_val = val + 1;
+            actual_val = val + 1;
         };
         
         uni range.min(None) = {
@@ -190,7 +190,7 @@ defn set_upper_bound(
     uni range_entry(Some(range)) = {
         let actual_val = val;
         [!inclusive] {
-            &actual_val = val - 1;
+            actual_val = val - 1;
         };
 
         uni range.max(None) = {

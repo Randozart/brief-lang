@@ -70,7 +70,7 @@ node configure_uart [step < 3][step == 3] {
         let final_ok: Bool = write_uart(UART_LCRH, 0x60);
         uart_init_done = final_ok;
         result = result + 2;  // total = 3
-        &step = step + 1;
+        step = step + 1;
         term;
     };
 };

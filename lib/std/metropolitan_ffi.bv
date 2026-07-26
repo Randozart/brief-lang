@@ -104,10 +104,10 @@ enum FFIStatus {
 
 defn write_status(region: SharedRegion, offset: Int, status: FFIStatus) -> Result<Void, String> {
     let status_word: Int = 0;
-    uni status(StatusReady) = { &status_word = 0; };
-    uni status(StatusProcessing) = { &status_word = 1; };
-    uni status(StatusComplete) = { &status_word = 2; };
-    uni status(StatusError(code)) = { &status_word = 0x80000000 | code; };
+    uni status(StatusReady) = { status_word = 0; };
+    uni status(StatusProcessing) = { status_word = 1; };
+    uni status(StatusComplete) = { status_word = 2; };
+    uni status(StatusError(code)) = { status_word = 0x80000000 | code; };
     
     // Write status_word to memory at offset
     term Ok();

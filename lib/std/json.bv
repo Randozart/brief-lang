@@ -79,7 +79,7 @@ txn find_pair(pairs: List<(String, JsonValue)>, key: String, i: Int)
     when pairs[i][0] == key {
         term ok_value(pairs[i][1]);
     };
-    &i = i + 1;
+    i = i + 1;
     when i >= pairs .#Size {
         term err_value(e_utoken());
     };
@@ -103,7 +103,7 @@ txn skip_ws(s: String, pos: Int)
     [pos >= (s .#Size) || !is_whitespace(s[pos])]
     -> Int
 {
-    &pos = pos + 1;
+    pos = pos + 1;
     term pos;
 };
 
@@ -166,33 +166,33 @@ txn parse_str_chars(s: String, pos: Int, sb: StringBuilder)
     -> Result<ParseFrame, String>
 {
     when s[pos] == '\\' {
-        &pos = pos + 1;
+        pos = pos + 1;
         when pos < s .#Size {
             let esc: Char = s[pos];
-            when esc == '"' { &sb = sb.append_char('"');  };
-            when esc == '\\' { &sb = sb.append_char('\\'); };
-            when esc == '/' { &sb = sb.append_char('/');  };
-            when esc == 'n' { &sb = sb.append_char('\n'); };
-            when esc == 'r' { &sb = sb.append_char('\r'); };
-            when esc == 't' { &sb = sb.append_char('\t'); };
-            when esc == 'b' { &sb = sb.append_char('\b'); };
-            when esc == 'f' { &sb = sb.append_char('\f'); };
+            when esc == '"' { sb = sb.append_char('"');  };
+            when esc == '\\' { sb = sb.append_char('\\'); };
+            when esc == '/' { sb = sb.append_char('/');  };
+            when esc == 'n' { sb = sb.append_char('\n'); };
+            when esc == 'r' { sb = sb.append_char('\r'); };
+            when esc == 't' { sb = sb.append_char('\t'); };
+            when esc == 'b' { sb = sb.append_char('\b'); };
+            when esc == 'f' { sb = sb.append_char('\f'); };
             when esc == 'u' {
-                &pos = pos + 1;
+                pos = pos + 1;
                 let uc = parse_hex_escape(s, pos);
                 uni uc(Ok(ch)) -> {
-                    &sb = sb.append_char(ch);
-                    &pos = pos + 4;
+                    sb = sb.append_char(ch);
+                    pos = pos + 4;
                 };
                 uni uc(Err(_)) -> {
                     term err_frame(e_invesc());
                 };
             };
-            &pos = pos + 1;
+            pos = pos + 1;
         };
     };
-    &sb = sb.append_char(s[pos]);
-    &pos = pos + 1;
+    sb = sb.append_char(s[pos]);
+    pos = pos + 1;
     term Ok(ParseFrame { value: StrVal(sb.to_string()), pos: pos });
 };
 
@@ -250,8 +250,8 @@ txn parse_int_digits(s: String, pos: Int, val: Int)
     -> Result<ParseFrame, String>
 {
     let d = digit_to_int(s[pos]);
-    &val = val * 10 + d;
-    &pos = pos + 1;
+    val = val * 10 + d;
+    pos = pos + 1;
     term Ok(ParseFrame { value: IntVal(val), pos: pos });
 };
 
@@ -292,9 +292,9 @@ txn parse_float_digits(s: String, pos: Int, frac: Float, place: Float)
     -> Result<ParseFrame, String>
 {
     let d = digit_to_int(s[pos]) as Float;
-    &frac = frac + d / (place * 10.0);
-    &place = place * 10.0;
-    &pos = pos + 1;
+    frac = frac + d / (place * 10.0);
+    place = place * 10.0;
+    pos = pos + 1;
     term Ok(ParseFrame { value: FloatVal(frac), pos: pos });
 };
 
@@ -342,8 +342,8 @@ defn parse_exponent_apply(base: JsonValue, pow: Float, is_neg_exp: Bool) -> Resu
 txn ten_pow_loop(e: Int, result: Float)
     [e > 0][e == 0] -> Float
 {
-    &result = result * 10.0;
-    &e = e - 1;
+    result = result * 10.0;
+    e = e - 1;
     term result;
 };
 
@@ -382,12 +382,12 @@ txn parse_array_elems(s: String, pos: Int, elems: List<JsonValue>)
 {
     let val = parse_value(s, pos);
     uni val(Ok(frame)) -> {
-        &elems = elems + [frame.value];
-        &pos = frame.pos;
-        &pos = skip_ws(s, pos);
+        elems = elems + [frame.value];
+        pos = frame.pos;
+        pos = skip_ws(s, pos);
         when pos < s .#Size && s[pos] == ',' {
-            &pos = pos + 1;
-            &pos = skip_ws(s, pos);
+            pos = pos + 1;
+            pos = skip_ws(s, pos);
         };
         term Ok(ParseFrame { value: Array(elems), pos: pos });
     };
@@ -426,18 +426,18 @@ txn parse_object_pairs(s: String, pos: Int, pairs: List<(String, JsonValue)>)
     let key_res = parse_string(s, pos);
     uni key_res(Ok(kf)) -> {
         uni kf.value(StrVal(key)) -> {
-            &pos = skip_ws(s, kf.pos);
+            pos = skip_ws(s, kf.pos);
             when pos >= s .#Size || s[pos] != ':' {
                 term err_frame(e_expcolon());
             };
-            &pos = skip_ws(s, pos + 1);
+            pos = skip_ws(s, pos + 1);
             let val_res = parse_value(s, pos);
             uni val_res(Ok(vf)) -> {
-                &pos = skip_ws(s, vf.pos);
-                &pairs = pairs + [(key, vf.value)];
+                pos = skip_ws(s, vf.pos);
+                pairs = pairs + [(key, vf.value)];
                 when pos < s .#Size && s[pos] == ',' {
-                    &pos = pos + 1;
-                    &pos = skip_ws(s, pos);
+                    pos = pos + 1;
+                    pos = skip_ws(s, pos);
                 };
                 term Ok(ParseFrame { value: Object(pairs), pos: pos });
             };
@@ -497,18 +497,18 @@ txn parse_object_pairs(s: String, pos: Int, pairs: List<(String, JsonValue)>)
     let key_res = parse_string(s, pos);
     uni key_res(Ok(kf)) -> {
         uni kf.value(StrVal(key)) -> {
-            &pos = skip_ws(s, kf.pos);
+            pos = skip_ws(s, kf.pos);
             when pos >= s .#Size || s[pos] != ':' {
                 term err_frame(e_expcolon());
             };
-            &pos = skip_ws(s, pos + 1);
+            pos = skip_ws(s, pos + 1);
             let val_res = parse_value(s, pos);
             uni val_res(Ok(vf)) -> {
-                &pos = skip_ws(s, vf.pos);
-                &pairs = pairs + [(key, vf.value)];
+                pos = skip_ws(s, vf.pos);
+                pairs = pairs + [(key, vf.value)];
                 when pos < s .#Size && s[pos] == ',' {
-                    &pos = pos + 1;
-                    &pos = skip_ws(s, pos);
+                    pos = pos + 1;
+                    pos = skip_ws(s, pos);
                 };
                 term Ok(ParseFrame { value: Object(pairs), pos: pos });
             };

@@ -32,7 +32,7 @@ txn union_loop<T>(other_list: List<T>, result: HashSet<T>, i: Int)
     [i < other_list .#Size][i == other_list .#Size] -> HashSet<T>
 {
     &result <- other_list[i];
-    &i = i + 1;
+    i = i + 1;
     term result;
 };
 defn union<T>(a: HashSet<T>, b: HashSet<T>) -> HashSet<T> {
@@ -44,7 +44,7 @@ txn intersection_loop<T>(a_list: List<T>, b: HashSet<T>, result: HashSet<T>, i: 
     when b :> Contains(a_list[i]) {
         &result <- a_list[i];
     };
-    &i = i + 1;
+    i = i + 1;
     term result;
 };
 defn intersection<T>(a: HashSet<T>, b: HashSet<T>) -> HashSet<T> {
@@ -56,7 +56,7 @@ txn difference_loop<T>(a_list: List<T>, b: HashSet<T>, result: HashSet<T>, i: In
     when !b :> Contains(a_list[i]) {
         &result <- a_list[i];
     };
-    &i = i + 1;
+    i = i + 1;
     term result;
 };
 defn difference<T>(a: HashSet<T>, b: HashSet<T>) -> HashSet<T> {
@@ -66,7 +66,7 @@ txn from_list_loop<T>(items: List<T>, result: HashSet<T>, i: Int)
     [i < items .#Size][i == items .#Size] -> HashSet<T>
 {
     &result <- items[i];
-    &i = i + 1;
+    i = i + 1;
     term result;
 };
 defn from_list<T>(items: List<T>) -> HashSet<T> {

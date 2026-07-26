@@ -180,7 +180,7 @@ output = output.append_str(String(len(cg.cylist)));
             output = output.append_str(txn.name);
             output = output.append_str("\n");
         };
-        &i = i + 1;
+        i = i + 1;
     };
     output = output.append_str("\n");
     output = output.append_str("#[tokio::main]\n");
@@ -241,23 +241,23 @@ defn parse_args(args: List<String>) -> (String, String, Bool, Bool) {
     let i: Int = 0;
     [i < args.len()] {
         [args[i] == "--wasm"] {
-            &backend = "wasm";
+            backend = "wasm";
         };
         [args[i] == "--webstack"] {
-            &backend = "webstack";
+            backend = "webstack";
         };
         [args[i] == "--verbose"] {
-            &verbose = true;
+            verbose = true;
         };
         [args[i] == "--strict"] {
-            &strict = true;
+            strict = true;
         };
         [args[i] != "--wasm" && args[i] != "--webstack" && args[i] != "--verbose" && args[i] != "--strict"] {
             [file_path == ""] {
-                &file_path = args[i];
+                file_path = args[i];
             };
         };
-        &i = i + 1;
+        i = i + 1;
     };
 
     term (file_path, backend, verbose, strict);

@@ -7,7 +7,7 @@
 //
 //   import "std/console.bv";
 //   trg inp: String @ Console!;
-//   node handle [[inp != ""] { process(inp); &inp = ""; term; };
+//   node handle [[inp != ""] { process(inp); inp = ""; term; };
 //
 // The `@ Console!` shorthand creates an async persistent Console instance
 // and binds a trigger to its `line` output port. The `Console!` suffix
@@ -20,7 +20,7 @@
 //   let last_id: Int = -1;
 //   node handle [inp_id != last_id]] {
 //       process(inp_line);
-//       &last_id = inp_id;
+//       last_id = inp_id;
 //       term;
 //   };
 //
@@ -41,15 +41,15 @@ cell! Console -> line: String, line_id: Int {
 
     node process [raw != prev_key]] {
         when raw == '\n' {
-            &seq = seq + 1;
-            &line_id = seq;
+            seq = seq + 1;
+            line_id = seq;
         };
 
         when raw >= ' ' && raw != '\x7f' {
-            &line = line + (String)raw;line = (String)raw;
+            line = line + (String)raw;line = (String)raw;
         };
 
-        &prev_key = raw;
+        prev_key = raw;
         term;
     };
 };

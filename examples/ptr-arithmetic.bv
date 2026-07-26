@@ -84,7 +84,7 @@ node run [tick < 1][tick == 1] {
         write_ok = ok;
 
         // volatile_load returns the register value (0 in interpreter)
-        &read_val = volatile_load#(uart_tx);
+        read_val = volatile_load#(uart_tx);
 
         term! -> Print#(result);
     } else {

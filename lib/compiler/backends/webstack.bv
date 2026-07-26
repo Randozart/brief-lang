@@ -46,7 +46,7 @@ defn generate_state_struct(signals: List<SignalInfo>) -> String {
         output = output.append_str(": ");
         output = output.append_str(signals[i].signal_type);
         output = output.append_str(",\n");
-        &i = i + 1;
+        i = i + 1;
     };
     
     output = output.append_str("}\n\n");
@@ -71,7 +71,7 @@ defn generate_reactive_engine(txns: List<TransactionInfo>) -> String {
         output = output.append_str(" {\n");
         output = output.append_str("            changed = true;\n");
         output = output.append_str("        }\n");
-        &i = i + 1;
+        i = i + 1;
     };
     
     output = output.append_str("        changed\n");
@@ -103,7 +103,7 @@ defn generate_js_glue(state_name: String, signals: List<SignalInfo>) -> String {
         output = output.append_str(signals[i].name);
         output = output.append_str(";\n");
         output = output.append_str("}\n\n");
-        &i = i + 1;
+        i = i + 1;
     };
     
     term output.to_string();
@@ -137,7 +137,7 @@ defn generate_webstack(program: Program, program_name: String, cg: CallGraphResu
                         index: signals.len(),
                     });
                 };
-                &j = j + 1;
+                j = j + 1;
             };
         };
         uni program.items[i](TopDefn(defn)) = {
@@ -150,16 +150,16 @@ defn generate_webstack(program: Program, program_name: String, cg: CallGraphResu
                 });
             };
         };
-        &i = i + 1;
+        i = i + 1;
     };
     
     // Emit acyclicity annotation in Rust output
     let acyc_comment: String;
     [!cg.has_cycle] {
-        &acyc_comment = "// Call graph: acyclic -- static dispatch enabled\n";
+        acyc_comment = "// Call graph: acyclic -- static dispatch enabled\n";
     };
     [cg.has_cycle] {
-        &acyc_comment = "// Call graph: cyclic -- dynamic dispatch required\n";
+        acyc_comment = "// Call graph: cyclic -- dynamic dispatch required\n";
     };
 
     // Generate components

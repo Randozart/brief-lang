@@ -27,7 +27,7 @@ defn generate_llvm(program: Program, cg: CgResult) -> String {
     let fi: Int = 0;
     [fi < len(fields)] {
         [!first] { sb = sb.append_str(", "); };
-        sb = sb.append_str(fields[fi]); &first = false; &fi = fi + 1;
+        sb = sb.append_str(fields[fi]); first = false; fi = fi + 1;
     };
     sb = sb.append_str(" }\n");
     sb = sb.append_str("@global_state = global %State zeroinitializer\n\n");
@@ -39,7 +39,7 @@ defn generate_llvm(program: Program, cg: CgResult) -> String {
             sb = sb.append_str(emit_defn(defn));
             sb = sb.append_str("\n");
         };
-        &di = di + 1;
+        di = di + 1;
     };
 
     // Transactions
@@ -49,7 +49,7 @@ defn generate_llvm(program: Program, cg: CgResult) -> String {
             sb = sb.append_str(emit_txn(txn, fields, field_names));
             sb = sb.append_str("\n");
         };
-        &ti = ti + 1;
+        ti = ti + 1;
     };
 
     // Precondition functions
@@ -59,7 +59,7 @@ defn generate_llvm(program: Program, cg: CgResult) -> String {
             sb = sb.append_str(emit_pre_func(txn, fields, field_names));
             sb = sb.append_str("\n");
         };
-        &pi = pi + 1;
+        pi = pi + 1;
     };
 
     // Init state
@@ -104,9 +104,9 @@ defn collect_field_types(program: Program) -> List<String> {
     let i: Int = 0;
     [i < len(program.items)] {
         uni program.items[i](TopState(decl)) = {
-            &result = result.append(llvm_type(decl.state_type));
+            result = result.append(llvm_type(decl.state_type));
         };
-        &i = i + 1;
+        i = i + 1;
     };
     term result;
 }
@@ -116,9 +116,9 @@ defn collect_field_names(program: Program) -> List<String> {
     let i: Int = 0;
     [i < len(program.items)] {
         uni program.items[i](TopState(decl)) = {
-            &result = result.append(decl.name);
+            result = result.append(decl.name);
         };
-        &i = i + 1;
+        i = i + 1;
     };
     term result;
 }
@@ -127,7 +127,7 @@ defn field_index(name: String, names: List<String>) -> Int {
     let i: Int = 0;
     [i < len(names)] {
         [names[i] == name] { term i; };
-        &i = i + 1;
+        i = i + 1;
     };
     term 0;
 }
@@ -135,8 +135,8 @@ defn field_index(name: String, names: List<String>) -> Int {
 defn count_triggers(program: Program) -> Int {
     let c: Int = 0; let i: Int = 0;
     [i < len(program.items)] {
-        uni program.items[i](TopTrigger(_)) = { &c = c + 1; };
-        &i = i + 1;
+        uni program.items[i](TopTrigger(_)) = { c = c + 1; };
+        i = i + 1;
     };
     term c;
 }
@@ -159,7 +159,7 @@ defn emit_init_state(fields: List<String>) -> String {
         sb = sb.append_str("), align ");
         sb = sb.append_str(String(align_of(ty)));
         sb = sb.append_str("\n");
-        &i = i + 1;
+        i = i + 1;
     };
     sb = sb.append_str("  ret void\n}\n");
     term sb.to_string();
@@ -178,7 +178,7 @@ defn emit_defn(defn: Definition) -> String {
         sb = sb.append_str(llvm_type(defn.params[i].param_type));
         sb = sb.append_str(" %arg");
         sb = sb.append_str(String(i));
-        &i = i + 1;
+        i = i + 1;
     };
     sb = sb.append_str(") local_unnamed_addr #0 {\n  entry:\n");
     let j: Int = 0;
@@ -197,7 +197,7 @@ defn emit_defn(defn: Definition) -> String {
             sb = sb.append_str("  %ai" + String(j) + " = bitcast float %arg" + String(j) + " to i32\n");
             sb = sb.append_str("  %ac" + String(j) + " = zext i32 %ai" + String(j) + " to i64\n");
         };
-        &j = j + 1;
+        j = j + 1;
     };
     sb = sb.append_str(emit_body(defn.body));
     sb = sb.append_str("}\n");
@@ -235,7 +235,7 @@ defn emit_body(body: List<Statement>) -> String {
     let i: Int = 0;
     [i < len(body)] {
         sb = sb.append_str(emit_stmt(body[i]));
-        &i = i + 1;
+        i = i + 1;
     };
     term sb.to_string();
 }

@@ -42,8 +42,8 @@ defn clear<K,V>(map: HashMap<K,V>) -> HashMap<K,V> {
 txn iter_loop<K,V>(ks: List<K>, vs: List<V>, result: List<(K,V)>, i: Int)
     [i < ks .#Size][i == ks .#Size] -> List<(K,V)>
 {
-    &result = result + [(ks[i], vs[i])];
-    &i = i + 1;
+    result = result + [(ks[i], vs[i])];
+    i = i + 1;
     term result;
 };
 defn iter<K,V>(map: HashMap<K,V>) -> List<(K,V)> {
@@ -53,7 +53,7 @@ txn merge_loop<K,V>(bk: List<K>, bv: List<V>, result: HashMap<K,V>, i: Int)
     [i < bk .#Size][i == bk .#Size] -> HashMap<K,V>
 {
     &result <- (bk[i], bv[i]);
-    &i = i + 1;
+    i = i + 1;
     term result;
 };
 defn merge<K,V>(a: HashMap<K,V>, b: HashMap<K,V>) -> HashMap<K,V> {
@@ -65,7 +65,7 @@ txn filter_loop<K,V>(mk: List<K>, mv: List<V>, pred: (K, V) -> Bool, result: Has
     when pred(mk[i], mv[i]) {
         &result <- (mk[i], mv[i]);
     };
-    &i = i + 1;
+    i = i + 1;
     term result;
 };
 defn filter<K,V>(map: HashMap<K,V>, pred: (K, V) -> Bool) -> HashMap<K,V> {

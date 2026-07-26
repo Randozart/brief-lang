@@ -9,6 +9,6 @@ txn load_user [fetch_status == false]
   let result = fetch_user(user_id);
   
   Bool(b) = result;
-  [b == true] &fetch_status = true;
+  [b == true] fetch_status = true;
   term;
 };

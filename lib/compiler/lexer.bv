@@ -76,8 +76,8 @@ defn advance(state: LexerState) -> LexerState {
 defn skip_chars(state: LexerState, count: Int) -> LexerState {
     let i: Int = 0;
     [i < count] {
-        &state = advance(state);
-        &i = i + 1;
+        state = advance(state);
+        i = i + 1;
     };
     term state;
 }
@@ -107,7 +107,7 @@ defn skip_whitespace(state: LexerState) -> LexerState {
     [is_some(current_char(state))] {
         let c = unwrap(current_char(state));
         [is_whitespace(c)] {
-            &state = advance(state);
+            state = advance(state);
             term skip_whitespace(state);
         };
     };
@@ -120,7 +120,7 @@ defn skip_comment(state: LexerState) -> LexerState {
     [is_some(current_char(state))] {
         let c = unwrap(current_char(state));
         [c != '\n'] {
-            &state = advance(state);
+            state = advance(state);
             term skip_comment(state);
         };
     };
@@ -132,7 +132,7 @@ defn read_identifier(state: LexerState) -> (Token, LexerState) {
     [is_some(current_char(state))] {
         let c = unwrap(current_char(state));
         [is_alphanumeric(c) || c == '_'] {
-            &state = advance(state);
+            state = advance(state);
             let (tok, state) = read_identifier(state);
             term (tok, state);
         };
@@ -178,8 +178,8 @@ defn read_number(state: LexerState) -> (Token, LexerState) {
         [is_some(peek_char(state, 1))] {
             let next = unwrap(peek_char(state, 1));
             [next == 'x' || next == 'X'] {
-                &state = advance(state);  // consume 0
-                &state = advance(state);  // consume x/X
+                state = advance(state);  // consume 0
+                state = advance(state);  // consume x/X
                 let (tok, state) = read_hex_number(state);
                 term (tok, state);
             };
@@ -190,7 +190,7 @@ defn read_number(state: LexerState) -> (Token, LexerState) {
     [is_some(current_char(state))] {
         let c = unwrap(current_char(state));
         [is_digit(c)] {
-            &state = advance(state);
+            state = advance(state);
             let (tok, state) = read_number(state);
             term (tok, state);
         };
@@ -199,7 +199,7 @@ defn read_number(state: LexerState) -> (Token, LexerState) {
             [is_some(peek_char(state, 1))] {
                 let next = unwrap(peek_char(state, 1));
                 [is_digit(next)] {
-                    &state = advance(state);  // consume .
+                    state = advance(state);  // consume .
                     let (tok, state) = read_float_fraction(state);
                     term (tok, state);
                 };
@@ -216,7 +216,7 @@ defn read_hex_number(state: LexerState) -> (Token, LexerState) {
     [is_some(current_char(state))] {
         let c = unwrap(current_char(state));
         [is_hex_digit(c)] {
-            &state = advance(state);
+            state = advance(state);
             let (tok, state) = read_hex_number(state);
             term (tok, state);
         };
@@ -230,7 +230,7 @@ defn read_float_fraction(state: LexerState) -> (Token, LexerState) {
     [is_some(current_char(state))] {
         let c = unwrap(current_char(state));
         [is_digit(c)] {
-            &state = advance(state);
+            state = advance(state);
             let (tok, state) = read_float_fraction(state);
             term (tok, state);
         };
@@ -243,7 +243,7 @@ defn read_float_fraction(state: LexerState) -> (Token, LexerState) {
 // Read string literal
 defn read_string(state: LexerState) -> (Token, LexerState) {
     // Skip opening quote
-    &state = advance(state);
+    state = advance(state);
     
     let sb = new_builder();
     
@@ -252,27 +252,27 @@ defn read_string(state: LexerState) -> (Token, LexerState) {
         [c != '"'] {
             [c == '\\'] {
                 // Escape sequence
-                &state = advance(state);
+                state = advance(state);
                 [is_some(current_char(state))] {
                     let escaped = unwrap(current_char(state));
-                    [escaped == 'n'] { &sb = append_char(sb, '\n'); };
-                    [escaped == 't'] { &sb = append_char(sb, '\t'); };
-                    [escaped == 'r'] { &sb = append_char(sb, '\r'); };
-                    [escaped == '\\'] { &sb = append_char(sb, '\\'); };
-                    [escaped == '"'] { &sb = append_char(sb, '"'); };
-                    &state = advance(state);
+                    [escaped == 'n'] { sb = append_char(sb, '\n'); };
+                    [escaped == 't'] { sb = append_char(sb, '\t'); };
+                    [escaped == 'r'] { sb = append_char(sb, '\r'); };
+                    [escaped == '\\'] { sb = append_char(sb, '\\'); };
+                    [escaped == '"'] { sb = append_char(sb, '"'); };
+                    state = advance(state);
                 };
             };
             [c != '\\'] {
-                &sb = append_char(sb, c);
-                &state = advance(state);
+                sb = append_char(sb, c);
+                state = advance(state);
             };
         };
     };
     
     // Skip closing quote
     [is_some(current_char(state)) && unwrap(current_char(state)) == '"'] {
-        &state = advance(state);
+        state = advance(state);
     };
     
     term (TokenString(to_string(sb)), state);
@@ -281,7 +281,7 @@ defn read_string(state: LexerState) -> (Token, LexerState) {
 // Read char literal
 defn read_char_literal(state: LexerState) -> (Token, LexerState) {
     // Skip opening quote
-    &state = advance(state);
+    state = advance(state);
     
     let c: Char = ' ';
     
@@ -290,27 +290,27 @@ defn read_char_literal(state: LexerState) -> (Token, LexerState) {
         [ch != '\''] {
             [ch == '\\'] {
                 // Escape sequence
-                &state = advance(state);
+                state = advance(state);
                 [is_some(current_char(state))] {
                     let escaped = unwrap(current_char(state));
-                    [escaped == 'n'] { &c = '\n'; };
-                    [escaped == 't'] { &c = '\t'; };
-                    [escaped == 'r'] { &c = '\r'; };
-                    [escaped == '\\'] { &c = '\\'; };
-                    [escaped == '\''] { &c = '\''; };
-                    &state = advance(state);
+                    [escaped == 'n'] { c = '\n'; };
+                    [escaped == 't'] { c = '\t'; };
+                    [escaped == 'r'] { c = '\r'; };
+                    [escaped == '\\'] { c = '\\'; };
+                    [escaped == '\''] { c = '\''; };
+                    state = advance(state);
                 };
             };
             [ch != '\\'] {
-                &c = ch;
-                &state = advance(state);
+                c = ch;
+                state = advance(state);
             };
         };
     };
     
     // Skip closing quote
     [is_some(current_char(state)) && unwrap(current_char(state)) == '\''] {
-        &state = advance(state);
+        state = advance(state);
     };
     
     term (TokenChar(c), state);
@@ -320,7 +320,7 @@ defn read_char_literal(state: LexerState) -> (Token, LexerState) {
 
 defn next_token(state: LexerState) -> Result<(Token, LexerState), String> {
     // Skip whitespace
-    &state = skip_whitespace(state);
+    state = skip_whitespace(state);
     
     // Check for EOF
     [is_none(current_char(state))] {
@@ -328,99 +328,99 @@ defn next_token(state: LexerState) -> Result<(Token, LexerState), String> {
     };
     
     // Start new token
-    &state = start_token(state);
+    state = start_token(state);
     
     let c = unwrap(current_char(state));
     
     // Single-char operators
-    [c == '+'] { &state = advance(state); term Ok((OpPlus, state)); };
-    [c == '-'] { &state = advance(state); term Ok((OpMinus, state)); };
-    [c == '*'] { &state = advance(state); term Ok((OpStar, state)); };
+    [c == '+'] { state = advance(state); term Ok((OpPlus, state)); };
+    [c == '-'] { state = advance(state); term Ok((OpMinus, state)); };
+    [c == '*'] { state = advance(state); term Ok((OpStar, state)); };
     [c == '/'] {
         // Check for comment
         [is_some(peek_char(state, 1)) && unwrap(peek_char(state, 1)) == '/'] {
-            &state = advance(state);
-            &state = advance(state);
-            &state = skip_comment(state);
+            state = advance(state);
+            state = advance(state);
+            state = skip_comment(state);
             term next_token(state);  // Recurse to get next token
         };
-        &state = advance(state);
+        state = advance(state);
         term Ok((OpSlash, state));
     };
-    [c == '%'] { &state = advance(state); term Ok((OpPercent, state)); };
-    [c == '='] { &state = advance(state); term Ok((OpEq, state)); };
-    [c == '!'] { &state = advance(state); term Ok((OpBang, state)); };
-    [c == '&'] { &state = advance(state); term Ok((OpAmp, state)); };
-    [c == '|'] { &state = advance(state); term Ok((OpPipe, state)); };
-    [c == '^'] { &state = advance(state); term Ok((OpCaret, state)); };
-    [c == '~'] { &state = advance(state); term Ok((OpTilde, state)); };
-    [c == '?'] { &state = advance(state); term Ok((OpQuestion, state)); };
+    [c == '%'] { state = advance(state); term Ok((OpPercent, state)); };
+    [c == '='] { state = advance(state); term Ok((OpEq, state)); };
+    [c == '!'] { state = advance(state); term Ok((OpBang, state)); };
+    [c == '&'] { state = advance(state); term Ok((OpAmp, state)); };
+    [c == '|'] { state = advance(state); term Ok((OpPipe, state)); };
+    [c == '^'] { state = advance(state); term Ok((OpCaret, state)); };
+    [c == '~'] { state = advance(state); term Ok((OpTilde, state)); };
+    [c == '?'] { state = advance(state); term Ok((OpQuestion, state)); };
     [c == '#'] {
         [is_some(peek_char(state, 1))] {
             let next = unwrap(peek_char(state, 1));
             [next == '!'] {
-                &state = advance(state);
-                &state = advance(state);
+                state = advance(state);
+                state = advance(state);
                 term Ok((HashBang, state));
             };
             [next == '['] {
-                &state = advance(state);
-                &state = advance(state);
+                state = advance(state);
+                state = advance(state);
                 term Ok((HashBracket, state));
             };
             [next == '('] {
-                &state = advance(state);
-                &state = advance(state);
+                state = advance(state);
+                state = advance(state);
                 term Ok((HashParen, state));
             };
             [next == '?'] {
-                &state = advance(state);
-                &state = advance(state);
+                state = advance(state);
+                state = advance(state);
                 term Ok((HashQuestion, state));
             };
             [is_alpha(next) || next == '_'] {
-                &state = advance(state);
+                state = advance(state);
                 term Ok((Hash, state));
             };
         };
-        &state = advance(state);
+        state = advance(state);
         term Ok((TokenComment("#"), state));
     };
-    [c == '@'] { &state = advance(state); term Ok((OpAt, state)); };
-    [c == '.'] { &state = advance(state); term Ok((OpDot, state)); };
-    [c == ':'] { &state = advance(state); term Ok((OpColon, state)); };
-    [c == ';'] { &state = advance(state); term Ok((OpSemicolon, state)); };
-    [c == ','] { &state = advance(state); term Ok((OpComma, state)); };
+    [c == '@'] { state = advance(state); term Ok((OpAt, state)); };
+    [c == '.'] { state = advance(state); term Ok((OpDot, state)); };
+    [c == ':'] { state = advance(state); term Ok((OpColon, state)); };
+    [c == ';'] { state = advance(state); term Ok((OpSemicolon, state)); };
+    [c == ','] { state = advance(state); term Ok((OpComma, state)); };
     
     // Delimiters
-    [c == '('] { &state = advance(state); term Ok((DelimLParen, state)); };
-    [c == ')'] { &state = advance(state); term Ok((DelimRParen, state)); };
-    [c == '{'] { &state = advance(state); term Ok((DelimLBrace, state)); };
-    [c == '}'] { &state = advance(state); term Ok((DelimRBrace, state)); };
-    [c == '['] { &state = advance(state); term Ok((DelimLBracket, state)); };
-    [c == ']'] { &state = advance(state); term Ok((DelimRBracket, state)); };
+    [c == '('] { state = advance(state); term Ok((DelimLParen, state)); };
+    [c == ')'] { state = advance(state); term Ok((DelimRParen, state)); };
+    [c == '{'] { state = advance(state); term Ok((DelimLBrace, state)); };
+    [c == '}'] { state = advance(state); term Ok((DelimRBrace, state)); };
+    [c == '['] { state = advance(state); term Ok((DelimLBracket, state)); };
+    [c == ']'] { state = advance(state); term Ok((DelimRBracket, state)); };
     
     // Multi-char operators (check first)
     [c == '<'] {
         [is_some(peek_char(state, 1))] {
             let next = unwrap(peek_char(state, 1));
             [next == '='] {
-                &state = advance(state);
-                &state = advance(state);
+                state = advance(state);
+                state = advance(state);
                 term Ok((OpLtEq, state));
             };
             [next == '<'] {
-                &state = advance(state);
-                &state = advance(state);
+                state = advance(state);
+                state = advance(state);
                 term Ok((OpLtLt, state));
             };
             [next == '-'] {
-                &state = advance(state);
-                &state = advance(state);
+                state = advance(state);
+                state = advance(state);
                 term Ok((OpArrow, state));
             };
         };
-        &state = advance(state);
+        state = advance(state);
         term Ok((OpLt, state));
     };
     
@@ -428,37 +428,37 @@ defn next_token(state: LexerState) -> Result<(Token, LexerState), String> {
         [is_some(peek_char(state, 1))] {
             let next = unwrap(peek_char(state, 1));
             [next == '='] {
-                &state = advance(state);
-                &state = advance(state);
+                state = advance(state);
+                state = advance(state);
                 term Ok((OpGtEq, state));
             };
             [next == '>'] {
-                &state = advance(state);
-                &state = advance(state);
+                state = advance(state);
+                state = advance(state);
                 term Ok((OpGtGt, state));
             };
             [next == '='] {
-                &state = advance(state);
-                &state = advance(state);
+                state = advance(state);
+                state = advance(state);
                 term Ok((OpFatArrow, state));
             };
         };
-        &state = advance(state);
+        state = advance(state);
         term Ok((OpGt, state));
     };
     
     [c == '|'] {
         [is_some(peek_char(state, 1)) && unwrap(peek_char(state, 1)) == '|'] {
-            &state = advance(state);
-            &state = advance(state);
+            state = advance(state);
+            state = advance(state);
             term Ok((OpOr, state));
         };
     };
     
     [c == '&'] {
         [is_some(peek_char(state, 1)) && unwrap(peek_char(state, 1)) == '&'] {
-            &state = advance(state);
-            &state = advance(state);
+            state = advance(state);
+            state = advance(state);
             term Ok((OpAnd, state));
         };
     };
@@ -499,7 +499,7 @@ defn tokenize(source: String) -> Result<List<Token>, String> {
         [is_ok(result)] {
             let (tok, new_state) = unwrap(result);
             &tokens <- tok;
-            &state = new_state;
+            state = new_state;
             [tok != TokenEof] {
                 term tokenize_continue(source, tokens, state);
             };

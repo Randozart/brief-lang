@@ -407,7 +407,7 @@ defn x64_resolve_labels(instrs: List<X64Instr>) -> HashMap<String, Int> {
         [!uni instrs[i](Label(_)) = true] {
             pc = pc + x64_instr_byte_size(instrs[i]);
         };
-        &i = i + 1;
+        i = i + 1;
     };
     
     term labels;
@@ -426,7 +426,7 @@ defn x64_emit_binary(instrs: List<X64Instr>) -> List<u8> {
         let bytes = x64_encode_instr_with_labels(instrs[i], pc, labels);
         binary = binary.append_all(bytes);
         pc = pc + x64_instr_byte_size(instrs[i]);
-        &i = i + 1;
+        i = i + 1;
     };
     
     term binary;
@@ -467,7 +467,7 @@ defn x64_generate_reactor(txns: List<Transaction>) -> List<X64Instr> {
     let i: Int = 0;
     [i < txns.len()] {
         instrs = instrs.append(x64_emit_call(txns[i].name + "_check"));
-        &i = i + 1;
+        i = i + 1;
     };
     
     // Loop back
@@ -513,7 +513,7 @@ defn generate_x86_64(program: Program, cg: CallGraphResult) -> List<u8> {
         uni program.items[i](TopTxn(txn)) = {
             txns = txns.append(txn);
         };
-        &i = i + 1;
+        i = i + 1;
     };
     
     // Generate reactor
@@ -525,7 +525,7 @@ defn generate_x86_64(program: Program, cg: CallGraphResult) -> List<u8> {
     [j < txns.len()] {
         let txn_instrs = x64_generate_transaction_check(txns[j]);
         all_instrs = all_instrs.append_all(txn_instrs);
-        &j = j + 1;
+        j = j + 1;
     };
     
     // Emit binary

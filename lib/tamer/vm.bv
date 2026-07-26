@@ -62,9 +62,9 @@ txn vm_loop(stack_data: Ptr<Int>, stack_len: Int,
         op, pc, saved_locals_base);
     let new_stack_len = *sl_out;
 
-    when new_pc < 0 { &running = 0; };
-    when new_pc >= 0 && new_pc < bc_len { &pc = new_pc; };
-    &stack_len = new_stack_len;
+    when new_pc < 0 { running = 0; };
+    when new_pc >= 0 && new_pc < bc_len { pc = new_pc; };
+    stack_len = new_stack_len;
     term 0;
 };
 

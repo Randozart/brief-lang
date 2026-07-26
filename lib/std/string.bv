@@ -72,7 +72,7 @@ txn contains_loop(haystack: String, needle: String, i: Int)
   when i + needle .#Size <= haystack .#Size && haystack[i..i+needle .#Size] == needle {
     term true;
   };
-  &i = i + 1;
+  i = i + 1;
   term false;
 };
 
@@ -102,7 +102,7 @@ txn find_loop(s: String, needle: String, i: Int)
   when i + needle .#Size <= s .#Size && s[i..i+needle .#Size] == needle {
     term i;
   };
-  &i = i + 1;
+  i = i + 1;
   term -1;
 };
 
@@ -142,15 +142,15 @@ defn split(s: String, delim: String) [delim .#Size > 0][true] -> List<String> {
   let last: Int = 0;
   when i < s .#Size {
     when i + delim .#Size <= s .#Size && s[i..i+delim .#Size] == delim {
-      &result = result + [s[last..i]];
-      &last = i + delim .#Size;
-      &i = i + delim .#Size;
+      result = result + [s[last..i]];
+      last = i + delim .#Size;
+      i = i + delim .#Size;
     };
     when i + delim .#Size > s .#Size || s[i..i+delim .#Size] != delim {
-      &i = i + 1;
+      i = i + 1;
     };
   };
-  &result = result + [s[last..s .#Size]];
+  result = result + [s[last..s .#Size]];
   term result;
 };
 
@@ -164,8 +164,8 @@ defn lines(s: String) [true][term .#Size >= 0] -> List<String> {
 txn join_loop(list: List<String>, delim: String, result: String, i: Int)
     [i < list .#Size][i == list .#Size] -> String
 {
-  &result = result + delim + list[i];
-  &i = i + 1;
+  result = result + delim + list[i];
+  i = i + 1;
   term result;
 };
 
@@ -183,8 +183,8 @@ defn pad_left(s: String, width: Int) [width >= s .#Size][term .#Size == width.ma
     let pad: String = "";
     let i: Int = 0;
     when i < spaces {
-      &pad = pad + " ";
-      &i = i + 1;
+      pad = pad + " ";
+      i = i + 1;
     };
     term pad + s;
   };
@@ -197,8 +197,8 @@ defn pad_right(s: String, width: Int) [width >= s .#Size][term .#Size == width.m
     let pad: String = "";
     let i: Int = 0;
     when i < spaces {
-      &pad = pad + " ";
-      &i = i + 1;
+      pad = pad + " ";
+      i = i + 1;
     };
     term s + pad;
   };
@@ -214,13 +214,13 @@ defn pad_both(s: String, width: Int) [width >= s .#Size][term .#Size == width.ma
     let pad_right: String = "";
     let i: Int = 0;
     when i < left {
-      &pad_left = pad_left + " ";
-      &i = i + 1;
+      pad_left = pad_left + " ";
+      i = i + 1;
     };
-    &i = 0;
+    i = 0;
     when i < right {
-      &pad_right = pad_right + " ";
-      &i = i + 1;
+      pad_right = pad_right + " ";
+      i = i + 1;
     };
     term pad_left + s + pad_right;
   };
@@ -231,8 +231,8 @@ defn pad_both(s: String, width: Int) [width >= s .#Size][term .#Size == width.ma
 txn repeat_loop(s: String, count: Int, result: String, i: Int)
     [i < count][i == count] -> String
 {
-  &result = result + s;
-  &i = i + 1;
+  result = result + s;
+  i = i + 1;
   term result;
 };
 
@@ -266,7 +266,7 @@ txn is_whitespace_loop(s: String, i: Int)
     when !c.is_whitespace() {
         term false;
     };
-    &i = i + 1;
+    i = i + 1;
     term true;
 };
 
@@ -281,7 +281,7 @@ txn is_alpha_loop(s: String, i: Int)
     when !c.is_alpha() {
         term false;
     };
-    &i = i + 1;
+    i = i + 1;
     term true;
 };
 
@@ -299,7 +299,7 @@ txn is_numeric_loop(s: String, i: Int)
     when !c.is_digit() {
         term false;
     };
-    &i = i + 1;
+    i = i + 1;
     term true;
 };
 
@@ -314,8 +314,8 @@ txn to_lower_loop(s: String, sb: StringBuilder, i: Int)
     [i < s .#Size][i == s .#Size] -> String
 {
     let c = s[i..i+1];
-    &sb = sb.append_char(c.to_lower());
-    &i = i + 1;
+    sb = sb.append_char(c.to_lower());
+    i = i + 1;
     term sb.to_string();
 };
 
@@ -327,8 +327,8 @@ txn to_upper_loop(s: String, sb: StringBuilder, i: Int)
     [i < s .#Size][i == s .#Size] -> String
 {
     let c = s[i..i+1];
-    &sb = sb.append_char(c.to_upper());
-    &i = i + 1;
+    sb = sb.append_char(c.to_upper());
+    i = i + 1;
     term sb.to_string();
 };
 
@@ -339,18 +339,18 @@ defn to_upper_str(s: String) [true][term .#Size == s .#Size] -> String {
 txn trim_left_loop(s: String, i: Int)
     [i < s .#Size && s[i..i+1].is_whitespace()][i == s .#Size || !s[i..i+1].is_whitespace()] -> String
 {
-    &i = i + 1;
+    i = i + 1;
     term s[i..s .#Size];
 };
 
 defn trim_str(s: String) [true][term .#Size <= s .#Size] -> String {
     let start: Int = 0;
     when start < s .#Size && s[start..start+1].is_whitespace() {
-        &start = start + 1;
+        start = start + 1;
     };
     let end: Int = s .#Size;
     when end > start && s[end-1..end].is_whitespace() {
-        &end = end - 1;
+        end = end - 1;
     };
     term s[start..end];
 };
@@ -358,7 +358,7 @@ defn trim_str(s: String) [true][term .#Size <= s .#Size] -> String {
 defn trim_left_str(s: String) [true][term .#Size <= s .#Size] -> String {
     let i: Int = 0;
     when i < s .#Size && s[i..i+1].is_whitespace() {
-        &i = i + 1;
+        i = i + 1;
     };
     term s[i..s .#Size];
 };
@@ -366,7 +366,7 @@ defn trim_left_str(s: String) [true][term .#Size <= s .#Size] -> String {
 defn trim_right_str(s: String) [true][term .#Size <= s .#Size] -> String {
     let end: Int = s .#Size;
     when end > 0 && s[end-1..end].is_whitespace() {
-        &end = end - 1;
+        end = end - 1;
     };
     term s[0..end];
 };
@@ -375,8 +375,8 @@ txn capitalize_loop(s: String, sb: StringBuilder, i: Int)
     [i < s .#Size][i == s .#Size] -> String
 {
     let c = s[i..i+1];
-    &sb = sb.append_char(c.to_lower());
-    &i = i + 1;
+    sb = sb.append_char(c.to_lower());
+    i = i + 1;
     term sb.to_string();
 };
 
@@ -393,8 +393,8 @@ txn reverse_loop(s: String, sb: StringBuilder, i: Int)
     [i < s .#Size][i == s .#Size] -> String
 {
     let c = s[s .#Size-1-i..s .#Size-i];
-    &sb = sb.append_char(c);
-    &i = i + 1;
+    sb = sb.append_char(c);
+    i = i + 1;
     term sb.to_string();
 };
 
@@ -406,9 +406,9 @@ txn count_char_loop(s: String, c: String, count: Int, i: Int)
     [i < s .#Size][i == s .#Size] -> Int
 {
     when s[i..i+1] == c {
-        &count = count + 1;
+        count = count + 1;
     };
-    &i = i + 1;
+    i = i + 1;
     term count;
 };
 
@@ -422,7 +422,7 @@ txn is_blank_loop(s: String, i: Int)
     when !s[i..i+1].is_whitespace() {
         term false;
     };
-    &i = i + 1;
+    i = i + 1;
     term true;
 };
 

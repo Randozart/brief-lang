@@ -38,7 +38,7 @@ txn run_tests [true][all_passed] {
     let r1 = check(5, is_positive);   // true
     let r2 = check(4, is_even);       // true
     let r3 = check(3, is_even);       // false
-    &all_passed = r1 && r2 && ~r3;
+    all_passed = r1 && r2 && ~r3;
     term;
 };
 

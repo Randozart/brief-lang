@@ -141,7 +141,7 @@ defn alloc_reg(alloc: RegisterAllocator, hint: Option<String>) -> (String, Regis
                 spill_instrs: alloc.spill_instrs
             });
         };
-        &i = i + 1;
+        i = i + 1;
     };
     
     // Need to spill - pick a register and spill it to stack
@@ -266,7 +266,7 @@ defn compute_memory_layout(txns: List<Transaction>) -> MemoryLayout {
         [j < txn.params.len()] {
             layout.param_offsets = layout.param_offsets.insert(txn.params[j].name, offset);
             offset = offset + 8;  // 8 bytes per parameter
-            &j = j + 1;
+            j = j + 1;
         };
         
         // Collect variables from body
@@ -277,10 +277,10 @@ defn compute_memory_layout(txns: List<Transaction>) -> MemoryLayout {
                 layout.var_offsets = layout.var_offsets.insert(vars[k], offset);
                 offset = offset + 8;
             };
-            &k = k + 1;
+            k = k + 1;
         };
         
-        &i = i + 1;
+        i = i + 1;
     };
     
     // Round up to 16-byte alignment (AAPCS requirement)
@@ -334,7 +334,7 @@ defn collect_vars_from_stmts(stmts: List<Statement>) -> List<String> {
         uni stmts[i](StmtAlka(_)) = {
             // No variables from alka blocks
         };
-        &i = i + 1;
+        i = i + 1;
     };
     
     term vars;
@@ -442,7 +442,7 @@ defn compute_packed_layout(fields: List<(String, String, Option<Int>)>, mmio_bas
         layout.fields = layout.fields.append(field_layout);
         current_bit = current_bit + width;
         
-        &i = i + 1;
+        i = i + 1;
     };
     
     layout.total_bits = current_bit;
@@ -462,7 +462,7 @@ defn find_field_layout(layout: PackedStructLayout, field_name: String) -> Option
         [layout.fields[i].field_name == field_name] {
             term Some(layout.fields[i]);
         };
-        &i = i + 1;
+        i = i + 1;
     };
     term None;
 }
@@ -580,7 +580,7 @@ defn find_mmio_register(region: MMIORegion, name: String) -> Option<MMIORegister
         [region.registers[i].name == name] {
             term Some(region.registers[i]);
         };
-        &i = i + 1;
+        i = i + 1;
     };
     term None;
 }
@@ -993,7 +993,7 @@ defn resolve_labels(instrs: List<A64Instr>) -> HashMap<String, Int> {
         [!uni instrs[i](Label(_)) = true] {
             pc = pc + instr_byte_size(instrs[i]);
         };
-        &i = i + 1;
+        i = i + 1;
     };
     
     term labels;
@@ -1012,7 +1012,7 @@ defn emit_binary(instrs: List<A64Instr>) -> List<u8> {
         let bytes = encode_instr_with_labels(instrs[i], pc, labels);
         binary = binary.append_all(bytes);
         pc = pc + instr_byte_size(instrs[i]);
-        &i = i + 1;
+        i = i + 1;
     };
     
     term binary;
@@ -1125,7 +1125,7 @@ defn generate_reactor(txns: List<Transaction>) -> List<A64Instr> {
     let i: Int = 0;
     [i < txns.len()] {
         instrs = instrs.append(emit_bl(txns[i].name + "_check"));
-        &i = i + 1;
+        i = i + 1;
     };
     
     // Loop back
@@ -1155,12 +1155,12 @@ defn generate_transaction_check(txn: Transaction) -> List<A64Instr> {
     [i < txn.params.len()] {
         let param = txn.params[i];
         let (reg, new_alloc) = alloc_reg(alloc, None);
-        &alloc = new_alloc;
+        alloc = new_alloc;
         
         // Load from memory (simplified - assumes state at known offset)
         instrs = instrs.append(emit_ldr(reg, "X29", i * 8));
         instrs = instrs.append(emit_comment("Load param: " + param.name));
-        &i = i + 1;
+        i = i + 1;
     };
     
     // Evaluate precondition (simplified)
@@ -1191,8 +1191,8 @@ defn generate_statement_list(stmts: List<Statement>, alloc: RegisterAllocator) -
     [i < stmts.len()] {
         let (stmt_instrs, new_alloc) = generate_statement(stmts[i], current_alloc);
         instrs = instrs.append_all(stmt_instrs);
-        &current_alloc = new_alloc;
-        &i = i + 1;
+        current_alloc = new_alloc;
+        i = i + 1;
     };
     
     term (instrs, current_alloc);
@@ -1233,9 +1233,9 @@ defn generate_statement(stmt: Statement, alloc: RegisterAllocator) -> (List<A64I
             [values[i].is_some()] {
                 let (expr_instrs, new_alloc) = generate_expr(values[i].unwrap(), current_alloc);
                 instrs = instrs.append_all(expr_instrs);
-                &current_alloc = new_alloc;
+                current_alloc = new_alloc;
             };
-            &i = i + 1;
+            i = i + 1;
         };
         
         instrs = instrs.append(emit_ret());
@@ -1270,9 +1270,9 @@ defn generate_statement(stmt: Statement, alloc: RegisterAllocator) -> (List<A64I
         let i: Int = 0;
         [i < body.len()] {
             let (body_instrs, new_alloc) = generate_statement(body[i], current_alloc);
-            &instrs = instrs.append_all(body_instrs);
-            &current_alloc = new_alloc;
-            &i = i + 1;
+            instrs = instrs.append_all(body_instrs);
+            current_alloc = new_alloc;
+            i = i + 1;
         };
         term (instrs, current_alloc);
     };
@@ -1280,7 +1280,7 @@ defn generate_statement(stmt: Statement, alloc: RegisterAllocator) -> (List<A64I
     uni stmt(StmtAlka(block)) = {
         let instrs: List<A64Instr> = [];
         let label = "alka";
-        [block.dangerous] { &label = "alka!"; };
+        [block.dangerous] { label = "alka!"; };
         let instrs = [emit_comment(label + ": " + block.content)];
         term (instrs, alloc);
     };
@@ -1357,7 +1357,7 @@ defn generate_aarch64(program: Program, cg: CallGraphResult) -> List<u8> {
         uni program.items[i](TopTxn(txn)) = {
             txns = txns.append(txn);
         };
-        &i = i + 1;
+        i = i + 1;
     };
     
     // Generate reactor loop
@@ -1369,7 +1369,7 @@ defn generate_aarch64(program: Program, cg: CallGraphResult) -> List<u8> {
     [j < txns.len()] {
         let txn_instrs = generate_transaction_check(txns[j]);
         all_instrs = all_instrs.append_all(txn_instrs);
-        &j = j + 1;
+        j = j + 1;
     };
     
     // Emit binary

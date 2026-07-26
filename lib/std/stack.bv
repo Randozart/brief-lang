@@ -30,7 +30,7 @@ defn to_list<T>(stack: Stack<T>) -> List<T> {
     let s: Stack<T> = stack;
     when !s.is_empty() {
         let v: T = <- &s;
-        &result = [v] + result;
+        result = [v] + result;
     };
     term result;
 };
@@ -38,7 +38,7 @@ txn from_list_loop<T>(items: List<T>, result: Stack<T>, i: Int)
     [i < items .#Size][i == items .#Size] -> Stack<T>
 {
     &result <- items[i];
-    &i = i + 1;
+    i = i + 1;
     term result;
 };
 defn from_list<T>(items: List<T>) -> Stack<T> {

@@ -115,7 +115,7 @@ defn encode_i32_const(value: i32) -> List<u8> {
     let val: u32 = u32(value);
     [val > 0x7F] {
         result = append(result, u8(val & 0x7F | 0x80));
-        &val = val >> 7;
+        val = val >> 7;
     };
     result = append(result, u8(val & 0x7F));
     term result;
@@ -132,10 +132,10 @@ defn encode_end() -> List<u8> {
 defn encode_block(result_type: WasmValueType) -> List<u8> {
     // block with optional result type
     let block_type: u8;
-    uni result_type(I32) = { &block_type = 0x7F; };
-    uni result_type(I64) = { &block_type = 0x7E; };
-    uni result_type(F32) = { &block_type = 0x7D; };
-    uni result_type(F64) = { &block_type = 0x7C; };
+    uni result_type(I32) = { block_type = 0x7F; };
+    uni result_type(I64) = { block_type = 0x7E; };
+    uni result_type(F32) = { block_type = 0x7D; };
+    uni result_type(F64) = { block_type = 0x7C; };
     term [0x02, block_type]; // block opcode + block type
 }
 
@@ -186,7 +186,7 @@ defn build_wasm_module(program: Program, cg: CallGraphResult) -> List<u8> {
             [j < txn.params.len()] {
                 let param_type = brief_type_to_wasm(txn.params[j].param_type);
                 params = append(params, value_type(param_type));
-                &j = j + 1;
+                j = j + 1;
             };
 
             // Add result type for term statements
@@ -213,7 +213,7 @@ defn build_wasm_module(program: Program, cg: CallGraphResult) -> List<u8> {
                 kind: ExportFunc(i)
             });
         };
-        &i = i + 1;
+        i = i + 1;
     };
 
     // Emit type section
@@ -224,7 +224,7 @@ defn build_wasm_module(program: Program, cg: CallGraphResult) -> List<u8> {
     let fi: Int = 0;
     [fi < func_bodies.len()] {
         func_indices = append(func_indices, u32(fi));
-        &fi = fi + 1;
+        fi = fi + 1;
     };
     bytes = append_all(bytes, encode_section(SecFunction, encode_function_section(func_indices)));
 
@@ -253,7 +253,7 @@ defn encode_leb128_u32(value: u32) -> List<u8> {
     let val = value;
     [val > 0x7F] {
         result = append(result, u8(val & 0x7F | 0x80));
-        &val = val >> 7;
+        val = val >> 7;
     };
     result = append(result, u8(val & 0x7F));
     term result;
@@ -264,7 +264,7 @@ defn encode_type_section(types: List<FunctionType>) -> List<u8> {
     let i: Int = 0;
     [i < types.len()] {
         result = append_all(result, encode_function_type(types[i]));
-        &i = i + 1;
+        i = i + 1;
     };
     term result;
 }
@@ -275,13 +275,13 @@ defn encode_function_type(ft: FunctionType) -> List<u8> {
     let i: Int = 0;
     [i < ft.params.len()] {
         result = append(result, encode_value_type(ft.params[i]));
-        &i = i + 1;
+        i = i + 1;
     };
     result = append_all(result, encode_leb128_u32(u32(ft.results.len())));
     let i: Int = 0;
     [i < ft.results.len()] {
         result = append(result, encode_value_type(ft.results[i]));
-        &i = i + 1;
+        i = i + 1;
     };
     term result;
 }
@@ -303,7 +303,7 @@ defn encode_export_section(exports: List<Export>) -> List<u8> {
     let i: Int = 0;
     [i < exports.len()] {
         result = append_all(result, encode_export(exports[i]));
-        &i = i + 1;
+        i = i + 1;
     };
     term result;
 }
@@ -315,7 +315,7 @@ defn encode_export(exp: Export) -> List<u8> {
     let j: Int = 0;
     [j < exp.name.len()] {
         result = append(result, u8(exp.name[j]));
-        &j = j + 1;
+        j = j + 1;
     };
     uni exp.kind(ExportFunc(idx)) = {
         result = append(result, 0x00); // func export
@@ -337,7 +337,7 @@ defn encode_code_section(bodies: List<FunctionBody>) -> List<u8> {
     let i: Int = 0;
     [i < bodies.len()] {
         result = append_all(result, encode_function_body(bodies[i]));
-        &i = i + 1;
+        i = i + 1;
     };
     term result;
 }
@@ -353,7 +353,7 @@ defn encode_function_body(body: FunctionBody) -> List<u8> {
         [i < body.locals.len()] {
             body_content = append_all(body_content, [0x01]); // count = 1
             body_content = append(body_content, encode_value_type(body.locals[i]));
-            &i = i + 1;
+            i = i + 1;
         };
     };
     [!body.locals.len() > 0] {
@@ -375,7 +375,7 @@ defn generate_transaction_body(txn: Transaction) -> List<u8> {
     let i: Int = 0;
     [i < txn.body.len()] {
         bytes = append_all(bytes, generate_statement(txn.body[i]));
-        &i = i + 1;
+        i = i + 1;
     };
     bytes = append_all(bytes, [0x0B]); // end
     term bytes;
@@ -399,7 +399,7 @@ defn generate_statement(stmt: Statement) -> List<u8> {
         let i: Int = 0;
         [i < body.len()] {
             body_bytes = append_all(body_bytes, generate_statement(body[i]));
-            &i = i + 1;
+            i = i + 1;
         };
         term append_all(append_all(append_all(condition_bytes, [0x04, 0x40]), body_bytes), [0x0B]); // if block end
     };
@@ -453,7 +453,7 @@ defn has_term_value(body: List<Statement>) -> Bool {
     let i: Int = 0;
     [i < body.len()] {
         uni body[i](StmtTerm(_)) = { term true; };
-        &i = i + 1;
+        i = i + 1;
     };
     term false;
 }
@@ -466,7 +466,7 @@ defn append_all(list1: List<u8>, list2: List<u8>) -> List<u8> {
     let i: Int = 0;
     [i < list2.len()] {
         result = append(result, list2[i]);
-        &i = i + 1;
+        i = i + 1;
     };
     term result;
 }

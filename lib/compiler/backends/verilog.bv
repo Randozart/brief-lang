@@ -106,7 +106,7 @@ defn generate_module(module: Module) -> String {
         sb = sb.append_str(module.ports[i].name);
         [i < module.ports.len() - 1] { sb = sb.append_str(","); };
         sb = sb.append_str("\n");
-        &i = i + 1;
+        i = i + 1;
     };
 
     sb = sb.append_str(");\n\n");
@@ -120,7 +120,7 @@ defn generate_module(module: Module) -> String {
             sb = sb.append_str(" ");
             sb = sb.append_str(module.wires[i].name);
             sb = sb.append_str(";\n");
-            &i = i + 1;
+            i = i + 1;
         };
         sb = sb.append_str("\n");
     };
@@ -143,7 +143,7 @@ defn generate_module(module: Module) -> String {
             [!module.regs[i].init_value != None] {
                 sb = sb.append_str(";\n");
             };
-            &i = i + 1;
+            i = i + 1;
         };
         sb = sb.append_str("\n");
     };
@@ -157,7 +157,7 @@ defn generate_module(module: Module) -> String {
         sb = sb.append_str(") begin\n");
         sb = sb.append_str(module.always_blocks[i].body);
         sb = sb.append_str("end\n\n");
-        &i = i + 1;
+        i = i + 1;
     };
 
     sb = sb.append_str("endmodule\n");
@@ -181,7 +181,7 @@ defn build_transaction_body_string(body: List<Statement>) -> String {
     let i: Int = 0;
     [i < body.len()] {
         result = result + "  " + statement_to_sv(body[i]) + "\n";
-        &i = i + 1;
+        i = i + 1;
     };
     term result;
 }
@@ -195,7 +195,7 @@ defn statement_to_sv(stmt: Statement) -> String {
         let i: Int = 0;
         [i < body.len()] {
             result = result + "    " + statement_to_sv(body[i]) + "\n";
-            &i = i + 1;
+            i = i + 1;
         };
         term result + "  end";
     };
@@ -248,7 +248,7 @@ defn generate_verilog(program: Program, cg: CallGraphResult) -> String {
                 init_value: None
             });
         };
-        &i = i + 1;
+        i = i + 1;
     };
 
     // Add clock and reset
@@ -261,7 +261,7 @@ defn generate_verilog(program: Program, cg: CallGraphResult) -> String {
         uni program.items[i](TopTxn(txn)) = {
             always_blocks = append(always_blocks, transaction_to_always(txn));
         };
-        &i = i + 1;
+        i = i + 1;
     };
 
     // Guard cache register
