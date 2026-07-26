@@ -1819,4 +1819,88 @@ mod tests {
         assert_eq!(pd.cast_edges[0].target_variant, "UTF8");
         assert_eq!(pd.cast_edges[1].target_variant, "UTF16");
     }
+
+    // ── Slice expression parsing ──────────────────────────────────
+
+    #[test]
+    fn test_parse_slice_contiguous() {
+        let src = "arr[2:8:1]";
+        let tokens = crate::lexer::tokenize(src).unwrap();
+        let mut p = Parser::new(tokens, src);
+        let expr = p.parse_expression().unwrap();
+        match expr {
+            crate::ast::Expr::Slice { array, start, end, stride } => {
+                assert_eq!(format!("{}", array), "arr");
+                assert!(start.is_some()); assert_eq!(format!("{}", start.unwrap()), "2");
+                assert!(end.is_some()); assert_eq!(format!("{}", end.unwrap()), "8");
+                assert!(stride.is_some()); assert_eq!(format!("{}", stride.unwrap()), "1");
+            }
+            _ => panic!("expected Expr::Slice"),
+        }
+    }
+
+    #[test]
+    fn test_parse_slice_implicit_start() {
+        let src = "arr[:10]";
+        let tokens = crate::lexer::tokenize(src).unwrap();
+        let mut p = Parser::new(tokens, src);
+        let expr = p.parse_expression().unwrap();
+        match expr {
+            crate::ast::Expr::Slice { array, start, end, stride } => {
+                assert!(start.is_none());
+                assert!(end.is_some()); assert_eq!(format!("{}", end.unwrap()), "10");
+                assert!(stride.is_none());
+            }
+            _ => panic!("expected Expr::Slice"),
+        }
+    }
+
+    #[test]
+    fn test_parse_slice_implicit_stride() {
+        let src = "arr[2:8]";
+        let tokens = crate::lexer::tokenize(src).unwrap();
+        let mut p = Parser::new(tokens, src);
+        let expr = p.parse_expression().unwrap();
+        match expr {
+            crate::ast::Expr::Slice { array, start, end, stride } => {
+                assert!(start.is_some()); assert_eq!(format!("{}", start.unwrap()), "2");
+                assert!(end.is_some()); assert_eq!(format!("{}", end.unwrap()), "8");
+                assert!(stride.is_none());
+            }
+            _ => panic!("expected Expr::Slice"),
+        }
+    }
+
+    #[test]
+    fn test_parse_slice_dynamic_bounds() {
+        let src = "arr[i:j:k]";
+        let tokens = crate::lexer::tokenize(src).unwrap();
+        let mut p = Parser::new(tokens, src);
+        let expr = p.parse_expression().unwrap();
+        match expr {
+            crate::ast::Expr::Slice { array, start, end, stride } => {
+                assert_eq!(format!("{}", array), "arr");
+                assert!(start.is_some()); assert_eq!(format!("{}", start.unwrap()), "i");
+                assert!(end.is_some()); assert_eq!(format!("{}", end.unwrap()), "j");
+                assert!(stride.is_some()); assert_eq!(format!("{}", stride.unwrap()), "k");
+            }
+            _ => panic!("expected Expr::Slice"),
+        }
+    }
+
+    #[test]
+    fn test_parse_slice_full_view() {
+        let src = "arr[:]";
+        let tokens = crate::lexer::tokenize(src).unwrap();
+        let mut p = Parser::new(tokens, src);
+        let expr = p.parse_expression().unwrap();
+        match expr {
+            crate::ast::Expr::Slice { array, start, end, stride } => {
+                assert!(start.is_none());
+                assert!(end.is_none());
+                assert!(stride.is_none());
+            }
+            _ => panic!("expected Expr::Slice"),
+        }
+    }
 }

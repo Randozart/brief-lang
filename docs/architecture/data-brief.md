@@ -639,7 +639,7 @@ parse_field_list() {
 }
 ```
 
-### 9.3 Error Handling
+### 10.3 Error Handling
 
 All parse errors must:
 1. Report the file path and line number
@@ -648,9 +648,9 @@ All parse errors must:
 
 ---
 
-## 10. Examples
+## 11. Examples
 
-### 10.1 FFI Bindings (`.dbv`)
+### 11.1 FFI Bindings (`.dbv`)
 
 ```
 schema FnBinding (name) {
@@ -674,7 +674,7 @@ as FnBinding {
 };
 ```
 
-### 10.2 GLUE Adapter Registry (`.dbvl`)
+### 11.2 GLUE Adapter Registry (`.dbvl`)
 
 ```
 #schema RegistryEntry from "glue/registry.dbv"
@@ -683,7 +683,7 @@ python; glue/python/types.bv;  py;  any;                       { Int: int64_t; F
 node;  glue/node/types.bv;    js;  any;                       { Int: int64_t; Float: double; Bool: bool; };
 ```
 
-### 10.3 Hardware Register Map (`.dbv`)
+### 11.3 Hardware Register Map (`.dbv`)
 
 ```
 schema Register {
@@ -703,7 +703,7 @@ as Device {
 };
 ```
 
-### 10.4 Standalone Entries
+### 11.4 Standalone Entries
 
 ```
 config: AppConfig { debug: true; budget: 256; threads: 4; };
@@ -712,28 +712,28 @@ target: Target { arch: x86_64; os: linux; };
 
 ---
 
-## 11. Design Decisions
+## 12. Design Decisions
 
-### 11.1 Why `;` Instead of `,`
+### 12.1 Why `;` Instead of `,`
 
 Commas appear frequently in data (lists, function arguments). Semicolons are
 rare in identifiers, paths, and type names. Using `;` as the universal
 separator means bare tokens are the default and escapes are rarely needed.
 
-### 11.2 Why No `/ /` Line Continuation
+### 12.2 Why No `/ /` Line Continuation
 
 Every entry is self-contained. Line continuation would require the parser to
 track state across lines, which conflicts with the single-pass streaming
 design of `.dbvl` and the brace-delimited clarity of `.dbv`.
 
-### 11.3 Why Schema is Never Inferred
+### 12.3 Why Schema is Never Inferred
 
 Inference is unsound without heuristics. A field containing `42` could be
 `Int`, `String`, `Float`, or `UInt`. The compiler must never guess — schema
 must always be explicitly declared or imported. This eliminates an entire
 class of silent miscompilation bugs.
 
-### 11.4 Why `.dbvl` Has No Nested Blocks
+### 12.4 Why `.dbvl` Has No Nested Blocks
 
 Line-oriented format means one entry per line. Nested blocks belong in `.dbv`
 where braces and multiple lines are expected. A `.dbvl` line with `{ }` would
@@ -742,7 +742,7 @@ purpose of the line-per-record design.
 
 ---
 
-## 12. Migration from Legacy Syntax
+## 13. Migration from Legacy Syntax
 
 The old Data Brief syntax (`docs/DATABRIEF.md`, `docs/DATABRIEF_GUIDE.md`) used
 commas, quotes, and `schema { }` blocks with different token rules. Migration:
@@ -756,20 +756,20 @@ commas, quotes, and `schema { }` blocks with different token rules. Migration:
 | `@` not used | `@` for positional entries |
 | `.dbvs` separate | schema inline in `.dbv` |
 
-The canonicalization rules (§7) mean the compiler can mechanically convert old
+The canonicalization rules (§8) mean the compiler can mechanically convert old
 files — the resulting binary is identical regardless of input format.
 
 ---
 
-## 13. Future Directions
+## 14. Future Directions
 
-### 13.1 Schema Registry
+### 14.1 Schema Registry
 
 A `.brief/schemas/` directory (similar to `.brief/registry/`) for storing
 reusable schemas. `schema Person from "std/person.dbv"` resolves against the
 registry when the relative path fails.
 
-### 13.2 Byte Prefixes for Typed Bare Tokens
+### 14.2 Byte Prefixes for Typed Bare Tokens
 
 Optional type hint prefixes for bare tokens:
 - `i42` — literal Int
@@ -779,7 +779,7 @@ Optional type hint prefixes for bare tokens:
 These are consumed by the schema-aware consumer, not the parser. The parser
 sees them as bare tokens.
 
-### 13.3 Streaming `.dbvl` with `#checkpoint`
+### 14.3 Streaming `.dbvl` with `#checkpoint`
 
 A `#checkpoint N` directive that tells the parser "flush all prior entries,
 this is a safe resumption point" — enabling streaming processing of
