@@ -486,7 +486,7 @@ fn collect_strings_expr(expr: &Expr, seen: &mut std::collections::HashSet<String
 /// hardcoded name matches.
 ///
 /// Defaults:
-///   #Int         → i64  (narrowed later by narrow_int pass)
+///   #Int         → i64  (maxbits from primordial)
 ///   #Float       → float (default; maxbits:32→float, maxbits:64→double)
 ///   #Bool        → i8
 ///   #Char        → i32
@@ -1068,11 +1068,6 @@ impl LlvmBackend {
 
     pub fn with_gpu_offload(mut self, offload: bool) -> Self {
         self.ctx.gpu_offload = offload;
-        self
-    }
-
-    pub fn with_narrow_bindings(mut self, bindings: std::collections::HashMap<String, std::collections::HashMap<String, u64>>) -> Self {
-        self.ctx.narrow_bindings = bindings;
         self
     }
 

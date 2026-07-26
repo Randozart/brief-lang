@@ -1838,11 +1838,6 @@ impl LlvmBackend {
         } else {
             Type::int()
         };
-        // 2026-07-25: Override ret_ty with narrowed type if applicable.
-        if !is_float && !is_double && int_ty != "i64" {
-            let bits: u64 = int_ty[1..].parse().unwrap_or(64);
-            ret_ty = crate::ast::Type::from_bits(bits);
-        }
         // 2026-07-18: Phase 0 — try config-driven dispatch first.
         // The OP_CONFIG maps (op_name, type_name, bytes) → LLVM IR template.
         // If the config has an entry, fill the template and skip hardcoded matches.

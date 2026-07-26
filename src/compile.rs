@@ -455,12 +455,6 @@ pub fn compile_source(file_path: &str, source: &str, opts: &BuildOptions) -> Res
         }
     }
 
-    // ── Value-range Int narrowing ─────────────────────────────────────
-    // 2026-07-24: Infer value ranges for Int-typed bindings and narrow
-    // the type width where provably safe. On WASM this eliminates BigInt.
-    // Returns per-function binding → max_bits map used by LLVM codegen.
-    let narrow_bindings = brief_compiler::optimizer::narrow_int::narrow_types(&items);
-
     // ── frgn? guard safety check ────────────────────────────────────
     // 2026-07-25: Verify every frgn?/frgn!/frgn?! call is guarded by fn?.
     brief_compiler::analysis::frgn_guard::check_frgn_guards(&items)
@@ -565,7 +559,7 @@ pub fn compile_source(file_path: &str, source: &str, opts: &BuildOptions) -> Res
     // 2026-07-23: Check if any glue target requests native module init.
     let enable_module_init = glue_targets.values().any(|t| t.module_init);
 
-    let (codegen_output, ext) = codegen(&items, &mut universe, &pm, opts, alloc_strategies, resolved_frgns, enable_module_init, narrow_bindings)?;
+    let (codegen_output, ext) = codegen(&items, &mut universe, &pm, opts, alloc_strategies, resolved_frgns, enable_module_init)?;
 
     // BEAST/IR snapshot at Codegen stage
     emit_beast_snapshot(file_path, BeastStage::Codegen, BeastPosition::After, &items, &universe, opts)?;
@@ -870,7 +864,6 @@ fn codegen(
     alloc_strategies: std::collections::HashMap<usize, brief_compiler::backend::llvm::AllocStrategy>,
     resolved_frgns: std::collections::HashMap<String, brief_compiler::analysis::frgn_dispatch::ResolvedFrgn>,
     enable_module_init: bool,
-    narrow_bindings: std::collections::HashMap<String, std::collections::HashMap<String, u64>>,
 ) -> Result<(String, &'static str), String> {
     // 2026-07-20: Extract operator definitions from AST for backend dispatch.
     let mut operator_defs: std::collections::HashMap<String, Vec<brief_compiler::ast::top::OperatorDef>> = std::collections::HashMap::new();
@@ -897,8 +890,40 @@ fn codegen(
                 .with_operator_defs(operator_defs)
                 .with_resolved_frgns(resolved_frgns.clone())
                 .with_trg_unresolved_action(opts.trg_unresolved_action)
-                .with_module_init(enable_module_init)
-                .with_narrow_bindings(narrow_bindings);
+                .with_module_init(enable_module_init);
+            if opts.gpu_offload {
+                b = b.with_gpu_offload(true);
+                b = b.with_svo(opts.feature_svo);
+            }
+            // Apply target config if available
+            let ext = get_extension(&opts.file_path);
+            let target_config = load_target_config(opts);
+            if let Some(entry) = target_config.lookup(&ext) {
+                if let Some(ref triple) = entry.target_triple {
+                    b = b.with_target_triple(triple);
+                }
+                if let Some(ref dl) = entry.data_layout {
+                    b = b.with_data_layout(dl);
+                }
+            }
+            output = b.generate(items, None);
+            ".ll"
+        }
+        BackendKind::Webstack => {
+            // 2026-07-26: Phase 4 — Webstack uses LlvmBackend(wasm32) + with_webstack().
+            // The old TS emitter path is deprecated. Phase 6 will also invoke
+            // GlueWebGenerator to produce the JS shim from view bindings.
+            // Phase 5: Extension is .ll — compile_wasm will produce .wasm from it.
+            let mut b = LlvmBackend::new()
+                .with_webstack(true)
+                .with_int_bits(32)
+                .with_target_triple("wasm32-unknown-wasi")
+                .with_type_universe(universe.clone())
+                .with_alloc_strategies(alloc_strategies)
+                .with_stack_threshold(opts.stack_threshold)
+                .with_optimize_budget(opts.optimize_budget)
+                .with_resolved_frgns(resolved_frgns)
+                .with_optimize_report(true);
             if opts.gpu_offload {
                 b = b.with_gpu_offload(true);
                 b = b.with_svo(opts.feature_svo);
@@ -936,8 +961,7 @@ fn codegen(
                 .with_stack_threshold(opts.stack_threshold)
                 .with_optimize_budget(opts.optimize_budget)
                 .with_resolved_frgns(resolved_frgns)
-                .with_optimize_report(true)
-                .with_narrow_bindings(narrow_bindings);
+                .with_optimize_report(true);
             if opts.gpu_offload {
                 b = b.with_gpu_offload(true);
             }
@@ -955,8 +979,7 @@ fn codegen(
                 .with_optimize_budget(opts.optimize_budget)
                 .with_type_universe(universe.clone())
                 .with_resolved_frgns(resolved_frgns)
-                .with_trg_unresolved_action(opts.trg_unresolved_action)
-                .with_narrow_bindings(narrow_bindings);
+                .with_trg_unresolved_action(opts.trg_unresolved_action);
             if opts.gpu_offload {
                 b = b.with_gpu_offload(true);
             }

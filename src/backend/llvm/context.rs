@@ -126,12 +126,7 @@ pub struct CompilerContext {
     pub has_cycles: bool,
     pub slp_hazard_fns: HashSet<String>,
 
-    // 2026-07-24: Per-binding Int width narrowing (from optimizer pass).
-    // Key: function/transaction name, Value: binding → max_bits.
-    // "ret" = return value, "param_0" = param, "let_x" = let binding.
-    pub narrow_bindings: HashMap<String, HashMap<String, u64>>,
-
-    // 2026-07-25: Native integer width for #Int protocol (default 64).
+    // 2026-07-26: Native integer width for #Int protocol (default 64).
     // Controls i32 vs i64 emission for Int/UInt types.
     // WASM targets set to 32 to avoid BigInt in JavaScript.
     pub int_bits: u64,
@@ -246,7 +241,6 @@ impl CompilerContext {
             emit_remarks: false,
             has_cycles: false,
             slp_hazard_fns: HashSet::new(),
-            narrow_bindings: HashMap::new(),
             int_bits: 64,
             target_triple: "x86_64-unknown-linux-gnu".to_string(),
             data_layout: Some(
@@ -299,11 +293,6 @@ pub struct FunctionContext {
     /// Keyed by variable name. When &x is taken on a struct-typed let binding,
     /// this map provides the stack alloca pointer instead of the ptrtoint result.
     pub struct_literal_allocas: HashMap<String, String>,
-
-    /// 2026-07-24: Narrowed bit widths for this function's bindings.
-    /// Populated from CompilerContext.narrow_bindings[fn_name].
-    /// "ret" → 8 means the return value fits in 8 bits (i8).
-    pub narrowed: HashMap<String, u64>,
 
     // Register type caches
     pub reg_float_cache: HashMap<String, String>,
@@ -582,7 +571,6 @@ impl FunctionContext {
             expr_dedup_cache: HashMap::new(),
             alloc_strategies: HashMap::new(),
             fat_ptrs: HashMap::new(),
-            narrowed: HashMap::new(),
         }
     }
 

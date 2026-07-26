@@ -212,11 +212,6 @@ pub fn emit_statement(backend: &mut LlvmBackend, out: &mut String, stmt: &Statem
                             let c = backend.fun.gen_reg();
                             writeln!(out, "{}{} = ptrtoint ptr {} to i64", indent, c, reg.name).ok();
                             c
-                        } else if val_ty == "i64" && backend.fun.fn_ret_ty.starts_with('i') {
-                            // 2026-07-25: Truncate from actual i64 to narrower return type.
-                            let c = backend.fun.gen_reg();
-                            writeln!(out, "{}{} = trunc i64 {} to {}", indent, c, reg.name, backend.fun.fn_ret_ty).ok();
-                            c
                         } else {
                             reg.name
                         }
@@ -245,12 +240,6 @@ pub fn emit_statement(backend: &mut LlvmBackend, out: &mut String, stmt: &Statem
                         } else if val_ty == "ptr" && backend.fun.fn_ret_ty == "i64" {
                             let c = backend.fun.gen_reg();
                             writeln!(out, "{}{} = ptrtoint ptr {} to i64", indent, c, reg.name).ok();
-                            c
-                        } else if val_ty.starts_with('i') && backend.fun.fn_ret_ty.starts_with('i') && val_ty != backend.fun.fn_ret_ty {
-                            // 2026-07-24: Truncate/zext from computed width to declared return type
-                            // (narrowed by value-range inference pass).
-                            let c = backend.fun.gen_reg();
-                            writeln!(out, "{}{} = trunc {} {} to {}", indent, c, val_ty, reg.name, backend.fun.fn_ret_ty).ok();
                             c
                         } else {
                         reg.name

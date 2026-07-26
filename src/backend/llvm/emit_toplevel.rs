@@ -298,31 +298,16 @@ impl LlvmBackend {
                 }
             }
         }
-        // 2026-07-25: #Int protocol default width from --int-bits.
-        // Narrowing evidence (contracts) has priority — if we reach here,
-        // no narrowing was proven. Fall back to target-configured default.
-        // On WASM with --int-bits 32, this emits i32 instead of i64 without
-        // requiring contract annotations. On native x86_64, default 64 keeps i64.
+        // 2026-07-26: #Int protocol width from --int-bits (default 64).
+        // Respects bits <~ N floor from primordial type (Int64 → 64).
         if let Type::Custom(name) = ty {
             if name == "Int" || name == "UInt" {
-                let default_bits = self.ctx.int_bits;
-                // 2026-07-25: Respect bits <~ N floor (Int64 → never below 64).
                 let type_floor = self.ctx.type_universe.as_ref()
                     .and_then(|u| ty.universe_key().and_then(|k| u.get(k)))
                     .and_then(|rt| rt.properties.get("bits"))
                     .and_then(|pv| if let crate::ast::PropertyValue::Int(n) = pv { Some(*n as u64) } else { None })
                     .unwrap_or(0);
-                // 2026-07-25: Protocol-based narrowing from value-range proof.
-                // For types without bits <~ (plain Int), use narrowed width directly.
-                // For types with bits <~ N (Int64), cap floor at N.
-                let bits = if !self.fun.narrowed.is_empty() {
-                    let narrowed = self.fun.narrowed.get("ret").copied()
-                        .or_else(|| self.fun.narrowed.values().max().copied())
-                        .unwrap_or(default_bits);
-                    narrowed.max(type_floor)
-                } else {
-                    default_bits.max(type_floor)
-                };
+                let bits = self.ctx.int_bits.max(type_floor);
                 let llvm_bits: u64 = if bits <= 8 { 8 } else if bits <= 16 { 16 }
                     else if bits <= 32 { 32 } else { 64 };
                 return format!("i{}", llvm_bits);
@@ -1126,9 +1111,6 @@ impl LlvmBackend {
         self.fun.is_static_bound = false;
         self.fun.ssa_old_int_regs.clear();
         self.fun.ssa_old_float_regs.clear();
-        // 2026-07-24: Load per-binding narrowed widths for this function.
-        self.fun.narrowed = self.ctx.narrow_bindings.get(&d.name)
-            .cloned().unwrap_or_default();
         // 2026-07-01: Use "i64" for all non-float returns instead of llvm_type().
         // The body always produces i64 values (via adapt_to_i64) and call.rs expects
         // i64 at the call site. Using llvm_type() gave "i8*" for String/Bool returns,
@@ -1338,9 +1320,6 @@ impl LlvmBackend {
 
     pub(super) fn emit_transaction(&mut self, out: &mut String, txn: &crate::ast::Transaction, name: &str, range_meta: &mut Vec<String>) {
         let has_output = txn.output_type.is_some() || !txn.outputs.is_empty();
-        // 2026-07-24: Load per-binding narrowed widths for this transaction.
-        self.fun.narrowed = self.ctx.narrow_bindings.get(name)
-            .cloned().unwrap_or_default();
         if !txn.is_reactive && (!txn.parameters.is_empty() || has_output) {
             self.emit_callable_txn(out, txn, name);
             return;
