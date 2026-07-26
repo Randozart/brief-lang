@@ -59,7 +59,7 @@
       {
         "id": "dbrief",
         "aliases": ["Data Brief", "dbrief", "Brief Data", "brief-data"],
-        "extensions": [".dbv", ".dbvl", ".dbvs"],
+        "extensions": [".dbv", ".dbvl"],
         "icon": {
           "light": "./images/d-brief-logo.svg",
           "dark": "./images/d-brief-logo.svg"

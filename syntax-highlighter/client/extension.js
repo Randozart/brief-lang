@@ -59,7 +59,7 @@ function activate(context) {
         ],
         synchronize: {
             // Notify the server about file changes
-            fileEvents: vscode.workspace.createFileSystemWatcher('**/*.{bv,rbv,ebv,dbv,dbvl,dbvs,sbv,srbv,sebv}')
+            fileEvents: vscode.workspace.createFileSystemWatcher('**/*.{bv,rbv,ebv,dbv,dbvl,sbv,srbv,sebv}')
         }
     };
 
