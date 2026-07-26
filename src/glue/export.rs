@@ -278,26 +278,11 @@ fn serialize_ctypes_dbvl(c_type_map: &HashMap<String, String>) -> String {
     lines.join("\n")
 }
 
-/// Parse a DBVL type map field like "{Int:i64 Float:f64 Bool:bool}"
-/// into a HashMap. Matches dbvl_reader::parse_map() behavior.
+/// Parse a DBVL type map field like "{Int: i64; Float: f64; Bool: bool;}"
+/// into a HashMap. Delegates to dbvl_reader::parse_map() for consistency.
+/// 2026-07-26: Updated for new syntax (; separator inside {}).
 fn parse_type_map(s: &str) -> HashMap<String, String> {
-    let mut map = HashMap::new();
-    let trimmed = s.trim();
-    let inner = if trimmed.starts_with('{') && trimmed.ends_with('}') {
-        &trimmed[1..trimmed.len() - 1]
-    } else {
-        trimmed
-    };
-    for pair in inner.split_whitespace() {
-        if let Some(pos) = pair.find(':') {
-            let key = pair[..pos].trim().to_string();
-            let value = pair[pos + 1..].trim().to_string();
-            if !key.is_empty() {
-                map.insert(key, value);
-            }
-        }
-    }
-    map
+    crate::glue::dbvl_reader::parse_map(s)
 }
 
 /// Find a language target entry in glue.dbvl.
@@ -311,10 +296,7 @@ pub fn find_adapter(language: &str, dbvl_path: &Path) -> Result<AdapterEntry, St
 
     let file = crate::glue::dbvl_reader::parse_dbvl(&source);
     for entry in &file.entries {
-        let fields = match entry {
-            crate::glue::dbvl_reader::DbvlEntry::Raw(tokens) => tokens,
-            crate::glue::dbvl_reader::DbvlEntry::Validated { fields, .. } => fields,
-        };
+        let fields = &entry.fields;
         if fields.len() < 4 {
             continue;
         }
@@ -740,7 +722,7 @@ mod tests {
 
     #[test]
     fn test_parse_type_map() {
-        let map = parse_type_map("{Int:int64_t Float:double Bool:bool}");
+        let map = parse_type_map("{ Int: int64_t; Float: double; Bool: bool; }");
         assert_eq!(map.get("Int"), Some(&"int64_t".to_string()));
         assert_eq!(map.get("Float"), Some(&"double".to_string()));
         assert_eq!(map.get("Bool"), Some(&"bool".to_string()));
@@ -754,8 +736,9 @@ mod tests {
 
     #[test]
     fn test_parse_type_map_no_braces() {
-        let map = parse_type_map("Int:int64_t Float:double");
+        let map = parse_type_map("Int: int64_t; Float: double");
         assert_eq!(map.get("Int"), Some(&"int64_t".to_string()));
+        assert_eq!(map.get("Float"), Some(&"double".to_string()));
         assert_eq!(map.len(), 2);
     }
 
@@ -781,7 +764,7 @@ mod tests {
     fn test_find_adapter_new_format() {
         let dir = std::env::temp_dir();
         let dbvl_path = dir.join("test_glue_export.dbvl");
-        let dbvl_content = "schema lib/glue.dbvs;\nrust, glue/rust/types.bv, rs, x86_64-unknown-linux-gnu, {Int:int64_t Float:double}";
+        let dbvl_content = ">schema glue/export.dbv\nrust; glue/rust/types.bv; rs; x86_64-unknown-linux-gnu; { Int: int64_t; Float: double; }";
         fs::write(&dbvl_path, dbvl_content).unwrap();
 
         let result = find_adapter("rust", &dbvl_path);
@@ -801,7 +784,7 @@ mod tests {
     fn test_find_adapter_language_not_found() {
         let dir = std::env::temp_dir();
         let dbvl_path = dir.join("test_glue_missing.dbvl");
-        let dbvl_content = "schema lib/glue.dbvs;\nrust, glue/rust/types.bv, rs, x86_64";
+        let dbvl_content = ">schema glue/export.dbv\nrust; glue/rust/types.bv; rs; x86_64";
         fs::write(&dbvl_path, dbvl_content).unwrap();
 
         let result = find_adapter("python", &dbvl_path);
@@ -814,7 +797,7 @@ mod tests {
     fn test_find_adapter_too_few_fields() {
         let dir = std::env::temp_dir();
         let dbvl_path = dir.join("test_glue_too_few.dbvl");
-        let dbvl_content = "schema lib/glue.dbvs;\nrust, glue/rust/types.bv, rs";
+        let dbvl_content = ">schema glue/export.dbv\nrust; glue/rust/types.bv; rs";
         fs::write(&dbvl_path, dbvl_content).unwrap();
 
         let result = find_adapter("rust", &dbvl_path);
