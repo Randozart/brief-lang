@@ -931,6 +931,7 @@ impl<'a> Parser<'a> {
         let mut slots = Vec::new();
         let mut metadata = std::collections::HashMap::new();
         let mut operators: Vec<OperatorDef> = Vec::new();
+        let mut props: Vec<PropDef> = Vec::new();
         if self.eat(&Token::LBrace) {
             while !self.check(&Token::RBrace) && !self.is_at_end() {
                 let slot_name = self.expect_identifier()?;
@@ -999,6 +1000,10 @@ impl<'a> Parser<'a> {
                     metadata.insert(format!("op.{}", op_name), PropertyValue::String(impl_val));
                     continue;
                 }
+                if slot_name == "prop" {
+                    self.parse_prop_binding(&mut props)?;
+                    continue;
+                }
                 let slot_ty = if self.eat(&Token::TildeArrow) {
                     self.parse_expression()?;
                     Type::int()
@@ -1030,6 +1035,7 @@ impl<'a> Parser<'a> {
                     projections: vec![],
                     bindings: vec![],
                     operators: operators.clone(),
+                    props: props.clone(),
                     constraints: vec![],
                     span: None,
                 },
@@ -1050,6 +1056,7 @@ impl<'a> Parser<'a> {
                 projections: vec![],
                 bindings: vec![],
                 operators,
+                props,
                 constraints: vec![],
                 span: None,
             },
@@ -1087,6 +1094,7 @@ impl<'a> Parser<'a> {
         let mut slots = Vec::new();
         let mut metadata = std::collections::HashMap::new();
         let mut operators: Vec<OperatorDef> = Vec::new();
+        let mut props: Vec<PropDef> = Vec::new();
         if self.eat(&Token::LBrace) {
             while !self.check(&Token::RBrace) && !self.is_at_end() {
                 let slot_name = self.expect_identifier()?;
@@ -1133,6 +1141,10 @@ impl<'a> Parser<'a> {
                     self.parse_op_binding(&mut operators)?;
                     continue;
                 }
+                if slot_name == "prop" {
+                    self.parse_prop_binding(&mut props)?;
+                    continue;
+                }
                 // 2026-07-20: Slot-name property binding via <~ (general metadata).
                 // InsertAt/ExtractFrom are now parsed via `op InsertAt(T) = fn(#L,#R)`
                 // in the op handler above. They no longer get special "op." prefix treatment.
@@ -1161,6 +1173,7 @@ impl<'a> Parser<'a> {
                 projections: vec![],
                 bindings: vec![],
                 operators,
+                props,
                 constraints: vec![],
                 span: None,
             },
@@ -1228,6 +1241,17 @@ impl<'a> Parser<'a> {
         Ok(())
     }
 
+    /// 2026-07-26: Parse prop Name = expr;
+    /// Declares a metaproperty with an implementation expression.
+    fn parse_prop_binding(&mut self, props: &mut Vec<PropDef>) -> Result<(), SyntaxError> {
+        let name = self.expect_identifier()?;
+        self.expect(Token::Eq)?;
+        let expr = self.parse_expression()?;
+        self.expect(Token::Semicolon)?;
+        props.push(PropDef { name, expr, span: None });
+        Ok(())
+    }
+
     /// 2026-07-20: Validate a pre:/suf: discriminator string.
     /// Rejects symbols that conflict with language operators or syntax.
     fn validate_discriminator(&self, val: &str) -> Result<(), crate::errors::SyntaxError> {
@@ -1292,7 +1316,7 @@ impl<'a> Parser<'a> {
             bit_range: None, span: None,
             body: TypeDefBody {
                 slots, metadata: std::collections::HashMap::new(),
-                projections: vec![], bindings: vec![], operators: vec![], constraints: vec![], span: None,
+                projections: vec![], bindings: vec![], operators: vec![], props: vec![], constraints: vec![], span: None,
             },
         }))
     }
@@ -1369,7 +1393,7 @@ impl<'a> Parser<'a> {
             bit_range: None, span: None,
             body: TypeDefBody {
                 slots, metadata: std::collections::HashMap::new(),
-                projections: vec![], bindings: vec![], operators: vec![], constraints: vec![], span: None,
+                projections: vec![], bindings: vec![], operators: vec![], props: vec![], constraints: vec![], span: None,
             },
         }))
     }
@@ -1920,5 +1944,33 @@ mod tests {
             }
             _ => panic!("expected Expr::Slice"),
         }
+    }
+
+    // ── Prop declaration parsing ──────────────────────────────────
+
+    fn parse_prop_from_type_def(src: &str) -> Vec<crate::ast::top::PropDef> {
+        let tokens = crate::lexer::tokenize(src).unwrap();
+        let mut p = Parser::new(tokens, src);
+        match p.parse_top_level() {
+            Ok(crate::ast::TopLevel::TypeDef(td)) => td.body.props,
+            Ok(other) => panic!("expected TypeDef, got {:?}", other),
+            Err(e) => panic!("parse error: {:?}", e),
+        }
+    }
+
+    #[test]
+    fn test_parse_prop_declaration() {
+        let props = parse_prop_from_type_def("type T { prop Size = 42; };");
+        assert_eq!(props.len(), 1);
+        assert_eq!(props[0].name, "Size");
+    }
+
+    #[test]
+    fn test_parse_multiple_props() {
+        let props = parse_prop_from_type_def(
+            "type T { prop Size = 42; prop Bytes = 128; };");
+        assert_eq!(props.len(), 2);
+        assert_eq!(props[0].name, "Size");
+        assert_eq!(props[1].name, "Bytes");
     }
 }

@@ -439,6 +439,7 @@ mod tests {
                 projections: vec![],
                 bindings: vec![],
                 operators: vec![],
+            props: vec![],
                 constraints: vec![],
                 span: None,
             },

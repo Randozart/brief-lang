@@ -533,6 +533,7 @@ fn test_type_with_slots_populates_struct_types() {
                 projections: vec![],
                 bindings: vec![],
                 operators: vec![],
+            props: vec![],
                 constraints: vec![],
                 span: None,
             },
