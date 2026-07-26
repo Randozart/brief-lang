@@ -730,7 +730,16 @@ impl LlvmBackend {
                 return self.emit_struct_literal(out, v, type_name, fields, indent);
             }
             Expr::Exists(_) => { unreachable!("fn? only in stage eval") },
-            Expr::Slice { array, .. } => self.emit_expr(out, array, indent),
+            Expr::Slice { array, start, end, stride } => {
+                // 2026-07-26: Evaluate slice bounds for side effects.
+                // The narrowing pass converts constant-bounds slices to Vector<T,N>
+                // before codegen; this arm handles dynamic slices.
+                let array_reg = self.emit_expr(out, array, indent);
+                if let Some(s) = start { self.emit_expr(out, s, indent); }
+                if let Some(e) = end { self.emit_expr(out, e, indent); }
+                if let Some(s) = stride { self.emit_expr(out, s, indent); }
+                array_reg
+            }
         }
     }
 
