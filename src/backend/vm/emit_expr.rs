@@ -105,8 +105,14 @@ impl VmBackend {
                         self.asm.emit_swap();
                         self.asm.emit_sub();
                     }
-                    UnaryOpKind::Not | UnaryOpKind::BitNot => {
+                    UnaryOpKind::Not => {
+                        // 2026-07-26: Logical NOT — emit NOT which is now
+                        // a logical NOT (0→1, else→0) in both C and Brief VM.
                         self.asm.emit_not();
+                    }
+                    UnaryOpKind::BitNot => {
+                        // 2026-07-26: Bitwise NOT — emit BNOT for ~a.
+                        self.asm.emit_bnot();
                     }
                 }
             }

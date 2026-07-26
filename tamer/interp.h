@@ -41,6 +41,7 @@
 #define OP_RET      0x19
 #define OP_TRACE    0x1A
 #define OP_TRAP     0x1B
+#define OP_BNOT     0x1C
 
 // 1-byte immediate (2 bytes)
 #define OP_PUSH_I8      0x30

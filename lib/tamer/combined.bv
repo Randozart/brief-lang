@@ -54,192 +54,7 @@ defn read_i64(bc: Ptr<Int>, addr: Int) -> Int {
     term (word >> (byte_off * 8));
 };
 
-defn read_i8(bc: Ptr<Int>, addr: Int) -> Int {
-    let val = read_u8(bc, addr);
-    [val >= 128] { term val - 256; };
-    term val;
-};
 
-defn read_u16(bc: Ptr<Int>, addr: Int) -> Int {
-    let word = *(bc as Ptr<Int> + addr / 8);
-    let byte_off = addr % 8;
-    let val = (word >> (byte_off * 8)) & 0xFFFF;
-    term val;
-};
-
-defn read_i16(bc: Ptr<Int>, addr: Int) -> Int {
-    let val = read_u16(bc, addr);
-    [val >= 32768] { term val - 65536; };
-    term val;
-};
-
-defn read_u32(bc: Ptr<Int>, addr: Int) -> Int {
-    let word = *(bc as Ptr<Int> + addr / 8);
-    let byte_off = addr % 8;
-    let val = (word >> (byte_off * 8)) & 0xFFFFFFFF;
-    term val;
-};
-
-defn read_i64(bc: Ptr<Int>, addr: Int) -> Int {
-    let word = *(bc as Ptr<Int> + addr / 8);
-    let byte_off = addr % 8;
-    term (word >> (byte_off * 8));
-};
-
-// ── .lair header fields ──────────────────────────────────────────────────
-
-defn lair_version(bc: Ptr<Int>) -> Int { term read_u32(bc, 4); };
-
-defn lair_fn_offset(bc: Ptr<Int>) -> Int { term read_u64(bc, 32); };
-
-defn lair_fn_size(bc: Ptr<Int>) -> Int { term read_u64(bc, 40); };
-
-defn lair_bc_offset(bc: Ptr<Int>) -> Int { term read_u64(bc, 48); };
-
-defn lair_bc_size(bc: Ptr<Int>) -> Int { term read_u64(bc, 56); };
-
-// ── Function table entries ───────────────────────────────────────────────
-// Each entry: name_idx(4) + bc_offset(8) + bc_len(4) + local_count(2) + arg_count(2) = 20 bytes
-
-defn fn_bc_offset(fn_table: Ptr<Int>, fn_idx: Int) -> Int {
-    let entry_word = *(fn_table as Ptr<Int> + fn_idx * 20 / 8 + 0);
-    let entry_extra = *(fn_table as Ptr<Int> + fn_idx * 20 / 8 + 1);
-    term read_i64(fn_table, fn_idx * 20 + 4);
-};
-
-defn fn_bc_len(fn_table: Ptr<Int>, fn_idx: Int) -> Int {
-    term read_u32(fn_table, fn_idx * 20 + 12);
-};
-
-defn fn_local_count(fn_table: Ptr<Int>, fn_idx: Int) -> Int {
-    term read_u16(fn_table, fn_idx * 20 + 16);
-};
-
-defn fn_arg_count(fn_table: Ptr<Int>, fn_idx: Int) -> Int {
-    term read_u16(fn_table, fn_idx * 20 + 18);
-};
-
-// ── .bounty section extraction ─────────────────────────────────────────
-// The .bounty file format:
-//   magic(9) + version(4) + flags(4) + count(4) = 21 bytes header
-//   section table: entries of type(1) + offset(8) + size(8)
-//   section data follows
-
-defn find_bounty_section(data: Ptr<Int>, type_id: Int) -> Ptr<Int> {
-    let count = read_u32(data, 17);
-    [count >= 1] {
-        [read_u8(data, 21) == type_id] {
-            term data + read_u64(data, 22);
-        };
-    };
-    [count >= 2] {
-        [read_u8(data, 38) == type_id] {
-            term data + read_u64(data, 39);
-        };
-    };
-    [count >= 3] {
-        [read_u8(data, 55) == type_id] {
-            term data + read_u64(data, 56);
-        };
-    };
-    term 0;
-};
-
-defn read_i8(bc: Ptr<Int>, addr: Int) -> Int {
-    let val = read_u8(bc, addr);
-    [val >= 128] { term val - 256; };
-    term val;
-};
-
-defn read_u16(bc: Ptr<Int>, addr: Int) -> Int {
-    let lo = read_u8(bc, addr);
-    let hi = read_u8(bc, addr + 1);
-    term lo | (hi << 8);
-};
-
-defn read_i16(bc: Ptr<Int>, addr: Int) -> Int {
-    let val = read_u16(bc, addr);
-    [val >= 32768] { term val - 65536; };
-    term val;
-};
-
-defn read_u32(bc: Ptr<Int>, addr: Int) -> Int {
-    let b0 = read_u8(bc, addr);
-    let b1 = read_u8(bc, addr + 1);
-    let b2 = read_u8(bc, addr + 2);
-    let b3 = read_u8(bc, addr + 3);
-    term b0 | (b1 << 8) | (b2 << 16) | (b3 << 24);
-};
-
-defn read_i64(bc: Ptr<Int>, addr: Int) -> Int {
-    let b0 = read_u8(bc, addr);
-    let b1 = read_u8(bc, addr + 1);
-    let b2 = read_u8(bc, addr + 2);
-    let b3 = read_u8(bc, addr + 3);
-    let b4 = read_u8(bc, addr + 4);
-    let b5 = read_u8(bc, addr + 5);
-    let b6 = read_u8(bc, addr + 6);
-    let b7 = read_u8(bc, addr + 7);
-    term b0 | (b1 << 8) | (b2 << 16) | (b3 << 24)
-        | (b4 << 32) | (b5 << 40) | (b6 << 48) | (b7 << 56);
-};
-
-// ── .lair header fields ──────────────────────────────────────────────────
-
-defn lair_version(bc: Ptr<Int>) -> Int { term read_u32(bc, 4); };
-
-defn lair_fn_offset(bc: Ptr<Int>) -> Int { term read_u64(bc, 32); };
-
-defn lair_fn_size(bc: Ptr<Int>) -> Int { term read_u64(bc, 40); };
-
-defn lair_bc_offset(bc: Ptr<Int>) -> Int { term read_u64(bc, 48); };
-
-defn lair_bc_size(bc: Ptr<Int>) -> Int { term read_u64(bc, 56); };
-
-// ── Function table entries ───────────────────────────────────────────────
-// Each entry: name_idx(4) + bc_offset(8) + bc_len(4) + local_count(2) + arg_count(2) = 20 bytes
-
-defn fn_bc_offset(fn_table: Ptr<Int>, fn_idx: Int) -> Int {
-    term read_u64(fn_table + fn_idx * 20 + 4);
-};
-
-defn fn_bc_len(fn_table: Ptr<Int>, fn_idx: Int) -> Int {
-    term read_u32(fn_table + fn_idx * 20 + 12);
-};
-
-defn fn_local_count(fn_table: Ptr<Int>, fn_idx: Int) -> Int {
-    term read_u16(fn_table + fn_idx * 20 + 16);
-};
-
-defn fn_arg_count(fn_table: Ptr<Int>, fn_idx: Int) -> Int {
-    term read_u16(fn_table + fn_idx * 20 + 18);
-};
-
-// ── .bounty section extraction via syscalls ─────────────────────────────
-// The .bounty file format:
-//   magic(9) + version(4) + flags(4) + count(4) = 21 bytes header
-//   section table: entries of type(1) + offset(8) + size(8)
-//   section data follows
-
-defn find_bounty_section(data: Ptr<Int>, type_id: Int) -> Ptr<Int> {
-    let count = read_u32(data, 17);
-    [count >= 1] {
-        [read_u8(data, 21) == type_id] {
-            term data + read_u64(data, 22);
-        };
-    };
-    [count >= 2] {
-        [read_u8(data, 38) == type_id] {
-            term data + read_u64(data, 39);
-        };
-    };
-    [count >= 3] {
-        [read_u8(data, 55) == type_id] {
-            term data + read_u64(data, 56);
-        };
-    };
-    term 0;
-};
 // 2026-07-25: Brief VM interpreter — pure Brief, no custom C runtime.
 // Memory by Contract: all buffer bounds proven by contract preconditions.
 
@@ -253,7 +68,14 @@ let OP_SWAP:    Int = 0x03;
 let OP_ADD:     Int = 0x06;
 let OP_SUB:     Int = 0x07;
 let OP_MUL:     Int = 0x08;
+let OP_AND:     Int = 0x0B;
+let OP_OR:      Int = 0x0C;
+let OP_XOR:     Int = 0x0D;
+let OP_NOT:     Int = 0x0E;
+let OP_SHL:     Int = 0x0F;
+let OP_SHR_S:   Int = 0x10;
 let OP_EQ:      Int = 0x11;
+let OP_BNOT:    Int = 0x1C;
 let OP_LOAD:    Int = 0x17;
 let OP_STORE:   Int = 0x18;
 let OP_RET:     Int = 0x19;
@@ -363,11 +185,71 @@ defn exec_op(sd: Ptr<Int>, sl_out: Ptr<Int>,
             *sl_out = sl; term pc + 1;
         };
 
-        0x08 => { // mul
+         0x08 => { // mul
             [sl >= 2] {
                 let a = *(sd + sl - 1);
                 let b = *(sd + sl - 2);
                 *(sd + sl - 2) = b * a;
+                *sl_out = sl - 1; term pc + 1;
+            };
+            *sl_out = sl; term pc + 1;
+        };
+
+        0x0B => { // and
+            [sl >= 2] {
+                let a = *(sd + sl - 1);
+                let b = *(sd + sl - 2);
+                *(sd + sl - 2) = b & a;
+                *sl_out = sl - 1; term pc + 1;
+            };
+            *sl_out = sl; term pc + 1;
+        };
+
+        0x0C => { // or
+            [sl >= 2] {
+                let a = *(sd + sl - 1);
+                let b = *(sd + sl - 2);
+                *(sd + sl - 2) = b | a;
+                *sl_out = sl - 1; term pc + 1;
+            };
+            *sl_out = sl; term pc + 1;
+        };
+
+        0x0D => { // xor
+            [sl >= 2] {
+                let a = *(sd + sl - 1);
+                let b = *(sd + sl - 2);
+                *(sd + sl - 2) = b ^ a;
+                *sl_out = sl - 1; term pc + 1;
+            };
+            *sl_out = sl; term pc + 1;
+        };
+
+        0x0E => { // not (logical NOT: 0→1, else→0)
+            [sl >= 1] {
+                let a = *(sd + sl - 1);
+                [a == 0] { *(sd + sl - 1) = 1; };
+                [a != 0] { *(sd + sl - 1) = 0; };
+                *sl_out = sl; term pc + 1;
+            };
+            *sl_out = sl; term pc + 1;
+        };
+
+        0x0F => { // shl
+            [sl >= 2] {
+                let a = *(sd + sl - 1);
+                let b = *(sd + sl - 2);
+                *(sd + sl - 2) = b << (a & 63);
+                *sl_out = sl - 1; term pc + 1;
+            };
+            *sl_out = sl; term pc + 1;
+        };
+
+        0x10 => { // shr_s (arithmetic)
+            [sl >= 2] {
+                let a = *(sd + sl - 1);
+                let b = *(sd + sl - 2);
+                *(sd + sl - 2) = b >> (a & 63);
                 *sl_out = sl - 1; term pc + 1;
             };
             *sl_out = sl; term pc + 1;
@@ -541,13 +423,22 @@ defn exec_op(sd: Ptr<Int>, sl_out: Ptr<Int>,
             *sl_out = sl; term pc + 5;
         };
 
-        0x90 => { // push_i64
+         0x90 => { // push_i64
             let val = read_i64(bc, pc + 1);
             [sl < 1024] {
                 *(sd + sl) = val;
                 *sl_out = sl + 1; term pc + 9;
             };
             *sl_out = sl; term pc + 9;
+        };
+
+        0x1C => { // bnot (bitwise NOT: ~a)
+            [sl >= 1] {
+                let a = *(sd + sl - 1);
+                *(sd + sl - 1) = ~a;
+                *sl_out = sl; term pc + 1;
+            };
+            *sl_out = sl; term pc + 1;
         };
 
         _ => { *sl_out = sl; term -1; };

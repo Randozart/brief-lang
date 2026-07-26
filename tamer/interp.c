@@ -319,6 +319,16 @@ uint64_t vm_execute(VmState* vm, uint32_t fn_idx) {
 
             case OP_NOT: {
                 uint64_t a = stack_pop(vm);
+                // 2026-07-26: Logical NOT (0→1, else→0), not bitwise.
+                // Boolean inversion for jz/jnz. Bitwise NOT is OP_BNOT.
+                if (!vm->has_error) { stack_push(vm, a == 0 ? 1 : 0); }
+                pc += 1; break;
+            }
+
+            case OP_BNOT: {
+                uint64_t a = stack_pop(vm);
+                // 2026-07-26: Bitwise NOT (~a). Separate from OP_NOT which
+                // is logical. Added so the VM can express both operations.
                 if (!vm->has_error) { stack_push(vm, ~a); }
                 pc += 1; break;
             }
@@ -544,13 +554,17 @@ uint64_t vm_execute(VmState* vm, uint32_t fn_idx) {
                     vm->has_error = 1; return 0;
                 }
                 LairFunction* callee = &vm->function_table[callee_idx];
-                // Save return state in current frame
+                // Push new frame for callee first
+                if (push_frame(vm, callee->local_count) != 0) return 0;
+                // 2026-07-26: Save return state on callee frame, not caller.
+                // Before: saved on frame_count-1 before push_frame (caller),
+                // then push_frame created callee at frame_count-1 with NULL
+                // return_pc. OP_RET read from callee and got NULL — every
+                // call returned from vm_execute. After push_frame, frame_count-1
+                // IS the callee. See docs/plans/2026-07-26-tamer-zero-c-and-static-memory.md.
                 Frame* cur = &vm->frames[vm->frame_count - 1];
                 cur->return_pc = pc + 3;
                 cur->return_frame_idx = vm->frame_count - 1;
-
-                // Push new frame for callee
-                if (push_frame(vm, callee->local_count) != 0) return 0;
 
                 // Copy arguments from stack into callee's local slots
                 for (uint16_t i = 0; i < callee->arg_count; i++) {

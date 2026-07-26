@@ -12,7 +12,14 @@ let OP_SWAP:    Int = 0x03;
 let OP_ADD:     Int = 0x06;
 let OP_SUB:     Int = 0x07;
 let OP_MUL:     Int = 0x08;
+let OP_AND:     Int = 0x0B;
+let OP_OR:      Int = 0x0C;
+let OP_XOR:     Int = 0x0D;
+let OP_NOT:     Int = 0x0E;
+let OP_SHL:     Int = 0x0F;
+let OP_SHR_S:   Int = 0x10;
 let OP_EQ:      Int = 0x11;
+let OP_BNOT:    Int = 0x1C;
 let OP_LOAD:    Int = 0x17;
 let OP_STORE:   Int = 0x18;
 let OP_RET:     Int = 0x19;
@@ -122,11 +129,71 @@ defn exec_op(sd: Ptr<Int>, sl_out: Ptr<Int>,
             *sl_out = sl; term pc + 1;
         };
 
-        0x08 => { // mul
+         0x08 => { // mul
             [sl >= 2] {
                 let a = *(sd + sl - 1);
                 let b = *(sd + sl - 2);
                 *(sd + sl - 2) = b * a;
+                *sl_out = sl - 1; term pc + 1;
+            };
+            *sl_out = sl; term pc + 1;
+        };
+
+        0x0B => { // and
+            [sl >= 2] {
+                let a = *(sd + sl - 1);
+                let b = *(sd + sl - 2);
+                *(sd + sl - 2) = b & a;
+                *sl_out = sl - 1; term pc + 1;
+            };
+            *sl_out = sl; term pc + 1;
+        };
+
+        0x0C => { // or
+            [sl >= 2] {
+                let a = *(sd + sl - 1);
+                let b = *(sd + sl - 2);
+                *(sd + sl - 2) = b | a;
+                *sl_out = sl - 1; term pc + 1;
+            };
+            *sl_out = sl; term pc + 1;
+        };
+
+        0x0D => { // xor
+            [sl >= 2] {
+                let a = *(sd + sl - 1);
+                let b = *(sd + sl - 2);
+                *(sd + sl - 2) = b ^ a;
+                *sl_out = sl - 1; term pc + 1;
+            };
+            *sl_out = sl; term pc + 1;
+        };
+
+        0x0E => { // not (logical NOT: 0→1, else→0)
+            [sl >= 1] {
+                let a = *(sd + sl - 1);
+                [a == 0] { *(sd + sl - 1) = 1; };
+                [a != 0] { *(sd + sl - 1) = 0; };
+                *sl_out = sl; term pc + 1;
+            };
+            *sl_out = sl; term pc + 1;
+        };
+
+        0x0F => { // shl
+            [sl >= 2] {
+                let a = *(sd + sl - 1);
+                let b = *(sd + sl - 2);
+                *(sd + sl - 2) = b << (a & 63);
+                *sl_out = sl - 1; term pc + 1;
+            };
+            *sl_out = sl; term pc + 1;
+        };
+
+        0x10 => { // shr_s (arithmetic)
+            [sl >= 2] {
+                let a = *(sd + sl - 1);
+                let b = *(sd + sl - 2);
+                *(sd + sl - 2) = b >> (a & 63);
                 *sl_out = sl - 1; term pc + 1;
             };
             *sl_out = sl; term pc + 1;
@@ -300,13 +367,22 @@ defn exec_op(sd: Ptr<Int>, sl_out: Ptr<Int>,
             *sl_out = sl; term pc + 5;
         };
 
-        0x90 => { // push_i64
+         0x90 => { // push_i64
             let val = read_i64(bc, pc + 1);
             [sl < 1024] {
                 *(sd + sl) = val;
                 *sl_out = sl + 1; term pc + 9;
             };
             *sl_out = sl; term pc + 9;
+        };
+
+        0x1C => { // bnot (bitwise NOT: ~a)
+            [sl >= 1] {
+                let a = *(sd + sl - 1);
+                *(sd + sl - 1) = ~a;
+                *sl_out = sl; term pc + 1;
+            };
+            *sl_out = sl; term pc + 1;
         };
 
         _ => { *sl_out = sl; term -1; };

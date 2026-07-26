@@ -54,38 +54,6 @@ defn read_i64(bc: Ptr<Int>, addr: Int) -> Int {
     term (word >> (byte_off * 8));
 };
 
-defn read_i8(bc: Ptr<Int>, addr: Int) -> Int {
-    let val = read_u8(bc, addr);
-    [val >= 128] { term val - 256; };
-    term val;
-};
-
-defn read_u16(bc: Ptr<Int>, addr: Int) -> Int {
-    let word = *(bc as Ptr<Int> + addr / 8);
-    let byte_off = addr % 8;
-    let val = (word >> (byte_off * 8)) & 0xFFFF;
-    term val;
-};
-
-defn read_i16(bc: Ptr<Int>, addr: Int) -> Int {
-    let val = read_u16(bc, addr);
-    [val >= 32768] { term val - 65536; };
-    term val;
-};
-
-defn read_u32(bc: Ptr<Int>, addr: Int) -> Int {
-    let word = *(bc as Ptr<Int> + addr / 8);
-    let byte_off = addr % 8;
-    let val = (word >> (byte_off * 8)) & 0xFFFFFFFF;
-    term val;
-};
-
-defn read_i64(bc: Ptr<Int>, addr: Int) -> Int {
-    let word = *(bc as Ptr<Int> + addr / 8);
-    let byte_off = addr % 8;
-    term (word >> (byte_off * 8));
-};
-
 // ── .lair header fields ──────────────────────────────────────────────────
 
 defn lair_version(bc: Ptr<Int>) -> Int { term read_u32(bc, 4); };
@@ -102,8 +70,6 @@ defn lair_bc_size(bc: Ptr<Int>) -> Int { term read_u64(bc, 56); };
 // Each entry: name_idx(4) + bc_offset(8) + bc_len(4) + local_count(2) + arg_count(2) = 20 bytes
 
 defn fn_bc_offset(fn_table: Ptr<Int>, fn_idx: Int) -> Int {
-    let entry_word = *(fn_table as Ptr<Int> + fn_idx * 20 / 8 + 0);
-    let entry_extra = *(fn_table as Ptr<Int> + fn_idx * 20 / 8 + 1);
     term read_i64(fn_table, fn_idx * 20 + 4);
 };
 
@@ -120,102 +86,6 @@ defn fn_arg_count(fn_table: Ptr<Int>, fn_idx: Int) -> Int {
 };
 
 // ── .bounty section extraction ─────────────────────────────────────────
-// The .bounty file format:
-//   magic(9) + version(4) + flags(4) + count(4) = 21 bytes header
-//   section table: entries of type(1) + offset(8) + size(8)
-//   section data follows
-
-defn find_bounty_section(data: Ptr<Int>, type_id: Int) -> Ptr<Int> {
-    let count = read_u32(data, 17);
-    [count >= 1] {
-        [read_u8(data, 21) == type_id] {
-            term data + read_u64(data, 22);
-        };
-    };
-    [count >= 2] {
-        [read_u8(data, 38) == type_id] {
-            term data + read_u64(data, 39);
-        };
-    };
-    [count >= 3] {
-        [read_u8(data, 55) == type_id] {
-            term data + read_u64(data, 56);
-        };
-    };
-    term 0;
-};
-
-defn read_i8(bc: Ptr<Int>, addr: Int) -> Int {
-    let val = read_u8(bc, addr);
-    [val >= 128] { term val - 256; };
-    term val;
-};
-
-defn read_u16(bc: Ptr<Int>, addr: Int) -> Int {
-    let lo = read_u8(bc, addr);
-    let hi = read_u8(bc, addr + 1);
-    term lo | (hi << 8);
-};
-
-defn read_i16(bc: Ptr<Int>, addr: Int) -> Int {
-    let val = read_u16(bc, addr);
-    [val >= 32768] { term val - 65536; };
-    term val;
-};
-
-defn read_u32(bc: Ptr<Int>, addr: Int) -> Int {
-    let b0 = read_u8(bc, addr);
-    let b1 = read_u8(bc, addr + 1);
-    let b2 = read_u8(bc, addr + 2);
-    let b3 = read_u8(bc, addr + 3);
-    term b0 | (b1 << 8) | (b2 << 16) | (b3 << 24);
-};
-
-defn read_i64(bc: Ptr<Int>, addr: Int) -> Int {
-    let b0 = read_u8(bc, addr);
-    let b1 = read_u8(bc, addr + 1);
-    let b2 = read_u8(bc, addr + 2);
-    let b3 = read_u8(bc, addr + 3);
-    let b4 = read_u8(bc, addr + 4);
-    let b5 = read_u8(bc, addr + 5);
-    let b6 = read_u8(bc, addr + 6);
-    let b7 = read_u8(bc, addr + 7);
-    term b0 | (b1 << 8) | (b2 << 16) | (b3 << 24)
-        | (b4 << 32) | (b5 << 40) | (b6 << 48) | (b7 << 56);
-};
-
-// ── .lair header fields ──────────────────────────────────────────────────
-
-defn lair_version(bc: Ptr<Int>) -> Int { term read_u32(bc, 4); };
-
-defn lair_fn_offset(bc: Ptr<Int>) -> Int { term read_u64(bc, 32); };
-
-defn lair_fn_size(bc: Ptr<Int>) -> Int { term read_u64(bc, 40); };
-
-defn lair_bc_offset(bc: Ptr<Int>) -> Int { term read_u64(bc, 48); };
-
-defn lair_bc_size(bc: Ptr<Int>) -> Int { term read_u64(bc, 56); };
-
-// ── Function table entries ───────────────────────────────────────────────
-// Each entry: name_idx(4) + bc_offset(8) + bc_len(4) + local_count(2) + arg_count(2) = 20 bytes
-
-defn fn_bc_offset(fn_table: Ptr<Int>, fn_idx: Int) -> Int {
-    term read_u64(fn_table + fn_idx * 20 + 4);
-};
-
-defn fn_bc_len(fn_table: Ptr<Int>, fn_idx: Int) -> Int {
-    term read_u32(fn_table + fn_idx * 20 + 12);
-};
-
-defn fn_local_count(fn_table: Ptr<Int>, fn_idx: Int) -> Int {
-    term read_u16(fn_table + fn_idx * 20 + 16);
-};
-
-defn fn_arg_count(fn_table: Ptr<Int>, fn_idx: Int) -> Int {
-    term read_u16(fn_table + fn_idx * 20 + 18);
-};
-
-// ── .bounty section extraction via syscalls ─────────────────────────────
 // The .bounty file format:
 //   magic(9) + version(4) + flags(4) + count(4) = 21 bytes header
 //   section table: entries of type(1) + offset(8) + size(8)

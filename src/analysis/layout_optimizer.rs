@@ -633,7 +633,7 @@ mod tests {
         let mut resolved_frgns = HashMap::new();
         resolved_frgns.insert(
             "inline_func".to_string(),
-            ResolvedFrgn::Inline { symbol: "inline_func".to_string(), compile_source: true },
+            ResolvedFrgn::Inline { symbol: "inline_func".to_string(), compile_source: true, protocol_lib: None },
         );
         let targets = sample_glue_targets();
 

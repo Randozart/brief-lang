@@ -26,6 +26,7 @@ pub const OP_AND: u8       = 0x0B;
 pub const OP_OR: u8        = 0x0C;
 pub const OP_XOR: u8       = 0x0D;
 pub const OP_NOT: u8       = 0x0E;
+pub const OP_BNOT: u8      = 0x1C;
 pub const OP_SHL: u8       = 0x0F;
 pub const OP_SHR_S: u8     = 0x10;
 pub const OP_EQ: u8        = 0x11;
@@ -217,6 +218,7 @@ impl Assembler {
     pub fn emit_or(&mut self)     { self.emit_op(OP_OR); }
     pub fn emit_xor(&mut self)    { self.emit_op(OP_XOR); }
     pub fn emit_not(&mut self)    { self.emit_op(OP_NOT); }
+    pub fn emit_bnot(&mut self)   { self.emit_op(OP_BNOT); }
     pub fn emit_shl(&mut self)    { self.emit_op(OP_SHL); }
     pub fn emit_shr_s(&mut self)  { self.emit_op(OP_SHR_S); }
     pub fn emit_eq(&mut self)     { self.emit_op(OP_EQ); }
