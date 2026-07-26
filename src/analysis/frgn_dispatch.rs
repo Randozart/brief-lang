@@ -534,8 +534,9 @@ mod tests {
         );
         let targets = sample_glue_targets();
         let result = resolve_single_frgn(&fb, "", &targets, BackendKind::Llvm, None);
-        assert!(result.is_err(), "unknown protocol should error");
-        assert!(result.unwrap_err().contains("only supported protocol"));
+        let err = result.unwrap_err();
+        assert!(err.contains("supported protocols"),
+            "should mention supported protocols (got: '{}')", err);
     }
 
     #[test]

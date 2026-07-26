@@ -337,6 +337,8 @@ fn parse_build_args(args: &[String]) -> Result<compile::BuildOptions, String> {
         style_css: None,
         view_html: None,
         view_bindings: vec![],
+        ssr: false,
+        dev: false,
     })
 }
 
@@ -384,6 +386,8 @@ fn run_bounty(args: &[String]) -> Result<(), String> {
         style_css: None,
         view_html: None,
         view_bindings: vec![],
+        ssr: false,
+        dev: false,
     };
     let source = std::fs::read_to_string(file_path)
         .map_err(|e| format!("cannot read '{}': {}", file_path, e))?;

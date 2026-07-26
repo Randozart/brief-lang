@@ -269,6 +269,39 @@ export class WasmDomRuntime {{
     }}
   }}
 
+  _serializeState() {{
+    const mem = new DataView(this._memory.buffer);
+    const state = {{}};
+    for (const binding of this._bindingTable) {{
+      if (binding) {{
+        state[binding.handle] = mem.getUint32(binding.offset, true);
+      }}
+    }}
+    return state;
+  }}
+
+  _deserializeState(state) {{
+    const mem = new DataView(this._memory.buffer);
+    for (const [handle, val] of Object.entries(state)) {{
+      const binding = this._bindingTable[Number(handle)];
+      if (binding) {{
+        mem.setUint32(binding.offset, val, true);
+      }}
+    }}
+  }}
+
+  async hotReload(wasmBytes) {{
+    const oldState = this._serializeState();
+    const oldHandles = this._handles.slice();
+    const newRuntime = new WasmDomRuntime(wasmBytes);
+    newRuntime._handles = oldHandles;
+    newRuntime._deserializeState(oldState);
+    this._instance = newRuntime._instance;
+    this._memory = newRuntime._memory;
+    this._bindingTable = newRuntime._bindingTable;
+    this._loadStateLayout();
+  }}
+
   _applyFlush(updatesPtr, count) {{
     const mem = new DataView(this._memory.buffer);
     let off = updatesPtr;
@@ -787,7 +820,6 @@ mod tests {
             .map(|e| stub_start + e + 2)
             .unwrap_or(out.dom_shim.len());
         let stub_body = &out.dom_shim[stub_start..stub_end];
-        eprintln!("STUB BODY: '{}'", stub_body);
         assert!(!stub_body.contains("_readString"),
             "Int/Float params should NOT generate _readString in the frgn stub body");
         assert!(out.dom_shim.contains("compute"),
@@ -858,7 +890,6 @@ mod tests {
             .map(|e| stub_start + e + 2)
             .unwrap_or(out.dom_shim.len());
         let stub_body = &out.dom_shim[stub_start..stub_end];
-        eprintln!("STUB BODY: '{}'", stub_body);
         let readstring_count = stub_body.matches("_readString").count();
         assert_eq!(readstring_count, 1,
             "only one _readString in the update() stub (for String param, not Int); got {}", readstring_count);

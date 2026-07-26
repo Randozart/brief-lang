@@ -174,6 +174,14 @@ pub struct BuildOptions {
     /// 2026-07-26: Phase 6b — View bindings from processed <html> template.
     /// Passed to GlueWebGenerator for DOM binding table generation.
     pub view_bindings: Vec<brief_compiler::view_compiler::Binding>,
+    /// 2026-07-26: Item 3 — Enable SSR (Server-Side Rendering).
+    /// Pre-renders initial state into the HTML at compile time.
+    /// Only meaningful for webstack backend.
+    pub ssr: bool,
+    /// 2026-07-26: Item 4 — Enable dev mode (HMR support).
+    /// Uses dev-shim.mjs instead of dom-shim.mjs.
+    /// Only meaningful for webstack backend.
+    pub dev: bool,
     /// 2026-07-23: Allow macros to read files (FileRead$).
     pub allow_read: bool,
     /// 2026-07-23: Allow macros to write files (FileWrite$).
@@ -646,6 +654,22 @@ pub fn compile_source(file_path: &str, source: &str, opts: &BuildOptions) -> Res
                 std::fs::write(&index_path, &index_content)
                     .map_err(|e| format!("cannot write '{}': {}", index_path, e))?;
                 println!("wrote {}", index_path);
+
+                // 2026-07-26: Item 3 — SSR pass. If --ssr is set, replace
+                // the standard app.html with an SSR-enabled version that
+                // embeds initial state as JSON and pre-renders the view.
+                if opts.ssr {
+                    let ssr_out = brief_compiler::ssr::render_ssr(
+                        html,
+                        &items,
+                        opts.style_css.as_deref(),
+                        binary_base,
+                        opts.dev,
+                    );
+                    std::fs::write(&index_path, &ssr_out.full_html)
+                        .map_err(|e| format!("cannot write SSRed '{}': {}", index_path, e))?;
+                    println!("ssr {}", index_path);
+                }
             }
 
             // 2026-07-26: Phase 6c — Generate dom-shim.mjs + .d.ts from frgn decls.
@@ -775,6 +799,8 @@ pub fn check_source(file_path: &str, source: &str) -> Result<(), String> {
         style_css: None,
         view_html: None,
         view_bindings: vec![],
+        ssr: false,
+        dev: false,
     };
     let (_items, _universe) = parse_and_check(file_path, source, &default_opts)?;
     println!("OK");

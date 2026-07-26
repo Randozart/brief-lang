@@ -218,10 +218,10 @@ mod tests {
     #[test]
     fn test_protocol_config_resolve_unknown_protocol() {
         let config = ProtocolConfig::load();
-        let result = config.resolve("x86_64-linux", "#SomethingElse");
-        assert!(result.is_err(), "non-#System protocol should error");
-        assert!(result.unwrap_err().contains("only supported protocol"),
-            "error should mention #System is the only protocol");
+        let err = config.resolve("x86_64-linux", "#SomethingElse")
+            .unwrap_err();
+        assert!(err.contains("supported protocols"),
+            "error should mention supported protocols (got: '{}')", err);
     }
 
     #[test]
