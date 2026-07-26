@@ -375,12 +375,6 @@ pub enum Token {
     #[token(";")]
     Semicolon,
 
-    #[token("<:")]
-    LtColon,
-
-    #[token(":>")]
-    ColonGreaterThan,
-
     #[token(".#")]
     DotHash,
 
@@ -493,8 +487,8 @@ pub enum Token {
                             }
                             if let Ok(cp) = u32::from_str_radix(&hex, 16) {
                                 out.push(char::from_u32(cp).unwrap_or('?'));
-                            }
-                        }
+        }
+    }
                     }
                     Some(c) => { out.push('\\'); out.push(c); }
                     None => out.push('\\'),
@@ -647,16 +641,7 @@ impl std::fmt::Display for Token {
             Token::HashBracket => write!(f, "#["),
             Token::HashBangBracket => write!(f, "#!["),
             Token::Pragma => write!(f, "#pragma"),
-            Token::PragmaBang => write!(f, "#!pragma"),
-            Token::HashQuestion => write!(f, "#?"),
-            Token::HashBang => write!(f, "#!"),
-            Token::HashL => write!(f, "#L"),
-            Token::HashR => write!(f, "#R"),
-            Token::HashT => write!(f, "#T"),
-            Token::HashSelf => write!(f, "#Self"),
             Token::Semicolon => write!(f, ";"),
-            Token::LtColon => write!(f, "<:"),
-            Token::ColonGreaterThan => write!(f, ":>"),
             Token::DotHash => write!(f, ".#"),
             Token::ColonEq => write!(f, ":="),
             Token::Colon => write!(f, ":"),
@@ -692,6 +677,13 @@ impl std::fmt::Display for Token {
             Token::DocComment(s) => write!(f, "///{}", s),
             Token::DocCommentBang(s) => write!(f, "//!{}", s),
             Token::Slash => write!(f, "/"),
+            Token::HashBang => write!(f, "#!"),
+            Token::HashQuestion => write!(f, "#?"),
+            Token::HashL => write!(f, "#L"),
+            Token::HashR => write!(f, "#R"),
+            Token::HashT => write!(f, "#T"),
+            Token::HashSelf => write!(f, "#Self"),
+            Token::PragmaBang => write!(f, "#pragma!"),
         }
     }
 }

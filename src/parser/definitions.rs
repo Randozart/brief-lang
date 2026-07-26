@@ -923,7 +923,7 @@ impl<'a> Parser<'a> {
             }
         }
         self.expect(Token::RBracket)?;
-        let base = if self.eat(&Token::LtColon) {
+        let base = if self.eat(&Token::Colon) {
             self.parse_expression()?
         } else {
             Expr::Identifier(base_name.to_string())
@@ -1062,23 +1062,24 @@ impl<'a> Parser<'a> {
         let mut parent: Option<Box<Expr>> = None;
         let mut protocol: Option<String> = None;
         if self.eat(&Token::Colon) {
-            // Parse optional protocol (#HashWord) or parent type name
+            // 2026-07-26: Parse type X: #Proto Parent or type X: Parent or type X: #Proto
+            // Hashwords always sit left of what they attach to.
             match self.peek() {
                 Some(&Token::Identifier(ref s)) if s.starts_with('#') => {
                     let proto = s.clone(); self.pos += 1;
                     protocol = Some(proto);
+                    // Optional parent type after protocol hashword
+                    match self.peek() {
+                        Some(&Token::Identifier(ref s)) if !s.starts_with('#') => {
+                            let pname = s.clone(); self.pos += 1;
+                            parent = Some(Box::new(Expr::Identifier(pname)));
+                        }
+                        _ => {}
+                    }
                 }
                 Some(&Token::Identifier(_)) => {
                     let pname = self.expect_identifier()?;
                     parent = Some(Box::new(Expr::Identifier(pname)));
-                    // Optional protocol after parent
-                    match self.peek() {
-                        Some(&Token::Identifier(ref s)) if s.starts_with('#') => {
-                            let proto = s.clone(); self.pos += 1;
-                            protocol = Some(proto);
-                        }
-                        _ => {}
-                    }
                 }
                 _ => {}
             }
