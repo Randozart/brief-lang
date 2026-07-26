@@ -661,17 +661,17 @@ Same behavior as `.#Size` — just different syntax.
 | `val .#Alignment` | `val .#Alignment` |
 | `val .#Range` | `val .#Range` |
 
-### 1.6c. Type Inheritance Syntax (`type X: Y #Proto`)
+### 1.6c. Type Inheritance Syntax (`type X: #Proto Parent`)
 
 **Replace `<:` with `:`** for type inheritance. The `<:` token is removed
-from the lexer.
+from the lexer. **Hashwords always sit left of what they attach to:**
 
 ```brief
 // Old:
-type String : Bits { ... };
+type String <: Bits { ... };
 
-// New:
-type String: Bits #String { ... };
+// New — protocol first, then parent:
+type String: #String Bits { ... };
 
 // Without protocol override — inherits parent's protocol:
 type MyString: String { ... };
@@ -680,8 +680,10 @@ type MyString: String { ... };
 type ASCII: #String<ASCII> { ... };
 ```
 
-**Rule:** `:` introduces the immediate parent. `#Proto` sets the protocol
-hashword. If `#Proto` is omitted, the child inherits the parent's protocol.
+**Rule:** `:` introduces the optional protocol hashword (`#Proto`) and optional
+parent type name. Both are individually optional — `type X: #Proto Parent`.
+If no protocol is given, the child inherits the parent's protocol.
+If neither is given, the child defaults to Bits + #Bits.
 
 The `<:` Derivation lens (which also served as `observable <~ true` in
 contract declarations) is removed entirely. `observable` becomes a standalone
