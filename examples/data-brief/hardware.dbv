@@ -1,23 +1,18 @@
 // hardware.dbv — Hardware register map for MMIO
-// Used by Embedded Brief (.ebv) for address binding
+// Uses positional entries with > for register list
 
-{
-    "gpio": {
-        "base": "0x4000",
-        "width": 32,
-        "registers": {
-            "output": { "offset": 0, "access": "rw" },
-            "input":  { "offset": 4, "access": "ro" },
-            "dir":    { "offset": 8, "access": "rw" }
-        }
-    },
-    "uart": {
-        "base": "0x8000",
-        "width": 8,
-        "registers": {
-            "data":  { "offset": 0, "access": "rw" },
-            "status": { "offset": 1, "access": "ro" },
-            "ctrl":  { "offset": 2, "access": "rw" }
-        }
-    }
-}
+schema Register {
+    offset: Int;
+    access: String;
+};
+
+schema Device {
+    base: Int;
+    width: Int;
+    registers: Register[];
+};
+
+as Device {
+    gpio: 0x4000; 32; { > 0; rw; > 4; ro; > 8; rw; };
+    uart: 0x8000; 8;  { > 0; rw; > 1; ro; > 2; rw; };
+};

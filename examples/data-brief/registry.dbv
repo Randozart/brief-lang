@@ -1,0 +1,9 @@
+// registry.dbv — Schema for GLUE adapter registry entries
+// Imported by adapters.dbvl and used for schema validation
+
+schema RegistryEntry (language) {
+    language: String;
+    path: String;
+    extension: String;
+    directory: String;
+};

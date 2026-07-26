@@ -1,16 +1,21 @@
 // config.dbv — Data Brief configuration file
-// A .dbv file is pure data — no code, no contracts
-// Used for configuration, hardware register maps, etc.
+// Schema defined inline, > marks positional entries
 
-{
-    "app": "brief-compiler",
-    "version": "0.11.0",
-    "debug": false,
-    "optimization": {
-        "budget": 256,
-        "simplify": true,
-        "vectorize": true
-    },
-    "backends": ["llvm", "webstack", "circt"],
-    "threads": 4
-}
+schema Config {
+    app: String;
+    version: String;
+    debug: Bool;
+    optimization: OptimConfig;
+    backends: String[];
+    threads: Int;
+};
+
+schema OptimConfig {
+    budget: Int;
+    simplify: Bool;
+    vectorize: Bool;
+};
+
+as Config {
+    main: brief-compiler; 1.0.0; false; { 256; true; true }; llvm webstack circt; 4;
+};

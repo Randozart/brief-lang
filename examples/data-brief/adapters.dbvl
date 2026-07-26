@@ -1,6 +1,7 @@
-// adapters.dbvl — Data Brief Lines (one entry per line)
-// GLUE adapter registry for the FFI bridge system
+// adapters.dbvl — GLUE adapter registry (line-oriented format)
+// Schema imported via > directive
 
-rust glue/adapters/rust.bv .rs src/
-python glue/adapters/python.bv .py lib/
-node  glue/adapters/node.bv  .js  lib/
+>schema RegistryEntry from "registry.dbv"
+rust; glue/adapters/rust.bv; rs; src;
+python; glue/adapters/python.bv; py; lib;
+node; glue/adapters/node.bv; js; lib;

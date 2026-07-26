@@ -33,7 +33,7 @@ Three principles govern the design:
 | Extension | Name | Purpose |
 |-----------|------|---------|
 | `.dbv` | Data Brief Volume | Structured data with optional inline schema. Supports named entries, positional entries, nested blocks, and key-value maps. |
-| `.dbvl` | Data Brief Lines | Line-oriented format. One entry per line. Positional fields separated by `;`. Schema imported via `#` directives. |
+| `.dbvl` | Data Brief Lines | Line-oriented format. One entry per line. Positional fields separated by `;`. Schema imported via `>` directives. |
 
 `.dbvs` is removed. Schema definitions live in `.dbv` files (inline or as
 standalone schema-only `.dbv` files).
@@ -244,7 +244,7 @@ schema Team {
 };
 
 as Team {
-    alpha: Alpha Team; { @ Alice Smith; 30; @ Bob; 25; };
+    alpha: Alpha Team; { > Alice Smith; 30; > Bob; 25; };
 };
 ```
 
@@ -418,28 +418,34 @@ Bob; 25; Oak Ave; Portland;
 Charlie; 40; Elm St; Denver;
 ```
 
-### 7.2 Directives (`#`)
+### 7.2 Directives (`>`)
 
-Lines beginning with `#` are directives, not data. They are processed in order
+Lines beginning with `>` are directives, not data. They are processed in order
 and affect all subsequent data lines.
 
 | Directive | Purpose |
 |-----------|---------|
-| `#schema <Name> from <path>` | Imports a schema for data validation |
-| `#import <path>` | Imports another `.dbvl` file inline |
-| `#encoding <name>` | Sets text encoding for subsequent lines |
-| `#version <n>` | Version marker for tooling |
+| `>schema <Name> from <path>` | Imports a schema for data validation |
+| `>import <path>` | Imports another `.dbvl` file inline |
+| `>encoding <name>` | Sets text encoding for subsequent lines |
+| `>version <n>` | Version marker for tooling |
 
 A `.dbvl` file may have any number of directives interleaved with data. Once
-a `#schema` directive is processed, all subsequent data lines are validated
-against that schema until the next `#schema` directive replaces it.
+a `>schema` directive is processed, all subsequent data lines are validated
+against that schema until the next `>schema` directive replaces it.
 
 ```
-#schema Person from "person.dbv"
+>schema Person from "person.dbv"
 Alice Smith; 30;
 Bob; 25;
 
-#schema Address from "address.dbv"
+>schema Address from "address.dbv"
+```
+>schema Person from "person.dbv"
+Alice Smith; 30;
+Bob; 25;
+
+>schema Address from "address.dbv"
 Main St; Springfield;
 Oak Ave; Portland;
 ```
@@ -447,12 +453,12 @@ Oak Ave; Portland;
 ### 7.3 Key Assignment
 
 If the imported schema declares a key field, the parser extracts the key from
-that field's position automatically. No `@` or `key:` syntax is needed — every
+that field's position automatically. No `>` or `key:` syntax is needed — every
 line is implicitly a positional entry.
 
 ```
 // schema Person (name) { name: String; age: Int; }
-#schema Person from "person.dbv"
+>schema Person from "person.dbv"
 Alice Smith; 30;     // key = "Alice Smith"
 Bob; 25;             // key = "Bob"
 ```
@@ -461,7 +467,7 @@ If a line should use an explicit key that differs from the key field's value,
 prefix the line with `key: `:
 
 ```
-#schema Person from "person.dbv"
+>schema Person from "person.dbv"
 admin: Alice Smith; 30;    // key = "admin", name = "Alice Smith"
 ```
 
@@ -471,7 +477,7 @@ The explicit key overrides the schema-derived key.
 
 Quoted strings are not supported in `.dbvl` — not even as a parser flag. The
 format is designed for single-pass streaming parse. If data contains `;` or
-`#` at line start, use `.dbv` instead. This keeps the `.dbvl` parser at
+`>` at line start, use `.dbv` instead. This keeps the `.dbvl` parser at
 ~40 lines of code in any language.
 
 ---
@@ -593,7 +599,7 @@ computation skips absent fields without needing to rewrite old records.
 for each line in file:
     if line.is_empty() or line.starts_with("//"):
         continue
-    if line.starts_with("#"):
+    if line.starts_with(">"):
         process_directive(line)
         continue
     fields = split_on_semicolons(line)
@@ -613,7 +619,7 @@ parse_as_block() {
     while not "}":
         skip comments
         if peek is "}": break
-        if peek is "@":
+        if peek is ">":
             entry = parse_positional_entry()
         else:
             entry = parse_keyed_entry()
@@ -676,7 +682,7 @@ as FnBinding {
 ### 11.2 GLUE Adapter Registry (`.dbvl`)
 
 ```
-#schema RegistryEntry from "glue/registry.dbv"
+>schema RegistryEntry from "glue/registry.dbv"
 rust;  glue/rust/types.bv;   rs;  x86_64-unknown-linux-gnu;  { Int: int64_t; Float: double; Bool: bool; };
 python; glue/python/types.bv;  py;  any;                       { Int: int64_t; Float: double; Bool: bool; };
 node;  glue/node/types.bv;    js;  any;                       { Int: int64_t; Float: double; Bool: bool; };
@@ -697,8 +703,8 @@ schema Device {
 };
 
 as Device {
-    gpio: 0x4000; 32; { @ 0; rw; @ 4; ro; @ 8; rw; };
-    uart: 0x8000; 8;  { @ 0; rw; @ 1; ro; @ 2; rw; };
+    gpio: 0x4000; 32; { > 0; rw; > 4; ro; > 8; rw; };
+    uart: 0x8000; 8;  { > 0; rw; > 1; ro; > 2; rw; };
 };
 ```
 
@@ -752,7 +758,7 @@ commas, quotes, and `schema { }` blocks with different token rules. Migration:
 | `field: value,` | `field: value;` |
 | `schema S { ... },` | `schema S { ... };` |
 | `import "file.dbvs"` | `schema Name from "file.dbv"` |
-| `@` not used | `@` for positional entries |
+| `>` not used | `>` for positional entries |
 | `.dbvs` separate | schema inline in `.dbv` |
 
 The canonicalization rules (§8) mean the compiler can mechanically convert old
@@ -778,8 +784,8 @@ Optional type hint prefixes for bare tokens:
 These are consumed by the schema-aware consumer, not the parser. The parser
 sees them as bare tokens.
 
-### 14.3 Streaming `.dbvl` with `#checkpoint`
+### 14.3 Streaming `.dbvl` with `>checkpoint`
 
-A `#checkpoint N` directive that tells the parser "flush all prior entries,
+A `>checkpoint N` directive that tells the parser "flush all prior entries,
 this is a safe resumption point" — enabling streaming processing of
 terabyte-scale `.dbvl` files.
