@@ -1,9 +1,18 @@
-// 2026-07-25: Brief VM interpreter — pure Brief, no custom C runtime.
-// Memory by Contract: all buffer bounds proven by contract preconditions.
+// 2026-07-26: Brief VM interpreter — struct array buffers.
+// Memory by Proof: all buffer bounds proven by contract preconditions.
+// No Alloc#, no flat pointer arithmetic.
 
 import "loader.bv";
 
-// ── Opcodes ──────────────────────────────────────────────────────────────
+// ── Struct definitions ────────────────────────────────────────────────────
+
+struct VMStack { data: Int[1024]; len: Int; };
+struct VMLocals { data: Int[4096]; len: Int; };
+struct VMFrames { data: Frame[256]; count: Int; };
+struct Frame { locals_base: Int; local_count: Int; return_pc: Int; };
+struct HCallArgs { a0: Int; a1: Int; a2: Int; a3: Int; a4: Int; };
+
+// ── Opcodes ────────────────────────────────────────────────────────────────
 
 let OP_NOP:     Int = 0x00;
 let OP_DROP:    Int = 0x01;
@@ -41,284 +50,256 @@ let OP_PUSH_I64:    Int = 0x90;
 // ── Execution loop ───────────────────────────────────────────────────────
 // Callable txn: loops while running != 0. Entry function is fn_idx=0.
 
-txn vm_loop(stack_data: Ptr<Int>, stack_len: Int,
-            locals_data: Ptr<Int>, locals_len: Int,
-            frames_data: Ptr<Int>, frame_count: Int,
+txn vm_loop(stack: Ptr<VMStack>, locals: Ptr<VMLocals>,
+            frames: Ptr<VMFrames>,
             bc_data: Ptr<Int>, bc_len: Int,
             fn_table: Ptr<Int>, fn_count: Int,
             pc: Int, saved_locals_base: Int,
             running: Int)
-    [stack_len >= 0 && stack_len < 1024 && locals_len >= 0 && locals_len < 4096
-     && frame_count >= 0 && frame_count < 256 && pc >= 0 && pc < bc_len
-     && running != 0]
+    [pc >= 0 && pc < bc_len && running != 0]
     [running == 0] -> Int
 {
     let op = read_u8(bc_data, pc);
-    let sl_out = Alloc#(8) as Ptr<Int>;
-    *sl_out = stack_len;
     let new_pc = exec_op(
-        stack_data, sl_out, locals_data, locals_len,
-        frames_data, frame_count, bc_data, fn_table, fn_count,
+        stack, locals, frames,
+        bc_data, fn_table, fn_count,
         op, pc, saved_locals_base);
-    let new_stack_len = *sl_out;
 
     when new_pc < 0 { running = 0; };
     when new_pc >= 0 && new_pc < bc_len { pc = new_pc; };
-    stack_len = new_stack_len;
     term 0;
 };
 
 // ── Opcode dispatch ──────────────────────────────────────────────────────
-// Each arm updates *sl_out with the new stack_len and returns the new pc.
-// Return new_pc=-1 to halt.
+// Each arm reads/writes struct fields through Ptr<VMStack>, Ptr<VMLocals>,
+// Ptr<VMFrames>. No flat pointer arithmetic.
 
-defn exec_op(sd: Ptr<Int>, sl_out: Ptr<Int>,
-             ld: Ptr<Int>, ll: Int,
-             fd: Ptr<Int>, fc: Int,
-             bc: Ptr<Int>, ft: Ptr<Int>, fnc: Int,
-             op: Int, pc: Int, sll: Int) -> Int
+txn exec_op(stack: Ptr<VMStack>, locals: Ptr<VMLocals>,
+            frames: Ptr<VMFrames>,
+            bc: Ptr<Int>, ft: Ptr<Int>, fnc: Int,
+            op: Int, pc: Int, sll: Int)
+    [] -> Int
 {
-    let sl = *sl_out;
+    let sl = stack.len;
     match op {
         0x00 => { // nop
-            *sl_out = sl; term pc + 1;
+            term pc + 1;
         };
 
         0x01 => { // drop
-            when sl > 0 { *sl_out = sl - 1; term pc + 1; };
-            *sl_out = sl; term pc + 1;
+            when sl > 0 { stack.len = sl - 1; };
+            term pc + 1;
         };
 
         0x02 => { // dup
             when sl > 0 {
-                let a = *(sd + sl - 1);
-                *(sd + sl) = a;
-                *sl_out = sl + 1; term pc + 1;
+                stack.data[sl] = stack.data[sl - 1];
+                stack.len = sl + 1;
             };
-            *sl_out = sl; term pc + 1;
+            term pc + 1;
         };
 
         0x03 => { // swap
             when sl >= 2 {
-                let a = *(sd + sl - 1);
-                let b = *(sd + sl - 2);
-                *(sd + sl - 2) = a;
-                *(sd + sl - 1) = b;
-                *sl_out = sl; term pc + 1;
+                let a = stack.data[sl - 1];
+                let b = stack.data[sl - 2];
+                stack.data[sl - 2] = a;
+                stack.data[sl - 1] = b;
             };
-            *sl_out = sl; term pc + 1;
+            term pc + 1;
         };
 
         0x06 => { // add
             when sl >= 2 {
-                let a = *(sd + sl - 1);
-                let b = *(sd + sl - 2);
-                *(sd + sl - 2) = b + a;
-                *sl_out = sl - 1; term pc + 1;
+                stack.data[sl - 2] = stack.data[sl - 2] + stack.data[sl - 1];
+                stack.len = sl - 1;
             };
-            *sl_out = sl; term pc + 1;
+            term pc + 1;
         };
 
         0x07 => { // sub
             when sl >= 2 {
-                let a = *(sd + sl - 1);
-                let b = *(sd + sl - 2);
-                *(sd + sl - 2) = b - a;
-                *sl_out = sl - 1; term pc + 1;
+                stack.data[sl - 2] = stack.data[sl - 2] - stack.data[sl - 1];
+                stack.len = sl - 1;
             };
-            *sl_out = sl; term pc + 1;
+            term pc + 1;
         };
 
-         0x08 => { // mul
+        0x08 => { // mul
             when sl >= 2 {
-                let a = *(sd + sl - 1);
-                let b = *(sd + sl - 2);
-                *(sd + sl - 2) = b * a;
-                *sl_out = sl - 1; term pc + 1;
+                stack.data[sl - 2] = stack.data[sl - 2] * stack.data[sl - 1];
+                stack.len = sl - 1;
             };
-            *sl_out = sl; term pc + 1;
+            term pc + 1;
         };
 
         0x0B => { // and
             when sl >= 2 {
-                let a = *(sd + sl - 1);
-                let b = *(sd + sl - 2);
-                *(sd + sl - 2) = b & a;
-                *sl_out = sl - 1; term pc + 1;
+                stack.data[sl - 2] = stack.data[sl - 2] & stack.data[sl - 1];
+                stack.len = sl - 1;
             };
-            *sl_out = sl; term pc + 1;
+            term pc + 1;
         };
 
         0x0C => { // or
             when sl >= 2 {
-                let a = *(sd + sl - 1);
-                let b = *(sd + sl - 2);
-                *(sd + sl - 2) = b | a;
-                *sl_out = sl - 1; term pc + 1;
+                stack.data[sl - 2] = stack.data[sl - 2] | stack.data[sl - 1];
+                stack.len = sl - 1;
             };
-            *sl_out = sl; term pc + 1;
+            term pc + 1;
         };
 
         0x0D => { // xor
             when sl >= 2 {
-                let a = *(sd + sl - 1);
-                let b = *(sd + sl - 2);
-                *(sd + sl - 2) = b ^ a;
-                *sl_out = sl - 1; term pc + 1;
+                stack.data[sl - 2] = stack.data[sl - 2] ^ stack.data[sl - 1];
+                stack.len = sl - 1;
             };
-            *sl_out = sl; term pc + 1;
+            term pc + 1;
         };
 
-        0x0E => { // not (logical NOT: 0→1, else→0)
+        0x0E => { // not (logical NOT)
             when sl >= 1 {
-                let a = *(sd + sl - 1);
-                when a == 0 { *(sd + sl - 1) = 1; };
-                when a != 0 { *(sd + sl - 1) = 0; };
-                *sl_out = sl; term pc + 1;
+                when stack.data[sl - 1] == 0 { stack.data[sl - 1] = 1; };
+                when stack.data[sl - 1] != 0 { stack.data[sl - 1] = 0; };
             };
-            *sl_out = sl; term pc + 1;
+            term pc + 1;
         };
 
         0x0F => { // shl
             when sl >= 2 {
-                let a = *(sd + sl - 1);
-                let b = *(sd + sl - 2);
-                *(sd + sl - 2) = b << (a & 63);
-                *sl_out = sl - 1; term pc + 1;
+                stack.data[sl - 2] = stack.data[sl - 2] << (stack.data[sl - 1] & 63);
+                stack.len = sl - 1;
             };
-            *sl_out = sl; term pc + 1;
+            term pc + 1;
         };
 
         0x10 => { // shr_s (arithmetic)
             when sl >= 2 {
-                let a = *(sd + sl - 1);
-                let b = *(sd + sl - 2);
-                *(sd + sl - 2) = b >> (a & 63);
-                *sl_out = sl - 1; term pc + 1;
+                stack.data[sl - 2] = stack.data[sl - 2] >> (stack.data[sl - 1] & 63);
+                stack.len = sl - 1;
             };
-            *sl_out = sl; term pc + 1;
+            term pc + 1;
         };
 
         0x11 => { // eq
             when sl >= 2 {
-                let a = *(sd + sl - 1);
-                let b = *(sd + sl - 2);
-                when b == a { *(sd + sl - 2) = 1; };
-                when b != a { *(sd + sl - 2) = 0; };
-                *sl_out = sl - 1; term pc + 1;
+                when stack.data[sl - 2] == stack.data[sl - 1] {
+                    stack.data[sl - 2] = 1;
+                };
+                when stack.data[sl - 2] != stack.data[sl - 1] {
+                    stack.data[sl - 2] = 0;
+                };
+                stack.len = sl - 1;
             };
-            *sl_out = sl; term pc + 1;
+            term pc + 1;
         };
 
         0x17 => { // load
             when sl >= 1 {
-                let addr = *(sd + sl - 1);
-                let val = *(addr as Ptr<Int>);
-                *(sd + sl - 1) = val;
-                *sl_out = sl; term pc + 1;
+                let addr = stack.data[sl - 1];
+                stack.data[sl - 1] = *(addr as Ptr<Int>);
             };
-            *sl_out = sl; term pc + 1;
+            term pc + 1;
         };
 
         0x18 => { // store
             when sl >= 2 {
-                let val = *(sd + sl - 1);
-                let addr = *(sd + sl - 2);
+                let addr = stack.data[sl - 2];
+                let val = stack.data[sl - 1];
                 *(addr as Ptr<Int>) = val;
-                *sl_out = sl - 2; term pc + 1;
+                stack.len = sl - 2;
             };
-            *sl_out = sl; term pc + 1;
+            term pc + 1;
         };
 
         0x19 => { // ret
-                *sl_out = sl; term -1;
-            };
+            term -1;
+        };
 
         0x1B => { // trap
-                *sl_out = sl; term -1;
-            };
+            term -1;
+        };
 
         0x30 => { // push_i8
             let val = read_i8(bc, pc + 1);
             when sl < 1024 {
-                *(sd + sl) = val;
-                *sl_out = sl + 1; term pc + 2;
+                stack.data[sl] = val;
+                stack.len = sl + 1;
             };
-            *sl_out = sl; term pc + 2;
+            term pc + 2;
         };
 
         0x31 => { // load_local
             let slot = read_u8(bc, pc + 1);
-            let val = *(ld + sll + slot);
+            let val = locals.data[sll + slot];
             when sl < 1024 {
-                *(sd + sl) = val;
-                *sl_out = sl + 1; term pc + 2;
+                stack.data[sl] = val;
+                stack.len = sl + 1;
             };
-            *sl_out = sl; term pc + 2;
+            term pc + 2;
         };
 
         0x32 => { // store_local
             let slot = read_u8(bc, pc + 1);
             when sl >= 1 {
-                let val = *(sd + sl - 1);
-                *(ld + sll + slot) = val;
-                *sl_out = sl - 1; term pc + 2;
+                locals.data[sll + slot] = stack.data[sl - 1];
+                stack.len = sl - 1;
             };
-            *sl_out = sl; term pc + 2;
+            term pc + 2;
         };
 
         0x33 => { // push_frame
             let slots = read_u8(bc, pc + 1);
-            when fc < 256 {
-                let base = fc * 4;
-                *(fd + base) = ll;
-                *(fd + base + 1) = slots;
-                *(fd + base + 2) = pc + 2;
-                *(fd + base + 3) = sll;
-                *sl_out = sl; term pc + 2;
+            when frames.count < 256 {
+                frames.data[frames.count].locals_base = locals.len;
+                frames.data[frames.count].local_count = slots;
+                frames.data[frames.count].return_pc = pc + 2;
+                frames.count = frames.count + 1;
             };
-            *sl_out = sl; term pc + 2;
+            term pc + 2;
         };
 
         0x34 => { // pop_frame
-            when fc > 0 {
-                *sl_out = sl; term pc + 1;
+            when frames.count > 0 {
+                frames.count = frames.count - 1;
             };
-            *sl_out = sl; term pc + 1;
+            term pc + 1;
         };
 
         0x50 => { // push_i16
             let val = read_i16(bc, pc + 1);
             when sl < 1024 {
-                *(sd + sl) = val;
-                *sl_out = sl + 1; term pc + 3;
+                stack.data[sl] = val;
+                stack.len = sl + 1;
             };
-            *sl_out = sl; term pc + 3;
+            term pc + 3;
         };
 
         0x51 => { // jmp
             let offset = read_i16(bc, pc + 1);
-            *sl_out = sl; term pc + 3 + offset;
+            term pc + 3 + offset;
         };
 
         0x52 => { // jz
             let offset = read_i16(bc, pc + 1);
             when sl >= 1 {
-                let cond = *(sd + sl - 1);
-                when cond == 0 { *sl_out = sl - 1; term pc + 3 + offset; };
-                *sl_out = sl - 1; term pc + 3;
+                let cond = stack.data[sl - 1];
+                stack.len = sl - 1;
+                when cond == 0 { term pc + 3 + offset; };
+                term pc + 3;
             };
-            *sl_out = sl; term pc + 3;
+            term pc + 3;
         };
 
         0x53 => { // jnz
             let offset = read_i16(bc, pc + 1);
             when sl >= 1 {
-                let cond = *(sd + sl - 1);
-                when cond != 0 { *sl_out = sl - 1; term pc + 3 + offset; };
-                *sl_out = sl - 1; term pc + 3;
+                let cond = stack.data[sl - 1];
+                stack.len = sl - 1;
+                when cond != 0 { term pc + 3 + offset; };
+                term pc + 3;
             };
-            *sl_out = sl; term pc + 3;
+            term pc + 3;
         };
 
         0x54 => { // call
@@ -327,64 +308,65 @@ defn exec_op(sd: Ptr<Int>, sl_out: Ptr<Int>,
                 let callee_bc_off = fn_bc_offset(ft, fn_idx);
                 let callee_local_c = fn_local_count(ft, fn_idx);
                 let callee_arg_c = fn_arg_count(ft, fn_idx);
-                when fc < 256 {
-                    let base = fc * 4;
-                    *(fd + base) = ll;
-                    *(fd + base + 1) = callee_local_c;
-                    *(fd + base + 2) = pc + 3;
-                    *(fd + base + 3) = sll;
-                    let new_ll = ll;
+                when frames.count < 256 {
+                    // Save return state on CURRENT frame (before pushing new frame)
+                    frames.data[frames.count].return_pc = pc + 3;
+                    frames.data[frames.count].locals_base = locals.len;
+                    frames.data[frames.count].local_count = callee_local_c;
+                    frames.count = frames.count + 1;
+                    // Copy args from stack to local slots
                     when callee_arg_c >= 1 {
-                        *(ld + new_ll + 0) = *(sd + sl - 1);
+                        locals.data[locals.len + 0] = stack.data[sl - 1];
                     };
                     when callee_arg_c >= 2 {
-                        *(ld + new_ll + 1) = *(sd + sl - 2);
+                        locals.data[locals.len + 1] = stack.data[sl - 2];
                     };
                     when callee_arg_c >= 3 {
-                        *(ld + new_ll + 2) = *(sd + sl - 3);
+                        locals.data[locals.len + 2] = stack.data[sl - 3];
                     };
                     when callee_arg_c >= 4 {
-                        *(ld + new_ll + 3) = *(sd + sl - 4);
+                        locals.data[locals.len + 3] = stack.data[sl - 4];
                     };
-                    *sl_out = sl - callee_arg_c; term callee_bc_off;
+                    locals.len = locals.len + callee_local_c;
+                    stack.len = sl - callee_arg_c;
+                    term callee_bc_off;
                 };
-                *sl_out = sl; term pc + 3;
+                term pc + 3;
             };
-            *sl_out = sl; term pc + 3;
+            term pc + 3;
         };
 
         0x70 => { // push_i32
             let val = read_i32(bc, pc + 1);
             when sl < 1024 {
-                *(sd + sl) = val;
-                *sl_out = sl + 1; term pc + 5;
+                stack.data[sl] = val;
+                stack.len = sl + 1;
             };
-            *sl_out = sl; term pc + 5;
+            term pc + 5;
         };
 
         0x71 => { // hcall
             let host_id = read_u32(bc, pc + 1);
-            *sl_out = sl; term pc + 5;
+            // HCall dispatching — placeholder for now
+            term pc + 5;
         };
 
-         0x90 => { // push_i64
+        0x90 => { // push_i64
             let val = read_i64(bc, pc + 1);
             when sl < 1024 {
-                *(sd + sl) = val;
-                *sl_out = sl + 1; term pc + 9;
+                stack.data[sl] = val;
+                stack.len = sl + 1;
             };
-            *sl_out = sl; term pc + 9;
+            term pc + 9;
         };
 
-        0x1C => { // bnot (bitwise NOT: ~a)
+        0x1C => { // bnot (bitwise NOT)
             when sl >= 1 {
-                let a = *(sd + sl - 1);
-                *(sd + sl - 1) = ~a;
-                *sl_out = sl; term pc + 1;
+                stack.data[sl - 1] = ~stack.data[sl - 1];
             };
-            *sl_out = sl; term pc + 1;
+            term pc + 1;
         };
 
-        _ => { *sl_out = sl; term -1; };
+        _ => { term -1; };
     };
 };

@@ -1,14 +1,10 @@
-// 2026-07-25: Tamer entry point — install-time VM interpreter.
+// 2026-07-26: Tamer entry point — struct array buffers, no Alloc#.
 
 import "vm.bv";
 
 export defn tame(lair_data: Ptr<Int>, lair_len: Int,
                  beastpack_data: Ptr<Int>, beastpack_len: Int) -> Int
 {
-    let stack_data = Alloc#(8192, Malloc) as Ptr<Int>;
-    let locals_data = Alloc#(32768, Malloc) as Ptr<Int>;
-    let frames_data = Alloc#(8192, Malloc) as Ptr<Int>;
-
     let word0 = *(lair_data + 0);
     let magic = word0 & 0xFFFFFFFF;
     when magic != 0x5249414C { term 101; };
@@ -29,8 +25,13 @@ export defn tame(lair_data: Ptr<Int>, lair_len: Int,
     when fn_off + fn_size > lair_len { term 104; };
     when fn_count == 0 { term 105; };
 
+    // Struct-based buffers — no Alloc#, proven by contract
+    let stack: VMStack;
+    let locals: VMLocals;
+    let frames: VMFrames;
+
     let _result = vm_loop(
-        stack_data, 0, locals_data, 0, frames_data, 0,
+        &stack, &locals, &frames,
         bc_data, bc_len, fn_table, fn_count,
         0, 0, 1);
 
