@@ -1,5 +1,0 @@
-import "constants.bv";
-
-defn test() -> Int {
-    term FOO;
-};
