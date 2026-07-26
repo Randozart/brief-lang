@@ -15,6 +15,16 @@ pub fn document_to_program(doc: &DbriefDocument, name: &str) -> Vec<ast::TopLeve
 pub fn document_to_program_flags(doc: &DbriefDocument, name: &str, use_lazy: bool) -> Vec<ast::TopLevel> {
     let mut items: Vec<ast::TopLevel> = Vec::new();
 
+    // 0. Convert imports to Brief import statements
+    // 2026-07-26: New syntax — imports are stored as paths in doc.imports.
+    for import_path in &doc.imports {
+        items.push(ast::TopLevel::Import(ast::Import {
+            kind: ast::ImportKind::Literal(import_path.clone()),
+            symbols: Vec::new(),
+            span: None,
+        }));
+    }
+
     // 1. Convert schemas to Struct definitions
     for schema in &doc.schemas {
         items.push(schema_to_struct(schema));
@@ -53,16 +63,17 @@ pub fn document_to_program_flags(doc: &DbriefDocument, name: &str, use_lazy: boo
             // 2026-07-14: Non-lazy path — convert data entries directly
             } else {
                 for entry in &group.entries {
-                    if let Some(ref key) = entry.key {
-                        let entry_expr = data_entry_to_expr(entry, group.schema_name.as_deref(), &doc.schemas);
-                        data_map.push((
-                            ast::Expr::Quoted(key.clone().into()),
-                            ast::Expr::List(vec![
-                                ast::Expr::Quoted(key.clone().into()),
-                                entry_expr,
-                            ]),
-                        ));
-                    }
+                    let key_str = entry.key.clone().unwrap_or_else(|| {
+                        format!("_{}", data_map.len())
+                    });
+                    let entry_expr = data_entry_to_expr(entry, group.schema_name.as_deref(), &doc.schemas);
+                    data_map.push((
+                        ast::Expr::Quoted(key_str.clone().into()),
+                        ast::Expr::List(vec![
+                            ast::Expr::Quoted(key_str.into()),
+                            entry_expr,
+                        ]),
+                    ));
                 }
             }
         }
@@ -202,20 +213,32 @@ fn flatten_peripheral_constants(doc: &DbriefDocument) -> Vec<ast::TopLevel> {
 }
 
 /// Convert a schema into a StructDefinition
+/// 2026-07-26: Preserves key_field annotation as the first struct field with
+/// a special field name ~key so the compiler can identify the primary key field.
 fn schema_to_struct(schema: &SchemaDef) -> ast::TopLevel {
-    let fields: Vec<ast::StructField> = schema
-        .fields
-        .iter()
-        .map(|f| {
-            let ty = field_type_to_brief(&f.ty);
-            ast::StructField {
-                name: f.name.clone(),
-                ty,
-                default: None,
-                visibility: ast::Visibility::Public,
-            }
-        })
-        .collect();
+    let mut fields: Vec<ast::StructField> = Vec::new();
+
+    // Emit the key field annotation as a synthetic first field if present.
+    // The ~ prefix is reserved for compiler-internal metadata in Brief.
+    // 2026-07-26: Key field annotation (name) in schema Person (name) { ... }
+    if let Some(ref kf) = schema.key_field {
+        fields.push(ast::StructField {
+            name: format!("~key_{}", kf),
+            ty: ast::Type::string(),
+            default: None,
+            visibility: ast::Visibility::Private,
+        });
+    }
+
+    for f in &schema.fields {
+        let ty = field_type_to_brief(&f.ty);
+        fields.push(ast::StructField {
+            name: f.name.clone(),
+            ty,
+            default: None,
+            visibility: ast::Visibility::Public,
+        });
+    }
 
     ast::TopLevel::Obj(ast::StructDefinition {
         name: schema.name.clone(),
