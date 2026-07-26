@@ -83,4 +83,5 @@ pub mod wrapper;
 pub mod doc;
 
 pub mod optimizer;
+pub mod registry;
 

@@ -1,0 +1,27 @@
+# Protocol → library/linker-flag mappings per target triple.
+# null means the protocol is unavailable on that target.
+# Compiled into the binary via include_str!.
+#
+# 2026-07-26: Phase 1 — #System protocol wire-up. Maps protocol names
+# (from `frgn printf from #System`) to linker flags per target.
+# Use "c" for libc (linked by default with clang), or specific library
+# names for other system libraries.
+#
+# #System is the only protocol. It abstracts "the platform's standard
+# system library" — libc on Linux, libSystem on macOS, WASI preview1
+# on wasm. Platform-specific APIs use a direct `from "link/lib.so"` path.
+
+[x86_64-linux]
+"#System" = "c"
+
+[aarch64-linux]
+"#System" = "c"
+
+[x86_64-macos]
+"#System" = "System"
+
+[aarch64-macos]
+"#System" = "System"
+
+[wasm32-wasi]
+"#System" = "wasi_snapshot_preview1"

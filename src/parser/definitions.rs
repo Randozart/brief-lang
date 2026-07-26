@@ -232,14 +232,48 @@ impl<'a> Parser<'a> {
     }
 
     /// 2026-07-16: P3 — Parse `from "path"` or `from <name>` after `from` token is consumed.
-    /// 2026-07-16: P3 — Parse `from "path"` or `from <name>` after `from` token is consumed.
     fn parse_from_spec(&mut self) -> Result<FromSpec, SyntaxError> {
-        // 2026-07-25: from #POSIX / #Win32 / #WASI — protocol-based linking.
+        // 2026-07-26: from #System — protocol-based linking.
+        // from #Link<name> — direct linker directive (-l<name>).
         if let Some(Token::Identifier(name)) = self.peek() {
             if name.starts_with('#') {
-                let proto = name.clone();
+                let hashword = name.clone();
                 self.advance();
-                return Ok(FromSpec::Protocol(proto));
+                // 2026-07-26: #Link<name> — parse <name> part
+                if hashword == "#Link" {
+                    self.expect(Token::Lt)?;
+                    let mut link_name = String::new();
+                    loop {
+                        match self.peek() {
+                            Some(Token::Gt) => {
+                                self.advance();
+                                break;
+                            }
+                            Some(Token::Identifier(seg)) => {
+                                link_name.push_str(seg);
+                                self.advance();
+                            }
+                            Some(Token::Dot) => {
+                                link_name.push('.');
+                                self.advance();
+                            }
+                            Some(Token::Integer(n)) => {
+                                link_name.push_str(&n.to_string());
+                                self.advance();
+                            }
+                            other => {
+                                return self.error_at_current(&format!(
+                                    "expected '>' to close #Link<...>, got {:?}", other
+                                ));
+                            }
+                        }
+                    }
+                    if link_name.is_empty() {
+                        return self.error_at_current("expected library name in #Link<...>");
+                    }
+                    return Ok(FromSpec::Linked(link_name));
+                }
+                return Ok(FromSpec::Protocol(hashword));
             }
         }
         if self.eat(&Token::Lt) {

@@ -33,6 +33,7 @@ fn main() {
         "config" => run_config(&args[2..]),
         "init" => run_init(args.get(2).map(|s| s.as_str())),
         "bounty" => run_bounty(&args[2..]),
+        "registry" => run_registry(&args[2..]),
         "register" => run_register(&args[2..]),
         "install-deps" => deps::install_all(),
         "install-highlighter" => run_install_highlighter(&args[2..]),
@@ -525,6 +526,53 @@ fn run_audit_cmd(args: &[String]) -> Result<(), String> {
     let results = brief_compiler::macros::audit::run_audit(source_file)?;
     brief_compiler::macros::audit::print_audit(&results);
     Ok(())
+}
+
+/// `briefc registry {add,list,remove}` — manage the compiler registry.
+/// 2026-07-26: Phase 1f — Per-user registry directory.
+fn run_registry(args: &[String]) -> Result<(), String> {
+    let sub = args.first().ok_or("expected 'add', 'list', or 'remove'")?;
+    match sub.as_str() {
+        "add" => {
+            let path = args.get(1).ok_or("missing path argument for 'registry add'")?;
+            let source = std::path::Path::new(path);
+            let name = args.get(2).and_then(|s| {
+                if s.starts_with("--name=") { Some(&s[7..]) } else { None }
+            }).or_else(|| {
+                source.file_stem().and_then(|s| s.to_str())
+            }).ok_or("could not infer registry name from path; use --name=<name>")?;
+            brief_compiler::registry::add(source, name)?;
+            Ok(())
+        }
+        "list" => {
+            let entries = brief_compiler::registry::list()?;
+            if entries.is_empty() {
+                println!("(registry is empty)");
+            } else {
+                println!("{:<30} {:<15} {:>10}", "Name", "Type", "Size");
+                println!("{:-<30} {:-<15} {:-<10}", "", "", "");
+                for (name, kind, size) in &entries {
+                    let size_str = if *size > 0 {
+                        if *size > 1024 {
+                            format!("{}k", size / 1024)
+                        } else {
+                            format!("{}b", size)
+                        }
+                    } else {
+                        "-".to_string()
+                    };
+                    println!("{:<30} {:<15} {:>10}", name, kind, size_str);
+                }
+            }
+            Ok(())
+        }
+        "remove" => {
+            let name = args.get(1).ok_or("missing name argument for 'registry remove'")?;
+            brief_compiler::registry::remove(name)?;
+            Ok(())
+        }
+        _ => Err(format!("unknown registry subcommand '{}'. Use 'add', 'list', or 'remove'", sub)),
+    }
 }
 
 /// `brief-compiler register <name>` — register a project/target schema.

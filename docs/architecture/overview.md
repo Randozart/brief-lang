@@ -26,7 +26,7 @@
 > **2026-07-25:** Conditional FFI — `frgn?`/`frgn!`/`frgn?!` for optional,
 > fire-and-forget, and delivery-checked foreign calls. `fn?` expression for
 > compile-time existence checks. `term expr?` for conditional return chains.
-> `from #POSIX`/`#Win32`/`#WASI` hashword sources replace `from "c"`.
+> `from #System` (the sole protocol hashword) replaces `from "c"`.
 > See `docs/architecture/conditional-ffi.md`.
 >
 > **2026-07-25:** Bounty install-time compilation pipeline. `briefc bounty`

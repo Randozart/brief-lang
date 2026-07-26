@@ -115,6 +115,31 @@ using `#String` without specifying the variant.
 Each backend declares supported protocols in `config/targets.toml`. A function
 requiring a protocol the backend doesn't support produces a compile error.
 
+**`#Link<name>` hashwords** (`from #Link<user32>`) are linker directives —
+they emit `-l<name>` directly without any per-target config or registry lookup.
+`#System` is the sole bare protocol hashword; `#Link<name>` is always
+parameterized and always means "link against system library `name`."
+See `docs/architecture/conditional-ffi.md`.
+
+### Compiler Registry
+
+`~/.brief/registry/` (or `dirs::data_dir()`/brief/registry/ on each platform)
+is a per-user directory for installing Brief modules and foreign sources.
+Managed by `briefc registry {add,list,remove}`.
+
+- `briefc registry add ./my-lib.bv` — copies file to registry (version-locked, no symlink)
+- `briefc registry add ./xxhash/ --name xxhash` — copies directory tree
+- `briefc registry list` — enumerates registry contents
+- `briefc registry remove <name>` — deletes matching entry
+
+Lookup order for `import <name>` / `from <name>`:
+1. Project-local `.brief/registry/<name>` (if `.brief/registry/` exists)
+2. User-wide `~/.brief/registry/<name>`
+3. `config/module-registry.toml` (for imports)
+4. Stdlib path (for `from <name>` and `import <name>` fallback)
+
+See `docs/plans/2026-07-26-tamer-zero-c-and-static-memory.md` §1f.
+
 See `docs/architecture/casting-protocol.md`.
 
 ### Provenance Tracking

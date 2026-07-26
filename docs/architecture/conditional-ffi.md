@@ -22,7 +22,7 @@ compilation fails. `fn?` always returns `true`. No guard needed.
 Links if available. The compiler **requires** a `fn?` guard before any call:
 
 ```brief
-frgn? gpu_kernel(n: Int) -> Int from #POSIX fallback -1;
+frgn? gpu_kernel(n: Int) -> Int from #System fallback -1;
 
 export defn run(n: Int) -> Int {
     when gpu_kernel? {
@@ -49,7 +49,7 @@ Returns immediately. The return type is always `Void`. If the symbol doesn't
 link, the call is silently skipped at the codegen level — no LLVM IR emitted.
 
 ```brief
-frgn! emit_log(msg: String) -> Void from #POSIX fallback;
+frgn! emit_log(msg: String) -> Void from #System fallback;
 
 export defn process() {
     emit_log("processing started");  // non-blocking, no guard needed
@@ -63,7 +63,7 @@ Returns `Bool(true)` if the call was dispatched, `Bool(false)` if the symbol
 doesn't link or the dispatch failed. Never blocks.
 
 ```brief
-frgn?! send_telemetry(value: Int) -> Bool from #POSIX fallback false;
+frgn?! send_telemetry(value: Int) -> Bool from #System fallback false;
 
 export defn report(v: Int) -> Bool {
     term send_telemetry(v);  // returns true if dispatched, false otherwise
@@ -117,25 +117,75 @@ branch and unwrapping the `term expr?` into a direct `term`.
 
 ## Hashword Sources
 
-`from "c"` is replaced by `from #Protocol`:
+`from "c"` is replaced by `from #System`.
 
-| Protocol | Linux | macOS | Windows | WASM/WASI |
-|----------|-------|-------|---------|-----------|
-| `#POSIX` | libc | libc | CRT shim | WASI libc |
-| `#Win32` | ❌ | ❌ | kernel32 | ❌ |
-| `#WASI` | ❌ | ❌ | ❌ | wasi-emulated |
-| `"file.c"` | compiled | compiled | compiled | compiled |
+**`#System` is the sole protocol.** There is no `#Win32`, `#WASI`, or any other
+protocol hashword. Platform-specific APIs use a direct `from "link/lib.so"` path.
+`#System` abstracts "the platform's standard system library" — it maps to
+different libraries per target but means the same thing to the compiler:
 
-The compiler maps each `#Protocol` to the appropriate library/header system
-per target in `config/targets.toml`:
+| Target | `#System` resolves to |
+|--------|----------------------|
+| `x86_64-linux` | `c` (libc, via `-lc`) |
+| `aarch64-linux` | `c` (libc, via `-lc`) |
+| `x86_64-macos` | `System` (libSystem, via `-lSystem`) |
+| `aarch64-macos` | `System` (libSystem, via `-lSystem`) |
+| `wasm32-wasi` | `wasi_snapshot_preview1` |
+
+The compiler maps `#System` to the appropriate library per target in
+`config/protocols.toml`:
 
 ```toml
-[target.x86_64-linux]
-protocol_map = { "#POSIX" = "libc.so.6", "#Win32" = null, "#WASI" = null }
+[x86_64-linux]
+"#System" = "c"
 
-[target.x86_64-windows]
-protocol_map = { "#POSIX" = "msvcrt", "#Win32" = "kernel32", "#WASI" = null }
+[wasm32-wasi]
+"#System" = "wasi_snapshot_preview1"
 ```
+
+Any bare protocol hashword other than `#System` produces a compile error.
+
+## `#Link<name>` — Direct System Library Linking
+
+`from #Link<name>` links a system library directly by name — no per-target
+config, no registry lookup. The canonical brief form is:
+
+```brief
+frgn MessageBoxW(h: Int, text: Int, caption: Int, type: Int) -> Int from #Link<user32>;
+```
+
+The compiler passes `-l<name>` to the linker. This works on all platforms
+clang/gcc support — `-lz` for zlib, `-luser32` for Windows USER32,
+`-lwasi_snapshot_preview1` for WASI, etc.
+
+### How it differs from `from #System`
+
+| Feature | `from #System` | `from #Link<z>` |
+|---------|---------------|-----------------|
+| Per-target resolution | Yes — different lib per target | No — always `-l<name>` |
+| Config file | `config/protocols.toml` | None |
+| Example | Linux: `-lc`, macOS: `-lSystem` | `-lz` on any platform |
+
+### How it differs from `from "path"`
+
+`#Link<name>` is a *linker directive*, not a file path. The symbol is assumed
+to be in a system-installed library that the linker can resolve via `-l`.
+Use `from "path/file.c"` for source files you control.
+
+### Canonical patterns
+
+| Pattern | Use case |
+|---------|----------|
+| `from #System` | CRT functions: `printf`, `malloc`, `memcpy` |
+| `from #Link<z>` | Common system libs: zlib, libpng, libjpeg |
+| `from #Link<user32>` | Windows platform APIs |
+| `from #Link<wasi_snapshot_preview1>` | WASI imports |
+| `from "path/file.c"` | Your own source files |
+| `from <registry_entry>` | Registry-installed (via `briefc registry add`) |
+| `from <stdlib/file.bv>` | Compiler stdlib |
+
+See `docs/plans/2026-07-26-tamer-zero-c-and-static-memory.md` §1f for the
+registry design (`briefc registry add`, lookup order, platform paths).
 
 ## Compile-Time Guard Safety
 
@@ -161,7 +211,7 @@ always `when fn? { term fn(...); }`.
 Parser
   → frgn?/frgn!/frgn?! parsed with flags
   → fn? parsed as Expr::Exists
-  → from #POSIX parsed as ProtoSource::Posix
+  → from #System parsed as FromSpec::Protocol("#System")
   ↓
 Type checker
   → ForeignBinding flags resolved

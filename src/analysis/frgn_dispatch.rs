@@ -18,7 +18,7 @@
 
 use std::collections::HashMap;
 
-use crate::ast::top::{Fallback, ForeignBinding};
+use crate::ast::top::{Fallback, ForeignBinding, FromSpec};
 use crate::glue::config::{find_language_by_extension, GlueTarget};
 use crate::target::BackendKind;
 
@@ -34,6 +34,11 @@ pub enum ResolvedFrgn {
         symbol: String,
         /// If true, the backend should compile this source to .o first
         compile_source: bool,
+        /// 2026-07-26: Protocol library name for from #System.
+        /// `#System` is the sole protocol — any other hashword produces a
+        /// compile error. None = resolved from a normal file path or
+        /// compiler registry. Some(lib) = link with -l<lib>.
+        protocol_lib: Option<String>,
     },
     /// Route through the GLUE bridge
     Bridge {
@@ -93,6 +98,40 @@ pub fn resolve_single_frgn(
     backend: BackendKind,
     universe: Option<&crate::type_universe::TypeUniverse>,
 ) -> Result<ResolvedFrgn, String> {
+    // 2026-07-26: Resolve protocol-based FFI (from #System).
+    // #System is the sole protocol — any other hashword produces an error.
+    // This must come before the extension check because FromSpec::Protocol
+    // has no file extension — it resolves to a system library instead.
+    if let FromSpec::Protocol(proto) = &fb.from {
+        let protocol_config = crate::target::ProtocolConfig::load();
+        // 2026-07-26: Use the default target triple. A future enhancement
+        // would pass the actual --target from CLI opts. For now, x86_64-linux
+        // covers the common case; cross-compilation requires target awareness.
+        let default_triple = "x86_64-linux";
+        let lib = protocol_config.resolve(default_triple, proto).map_err(|e| {
+            format!(
+                "frgn '{}': {}",
+                fb.effective_brief_name(),
+                e
+            )
+        })?;
+        return Ok(ResolvedFrgn::Inline {
+            symbol: fb.foreign_name.clone(),
+            compile_source: false,
+            protocol_lib: lib.map(|s| s.to_string()),
+        });
+    }
+
+    // 2026-07-26: Resolve #Link<name> — direct linker directive.
+    // No protocol config lookup needed; the library name IS the linker flag.
+    if let FromSpec::Linked(lib) = &fb.from {
+        return Ok(ResolvedFrgn::Inline {
+            symbol: fb.foreign_name.clone(),
+            compile_source: false,
+            protocol_lib: Some(lib.clone()),
+        });
+    }
+
     // 2026-07-22: Empty extension means the foreign path has no known type —
     // treat as unsupported with a clear error message.
     if ext.is_empty() {
@@ -115,6 +154,7 @@ pub fn resolve_single_frgn(
         return Ok(ResolvedFrgn::Inline {
             symbol,
             compile_source: true,
+            protocol_lib: None,
         });
     }
 
@@ -149,6 +189,7 @@ pub fn resolve_single_frgn(
         return Ok(ResolvedFrgn::Inline {
             symbol,
             compile_source: false,
+            protocol_lib: None,
         });
     }
 
@@ -344,7 +385,7 @@ mod tests {
         let targets = sample_glue_targets();
         let result = resolve_single_frgn(&fb, "c", &targets, BackendKind::Llvm, None).unwrap();
         match result {
-            ResolvedFrgn::Inline { symbol, compile_source } => {
+            ResolvedFrgn::Inline { symbol, compile_source, .. } => {
                 assert_eq!(symbol, "my_func");
                 assert!(compile_source);
             }
@@ -425,9 +466,71 @@ mod tests {
         let targets = sample_glue_targets();
         let result = resolve_single_frgn(&fb, "so", &targets, BackendKind::Llvm, None).unwrap();
         match result {
-            ResolvedFrgn::Inline { symbol, compile_source } => {
+            ResolvedFrgn::Inline { symbol, compile_source, .. } => {
                 assert_eq!(symbol, "native_fn");
                 assert!(!compile_source);
+            }
+            other => panic!("Expected Inline, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_resolve_single_frgn_protocol_system() {
+        // 2026-07-26: from #System should resolve to Inline with protocol_lib
+        let fb = ForeignBinding::new(
+            "printf".to_string(),
+            None,
+            FromSpec::Protocol("#System".to_string()),
+            ForeignTarget::Native,
+            Fallback::None,
+        );
+        let targets = sample_glue_targets();
+        let result = resolve_single_frgn(&fb, "", &targets, BackendKind::Llvm, None).unwrap();
+        match result {
+            ResolvedFrgn::Inline { symbol, compile_source, protocol_lib } => {
+                assert_eq!(symbol, "printf");
+                assert!(!compile_source, "protocol frgn should not need compilation");
+                assert_eq!(protocol_lib, Some("c".to_string()),
+                    "#System on x86_64-linux should resolve to 'c'");
+            }
+            other => panic!("Expected Inline, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_resolve_single_frgn_protocol_unknown() {
+        // 2026-07-26: from #SomethingElse should produce an error
+        let fb = ForeignBinding::new(
+            "foo".to_string(),
+            None,
+            FromSpec::Protocol("#SomethingElse".to_string()),
+            ForeignTarget::Native,
+            Fallback::None,
+        );
+        let targets = sample_glue_targets();
+        let result = resolve_single_frgn(&fb, "", &targets, BackendKind::Llvm, None);
+        assert!(result.is_err(), "unknown protocol should error");
+        assert!(result.unwrap_err().contains("only supported protocol"));
+    }
+
+    #[test]
+    fn test_resolve_single_frgn_link() {
+        // 2026-07-26: from #Link<z> should resolve to Inline with protocol_lib = "z"
+        let fb = ForeignBinding::new(
+            "compress".to_string(),
+            None,
+            FromSpec::Linked("z".to_string()),
+            ForeignTarget::Native,
+            Fallback::None,
+        );
+        let targets = sample_glue_targets();
+        let result = resolve_single_frgn(&fb, "", &targets, BackendKind::Llvm, None).unwrap();
+        match result {
+            ResolvedFrgn::Inline { symbol, compile_source, protocol_lib } => {
+                assert_eq!(symbol, "compress");
+                assert!(!compile_source, "#Link frgn should not need compilation");
+                assert_eq!(protocol_lib, Some("z".to_string()),
+                    "#Link<z> should resolve to protocol_lib = Some('z')");
             }
             other => panic!("Expected Inline, got {:?}", other),
         }

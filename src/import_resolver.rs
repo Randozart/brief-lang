@@ -255,10 +255,17 @@ impl ImportResolver {
             return Ok(vec![]);
         }
 
-        // Handle Registry imports — look up name in the module registry config
-        // to find the actual filesystem path, then recurse as a Literal import.
+        // Handle Registry imports — look up name in registry dir first,
+        // then fall back to the TOML module registry config.
         // 2026-07-15: Phase 7i
+        // 2026-07-26: Check ~/.brief/registry/ before TOML registry.
         if let ImportKind::Registry(name) = &import.kind {
+            // 2026-07-26: Check registry directory first (user-installed modules
+            // take priority over baked config/module-registry.toml entries).
+            if let Some(reg_path) = crate::registry::find_registry_entry(name) {
+                let literal_import = Import::literal(reg_path.to_string_lossy().to_string(), import.symbols.clone());
+                return self.resolve_import(&literal_import, source_file);
+            }
             let resolved_path = self.registry.get(name.as_str());
             let actual_path = match resolved_path {
                 Some(p) => p.clone(),

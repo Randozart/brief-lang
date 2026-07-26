@@ -501,6 +501,16 @@ pub fn compile_source(file_path: &str, source: &str, opts: &BuildOptions) -> Res
         resolved_frgns.insert(fb.effective_brief_name().to_string(), dispatch);
     }
 
+    // 2026-07-26: Collect protocol library names from resolved frgns
+    // for passing as -l<lib> flags to clang during linking.
+    let protocol_libs: Vec<String> = resolved_frgns.values().filter_map(|rf| {
+        if let brief_compiler::analysis::frgn_dispatch::ResolvedFrgn::Inline { protocol_lib: Some(lib), .. } = rf {
+            Some(lib.clone())
+        } else {
+            None
+        }
+    }).collect();
+
     // ── Layout optimization (frgn/export boundary) ─────────────────────
     // 2026-07-22: Propose adopting foreign type layouts to minimize
     // protocol transform costs. Only applies to bridge-path frgns.
@@ -577,7 +587,7 @@ pub fn compile_source(file_path: &str, source: &str, opts: &BuildOptions) -> Res
             // declarations (frgn .c/.cpp sources are auto-compiled to .o)
             let mut all_objects = opts.extra_objects.clone();
             all_objects.extend(extra_objects);
-            compile_ll_to_binary(&out_path, &binary_path, &all_objects, opts.shared)?;
+            compile_ll_to_binary(&out_path, &binary_path, &all_objects, &protocol_libs, opts.shared)?;
         }
 
         // ── Linked stage: binary processing ───────────────────────────
@@ -952,9 +962,18 @@ fn collect_extra_objects(items: &[brief_compiler::ast::TopLevel], resolver: &bri
             _ => continue,
         };
         let ext = fb.from.extension();
+        // 2026-07-26: Check registry directory first for <name> lookups,
+        // then fall back to stdlib path, then use the name as a direct path.
         let resolved_path = || -> PathBuf {
-            resolver.resolve_stdlib_relative_path(&fb.from.as_str())
-                .unwrap_or_else(|| PathBuf::from(fb.from.as_str()))
+            let from_str = fb.from.as_str();
+            // Check registry for CompilerRegistry entries (<name>)
+            if let brief_compiler::ast::top::FromSpec::CompilerRegistry(_) = &fb.from {
+                if let Some(reg_path) = brief_compiler::registry::find_registry_entry(&from_str) {
+                    return reg_path;
+                }
+            }
+            resolver.resolve_stdlib_relative_path(&from_str)
+                .unwrap_or_else(|| PathBuf::from(from_str))
         };
         match ext.as_deref() {
             Some("c") | Some("cpp") | Some("cc") | Some("cxx") | Some("m") => {
@@ -1014,7 +1033,10 @@ fn compile_source_to_object(source_path: &Path, cache_dir: &Path) -> Result<Path
 }
 
 /// Compile a `.ll` file to a binary using clang.
-fn compile_ll_to_binary(ll_path: &str, binary_path: &str, extra_objects: &[PathBuf], shared: bool) -> Result<(), String> {
+///
+/// 2026-07-26: Added `protocol_libs` parameter — library names from
+/// `from #System` frgns are passed as `-l<lib>` flags to clang.
+fn compile_ll_to_binary(ll_path: &str, binary_path: &str, extra_objects: &[PathBuf], protocol_libs: &[String], shared: bool) -> Result<(), String> {
     let mut cmd = Command::new("clang");
     let rt_path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("lib/runtime/brief_rt.c");
     let rt_str = rt_path.to_string_lossy().to_string();
@@ -1026,6 +1048,11 @@ fn compile_ll_to_binary(ll_path: &str, binary_path: &str, extra_objects: &[PathB
     }
     for obj in extra_objects {
         cmd.arg(obj.as_os_str());
+    }
+    // 2026-07-26: Link protocol-based libraries (from #System).
+    // The clang driver adds these as -l<name> flags to the linker.
+    for lib in protocol_libs {
+        cmd.arg(format!("-l{}", lib));
     }
     cmd.args(["-o", binary_path, "-lm"]);
     let status = cmd.status()

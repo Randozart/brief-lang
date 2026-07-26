@@ -591,8 +591,11 @@ pub enum FromSpec {
     Literal(PathBuf),
     /// from <name> — compiler-relative lookup (same pattern as import <name>).
     CompilerRegistry(String),
-    /// 2026-07-25: from #POSIX / #Win32 / #WASI — protocol-based linking.
+    /// 2026-07-26: from #System — protocol-based linking. #System is the sole protocol.
     Protocol(String),
+    /// 2026-07-26: from #Link<user32> — link against system library -l<name>.
+    /// No per-target config or registry lookup. `-l<name>` is emitted directly.
+    Linked(String),
 }
 
 impl Default for FromSpec {
@@ -608,6 +611,7 @@ impl FromSpec {
             Self::Literal(p) => p.extension().and_then(|s| s.to_str()).map(|s| s.to_string()),
             Self::CompilerRegistry(name) => name.rsplit('.').next().map(|s| s.to_string()),
             Self::Protocol(_) => None,
+            Self::Linked(_) => None,
         }
     }
 
@@ -617,6 +621,7 @@ impl FromSpec {
             Self::Literal(p) => p.to_string_lossy().to_string(),
             Self::CompilerRegistry(n) => n.clone(),
             Self::Protocol(n) => n.clone(),
+            Self::Linked(n) => format!("#Link<{}>", n),
         }
     }
 }
