@@ -51,6 +51,30 @@ type Bfloat16 {
 
 Functions bound to ops via `= fn(...)` are emitted with LLVM's `alwaysinline`.
 
+### `prop` — Metaproperty Declarations
+
+Alongside `op`, types declare metaproperties via `prop`:
+
+```brief
+type MyString: Bits #String {
+    op CastTo(#Bits) = my_encode(#L);
+    prop Size = my_chars(#L);     // .#Size → character count
+    prop Bytes = my_byte_len(#L); // .#Bytes → encoded byte length
+};
+```
+
+A `prop` declares a metaproperty accessible via `expr .#Name`. The compiler
+resolves it through the protocol chain — `#String` provides `Size` and `Bytes`,
+but a custom type can override them. Same resolution mechanism as `op`.
+
+**Built-in metaproperties by protocol:**
+
+| Protocol | Metaproperties |
+|----------|---------------|
+| `#Bits` | `.#Bits`, `.#Alignment` |
+| `#String` | `.#Size`, `.#Bytes` |
+| Any type | User-defined via `prop` |
+
 ## 3. Protocol Variants
 
 Hashwords can be parameterized by protocol variant:

@@ -689,7 +689,33 @@ The `<:` Derivation lens (which also served as `observable <~ true` in
 contract declarations) is removed entirely. `observable` becomes a standalone
 keyword or hashword annotation.
 
-### 1.6d. Hashword Annotations for Struct/Obj Fields
+### 1.6d. `prop` — Protocol Metaproperty Declarations
+
+Alongside `op` declarations, protocols declare metaproperties via `prop`:
+
+```brief
+proto #String {
+    op CastTo(#Bits) = encode(#L);
+    prop Size = chars(#L);          // .#Size → character count
+    prop Bytes = encoded_len(#L);   // .#Bytes → byte length
+};
+
+type MyString: Bits #String {
+    op CastTo(#Bits) = my_encode(#L);
+    prop Size = my_chars(#L);       // custom Size, not chars
+};
+```
+
+The `prop` keyword declares a metaproperty accessible via `expr .#Name`.
+Resolution follows the protocol chain — find `prop Size` in the type's
+protocol, emit the function call. Same mechanism as `op`, different
+declaration keyword.
+
+For bootstrap protocols (`#Bits`, `#Int`, `#Float`, `#Bool`, `#Void`,
+`#Ptr`), the compiler hardcodes `prop` implementations. Everything else
+is user-defined through `prop` in proto/type bodies.
+
+### 1.6e. Hashword Annotations for Struct/Obj Fields
 
 Hashwords placed before struct/obj fields or declarations act as compiler
 directives:
@@ -720,13 +746,13 @@ The parser recognizes hashwords in annotation position and attaches them as
 field/property metadata. The LLVM backend uses `#Stack` → alloca (or no-op
 when already proven), `#Heap` → malloc, `#Scalar` → `!llvm.loop.disable_nonforced`.
 
-### 1.6e. Memory by Proof → Memory by Proof
+### 1.6f. Memory by Contract → Memory by Proof
 
-Rename `docs/plans/2026-07-25-memory-by-proof.md` to
+Rename `docs/plans/2026-07-25-memory-by-contract.md` to
 `docs/plans/2026-07-25-memory-by-proof.md`. Update all internal cross-references
 across the codebase.
 
-### 1.6f. Remove Built-in Collection Types from Compiler Knowledge
+### 1.6g. Remove Built-in Collection Types from Compiler Knowledge
 
 `List<T>`, `HashMap<K, V>`, `RingBuffer<T>` are no longer known to the compiler.
 They become user-defined `obj` declarations in stdlib. The type checker removes
@@ -746,7 +772,7 @@ obj List<T> {
 The compiler sees `InsertAt <~ fn(#L, #R)` and emits a call to `fn(collection,
 value)` when `<-` is used. No type names are hardcoded.
 
-### 1.6g. Files Changed
+### 1.6h. Files Changed
 
 | File | Change |
 |------|--------|
@@ -773,7 +799,7 @@ value)` when `<-` is used. No type names are hardcoded.
 | `learn-brief/13-projections.md` | Rewrite for `.#` |
 | `docs/architecture/overview.md` | Note Phase 1.6 |
 
-### 1.6h. Risks
+### 1.6i. Risks
 
 | Risk | Likelihood | Impact | Mitigation |
 |------|-----------|--------|------------|
@@ -782,7 +808,7 @@ value)` when `<-` is used. No type names are hardcoded.
 | `<:` removal breaks existing benchmarks | Medium | Low | 17 files to migrate, each is a mechanical `s/: /: /` |
 | Special collection type removal in typechecker is risky | Medium | High | Keep dead match arms with `_ =>` for now; remove in dedicated clean-up pass |
 
-### 1.6i. Documentation
+### 1.6j. Documentation
 
 | Document | Phase | What to update |
 |----------|-------|----------------|

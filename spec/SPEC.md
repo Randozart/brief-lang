@@ -174,11 +174,12 @@ top_level ::= definition
             | cell_input       (* Valid only in .c.bv files *)
             | cell_output      (* Valid only in .c.bv files *)
 
-type_def ::= "type" identifier type_params? "<:" type_expr "{" (slot_decl | type_property | op_decl | constraint)* "}" ";"
+type_def ::= "type" identifier type_params? ":" type_expr "{" (slot_decl | type_property | op_decl | prop_decl | constraint)* "}" ";"
 slot_decl ::= identifier ":" type_expr ";"
 type_property ::= identifier ("(" params? ")")? "<~" expression ";"
 constraint ::= "[" expression "]"
 op_decl ::= "op" rune_name "(" param_type? ")" "->" return_type "=" intrinsic ";"
+prop_decl ::= "prop" identifier "=" expression ";"
 
 exit_condition ::= "#!exit" expression
 
@@ -1308,7 +1309,7 @@ The expression discard `<- expr` evaluates any expression and discards its resul
 
 ### 3.15 Projection Operator (`:>`)
 
-The `:>` (metadata lens) operator projects compile-time-known properties from
+The `.#` (DotHash) operator projects compile-time-known metaproperties from
 values without runtime overhead. All operations map directly to LLVM intrinsics
 or constant evaluation.
 

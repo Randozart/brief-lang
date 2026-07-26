@@ -93,6 +93,7 @@ type Int : Bits {
 | `op Add(#Float)` | `op Add ~> "float.add"` + config entry | Backend knows `fadd` |
 | Structure + fields | `ctd <~ "Float"` + `llvm <~ "float"` | `llvm_type` derived from layout |
 | `op Add(Posit32) = fn(#L, #R)` | TOML custom template | Auto-`alwaysinline` |
+| `prop Size = chars(#L)` | Compiler hardcoded `.Size` | Protocol-metaproperty via `.#` |
 | `Cast(#Bits)` implicit | `ctd_to_llvm()` fallback chain | Every type IS bits |
 
 ### Hash Words Convention
