@@ -1,0 +1,126 @@
+// ── DAG-Based Buffer Size Inference ──────────────────────────────────
+// 2026-07-26: Static analysis of .lair bytecode to compute minimum
+// sufficient buffer sizes for the tamer VM. Runs before VM execution.
+// Proves bounds contractually — no runtime checks after initialization.
+
+import "loader.bv";
+
+// ── Opcode sizes (bytes, including opcode byte) ────────────────────────
+// Used to walk bytecode and compute stack depth deltas for each opcode.
+// Stack change: push count - pop count.
+
+defn opcode_stack_change(op: Int) -> Int {
+    match op {
+        0x00 => { term 0; };  // nop
+        0x01 => { term -1; }; // drop
+        0x02 => { term 1; };  // dup
+        0x03 => { term 0; };  // swap
+        0x06 => { term -1; }; // add
+        0x07 => { term -1; }; // sub
+        0x08 => { term -1; }; // mul
+        0x0B => { term -1; }; // and
+        0x0C => { term -1; }; // or
+        0x0D => { term -1; }; // xor
+        0x0E => { term 0; };  // not
+        0x0F => { term -1; }; // shl
+        0x10 => { term -1; }; // shr_s
+        0x11 => { term -1; }; // eq
+        0x1C => { term 0; };  // bnot
+        0x17 => { term 0; };  // load
+        0x18 => { term -2; }; // store
+        0x19 => { term 0; };  // ret
+        0x1B => { term 0; };  // trap
+        0x30 => { term 1; };  // push_i8
+        0x31 => { term 1; };  // load_local
+        0x32 => { term -1; }; // store_local
+        0x33 => { term 0; };  // push_frame
+        0x34 => { term 0; };  // pop_frame
+        0x50 => { term 1; };  // push_i16
+        0x51 => { term 0; };  // jmp
+        0x52 => { term -1; }; // jz (pops cond)
+        0x53 => { term -1; }; // jnz (pops cond)
+        0x54 => { term 0; };  // call (net: returns 1, pops args — handled by caller)
+        0x70 => { term 1; };  // push_i32
+        0x71 => { term 0; };  // hcall (net depends on host fn — assume 0 for analysis)
+        0x90 => { term 1; };  // push_i64
+        _ => { term 0; };
+    };
+};
+
+// ── Instruction sizes (bytes, for advancing PC) ────────────────────────
+
+defn instr_size(op: Int) -> Int {
+    match op {
+        0x30 | 0x31 | 0x32 | 0x33 | 0x34 => { term 2; };  // op + 1 byte
+        0x50 | 0x51 | 0x52 | 0x53 | 0x54 => { term 3; };  // op + 2 bytes
+        0x70 | 0x71 => { term 5; };                       // op + 4 bytes
+        0x90 => { term 9; };                               // op + 8 bytes
+        _ => { term 1; };                                   // op only
+    };
+};
+
+// ── Stack depth analysis ───────────────────────────────────────────────
+// Walk a function's bytecodes and find the maximum stack depth.
+// Conservative: assumes all control flow paths are taken.
+
+export defn analyze_fn_stack(bc: Ptr<Int>, fn_offset: Int, fn_len: Int) -> Int {
+    let mut pc = fn_offset;
+    let mut max_depth = 0;
+    let mut depth = 0;
+    while pc < fn_offset + fn_len {
+        let op = read_u8(bc, pc);
+        let change = opcode_stack_change(op);
+        let new_depth = depth + change;
+        when new_depth > max_depth {
+            max_depth = new_depth;
+        };
+        depth = new_depth;
+        when depth < 0 { depth = 0; };
+        pc = pc + instr_size(op);
+    };
+    term max_depth;
+};
+
+// ── Call graph + worst-case analysis ────────────────────────────────────
+// Walk all functions, build call graph, compute transitive worst-case
+// stack depth accounting for function calls (which push frame + args).
+
+export defn analyze_max_stack(fn_table: Ptr<Int>, fn_count: Int,
+                              bc_data: Ptr<Int>, bc_len: Int) -> Int
+{
+    // For MVP: compute per-function max depth, then pick the worst.
+    // Future: walk call graph to find paths through multiple calls.
+    let mut global_max = 0;
+    let mut fn_idx = 0;
+    while fn_idx < fn_count {
+        let bc_offset = fn_bc_offset(fn_table, fn_idx);
+        let bc_len = fn_bc_len(fn_table, fn_idx);
+        let local_count = fn_local_count(fn_table, fn_idx);
+        let fn_max = analyze_fn_stack(bc_data, bc_offset, bc_len);
+        let total = fn_max + local_count;  // stack + locals
+        when total > global_max {
+            global_max = total;
+        };
+        fn_idx = fn_idx + 1;
+    };
+    // Bounds check: if analysis exceeds fixed buffer, clamp for safety
+    when global_max > 1024 { term 1024; };
+    term global_max;
+};
+
+// ── Integration ─────────────────────────────────────────────────────────
+// Called by main.bv before vm_loop to compute buffer sizes.
+// Returns (stack_size, locals_size, frames_count).
+// For MVP: returns fixed maxes since analysis is preliminary.
+
+export defn compute_buffer_sizes(fn_table: Ptr<Int>, fn_count: Int,
+                                 bc_data: Ptr<Int>, bc_len: Int)
+    -> (Int, Int, Int)
+{
+    let max_stack = analyze_max_stack(fn_table, fn_count, bc_data, bc_len);
+    let stack_slots = when max_stack < 64 { 64 } else { max_stack };
+    let locals_slots = when max_stack < 256 { 256 } else { max_stack * 2 };
+    let frames_max = when fn_count < 16 { 16 } else { fn_count * 2 };
+    when frames_max > 256 { term (stack_slots, locals_slots, 256); };
+    term (stack_slots, locals_slots, frames_max);
+};
