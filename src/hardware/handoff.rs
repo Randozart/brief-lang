@@ -249,38 +249,6 @@ fn extract_xml_attr<'a>(line: &'a str, element: &str, attr: &str) -> Option<&'a 
     Some(&value_start[..end])
 }
 
-// ── DBVS Schema Generator ─────────────────────────────────────────
-
-/// Generate a `.dbvs` schema from extracted hardware peripherals.
-///
-/// Each peripheral becomes a named register with its physical address,
-/// plus a type-only alias for schema import. Users reference via the alias.
-/// Addresses are resolved at compile time from the target .dbv file.
-pub fn generate_dbvs(peripherals: &HashMap<String, HardwarePeripheral>) -> String {
-    let mut out = String::new();
-    out.push_str("// Auto-generated from Vivado hardware handoff\n");
-    out.push_str("// Schema: peripheral registers and their types\n");
-    out.push_str("// Compound with --target-dbv <board>.dbv to resolve addresses\n\n");
-
-    let mut names: Vec<&String> = peripherals.keys().collect();
-    names.sort();
-
-    for name in names {
-        let p = &peripherals[name];
-        out.push_str(&format!(
-            "register @{:#010X} as \"{}\" {{\n    type: UInt;\n    description: \"{} memory-mapped peripheral\";\n}};\n\n",
-            p.base_address, p.name, p.interface_type
-        ));
-        // Schema alias: type only, no address. Addresses come from target .dbv.
-        out.push_str(&format!(
-            "alias {}: UInt;\n\n",
-            p.name
-        ));
-    }
-
-    out
-}
-
 // ── DBV Target Generator ──────────────────────────────────────────
 
 /// Generate a `.dbv` target binding from extracted hardware peripherals.
@@ -447,21 +415,6 @@ mod tests {
     }
 
     #[test]
-    fn test_generate_dbvs() {
-        let peripherals = extract_from_hwh_xml(SAMPLE_HWH).unwrap();
-        let dbvs = generate_dbvs(&peripherals);
-        assert!(dbvs.contains("axi_gpio_0"));
-        assert!(dbvs.contains("axi_uart_1"));
-        // Register has @ address (required by DBrief parser), alias does not
-        assert!(dbvs.contains("register @0x8000A000 as \"axi_gpio_0\""));
-        assert!(dbvs.contains("register @0x8000B000 as \"axi_uart_1\""));
-        // Schema aliases are type-only, no address
-        assert!(dbvs.contains("alias axi_gpio_0: UInt;"));
-        assert!(dbvs.contains("alias axi_uart_1: UInt;"));
-        // No = @ address in aliases
-        assert!(!dbvs.contains("alias axi_gpio_0: UInt = @"));
-    }
-
     #[test]
     fn test_generate_dbv() {
         let peripherals = extract_from_hwh_xml(SAMPLE_HWH).unwrap();
