@@ -1,54 +1,52 @@
-# RStruct — Rendered Struct Components
+# Render Struct — UI Component System (was RStruct)
 
-**Date:** 2026-06-24
-**Phase:** TBD
-**Status:** Fully parsed, desugared, and emitted in the web pipeline
+**Date:** 2026-06-24 (updated 2026-07-26)
+**Status:** Active — `rstruct` syntax deprecated, use `render struct`/`render obj`
+
+> **⚠️ DEPRECATED 2026-07-26:** The `rstruct` keyword is deprecated. Use
+> `render struct <name> { <html> }` or `render obj <name> { <html> }` instead.
+> See `docs/architecture/features/rendered-brief-wasm.md` for the current spec.
+> The old examples are archived in `archive/examples/`.
 
 ## Overview
 
-`rstruct` (Rendered Struct) is Brief's component system for `.rbv` files. It defines a self-contained UI component with its own state, transactions, and HTML view. An `rstruct` desugars into separate state declarations, top-level transactions, and a render block.
+The `render struct` / `render obj` keywords attach view HTML to existing
+data types. Together with top-level `let` state declarations and `txn` blocks,
+they form Brief's component system for `.rbv` files.
 
 ## Syntax
 
 ```brief
-rstruct ComponentName {
-    // State fields with optional defaults
-    field1: Type1 = default1;
-    field2: Type2 = default2;
+// Define state
+let count: Int = 0;
 
-    // Transactions (become ComponentName.method)
-    txn ComponentName.method [pre][post] {
-        &field1 = new_value;
-        term;
-    };
+// Define transactions
+txn increment [count < 100][@count + 1 == count] {
+    count = count + 1;
+    term;
+};
 
-    // View HTML with b-* directives
-    <div class="component">
-        <span b-text="field1">Default</span>
-        <button b-trigger:click="method">Click</button>
+// Attach view HTML to a struct pattern
+render struct Counter {
+    <div class="counter">
+        <span b-text="count">0</span>
+        <button b-trigger:click="increment">+</button>
     </div>
 };
 ```
 
-## Desugaring
+## How It Works
 
-An `rstruct Counter { count: Int = 0; txn ...; <div>...</div> }` desugars into:
+A `render struct Counter { <html> }` block:
 
-1. **State declarations**: `let count: Int = 0;`
-2. **Top-level transactions**: `txn Counter.increment ...`
-3. **Struct definition**: `struct Counter { count: Int }` with the view HTML attached
-4. **Render block**: Maps the struct name to its HTML template
-
-## Features
-
-- **Self-contained**: State, logic, and view in one block
-- **Reusable**: Multiple instances via `<Component />` tags
-- **Encapsulated**: Field names are namespaced within the component
-- **Desugared early**: After parsing, the compiler sees flat state and transactions
+1. Associates the HTML template with the name `Counter` for use in `<view>`
+2. The view compiler processes the `b-*` directives into typed bindings
+3. During codegen, the compiler analyzes which `txn` blocks modify which
+   state fields, and generates the minimal JS to update the DOM at commit points
 
 ## View Directives
 
-RStruct views support the same `b-*` directives as top-level `<view>` blocks:
+Render struct views support the same `b-*` directives:
 
 | Directive | Purpose |
 |-----------|---------|
@@ -63,6 +61,18 @@ RStruct views support the same `b-*` directives as top-level `<view>` blocks:
 
 ## Examples
 
-- `examples/rstruct-demo.rbv` — Simple greeter component
-- `examples/counter.rbv` — Counter with increment/decrement/reset
-- `examples/shopping_cart.rbv` — Multi-step shopping cart with product selection
+- `examples/rstruct-demo.rbv` (migrated to `render struct` — see `archive/examples/rstruct-demo.rbv.old-rstruct` for the original)
+- `examples/counter.rbv`
+- `examples/shopping_cart.rbv`
+
+## Deprecated: `rstruct` Syntax
+
+The old `rstruct` keyword bundled state declarations, transactions, and view
+HTML in a single block. The parser still accepts it for backward compatibility,
+with a deprecation warning. Migrate to the new pattern:
+
+| Old (`rstruct`) | New (`render struct`) |
+|-----------------|----------------------|
+| `rstruct X { field: T = val; txn ...; <html> };` | `let field: T = val; txn ...; render struct X { <html> };` |
+| `rstruct` bundles state + logic + view | State (`let`), logic (`txn`), and view (`render struct`) are separate |
+| Transactions prefixed with `rstruct` name | Transactions are top-level (no prefix) |

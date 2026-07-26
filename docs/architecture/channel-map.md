@@ -35,7 +35,7 @@ graph TD
     Anl --> Codegen[Codegen]
     Codegen -->|LLVM IR| LLVM[LLVM Pipeline]
     Codegen -->|MLIR| CIRCT[CIRCT]
-    Codegen -->|TS + WASM| Web[Webstack]
+    Codegen -->|WASM + JS shim| Web[Webstack]
 
     LLVM --> Link[llvm-link LTO with brief_rt.c]
     Link --> Opt[opt O3 ffast-math]

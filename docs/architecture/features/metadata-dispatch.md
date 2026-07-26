@@ -236,9 +236,16 @@ forward compatibility when new backends add new keys.
 
 ### 4.4 Webstack Backend Responsibilities (`brief-webstack`)
 
+> **2026-07-26:** The webstack backend is migrating from a TS emitter to a
+> WASM-first architecture. Section under review — the `GlueWebGenerator` will
+> read additional metadata keys (`web_import`, `dom_binding`, `state_layout`)
+> in the new pipeline. See `docs/architecture/features/rendered-brief-wasm.md`.
+
 | Metadata key | Validation performed |
 |--------------|---------------------|
 | `wasm_op` | Validate WASM opcode exists. Emit as WASM bytecode instruction. |
+| `web_import` | Validate import exists in wasm_runtime imports table. |
+| `dom_binding` | Validate binding element/handle exists in view compiler output. |
 | `llvm_*` / `circt_*` keys | Silently ignored. |
 
 ### 4.5 Compile-Time Interpreter Responsibilities
