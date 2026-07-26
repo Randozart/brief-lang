@@ -147,6 +147,12 @@ impl<'a> DataflowAnalyzer<'a> {
                 for a in args { self.extract_ids_recursive(a, ids); }
             }
             Expr::Exists(_) => { unreachable!("fn? only in stage eval") },
+            Expr::Slice { array, start, end, stride } => {
+                self.extract_ids_recursive(array, ids);
+                if let Some(e) = start.as_deref() { self.extract_ids_recursive(e, ids); }
+                if let Some(e) = end.as_deref() { self.extract_ids_recursive(e, ids); }
+                if let Some(e) = stride.as_deref() { self.extract_ids_recursive(e, ids); }
+            }
 
         }
     }

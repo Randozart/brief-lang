@@ -442,6 +442,12 @@ fn collect_strings_expr(expr: &Expr, seen: &mut std::collections::HashSet<String
         Expr::Decimal(_) | Expr::TaggedLiteral(_, _) | Expr::Bool(_) | Expr::Float(_) | Expr::Identifier(_)
         | Expr::PropertyGet(_) | Expr::FormattingAnnotation(_) | Expr::StructLiteral { .. } => {}
         Expr::Exists(_) => { unreachable!("fn? only in stage eval") },
+            Expr::Slice { array, start, end, stride } => {
+                collect_strings_expr(array, seen, out);
+                if let Some(e) = start.as_deref() { collect_strings_expr(e, seen, out); }
+                if let Some(e) = end.as_deref() { collect_strings_expr(e, seen, out); }
+                if let Some(e) = stride.as_deref() { collect_strings_expr(e, seen, out); }
+            }
 
     }
 }

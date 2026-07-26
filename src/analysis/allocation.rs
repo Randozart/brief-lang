@@ -291,7 +291,7 @@ impl<'a> DagBuilder<'a> {
                 for a in args { self.walk_expr(a); }
             }
             Expr::Exists(_) => { unreachable!("fn? only in stage eval") },
-
+            Expr::Slice { .. } => {},
         }
     }
 }

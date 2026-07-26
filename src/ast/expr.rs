@@ -27,6 +27,13 @@ pub enum Expr {
     UnaryOp(UnaryOpKind, Box<Expr>),
     Field(Box<Expr>, String),
     Index(Box<Expr>, Box<Expr>),
+    /// arr[start:end:stride] — zero-copy slice view
+    Slice {
+        array: Box<Expr>,
+        start: Option<Box<Expr>>,
+        end: Option<Box<Expr>>,
+        stride: Option<Box<Expr>>,
+    },
 
     // ── Control flow ────────────────────────────────────────────
     Block(Vec<super::Statement>),

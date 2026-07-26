@@ -113,6 +113,12 @@ impl Annotator {
     fn collect_calls_from_expr(&self, expr: &Expr, calls: &mut Vec<String>) {
         match expr {
             Expr::Exists(_) => {},
+            Expr::Slice { array, start, end, stride } => {
+                self.collect_calls_from_expr(array, calls);
+                if let Some(e) = start.as_deref() { self.collect_calls_from_expr(e, calls); }
+                if let Some(e) = end.as_deref() { self.collect_calls_from_expr(e, calls); }
+                if let Some(e) = stride.as_deref() { self.collect_calls_from_expr(e, calls); }
+            }
             Expr::Call(name, args, _) => {
                 calls.push(name.clone());
                 for arg in args {
@@ -583,6 +589,15 @@ impl Annotator {
             }
             Expr::StructLiteral { type_name, .. } => format!("{} {{ ... }}", type_name),
             Expr::Exists(_) => { unreachable!("fn? only in stage eval") },
+            Expr::Slice { array, start, end, stride } => {
+                let mut s = format!("{}[", self.format_expr(array));
+                if let Some(v) = start { s.push_str(&self.format_expr(v)); }
+                s.push_str(":");
+                if let Some(v) = end { s.push_str(&self.format_expr(v)); }
+                if let Some(v) = stride { s.push_str(&format!(":{}", self.format_expr(v))); }
+                s.push_str("]");
+                s
+            }
 
         }
     }

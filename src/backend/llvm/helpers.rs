@@ -161,6 +161,13 @@ impl LlvmBackend {
                 type_args: vec![],
             },
             Expr::Exists(_) => { unreachable!("fn? only in stage eval") },
+            Expr::Slice { array, start, end, stride } => {
+                let new_array = Self::rewrite_cell_identifiers(array, cell_name);
+                let new_start = start.as_ref().map(|e| Box::new(Self::rewrite_cell_identifiers(e, cell_name)));
+                let new_end = end.as_ref().map(|e| Box::new(Self::rewrite_cell_identifiers(e, cell_name)));
+                let new_stride = stride.as_ref().map(|e| Box::new(Self::rewrite_cell_identifiers(e, cell_name)));
+                Expr::Slice { array: Box::new(new_array), start: new_start, end: new_end, stride: new_stride }
+            }
 
         }
     }

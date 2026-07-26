@@ -280,6 +280,12 @@ fn collect_expr_ids_inner(expr: &Expr, ids: &mut Vec<String>) {
             for a in args { collect_expr_ids_inner(a, ids); }
         }
         Expr::Exists(_) => { unreachable!("fn? only in stage eval") },
+        Expr::Slice { array, start, end, stride } => {
+            collect_expr_ids_inner(array, ids);
+            if let Some(e) = start.as_deref() { collect_expr_ids_inner(e, ids); }
+            if let Some(e) = end.as_deref() { collect_expr_ids_inner(e, ids); }
+            if let Some(e) = stride.as_deref() { collect_expr_ids_inner(e, ids); }
+        }
 
     }
 }

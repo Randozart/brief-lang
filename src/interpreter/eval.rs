@@ -124,6 +124,7 @@ pub fn eval_expr(
             name
         ))),
         Expr::Exists(_) => { unreachable!("fn? only in stage eval") },
+            Expr::Slice { array, .. } => eval_expr(array, heap, bindings),
 
     }
 }

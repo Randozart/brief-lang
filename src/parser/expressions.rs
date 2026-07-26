@@ -263,10 +263,45 @@ impl<'a> Parser<'a> {
                 let name = self.expect_identifier()?;
                 expr = Expr::PropertyGet(name);
             } else if self.eat(&Token::LBracket) {
-                // Index: a[b]
-                let index = self.parse_expression()?;
-                self.expect(Token::RBracket)?;
-                expr = Expr::Index(Box::new(expr), Box::new(index));
+                // Check for slice syntax: arr[start:end:stride]
+                if self.check(&Token::Colon) {
+                    // Slice with implicit start: arr[:end] or arr[:]
+                    self.pos += 1; // consume ':'
+                    let end = if self.check(&Token::RBracket) || self.check(&Token::Colon) {
+                        None
+                    } else {
+                        Some(Box::new(self.parse_expression()?))
+                    };
+                    let stride = if self.eat(&Token::Colon) {
+                        if !self.check(&Token::RBracket) {
+                            Some(Box::new(self.parse_expression()?))
+                        } else { None }
+                    } else { None };
+                    self.expect(Token::RBracket)?;
+                    expr = Expr::Slice { array: Box::new(expr), start: None, end, stride };
+                } else {
+                    // Index or slice with start
+                    let first = self.parse_expression()?;
+                    if self.eat(&Token::Colon) {
+                        // It's a slice: arr[start:end] or arr[start:] or arr[start:end:stride]
+                        let end = if self.check(&Token::RBracket) || self.check(&Token::Colon) {
+                            None
+                        } else {
+                            Some(Box::new(self.parse_expression()?))
+                        };
+                        let stride = if self.eat(&Token::Colon) {
+                            if !self.check(&Token::RBracket) {
+                                Some(Box::new(self.parse_expression()?))
+                            } else { None }
+                        } else { None };
+                        self.expect(Token::RBracket)?;
+                        expr = Expr::Slice { array: Box::new(expr), start: Some(Box::new(first)), end, stride };
+                    } else {
+                        // Simple index: arr[idx]
+                        self.expect(Token::RBracket)?;
+                        expr = Expr::Index(Box::new(expr), Box::new(first));
+                    }
+                }
             } else if self.eat(&Token::Not) {
                 // 2026-07-19: Plugin-intercept: name!(args)
                 // ! after an expression is the plugin-intercept marker.

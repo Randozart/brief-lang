@@ -304,6 +304,13 @@ pub fn infer_expression(
         // the plugin is responsible for final dispatch.
         Expr::PluginIntercept { .. } => Ok((Type::void(), Provenance::Unknown)),
         Expr::Exists(_) => { unreachable!("fn? only in stage eval") },
+            Expr::Slice { array, start, end, stride } => {
+                let elem_ty = infer_type_only(array, ctx)?;
+                if let Some(e) = start.as_deref() { infer_type_only(e, ctx)?; }
+                if let Some(e) = end.as_deref() { infer_type_only(e, ctx)?; }
+                if let Some(e) = stride.as_deref() { infer_type_only(e, ctx)?; }
+                Ok((elem_ty, Provenance::Unknown))
+            }
 
     }
 }

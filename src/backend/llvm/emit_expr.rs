@@ -730,7 +730,7 @@ impl LlvmBackend {
                 return self.emit_struct_literal(out, v, type_name, fields, indent);
             }
             Expr::Exists(_) => { unreachable!("fn? only in stage eval") },
-
+            Expr::Slice { array, .. } => self.emit_expr(out, array, indent),
         }
     }
 

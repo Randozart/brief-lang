@@ -35,6 +35,14 @@ impl fmt::Display for Expr {
             }
             Expr::Field(obj, name) => write!(f, "{}.{}", obj, name),
             Expr::Index(obj, index) => write!(f, "{}[{}]", obj, index),
+            Expr::Slice { array, start, end, stride } => {
+                write!(f, "{}[", array)?;
+                if let Some(s) = start { write!(f, "{}", s)?; }
+                write!(f, ":")?;
+                if let Some(e) = end { write!(f, "{}", e)?; }
+                if let Some(s) = stride { write!(f, ":{}", s)?; }
+                write!(f, "]")
+            }
             Expr::Exists(name) => write!(f, "{}?", name),
             Expr::Block(stmts) => {
                 write!(f, "{{ ")?;

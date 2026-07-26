@@ -205,6 +205,7 @@ fn walk_expr(expr: &mut Expr) {
         | Expr::FormattingAnnotation(_) => {}
         Expr::StructLiteral { .. } => {}
         Expr::Exists(_) => { unreachable!("fn? only in stage eval") },
+        Expr::Slice { .. } => {},
 
     }
 }
