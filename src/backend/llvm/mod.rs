@@ -973,6 +973,15 @@ impl LlvmBackend {
         self
     }
 
+    /// 2026-07-26: Enable webstack mode (WASM-first rendering).
+    /// When enabled, the backend emits __web_flush_state calls at term
+    /// and exports state_layout() for the JS runtime shim.
+    /// Only meaningful for .rbv files compiled with BackendKind::Webstack.
+    pub fn with_webstack(mut self, enabled: bool) -> Self {
+        self.ctx.webstack_enabled = enabled;
+        self
+    }
+
     /// Pre-populate MMIO address map from a resolved DBV target binding.
     /// Each alias name maps to a physical u64 address for volatile MMIO access.
     pub fn with_mmio_addresses(mut self, addresses: HashMap<String, u64>) -> Self {
@@ -3463,6 +3472,24 @@ impl LlvmBackend {
         // redefined duplicate %t{N} registers as %tddup{N} but did NOT
         // rename subsequent uses, creating SSA violations.
         // See docs/plans/2026-06-29-llvm-backend-refactoring.md#p2.
+
+        // 2026-07-26: Phase 4 — Webstack exports (state_layout + generation)
+        // and __web_flush_state import. Emitted when webstack_enabled is true.
+        if self.ctx.webstack_enabled {
+            // Declare the __web_flush_state import — called at each term;
+            writeln!(out, "declare void @__web_flush_state(i32, i32)").ok();
+            // Generation counter — incremented after each txn commit
+            writeln!(out, "@__web_generation = global i32 0").ok();
+            // Export generation counter (WASM global export)
+            writeln!(out, "@__web_generation_export = hidden global ptr @__web_generation").ok();
+            // State layout function — returns ptr to layout struct
+            // For Phase 4, emit a stub with 0 fields. Phase 6 will wire
+            // the actual field layout table.
+            writeln!(out, "@__web_layout = private constant {{ i32, i32, i32, i32 }} {{ i32 0, i32 0, i32 64, i32 16 }}").ok();
+            writeln!(out, "define i32 @state_layout() {{").ok();
+            writeln!(out, "  ret i32 ptrtoint ({{ i32, i32, i32, i32 }}* @__web_layout to i32)").ok();
+            writeln!(out, "}}").ok();
+        }
 
         out
     }

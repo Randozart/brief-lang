@@ -787,10 +787,25 @@ fn codegen(
             ".mlir"
         }
         BackendKind::Webstack => {
-            let result = brief_compiler::backend::webstack::WebstackGenerator::new()
-                .generate(items, &[], "program");
-            output = result.ts_code;
-            ".ts"
+            // 2026-07-26: Phase 4 — Webstack uses LlvmBackend(wasm32) + with_webstack().
+            // The old TS emitter path is deprecated. Phase 6 will also invoke
+            // GlueWebGenerator to produce the JS shim from view bindings.
+            let mut b = LlvmBackend::new()
+                .with_webstack(true)
+                .with_int_bits(32)
+                .with_target_triple("wasm32-unknown-wasi")
+                .with_type_universe(universe.clone())
+                .with_alloc_strategies(alloc_strategies)
+                .with_stack_threshold(opts.stack_threshold)
+                .with_optimize_budget(opts.optimize_budget)
+                .with_resolved_frgns(resolved_frgns)
+                .with_optimize_report(true)
+                .with_narrow_bindings(narrow_bindings);
+            if opts.gpu_offload {
+                b = b.with_gpu_offload(true);
+            }
+            output = b.generate(items, None);
+            ".wasm"
         }
         BackendKind::Gpu => {
             let mut b = LlvmBackend::new()

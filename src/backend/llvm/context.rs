@@ -160,6 +160,12 @@ pub struct CompilerContext {
 
     // Dependency graph (built during generate(), then read-only)
     pub dep_graph: DependencyGraph,
+
+    // 2026-07-26: Webstack (WASM-first rendering) enabled.
+    // When true, emit __web_flush_state calls at term; and export
+    // state_layout() for the JS shim. Only active for .rbv compilation
+    // with BackendKind::Webstack.
+    pub webstack_enabled: bool,
 }
 
 impl CompilerContext {
@@ -252,6 +258,7 @@ impl CompilerContext {
             is_embedded: false,
             type_universe: None,
             operator_defs: HashMap::new(),
+            webstack_enabled: false,
             dep_graph: DependencyGraph {
                 topo_order: Vec::new(),
                 bit_index: HashMap::new(),
