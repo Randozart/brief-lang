@@ -306,11 +306,12 @@
       "patterns": [
         {
           "name": "support.type.property-name.hashword.brief",
-          "match": "#L|#R|#T"
+          "comment": "Positional markers (#L, #R, #T) and protocol category hashwords (#Int, #Float, #String, #Bool, #Char, #Bits, #UInt, #Ptr, #Link, #System). Optional <variant> suffix for parameterized protocols like #String<utf8>.",
+          "match": "#(L|R|T|Int|Float|String|Bool|Char|Bits|UInt|Ptr|Link|System)(<[a-zA-Z0-9_]+>)?"
         }
       ]
     },
-        "booleans": {
+    "booleans": {
       "patterns": [
         {
           "name": "constant.language.true.brief",
