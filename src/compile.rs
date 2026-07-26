@@ -605,9 +605,13 @@ pub fn compile_source(file_path: &str, source: &str, opts: &BuildOptions) -> Res
         };
         if opts.backend == BackendKind::Llvm || opts.backend == BackendKind::Gpu {
             // Merge CLI-provided extra_objects with ones collected from frgn
-            // declarations (frgn .c/.cpp sources are auto-compiled to .o)
+            // declarations (frgn .c/.cpp sources are auto-compiled to .o).
+            // 2026-07-26: Deduplicate — multiple frgns may reference the same
+            // .c source (e.g., brief_rt.c), producing identical cached .o paths.
             let mut all_objects = opts.extra_objects.clone();
             all_objects.extend(extra_objects);
+            all_objects.sort();
+            all_objects.dedup();
             compile_ll_to_binary(&out_path, &binary_path, &all_objects, &protocol_libs, opts.shared)?;
         }
         // 2026-07-26: Phase 5 — Compile LLVM IR to WASM binary for webstack backend.
@@ -1190,13 +1194,14 @@ fn compile_source_to_object(source_path: &Path, cache_dir: &Path) -> Result<Path
 /// `from #System` frgns are passed as `-l<lib>` flags to clang.
 fn compile_ll_to_binary(ll_path: &str, binary_path: &str, extra_objects: &[PathBuf], protocol_libs: &[String], shared: bool) -> Result<(), String> {
     let mut cmd = Command::new("clang");
-    let rt_path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("lib/runtime/brief_rt.c");
-    let rt_str = rt_path.to_string_lossy().to_string();
-    // 2026-07-21: Use -flto so clang can inline __print_char (~5-8 cycles/iter).
+    // 2026-07-26: brief_rt.c is no longer hardcoded here — frgn declarations in
+    // stdlib (e.g., `frgn __print_int from "lib/runtime/brief_rt.c"`) are compiled
+    // by collect_extra_objects and passed via extra_objects. This removes the
+    // duplicate symbol error that occurred when brief_rt.c was compiled twice.
     if shared {
-        cmd.args(["-O3", "-flto", "-shared", "-fPIC", ll_path, &rt_str]);
+        cmd.args(["-O3", "-flto", "-shared", "-fPIC", ll_path]);
     } else {
-        cmd.args(["-O3", "-flto", "-march=native", "-ffast-math", ll_path, &rt_str]);
+        cmd.args(["-O3", "-flto", "-march=native", "-ffast-math", ll_path]);
     }
     for obj in extra_objects {
         cmd.arg(obj.as_os_str());
