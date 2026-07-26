@@ -324,7 +324,7 @@ impl LspServer {
 
         if is_dbrief {
             let mut diagnostics = Vec::new();
-            if let Err(e) = crate::dbrief::parse_dbvl(text).map(|_| ()) {
+            if let Err(e) = crate::dbrief::v2::parse_document(text).map(|_| ()) {
                 diagnostics.push(serde_json::json!({
                     "range": {
                         "start": { "line": 0, "character": 0 },

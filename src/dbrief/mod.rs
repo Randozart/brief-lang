@@ -12,32 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-pub mod ast;
-pub mod parser;
 pub mod v2;
 pub mod bridge;
 
-pub use ast::*;
-pub use parser::{parse_dbrief, parse_dbvl};
 pub use v2::*;
-
-/// Backward-compat JSON serialization for CLI — will be phased out
-pub fn dbvl_to_json(program: &DbvlProgram, pretty: bool) -> Result<String, String> {
-    if pretty {
-        serde_json::to_string_pretty(program)
-            .map_err(|e| format!("JSON serialization error: {}", e))
-    } else {
-        serde_json::to_string(program)
-            .map_err(|e| format!("JSON serialization error: {}", e))
-    }
-}
-
-pub fn dbrief_to_json(program: &ast::DbriefProgram, pretty: bool) -> Result<String, String> {
-    if pretty {
-        serde_json::to_string_pretty(program)
-            .map_err(|e| format!("JSON serialization error: {}", e))
-    } else {
-        serde_json::to_string(program)
-            .map_err(|e| format!("JSON serialization error: {}", e))
-    }
-}

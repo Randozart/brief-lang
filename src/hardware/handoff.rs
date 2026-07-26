@@ -251,10 +251,10 @@ fn extract_xml_attr<'a>(line: &'a str, element: &str, attr: &str) -> Option<&'a 
 
 // ── DBV Target Generator ──────────────────────────────────────────
 
-/// Generate a `.dbv` target binding from extracted hardware peripherals.
+/// Generate a `.dbvl` target binding from extracted hardware peripherals.
 ///
 /// Maps each schema alias to its physical address for this specific target.
-/// Uses proper DBrief alias syntax: `alias name: Type = @0x...;`
+/// Uses `.dbvl` positional entry syntax: `> name; @0x...;`
 pub fn generate_dbv(
     peripherals: &HashMap<String, HardwarePeripheral>,
     target_name: &str,
@@ -264,7 +264,7 @@ pub fn generate_dbv(
         "// Auto-generated target binding for {}\n",
         target_name
     ));
-    out.push_str("// Maps DBVS schema aliases to physical addresses\n");
+    out.push_str("// Maps schema aliases to physical addresses\n");
     out.push_str(&format!(
         "// Generated from Vivado hardware handoff — {} peripherals\n\n",
         peripherals.len()
@@ -276,7 +276,7 @@ pub fn generate_dbv(
     for name in names {
         let p = &peripherals[name];
         out.push_str(&format!(
-            "alias {}: UInt = @{:#010X};  // {} [{}..{}], size={}\n",
+            "> {}; @{:#010X};  // {} [{}..{}], size={}\n",
             p.name,
             p.base_address,
             p.interface_type,
@@ -289,46 +289,49 @@ pub fn generate_dbv(
     out
 }
 
-/// Extract alias → address mappings from a .dbv target binding file.
+/// Extract alias → address mappings from a .dbvl target binding file.
 ///
-/// Parses the DBrief file and extracts every `ALIAS name: Type = @0x...` entry,
-/// returning a map of alias name to its physical u64 address.
-/// Named addresses and non-numeric addresses are skipped with a warning.
+/// Parses the DBrief Lines file and extracts every positional entry with
+/// `name; @0x...` pattern, returning a map of alias name to its physical
+/// u64 address.
+///
+/// 2026-07-26: Rewritten for V2 .dbvl syntax. Use:
+///   >schema AliasBinding from "bindings.dbv"
+///   gpio0; @0x8000A000;
+///   gpio1; @0x8000B000;
+/// Or standalone entries without schema:
+///   gpio0; @0x8000A000;
 pub fn extract_target_addresses(dbv_content: &str) -> Result<HashMap<String, u64>, String> {
-    use crate::dbrief::ast::DbriefAddress;
+    use crate::dbrief::{DataField, DataValue};
 
-    let program = crate::dbrief::parse_dbrief(dbv_content)
-        .map_err(|e| format!("Failed to parse .dbv file: {}", e))?;
+    let doc = crate::dbrief::v2::parse_document(dbv_content)
+        .map_err(|e| format!("Failed to parse .dbvl file: {}", e))?;
 
     let mut addresses = HashMap::new();
 
-    for alias in &program.aliases {
-        if let Some(addr) = &alias.address {
-            match addr {
-                DbriefAddress::Numeric(n) | DbriefAddress::Hex(n) => {
-                    addresses.insert(alias.name.clone(), *n);
-                }
-                DbriefAddress::Auto => {
-                    // Skip auto-allocated — not a known physical address
-                }
-                DbriefAddress::Named(name) => {
-                    eprintln!(
-                        "  Warning: alias '{}' references named address '{}' — not yet resolved",
-                        alias.name, name
-                    );
-                }
-                DbriefAddress::Remote(_) => {
-                    eprintln!(
-                        "  Warning: alias '{}' uses remote address — skipping",
-                        alias.name
-                    );
-                }
+    for group in &doc.data_groups {
+        for entry in &group.entries {
+            if entry.fields.len() < 2 {
+                continue;
             }
+            let name = match &entry.fields[0] {
+                DataField::Positional(DataValue::String(s)) => s.clone(),
+                _ => continue,
+            };
+            let addr_str = match &entry.fields[1] {
+                DataField::Positional(DataValue::String(s)) => s.clone(),
+                _ => continue,
+            };
+            let hex_str = addr_str.strip_prefix('@').unwrap_or(&addr_str);
+            let hex_clean = hex_str.strip_prefix("0x").or_else(|| hex_str.strip_prefix("0X")).unwrap_or(hex_str);
+            let addr = u64::from_str_radix(hex_clean, 16)
+                .map_err(|e| format!("Invalid hex address '{}': {}", hex_str, e))?;
+            addresses.insert(name, addr);
         }
     }
 
     if addresses.is_empty() {
-        return Err("No numeric addresses found in .dbv file — does it use `alias = @0x...` syntax?".to_string());
+        return Err("No numeric addresses found in .dbvl file".to_string());
     }
 
     Ok(addresses)
@@ -415,23 +418,19 @@ mod tests {
     }
 
     #[test]
-    #[test]
     fn test_generate_dbv() {
         let peripherals = extract_from_hwh_xml(SAMPLE_HWH).unwrap();
         let dbv = generate_dbv(&peripherals, "zcu4ev");
         assert!(dbv.contains("zcu4ev"));
         assert!(dbv.contains("axi_gpio_0"));
         assert!(dbv.contains("axi_uart_1"));
-        assert!(dbv.contains("alias "));
-        assert!(dbv.contains("= @0x8000A000"));
-        assert!(dbv.contains("= @0x8000B000"));
+        assert!(dbv.contains("@0x8000A000"));
+        assert!(dbv.contains("@0x8000B000"));
     }
 
     #[test]
     fn test_extract_target_addresses() {
-        let dbv_content = "alias axi_gpio_0: UInt = @0x8000A000;\n\
-                          alias axi_uart_1: UInt = @0x8000B000;\n\
-                          alias axi_dma_0: UInt = @0x80004000;\n";
+        let dbv_content = "> axi_gpio_0; @0x8000A000;\n> axi_uart_1; @0x8000B000;\n> axi_dma_0; @0x80004000;\n";
         let addresses = extract_target_addresses(dbv_content).unwrap();
         assert_eq!(addresses.len(), 3);
         assert_eq!(addresses.get("axi_gpio_0"), Some(&0x8000A000));

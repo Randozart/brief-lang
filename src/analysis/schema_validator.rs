@@ -2,12 +2,12 @@ use crate::errors::{Diagnostic, Severity};
 use std::collections::{HashMap, HashSet};
 
 pub fn cross_validate(
-    schema_aliases: &HashMap<String, crate::dbrief::DbriefType>,
+    schema_alias_names: &HashSet<String>,
     target_addresses: &HashMap<String, u64>,
 ) -> Vec<Diagnostic> {
     let mut diagnostics = Vec::new();
 
-    let schema_names: HashSet<&String> = schema_aliases.keys().collect();
+    let schema_names: HashSet<&String> = schema_alias_names.iter().collect();
     let target_names: HashSet<&String> = target_addresses.keys().collect();
 
     for name in schema_names.difference(&target_names) {
@@ -44,7 +44,7 @@ pub fn cross_validate(
 
     let mut base_addrs: Vec<(String, u64)> = Vec::new();
     for (name, addr) in &addr_by_name {
-        if !schema_aliases.contains_key(*name) {
+        if !schema_alias_names.contains(*name) {
             continue;
         }
         for (existing_name, existing_addr) in &base_addrs {
@@ -73,8 +73,8 @@ mod tests {
 
     #[test]
     fn test_all_aliases_have_targets() {
-        let mut schema = HashMap::new();
-        schema.insert("gpio0".to_string(), crate::dbrief::DbriefType::UInt(32));
+        let mut schema = HashSet::new();
+        schema.insert("gpio0".to_string());
         let mut target = HashMap::new();
         target.insert("gpio0".to_string(), 0xA0000000);
         let d = cross_validate(&schema, &target);
@@ -83,8 +83,8 @@ mod tests {
 
     #[test]
     fn test_missing_target_binding_error() {
-        let mut schema = HashMap::new();
-        schema.insert("uart_debug".to_string(), crate::dbrief::DbriefType::Data);
+        let mut schema = HashSet::new();
+        schema.insert("uart_debug".to_string());
         let target: HashMap<String, u64> = HashMap::new();
         let d = cross_validate(&schema, &target);
         assert_eq!(d.len(), 1);
@@ -94,7 +94,7 @@ mod tests {
 
     #[test]
     fn test_unreferenced_target_warning() {
-        let schema: HashMap<String, crate::dbrief::DbriefType> = HashMap::new();
+        let schema: HashSet<String> = HashSet::new();
         let mut target = HashMap::new();
         target.insert("gic_distributor".to_string(), 0xF9010000);
         let d = cross_validate(&schema, &target);
@@ -105,9 +105,9 @@ mod tests {
 
     #[test]
     fn test_address_overlap_error() {
-        let mut schema = HashMap::new();
-        schema.insert("gpio0".to_string(), crate::dbrief::DbriefType::UInt(32));
-        schema.insert("gpio1".to_string(), crate::dbrief::DbriefType::UInt(32));
+        let mut schema = HashSet::new();
+        schema.insert("gpio0".to_string());
+        schema.insert("gpio1".to_string());
         let mut target = HashMap::new();
         target.insert("gpio0".to_string(), 0xA0000000);
         target.insert("gpio1".to_string(), 0xA0000000);
