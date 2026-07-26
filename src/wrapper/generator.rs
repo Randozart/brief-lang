@@ -449,20 +449,20 @@ pub fn write_bind_files(
             .map_err(|e| format!("Failed to create output directory: {}", e))?;
     }
 
-    let dbvs_path = output_dir.join("bindings.dbv");
+    let dbv_path = output_dir.join("bindings.dbv");
     let bridge_path = output_dir.join("bridge.bv");
 
-    if dbvs_path.exists() && !force {
+    if dbv_path.exists() && !force {
         return Err(format!("bindings.dbv already exists (use --force to overwrite)"));
     }
     if bridge_path.exists() && !force {
         return Err(format!("bridge.bv already exists (use --force to overwrite)"));
     }
 
-    let dbvs_content = generate_bindings_dbv(result);
+    let dbv_content = generate_bindings_dbv(result);
     let bridge_content = generate_bridge_bv(result);
 
-    fs::write(&dbvs_path, dbvs_content)
+    fs::write(&dbv_path, dbv_content)
         .map_err(|e| format!("Failed to write bindings.dbv: {}", e))?;
 
     fs::write(&bridge_path, bridge_content)

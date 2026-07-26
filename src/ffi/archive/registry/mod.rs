@@ -142,21 +142,7 @@ impl FunctionRegistry {
         Ok(())
     }
 
-    // 2026-07-26: load_from_dbvs removed — .dbvs format is replaced by .dbv
-    // Register parsing is now handled by load_from_dbv with V2 parser.
-    fn load_from_dbvs(&mut self, path: &std::path::Path) -> Result<(), String> {
-        Err(format!(".dbvs format removed — convert {} to .dbv format", path.display()))                .ok_or_else(|| "Register missing 'as' name".to_string())?;
-            let location = register.location.as_ref()
-                .ok_or_else(|| format!("Register '{}' missing 'location' field", name))?;
-            self.fn_locations_by_name.insert(name.clone(), location.clone());
-            if let Some(func) = resolve_location_to_impl(location) {
-                self.register(location.clone(), func);
-            } else {
-                eprintln!("[WARN] No implementation for location '{}' in {}", location, path.display());
-            }
-        }
-        Ok(())
-    }
+
 
     pub fn get_location_by_name(&self, name: &str) -> Option<&str> {
         self.fn_locations_by_name.get(name).map(|s| s.as_str())
