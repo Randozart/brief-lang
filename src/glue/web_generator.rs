@@ -97,11 +97,8 @@ pub struct GlueWebOutput {
 ///   1. Instantiates the WASM module with __web_flush_state import
 ///   2. Reads state_layout() export at init to build the binding table
 ///   3. Applies DOM mutations when __web_flush_state is called
-///
-/// In Phase 4 (LLVM backend wired), the WASM module actually calls
-/// __web_flush_state. In this phase, the generator infrastructure is built
-/// such that it can immediately produce correct output once the LLVM backend
-/// side is complete.
+///   4. (Phase 6) Generates frgn from #Web import stubs for DOM/Canvas operations
+///      and wraps render_frame in requestAnimationFrame loop when present.
 pub struct GlueWebGenerator {
     /// The compiled WASM module bytes (or empty during testing).
     wasm_module: Vec<u8>,
@@ -111,23 +108,28 @@ pub struct GlueWebGenerator {
     state_layout: StateLayout,
     /// Protocol mappings from GLUE config (for type resolution).
     protocol_mappings: HashMap<String, crate::glue::config::ProtocolEntry>,
+    /// 2026-07-26: Phase 6 — Foreign function declarations using from #Web protocol.
+    /// Each produces a JS import stub in the WASM instantiation's import object.
+    frgn_decls: Vec<crate::ast::top::ForeignBinding>,
 }
 
 impl GlueWebGenerator {
     /// Create a new GlueWebGenerator with compile-time data.
-    /// 2026-07-26: Phase 3 — `wasm_module` may be empty during testing;
-    /// it is used in Phase 4+ for verifying state_layout export alignment.
+    /// 2026-07-26: Phase 3 — `wasm_module` may be empty during testing.
+    /// 2026-07-26: Phase 6 — Add frgn_decls for from #Web import stub generation.
     pub fn new(
         wasm_module: Vec<u8>,
         bindings: Vec<crate::view_compiler::Binding>,
         state_layout: StateLayout,
         protocol_mappings: HashMap<String, crate::glue::config::ProtocolEntry>,
+        frgn_decls: Vec<crate::ast::top::ForeignBinding>,
     ) -> Self {
         GlueWebGenerator {
             wasm_module,
             bindings,
             state_layout,
             protocol_mappings,
+            frgn_decls,
         }
     }
 
@@ -171,6 +173,7 @@ export class WasmDomRuntime {{
     this._instance = wasm.instance;
     this._memory = wasm.instance.exports.memory;
     this._loadStateLayout();
+    this._startRenderLoop();
   }}
 
   _buildImports() {{
@@ -219,6 +222,51 @@ export class WasmDomRuntime {{
         console.debug(`[web] state update: handle=${{handle}} value=${{value}}`);
       }},
     }};
+  }}
+
+  _readString(ptr) {{
+    if (!ptr) return null;
+    const mem = new Uint8Array(this._memory.buffer);
+    // Brief strings: [i64 length][data\0] — read length, then slice data
+    const lenView = new DataView(this._memory.buffer);
+    const len = Number(lenView.getBigUint64(ptr, true));
+    const bytes = mem.slice(Number(ptr) + 8, Number(ptr) + 8 + len);
+    return new TextDecoder().decode(bytes);
+  }}
+
+  _writeString(str) {{
+    // Allocate WASM memory for a Brief string (i64 length + bytes + \0)
+    // and return the pointer. Uses Module.malloc or pre-allocated buffer.
+    const encoder = new TextEncoder();
+    const bytes = encoder.encode(str);
+    const ptr = this._instance.exports.malloc
+      ? this._instance.exports.malloc(8 + bytes.length + 1)
+      : this._allocateStatic(8 + bytes.length + 1);
+    const mem = new DataView(this._memory.buffer);
+    mem.setBigUint64(ptr, BigInt(bytes.length), true);
+    const arr = new Uint8Array(this._memory.buffer);
+    arr.set(bytes, ptr + 8);
+    arr[ptr + 8 + bytes.length] = 0;
+    return ptr;
+  }}
+
+  _allocateStatic(size) {{
+    // Fallback: bump-allocate from a known free region.
+    // Overridden by the WASM module's malloc when available.
+    if (!this._heapPtr) this._heapPtr = 65536;
+    const ptr = this._heapPtr;
+    this._heapPtr += size;
+    return ptr;
+  }}
+
+  _startRenderLoop() {{
+    if (this._instance.exports.render_frame) {{
+      const loop = () => {{
+        this._instance.exports.render_frame();
+        requestAnimationFrame(loop);
+      }};
+      requestAnimationFrame(loop);
+    }}
   }}
 
   _applyFlush(updatesPtr, count) {{
@@ -330,9 +378,140 @@ export async function createApp(wasmBytes) {{
     }
 
     /// Generate custom imports section for frgn from #Web handlers.
+    ///
+    /// 2026-07-26: Phase 6 — Type-driven dispatch. For each frgn declaration
+    /// using from #Web, emit a JS import stub in the WASM instantiation's
+    /// import object. The stub unmarshals each parameter from WASM ABI to JS
+    /// value (using GLUE protocol mappings), calls the native function by its
+    /// Brief name, then marshals the return value back to WASM ABI.
+    ///
+    /// No function name matching — the TYPE determines marshalling:
+    ///   #String       → _readString(ptr) / _writeString(str)
+    ///   #Int          → raw i32 val
+    ///   #Float        → raw f64 val
+    ///   #Bool         → val !== 0
+    ///   #Element      → this._handles[handle]
+    ///   #CanvasContext → this._handles[handle]
+    ///
+    /// The user provides the native JS function implementation (as a module
+    /// or global). Future GLUE templates for `[web]` will provide standard
+    /// browser API wrappers automatically.
     fn generate_imports(&self) -> String {
-        // Phase 6 will wire actual frgn imports resolved through #Web protocol.
-        String::from("      // frgn from #Web imports added here in Phase 6\n")
+        let mut out = String::new();
+        for fb in &self.frgn_decls {
+            let fn_name = fb.effective_brief_name();
+            let param_names = self.frgn_param_names(&fb.inputs);
+            let marshal_in = self.frgn_marshal_in(&fb.inputs, &param_names);
+            let marshal_out = self.frgn_marshal_out(&fb.success_output);
+
+            // Build the JS stub body: unmarshal params, call native, marshal result
+            let mut body = String::new();
+            for line in &marshal_in {
+                body.push_str(&format!("        {}\n", line));
+            }
+            // If the function has a non-void return, capture the result
+            if fb.success_output.is_empty()
+                || matches!(fb.success_output[0].1, crate::ast::Type::Void) {
+                body.push_str(&format!("        {}(", fn_name));
+                for (i, pn) in param_names.iter().enumerate() {
+                    if i > 0 { body.push_str(", "); }
+                    body.push_str(pn);
+                }
+                body.push_str(");\n");
+            } else {
+                body.push_str(&format!(
+                    "        const _result = {}({});\n",
+                    fn_name,
+                    param_names.join(", "),
+                ));
+                for line in &marshal_out {
+                    body.push_str(&format!("        {}\n", line));
+                }
+            }
+
+            out.push_str(&format!(
+                "      {}({}) => {{\n{}\n      }},\n",
+                fn_name,
+                param_names.join(", "),
+                body,
+            ));
+        }
+        out
+    }
+
+    /// Derive JS parameter names from Brief parameter types.
+    /// 2026-07-26: Phase 6 — Type-driven naming so the generated JS is readable.
+    fn frgn_param_names(&self, inputs: &[(String, crate::ast::Type)]) -> Vec<String> {
+        inputs.iter().enumerate().map(|(i, (name, ty))| {
+            if !name.is_empty() {
+                name.clone()
+            } else {
+                self.param_name_from_type(ty, i)
+            }
+        }).collect()
+    }
+
+    /// Generate a JS parameter name based on its Brief type.
+    fn param_name_from_type(&self, ty: &crate::ast::Type, idx: usize) -> String {
+        match ty {
+            crate::ast::Type::Ptr(_) => format!("ptr{}", idx),
+            crate::ast::Type::Custom(s) if s == "String" => format!("str{}", idx),
+            crate::ast::Type::Custom(s) if s == "Int" => format!("val{}", idx),
+            crate::ast::Type::Custom(s) if s == "Float" => format!("f{}", idx),
+            crate::ast::Type::Custom(s) if s == "Bool" => format!("b{}", idx),
+            crate::ast::Type::Custom(s) if s == "Element" || s == "CanvasContext" => format!("handle{}", idx),
+            _ => format!("arg{}", idx),
+        }
+    }
+
+    /// Generate marshal-in statements: convert WASM ABI values to JS values.
+    /// 2026-07-26: Phase 6 — Type-driven. Each parameter becomes a JS const
+    /// declaration if the type needs decoding (String → _readString, etc.).
+    fn frgn_marshal_in(&self, inputs: &[(String, crate::ast::Type)], param_names: &[String])
+        -> Vec<String>
+    {
+        let mut stmts = Vec::new();
+        for (i, (_, ty)) in inputs.iter().enumerate() {
+            let pn = &param_names[i];
+            match ty {
+                crate::ast::Type::Custom(s) if s == "String" => {
+                    stmts.push(format!("const {} = this._readString({});", pn, pn));
+                }
+                crate::ast::Type::Custom(s) if s == "Bool" => {
+                    stmts.push(format!("const {} = {} !== 0;", pn, pn));
+                }
+                crate::ast::Type::Custom(s) if s == "Element" || s == "CanvasContext" => {
+                    stmts.push(format!("const {} = this._handles[{}];", pn, pn));
+                }
+                _ => {} // Int, Float pass through as-is
+            }
+        }
+        stmts
+    }
+
+    /// Generate marshal-out statements: convert JS return value to WASM ABI.
+    /// 2026-07-26: Phase 6 — Type-driven. Handles handle registration,
+    /// string allocation, etc.
+    fn frgn_marshal_out(&self, outputs: &[(String, crate::ast::Type)]) -> Vec<String> {
+        let mut stmts = Vec::new();
+        if let Some((_, ty)) = outputs.first() {
+            match ty {
+                crate::ast::Type::Custom(s) if s == "Element" || s == "CanvasContext" => {
+                    stmts.push("return this._handles.push(_result) - 1;".to_string());
+                }
+                crate::ast::Type::Custom(s) if s == "String" => {
+                    stmts.push("return this._writeString(_result);".to_string());
+                }
+                crate::ast::Type::Custom(s) if s == "Bool" => {
+                    stmts.push("return _result ? 1 : 0;".to_string());
+                }
+                _ if matches!(ty, crate::ast::Type::Void) => {} // void — no return statement
+                _ => {
+                    stmts.push("return _result;".to_string());
+                }
+            }
+        }
+        stmts
     }
 
     /// Generate the app.d.ts TypeScript declarations.
@@ -414,6 +593,7 @@ mod tests {
                 ],
             },
             HashMap::new(),
+            Vec::new(),
         )
     }
 
@@ -473,6 +653,7 @@ mod tests {
                 ],
             },
             HashMap::new(),
+            Vec::new(),
         );
         let output = g.generate().expect("generate should succeed");
         assert!(output.dom_shim.contains("counter_app"),
@@ -500,5 +681,186 @@ mod tests {
             "should include max flush entries");
         assert!(output.dom_shim.contains("_flushBufferOffset"),
             "should include flush buffer offset");
+    }
+
+    // ── Phase 6: frgn from #Web import stubs (type-driven) ─────
+
+    /// Helper: create a frgn from #Web with given param and return types.
+    /// 2026-07-26: Phase 6 — Type-driven testing: no name matching.
+    fn make_web_frgn(
+        name: &str,
+        inputs: Vec<(String, crate::ast::Type)>,
+        outputs: Vec<(String, crate::ast::Type)>,
+    ) -> crate::ast::top::ForeignBinding {
+        let mut fb = crate::ast::ForeignBinding::new(
+            name.to_string(),
+            None,
+            crate::ast::FromSpec::Protocol("#Web".to_string()),
+            crate::ast::ForeignTarget::Native,
+            crate::ast::Fallback::None,
+        );
+        fb.inputs = inputs;
+        fb.success_output = outputs;
+        fb
+    }
+
+    #[test]
+    fn test_frgn_string_param_uses_read_string() {
+        // frgn foo(msg: String) from #Web
+        let frgn = make_web_frgn(
+            "foo",
+            vec![("msg".to_string(), crate::ast::Type::string())],
+            vec![],
+        );
+        let g = GlueWebGenerator::new(
+            Vec::new(), Vec::new(),
+            StateLayout { app_name: "t".into(), generation_offset: 0, flush_buffer_offset: 0, max_flush_entries: 0, fields: vec![] },
+            HashMap::new(),
+            vec![frgn],
+        );
+        let out = g.generate().unwrap();
+        assert!(out.dom_shim.contains("_readString"),
+            "String param should generate _readString call");
+        assert!(!out.dom_shim.contains("document.createElement"),
+            "no DOM-specific names should appear in the compiler");
+    }
+
+    #[test]
+    fn test_frgn_element_creates_handle() {
+        // frgn make_widget() -> Element from #Web
+        let frgn = make_web_frgn(
+            "make_widget",
+            vec![],
+            vec![("result".to_string(), crate::ast::Type::Custom("Element".to_string()))],
+        );
+        let g = GlueWebGenerator::new(
+            Vec::new(), Vec::new(),
+            StateLayout { app_name: "t".into(), generation_offset: 0, flush_buffer_offset: 0, max_flush_entries: 0, fields: vec![] },
+            HashMap::new(),
+            vec![frgn],
+        );
+        let out = g.generate().unwrap();
+        assert!(out.dom_shim.contains("_handles.push"),
+            "Element return should register in handle table");
+    }
+
+    #[test]
+    fn test_frgn_bool_returns_01() {
+        // frgn is_ready() -> Bool from #Web
+        let frgn = make_web_frgn(
+            "is_ready",
+            vec![],
+            vec![("result".to_string(), crate::ast::Type::bool_())],
+        );
+        let g = GlueWebGenerator::new(
+            Vec::new(), Vec::new(),
+            StateLayout { app_name: "t".into(), generation_offset: 0, flush_buffer_offset: 0, max_flush_entries: 0, fields: vec![] },
+            HashMap::new(),
+            vec![frgn],
+        );
+        let out = g.generate().unwrap();
+        assert!(out.dom_shim.contains("? 1 : 0"),
+            "Bool return should marshal to 1/0");
+    }
+
+    #[test]
+    fn test_frgn_int_float_raw_params() {
+        // frgn compute(a: Int, b: Float) from #Web
+        let frgn = make_web_frgn(
+            "compute",
+            vec![
+                ("a".to_string(), crate::ast::Type::int()),
+                ("b".to_string(), crate::ast::Type::float()),
+            ],
+            vec![],
+        );
+        let g = GlueWebGenerator::new(
+            Vec::new(), Vec::new(),
+            StateLayout { app_name: "t".into(), generation_offset: 0, flush_buffer_offset: 0, max_flush_entries: 0, fields: vec![] },
+            HashMap::new(),
+            vec![frgn],
+        );
+        let out = g.generate().unwrap();
+        // Find the compute() stub — it starts with "compute: (" (inside _buildImports return)
+        let stub_start = out.dom_shim.find("compute(").unwrap_or(0);
+        let stub_end = out.dom_shim[stub_start..].find("},")
+            .map(|e| stub_start + e + 2)
+            .unwrap_or(out.dom_shim.len());
+        let stub_body = &out.dom_shim[stub_start..stub_end];
+        eprintln!("STUB BODY: '{}'", stub_body);
+        assert!(!stub_body.contains("_readString"),
+            "Int/Float params should NOT generate _readString in the frgn stub body");
+        assert!(out.dom_shim.contains("compute"),
+            "should include the frgn name");
+    }
+
+    #[test]
+    fn test_frgn_without_frgn_skips_imports() {
+        let g = GlueWebGenerator::new(
+            Vec::new(), Vec::new(),
+            StateLayout { app_name: "t".into(), generation_offset: 0, flush_buffer_offset: 0, max_flush_entries: 0, fields: vec![] },
+            HashMap::new(),
+            vec![],
+        );
+        let out = g.generate().unwrap();
+        // No frgns — import section should still be valid (empty)
+        assert!(out.dom_shim.contains("_buildImports"),
+            "should still create _buildImports method");
+        assert!(out.dom_shim.contains("__web_flush_state"),
+            "should still include __web_flush_state");
+    }
+
+    #[test]
+    fn test_frgn_string_return_uses_write_string() {
+        // frgn get_data() -> String from #Web
+        let frgn = make_web_frgn(
+            "get_data",
+            vec![],
+            vec![("result".to_string(), crate::ast::Type::string())],
+        );
+        let g = GlueWebGenerator::new(
+            Vec::new(), Vec::new(),
+            StateLayout { app_name: "t".into(), generation_offset: 0, flush_buffer_offset: 0, max_flush_entries: 0, fields: vec![] },
+            HashMap::new(),
+            vec![frgn],
+        );
+        let out = g.generate().unwrap();
+        assert!(out.dom_shim.contains("_writeString"),
+            "String return should generate _writeString call");
+    }
+
+    #[test]
+    fn test_frgn_mixed_params() {
+        // frgn update(elem: Element, msg: String, count: Int) from #Web
+        let frgn = make_web_frgn(
+            "update",
+            vec![
+                ("elem".to_string(), crate::ast::Type::Custom("Element".to_string())),
+                ("msg".to_string(), crate::ast::Type::string()),
+                ("count".to_string(), crate::ast::Type::int()),
+            ],
+            vec![],
+        );
+        let g = GlueWebGenerator::new(
+            Vec::new(), Vec::new(),
+            StateLayout { app_name: "t".into(), generation_offset: 0, flush_buffer_offset: 0, max_flush_entries: 0, fields: vec![] },
+            HashMap::new(),
+            vec![frgn],
+        );
+        let out = g.generate().unwrap();
+        assert!(out.dom_shim.contains("_handles["),
+            "Element param should use handle lookup");
+        assert!(out.dom_shim.contains("_readString"),
+            "String param should use _readString");
+        // count: Int passes through as raw value — no _readString in the stub body
+        let stub_start = out.dom_shim.find("update(").unwrap_or(0);
+        let stub_end = out.dom_shim[stub_start..].find("},")
+            .map(|e| stub_start + e + 2)
+            .unwrap_or(out.dom_shim.len());
+        let stub_body = &out.dom_shim[stub_start..stub_end];
+        eprintln!("STUB BODY: '{}'", stub_body);
+        let readstring_count = stub_body.matches("_readString").count();
+        assert_eq!(readstring_count, 1,
+            "only one _readString in the update() stub (for String param, not Int); got {}", readstring_count);
     }
 }
