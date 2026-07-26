@@ -984,7 +984,7 @@ The file extension selects the backend:
 | `.bv` | Brief | LLVM | Native binary (`llc` + `ld`) |
 | `.ebv` | Embedded Brief | LLVM | Microcontroller binary |
 | `.abv` | Accelerated Brief | LLVM | SPIR-V GPU kernel |
-| `.rbv` | Rendered Brief | Webstack | TypeScript + WASM + view bindings |
+| `.rbv` | Rendered Brief | Webstack | WASM + JS shim + view bindings |
 | `.cbv` | Circuit Brief | CIRCT | Verilog/VHDL (via MLIR) |
 | `.dbv` / `.dbvs` / `.dbvl` | Data Brief | (parsed by Brief) | Configuration data |
 
@@ -997,7 +997,7 @@ brief-compiler check input.bv                # type-check only
 
 ### Web Frontend (`.rbv`)
 ```bash
-brief-compiler build input.rbv               # TypeScript + WASM
+brief-compiler build input.rbv --backend webstack   # WASM + JS shim
 ```
 
 ### Hardware (`.cbv`)
