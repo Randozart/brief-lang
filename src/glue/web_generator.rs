@@ -329,10 +329,10 @@ export async function createApp(wasmBytes) {{
         }
     }
 
-    /// Generate custom imports section for frgn from "web" handlers.
+    /// Generate custom imports section for frgn from #Web handlers.
     fn generate_imports(&self) -> String {
-        // In Phase 3, we emit a placeholder. Phase 6 will wire actual frgn imports.
-        String::from("      // frgn from \"web\" imports added here in Phase 6\n")
+        // Phase 6 will wire actual frgn imports resolved through #Web protocol.
+        String::from("      // frgn from #Web imports added here in Phase 6\n")
     }
 
     /// Generate the app.d.ts TypeScript declarations.

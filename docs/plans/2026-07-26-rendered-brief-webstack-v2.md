@@ -223,7 +223,7 @@ cargo build  # verify the worktree compiles
            __web_flush_state: (updatesPtr, count) => {
              this._applyFlush(updatesPtr, count);
            },
-           // ... frgn from "web" imports mapped to handle table ops ...
+           // ... frgn from #Web imports mapped to handle table ops ...
          }
        });
        this._instance = wasm.instance;
@@ -418,7 +418,7 @@ cargo build  # verify the worktree compiles
 
 3. **Update `GlueWebGenerator` to produce minimal metropipe-shim for `.bv`:**
 
-   When there are no view bindings, the shim contains only the `frgn from "web"` import stubs — no DOM binding table, no `__web_flush_state`.
+   When there are no view bindings, the shim contains only the `frgn from #Web` import stubs — no DOM binding table, no `__web_flush_state`.
 
 ### Tests
 
@@ -443,7 +443,7 @@ cargo build  # verify the worktree compiles
 
 1. **Add `canvas_init` export to WASM module:**
 
-   When the `.rbv` declares `frgn get_canvas(id: String) -> CanvasContext from "web"`, the shim generator produces:
+   When the `.rbv` declares `frgn get_canvas(id: String) -> CanvasContext from #Web`, the shim generator produces:
    ```javascript
    const canvas = document.getElementById(canvasId);
    const gl = canvas.getContext('webgl2');

@@ -1,21 +1,22 @@
 // 2026-07-26: Web/WASM type declarations for Brief's type universe.
-// Types are defined against protocol hashwords so GLUE can find
-// CastTo/CastFrom paths for the wasm_runtime bridge.
+// Types are defined against the #Web protocol hashword so GLUE can
+// route frgn declarations through the wasm_runtime bridge target.
 //
-// Web types are opaque i32 handles in WASM linear memory, backed by
-// native JS objects in the runtime's handle table.
+// #Web protocol types are opaque i32 handles in WASM linear memory,
+// backed by native JS objects in the runtime's handle table.
+// The compiler resolves `from #Web` to the GLUE `[web]` target config.
 
-type Element: #System {
+type Element: #Web {
     // Opaque handle — i32 in WASM, HTMLElement in JS.
     // No CastTo/CastFrom to #Bits — Element cannot be constructed from
-    // raw bytes; it's created via frgn from "web" (create_element, etc.)
+    // raw bytes; it's created via frgn from #Web (create_element, etc.)
     maxbits <~ 32;
     alignment <~ 4;
 };
 
-type CanvasContext: #System {
+type CanvasContext: #Web {
     // Opaque handle — i32 in WASM, WebGLRenderingContext or GPUDevice in JS.
-    // Passed from JS to WASM during initialization handoff.
+    // Passed from JS to WASM during initialization handoff via frgn from #Web.
     maxbits <~ 32;
     alignment <~ 4;
 };
