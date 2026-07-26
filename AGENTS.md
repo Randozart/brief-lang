@@ -911,6 +911,11 @@ it. The more LLVM knows, the more aggressively it can optimize.
     - **Contract-bound safety**: `[i >= 0 && i < arr :> Size]` proves every
       access in bounds for both `Vector<T, N>` and `Slice<T>`. Slice length
       is proven by contracts, not runtime checks.
+    - **View casts**: `raw as Byte[8192]` — type-punned zero-copy view that
+      reinterprets the same bytes as a different element type. Compile-time
+      validation: `N * sizeof(T) == M * sizeof(U)`. Also works with slices:
+      `raw[0:1024:2] as Int[512]` strided view computed from slice bounds.
+      Emits `bitcast` in LLVM IR.
     - **Stdlib, not magic**: `map`, `filter`, `fold`, `any`, `all`, `sum`,
       `product` are regular txn functions in `lib/std/array.bv`. The LLVM
       auto-vectorizer recognizes the `[i < N]` convergence contract and
