@@ -165,6 +165,23 @@ pub struct BuildOptions {
     /// 2026-07-25: Native integer width for #Int protocol (default 64).
     /// WASM targets should set to 32 to avoid BigInt in JavaScript.
     pub int_bits: u64,
+    /// 2026-07-26: Phase 6b — CSS content from <style> block in .rbv files.
+    /// Written as app.css alongside the compiled output for webstack backend.
+    pub style_css: Option<String>,
+    /// 2026-07-26: Phase 6b — Raw HTML from <view> block in .rbv files.
+    /// Wrapped in index.html boilerplate for webstack backend.
+    pub view_html: Option<String>,
+    /// 2026-07-26: Phase 6b — View bindings from processed <html> template.
+    /// Passed to GlueWebGenerator for DOM binding table generation.
+    pub view_bindings: Vec<brief_compiler::view_compiler::Binding>,
+    /// 2026-07-26: Item 3 — Enable SSR (Server-Side Rendering).
+    /// Pre-renders initial state into the HTML at compile time.
+    /// Only meaningful for webstack backend.
+    pub ssr: bool,
+    /// 2026-07-26: Item 4 — Enable dev mode (HMR support).
+    /// Uses dev-shim.mjs instead of dom-shim.mjs.
+    /// Only meaningful for webstack backend.
+    pub dev: bool,
     /// 2026-07-23: Allow macros to read files (FileRead$).
     pub allow_read: bool,
     /// 2026-07-23: Allow macros to write files (FileWrite$).
@@ -593,6 +610,116 @@ pub fn compile_source(file_path: &str, source: &str, opts: &BuildOptions) -> Res
             all_objects.extend(extra_objects);
             compile_ll_to_binary(&out_path, &binary_path, &all_objects, &protocol_libs, opts.shared)?;
         }
+        // 2026-07-26: Phase 5 — Compile LLVM IR to WASM binary for webstack backend.
+        // Uses llc to compile the .ll (emitted with wasm32 target triple) to .wasm.
+        // Skips C runtime linking — WASM modules are self-contained pure logic.
+        if opts.backend == BackendKind::Webstack {
+            let wasm_path = format!("{}.wasm", binary_base);
+            compile_wasm(&out_path, &wasm_path)?;
+
+            // 2026-07-26: Phase 6b — Write app.css from <style> block content.
+            if let Some(ref css) = opts.style_css {
+                let css_path = format!("{}.css", binary_base);
+                std::fs::write(&css_path, css)
+                    .map_err(|e| format!("cannot write '{}': {}", css_path, e))?;
+                println!("wrote {}", css_path);
+            }
+
+            // 2026-07-26: Phase 6b — Write index.html from <view> block content.
+            // Wraps the raw view HTML in a minimal HTML5 boilerplate that
+            // links app.css and loads dom-shim.mjs via ES module import.
+            if let Some(ref html) = opts.view_html {
+                let index_path = format!("{}.html", binary_base);
+                let index_content = format!(
+                    "<!DOCTYPE html>\n\
+                     <html lang=\"en\">\n\
+                     <head>\n\
+                     <meta charset=\"UTF-8\">\n\
+                     <meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\">\n\
+                     <link rel=\"stylesheet\" href=\"app.css\">\n\
+                     <script type=\"module\" src=\"dom-shim.mjs\"></script>\n\
+                     </head>\n\
+                     <body>\n\
+                     {}\n\
+                     <script type=\"module\">\n\
+                     import {{ createApp }} from './dom-shim.mjs';\n\
+                     fetch('{}.wasm').then(r => r.arrayBuffer())\n\
+                       .then(bytes => createApp(new Uint8Array(bytes)));\n\
+                     </script>\n\
+                     </body>\n\
+                     </html>\n",
+                    html,
+                    binary_base,
+                );
+                std::fs::write(&index_path, &index_content)
+                    .map_err(|e| format!("cannot write '{}': {}", index_path, e))?;
+                println!("wrote {}", index_path);
+
+                // 2026-07-26: Item 3 — SSR pass. If --ssr is set, replace
+                // the standard app.html with an SSR-enabled version that
+                // embeds initial state as JSON and pre-renders the view.
+                if opts.ssr {
+                    let ssr_out = brief_compiler::ssr::render_ssr(
+                        html,
+                        &items,
+                        opts.style_css.as_deref(),
+                        binary_base,
+                        opts.dev,
+                    );
+                    std::fs::write(&index_path, &ssr_out.full_html)
+                        .map_err(|e| format!("cannot write SSRed '{}': {}", index_path, e))?;
+                    println!("ssr {}", index_path);
+                }
+            }
+
+            // 2026-07-26: Phase 6c — Generate dom-shim.mjs + .d.ts from frgn decls.
+            let frgn_decls: Vec<brief_compiler::ast::ForeignBinding> = items.iter()
+                .filter_map(|item| {
+                    if let brief_compiler::ast::TopLevel::ForeignBinding(fb) = item {
+                        if matches!(fb.from, brief_compiler::ast::FromSpec::Protocol(ref p) if p == "#Web") {
+                            Some(fb.clone())
+                        } else {
+                            None
+                        }
+                    } else {
+                        None
+                    }
+                })
+                .collect();
+            if !frgn_decls.is_empty() || !opts.view_bindings.is_empty() {
+                // Build a StateLayout matching what the LLVM backend emits
+                // (generation at offset 0, flush buffer at 64, max 16 entries).
+                let state_layout = brief_compiler::glue::web_generator::StateLayout {
+                    app_name: binary_base.to_string(),
+                    generation_offset: 0,
+                    flush_buffer_offset: 64,
+                    max_flush_entries: 16,
+                    fields: vec![],
+                };
+                let web_gen = brief_compiler::glue::web_generator::GlueWebGenerator::new(
+                    Vec::new(), // wasm bytes not needed for stub generation
+                    opts.view_bindings.clone(),
+                    state_layout,
+                    HashMap::new(),
+                    frgn_decls,
+                );
+                match web_gen.generate() {
+                    Ok(output) => {
+                        let mjs_path = format!("{}.mjs", binary_base);
+                        std::fs::write(&mjs_path, &output.dom_shim)
+                            .map_err(|e| format!("cannot write '{}': {}", mjs_path, e))?;
+                        println!("wrote {}", mjs_path);
+                        let dts_path = format!("{}.d.ts", binary_base);
+                        std::fs::write(&dts_path, &output.dts)
+                            .map_err(|e| format!("cannot write '{}': {}", dts_path, e))?;
+                        println!("wrote {}", dts_path);
+                    }
+                    Err(e) => {
+                        return Err(format!("GlueWebGenerator failed: {}", e));
+                    }
+                }
+            }
+        }
 
         // ── Linked stage: binary processing ───────────────────────────
         let bin_path = std::path::Path::new(&binary_path);
@@ -669,6 +796,11 @@ pub fn check_source(file_path: &str, source: &str) -> Result<(), String> {
         target: None,
         sysquery_pairs: vec![],
         sysquery_files: vec![],
+        style_css: None,
+        view_html: None,
+        view_bindings: vec![],
+        ssr: false,
+        dev: false,
     };
     let (_items, _universe) = parse_and_check(file_path, source, &default_opts)?;
     println!("OK");
@@ -787,10 +919,26 @@ fn codegen(
             ".mlir"
         }
         BackendKind::Webstack => {
-            let result = brief_compiler::backend::webstack::WebstackGenerator::new()
-                .generate(items, &[], "program");
-            output = result.ts_code;
-            ".ts"
+            // 2026-07-26: Phase 4 — Webstack uses LlvmBackend(wasm32) + with_webstack().
+            // The old TS emitter path is deprecated. Phase 6 will also invoke
+            // GlueWebGenerator to produce the JS shim from view bindings.
+            // Phase 5: Extension is .ll — compile_wasm will produce .wasm from it.
+            let mut b = LlvmBackend::new()
+                .with_webstack(true)
+                .with_int_bits(32)
+                .with_target_triple("wasm32-unknown-wasi")
+                .with_type_universe(universe.clone())
+                .with_alloc_strategies(alloc_strategies)
+                .with_stack_threshold(opts.stack_threshold)
+                .with_optimize_budget(opts.optimize_budget)
+                .with_resolved_frgns(resolved_frgns)
+                .with_optimize_report(true)
+                .with_narrow_bindings(narrow_bindings);
+            if opts.gpu_offload {
+                b = b.with_gpu_offload(true);
+            }
+            output = b.generate(items, None);
+            ".ll"
         }
         BackendKind::Gpu => {
             let mut b = LlvmBackend::new()
@@ -1073,6 +1221,42 @@ fn compile_ll_to_binary(ll_path: &str, binary_path: &str, extra_objects: &[PathB
     }
 
     println!("wrote {}", binary_path);
+    Ok(())
+}
+
+/// Compile LLVM IR (.ll) to WASM binary (.wasm) using llc.
+/// 2026-07-26: Phase 5 — Called for BackendKind::Webstack after codegen.
+/// The .ll file must have been emitted with wasm32 target triple.
+/// Uses `llc -march=wasm32 -filetype=obj` to produce a .o, then
+/// `wasm-ld` to link into .wasm. This avoids needing a wasm32 clang.
+fn compile_wasm(ll_path: &str, wasm_path: &str) -> Result<(), String> {
+    // Step 1: compile .ll to .wasm object file
+    let obj_path = format!("{}.o", wasm_path);
+    let mut assemble = Command::new("llc");
+    assemble.args(["-march=wasm32", "-filetype=obj", ll_path, "-o", &obj_path]);
+    let status = assemble.status()
+        .map_err(|e| format!(
+            "failed to invoke llc: {} (install llvm-tools or use --emit-ir-only)",
+            e
+        ))?;
+    if !status.success() {
+        return Err(format!("llc failed to compile '{}' to WASM object", ll_path));
+    }
+    // Step 2: link .o to .wasm
+    let mut link = Command::new("wasm-ld");
+    link.args(["--no-entry", "--allow-undefined", "-o", wasm_path, &obj_path]);
+    let status = link.status()
+        .map_err(|e| format!(
+            "failed to invoke wasm-ld: {} (install wasm-ld or use --emit-ir-only)",
+            e
+        ))?;
+    if !status.success() {
+        let _ = std::fs::remove_file(&obj_path);
+        return Err(format!("wasm-ld failed to link '{}'", wasm_path));
+    }
+    // Clean up intermediate object
+    let _ = std::fs::remove_file(&obj_path);
+    println!("wrote {}", wasm_path);
     Ok(())
 }
 

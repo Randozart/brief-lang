@@ -71,10 +71,12 @@ node handle_input [io.io_ready] {
 2. Fire the **first** transaction whose precondition is true
 3. Fall through to the next tick
 
-**Parallel dispatch** (with `#pragma dispatch parallel`):
+**Parallel dispatch** (with `#!dispatch(parallel)`):
 1. Evaluate ALL preconditions upfront
 2. Fire every transaction whose precondition is true AND whose write set does not conflict with any already-fired transaction
 3. Non-conflicting transactions fire in the same tick
+
+The `#pragma dispatch(parallel)` form is deprecated — use `#!dispatch(parallel)`.
 
 ### Zero-Magic Sleep
 

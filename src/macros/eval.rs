@@ -1244,7 +1244,8 @@ fn eval_nav_call(
                             let entry = target.protocols.get(&format!("#{}", type_name));
                             match (entry, proto_field) {
                                 (Some(e), "native") => Ok(NavValue::Str(e.native.clone())),
-                                (Some(e), "c_abi") => Ok(NavValue::Str(e.c_abi.clone())),
+                                // 2026-07-26: c_abi is optional — unwrap or use empty string
+                                (Some(e), "c_abi") => Ok(NavValue::Str(e.c_abi.clone().unwrap_or_default())),
                                 (Some(_), _) => Err(format!("ConfigGet$: unknown protocol field '{}' (expected 'native' or 'c_abi')", proto_field)),
                                 (None, _) => Err(format!("ConfigGet$: no protocol for type '{}' in section '{}'", type_name, section)),
                             }
@@ -1252,7 +1253,11 @@ fn eval_nav_call(
                             let proto_key = format!("#{}", field);
                             let entry = target.protocols.get(&proto_key);
                             match entry {
-                                Some(e) => Ok(NavValue::Str(format!("{}/{}", e.native, e.c_abi))),
+                                // 2026-07-26: c_abi is optional — display or fallback
+                                Some(e) => {
+                                    let abi = e.c_abi.as_deref().unwrap_or(&e.native);
+                                    Ok(NavValue::Str(format!("{}/{}", e.native, abi)))
+                                },
                                 None => Err(format!("ConfigGet$: no protocol '{}' in section '{}'", field, section)),
                             }
                         }

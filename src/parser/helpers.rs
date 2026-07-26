@@ -228,6 +228,39 @@ impl<'a> Parser<'a> {
         })
     }
 
+    /// 2026-07-26: Read the body of a `render struct/obj { ... }` block.
+    /// The open brace `{` must already be consumed (via expect(LBrace)).
+    /// Tracks brace depth through the token stream. Returns the raw HTML
+    /// text sliced from the source between `{` and the matching `}`.
+    /// Advances the parser position past the closing `}`.
+    pub fn read_html_body(&mut self) -> Result<String, SyntaxError> {
+        // Position of the first token after '{' — this is where HTML starts
+        let start = self.peek_with_span()
+            .map(|(_, s)| s.start)
+            .unwrap_or(self.pos);
+        let mut depth: u64 = 1;
+        loop {
+            let Some((tok, span)) = self.tokens.get(self.pos).cloned() else {
+                return Err(SyntaxError::InvalidExpression {
+                    reason: "unexpected end of file in render block body (missing })".into(),
+                    span: crate::errors::Span::dummy(),
+                });
+            };
+            match tok {
+                Token::LBrace => { depth += 1; self.pos += 1; }
+                Token::RBrace => {
+                    depth -= 1;
+                    self.pos += 1;
+                    if depth == 0 {
+                        let raw = &self.source[start..span.start];
+                        return Ok(raw.trim().to_string());
+                    }
+                }
+                _ => { self.pos += 1; }
+            }
+        }
+    }
+
     /// 2026-07-14: Read the body of a `layout <~ <...>` pattern.
     /// Consumes tokens from opening `<` to matching `>`, tracking nested
     /// brackets `[]`, parens `()`, and braces `{}`. Returns the raw text

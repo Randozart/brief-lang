@@ -35,11 +35,14 @@ They are Brief's single, universal escape hatch, exhaustively documented here.
 The compiler computes a `u64` bitmask for each transaction (bit N = writes field N)
 and checks masks at runtime before firing.
 
-**Backward compatibility:**
+**Deprecated forms (kept for migration):**
 ```brief
-#pragma dispatch(parallel)       // Item-level (backward compat)
-#!pragma dispatch(parallel)]     // File-level (backward compat)
+#pragma dispatch(parallel)       // Old item-level syntax — use #!dispatch(parallel)
+#!pragma dispatch(parallel)      // Old file-level syntax — use #!dispatch(parallel)
 ```
+
+Use `#!dispatch(parallel)` at the file level or `#!dispatch(sequential)` for
+the default first-true-wins semantics. The `#pragma` forms are deprecated.
 
 ---
 

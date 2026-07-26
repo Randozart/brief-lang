@@ -50,7 +50,7 @@ compile during a deprecation window but emit a warning.
 
 **Base Variants:**
 * **Core Brief** (`.bv`): Transactional state machines with FFI support. Compiles to native binary via LLVM backend.
-* **Rendered Brief** (`.rbv`): Adds `rstruct`, view components (HTML/CSS/SVG), and UI binding directives (b-text, b-show, b-trigger). Compiles to TypeScript + WASM via Webstack backend.
+* **Rendered Brief** (`.rbv`): Adds `render struct`/`render obj`, view components (HTML/CSS/SVG), and UI binding directives (b-text, b-show, b-trigger). Compiles to WASM + JS shim via Webstack backend (LlvmBackend wasm32 + GlueWebGenerator). `rstruct` deprecated.
 * **Embedded Brief** (`.ebv`): Adds native `Float` types, vector types, bit-range addressing, and hardware triggers (`trg`). Compiles to microcontroller binary via LLVM backend.
 * **Accelerated Brief** (`.abv`): GPU compute kernels. Compiles to SPIR-V via LLVM backend (GPU intrinsics, no FFI).
 * **Circuit Brief** (`.cbv`): Pure hardware logic. Compiles to Verilog/VHDL via CIRCT backend (no FFI, no external deps).
@@ -95,7 +95,7 @@ Plugin Hook: BeforeCodegen  ───→ loaded plugins can inspect/abort
 Three Canonical Backends:
   ├── LLVM (llvm/) → .bv → native binary, .ebv → MCU, .abv → SPIR-V
   │   └── Phase 6: --triple wasm32-unknown-wasi → .wasm via llc + wasm-ld
-  ├── Webstack (webstack.rs) → .rbv → TypeScript + WASM
+  ├── Webstack (webstack.rs + LlvmBackend wasm32) → .rbv → WASM + JS shim
   └── CIRCT (circt.rs) → .cbv → MLIR → Verilog/VHDL
 ```
 
@@ -104,7 +104,7 @@ Three Canonical Backends:
 | Backend | Input | Output | Status |
 |---------|-------|--------|--------|
 | LLVM | `.bv`, `.ebv`, `.abv` | Native binary, MCU binary, SPIR-V, WASM | Active |
-| Webstack | `.rbv` | TypeScript + WASM + view bindings | Active |
+| Webstack | `.rbv` | WASM + JS shim + view bindings | Active (migrating to WASM-first) |
 | CIRCT | `.cbv` | MLIR → Verilog/VHDL | Active |
 
 9 retired backends (Rust, C, WASM text, COBOL, SystemVerilog, VHDL, AArch64, x86_64, TCL) are archived in `src/archive/backend/` for reference.
@@ -163,7 +163,8 @@ top_level ::= definition
             | constant
             | import
             | struct_def
-            | rstruct_def
+            | render_struct_def
+            | render_obj_def
             | enum_def
             | type_def       (* NEW 2026-06-09: Type Name : Base { ... } *)
             | signature
@@ -225,7 +226,9 @@ struct_member ::= field_decl | transaction
 
 field_decl ::= identifier ":" type ("=" expression)? ";"
 
-rstruct_def ::= "rstruct" identifier "{" struct_member* view_body "}"
+rstruct_def ::= "rstruct" identifier "{" struct_member* view_body "}"  (* DEPRECATED 2026-07-26 — use render struct *)
+render_struct_def ::= "render" "struct" identifier "{" view_body "}"
+render_obj_def ::= "render" "obj" identifier "{" view_body "}"
 
 enum_def ::= "enum" identifier type_params? "{" enum_variant ("," enum_variant)* ","? "}"
 
@@ -237,7 +240,7 @@ import_items ::= "{" import_item ("," import_item)* "}"
 
 import_item ::= identifier ("as" identifier)?
 
-render_block ::= "render" identifier "{" view_body "}"
+render_block ::= "render" ("struct" | "obj") identifier "{" view_body "}"
 
 view_body ::= (view_component | html_element)*
 
@@ -977,25 +980,26 @@ let c: Counter = Counter {};
 c.increment(5);
 ```
 
-**Rstructs (Rendered Structs)** add UI components:
+**Render Structs** attach UI views to state (`.rbv` files):
 
 ```brief
-rstruct App {
-    count: Int = 0;
-    
-    txn increment() [true][count == @count + 1] {
-        count = count + 1;
-        term;
-    };
-    
-    view {
-        <div class="counter">
-            <span b-text="count"></span>
-            <button b-trigger:click="increment">+</button>
-        </div>
-    }
-}
+// counter.rbv — state declarations + transactions + render struct
+let count: Int = 0;
+
+txn increment [count < 100][@count + 1 == count] {
+    count = count + 1;
+    term;
+};
+
+render struct App {
+    <div class="counter">
+        <span b-text="count"></span>
+        <button b-trigger:click="increment">+</button>
+    </div>
+};
 ```
+
+The old `rstruct` keyword is deprecated — use `render struct`/`render obj`.
 
 ### 3.7 Enums
 
@@ -3388,7 +3392,7 @@ reset = "RESETn"
 | Tuples | ✅ Complete | Multi-value |
 | Structs | ✅ Complete | With methods |
 | Enums | ✅ Complete | With data |
-| Rstructs | ✅ Complete | Rendered structs with UI |
+| Render structs | ⚠️ Migration | `rstruct` deprecated — use `render struct`/`render obj` |
 | Generics | ⚠️ Partial | Syntax works, trait bounds pending |
 | Traits | ❌ Planned | For generic constraints |
 | `Ptr<T>` types | ✅ Complete | Verified pointer with compile-time bounds tracking \[2026-06-05\] |
@@ -3433,7 +3437,7 @@ reset = "RESETn"
 | LLVM IR | ⚠️ Partial | Text IR emitter with acyclic/`noalias`/`!range` optimization \[2026-05-29\] |
 | AArch64 | ⚠️ Partial | Binary via acyclic inlining \[2026-05-29\] |
 | x86_64 | ⚠️ Partial | Binary via acyclic inlining \[2026-05-29\] |
-| Webstack | ⚠️ Partial | Next.js / Vite page generation \[2026-05-29\] |
+| Webstack | ⚠️ Migration | WASM-first v2 in progress — LlvmBackend(wasm32) + GlueWebGenerator |
 | **Tooling** | | |
 | Language Server (LSP) | ✅ Complete | Type-checking, go-to-def |
 | Syntax highlighting | ✅ Complete | VS Code extension |
@@ -3604,28 +3608,26 @@ frgn! write_to_hw(address, value);
 ### 13.1 Counter Application
 
 ```brief
-// counter.rbv
-rstruct Counter {
-    count: Int = 0;
-    
-    txn increment() [true][count == @count + 1] {
-        count = count + 1;
-        term;
-    };
-    
-    txn decrement() [count > 0][count == @count - 1] {
-        count = count - 1;
-        term;
-    };
-    
-    view {
-        <div class="counter">
-            <h1 b-text="count"></h1>
-            <button b-trigger:click="increment">+</button>
-            <button b-trigger:click="decrement">-</button>
-        </div>
-    }
-}
+// counter.rbv — using render struct syntax
+let count: Int = 0;
+
+txn increment [count < 100][@count + 1 == count] {
+    count = count + 1;
+    term;
+};
+
+txn decrement [count > 0][@count - 1 == count] {
+    count = count - 1;
+    term;
+};
+
+render struct Counter {
+    <div class="counter">
+        <h1 b-text="count"></h1>
+        <button b-trigger:click="increment">+</button>
+        <button b-trigger:click="decrement">-</button>
+    </div>
+};
 ```
 
 ### 13.2 Bank Transfer

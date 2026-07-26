@@ -13,6 +13,11 @@
 #   {{exports}}      {{ffi_decls}}
 #
 # Special template keys: "fn_template", "ffi_template"
+#
+# Web target notes:
+#   bridge_kind = "wasm_runtime" means the target is a WASM runtime shim
+#   calling_convention = "wasm_import" uses wasm_abi fields instead of c_abi
+#   The generated output is a JS module that reads WASM linear memory
 
 [python]
 types_module = "glue/python/types.bv"
@@ -100,6 +105,80 @@ export function {{name}}({{params}}) {
 }
 """
 "ffi_template" = """{{name}}: [{{c_return}}, [{{s_param}}{{c_types}}]],"""
+
+[web]
+types_module = "glue/web/types.bv"
+extension = "mjs"
+bridge_kind = "wasm_runtime"
+calling_convention = "wasm_import"
+
+[web.protocols]
+"#String" = { native = "string", wasm_abi = "i32" }
+"#Int" = { native = "number", wasm_abi = "i32" }
+"#Float" = { native = "number", wasm_abi = "f64" }
+"#Bool" = { native = "boolean", wasm_abi = "i32" }
+"#Element" = { native = "Element", wasm_abi = "i32" }
+"#CanvasContext" = { native = "WebGLRenderingContext | GPUDevice", wasm_abi = "i32" }
+
+[web.templates]
+"dom-shim.mjs" = """
+// dom-shim.mjs — Auto-generated GLUE web runtime for {{bridge_name}}
+// Reads WASM linear memory at known state offsets. Called by the WASM module
+// via __web_flush_state import at each transaction commit point.
+
+export class WasmDomRuntime {
+  constructor(wasmBytes) {
+    this._handles = [null];
+    this._bindingTable = [];
+    this._init(wasmBytes);
+  }
+
+  async _init(wasmBytes) {
+    const wasm = await WebAssembly.instantiate(wasmBytes, {
+      env: this._buildImports(),
+    });
+    this._instance = wasm.instance;
+    this._memory = wasm.instance.exports.memory;
+    this._loadStateLayout();
+  }
+
+  _buildImports() {
+    return {
+      __web_flush_state: (updatesPtr, count) => {
+        this._applyFlush(updatesPtr, count);
+      },
+    };
+  }
+
+  _loadStateLayout() {
+    const layoutPtr = this._instance.exports.state_layout();
+    const mem = new DataView(this._memory.buffer);
+    // ... layout table read at runtime ...
+  }
+
+  _applyFlush(updatesPtr, count) {
+    const mem = new DataView(this._memory.buffer);
+    let off = updatesPtr;
+    for (let i = 0; i < count; i++) {
+      const handle = mem.getUint32(off, true); off += 4;
+      const valPtr = mem.getUint32(off, true); off += 4;
+      const valLen = mem.getUint32(off, true); off += 4;
+      const binding = this._bindingTable[handle];
+      if (binding) {
+        const value = valLen > 0
+          ? new TextDecoder().decode(new Uint8Array(this._memory.buffer, valPtr, valLen))
+          : null;
+        binding.applyFn(value);
+      }
+    }
+  }
+}
+
+export async function createApp(wasmBytes) {
+  const runtime = new WasmDomRuntime(wasmBytes);
+  return runtime._instance.exports;
+}
+"""
 
 [rust]
 types_module = "glue/rust/types.bv"

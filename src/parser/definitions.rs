@@ -35,6 +35,8 @@ impl<'a> Parser<'a> {
             // 2026-07-14: Handle `struct Name { fields }` as TypeDef
             Some(Token::Obj) => self.parse_obj_like().map(TopLevel::TypeDef),
             Some(Token::Struct) => self.parse_struct_def().map(TopLevel::StaticStruct),
+            // 2026-07-26: Handle `render struct Name { <html> }` and `render obj Name { <html> }`
+            Some(Token::Render) => self.parse_render_block(),
             // 2026-07-14: Handle `enum Name { variants }` as TypeDef (converted by normalizer)
             Some(Token::Enum) => self.parse_enum_like().map(TopLevel::TypeDef),
             // 2026-07-14: Top-level let — state variable declaration
@@ -110,6 +112,32 @@ impl<'a> Parser<'a> {
                 self.error_at_current(&format!("unexpected top-level item '{}'", name))
             }
         }
+    }
+
+    /// 2026-07-26: Parse `render struct <name> { <html> }` or `render obj <name> { <html> }`.
+    /// Consumes the `render` keyword. Checks for `struct` or `obj` identifier,
+    /// then the name, then reads the raw HTML body between braces.
+    pub fn parse_render_block(&mut self) -> Result<TopLevel, SyntaxError> {
+        // Capture span from the 'render' keyword
+        let start_span = self.peek_with_span()
+            .map(|(_, s)| self.make_span(s.clone()))
+            .unwrap_or(Span::dummy());
+        // Consume 'render' keyword
+        self.advance();
+        // Check for 'struct' or 'obj' keyword
+        if !self.eat(&Token::Struct) && !self.eat(&Token::Obj) {
+            return self.error_at_current("expected 'struct' or 'obj' after 'render'");
+        }
+        let struct_name = self.expect_identifier()?;
+        self.expect(Token::LBrace)?;
+        let view_html = self.read_html_body()?;
+        // Optional trailing semicolon after '}'
+        self.eat(&Token::Semicolon);
+        Ok(TopLevel::RenderBlock(RenderBlock {
+            struct_name,
+            view_html,
+            span: Some(start_span),
+        }))
     }
 
     /// 2026-07-22: Parse `frgn` declaration (import model).
@@ -1972,5 +2000,62 @@ mod tests {
         assert_eq!(props.len(), 2);
         assert_eq!(props[0].name, "Size");
         assert_eq!(props[1].name, "Bytes");
+    }
+
+    // ── Render struct/obj parsing ─────────────────────────────────
+
+    fn parse_render_block(src: &str) -> crate::ast::RenderBlock {
+        let tokens = crate::lexer::tokenize(src).unwrap();
+        let mut p = Parser::new(tokens, src);
+        match p.parse_top_level() {
+            Ok(crate::ast::TopLevel::RenderBlock(rb)) => rb,
+            Ok(other) => panic!("expected RenderBlock, got {:?}", other),
+            Err(e) => panic!("parse error: {:?}", e),
+        }
+    }
+
+    #[test]
+    fn test_parse_render_struct() {
+        let rb = parse_render_block(
+            "render struct Foo { <div>Hello</div> };");
+        assert_eq!(rb.struct_name, "Foo");
+        assert!(rb.view_html.contains("<div>Hello</div>"),
+            "HTML content should be preserved: got '{}'", rb.view_html);
+    }
+
+    #[test]
+    fn test_parse_render_obj() {
+        let rb = parse_render_block(
+            "render obj Bar { <span b-text=\"x\">0</span> };");
+        assert_eq!(rb.struct_name, "Bar");
+        assert!(rb.view_html.contains("b-text"),
+            "HTML should include b-* attribute: got '{}'", rb.view_html);
+    }
+
+    #[test]
+    fn test_parse_render_struct_with_style_attr() {
+        let rb = parse_render_block(
+            "render struct Styled { <div class=\"box\" style=\"color: red;\">Content</div> };");
+        assert_eq!(rb.struct_name, "Styled");
+        assert!(rb.view_html.contains("class=\"box\""),
+            "HTML should preserve attributes: got '{}'", rb.view_html);
+    }
+
+    #[test]
+    fn test_parse_render_struct_nested_tags() {
+        let rb = parse_render_block(
+            "render struct Nest { <ul><li b-each:item=\"list\" b-text=\"item\"></li></ul> };");
+        assert_eq!(rb.struct_name, "Nest");
+        assert!(rb.view_html.contains("b-each:item"),
+            "HTML should preserve b-each: got '{}'", rb.view_html);
+    }
+
+    #[test]
+    fn test_parse_render_rejects_bare_identifier() {
+        let src = "render foo { <div></div> };";
+        let tokens = crate::lexer::tokenize(src).unwrap();
+        let mut p = Parser::new(tokens, src);
+        let result = p.parse_top_level();
+        assert!(result.is_err(), "bare 'render foo' should be rejected");
     }
 }

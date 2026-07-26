@@ -42,6 +42,13 @@
 > (`type X: Y #Proto`). Hashword annotations (`#Stack`, `#Heap`, `#Scalar`)
 > on struct/obj fields. "Memory by Contract" renamed to "Memory by Proof".
 > See `docs/plans/2026-07-26-tamer-zero-c-and-static-memory.md` §Phase 1.6.
+>
+> **2026-07-26:** Webstack v2 — Rendered Brief compiles to **WASM + JS shim**
+> (not TypeScript). The old `WebstackGenerator` (TS emitter) is superseded by
+> `LlvmBackend(wasm32)` + `GlueWebGenerator`. `rstruct` keyword deprecated in
+> favor of `render struct`/`render obj`. See
+> `docs/architecture/features/rendered-brief-wasm.md` and
+> `docs/plans/2026-07-26-rendered-brief-webstack-v2.md`.
 
 ## Pipeline
 
@@ -334,7 +341,7 @@ A backend can start with just `bytes` and be fully correct. It then opts into `p
 | `vm/emit_stmt.rs` | Statement → VM bytecode instructions |
 | `vm/emit_toplevel.rs` | Top-level → VM function table entries |
 | `circt.rs` | `CirctBackend` — MLIR emission |
-| `webstack.rs` | `WebstackGenerator` — TypeScript + WASM |
+| `webstack.rs` | `WebstackGenerator` — deprecated; `LlvmBackend(wasm32)` + `GlueWebGenerator` active |
 
 ## Feature Flags
 

@@ -1,7 +1,21 @@
 # Webstack TypeScript Emitter + WASM FFI — Implementation Plan
 
 **Date**: 2026-06-19
-**Status**: ✅ Implemented (Phases 0, A, B complete)
+**Status**: ❌ Superseded 2026-07-26
+
+> **⚠️ SUPERSEDED 2026-07-26:** This plan is replaced by the WASM-first
+> webstack v2 architecture. The TypeScript emitter (`WebstackGenerator`) is
+> deprecated; the new pipeline uses `LlvmBackend(wasm32)` + `GlueWebGenerator`
+> to produce `.wasm` + `dom-shim.mjs`.
+>
+> See:
+> - `docs/architecture/features/rendered-brief-wasm.md` — current spec
+> - `docs/plans/2026-07-26-rendered-brief-webstack-v2.md` — current plan
+>
+> Phase A (TS emitter) was partially implemented — the TS emitter in
+> `src/backend/webstack.rs` exists and is the current code path. Phase B
+> (`(wasm) import` syntax) was never fully implemented; the new architecture
+> makes WASM the default compilation target instead of a special import form.
 
 ## Architecture
 

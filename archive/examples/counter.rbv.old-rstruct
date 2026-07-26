@@ -1,31 +1,30 @@
-// counter.rbv — Counter component using render struct
-// 2026-07-26: Migrated from rstruct to render struct syntax
+<script type="brief">
+rstruct Counter {
+  count: Int = 0;
 
-let count: Int = 0;
-
-txn increment [count < 100][@count + 1 == count] {
+  txn Counter.increment [count < 100][@count + 1 == count] {
     count = count + 1;
     term;
-};
+  };
 
-txn decrement [count > 0][@count - 1 == count] {
+  txn Counter.decrement [count > 0][@count - 1 == count] {
     count = count - 1;
     term;
-};
+  };
 
-txn reset [count != 0][0 == count] {
+  txn Counter.reset [count != 0][0 == count] {
     count = 0;
     term;
-};
+  };
 
-render struct Counter {
-    <div class="counter">
-        <span b-text="count">0</span>
-        <button b-trigger:click="increment">+</button>
-        <button b-trigger:click="decrement">-</button>
-        <button b-trigger:click="reset">Reset</button>
-    </div>
+  <div class="counter">
+    <span b-text="count">0</span>
+    <button b-trigger:click="increment">+</button>
+    <button b-trigger:click="decrement">-</button>
+    <button b-trigger:click="reset">Reset</button>
+  </div>
 };
+</script>
 
 <view>
   <div class="container">

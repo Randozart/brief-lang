@@ -72,6 +72,7 @@ pub mod resolver;
 pub mod scheduler;
 pub mod sig_casting;
 pub mod signal_graph;
+pub mod ssr;
 pub mod symbolic;
 pub mod target_spec;
 pub mod typechecker;

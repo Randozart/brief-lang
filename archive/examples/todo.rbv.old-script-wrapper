@@ -1,6 +1,4 @@
-// todo.rbv — Todo list app
-// 2026-07-26: Removed old <script> wrapper — Brief code is now the default content
-
+<script type="brief">
 let items: List<String> = ["Buy groceries", "Walk the dog", "Read a book"];
 
 txn add_item [items :> Size < 100][items :> Size == @items :> Size + 1] {
@@ -12,6 +10,7 @@ txn clear_all [items :> Size > 0][items :> Size == 0] {
   items = [];
   term;
 };
+</script>
 
 <view>
   <div class="container">

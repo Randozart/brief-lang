@@ -74,19 +74,19 @@ frgn read_file(path: String) -> Result<String, IOError>
 
 ### Naming Convention
 
-Raw FFI declarations use `frgn__` prefix in the Brief name:
+FFI declarations use the C/foreign symbol name as the first identifier,
+optionally renamed with `as`:
 
 ```brief
-frgn __getenv_brief(key: String) -> String as frgn__getenv_brief ...
+frgn __getenv_brief(key: String) -> String as get_env from "lib/runtime/brief_rt.c" fallback "";
 ```
 
-The `frgn__` prefix is a convention (not enforced by the compiler) that makes
-FFI boundaries visually distinct from pure Brief function calls. When the C
-symbol already starts with `frgn` or doesn't need renaming, the `as` clause
-can be omitted:
+The `as` clause provides the Brief-side name. When omitted, the C symbol
+name is used directly. There is no required `frgn__` prefix convention —
+use descriptive Brief-style names in the `as` clause:
 
 ```brief
-frgn frgn__to_upper(s: String) -> String from "lib/runtime/brief_rt.c" fallback "";
+frgn XXH64(data: Int, len: Int, seed: Int) -> Int as hash64 from "link/xxhash/xxhash.c" fallback 0;
 ```
 
 ### `from` Sources

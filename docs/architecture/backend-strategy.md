@@ -199,6 +199,14 @@ enabling precise bit-widths (i8, i16, i32, i64) for efficient FPGA synthesis.
 
 ## Webstack Backend
 
+> **⚠️ SUPERSEDED 2026-07-26** — This section describes the old TypeScript emitter
+> (`src/backend/webstack.rs`). The webstack v2 architecture compiles to **WASM + JS shim**
+> via the existing `LlvmBackend(wasm32)` and a new `GlueWebGenerator`. See
+> `docs/architecture/features/rendered-brief-wasm.md` and
+> `docs/plans/2026-07-26-rendered-brief-webstack-v2.md` for the current design.
+>
+> The content below is preserved for historical reference during the migration.
+
 (`src/backend/webstack.rs`, 1,200 lines) — TypeScript emitter for the web target.
 Replaced the Rust/wasm-bindgen codegen (Phase A, 2026-06-19). The archived Rust
 codegen lives at `archive/backend/webstack_rust_codegen.rs` (1,758 lines).

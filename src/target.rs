@@ -46,8 +46,9 @@ pub struct TargetConfig {
 /// Loaded config/protocols.toml.
 ///
 /// 2026-07-26: Maps protocol names to linker library names per target triple.
-/// `#System` is the sole protocol — it abstracts "the platform's standard
-/// system library" (libc on Linux, libSystem on macOS, WASI preview1 on wasm).
+/// `#System` abstracts "the platform's standard system library" (libc on Linux,
+/// libSystem on macOS, WASI preview1 on wasm). `#Web` routes through the GLUE
+/// wasm_runtime bridge (WASM targets only, no linker flag needed).
 /// Any other protocol hashword produces a compile error.
 /// Loaded by ProtocolConfig::load() and consulted during frgn dispatch resolution.
 #[derive(Debug, Clone, serde::Deserialize)]
@@ -67,19 +68,20 @@ impl ProtocolConfig {
 
     /// Resolve a protocol name to a library name for the given target.
     ///
-    /// `#System` is the sole protocol — any other hashword is rejected before
-    /// the target lookup.
+    /// `#System` and `#Web` are the two recognized protocols.
+    /// `#System` links against the platform's system library (libc, WASI).
+    /// `#Web` routes through the GLUE wasm_runtime bridge (valid on WASM targets only).
     ///
     /// Returns:
     /// - `Ok(Some(lib))` — protocol maps to library `lib`, link with `-l<lib>`.
     /// - `Ok(None)` — protocol is available but needs no extra linker flag
     ///   (e.g., libc is linked by default with clang).
-    /// - `Err(msg)` — protocol is not `#System` or is unavailable on target.
+    /// - `Err(msg)` — protocol is unrecognized or unavailable on target.
     pub fn resolve(&self, target_triple: &str, protocol: &str) -> Result<Option<&str>, String> {
-        if protocol != "#System" {
+        if protocol != "#System" && protocol != "#Web" {
             return Err(format!(
                 "'{}' is not a valid protocol hashword. \
-                 #System is the only supported protocol",
+                 #System and #Web are the supported protocols",
                 protocol
             ));
         }
@@ -94,8 +96,8 @@ impl ProtocolConfig {
             Some(Some(lib)) => Ok(Some(lib.as_str())),
             Some(None) => Ok(None),
             None => Err(format!(
-                "target '{}' has no '#System' entry in config/protocols.toml",
-                target_triple
+                "target '{}' has no '{}' entry in config/protocols.toml",
+                target_triple, protocol
             )),
         }
     }
@@ -216,10 +218,10 @@ mod tests {
     #[test]
     fn test_protocol_config_resolve_unknown_protocol() {
         let config = ProtocolConfig::load();
-        let result = config.resolve("x86_64-linux", "#SomethingElse");
-        assert!(result.is_err(), "non-#System protocol should error");
-        assert!(result.unwrap_err().contains("only supported protocol"),
-            "error should mention #System is the only protocol");
+        let err = config.resolve("x86_64-linux", "#SomethingElse")
+            .unwrap_err();
+        assert!(err.contains("supported protocols"),
+            "error should mention supported protocols (got: '{}')", err);
     }
 
     #[test]

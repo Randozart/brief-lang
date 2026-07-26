@@ -1501,7 +1501,7 @@ Phase 3: resolve Import("layout") → layout.bv has Import("understand")
 after the resolution while-loop. It keeps only the first occurrence of
 each named top-level item, keyed by `(category, name)`. Handles all
 15 named TopLevel variants (defn, txn, state, trigger, const, sig,
-frgn, struct, rstruct, enum, typedef, render, link, rsrc). Unnamed
+frgn, struct, render struct, render obj, enum, typedef, render, link, rsrc. (`rstruct` deprecated). Unnamed
 items (Stylesheet, Test, Assertion, Statement, etc.) pass through.
 
 **Lesson**: Any pipeline stage that splices items from another module

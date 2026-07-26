@@ -128,31 +128,30 @@ Encapsulate data access logic:
 
 ```brief
 struct UserRepository {
-    cache: HashMap<Int, User>,
-    dirty: Bool
+    cache: HashMap<Int, User>;
+    dirty: Bool;
 };
 
-impl UserRepository {
-    txn get(id: Int) -> Option<User> {
-        [cache.contains_key(id)] {
-            term cache.get(id);
-        };
-        let user = db_find_user(id);
-        &cache = cache.insert(id, user);
-        term user;
+// Transactions on a struct use the struct name as prefix
+txn get(repo: Ptr<UserRepository>, id: Int) -> Option<User> {
+    [repo.cache.contains_key(id)] {
+        term repo.cache.get(id);
     };
-    
-    txn save(user: User) [true][cache.contains_key(user.id)] {
-        &cache = cache.insert(user.id, user);
-        &dirty = true;
-        term;
-    };
-    
-    txn flush() [dirty][!dirty] {
-        db_save_all(cache.values());
-        &dirty = false;
-        term;
-    };
+    let user = db_find_user(id);
+    repo.cache = repo.cache.insert(id, user);
+    term user;
+};
+
+txn save(repo: Ptr<UserRepository>, user: User) [true][repo.cache.contains_key(user.id)] {
+    repo.cache = repo.cache.insert(user.id, user);
+    repo.dirty = true;
+    term;
+};
+
+txn flush(repo: Ptr<UserRepository>) [repo.dirty][!repo.dirty] {
+    db_save_all(repo.cache.values());
+    repo.dirty = false;
+    term;
 };
 ```
 
@@ -238,14 +237,14 @@ Swap algorithms at runtime:
 enum SortStrategy { BubbleSort, QuickSort, MergeSort }
 let strategy: SortStrategy = SortStrategy::QuickSort;
 
-defn sort(list: List<Int>) -> List<Int> {
-    unification strategy(SortStrategy::BubbleSort) = {
+txn sort(list: List<Int>) -> List<Int> {
+    when strategy == SortStrategy::BubbleSort {
         term bubble_sort(list);
     };
-    unification strategy(SortStrategy::QuickSort) = {
+    when strategy == SortStrategy::QuickSort {
         term quick_sort(list);
     };
-    unification strategy(SortStrategy::MergeSort) = {
+    when strategy == SortStrategy::MergeSort {
         term merge_sort(list);
     };
     term list;

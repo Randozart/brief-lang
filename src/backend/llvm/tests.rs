@@ -61,6 +61,77 @@ fn test_llvm_generates_module() {
 }
 
 #[test]
+fn test_webstack_enabled_emits_flush_state() {
+    // 2026-07-26: Phase 4 — with_webstack(true) should emit __web_flush_state
+    // import and state_layout() export function in the generated IR.
+    let mut backend = LlvmBackend::new()
+        .with_webstack(true)
+        .with_int_bits(32)
+        .with_target_triple("wasm32-unknown-wasi");
+    let output = backend.generate(&empty_program(), None);
+    assert!(output.contains("__web_flush_state"),
+        "should declare __web_flush_state import");
+    assert!(output.contains("state_layout"),
+        "should export state_layout function");
+    assert!(output.contains("__web_generation"),
+        "should emit generation counter global");
+}
+
+#[test]
+fn test_webstack_disabled_omits_flush_state() {
+    // 2026-07-26: Phase 4 — Without with_webstack, no webstack emits.
+    let mut backend = LlvmBackend::new()
+        .with_int_bits(32)
+        .with_target_triple("wasm32-unknown-wasi");
+    let output = backend.generate(&empty_program(), None);
+    assert!(!output.contains("__web_flush_state"),
+        "should NOT declare __web_flush_state without webstack enabled");
+    assert!(!output.contains("state_layout"),
+        "should NOT export state_layout without webstack enabled");
+}
+
+#[test]
+fn test_webstack_emits_flush_at_term() {
+    // 2026-07-26: Phase 4 — Transactions with webstack emit __web_flush_state call.
+    let mut backend = LlvmBackend::new()
+        .with_webstack(true)
+        .with_int_bits(32)
+        .with_target_triple("wasm32-unknown-wasi");
+    let program = vec![
+        TopLevel::StateDecl(StateDecl {
+            name: "count".to_string(),
+            ty: Type::int(),
+            span: None,
+        }),
+        make_txn("increment", vec![]),
+    ];
+    let output = backend.generate(&program, None);
+    assert!(output.contains("__web_flush_state"),
+        "transactions should call __web_flush_state at term");
+}
+
+#[test]
+fn test_webstack_bv_logic_only() {
+    // 2026-07-26: Phase 5 — A .bv-style program (pure logic, no view bindings)
+    // compiled with webstack backend should produce WASM-targeted LLVM IR.
+    let mut backend = LlvmBackend::new()
+        .with_webstack(true)
+        .with_int_bits(32)
+        .with_target_triple("wasm32-unknown-wasi");
+    let program = vec![
+        state_count(),
+        make_txn("compute", vec![]),
+    ];
+    let output = backend.generate(&program, None);
+    assert!(output.contains("wasm32-unknown-wasi"),
+        "should use wasm32 target triple in .bv webstack mode");
+    assert!(output.contains("__web_flush_state"),
+        "should emit flush state for webstack even with logic-only .bv");
+    assert!(output.contains("state_layout"),
+        "should export state_layout function");
+}
+
+#[test]
 fn test_llvm_generates_state_type() {
     let mut backend = LlvmBackend::new();
     let program = vec![

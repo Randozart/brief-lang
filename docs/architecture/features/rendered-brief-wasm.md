@@ -218,11 +218,11 @@ The JS shim maintains a flat array mapping handles to real objects:
 const _web_objects = [null]; // index 0 is reserved (null handle)
 ```
 
-`frgn` declarations from `"web"` source use this handle table:
+`frgn` declarations from `#Web` protocol use this handle table:
 
 ```brief
-frgn create_element(tag: String) -> Element from "web";
-frgn set_text(elem: Element, text: String) from "web";
+frgn create_element(tag: String) -> Element from #Web;
+frgn set_text(elem: Element, text: String) from #Web;
 ```
 
 These compile to WASM imports that the JS shim implements as handle-table lookups:
@@ -246,8 +246,8 @@ imports.env = {
 When a `.rbv` declares a canvas rendering context, the JS shim performs a one-time handoff and steps back completely:
 
 ```brief
-frgn get_canvas(id: String) -> CanvasContext from "web" fallback null;
-frgn present_frame(ctx: CanvasContext) from "web";
+frgn get_canvas(id: String) -> CanvasContext from #Web fallback null;
+frgn present_frame(ctx: CanvasContext) from #Web;
 ```
 
 ### Initialization Sequence
@@ -288,7 +288,7 @@ Additionally, a `.bv` can be compiled for web explicitly:
 briefc build logic.bv --backend webstack --target wasm32-unknown-wasi
 ```
 
-This routes through `LlvmBackend` with the WASM target triple, producing `logic.wasm` and a minimal `metropipe-shim.mjs` that handles only `frgn from "web"` imports (no DOM binding layer).
+This routes through `LlvmBackend` with the WASM target triple, producing `logic.wasm` and a minimal `metropipe-shim.mjs` that handles only `frgn from #Web` imports (no DOM binding layer).
 
 ## Published Outputs
 
@@ -306,7 +306,7 @@ For a `.bv` file `logic.bv` compiled with `--backend webstack`:
 | File | Contents | Producer |
 |------|----------|----------|
 | `logic.wasm` | Compiled Brief logic, WASM32 | `LlvmBackend(wasm32)` |
-| `metropipe-shim.mjs` | Minimal import stubs for `frgn from "web"` | `GlueWebGenerator` |
+| `metropipe-shim.mjs` | Minimal import stubs for `frgn from #Web` | `GlueWebGenerator` |
 
 ## Relationship to Existing Systems
 

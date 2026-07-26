@@ -1,25 +1,18 @@
-// wasm-import.rbv — (wasm) import syntax for compute-heavy Brief sub-programs
-// The `(wasm)` annotation tells the compiler to compile the imported .bv to
-// a WASM sidecar module and auto-generate TypeScript wrapper functions.
+// wasm-import.rbv — Compute module import via WASM sidecar
 //
-// The imported file runs as native WASM (via LLVM wasm32 target). All standard
-// intrinsics (print_int#, put_char#, etc.) resolve via the env import stubs
-// generated in the TS output.
-//
-// Custom `frgn from "c"` in the imported .bv is a compile-time error — WASM
-// modules can only use built-in intrinsics and pure Brief logic.
-//
-// Other import targets: (circt) for hardware compilation, (javascript) for
-// inline JS/TS functions, (native) for default (no prefix needed).
+// 2026-07-26: Superseded — the webstack v2 compiles ALL .bv/.rbv code to WASM
+// by default. The (wasm) import annotation is no longer needed; .bv modules
+// used as compute sidecars are compiled to WASM via LlvmBackend(wasm32) and
+// linked by the GlueWebGenerator at runtime.
 //
 // Compilation:
-//   brief build wasm-import.rbv   → emits wasm-import.ts, wasm-import.js, wasm-import.html
-//   The physics.wasm sidecar is compiled and embedded as a Uint8Array
-//   in the .ts file, instantiated via WebAssembly.instantiate() at runtime.
+//   brief build wasm-import.rbv --backend webstack
+//     → app.wasm (main logic) + dom-shim.mjs (runtime bridge)
+//   The imported physics.bv compiles to a separate .wasm sidecar, linked
+//   via the wasm_runtime bridge in lib/glue.toml.
 //
-// The embedded WASM module's exports are accessible via wrapper functions:
-//   await init_physics_wasm();  // returns WebAssembly.Instance
-//   instance.exports.simulate(data, count);  // call exported functions
+// See docs/architecture/features/rendered-brief-wasm.md for the current
+// webstack architecture.
 
 (wasm) import physics from "physics.bv" as wasmPhysics;
 

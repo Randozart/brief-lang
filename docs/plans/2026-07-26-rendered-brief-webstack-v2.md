@@ -223,7 +223,7 @@ cargo build  # verify the worktree compiles
            __web_flush_state: (updatesPtr, count) => {
              this._applyFlush(updatesPtr, count);
            },
-           // ... frgn from "web" imports mapped to handle table ops ...
+           // ... frgn from #Web imports mapped to handle table ops ...
          }
        });
        this._instance = wasm.instance;
@@ -418,7 +418,7 @@ cargo build  # verify the worktree compiles
 
 3. **Update `GlueWebGenerator` to produce minimal metropipe-shim for `.bv`:**
 
-   When there are no view bindings, the shim contains only the `frgn from "web"` import stubs — no DOM binding table, no `__web_flush_state`.
+   When there are no view bindings, the shim contains only the `frgn from #Web` import stubs — no DOM binding table, no `__web_flush_state`.
 
 ### Tests
 
@@ -435,59 +435,132 @@ cargo build  # verify the worktree compiles
 
 ---
 
-## Phase 6: Canvas/WebGPU Path
+## Phase 6: Type-Driven Import Stubs + CSS Passthrough
 
-**Goal:** The webstack supports rendering context handoff — JS shim passes a canvas context handle to WASM, then steps back.
+**Goal:** `frgn from #Web` produces real JS import stubs driven by type
+signatures (not function names). `<style>` blocks from `.rbv` are emitted
+as `app.css`. `render struct`/`render obj` own the DOM — no `frgn` needed
+for element creation.
 
-### Work
+### Why Name Matching Is Wrong
 
-1. **Add `canvas_init` export to WASM module:**
+A match arm for `"create_element"` solves today's benchmark but fails for
+a user's `custom_fetch(url: String) -> Element from #Web`. The type
+signature already carries all information the GLUE system needs:
 
-   When the `.rbv` declares `frgn get_canvas(id: String) -> CanvasContext from "web"`, the shim generator produces:
-   ```javascript
-   const canvas = document.getElementById(canvasId);
-   const gl = canvas.getContext('webgl2');
-   const handle = runtime._handles.push(gl) - 1;
-   wasm.exports.init_canvas(handle, canvas.width, canvas.height);
-   ```
+| Brief type | wasm_abi | marshal in | marshal out |
+|------------|----------|------------|-------------|
+| `String` | `i32` | `_readString(ptr)` | `_writeString(str)` |
+| `Int` | `i32` | raw `val` | raw `val` |
+| `Float` | `f64` | raw `val` | raw `val` |
+| `Bool` | `i32` | `val !== 0` | `val ? 1 : 0` |
+| `Element` | `i32` | `_handles[handle]` | `_handles.push(obj) - 1` |
+| `CanvasContext` | `i32` | `_handles[handle]` | `_handles.push(obj) - 1` |
 
-2. **Add `requestAnimationFrame` loop in shim:**
+The generator iterates each parameter and return type, looks up the protocol
+mapping in the GLUE config, and emits the appropriate marshal code. No
+`match` on function names.
 
-   ```javascript
-   const frame = () => {
-     wasm.exports.render_frame();
-     requestAnimationFrame(frame);
-   };
-   requestAnimationFrame(frame);
-   ```
+### 6a — Type-Driven `generate_imports()`
 
-3. **Add WebGPU path detection:**
+For each `frgn from #Web` declaration:
 
-   ```javascript
-   const gpu = navigator.gpu;
-   if (gpu) {
-     const adapter = await gpu.requestAdapter();
-     const device = await adapter.requestDevice();
-     const context = canvas.getContext('webgpu');
-     // Pass handles for device, context, swap chain
-     wasm.exports.init_webgpu(
-       runtime._handles.push(device) - 1,
-       runtime._handles.push(context) - 1,
-       canvas.width, canvas.height
-     );
-   }
-   ```
+```javascript
+_buildImports() {
+  return {
+    __web_flush_state: (updatesPtr, count) => { this._applyFlush(...); },
+    // type-driven — Example: frgn get_canvas(id: String) -> CanvasContext from #Web
+    get_canvas: (strPtr0) => {
+      const id = this._readString(strPtr0);
+      const canvas = document.getElementById(id);
+      if (!canvas) return 0;
+      const ctx = canvas.getContext('webgl2');
+      return this._handles.push(ctx) - 1;
+    },
+    // type-driven — Example: frgn console_log(msg: String) from #Web
+    console_log: (strPtr0) => {
+      console.log(this._readString(strPtr0));
+    },
+  };
+}
+```
+
+Algorithm:
+1. For each `ForeignBinding` with `FromSpec::Protocol("#Web")`:
+   a. Brief name → JS function name (the `as` clause or foreign symbol)
+   b. For each input param: look up protocol mapping by type, emit marshal-in code
+   c. For return type: look up protocol mapping, emit marshal-out code
+   d. If `Element` or `CanvasContext` return: emit `_handles.push(...) - 1`
+2. The function name is an identifier — never matched against a string list.
+
+### 6b — `render struct`/`render obj` HTML DOM Ownership
+
+The `<html>` template inside `render struct`/`render obj` is processed by
+the view compiler into `Vec<Binding>`. These bindings are the **sole source**
+of DOM structure. No `frgn create_element` exists — the compiler generates
+the DOM creation code from the template at compile time, and the JS shim's
+`_loadStateLayout()` reads WASM state at known offsets to update element
+content/attributes.
+
+The `render struct`/`render obj` pattern:
+```brief
+render struct Counter {
+    <div class="counter">
+        <span b-text="count">0</span>
+        <button b-trigger:click="increment">+</button>
+    </div>
+};
+```
+Desugars to:
+- View compiler produces `Vec<Binding>`: `[Text { count → #counter-span }, Trigger { click → increment }]`
+- GlueWebGenerator's binding table maps each binding to a WASM state field offset
+- At `__web_flush_state`, the JS shim applies the new text content or fires the transaction
+
+Legitimate use cases for `frgn from #Web`:
+- `frgn get_canvas(id: String) -> CanvasContext from #Web` — browser canvas API
+- `frgn present_frame(ctx: CanvasContext) from #Web` — GPU presentation
+- `frgn console_log(msg: String) from #Web` — debugging
+- `frgn fetch(url: String) -> String from #Web` — HTTP requests
+
+### 6c — CSS Passthrough
+
+The `<style>` block (extracted by `RbvFile::parse()`) is written to `app.css`
+alongside the compiled `.wasm` and `.mjs`. A companion `index.html` links it:
+
+```html
+<!DOCTYPE html>
+<html>
+<head>
+  <link rel="stylesheet" href="app.css">
+  <script type="module" src="dom-shim.mjs"></script>
+</head>
+<body>
+  <script type="module">
+    import { createApp } from './dom-shim.mjs';
+    const wasm = await fetch('app.wasm');
+    const app = await createApp(new Uint8Array(await wasm.arrayBuffer()));
+  </script>
+</body>
+</html>
+```
 
 ### Tests
 
-- Manual browser test: create an `.rbv` that draws to `<canvas>` via WebGL, verify it renders
-- Manual browser test: verify the JS shim steps back after handoff (no JS DOM calls during frame loop)
+- Unit: `GlueWebGenerator` with `frgn (String) -> Element from #Web` produces
+  JS stub with `_readString()` call and `_handles.push()` return
+- Unit: `GlueWebGenerator` with `frgn (Element, String) from #Web` produces
+  JS stub with `_handles[handle]` lookup and `_readString()` call
+- Unit: `GlueWebGenerator` with `frgn (Int, Float, Bool) from #Web` produces
+  JS stub with raw value parameters
+- Unit: No function name strings appear in the compiler
 
 ### Files Changed
 
 | File | Change |
 |------|--------|
-| `src/glue/web_generator.rs` | Add canvas init sequence, rAF loop, WebGPU detection |
+| `src/glue/web_generator.rs` | Rewrite `generate_imports()` — type-driven dispatch using protocol mappings. Add `frgn_to_js_stub()` helper. Tests for each protocol mapping. |
+| `src/compile.rs` | Filter `frgn from #Web` declarations, pass to `GlueWebGenerator`. Write `app.css` from style content. Write `index.html` stub. |
+| `lib/glue.toml` | Add `[web.templates]` entry for `index.html` |
 
 ---
 

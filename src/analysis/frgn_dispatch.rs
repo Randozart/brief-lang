@@ -98,15 +98,40 @@ pub fn resolve_single_frgn(
     backend: BackendKind,
     universe: Option<&crate::type_universe::TypeUniverse>,
 ) -> Result<ResolvedFrgn, String> {
-    // 2026-07-26: Resolve protocol-based FFI (from #System).
-    // #System is the sole protocol — any other hashword produces an error.
+    // 2026-07-26: Resolve protocol-based FFI (from #System, from #Web).
+    // #System resolves to a system library for linking.
+    // #Web routes through the GLUE web bridge (wasm_runtime).
     // This must come before the extension check because FromSpec::Protocol
-    // has no file extension — it resolves to a system library instead.
+    // has no file extension — it resolves to a system library or GLUE bridge.
     if let FromSpec::Protocol(proto) = &fb.from {
+        // 2026-07-26: #Web protocol — route through GLUE web bridge.
+        // The web target provides wasm_runtime import stubs (handle table,
+        // DOM operations, canvas context). No library linking needed.
+        if proto == "#Web" {
+            let web_lang = find_language_by_extension(glue_targets, "mjs");
+            if let Some(target) = web_lang {
+                let param_paths: Vec<ProtocolStep> = fb.inputs.iter()
+                    .map(|(_, brief_type)| {
+                        let foreign_type = lookup_foreign_type(brief_type, &target.protocols, universe);
+                        compute_protocol_path(brief_type, &foreign_type, universe)
+                            .and_then(|steps| steps.into_iter().next().ok_or_else(|| "empty path".to_string()))
+                    })
+                    .collect::<Result<Vec<_>, _>>()?;
+                let return_path: Option<ProtocolStep> = fb.success_output.first()
+                    .and_then(|(_, ty)| {
+                        let foreign_type = lookup_foreign_type(ty, &target.protocols, universe);
+                        compute_protocol_path(ty, &foreign_type, universe).ok()?.into_iter().next()
+                    });
+                return Ok(ResolvedFrgn::Bridge {
+                    language: target.language.clone(),
+                    param_paths,
+                    return_path,
+                    fallback: fb.fallback.clone(),
+                });
+            }
+        }
+        // 2026-07-26: #System protocol — resolve to a system library.
         let protocol_config = crate::target::ProtocolConfig::load();
-        // 2026-07-26: Use the default target triple. A future enhancement
-        // would pass the actual --target from CLI opts. For now, x86_64-linux
-        // covers the common case; cross-compilation requires target awareness.
         let default_triple = "x86_64-linux";
         let lib = protocol_config.resolve(default_triple, proto).map_err(|e| {
             format!(
@@ -509,8 +534,9 @@ mod tests {
         );
         let targets = sample_glue_targets();
         let result = resolve_single_frgn(&fb, "", &targets, BackendKind::Llvm, None);
-        assert!(result.is_err(), "unknown protocol should error");
-        assert!(result.unwrap_err().contains("only supported protocol"));
+        let err = result.unwrap_err();
+        assert!(err.contains("supported protocols"),
+            "should mention supported protocols (got: '{}')", err);
     }
 
     #[test]

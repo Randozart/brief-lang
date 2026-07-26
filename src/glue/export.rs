@@ -588,8 +588,9 @@ pub fn run_export_cli(file_path: &str, language: &str, out_dir: &str) -> Result<
         types_module: target.types_module.to_string_lossy().to_string(),
         file_extension: target.extension.clone(),
         llvm_triple: "x86_64-unknown-linux-gnu".to_string(),
+        // 2026-07-26: c_abi is optional — fall back to native type if absent
         c_type_map: target.protocols.iter()
-            .map(|(k, v)| (k.clone(), v.c_abi.clone()))
+            .map(|(k, v)| (k.clone(), v.c_abi.clone().unwrap_or_else(|| v.native.clone())))
             .collect(),
     };
     let mut dbvl_content = String::new();
@@ -616,14 +617,18 @@ pub fn run_export_cli(file_path: &str, language: &str, out_dir: &str) -> Result<
 }
 
 /// Look up a Brief type's protocol mapping in a target's protocols map.
-/// Returns (native_type, c_abi_type) or falls back to the input type name.
+/// Returns (native_type, c_abi_or_wasm_abi_type) or falls back to the input type name.
+/// 2026-07-26: c_abi is optional — for wasm_import targets, use wasm_abi instead.
 fn resolve_protocol(
     brief_type_name: &str,
     protocols: &HashMap<String, crate::glue::config::ProtocolEntry>,
 ) -> (String, String) {
     let protocol_key = format!("#{}", brief_type_name);
     if let Some(entry) = protocols.get(&protocol_key) {
-        (entry.native.clone(), entry.c_abi.clone())
+        let abi = entry.c_abi.clone()
+            .or_else(|| entry.wasm_abi.clone())
+            .unwrap_or_else(|| entry.native.clone());
+        (entry.native.clone(), abi)
     } else {
         (brief_type_name.to_string(), brief_type_name.to_string())
     }
