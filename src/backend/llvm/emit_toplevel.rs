@@ -198,22 +198,9 @@ impl LlvmBackend {
         // 2026-06-26: realloc used by the arena allocator grow path when
         // the bump-allocated buffer is exhausted (emit_arena_alloc in mod.rs).
         writeln!(out, "declare ptr @realloc(ptr, i64) nounwind").ok();
-        writeln!(out, "declare i64 @__read_file__(i64)").ok();
         writeln!(out, "declare i64 @ShellCmd(i64)").ok();
-        writeln!(out, "declare i64 @__write_file__(i64, i64)").ok();
-        writeln!(out, "declare i64 @__readln__()").ok();
-        writeln!(out, "declare i64 @__sort_list__(i64)").ok();
-        writeln!(out, "declare i64 @__reverse_list__(i64)").ok();
-        writeln!(out, "declare i64 @__range__(i64)").ok();
-        writeln!(out, "declare i64 @__trim_left__(ptr)").ok();
-        writeln!(out, "declare i64 @__trim_right__(ptr)").ok();
-        writeln!(out, "declare i64 @__to_lower__(ptr)").ok();
-        writeln!(out, "declare i64 @__contains_at__(ptr, ptr, i64)").ok();
-        writeln!(out, "declare i64 @__find_from__(ptr, ptr, i64)").ok();
-        writeln!(out, "declare i64 @__splitn__(ptr, ptr, i64)").ok();
-        writeln!(out, "declare i64 @__float_to_str(float)").ok();
-        writeln!(out, "declare i64 @__to_str(i64)").ok();
-        writeln!(out, "declare i64 @__stack_top__(i64)").ok();
+        // 2026-07-26: ~50 dead declares removed — no Rust code path generated
+        // calls to them. Only ShellCmd is kept (called via ShellCmd# intrinsic).
         // 2026-07-15: Raw OS syscall (SysCall# intrinsic)
         writeln!(out, "declare i64 @brief_syscall(i64, i64, i64, i64, i64, i64, i64)").ok();
         // 2026-07-15: Runtime system configuration (SysConf# intrinsic)
@@ -224,47 +211,6 @@ impl LlvmBackend {
         writeln!(out, "declare i32 @dlclose(ptr) nounwind").ok();
         // 2026-07-15: Stack backtrace (Backtrace# intrinsic)
         writeln!(out, "declare i64 @brief_backtrace()").ok();
-        writeln!(out, "declare i64 @__queue_front__(i64)").ok();
-        writeln!(out, "declare i64 @__hashmap_get__(i64, i64)").ok();
-        writeln!(out, "declare i64 @__hashset_elements__(i64)").ok();
-        writeln!(out, "declare void @__exit()").ok();
-        writeln!(out, "declare i64 @__tty_raw_mode__(i64)").ok();
-        writeln!(out, "declare i64 @__spawn_with_output__(i64)").ok();
-        writeln!(out, "declare i64 @__readlink__(i64)").ok();
-        writeln!(out, "declare i64 @__getcwd__()").ok();
-        writeln!(out, "declare i64 @__readdir__(i64)").ok();
-        writeln!(out, "declare i64 @__sigaction__(i64, i64)").ok();
-        writeln!(out, "declare i64 @__sigprocmask__(i64, i64)").ok();
-        writeln!(out, "declare i64 @__getaddrinfo__(i64, i64)").ok();
-        writeln!(out, "declare i64 @__map_keys__(i64)").ok();
-        writeln!(out, "declare i64 @__map_values__(i64)").ok();
-        // D12–D18 + Extra Shim declares (2026-06-19)
-        writeln!(out, "declare i64 @__errno__()").ok();
-        writeln!(out, "declare i64 @__getrandom__(i64, i64, i64)").ok();
-        writeln!(out, "declare i64 @__uname__()").ok();
-        writeln!(out, "declare i64 @__hostname__()").ok();
-        writeln!(out, "declare i64 @__strerror__(i64)").ok();
-        writeln!(out, "declare i64 @__strsignal__(i64)").ok();
-        writeln!(out, "declare i64 @__realpath__(i64)").ok();
-        writeln!(out, "declare i64 @__backtrace__()").ok();
-        writeln!(out, "declare i64 @__getpwuid__(i64)").ok();
-        writeln!(out, "declare i64 @__getgrgid__(i64)").ok();
-        writeln!(out, "declare i64 @__thread_create__(i64, i64)").ok();
-        writeln!(out, "declare i64 @__thread_join__(i64)").ok();
-        writeln!(out, "declare void @__thread_exit__(i64)").ok();
-        writeln!(out, "declare i64 @__mutex_lock__(i64)").ok();
-        writeln!(out, "declare i64 @__mutex_unlock__(i64)").ok();
-        writeln!(out, "declare i64 @__condvar_wait__(i64, i64)").ok();
-        writeln!(out, "declare i64 @__condvar_signal__(i64)").ok();
-        writeln!(out, "declare i64 @__condvar_broadcast__(i64)").ok();
-        writeln!(out, "declare i64 @__getrlimit__(i64)").ok();
-        writeln!(out, "declare i64 @__setrlimit__(i64, i64)").ok();
-        writeln!(out, "declare i64 @__mkstemp__(i64)").ok();
-        writeln!(out, "declare i64 @__mkdtemp__(i64)").ok();
-        writeln!(out, "declare i64 @__dlopen__(i64)").ok();
-        writeln!(out, "declare i64 @__dlsym__(i64, i64)").ok();
-        writeln!(out, "declare i64 @__dlclose__(i64)").ok();
-        writeln!(out, "declare i64 @__ttyname__(i64)").ok();
         // 2026-07-15: POSIX socket/ioctl declarations removed — they conflict
         // with the defn wrappers in std/os/ (which now use SysCall# internally).
     }

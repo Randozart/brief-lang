@@ -31,87 +31,91 @@ pub struct Signature {
     pub return_kind: ReturnKind,
     /// If true, this intrinsic has observable side effects (DCE guard).
     pub observable: bool,
+    /// If true, this intrinsic accepts additional arguments beyond declared
+    /// parameters (e.g., SysCall# takes num + up to 6 more). Default false.
+    /// 2026-07-26: Added for variadic intrinsics to avoid false arity errors.
+    pub variadic: bool,
 }
 
 /// Look up the signature of a # intrinsic by name.
 pub fn get_intrinsic_signature(name: &str) -> Option<Signature> {
     match name {
         // ── Arithmetic (return matches input type) ────────────────────
-        "Add#" => Some(Signature { name: "Add#", parameters: vec![], return_kind: ReturnKind::Inferred, observable: false }),
-        "Sub#" => Some(Signature { name: "Sub#", parameters: vec![], return_kind: ReturnKind::Inferred, observable: false }),
-        "Mul#" => Some(Signature { name: "Mul#", parameters: vec![], return_kind: ReturnKind::Inferred, observable: false }),
-        "Div#" => Some(Signature { name: "Div#", parameters: vec![], return_kind: ReturnKind::Inferred, observable: false }),
-        "Rem#" => Some(Signature { name: "Rem#", parameters: vec![], return_kind: ReturnKind::Inferred, observable: false }),
-        "Neg#" => Some(Signature { name: "Neg#", parameters: vec![], return_kind: ReturnKind::Inferred, observable: false }),
-        "Abs#" => Some(Signature { name: "Abs#", parameters: vec![], return_kind: ReturnKind::Inferred, observable: false }),
+        "Add#" => Some(Signature { name: "Add#", parameters: vec![], return_kind: ReturnKind::Inferred, observable: false, variadic: false }),
+        "Sub#" => Some(Signature { name: "Sub#", parameters: vec![], return_kind: ReturnKind::Inferred, observable: false, variadic: false }),
+        "Mul#" => Some(Signature { name: "Mul#", parameters: vec![], return_kind: ReturnKind::Inferred, observable: false, variadic: false }),
+        "Div#" => Some(Signature { name: "Div#", parameters: vec![], return_kind: ReturnKind::Inferred, observable: false, variadic: false }),
+        "Rem#" => Some(Signature { name: "Rem#", parameters: vec![], return_kind: ReturnKind::Inferred, observable: false, variadic: false }),
+        "Neg#" => Some(Signature { name: "Neg#", parameters: vec![], return_kind: ReturnKind::Inferred, observable: false, variadic: false }),
+        "Abs#" => Some(Signature { name: "Abs#", parameters: vec![], return_kind: ReturnKind::Inferred, observable: false, variadic: false }),
 
         // ── Comparison (returns Bool, but type-inferred) ──────────────
-        "Eq#"  => Some(Signature { name: "Eq#",  parameters: vec![], return_kind: ReturnKind::Inferred, observable: false }),
-        "Neq#" => Some(Signature { name: "Neq#", parameters: vec![], return_kind: ReturnKind::Inferred, observable: false }),
-        "Lt#"  => Some(Signature { name: "Lt#",  parameters: vec![], return_kind: ReturnKind::Inferred, observable: false }),
-        "Gt#"  => Some(Signature { name: "Gt#",  parameters: vec![], return_kind: ReturnKind::Inferred, observable: false }),
-        "Le#"  => Some(Signature { name: "Le#",  parameters: vec![], return_kind: ReturnKind::Inferred, observable: false }),
-        "Ge#"  => Some(Signature { name: "Ge#",  parameters: vec![], return_kind: ReturnKind::Inferred, observable: false }),
+        "Eq#"  => Some(Signature { name: "Eq#",  parameters: vec![], return_kind: ReturnKind::Inferred, observable: false, variadic: false }),
+        "Neq#" => Some(Signature { name: "Neq#", parameters: vec![], return_kind: ReturnKind::Inferred, observable: false, variadic: false }),
+        "Lt#"  => Some(Signature { name: "Lt#",  parameters: vec![], return_kind: ReturnKind::Inferred, observable: false, variadic: false }),
+        "Gt#"  => Some(Signature { name: "Gt#",  parameters: vec![], return_kind: ReturnKind::Inferred, observable: false, variadic: false }),
+        "Le#"  => Some(Signature { name: "Le#",  parameters: vec![], return_kind: ReturnKind::Inferred, observable: false, variadic: false }),
+        "Ge#"  => Some(Signature { name: "Ge#",  parameters: vec![], return_kind: ReturnKind::Inferred, observable: false, variadic: false }),
 
         // ── Bitwise (return matches input type) ─────────────────────────
-        "BitAnd#" => Some(Signature { name: "BitAnd#", parameters: vec![], return_kind: ReturnKind::Inferred, observable: false }),
-        "BitOr#" => Some(Signature { name: "BitOr#", parameters: vec![], return_kind: ReturnKind::Inferred, observable: false }),
-        "BitXor#" => Some(Signature { name: "BitXor#", parameters: vec![], return_kind: ReturnKind::Inferred, observable: false }),
-        "Shl#" => Some(Signature { name: "Shl#", parameters: vec![], return_kind: ReturnKind::Inferred, observable: false }),
-        "Shr#" => Some(Signature { name: "Shr#", parameters: vec![], return_kind: ReturnKind::Inferred, observable: false }),
-        "BitNot#" => Some(Signature { name: "BitNot#", parameters: vec![], return_kind: ReturnKind::Inferred, observable: false }),
+        "BitAnd#" => Some(Signature { name: "BitAnd#", parameters: vec![], return_kind: ReturnKind::Inferred, observable: false, variadic: false }),
+        "BitOr#" => Some(Signature { name: "BitOr#", parameters: vec![], return_kind: ReturnKind::Inferred, observable: false, variadic: false }),
+        "BitXor#" => Some(Signature { name: "BitXor#", parameters: vec![], return_kind: ReturnKind::Inferred, observable: false, variadic: false }),
+        "Shl#" => Some(Signature { name: "Shl#", parameters: vec![], return_kind: ReturnKind::Inferred, observable: false, variadic: false }),
+        "Shr#" => Some(Signature { name: "Shr#", parameters: vec![], return_kind: ReturnKind::Inferred, observable: false, variadic: false }),
+        "BitNot#" => Some(Signature { name: "BitNot#", parameters: vec![], return_kind: ReturnKind::Inferred, observable: false, variadic: false }),
         // ── Logical (unary, no short-circuit) ────────────────────────────
-        "Not#" => Some(Signature { name: "Not#", parameters: vec![], return_kind: ReturnKind::Inferred, observable: false }),
+        "Not#" => Some(Signature { name: "Not#", parameters: vec![], return_kind: ReturnKind::Inferred, observable: false, variadic: false }),
         // ── Pointer operations ─────────────────────────────────────────
-        "Deref#" => Some(Signature { name: "Deref#", parameters: vec![], return_kind: ReturnKind::Inferred, observable: false }),
-        "Index#" => Some(Signature { name: "Index#", parameters: vec![], return_kind: ReturnKind::Inferred, observable: false }),
-        "Cast#" => Some(Signature { name: "Cast#", parameters: vec![], return_kind: ReturnKind::Inferred, observable: false }),
-        "Ptr#" => Some(Signature { name: "Ptr#", parameters: vec![], return_kind: ReturnKind::Inferred, observable: false }),
+        "Deref#" => Some(Signature { name: "Deref#", parameters: vec![], return_kind: ReturnKind::Inferred, observable: false, variadic: false }),
+        "Index#" => Some(Signature { name: "Index#", parameters: vec![], return_kind: ReturnKind::Inferred, observable: false, variadic: false }),
+        "Cast#" => Some(Signature { name: "Cast#", parameters: vec![], return_kind: ReturnKind::Inferred, observable: false, variadic: false }),
+        "Ptr#" => Some(Signature { name: "Ptr#", parameters: vec![], return_kind: ReturnKind::Inferred, observable: false, variadic: false }),
 
         // ── Float math (returns native Float) ─────────────────────────
-        "Sqrt#"  => Some(Signature { name: "Sqrt#",  parameters: vec![], return_kind: ReturnKind::Native("Float"), observable: false }),
-        "Sin#"   => Some(Signature { name: "Sin#",   parameters: vec![], return_kind: ReturnKind::Native("Float"), observable: false }),
-        "Cos#"   => Some(Signature { name: "Cos#",   parameters: vec![], return_kind: ReturnKind::Native("Float"), observable: false }),
-        "Fabs#"  => Some(Signature { name: "Fabs#",  parameters: vec![], return_kind: ReturnKind::Native("Float"), observable: false }),
-        "Ceil#"  => Some(Signature { name: "Ceil#",  parameters: vec![], return_kind: ReturnKind::Native("Float"), observable: false }),
-        "Floor#" => Some(Signature { name: "Floor#", parameters: vec![], return_kind: ReturnKind::Native("Float"), observable: false }),
-        "Pow#"   => Some(Signature { name: "Pow#",   parameters: vec![], return_kind: ReturnKind::Inferred, observable: false }),
+        "Sqrt#"  => Some(Signature { name: "Sqrt#",  parameters: vec![], return_kind: ReturnKind::Native("Float"), observable: false, variadic: false }),
+        "Sin#"   => Some(Signature { name: "Sin#",   parameters: vec![], return_kind: ReturnKind::Native("Float"), observable: false, variadic: false }),
+        "Cos#"   => Some(Signature { name: "Cos#",   parameters: vec![], return_kind: ReturnKind::Native("Float"), observable: false, variadic: false }),
+        "Fabs#"  => Some(Signature { name: "Fabs#",  parameters: vec![], return_kind: ReturnKind::Native("Float"), observable: false, variadic: false }),
+        "Ceil#"  => Some(Signature { name: "Ceil#",  parameters: vec![], return_kind: ReturnKind::Native("Float"), observable: false, variadic: false }),
+        "Floor#" => Some(Signature { name: "Floor#", parameters: vec![], return_kind: ReturnKind::Native("Float"), observable: false, variadic: false }),
+        "Pow#"   => Some(Signature { name: "Pow#",   parameters: vec![], return_kind: ReturnKind::Inferred, observable: false, variadic: false }),
 
         // ── Runtime (observable) ────────────────────────────────────
         // 2026-07-19: GetEnv#/GetEnvInt# moved to stdlib env.bv via ! plugin.
         // Print#/PutChar# moved to stdlib ffi/io.bv via ! plugin.
 
         // ── Memory (observable) ─────────────────────────────────────
-        "Malloc#"  => Some(Signature { name: "Malloc#",  parameters: vec![("size", Type::int())], return_kind: ReturnKind::Exact(Type::ptr(Type::bits(1))), observable: true }),
+        "Malloc#"  => Some(Signature { name: "Malloc#",  parameters: vec![("size", Type::int())], return_kind: ReturnKind::Exact(Type::ptr(Type::bits(1))), observable: true, variadic: false }),
         // 2026-07-18: Variadic — first arg is size (Int), optional second is
         // strategy (Identifier or Quoted). Codegen handles both cases.
-        "Alloc#"   => Some(Signature { name: "Alloc#",   parameters: vec![], return_kind: ReturnKind::Exact(Type::ptr(Type::bits(1))), observable: true }),
-        "Free#"    => Some(Signature { name: "Free#",    parameters: vec![("ptr", Type::ptr(Type::bits(1)))], return_kind: ReturnKind::Exact(Type::void()), observable: true }),
-        "Load#"    => Some(Signature { name: "Load#",    parameters: vec![], return_kind: ReturnKind::Native("Int"), observable: true }),
-        "Store#"   => Some(Signature { name: "Store#",   parameters: vec![], return_kind: ReturnKind::Exact(Type::void()), observable: true }),
-        "Copy#"    => Some(Signature { name: "Copy#",    parameters: vec![], return_kind: ReturnKind::Exact(Type::void()), observable: true }),
-        "Fill#"    => Some(Signature { name: "Fill#",    parameters: vec![], return_kind: ReturnKind::Exact(Type::void()), observable: true }),
+        "Alloc#"   => Some(Signature { name: "Alloc#",   parameters: vec![], return_kind: ReturnKind::Exact(Type::ptr(Type::bits(1))), observable: true, variadic: false }),
+        "Free#"    => Some(Signature { name: "Free#",    parameters: vec![("ptr", Type::ptr(Type::bits(1)))], return_kind: ReturnKind::Exact(Type::void()), observable: true, variadic: false }),
+        "Load#"    => Some(Signature { name: "Load#",    parameters: vec![], return_kind: ReturnKind::Native("Int"), observable: true, variadic: false }),
+        "Store#"   => Some(Signature { name: "Store#",   parameters: vec![], return_kind: ReturnKind::Exact(Type::void()), observable: true, variadic: false }),
+        "Copy#"    => Some(Signature { name: "Copy#",    parameters: vec![], return_kind: ReturnKind::Exact(Type::void()), observable: true, variadic: false }),
+        "Fill#"    => Some(Signature { name: "Fill#",    parameters: vec![], return_kind: ReturnKind::Exact(Type::void()), observable: true, variadic: false }),
 
         // ── String ───────────────────────────────────────────────────
-        "Concat#"    => Some(Signature { name: "Concat#",    parameters: vec![], return_kind: ReturnKind::Inferred, observable: false }),
-        "Length#"    => Some(Signature { name: "Length#",    parameters: vec![], return_kind: ReturnKind::Native("Int"), observable: false }),
-        "ToInt#"     => Some(Signature { name: "ToInt#",     parameters: vec![], return_kind: ReturnKind::Native("Int"), observable: false }),
-        "ToFloat#"   => Some(Signature { name: "ToFloat#",   parameters: vec![], return_kind: ReturnKind::Native("Float"), observable: false }),
-        "ToString#"  => Some(Signature { name: "ToString#",  parameters: vec![], return_kind: ReturnKind::Inferred, observable: false }),
+        "Concat#"    => Some(Signature { name: "Concat#",    parameters: vec![], return_kind: ReturnKind::Inferred, observable: false, variadic: false }),
+        "Length#"    => Some(Signature { name: "Length#",    parameters: vec![], return_kind: ReturnKind::Native("Int"), observable: false, variadic: false }),
+        "ToInt#"     => Some(Signature { name: "ToInt#",     parameters: vec![], return_kind: ReturnKind::Native("Int"), observable: false, variadic: false }),
+        "ToFloat#"   => Some(Signature { name: "ToFloat#",   parameters: vec![], return_kind: ReturnKind::Native("Float"), observable: false, variadic: false }),
+        "ToString#"  => Some(Signature { name: "ToString#",  parameters: vec![], return_kind: ReturnKind::Inferred, observable: false, variadic: false }),
 
         // ── Collection ───────────────────────────────────────────────
-        "Get#"    => Some(Signature { name: "Get#",    parameters: vec![], return_kind: ReturnKind::Inferred, observable: false }),
-        "Insert#" => Some(Signature { name: "Insert#", parameters: vec![], return_kind: ReturnKind::Exact(Type::void()), observable: true }),
+        "Get#"    => Some(Signature { name: "Get#",    parameters: vec![], return_kind: ReturnKind::Inferred, observable: false, variadic: false }),
+        "Insert#" => Some(Signature { name: "Insert#", parameters: vec![], return_kind: ReturnKind::Exact(Type::void()), observable: true, variadic: false }),
 
         // ── GPU ───────────────────────────────────────────────────────
-        "GetGlobalId#"   => Some(Signature { name: "GetGlobalId#",   parameters: vec![], return_kind: ReturnKind::Native("Int"), observable: false }),
-        "GetGlobalSize#" => Some(Signature { name: "GetGlobalSize#", parameters: vec![], return_kind: ReturnKind::Native("Int"), observable: false }),
-        "GetLocalId#"    => Some(Signature { name: "GetLocalId#",    parameters: vec![], return_kind: ReturnKind::Native("Int"), observable: false }),
-        "WorkgroupSize#" => Some(Signature { name: "WorkgroupSize#", parameters: vec![], return_kind: ReturnKind::Native("Int"), observable: false }),
+        "GetGlobalId#"   => Some(Signature { name: "GetGlobalId#",   parameters: vec![], return_kind: ReturnKind::Native("Int"), observable: false, variadic: false }),
+        "GetGlobalSize#" => Some(Signature { name: "GetGlobalSize#", parameters: vec![], return_kind: ReturnKind::Native("Int"), observable: false, variadic: false }),
+        "GetLocalId#"    => Some(Signature { name: "GetLocalId#",    parameters: vec![], return_kind: ReturnKind::Native("Int"), observable: false, variadic: false }),
+        "WorkgroupSize#" => Some(Signature { name: "WorkgroupSize#", parameters: vec![], return_kind: ReturnKind::Native("Int"), observable: false, variadic: false }),
         // 2026-07-15: Additional GPU intrinsics
-        "GetGroupId#"    => Some(Signature { name: "GetGroupId#",    parameters: vec![], return_kind: ReturnKind::Native("Int"), observable: false }),
-        "GetNumGroups#"  => Some(Signature { name: "GetNumGroups#",  parameters: vec![], return_kind: ReturnKind::Native("Int"), observable: false }),
-        "Dims#"          => Some(Signature { name: "Dims#",          parameters: vec![], return_kind: ReturnKind::Native("Int"), observable: false }),
+        "GetGroupId#"    => Some(Signature { name: "GetGroupId#",    parameters: vec![], return_kind: ReturnKind::Native("Int"), observable: false, variadic: false }),
+        "GetNumGroups#"  => Some(Signature { name: "GetNumGroups#",  parameters: vec![], return_kind: ReturnKind::Native("Int"), observable: false, variadic: false }),
+        "Dims#"          => Some(Signature { name: "Dims#",          parameters: vec![], return_kind: ReturnKind::Native("Int"), observable: false, variadic: false }),
 
         // ── Pointers (compile-time address resolution) ──────────────
         "AddressOf#" => Some(Signature {
@@ -119,15 +123,18 @@ pub fn get_intrinsic_signature(name: &str) -> Option<Signature> {
             parameters: vec![("id", Type::string())],
             return_kind: ReturnKind::Exact(Type::ptr(Type::bits(8))),
             observable: false,
+            variadic: false,
         }),
 
-        // ── OS SysCall (observable) ────────────────────────────────────
+        // ── OS SysCall (observable, variadic) ──────────────────────────
         // 2026-07-15: Returns native Int (result or errno).
+        // 2026-07-26: variadic — first arg is syscall number, up to 6 more args.
         "SysCall#" => Some(Signature {
             name: "SysCall#",
-            parameters: vec![],
+            parameters: vec![("num", Type::int())],
             return_kind: ReturnKind::Native("Int"),
             observable: true,
+            variadic: true,
         }),
 
         // ── POSIX SysConf (observable) ─────────────────────────────────
@@ -137,6 +144,7 @@ pub fn get_intrinsic_signature(name: &str) -> Option<Signature> {
             parameters: vec![],
             return_kind: ReturnKind::Native("Int"),
             observable: true,
+            variadic: false,
         }),
 
         // ── Atomic operations (LLVM atomicrmw / load atomic / fence) ──
@@ -146,36 +154,42 @@ pub fn get_intrinsic_signature(name: &str) -> Option<Signature> {
             parameters: vec![],
             return_kind: ReturnKind::Native("Int"),
             observable: false,
+            variadic: false,
         }),
         "AtomicStore#" => Some(Signature {
             name: "AtomicStore#",
             parameters: vec![],
             return_kind: ReturnKind::Native("Int"),
             observable: true,
+            variadic: false,
         }),
         "AtomicCas#" => Some(Signature {
             name: "AtomicCas#",
             parameters: vec![],
             return_kind: ReturnKind::Native("Int"),
             observable: true,
+            variadic: false,
         }),
         "AtomicXchg#" => Some(Signature {
             name: "AtomicXchg#",
             parameters: vec![],
             return_kind: ReturnKind::Native("Int"),
             observable: true,
+            variadic: false,
         }),
         "AtomicAdd#" => Some(Signature {
             name: "AtomicAdd#",
             parameters: vec![],
             return_kind: ReturnKind::Native("Int"),
             observable: true,
+            variadic: false,
         }),
         "Fence#" => Some(Signature {
             name: "Fence#",
             parameters: vec![],
             return_kind: ReturnKind::Exact(Type::void()),
             observable: true,
+            variadic: false,
         }),
 
         // ── Dynamic linker (platform library functions) ──────────────
@@ -185,18 +199,21 @@ pub fn get_intrinsic_signature(name: &str) -> Option<Signature> {
             parameters: vec![],
             return_kind: ReturnKind::Exact(Type::ptr(Type::bits(8))),
             observable: true,
+            variadic: false,
         }),
         "DlSym#" => Some(Signature {
             name: "DlSym#",
             parameters: vec![],
             return_kind: ReturnKind::Exact(Type::ptr(Type::bits(8))),
             observable: false,
+            variadic: false,
         }),
         "DlClose#" => Some(Signature {
             name: "DlClose#",
             parameters: vec![],
             return_kind: ReturnKind::Native("Int"),
             observable: true,
+            variadic: false,
         }),
 
         // ── String operations (runtime + compile-time) ──────────────
@@ -206,12 +223,14 @@ pub fn get_intrinsic_signature(name: &str) -> Option<Signature> {
             parameters: vec![("s", Type::string()), ("pat", Type::string())],
             return_kind: ReturnKind::Inferred,
             observable: false,
+            variadic: false,
         }),
         "EnvGet#" => Some(Signature {
             name: "EnvGet#",
             parameters: vec![("name", Type::string())],
             return_kind: ReturnKind::Inferred,
             observable: false,
+            variadic: false,
         }),
 
         // ── System queries (observable — reads host state) ──────────
@@ -220,12 +239,14 @@ pub fn get_intrinsic_signature(name: &str) -> Option<Signature> {
             parameters: vec![("query", Type::string())],
             return_kind: ReturnKind::Inferred,
             observable: false,
+            variadic: false,
         }),
         "TimeNow#" => Some(Signature {
             name: "TimeNow#",
             parameters: vec![],
             return_kind: ReturnKind::Native("Int"),
             observable: false,
+            variadic: false,
         }),
 
         // ── External I/O (observable — side effects) ────────────────
@@ -234,12 +255,14 @@ pub fn get_intrinsic_signature(name: &str) -> Option<Signature> {
             parameters: vec![("url", Type::string())],
             return_kind: ReturnKind::Inferred,
             observable: true,
+            variadic: false,
         }),
         "ShellCmd#" => Some(Signature {
             name: "ShellCmd#",
             parameters: vec![("cmd", Type::string())],
             return_kind: ReturnKind::Inferred,
             observable: true,
+            variadic: false,
         }),
 
         // ── Debugging (stack trace) ──────────────────────────────────
@@ -249,6 +272,7 @@ pub fn get_intrinsic_signature(name: &str) -> Option<Signature> {
             parameters: vec![],
             return_kind: ReturnKind::Native("Int"),
             observable: true,
+            variadic: false,
         }),
 
         _ => None,

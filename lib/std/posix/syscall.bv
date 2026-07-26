@@ -1,0 +1,51 @@
+// 2026-07-26: POSIX syscall wrappers. All system calls go through SysCall#
+// which emits inline assembly (syscall instruction on x86_64, svc #0 on
+// aarch64). No libc dependency.
+
+// ── Syscall numbers (x86_64 Linux) ────────────────────────────────────────
+
+export let SYS_READ:          Int = 0;
+export let SYS_WRITE:         Int = 1;
+export let SYS_OPEN:          Int = 2;
+export let SYS_CLOSE:         Int = 3;
+export let SYS_LSEEK:         Int = 8;
+export let SYS_MMAP:          Int = 9;
+export let SYS_BRK:           Int = 12;
+export let SYS_CLOCK_GETTIME: Int = 228;
+export let SYS_EXIT:          Int = 60;
+export let SYS_EXIT_GROUP:    Int = 231;
+export let SYS_CLONE:         Int = 56;
+export let SYS_EXECVE:        Int = 59;
+export let SYS_WAIT4:         Int = 61;
+export let SYS_GETDENTS64:    Int = 217;
+export let SYS_NANO_SLEEP:    Int = 35;
+
+// ── Syscall helpers ───────────────────────────────────────────────────────
+
+export defn syscall0(n: Int) -> Int {
+    term SysCall#(n);
+};
+
+export defn syscall1(n: Int, a1: Int) -> Int {
+    term SysCall#(n, a1);
+};
+
+export defn syscall2(n: Int, a1: Int, a2: Int) -> Int {
+    term SysCall#(n, a1, a2);
+};
+
+export defn syscall3(n: Int, a1: Int, a2: Int, a3: Int) -> Int {
+    term SysCall#(n, a1, a2, a3);
+};
+
+export defn syscall4(n: Int, a1: Int, a2: Int, a3: Int, a4: Int) -> Int {
+    term SysCall#(n, a1, a2, a3, a4);
+};
+
+export defn syscall5(n: Int, a1: Int, a2: Int, a3: Int, a4: Int, a5: Int) -> Int {
+    term SysCall#(n, a1, a2, a3, a4, a5);
+};
+
+export defn syscall6(n: Int, a1: Int, a2: Int, a3: Int, a4: Int, a5: Int, a6: Int) -> Int {
+    term SysCall#(n, a1, a2, a3, a4, a5, a6);
+};

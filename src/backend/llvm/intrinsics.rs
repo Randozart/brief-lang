@@ -708,9 +708,10 @@ fn resolve_syscall_number(op: &str) -> Option<i64> {
     })
 }
 
-/// 2026-07-15: Emit SysCall# — first arg is op (Int raw number or PascalCase
+/// 2026-07-26: Emit SysCall# — first arg is op (Int raw number or PascalCase
 /// abstract name), followed by up to 6 Int arguments.
-/// Emits: call i64 @brief_syscall(i64 %num, i64 %a1, ..., i64 %a6)
+/// On x86_64/aarch64 Linux: emits inline assembly (syscall/svc #0).
+/// On other targets: falls back to @brief_syscall from brief_rt.c.
 fn emit_syscall(
     backend: &mut LlvmBackend, out: &mut String, v: &str,
     args: &[Expr], indent: &str,
@@ -722,9 +723,7 @@ fn emit_syscall(
     }
     // Resolve the syscall number from the first argument
     let num_reg = match &args[0] {
-        // Raw numeric syscall number: SysCall#(2, args...)
         Expr::Decimal(n) => format!("{}", n),
-        // Abstract PascalCase op: SysCall#(Open, args...)
         Expr::Identifier(op) => {
             let n = resolve_syscall_number(op)
                 .map(|n| n.to_string())
@@ -735,7 +734,6 @@ fn emit_syscall(
             n
         }
         _ => {
-            // Fallback: emit as expression
             let reg = emit_arg(backend, out, &args[0], indent);
             reg
         }
@@ -749,7 +747,24 @@ fn emit_syscall(
     while all_args.len() < 7 {
         all_args.push("i64 0".to_string());
     }
-    writeln!(out, "{}{} = call i64 @brief_syscall({})", indent, v, all_args.join(", ")).ok();
+    let triple = &backend.ctx.target_triple;
+    if triple.starts_with("x86_64") && triple.contains("linux") {
+        // x86_64 Linux: inline syscall instruction
+        // syscall clobbers rcx (saves RIP) and r11 (saves RFLAGS).
+        // Args in rax, rdi, rsi, rdx, r10, r8, r9. Output in rax.
+        writeln!(out, "{}{} = call i64 asm sideeffect \"syscall\", \"={{rax}},{{rax}},{{rdi}},{{rsi}},{{rdx}},{{r10}},{{r8}},{{r9}},~{{rcx}},~{{r11}}\" ({}",
+            indent, v, all_args.join(", ")).ok();
+        writeln!(out, "{}  )", indent).ok();
+    } else if triple.starts_with("aarch64") && triple.contains("linux") {
+        // aarch64 Linux: inline svc #0
+        // Args in x0-x5, output in x0. No clobbers beyond the ABI (kernel preserves).
+        writeln!(out, "{}{} = call i64 asm sideeffect \"svc #0\", \"={{x0}},{{x0}},{{x1}},{{x2}},{{x3}},{{x4}},{{x5}}\" ({}",
+            indent, v, all_args.join(", ")).ok();
+        writeln!(out, "{}  )", indent).ok();
+    } else {
+        // Non-Linux fallback: call brief_syscall via C runtime
+        writeln!(out, "{}{} = call i64 @brief_syscall({})", indent, v, all_args.join(", ")).ok();
+    }
     BTypedRegister { name: v.to_string(), ty: Type::int() }
 }
 
