@@ -1,0 +1,4 @@
+// 2026-07-26: High-resolution time API (browser performance.now).
+// Returns milliseconds since page load as Float.
+
+frgn performance_now() -> Float as now from #Web;

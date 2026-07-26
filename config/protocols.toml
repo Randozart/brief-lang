@@ -25,3 +25,4 @@
 
 [wasm32-wasi]
 "#System" = "wasi_snapshot_preview1"
+"#Web" = "wasm_runtime"
