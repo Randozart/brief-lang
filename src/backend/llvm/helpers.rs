@@ -33,23 +33,6 @@ fn rt_llvm_type(rt: &ResolvedType) -> String {
     format!("i{}", rt.bytes * 8)
 }
 
-/// 2026-07-12: Check if a type matches a canonical name via property
-/// system (preferred) with hardcoded legacy fallback for types without
-/// a universe entry (e.g. during bootstrap).
-fn type_is(universe: &Option<crate::type_universe::TypeUniverse>, ty: &Type, name: &str) -> bool {
-    if *ty == Type::Custom(name.to_string()) {
-        return true;
-    }
-    if let Some(u) = universe {
-        if let Some(key) = ty.universe_key() {
-            if u.contains(key) {
-                return name == key || u.get(key).map_or(false, |rt| rt.name == name);
-            }
-        }
-    }
-    false
-}
-
 impl LlvmBackend {
     // ═══════════════════════════════════════════════════════════════
     // Section 1: Cell Rewriting
@@ -731,11 +714,13 @@ impl LlvmBackend {
         indent: &str,
         reg: &TypedRegister,
     ) -> String {
-        if type_is(&self.ctx.type_universe, &reg.ty, "Int") {
+        // 2026-07-26: Protocol-driven dispatch — no name matching.
+        // Int values are i64 — trunc to i1.
+        if self.is_protocol_member(&reg.ty, "#Int") {
             let t = self.next_reg_with_prefix("tb");
             writeln!(out, "{}{} = trunc i64 {} to i1", indent, t, reg.name).ok();
             t
-        } else if type_is(&self.ctx.type_universe, &reg.ty, "Bool") {
+        } else if self.is_protocol_member(&reg.ty, "#Bool") {
             // 2026-07-14: Bool is i8 — trunc to i1 for br
             let t = self.next_reg_with_prefix("tb");
             writeln!(out, "{}{} = trunc i8 {} to i1", indent, t, reg.name).ok();
@@ -753,8 +738,8 @@ impl LlvmBackend {
         indent: &str,
         reg: &TypedRegister,
     ) -> String {
-        if type_is(&self.ctx.type_universe, &reg.ty, "String")
-            || type_is(&self.ctx.type_universe, &reg.ty, "Data")
+        if self.is_protocol_member(&reg.ty, "#String")
+            || self.is_protocol_member(&reg.ty, "#Data")
         {
             let p = self.next_reg_with_prefix("ptri");
             writeln!(out, "{}{} = ptrtoint ptr {} to i64", indent, p, reg.name).ok();
@@ -830,12 +815,11 @@ impl LlvmBackend {
         };
         // 2026-07-18: Replaced `type_is(..., "String")` with `is_string_like`.
         // `is_string_like` matches via CTD="String" (Phase A) or shape+encoding (Phase B).
-        // Data is still checked by name since it has no encoding property.
         self.ctx
             .type_universe
             .as_ref()
             .map_or(false, |u| u.is_string_like(&trg.ty))
-            || type_is(&self.ctx.type_universe, &trg.ty, "Data")
+            || self.is_protocol_member(&trg.ty, "#Data")
     }
 
     /// Emit a cached projection: load valid flag, branch on hit/miss.
@@ -1504,7 +1488,7 @@ impl LlvmBackend {
                     .type_universe
                     .as_ref()
                     .map_or(false, |u| u.is_string_like(target_ty))
-                    || type_is(&self.ctx.type_universe, target_ty, "Data")
+                    || self.is_protocol_member(target_ty, "#Data")
                     || self.is_string_chain(inner)
             }
             _ => false,
@@ -1516,11 +1500,15 @@ impl LlvmBackend {
     /// 2026-07-18: Replaced `type_is(..., "String")` with `is_string_like`.
     fn is_string_identifier(&self, name: &str) -> bool {
         let is_like = |t: &Type| -> bool {
+            let is_data = self.ctx.type_universe.as_ref()
+                .and_then(|u| t.universe_key().and_then(|k| u.get(k)))
+                .map(|rt| rt.properties.contains_key("Cast.#Data"))
+                .unwrap_or(false);
             self.ctx
                 .type_universe
                 .as_ref()
                 .map_or(false, |u| u.is_string_like(t))
-                || type_is(&self.ctx.type_universe, t, "Data")
+                || is_data
         };
         if self
             .fun
@@ -1638,24 +1626,22 @@ impl LlvmBackend {
     /// 2026-07-19: Reads `category` property (set by normalizer's structural
     /// inference) instead of ALU. This handles all float-like types uniformly
     /// (Float, Float64, Bfloat16, FP16, user-defined float types).
-    fn is_native_float(&self, ty: &Type) -> bool {
-        self.ctx
-            .type_universe
-            .as_ref()
+    /// 2026-07-26: Check if a type implements a protocol by looking for
+    /// Cast.<protocol> in its ResolvedType properties. No name matching.
+    fn is_protocol_member(&self, ty: &Type, protocol: &str) -> bool {
+        let prop_key = if protocol.starts_with('#') {
+            format!("Cast.{}", protocol)
+        } else {
+            format!("Cast.#{}", protocol)
+        };
+        self.ctx.type_universe.as_ref()
             .and_then(|u| ty.universe_key().and_then(|k| u.get(k)))
-            .map(|r| {
-                r.properties
-                    .get("category")
-                    .and_then(|pv| match pv {
-                        crate::ast::PropertyValue::String(s) => Some(s == "Float"),
-                        _ => None,
-                    })
-                    .unwrap_or(false)
-            })
-            .unwrap_or_else(|| {
-                type_is(&self.ctx.type_universe, ty, "Float")
-                    || type_is(&self.ctx.type_universe, ty, "Float64")
-            })
+            .map(|rt| rt.properties.contains_key(&prop_key))
+            .unwrap_or(false)
+    }
+
+    fn is_native_float(&self, ty: &Type) -> bool {
+        self.is_protocol_member(ty, "#Float")
     }
 
     /// Choose the dedup opcode based on float vs int.
@@ -1903,8 +1889,8 @@ impl LlvmBackend {
             self.emit_expr(out, r, indent),
         );
         let c = self.fun.next_reg_with_prefix("c");
-        if type_is(&self.ctx.type_universe, &a.ty, "Float")
-            || type_is(&self.ctx.type_universe, &b.ty, "Float")
+        if self.is_native_float(&a.ty)
+            || self.is_native_float(&b.ty)
         {
             let fa = self.ensure_float_reg(out, indent, &a);
             let fb = self.ensure_float_reg(out, indent, &b);
@@ -2594,8 +2580,7 @@ impl LlvmBackend {
         }
         let a = self.emit_expr(out, &lhs, indent);
         let b = self.emit_expr(out, &rhs, indent);
-        if type_is(&self.ctx.type_universe, &cast_ty, "Float")
-            || type_is(&self.ctx.type_universe, &cast_ty, "Float64")
+        if self.is_native_float(&cast_ty)
         {
             self.emit_eor_float_path(out, indent, v, kind, &a, &b, &cast_ty)
         } else {
