@@ -118,11 +118,11 @@ pub fn generate_with_exports(items: &[TopLevel], _file_path: &str) -> Result<Str
 fn emit_definition(defn: &crate::ast::Definition, out: &mut String) -> Result<(), String> {
     use std::fmt::Write;
     let params: Vec<String> = defn.parameters.iter()
-        .map(|(name, ty)| format!("{} %{}", types::lower_type(ty), name))
+        .map(|(name, ty)| format!("{} %{}", types::lower_type(ty, None), name))
         .collect();
     let ret_ty = defn.output_type.as_ref()
         .map(|ot| match ot {
-            crate::ast::OutputType::Single(ty) => types::lower_type(ty),
+            crate::ast::OutputType::Single(ty) => types::lower_type(ty, None),
             _ => "i64".into(),
         })
         .unwrap_or_else(|| "void".into());
@@ -148,11 +148,11 @@ fn emit_export_wrapper(defn: &crate::ast::Definition, out: &mut String) -> Resul
     // with this suffix so the wrapper can call it directly.
     let internal_name = format!("{}$internal", defn.name);
     let params: Vec<String> = defn.parameters.iter()
-        .map(|(name, ty)| format!("{} %{}", types::lower_type(ty), name))
+        .map(|(name, ty)| format!("{} %{}", types::lower_type(ty, None), name))
         .collect();
     let ret_ty = defn.output_type.as_ref()
         .map(|ot| match ot {
-            crate::ast::OutputType::Single(ty) => types::lower_type(ty),
+            crate::ast::OutputType::Single(ty) => types::lower_type(ty, None),
             _ => "i64".into(),
         })
         .unwrap_or_else(|| "void".into());
@@ -172,7 +172,7 @@ fn emit_export_wrapper(defn: &crate::ast::Definition, out: &mut String) -> Resul
     // Allocate a dummy %State and call the internal function
     writeln!(out, "  %state = alloca i8, i64 8, align 8").unwrap();
     let call_args: Vec<String> = defn.parameters.iter()
-        .map(|(name, ty)| format!("{} %{}", types::lower_type(ty), name))
+        .map(|(name, ty)| format!("{} %{}", types::lower_type(ty, None), name))
         .collect();
     writeln!(out, "  %result = call {} @{}(ptr %state{})", 
         ret_ty, internal_name,

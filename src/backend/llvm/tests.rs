@@ -415,7 +415,8 @@ fn test_binop_no_nuw_nsw() {
 
 #[test]
 fn test_float_binary_add() {
-    let mut backend = LlvmBackend::new();
+    let tu = crate::type_universe::TypeUniverse::new();
+    let mut backend = LlvmBackend::new().with_type_universe(tu);
     let program = vec![
         TopLevel::StateDecl(StateDecl {
             name: "x".to_string(),
@@ -2241,7 +2242,8 @@ fn test_frgn_ptr_return() {
 
 #[test]
 fn test_struct_literal_field_offsets() {
-    let mut backend = LlvmBackend::new();
+    let tu = crate::type_universe::TypeUniverse::new();
+    let mut backend = LlvmBackend::new().with_type_universe(tu);
     let program = vec![
         TopLevel::StaticStruct(StructDef {
             name: "Mixed".to_string(),

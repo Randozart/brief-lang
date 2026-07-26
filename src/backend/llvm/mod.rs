@@ -481,50 +481,28 @@ fn collect_strings_expr(expr: &Expr, seen: &mut std::collections::HashSet<String
 /// aware IR directly (TBAA, !range, noalias), we avoid the need for an
 /// expensive LLVM analysis pass to rediscover what the contracts already state.
 
-/// Protocol-driven LLVM type for a given Brief type.
-/// Uses type protocol metadata (maxbits, SSO config, etc.) instead of
-/// hardcoded name matches.
-///
-/// Defaults:
-///   #Int         → i64  (maxbits from primordial)
-///   #Float       → float (default; maxbits:32→float, maxbits:64→double)
-///   #Bool        → i8
-///   #Char        → i32
-///   #String/#Data→ ptr  (C ABI for frgn declare; internal is {i64,i64})  
-///   #Ptr<T>      → ptr
-///   #UInt        → i64
-pub fn protocol_llvm_type(ty: &Type) -> &str {
-    match ty {
-        Type::Vector(inner, _) => {
-            let inner_ll = protocol_llvm_type(inner);
-            // Vector types use pointer to element for frgn ABI
-            "ptr"
-        }
-        Type::Ptr(_) => "ptr",
-        Type::Custom(s) => match s.as_str() {
-            "Int" | "Int64" => "i64",
-            "Int32" => "i32",
-            "Int16" => "i16",
-            "Int8" => "i8",
-            "UInt" | "UInt64" => "i64",
-            "UInt32" => "i32",
-            "UInt16" => "i16",
-            "UInt8" => "i8",
-            "Bool" => "i8",
-            "Char" => "i32",
-            "Float" => "float",
-            "Float64" => "double",
-            "String" | "Data" => "ptr",
-            "Ptr" => "ptr",
-            _ => "i64",
-        },
-        _ => "i64",
+/// 2026-07-26: Protocol-driven LLVM type. Reads llvm_type from the
+/// type's ResolvedType in the universe. No name matching — the primordial
+/// llvm_type property is the single source of truth. Returns "i64" if the
+/// universe is unavailable or the type is unknown (safe default).
+/// Ptr<T> and Vector<T,N> are compiler constructs, not universe types.
+pub fn protocol_llvm_type(ty: &Type, universe: Option<&crate::type_universe::TypeUniverse>) -> String {
+    if matches!(ty, Type::Ptr(_) | Type::Vector(_, _)) {
+        return "ptr".to_string();
     }
+    if let Some(ref u) = universe {
+        if let Some(rt) = ty.universe_key().and_then(|k| u.get(k)) {
+            if let Some(crate::ast::PropertyValue::String(s)) = rt.properties.get("llvm_type") {
+                return s.clone();
+            }
+        }
+    }
+    "i64".to_string()
 }
-/// The C runtime provides `char` (Bool→i8), `int64_t` (Int→i64),
-/// and `char*` (String→i8*).
-pub(super) fn trg_llvm_storage_ty(ty: &Type) -> &str {
-    protocol_llvm_type(ty)
+/// 2026-07-26: Storage type for trigger fields. Calls protocol_llvm_type
+/// with the universe available during codegen.
+pub(super) fn trg_llvm_storage_ty(ty: &Type, universe: Option<&crate::type_universe::TypeUniverse>) -> String {
+    protocol_llvm_type(ty, universe)
 }
 
 /// Map a field's LLVM storage type string to its TBAA metadata node index.
@@ -1924,7 +1902,7 @@ impl LlvmBackend {
                     if let Some(ref mut universe) = self.ctx.type_universe {
                         if !universe.types.contains_key(&s.name) {
                             let bytes: u64 = fields.iter().map(|(_, ty)| {
-                                crate::backend::llvm::types::type_size(ty)
+                                crate::backend::llvm::types::type_size(ty, Some(universe))
                             }).sum();
                             let rt = crate::type_universe::ResolvedType {
                                 name: s.name.clone(),
@@ -1950,7 +1928,7 @@ impl LlvmBackend {
                     if let Some(ref mut universe) = self.ctx.type_universe {
                         if !universe.types.contains_key(&s.name) {
                             let bytes: u64 = fields.iter().map(|(_, ty)| {
-                                crate::backend::llvm::types::type_size(ty)
+                                crate::backend::llvm::types::type_size(ty, Some(universe))
                             }).sum();
                             let rt = crate::type_universe::ResolvedType {
                                 name: s.name.clone(),
@@ -1978,7 +1956,7 @@ impl LlvmBackend {
                     if let Some(ref mut universe) = self.ctx.type_universe {
                         if !universe.types.contains_key(&td.name) {
                             let bytes: u64 = fields.iter().map(|(_, ty)| {
-                                crate::backend::llvm::types::type_size(ty)
+                                crate::backend::llvm::types::type_size(ty, Some(universe))
                             }).sum();
                             let rt = crate::type_universe::ResolvedType {
                                 name: td.name.clone(),
@@ -2101,20 +2079,20 @@ impl LlvmBackend {
             if trigger_linked_symbols.contains(name.as_str()) { continue; }
             // Dedup: skip if we already emitted a declare for this foreign_name
             if !declared.insert(&sig.name) { continue; }
-            let ret_ty = match sig.result_type {
-                crate::ast::ResultType::VoidType | crate::ast::ResultType::TrueAssertion => "void",
+            let ret_ty: String = match sig.result_type {
+                crate::ast::ResultType::VoidType | crate::ast::ResultType::TrueAssertion => "void".into(),
                 crate::ast::ResultType::Projection(ref ts) => {
-                    if ts.is_empty() || ts.iter().any(|t| matches!(t, Type::Void)) { "void" }
+                    if ts.is_empty() || ts.iter().any(|t| matches!(t, Type::Void)) { "void".into() }
                     else {
                         // 2026-07-26: Use protocol-driven LLVM type.
                         let first_ret = &ts[0];
-                        protocol_llvm_type(first_ret)
+                        protocol_llvm_type(first_ret, self.ctx.type_universe.as_ref())
                     }
                 }
             };
-            let param_tys: Vec<&str> = sig.inputs.iter().map(|(_, t)| {
+            let param_tys: Vec<String> = sig.inputs.iter().map(|(_, t)| {
                 // 2026-07-26: Use protocol-driven LLVM type.
-                protocol_llvm_type(t)
+                protocol_llvm_type(t, self.ctx.type_universe.as_ref())
             }).collect();
             write!(out, "declare {} @{}(", ret_ty, sig.name).ok();
             for (pi, pt) in param_tys.iter().enumerate() {
@@ -2235,7 +2213,7 @@ impl LlvmBackend {
         // Emit external global declarations for linked triggers (fixes bug 4B)
         for (name, trg) in &self.ctx.triggers {
             if let crate::ast::LinkRef::Linked(sym) = &trg.address {
-                let store_ty = trg_llvm_storage_ty(&trg.ty);
+                let store_ty = trg_llvm_storage_ty(&trg.ty, self.ctx.type_universe.as_ref());
                 let align = if store_ty == "i64" { 8 } else if store_ty == "i32" { 4 } else { 1 };
                 writeln!(out, "@{} = external global {}, align {}", sym, store_ty, align).ok();
                 // Warn if a linked trigger symbol is also declared as a frgn function
@@ -2270,22 +2248,13 @@ impl LlvmBackend {
         sorted_constants.sort();
         for name in &sorted_constants {
             let (ty, expr) = &self.ctx.constants[name];
-            let llvm_ty = match ty {
-                Type::Custom(__t) if __t == "Float64" => "double",
-                Type::Custom(__t) if __t == "Float" => "float",
-                Type::Custom(__t) if __t == "Int" || __t == "UInt" => "i64",
-                Type::Custom(__t) if __t == "Int8" || __t == "UInt8" => "i8",
-                Type::Custom(__t) if __t == "Int16" || __t == "UInt16" => "i16",
-                Type::Custom(__t) if __t == "Int32" || __t == "UInt32" => "i32",
-                Type::Custom(__t) if __t == "Bool" => "i1",
-                _ => "i64",
-            };
+            let llvm_ty = protocol_llvm_type(ty, self.ctx.type_universe.as_ref());
             let key = match expr {
-                Expr::Float(f) => format!("{}:{}", llvm_ty, float_to_llvm_str(*f, llvm_ty)),
+                Expr::Float(f) => format!("{}:{}", llvm_ty, float_to_llvm_str(*f, &llvm_ty)),
                 Expr::Decimal(n) => format!("{}:{}", llvm_ty, n),
                 Expr::Bool(b) => format!("{}:{}", llvm_ty, if *b { "true" } else { "false" }),
                 Expr::UnaryOp(crate::ast::UnaryOpKind::Neg, inner) => match inner.as_ref() {
-                    Expr::Float(f) => format!("{}:{}", llvm_ty, float_to_llvm_str(-*f, llvm_ty)),
+                    Expr::Float(f) => format!("{}:{}", llvm_ty, float_to_llvm_str(-*f, &llvm_ty)),
                     Expr::Decimal(n) => format!("{}:-{}", llvm_ty, n),
                     _ => format!("{}:neg:{}", llvm_ty, name),
                 },
@@ -2307,35 +2276,17 @@ impl LlvmBackend {
             let (ty, expr) = &self.ctx.constants[name];
             let canonical = alias_map.get(name).cloned().unwrap_or_else(|| name.clone());
             if canonical != *name {
-                let llvm_ty = match ty {
-                    Type::Custom(__t) if __t == "Float64" => "double",
-                    Type::Custom(__t) if __t == "Float" => "float",
-                    Type::Custom(__t) if __t == "Int" || __t == "UInt" => "i64",
-                    Type::Custom(__t) if __t == "Int8" || __t == "UInt8" => "i8",
-                    Type::Custom(__t) if __t == "Int16" || __t == "UInt16" => "i16",
-                    Type::Custom(__t) if __t == "Int32" || __t == "UInt32" => "i32",
-                    Type::Custom(__t) if __t == "Bool" => "i1",
-                    _ => "i64",
-                };
+                let llvm_ty = protocol_llvm_type(ty, self.ctx.type_universe.as_ref());
                 writeln!(out, "@{} = alias {}, {}* @{}", name, llvm_ty, llvm_ty, canonical).ok();
                 continue;
             }
-            let llvm_ty = match ty {
-                Type::Custom(__t) if __t == "Float64" => "double",
-                Type::Custom(__t) if __t == "Float" => "float",
-                Type::Custom(__t) if __t == "Int" || __t == "UInt" => "i64",
-                Type::Custom(__t) if __t == "Int8" || __t == "UInt8" => "i8",
-                Type::Custom(__t) if __t == "Int16" || __t == "UInt16" => "i16",
-                Type::Custom(__t) if __t == "Int32" || __t == "UInt32" => "i32",
-                Type::Custom(__t) if __t == "Bool" => "i1",
-                _ => "i64",
-            };
+            let llvm_ty = protocol_llvm_type(ty, self.ctx.type_universe.as_ref());
             let val_str = match expr {
-                Expr::Float(f) => float_to_llvm_str(*f, llvm_ty),
+                Expr::Float(f) => float_to_llvm_str(*f, &llvm_ty),
                 Expr::Decimal(n) => n.to_string(),
                 Expr::Bool(b) => (if *b { "true" } else { "false" }).to_string(),
                 Expr::UnaryOp(crate::ast::UnaryOpKind::Neg, inner) => match inner.as_ref() {
-                    Expr::Float(f) => float_to_llvm_str(-*f, llvm_ty),
+                    Expr::Float(f) => float_to_llvm_str(-*f, &llvm_ty),
                     Expr::Decimal(n) => format!("-{}", n),
                     _ => if *ty == Type::float() { "0.0".to_string() } else { "0".to_string() },
                 },

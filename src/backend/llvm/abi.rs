@@ -38,16 +38,16 @@ pub fn marshal_export_wrapper(
     // Declare the wrapper with C calling convention
     let ret_llvm = ret_ty
         .as_ref()
-        .map(|t| super::types::lower_type(t))
+        .map(|t| super::types::lower_type(t, None))
         .unwrap_or_else(|| "void".into());
     let params_llvm: Vec<String> = param_tys
         .iter()
-        .map(|t| super::types::lower_type(t))
+        .map(|t| super::types::lower_type(t, None))
         .collect();
     let param_decls: Vec<String> = param_tys
         .iter()
         .enumerate()
-        .map(|(i, t)| format!("{} %p{}", super::types::lower_type(t), i))
+        .map(|(i, t)| format!("{} %p{}", super::types::lower_type(t, None), i))
         .collect();
 
     writeln!(

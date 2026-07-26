@@ -223,11 +223,6 @@ impl LlvmBackend {
     fn fallback_llvm_type(ty: &Type) -> &'static str {
         match ty {
             Type::Ptr(_) => "ptr",
-            Type::Custom(__t) if __t == "Float" => "float",
-            Type::Custom(__t) if __t == "Float64" || __t == "Double" => "double",
-            Type::Custom(__t) if __t == "Bool" => "i8",
-            Type::Custom(__t) if __t == "Char" => "i32",
-            Type::Custom(__t) if __t == "String" || __t == "Data" => "ptr",
             Type::Void => "void",
             Type::Bits(bytes) => match bytes * 8 {
                 1 => "i1",
@@ -492,7 +487,7 @@ impl LlvmBackend {
     pub(super) fn emit_trg_load(&mut self, out: &mut String, indent: &str, dst: &str, address: &crate::ast::LinkRef, trg_ty: &Type) {
         match address {
             crate::ast::LinkRef::Explicit(addr) => {
-                let store_ty = super::trg_llvm_storage_ty(trg_ty);
+                let store_ty = super::trg_llvm_storage_ty(trg_ty, self.ctx.type_universe.as_ref());
                 let tr_counter = self.fun.txn_counter;
                 self.fun.txn_counter += 1;
                 let raw = format!("%tr{}", tr_counter);
@@ -500,7 +495,7 @@ impl LlvmBackend {
                 self.emit_trg_load_finish(out, indent, dst, raw, trg_ty);
             }
             crate::ast::LinkRef::Linked(sym) => {
-                let store_ty = super::trg_llvm_storage_ty(trg_ty);
+                let store_ty = super::trg_llvm_storage_ty(trg_ty, self.ctx.type_universe.as_ref());
                 let tr_counter = self.fun.txn_counter;
                 self.fun.txn_counter += 1;
                 let raw = format!("%tr{}", tr_counter);
@@ -512,7 +507,7 @@ impl LlvmBackend {
             // When --error-unresolved-trg is set, emit a null check before the
             // load that branches to unreachable if the pointer is null.
             crate::ast::LinkRef::Deref(ptr_expr) => {
-                let store_ty = super::trg_llvm_storage_ty(trg_ty);
+                let store_ty = super::trg_llvm_storage_ty(trg_ty, self.ctx.type_universe.as_ref());
                 let tr_counter = self.fun.txn_counter;
                 self.fun.txn_counter += 1;
                 let raw = format!("%tr{}", tr_counter);

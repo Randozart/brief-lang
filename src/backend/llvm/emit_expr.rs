@@ -1305,7 +1305,7 @@ impl LlvmBackend {
         // Fall back: compute from struct_types fields
         self.ctx.struct_types.get(type_name)
             .map(|fields| {
-                fields.iter().map(|(_, ty)| types::type_size(ty)).sum()
+                fields.iter().map(|(_, ty)| types::type_size(ty, self.ctx.type_universe.as_ref())).sum()
             })
             .unwrap_or(8)
     }
@@ -1319,7 +1319,7 @@ impl LlvmBackend {
                 if fname == field_name {
                     return offset;
                 }
-                offset += types::type_size(ftype);
+                offset += types::type_size(ftype, self.ctx.type_universe.as_ref());
             }
         }
         0
