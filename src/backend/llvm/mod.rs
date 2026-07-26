@@ -918,10 +918,9 @@ impl LlvmBackend {
         // to always return "i64" for state fields — this keeps %State struct
         // layout uniform and avoids type mismatches in codegen paths that
         // assume i64 (load i64, store i64, add i64, icmp i64, etc.).
-        // 2026-07-18: SSO String / UTF8View fields occupy 2 consecutive i64 slots.
-        if matches!(ty, Type::Custom(name) if name == "UTF8View")
-            || (self.feature_sso_strings
-                && self.ctx.type_universe.as_ref().map_or(false, |u| u.is_string_like(ty)))
+        // 2026-07-18: SSO String / String-like fields occupy 2 consecutive i64 slots.
+        if self.feature_sso_strings
+            && self.ctx.type_universe.as_ref().map_or(false, |u| u.is_string_like(ty))
         {
             self.ctx.field_types.push("i64".to_string());
             self.ctx.field_brief_types.push(ty.clone());
@@ -1575,15 +1574,20 @@ impl LlvmBackend {
     }
 
     fn type_is_heap_allocated(&self, ty: &Type) -> bool {
-        // 2026-07-18: Phase A — String check replaced with is_string_like.
-        // Phase B (SSO) may make short strings non-heap; is_string_like stays.
-        // 2026-07-18: UTF8View, StaticString, SmallString64 are never heap-allocated.
-        if matches!(ty, Type::Custom(name) if name == "UTF8View" || name == "StaticString" || name == "SmallString64") {
-            return false;
+        // 2026-07-26: Protocol-driven. String-like types (SSO/non-SSO) are tracked
+        // by is_string_like in the universe. Heap-allocated types declare
+        // Cast.#HeapAllocated in their type properties. UTF8View, StaticString,
+        // SmallString64 are stack-allocated (no Cast.#HeapAllocated).
+        if self.ctx.type_universe.as_ref().map_or(false, |u| u.is_string_like(ty)) {
+            return true;
         }
-        (self.ctx.type_universe.as_ref().map_or(false, |u| u.is_string_like(ty))
-            || matches!(ty, Type::Custom(__t) if __t == "Data"))
-            || matches!(ty, Type::Custom(name) if name == "List" || name == "HashMap" || name == "HashSet" || name == "Stack" || name == "Queue" || name == "StringBuilder")
+        if self.is_protocol_member(ty, "#Data") {
+            return true;
+        }
+        ty.universe_key()
+            .and_then(|k| self.ctx.type_universe.as_ref().and_then(|u| u.get(k)))
+            .map(|rt| rt.properties.contains_key("Cast.#HeapAllocated"))
+            .unwrap_or(false)
     }
 
     fn check_stmt_embedded(&mut self, stmt: &Statement, ctx_name: &str, threading_intrinsics: &[&str]) {

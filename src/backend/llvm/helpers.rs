@@ -1628,7 +1628,7 @@ impl LlvmBackend {
     /// (Float, Float64, Bfloat16, FP16, user-defined float types).
     /// 2026-07-26: Check if a type implements a protocol by looking for
     /// Cast.<protocol> in its ResolvedType properties. No name matching.
-    fn is_protocol_member(&self, ty: &Type, protocol: &str) -> bool {
+    pub(super) fn is_protocol_member(&self, ty: &Type, protocol: &str) -> bool {
         let prop_key = if protocol.starts_with('#') {
             format!("Cast.{}", protocol)
         } else {
@@ -2663,71 +2663,67 @@ impl LlvmBackend {
         indent: &str,
         reg: &TypedRegister,
     ) -> String {
-        match &reg.ty {
-            Type::Custom(t) if t == "Float64" => {
+        // 2026-07-26: Protocol-driven dispatch. No name matching.
+        let ty = &reg.ty;
+        // #Float protocol: convert float/double to i64
+        if self.is_protocol_member(ty, "#Float") {
+            let maxbits = self.ctx.type_universe.as_ref()
+                .and_then(|u| ty.universe_key().and_then(|k| u.get(k)))
+                .map(|rt| rt.max_bits).unwrap_or(32);
+            if maxbits > 32 {
                 let tr = self.fun.gen_reg();
                 writeln!(out, "{}{} = bitcast double {} to i64", indent, tr, reg.name).ok();
-                tr
-            }
-            // 2026-07-17: Float (32-bit) must go float→i32→i64, not direct bitcast.
-            Type::Custom(t) if t == "Float" => {
+                return tr;
+            } else {
                 let tr = self.fun.gen_reg();
                 writeln!(out, "{}{} = bitcast float {} to i32", indent, tr, reg.name).ok();
                 let ze = self.fun.gen_reg();
                 writeln!(out, "{}{} = zext i32 {} to i64", indent, ze, tr).ok();
-                ze
+                return ze;
             }
-            Type::Custom(t) if t == "Bool" => {
-                let tr = self.fun.gen_reg();
-                writeln!(out, "{}{} = zext i8 {} to i64", indent, tr, reg.name).ok();
-                tr
-            }
-            Type::Custom(t)
-                if (t == "String" || t == "Data")
-                    && self.feature_sso_strings
-                    && self
-                        .ctx
-                        .type_universe
-                        .as_ref()
-                        .map_or(false, |u| u.is_string_like(&reg.ty)) =>
+        }
+        // #Bool protocol: zext i8 to i64
+        if self.is_protocol_member(ty, "#Bool") {
+            let tr = self.fun.gen_reg();
+            writeln!(out, "{}{} = zext i8 {} to i64", indent, tr, reg.name).ok();
+            return tr;
+        }
+        // #String / #Data protocol: extract SSO handle or ptrtoint
+        let is_string = self.is_protocol_member(ty, "#String");
+        let is_data = self.is_protocol_member(ty, "#Data");
+        if is_string || is_data {
+            if self.feature_sso_strings
+                && self.ctx.type_universe.as_ref()
+                    .map_or(false, |u| u.is_string_like(ty))
             {
-                // 2026-07-18: SSO String is {i64, i64} — extract handle[0] (data/tag).
                 let tr = self.fun.gen_reg();
-                writeln!(
-                    out,
-                    "{}{} = extractvalue {{ i64, i64 }} {}, 0",
-                    indent, tr, reg.name
-                )
-                .ok();
-                tr
-            }
-            Type::Custom(t) if t == "String" || t == "Data" => {
+                writeln!(out, "{}{} = extractvalue {{ i64, i64 }} {}, 0", indent, tr, reg.name).ok();
+                return tr;
+            } else {
                 let tr = self.fun.gen_reg();
                 writeln!(out, "{}{} = ptrtoint i8* {} to i64", indent, tr, reg.name).ok();
-                tr
+                return tr;
             }
-            // 2026-07-17: Ptr types are already represented as i64 (via
-            // ptrtoint in emit_malloc). Store the i64 bits directly.
-            Type::Ptr(_) => reg.name.clone(),
-            // 2026-07-26: With native %State widths, Int/UInt fields may be
-            // narrower than i64 (e.g., Int32→i32, Int8→i8). Widen via sext/zext.
-            Type::Custom(t) if t == "Int" || t == "UInt" => {
-                let llvm_ty = self.llvm_type(&reg.ty);
-                if llvm_ty != "i64" && llvm_ty.starts_with('i') {
-                    let tr = self.fun.gen_reg();
-                    let is_unsigned = t.starts_with('U');
-                    if is_unsigned {
-                        writeln!(out, "{}{} = zext {} {} to i64", indent, tr, llvm_ty, reg.name).ok();
-                    } else {
-                        writeln!(out, "{}{} = sext {} {} to i64", indent, tr, llvm_ty, reg.name).ok();
-                    }
-                    tr
-                } else {
-                    reg.name.clone()
-                }
-            }
-            _ => reg.name.clone(),
         }
+        // #Int / #UInt protocol: widen if narrower than i64
+        if self.is_protocol_member(ty, "#Int") {
+            let llvm_ty = self.llvm_type(ty);
+            if llvm_ty != "i64" && llvm_ty.starts_with('i') {
+                let tr = self.fun.gen_reg();
+                let is_unsigned = self.is_protocol_member(ty, "#UInt");
+                if is_unsigned {
+                    writeln!(out, "{}{} = zext {} {} to i64", indent, tr, llvm_ty, reg.name).ok();
+                } else {
+                    writeln!(out, "{}{} = sext {} {} to i64", indent, tr, llvm_ty, reg.name).ok();
+                }
+                return tr;
+            }
+        }
+        // Ptr: already i64 (via ptrtoint in emit_malloc).
+        if matches!(ty, Type::Ptr(_)) {
+            return reg.name.clone();
+        }
+        reg.name.clone()
     }
 
     /// Emit a getelementptr for a state field and return the GEP register name.
