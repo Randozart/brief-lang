@@ -27,10 +27,9 @@ use crate::ast::{
 };
 use crate::backend::llvm::directive::OptimizationRemark;
 use crate::backend::llvm::{AllocStrategy, ChimeraInfo};
-use crate::dbrief::DbriefType;
 use crate::target_spec::TargetSpec;
 use crate::type_universe::TypeUniverse;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 /// 2026-07-02: Indices of the 4 inline RingBuffer fields in %State.
 /// Used by emit_arrow_push/emit_arrow_discard to access RingBuf fields
@@ -43,7 +42,6 @@ pub struct RingbufInlineFields {
     pub tail_idx: usize,
     pub mask_idx: usize,
 }
-use std::collections::HashSet;
 
 // ── CompilerContext ───────────────────────────────────────────────────
 //
@@ -89,7 +87,9 @@ pub struct CompilerContext {
     pub mmio_fields: HashMap<String, u64>,
     pub mmio_initializers: HashMap<String, Option<Expr>>,
     pub mmio_prepopulated: bool,
-    pub schema_aliases: HashMap<String, DbriefType>,
+    /// 2026-07-26: Replaced DbriefType with HashSet. The type annotation
+    /// was never read in production — only names matter for cross-validation.
+    pub schema_alias_names: HashSet<String>,
 
     // FFI & Declarations
     pub triggers: HashMap<String, TriggerDeclaration>,
@@ -215,7 +215,7 @@ impl CompilerContext {
             mmio_fields: HashMap::new(),
             mmio_initializers: HashMap::new(),
             mmio_prepopulated: false,
-            schema_aliases: HashMap::new(),
+            schema_alias_names: HashSet::new(),
             triggers: HashMap::new(),
             trigger_names: Vec::new(),
             frgn_map: HashMap::new(),

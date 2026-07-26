@@ -264,17 +264,6 @@ pub struct DbriefProgram {
 }
 
 #[derive(Debug, Clone, Serialize)]
-pub struct DbvsProgram {
-    pub imports: Vec<ImportStmt>,
-    pub registers: Vec<DbriefRegister>,
-    pub structs: Vec<DbriefStruct>,
-    pub enums: Vec<DbriefEnum>,
-    pub services: Vec<DbriefService>,
-    pub aliases: Vec<DbriefAlias>,
-    pub depends: Vec<DbriefDependency>,
-}
-
-#[derive(Debug, Clone, Serialize)]
 pub struct DbvlProgram {
     pub imports: Vec<ImportStmt>,
     pub records: Vec<DbvlRecord>,

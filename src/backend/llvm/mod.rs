@@ -981,8 +981,8 @@ impl LlvmBackend {
         self
     }
 
-    pub fn with_schema_aliases(mut self, aliases: HashMap<String, crate::dbrief::DbriefType>) -> Self {
-        self.ctx.schema_aliases = aliases;
+    pub fn with_schema_aliases(mut self, aliases: HashSet<String>) -> Self {
+        self.ctx.schema_alias_names = aliases;
         self
     }
 
@@ -3536,36 +3536,10 @@ impl LlvmBackend {
         }
     }
 
+    /// 2026-07-26: Removed type-level validation — schema types were from .dbvs era.
+    /// The V2 parser's FieldType handles all type compatibility at parse time.
     fn validate_schema_types(&mut self) {
-        if self.ctx.schema_aliases.is_empty() {
-            return;
-        }
-        for (name, schema_type) in &self.ctx.schema_aliases.clone() {
-            let brief_type = match schema_type.to_brief_type_name() {
-                Ok(t) => t,
-                Err(e) => {
-                    self.warnings.push(format!(
-                        "warning: schema type incompatibility for '{}': {}. Field will NOT be treated as MMIO.",
-                        name, e
-                    ));
-                    continue;
-                }
-            };
-            let name_clone = name.clone();
-            for item_name in self.ctx.field_index_map.keys().chain(self.ctx.mmio_initializers.keys()) {
-                if item_name == &name_clone {
-                    if brief_type == "Int" {
-                        if brief_type == "Int" && schema_type.is_unsigned_int() {
-                            self.warnings.push(format!(
-                                "warning: schema declares '{}' as unsigned but Brief uses Int. 64-bit target makes this safe.",
-                                name
-                            ));
-                        }
-                    }
-                    break;
-                }
-            }
-        }
+        // No-op: alias validation is now name-only via schema_alias_names.
     }
 
     // ── Field index ───────────────────────────────────────────
@@ -3588,7 +3562,7 @@ impl LlvmBackend {
                 self.ctx.mmio_fields.insert(s.name.clone(), addr);
                 self.ctx.mmio_initializers.insert(s.name.clone(), None);
                 if self.ctx.mmio_prepopulated && self.ctx.mmio_fields.contains_key(&s.name) {
-                    if self.ctx.schema_aliases.is_empty() || self.ctx.schema_aliases.contains_key(&s.name) {
+                    if self.ctx.schema_alias_names.is_empty() || self.ctx.schema_alias_names.contains(&s.name) {
                         self.ctx.mmio_initializers.insert(s.name.clone(), None);
                     } else {
                         // Not in any imported schema — remove from mmio_fields to prevent

@@ -48,7 +48,7 @@ pub struct MemorySection {
 }
 
 /// Hardware bottleneck configuration for roofline analysis.
-/// Can be loaded from a bottlenecks.dbvs schema file.
+/// Can be loaded from a bottlenecks.dbv schema file.
 #[derive(Debug, Clone, Deserialize, Serialize, Default)]
 pub struct BottleneckSection {
     #[serde(default = "default_pcie_bw")]

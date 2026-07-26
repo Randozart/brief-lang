@@ -1239,21 +1239,6 @@ mod tests {
     }
 }
 
-pub fn parse_dbvs(input: &str) -> Result<DbvsProgram, String> {
-    let mut parser = DbriefParser::new(input.to_string());
-    let mut program = parser.parse()?;
-
-    Ok(DbvsProgram {
-        imports: program.imports,
-        registers: program.registers,
-        structs: program.structs,
-        enums: program.enums,
-        services: program.services,
-        aliases: program.aliases,
-        depends: program.depends,
-    })
-}
-
 pub fn parse_dbvl(input: &str) -> Result<DbvlProgram, String> {
     let mut parser = DbriefParser::new(input.to_string());
     let mut program = parser.parse()?;
@@ -1274,97 +1259,6 @@ pub fn parse_dbvl(input: &str) -> Result<DbvlProgram, String> {
         operations,
         depends: program.depends,
     })
-}
-
-#[cfg(test)]
-mod dbvs_tests {
-    use super::*;
-
-    #[test]
-    fn test_parse_dbvs_schema() {
-        let input = r#"
-            REGISTER @1: Vector[Person];
-            
-            STRUCT Person {
-                name: String;
-                age: UInt[8];
-                role: String;
-            }
-            
-            ALIAS status_reg: UInt[32];
-            ALIAS led: Bool;
-        "#;
-        let result = parse_dbvs(input);
-        assert!(result.is_ok(), "Failed to parse dbvs: {:?}", result);
-        let program = result.unwrap();
-        assert_eq!(program.registers.len(), 1);
-        assert_eq!(program.structs.len(), 1);
-        assert_eq!(program.aliases.len(), 2);
-    }
-
-    #[test]
-    fn test_dbvs_aliases_are_declarations_only() {
-        let input = r#"
-            ALIAS status_reg: UInt[32];
-            ALIAS led: Bool;
-        "#;
-        let result = parse_dbvs(input);
-        assert!(result.is_ok());
-        let program = result.unwrap();
-
-        for alias in &program.aliases {
-            assert!(alias.address.is_none(), "dbvs aliases should not have addresses");
-        }
-    }
-
-    #[test]
-    fn test_parse_service_basic() {
-        let input = r#"
-            SERVICE ImageClassifier {
-                INPUT img_data: Vector[UInt[8], 4096];
-                OUTPUT label: String;
-                OUTPUT confidence: Float;
-            }
-        "#;
-        let result = parse_dbvs(input);
-        assert!(result.is_ok(), "Failed to parse service: {:?}", result);
-        let program = result.unwrap();
-        assert_eq!(program.services.len(), 1);
-
-        let service = &program.services[0];
-        assert_eq!(service.name, "ImageClassifier");
-        assert_eq!(service.fields.len(), 3);
-
-        let input_field = &service.fields[0];
-        assert_eq!(input_field.direction, "INPUT");
-        assert_eq!(input_field.name, "img_data");
-
-        let output_field = &service.fields[1];
-        assert_eq!(output_field.direction, "OUTPUT");
-        assert_eq!(output_field.name, "label");
-    }
-
-    #[test]
-    fn test_parse_service_multiple() {
-        let input = r#"
-            SERVICE WeatherApi {
-                INPUT city: String;
-                OUTPUT temperature: Float;
-                OUTPUT humidity: Float;
-            }
-
-            SERVICE ImageClassifier {
-                INPUT img_data: Vector[UInt[8], 4096];
-                OUTPUT label: String;
-            }
-        "#;
-        let result = parse_dbvs(input);
-        assert!(result.is_ok(), "Failed to parse services: {:?}", result);
-        let program = result.unwrap();
-        assert_eq!(program.services.len(), 2);
-        assert_eq!(program.services[0].name, "WeatherApi");
-        assert_eq!(program.services[1].name, "ImageClassifier");
-    }
 }
 
 #[cfg(test)]

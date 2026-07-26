@@ -1140,56 +1140,17 @@ fn test_slp_hazard_avx_target() {
         "AVX2: 12 fields with 32 cross-ops should disable SLP (peak=28 >= 16)");
 }
 
-// ── DBrief schema tests ───────────────────────────────────
+// ── Schema alias tests ────────────────────────────────────
 
 #[test]
-fn test_dbvs_import_aliases_loaded() {
-    let mut aliases: HashMap<String, crate::dbrief::DbriefType> = HashMap::new();
-    aliases.insert("uart_debug".to_string(), crate::dbrief::DbriefType::Data);
+fn test_schema_aliases_loaded() {
+    let mut aliases = HashSet::new();
+    aliases.insert("uart_debug".to_string());
     let mut backend = LlvmBackend::new().with_schema_aliases(aliases);
-    assert_eq!(backend.ctx.schema_aliases.len(), 1);
-    assert!(backend.ctx.schema_aliases.contains_key("uart_debug"));
+    assert_eq!(backend.ctx.schema_alias_names.len(), 1);
+    assert!(backend.ctx.schema_alias_names.contains("uart_debug"));
     let output = backend.generate(&empty_program(), None);
     assert!(output.contains("ModuleID"));
-}
-
-#[test]
-fn test_schema_type_unsigned_warning() {
-    let mut aliases: HashMap<String, crate::dbrief::DbriefType> = HashMap::new();
-    aliases.insert("count".to_string(), crate::dbrief::DbriefType::UInt(64));
-    let program = vec![
-        TopLevel::StateDecl(StateDecl {
-            name: "count".to_string(),
-            ty: Type::int(),
-            span: None,
-        }),
-    ];
-    let mut backend = LlvmBackend::new().with_schema_aliases(aliases);
-    let _output = backend.generate(&program, None);
-    let warnings = backend.warnings();
-    let has_unsigned_warning = warnings.iter().any(|w| w.contains("unsigned") && w.contains("count"));
-    assert!(has_unsigned_warning,
-        "UInt(64) schema type with Int Brief type should produce unsigned warning, got: {:?}", warnings);
-}
-
-#[test]
-fn test_schema_vector_rejected() {
-    let mut aliases: HashMap<String, crate::dbrief::DbriefType> = HashMap::new();
-    aliases.insert("buf".to_string(), crate::dbrief::DbriefType::Vector(
-        Box::new(crate::dbrief::DbriefType::UInt(8)), Some(256)));
-    let program = vec![
-        TopLevel::StateDecl(StateDecl {
-            name: "buf".to_string(),
-            ty: Type::int(),
-            span: None,
-        }),
-    ];
-    let mut backend = LlvmBackend::new().with_schema_aliases(aliases);
-    let _output = backend.generate(&program, None);
-    let warnings = backend.warnings();
-    let has_vector_warning = warnings.iter().any(|w| w.contains("Vector") && w.contains("buf"));
-    assert!(has_vector_warning,
-        "Vector schema type should produce incompatibility warning, got: {:?}", warnings);
 }
 
 #[test]
@@ -1209,19 +1170,19 @@ fn test_no_schema_import_no_validation() {
 
 #[test]
 fn test_multiple_schema_imports_merged() {
-    let mut aliases: HashMap<String, crate::dbrief::DbriefType> = HashMap::new();
-    aliases.insert("gpio0".to_string(), crate::dbrief::DbriefType::UInt(32));
-    aliases.insert("gpio1".to_string(), crate::dbrief::DbriefType::UInt(32));
+    let mut aliases = HashSet::new();
+    aliases.insert("gpio0".to_string());
+    aliases.insert("gpio1".to_string());
     let mut backend = LlvmBackend::new().with_schema_aliases(aliases);
-    assert_eq!(backend.ctx.schema_aliases.len(), 2);
+    assert_eq!(backend.ctx.schema_alias_names.len(), 2);
     let output = backend.generate(&empty_program(), None);
     assert!(output.contains("ModuleID"));
 }
 
 #[test]
 fn test_imported_alias_is_mmio() {
-    let mut aliases: HashMap<String, crate::dbrief::DbriefType> = HashMap::new();
-    aliases.insert("led_0".to_string(), crate::dbrief::DbriefType::UInt(32));
+    let mut aliases = HashSet::new();
+    aliases.insert("led_0".to_string());
     let mut mmio: HashMap<String, u64> = HashMap::new();
     mmio.insert("led_0".to_string(), 0x40000000);
     let mut backend = LlvmBackend::new()
@@ -1262,8 +1223,8 @@ fn test_imported_alias_is_mmio() {
 
 #[test]
 fn test_unimported_alias_not_mmio() {
-    let mut aliases: HashMap<String, crate::dbrief::DbriefType> = HashMap::new();
-    aliases.insert("uart_debug".to_string(), crate::dbrief::DbriefType::Data);
+    let mut aliases = HashSet::new();
+    aliases.insert("uart_debug".to_string());
     let mut mmio: HashMap<String, u64> = HashMap::new();
     mmio.insert("led_0".to_string(), 0x40000000);
     mmio.insert("uart_debug".to_string(), 0xFF010000);
