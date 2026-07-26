@@ -1,7 +1,7 @@
 # Data Brief Implementation — New Syntax & Parser Rewrite
 
 **Date:** 2026-07-26
-**Status:** Plan
+**Status:** Complete (merged 2026-07-26)
 **Worktree:** `../brief-compiler-data-brief` (branch: `feat/data-brief`)
 
 ---
