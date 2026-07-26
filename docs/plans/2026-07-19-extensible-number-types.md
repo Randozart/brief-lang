@@ -18,7 +18,7 @@ Separately, the stdlib uses `llvm <~ "float"` to set the LLVM type directly on p
 
 | Category | Detected by | Example types |
 |----------|------------|---------------|
-| `"String"` | 2 Int fields (`data`, `len`) + `encoding` property | String, Utf8View, StaticString, SmallString64, MyString |
+| `"String"` | 2 Int fields (`data`, `len`) + `encoding` property | String, UTF8View, StaticString, SmallString64, MyString |
 | `"Float"` | `alu <~ "Float"` property | Float, Float64, Bfloat16, FP16 |
 | `"Bits"` | Everything else | Int, Bool, Char, Data, Posit32, Decimal64 |
 
@@ -648,8 +648,8 @@ Add `Display`, `as_int_ty()`, `size_bytes()` for the new variants.
 
 #### How auto-inline works
 
-When the op template references a function name (e.g., `call i32 @posit32_add`):
-1. The normalizer detects that `posit32_add` is referenced in an op template
+When the op template references a function name (e.g., `call i32 @Posit32_add`):
+1. The normalizer detects that `Posit32_add` is referenced in an op template
 2. It looks up the function definition in the universe (it's a `defn` in stdlib)
 3. When emitting the function, it adds LLVM's `alwaysinline` attribute
 4. LLVM's inliner at `-O3` eliminates the call, leaving only the integer ops
@@ -674,22 +674,22 @@ In the normalizer, after all types and functions are registered:
 ```brief
 type Posit32 <: Bits {
     bytes <~ 4; alignment <~ 4;
-    op Add ~> "posit32_add";
-    op Mul ~> "posit32_mul";
+    op Add ~> "Posit32_add";
+    op Mul ~> "Posit32_mul";
 };
 
-defn posit32_add(a: UInt32, b: UInt32) -> UInt32 {
+defn Posit32_add(a: UInt32, b: UInt32) -> UInt32 {
     // Pure bit manipulation — no Posit32-specific operations
-    // (implemented in std/aux/posit32.bv)
+    // (implemented in std/aux/Posit32.bv)
 };
 ```
 
 Config:
 ```toml
 [op.Add.Posit32."4"]
-template = "call i32 @posit32_add(i32 %a, i32 %b)"
+template = "call i32 @Posit32_add(i32 %a, i32 %b)"
 [op.Mul.Posit32."4"]
-template = "call i32 @posit32_mul(i32 %a, i32 %b)"
+template = "call i32 @Posit32_mul(i32 %a, i32 %b)"
 ```
 
 ---

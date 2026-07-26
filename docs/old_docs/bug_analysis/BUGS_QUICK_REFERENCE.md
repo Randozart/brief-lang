@@ -105,7 +105,7 @@ But JS tries to call: `invoke_increment` ← ERROR!
 ### Bug 2 Fix (Unicode)
 - [ ] Use `as_bytes()` for byte-level operations
 - [ ] Implement UTF-8 boundary checking helper
-- [ ] Use `char.len_utf8()` when incrementing position
+- [ ] Use `char.len_UTF8()` when incrementing position
 - [ ] Alternative: Use character iterator instead of byte iteration
 - [ ] Test with emoji, Chinese chars, combining marks
 

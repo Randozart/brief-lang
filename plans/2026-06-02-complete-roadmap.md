@@ -162,7 +162,7 @@ attributes #5 = { nofree norecurse nosync nounwind memory(readwrite)
 ### Phase 2 — P0 Bug Fixes (B1-B4)
 | Step | File | Change |
 |------|------|--------|
-| 2.1 | `lib/ffi/native/src/lib.rs` | UTF-8 safe `__contains_at`, `__find_from`, `__utf8_len` |
+| 2.1 | `lib/ffi/native/src/lib.rs` | UTF-8 safe `__contains_at`, `__find_from`, `__UTF8_len` |
 | 2.2 | `src/analysis/entry_point.rs` | Real `get_initial_value_numeric()` |
 | 2.3 | `src/assertion_verify.rs` | False-path exploration for Guarded |
 | 2.4 | `src/analysis/cross_reference.rs` | `decls.iter().any()` instead of `decls.first()` |

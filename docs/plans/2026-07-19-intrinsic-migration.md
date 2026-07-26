@@ -190,7 +190,7 @@ defn get_env_int(key: String) -> Int {
 
 All 23 benchmarks: `GetEnvInt#("BOUND")` → `!GetEnvInt("BOUND")`
 
-`utf8_ops.bv` — also change `const TOTAL` → `let TOTAL`:
+`UTF8_ops.bv` — also change `const TOTAL` → `let TOTAL`:
 ```brief
 let TOTAL: Int = !GetEnvInt("BOUND");
 let SEED: Int = !GetEnvInt("SEED");

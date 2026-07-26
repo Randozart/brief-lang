@@ -5,7 +5,7 @@ use std::sync::atomic::AtomicU32;
 
 fn value_to_string(args: &[Value], idx: usize) -> Result<String, RuntimeError> {
     match &args[idx] {
-        Value::Bits(b) => Ok(String::from_utf8_lossy(b).to_string()),
+        Value::Bits(b) => Ok(String::from_UTF8_lossy(b).to_string()),
         _ => Err(RuntimeError::TypeError {
             expected: "String".into(),
             found: format!("{:?}", args.get(idx)),
@@ -47,7 +47,7 @@ fn value_to_ptr_offset(args: &[Value], idx: usize) -> Result<*mut u8, RuntimeErr
 pub fn print_impl(args: Vec<Value>) -> Result<Value, RuntimeError> {
     for arg in &args {
         match arg {
-            Value::Bits(b) => print!("{}", String::from_utf8_lossy(b)),
+            Value::Bits(b) => print!("{}", String::from_UTF8_lossy(b)),
             Value::Void => print!("void"),
             _ => print!("{:?}", arg),
         }
@@ -57,7 +57,7 @@ pub fn print_impl(args: Vec<Value>) -> Result<Value, RuntimeError> {
 pub fn println_impl(args: Vec<Value>) -> Result<Value, RuntimeError> {
     for arg in &args {
         match arg {
-            Value::Bits(b) => print!("{}", String::from_utf8_lossy(b)),
+            Value::Bits(b) => print!("{}", String::from_UTF8_lossy(b)),
             Value::Void => print!("void"),
             _ => print!("{:?}", arg),
         }
@@ -68,7 +68,7 @@ pub fn println_impl(args: Vec<Value>) -> Result<Value, RuntimeError> {
 pub fn input_impl(args: Vec<Value>) -> Result<Value, RuntimeError> {
     use std::io::Write;
     if let Some(Value::Bits(prompt)) = args.first() {
-        print!("{}", String::from_utf8_lossy(prompt));
+        print!("{}", String::from_UTF8_lossy(prompt));
         std::io::stdout().flush().ok();
     }
     let mut line = String::new();
@@ -124,7 +124,7 @@ pub fn dbvl_append_impl(args: Vec<Value>) -> Result<Value, RuntimeError> {
         ));
     }
     let path = match &args[0] {
-        Value::Bits(b) => String::from_utf8_lossy(b).to_string(),
+        Value::Bits(b) => String::from_UTF8_lossy(b).to_string(),
         other => {
             return Err(RuntimeError::TypeError {
                 expected: "String".into(),
@@ -143,13 +143,13 @@ pub fn dbvl_append_impl(args: Vec<Value>) -> Result<Value, RuntimeError> {
     };
     let csv_parts: Vec<String> = values.iter().map(|v| {
         let Value::Bits(b) = v else { return format!("{:?}", v); };
-        if b.contains(&0u8) || !b.iter().all(|&x| x.is_ascii_graphic() || x.is_ascii_whitespace()) {
+        if b.contains(&0u8) || !b.iter().all(|&x| x.is_ASCII_graphic() || x.is_ASCII_whitespace()) {
             let mut arr = [0u8; 8];
             let copy_len = b.len().min(8);
             arr[..copy_len].copy_from_slice(&b[..copy_len]);
             i64::from_le_bytes(arr).to_string()
         } else {
-            let s = String::from_utf8_lossy(b);
+            let s = String::from_UTF8_lossy(b);
             if s.contains(',') || s.contains('"') || s.contains('\n') {
                 format!("\"{}\"", s.replace('"', "\"\""))
             } else {
@@ -295,7 +295,7 @@ pub fn exec_cmd_impl(args: Vec<Value>) -> Result<Value, RuntimeError> {
 pub fn http_get_impl(args: Vec<Value>) -> Result<Value, RuntimeError> {
     match args.first() {
         Some(Value::Bits(data)) => {
-            let url = String::from_utf8_lossy(data);
+            let url = String::from_UTF8_lossy(data);
             let response = ureq::get(&url)
                 .call()
                 .map_err(|e| RuntimeError::HeapError(format!("http::get failed: {}", e)))?;
@@ -312,8 +312,8 @@ pub fn http_get_impl(args: Vec<Value>) -> Result<Value, RuntimeError> {
 pub fn http_post_impl(args: Vec<Value>) -> Result<Value, RuntimeError> {
     match (args.first(), args.get(1)) {
         (Some(Value::Bits(url_data)), Some(Value::Bits(body_data))) => {
-            let url = String::from_utf8_lossy(url_data);
-            let body_str = String::from_utf8_lossy(body_data);
+            let url = String::from_UTF8_lossy(url_data);
+            let body_str = String::from_UTF8_lossy(body_data);
             let response = ureq::post(&url)
                 .send_string(&body_str)
                 .map_err(|e| RuntimeError::HeapError(format!("http::post failed: {}", e)))?;

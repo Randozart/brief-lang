@@ -2,7 +2,7 @@
 
 **Date:** 2026-07-19
 **Prerequisite:** Intrinsic migration + stabilization complete (23/24 MATCH)
-**Gaps:** nbody_newton 2.2× regression, utf8_ops MISMATCH, HashMap non-determinism
+**Gaps:** nbody_newton 2.2× regression, UTF8_ops MISMATCH, HashMap non-determinism
 
 ---
 
@@ -19,15 +19,15 @@
 | `mod.rs` | 2158 | `constants` | Same (second iteration) |
 | `mod.rs` | 2355 | `cell_defs` | `.values().collect()` → `.sort_by_key(\|d\| d.name)` |
 
-## Priority 2: Arena Allocator for Reactive Txns (utf8_ops Tier 1)
+## Priority 2: Arena Allocator for Reactive Txns (UTF8_ops Tier 1)
 
 **Problem:** `emit_transaction` in `emit_toplevel.rs` has two paths — the callable-txn path calls `emit_arena_init`, the standard reactive path does not. Every `Alloc#(8)` falls through to `@malloc(8)`.
 
 **Fix:** Add `emit_arena_init` to the standard path (~line 1428) before the body emission, and `emit_arena_fini` (already present at line 1459). Also set `is_static_bound` when the precondition is `x < N` with a known bound.
 
-**Impact:** 50-100× speedup for utf8_ops.
+**Impact:** 50-100× speedup for UTF8_ops.
 
-## Priority 3: Auto-Inlining Small Callable Txns (utf8_ops Tier 2)
+## Priority 3: Auto-Inlining Small Callable Txns (UTF8_ops Tier 2)
 
 **Problem:** `memcmp_loop` is a callable txn that iterates byte-by-byte. It's emitted as a separate function without `alwaysinline`, so LLVM can't optimize across the call boundary.
 
@@ -41,11 +41,11 @@ Then emit `alwaysinline` on the function. This is better than manual `#inline` a
 
 **Impact:** 5-10× speedup for memcmp-heavy workloads.
 
-## Priority 4: Constant-Length Fast Path for memcmp (utf8_ops Tier 3)
+## Priority 4: Constant-Length Fast Path for memcmp (UTF8_ops Tier 3)
 
 **Problem:** `memcmp(a, b, 8)` compares 8 bytes one at a time via `Load#(addr, 1)`. Each byte load goes through the full LLVM intrinsic path.
 
-**Fix:** In `lib/std/types/utf8view.bv`, add a fast path for `len == 8` that loads both values as `i64` via `Load#(a, 8)` and compares with a single `icmp`. This is safe because SSO strings store inline data packed as i64.
+**Fix:** In `lib/std/types/UTF8view.bv`, add a fast path for `len == 8` that loads both values as `i64` via `Load#(a, 8)` and compares with a single `icmp`. This is safe because SSO strings store inline data packed as i64.
 
 ## Priority 5: Native Float Types in State (nbody_newton)
 

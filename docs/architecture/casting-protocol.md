@@ -34,12 +34,12 @@ needed because both sides are concrete and the direction is unambiguous.
 
 ```brief
 type Latin1String {
-    op CastTo(#String) = latin1_to_utf8(#L);      // Latin1 → UTF-8
-    op CastFrom(#String) = utf8_to_latin1(#L);     // UTF-8 → Latin1
+    op CastTo(#String) = latin1_to_UTF8(#L);      // Latin1 → UTF-8
+    op CastFrom(#String) = UTF8_to_latin1(#L);     // UTF-8 → Latin1
 };
 
 type Posit32 {
-    op Cast(Int) = posit32_to_int(#L);             // Posit32 → Int (direct)
+    op Cast(Int) = Posit32_to_int(#L);             // Posit32 → Int (direct)
 };
 ```
 
@@ -52,27 +52,27 @@ representations of the same semantic concept:
 
 | Hashword | Protocol variants | Default (`.bv`) | Default (`.ebv`) |
 |---|---|---|---|
-| `#String` | `utf8`, `ascii`, `hex`, `base64` | `utf8` | `ascii` |
-| `#Float` | `ieee754`, `bin32`, `bin64` | `ieee754` (backends choose width) | *(same)* |
+| `#String` | `UTF8`, `ASCII`, `hex`, `base64` | `UTF8` | `ASCII` |
+| `#Float` | `IEEE754`, `bin32`, `bin64` | `IEEE754` (backends choose width) | *(same)* |
 | `#Int` | (no variants — width is target-dependent) | (intrinsic) | (intrinsic) |
 | `#Bool` | (no variants) | (intrinsic) | (intrinsic) |
-| `#Char` | `unicode`, `ascii` | `unicode` | `ascii` |
+| `#Char` | `unicode`, `ASCII` | `unicode` | `ASCII` |
 | `#Bits` | (no variants — raw bits) | (intrinsic) | (intrinsic) |
 
 **The file extension determines the default protocol:**
 
 ```brief
-// foo.bv — #String<utf8> by default
-op Add(#String, #String);   // resolves to #String<utf8>
+// foo.bv — #String<UTF8> by default
+op Add(#String, #String);   // resolves to #String<UTF8>
 
-// bar.ebv — #String<ascii> by default
-op Add(#String, #String);   // resolves to #String<ascii>
+// bar.ebv — #String<ASCII> by default
+op Add(#String, #String);   // resolves to #String<ASCII>
 ```
 
 **Cross-variant calls require explicit protocol:**
 
 ```brief
-fn cross(a: #String<utf8>, b: #String<ascii>) { ... };
+fn cross(a: #String<UTF8>, b: #String<ASCII>) { ... };
                                ^^^^^ explicit
 ```
 
@@ -82,8 +82,8 @@ from `.bv` where the protocol differs, the compiler errors:
 
 ```
 error: protocol declaration for #String not explicitly defined.
-  Called from .bv (default: utf8) into .ebv (default: ascii).
-  Use #String<utf8> or #String<ascii> to disambiguate.
+  Called from .bv (default: UTF8) into .ebv (default: ASCII).
+  Use #String<UTF8> or #String<ASCII> to disambiguate.
 ```
 
 ### Why explicit protocols matter
@@ -99,9 +99,9 @@ must acknowledge the encoding difference and declare the transformation
 via a `proto` declaration:
 
 ```brief
-proto ascii: #String {
-    CastTo(#String<utf8>) = ascii_to_utf8(#L);
-    CastFrom(#String<utf8>) = utf8_to_ascii(#L);
+proto ASCII: #String {
+    CastTo(#String<UTF8>) = ASCII_to_UTF8(#L);
+    CastFrom(#String<UTF8>) = UTF8_to_ASCII(#L);
 };
 ```
 
@@ -120,9 +120,9 @@ the shortest path from source to target at compile time via BFS.
 Protocol variants are declared via `proto` with required bindings:
 
 ```brief
-proto ascii: #String {
-    CastTo(#String<utf8>) = ascii_to_utf8(#L);      // edge: ascii → utf8
-    CastFrom(#String<utf8>) = utf8_to_ascii(#L);     // edge: utf8 → ascii
+proto ASCII: #String {
+    CastTo(#String<UTF8>) = ASCII_to_UTF8(#L);      // edge: ASCII → UTF8
+    CastFrom(#String<UTF8>) = UTF8_to_ASCII(#L);     // edge: UTF8 → ASCII
 };
 ```
 
@@ -136,8 +136,8 @@ Types can also declare edges via `op CastTo`/`op CastFrom`:
 
 ```brief
 type Latin1String {
-    op CastTo(#String) = latin1_to_utf8(#L);      // edge: Latin1String → #String
-    op CastFrom(#String) = utf8_to_latin1(#L);     // edge: #String → Latin1String
+    op CastTo(#String) = latin1_to_UTF8(#L);      // edge: Latin1String → #String
+    op CastFrom(#String) = UTF8_to_latin1(#L);     // edge: #String → Latin1String
 };
 ```
 
@@ -154,16 +154,16 @@ backends must be able to produce and consume:
 | Hashword | Variant | Representation | Required ops |
 |---|---|---|---|
 | `#Int` | *(none)* | `i{target_width}` | Add, Sub, Mul, Div, And, Or, Xor, Not, Shl, Shr |
-| `#Float` | `ieee754` | binary32 or binary64 | Add, Sub, Mul, Div, Sqrt, FMA, `Cast(Float64)` |
-| `#Float` | `bin32` | binary32 | Same as ieee754, fixed at 32-bit |
-| `#Float` | `bin64` | binary64 | Same as ieee754, fixed at 64-bit |
+| `#Float` | `IEEE754` | binary32 or binary64 | Add, Sub, Mul, Div, Sqrt, FMA, `Cast(Float64)` |
+| `#Float` | `bin32` | binary32 | Same as IEEE754, fixed at 32-bit |
+| `#Float` | `bin64` | binary64 | Same as IEEE754, fixed at 64-bit |
 | `#Bool` | *(none)* | `i1` (stored i8) | And, Or, Not |
 | `#Char` | `unicode` | `i32` code point 0–0x10FFFF | `Cast(#Int)`, Eq, Lt |
-| `#Char` | `ascii` | `i8` code point 0–127 | `Cast(#Int)`, Eq, Lt |
-| `#String` | `utf8` | UTF-8 byte sequence | Extract(`#Char`), InsertAt(`#Char`), Concat(`#String`), `:> Size`, `Cast(#Bits)` |
-| `#String` | `ascii` | ASCII byte sequence (0–127 per byte) | Same as utf8 — protocol ops are encoding-agnostic |
-| `#String` | `hex` | Hex-encoded bytes (`0-9a-f` pairs) | Same as utf8 |
-| `#String` | `base64` | Base64-encoded bytes | Same as utf8 |
+| `#Char` | `ASCII` | `i8` code point 0–127 | `Cast(#Int)`, Eq, Lt |
+| `#String` | `UTF8` | UTF-8 byte sequence | Extract(`#Char`), InsertAt(`#Char`), Concat(`#String`), `:> Size`, `Cast(#Bits)` |
+| `#String` | `ASCII` | ASCII byte sequence (0–127 per byte) | Same as UTF8 — protocol ops are encoding-agnostic |
+| `#String` | `hex` | Hex-encoded bytes (`0-9a-f` pairs) | Same as UTF8 |
+| `#String` | `base64` | Base64-encoded bytes | Same as UTF8 |
 | `#Bits` | *(none)* | Raw `iN` | And, Or, Xor, Not, Shl, Shr |
 
 The protocol ops (`Extract(#Char)`, `InsertAt(#Char)`, etc.) are the same
@@ -174,7 +174,7 @@ the variant's internal representation and the protocol shape (UTF-8 bytes).
 
 ## Conversion Path Resolution
 
-When the compiler encounters a cross-type operation (e.g., `ascii_str + string`),
+When the compiler encounters a cross-type operation (e.g., `ASCII_str + string`),
 it resolves the conversion path:
 
 1. **Exact match**: Type defines `op Add(String)` → use it.
@@ -191,20 +191,20 @@ Output: sequence of Cast ops, or error
 1. If source_type has op Cast(target_category<variant>):
        return [source_type → target_category<variant>]
 2. BFS over the protocol graph from source_type to target_category<variant>:
-   - Each node is a category variant (e.g. #String<utf8>)
+   - Each node is a category variant (e.g. #String<UTF8>)
    - Each edge is a Cast(Category<variant>) declaration
    - #Bits is always reachable from every type
 3. If path found: return sequence of Cast ops
 4. If no path: compiler error with available alternatives
 ```
 
-### Example: `#String<ascii> → #String<utf8>`
+### Example: `#String<ASCII> → #String<UTF8>`
 
-If no direct `op Cast(#String<utf8>)` exists, the path is:
+If no direct `op Cast(#String<UTF8>)` exists, the path is:
 `Source.CastTo(#Bits)` → `Target.CastFrom(#Bits)`
 
-1. `#String<ascii> :> CastTo(#Bits)` → raw bytes
-2. `#Bits :> CastFrom(#String<utf8>)` → construct UTF-8 from raw bytes
+1. `#String<ASCII> :> CastTo(#Bits)` → raw bytes
+2. `#Bits :> CastFrom(#String<UTF8>)` → construct UTF-8 from raw bytes
 
 The backend implements step 2 in its protocol handler. An optimizing backend
 that uses ASCII internally for both would skip both casts.
@@ -232,23 +232,23 @@ supports in `config/targets.toml`:
 [target.desktop]
 backend = "llvm"
 protocols = [
-    "#String<utf8>",
-    "#String<ascii>",
-    "#Float<ieee754>",
+    "#String<UTF8>",
+    "#String<ASCII>",
+    "#Float<IEEE754>",
     "#Int",
     "#Bool",
     "#Char<unicode>",
-    "#Char<ascii>",
+    "#Char<ASCII>",
     "#Bits",
 ]
 
 [target.embedded-riscv]
 backend = "llvm"
 protocols = [
-    "#String<ascii>",
+    "#String<ASCII>",
     "#Int",
     "#Bool",
-    "#Char<ascii>",
+    "#Char<ASCII>",
     "#Bits",
 ]
 ```
@@ -259,12 +259,12 @@ The backend implements a protocol handler — a `match` on the variant:
 impl LlvmBackend {
     fn emit_string_concat(&mut self, a: &TypedRegister, b: &TypedRegister, protocol: &str) {
         match protocol {
-            "utf8" => {
-                writeln!(out, "%r = call {{ i64, i64 }} @__utf8_concat({}, {})",
+            "UTF8" => {
+                writeln!(out, "%r = call {{ i64, i64 }} @__UTF8_concat({}, {})",
                     a, b);
             }
-            "ascii" => {
-                writeln!(out, "%r = call {{ i64, i64 }} @__ascii_concat({}, {})",
+            "ASCII" => {
+                writeln!(out, "%r = call {{ i64, i64 }} @__ASCII_concat({}, {})",
                     a, b);
             }
             "hex" | "base64" => {
@@ -281,31 +281,31 @@ impl LlvmBackend {
 A function requiring a protocol the backend does not implement:
 
 ```
-error: target 'embedded-riscv' does not support protocol '#String<utf8>'.
+error: target 'embedded-riscv' does not support protocol '#String<UTF8>'.
   Required by function 'generic_concat' in foo.bv.
-  Available protocols on this target: #String<ascii>, #Int, #Bool, ...
+  Available protocols on this target: #String<ASCII>, #Int, #Bool, ...
 ```
 
 ### Cross-variant detection
 
-The typechecker treats `#String<utf8>` and `#String<ascii>` as distinct types.
+The typechecker treats `#String<UTF8>` and `#String<ASCII>` as distinct types.
 Passing one where the other is expected produces:
 
 ```
-type mismatch: expected #String<ascii> for parameter 1, found #String<utf8>
+type mismatch: expected #String<ASCII> for parameter 1, found #String<UTF8>
 ```
 
 The file extension determines the default variant at parse time:
-- `.bv` files: bare `#String` → `#String<utf8>`
-- `.ebv` files: bare `#String` → `#String<ascii>`
+- `.bv` files: bare `#String` → `#String<UTF8>`
+- `.ebv` files: bare `#String` → `#String<ASCII>`
 
 When a `.bv` file calls an `.ebv` function using `#String`, the default
-variants differ (`utf8` vs `ascii`), and the typechecker's existing
+variants differ (`UTF8` vs `ASCII`), and the typechecker's existing
 mismatch detection catches it automatically. The programmer adds the
 explicit variant at the call site:
 
 ```brief
-fn cross(a: #String<utf8>, b: #String<ascii>) { ... };
+fn cross(a: #String<UTF8>, b: #String<ASCII>) { ... };
 ```
 
 ### Adding new protocols
@@ -369,7 +369,7 @@ These ops let ANY two `#String` types communicate through the `CastTo`/`CastFrom
 pair — they negotiate the UTF-8 protocol shape without an intermediate type.
 
 ```brief
-inline defn any_string_to_ascii(source: #String) -> #String<ascii> {
+inline defn any_string_to_ASCII(source: #String) -> #String<ASCII> {
     let bytes = source :> CastTo(#Bits);
     // bytes are UTF-8 — validate, then construct ASCIIString
     // ...
@@ -433,7 +433,7 @@ If yes, `K` satisfies `#String` regardless of its concrete name or layout.
 
 Protocol variant constraints are also valid:
 ```brief
-type AscHashMap<K: #String<ascii>, V> { ... };
+type AscHashMap<K: #String<ASCII>, V> { ... };
 ```
 
 ---
@@ -529,25 +529,25 @@ For every protocol that declares matching `CastTo`/`CastFrom` pairs, the
 compiler proves round-trip identity via symbolic execution and SMT:
 
 ```brief
-proto ascii: #String {
-    CastTo(#String<utf8>) = ascii_to_utf8(#L);
-    CastFrom(#String<utf8>) = utf8_to_ascii(#L);
+proto ASCII: #String {
+    CastTo(#String<UTF8>) = ASCII_to_UTF8(#L);
+    CastFrom(#String<UTF8>) = UTF8_to_ASCII(#L);
 };
 
-// Proved: utf8_to_ascii(ascii_to_utf8(x)) == x
+// Proved: UTF8_to_ASCII(ASCII_to_UTF8(x)) == x
 ```
 
 For every cross-variant `op` declaration, the compiler proves equivalence
 to the default round-trip path:
 
 ```brief
-protocol ascii: #String {
-    CastTo(#String<utf8>) = ascii_to_utf8(#L);
-    CastFrom(#String<utf8>) = utf8_to_ascii(#L);
-    op Add(#String<utf8>) = ascii_add_with_utf8(#L, #R);
+protocol ASCII: #String {
+    CastTo(#String<UTF8>) = ASCII_to_UTF8(#L);
+    CastFrom(#String<UTF8>) = UTF8_to_ASCII(#L);
+    op Add(#String<UTF8>) = ASCII_add_with_UTF8(#L, #R);
 };
 
-// Proved: ascii_add_with_utf8(x, y) == utf8_to_ascii(ascii_to_utf8(x) + y)
+// Proved: ASCII_add_with_UTF8(x, y) == UTF8_to_ASCII(ASCII_to_UTF8(x) + y)
 ```
 
 If either proof fails, compilation is denied. The existing pipeline in

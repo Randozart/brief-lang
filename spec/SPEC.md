@@ -2345,8 +2345,8 @@ Type Stack<T> <: List<T> { AllowIndex = false; };
 Type Queue<T> <: List<T> { ExtractFrom = 0; AllowIndex = false; };
 
 // Codec-bearing type
-import { Utf8 } from "std/utf8.bv";
-Type String <: List<U8> { Codec = Utf8; };
+import { UTF8 } from "std/UTF8.bv";
+Type String <: List<U8> { Codec = UTF8; };
 
 // Refinement constraint
 Type PositiveInt <: Int {

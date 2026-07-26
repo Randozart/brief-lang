@@ -28,8 +28,8 @@ impl ProtocolGraph {
     /// Create a new protocol graph with primordial defaults.
     pub fn new() -> Self {
         let mut defaults = HashMap::new();
-        defaults.insert("String".to_string(), "utf8".to_string());
-        defaults.insert("Float".to_string(), "ieee754".to_string());
+        defaults.insert("String".to_string(), "UTF8".to_string());
+        defaults.insert("Float".to_string(), "IEEE754".to_string());
         defaults.insert("Char".to_string(), "unicode".to_string());
         ProtocolGraph {
             edges: HashMap::new(),
@@ -211,7 +211,7 @@ impl ProtocolGraph {
     /// Two-pass approach:
     /// 1. Inject edges for explicitly declared variant names.
     /// 2. Propagate edges to all types that participate in a protocol category
-    ///    (so `type Foo: #String` auto-inherits CastTo(#String<ascii>), etc.).
+    ///    (so `type Foo: #String` auto-inherits CastTo(#String<ASCII>), etc.).
     pub fn inject_edges(&self, universe: &mut TypeUniverse) {
         // Pass 1: Inject edges for explicitly named variants
         for ((cat, var), edges) in &self.edges {
@@ -403,7 +403,7 @@ pub fn verify_crossop_equivalence(
         let Some(inverse_body) = find_defn_body(from_fn, items) else { continue; };
 
         // Build default path expression: CastFrom(CastTo(x) + y)
-        // and custom path expression: ascii_add_with_utf8(x, y)
+        // and custom path expression: ASCII_add_with_UTF8(x, y)
         // Compare via SMT
         let formula = build_crossop_smt(forward_body, inverse_body, custom_body);
         let result = crate::proof_engine::smt::prove_smt_formula(&formula, 1000);
@@ -481,10 +481,10 @@ mod tests {
     #[test]
     fn test_graph_single_edge() {
         let mut graph = ProtocolGraph::new();
-        let key = ("String".to_string(), "ascii".to_string());
-        graph.edges.insert(key, vec![make_edge(CastDirection::CastTo, "String", "utf8")]);
+        let key = ("String".to_string(), "ASCII".to_string());
+        graph.edges.insert(key, vec![make_edge(CastDirection::CastTo, "String", "UTF8")]);
 
-        let path = graph.find_protocol_path("String", "ascii", "String", "utf8");
+        let path = graph.find_protocol_path("String", "ASCII", "String", "UTF8");
         assert!(path.is_some());
         assert_eq!(path.unwrap().len(), 1);
     }
@@ -492,23 +492,23 @@ mod tests {
     #[test]
     fn test_graph_multi_hop() {
         let mut graph = ProtocolGraph::new();
-        let ascii_key = ("String".to_string(), "ascii".to_string());
-        graph.edges.insert(ascii_key, vec![make_edge(CastDirection::CastTo, "String", "utf8")]);
+        let ASCII_key = ("String".to_string(), "ASCII".to_string());
+        graph.edges.insert(ASCII_key, vec![make_edge(CastDirection::CastTo, "String", "UTF8")]);
 
-        let utf16_key = ("String".to_string(), "utf16".to_string());
-        graph.edges.insert(utf16_key.clone(), vec![make_edge(CastDirection::CastFrom, "String", "utf8")]);
-        // CastFrom(utf8) on utf16 means utf8 → utf16 is a reverse edge
+        let UTF16_key = ("String".to_string(), "UTF16".to_string());
+        graph.edges.insert(UTF16_key.clone(), vec![make_edge(CastDirection::CastFrom, "String", "UTF8")]);
+        // CastFrom(UTF8) on UTF16 means UTF8 → UTF16 is a reverse edge
         graph.reverse_edges.entry(
-            ("String".to_string(), "utf8".to_string())
+            ("String".to_string(), "UTF8".to_string())
         ).or_default().push(CastEdge {
             direction: CastDirection::CastTo,
             target_category: "String".to_string(),
-            target_variant: "utf16".to_string(),
+            target_variant: "UTF16".to_string(),
             binding: None,
         });
 
-        let path = graph.find_protocol_path("String", "ascii", "String", "utf16");
-        assert!(path.is_some(), "path should exist: ascii → utf8 → utf16");
+        let path = graph.find_protocol_path("String", "ASCII", "String", "UTF16");
+        assert!(path.is_some(), "path should exist: ASCII → UTF8 → UTF16");
         let steps = path.unwrap();
         assert_eq!(steps.len(), 2);
     }
@@ -516,10 +516,10 @@ mod tests {
     #[test]
     fn test_graph_default_delegation() {
         let mut graph = ProtocolGraph::new();
-        let key = ("String".to_string(), "ascii".to_string());
-        graph.edges.insert(key, vec![make_edge(CastDirection::CastTo, "String", "utf8")]);
+        let key = ("String".to_string(), "ASCII".to_string());
+        graph.edges.insert(key, vec![make_edge(CastDirection::CastTo, "String", "UTF8")]);
 
-        let path = graph.find_default_delegation("String", "ascii");
+        let path = graph.find_default_delegation("String", "ASCII");
         assert!(path.is_some());
     }
 
@@ -527,7 +527,7 @@ mod tests {
     fn test_graph_no_path() {
         let graph = ProtocolGraph::new();
         // No edges registered between these
-        let path = graph.find_protocol_path("String", "ascii", "Float", "ieee754");
+        let path = graph.find_protocol_path("String", "ASCII", "Float", "IEEE754");
         assert!(path.is_none());
     }
 
@@ -535,8 +535,8 @@ mod tests {
     fn test_graph_cross_op_lookup() {
         let mut graph = ProtocolGraph::new();
         graph.cross_ops.insert(
-            ("ascii".to_string(), "Add".to_string(), "utf8".to_string()),
-            "add_utf8_to_ascii".to_string(),
+            ("ASCII".to_string(), "Add".to_string(), "UTF8".to_string()),
+            "add_UTF8_to_ASCII".to_string(),
         );
     }
 
@@ -544,25 +544,25 @@ mod tests {
     fn test_graph_build_from_protocol_def() {
         let items = vec![
             TopLevel::ProtocolDef(ProtocolDef {
-                name: "ascii".to_string(),
+                name: "ASCII".to_string(),
                 category: "String".to_string(),
                 contract: None,
-                cast_edges: vec![make_edge(CastDirection::CastTo, "String", "utf8")],
+                cast_edges: vec![make_edge(CastDirection::CastTo, "String", "UTF8")],
                 cross_ops: vec![],
                 span: None,
             }),
         ];
 
         let graph = ProtocolGraph::build_from(&items);
-        let path = graph.find_protocol_path("String", "ascii", "String", "utf8");
+        let path = graph.find_protocol_path("String", "ASCII", "String", "UTF8");
         assert!(path.is_some());
     }
 
     #[test]
     fn test_graph_primordial_defaults() {
         let graph = ProtocolGraph::new();
-        assert_eq!(graph.default_variant("String"), "utf8");
-        assert_eq!(graph.default_variant("Float"), "ieee754");
+        assert_eq!(graph.default_variant("String"), "UTF8");
+        assert_eq!(graph.default_variant("Float"), "IEEE754");
         assert_eq!(graph.default_variant("Char"), "unicode");
     }
 }

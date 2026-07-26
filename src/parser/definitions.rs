@@ -1170,7 +1170,7 @@ impl<'a> Parser<'a> {
     /// 2026-07-20: Parse an op binding within a type body.
     /// Two forms:
     ///   op Add(#Int, #Int);                                     — declarative hashword dispatch
-    ///   op Add(Posit32) = posit32_add(#L, #R);                  — binding with explicit function
+    ///   op Add(Posit32) = Posit32_add(#L, #R);                  — binding with explicit function
     fn parse_op_binding(&mut self, operators: &mut Vec<OperatorDef>) -> Result<(), SyntaxError> {
         let op_name = self.expect_identifier()?;
         self.expect(Token::LParen)?;
@@ -1471,7 +1471,7 @@ impl<'a> Parser<'a> {
                             String::new(),
                         ),
                         _ => return self.error_at_current(&format!(
-                            "expected protocol variant like '#String<utf8>', got '{}'", target_type
+                            "expected protocol variant like '#String<UTF8>', got '{}'", target_type
                         )),
                     };
                     self.expect(Token::RParen)?;
@@ -1681,27 +1681,27 @@ mod tests {
 
     #[test]
     fn test_hashword_string_with_default_variant() {
-        // Bare #String resolves to utf8 (universal default)
+        // Bare #String resolves to UTF8 (universal default)
         let ty = parse_type("#String").unwrap();
-        assert_eq!(ty, crate::ast::Type::HashWordVariant("#String".into(), "utf8".into()));
+        assert_eq!(ty, crate::ast::Type::HashWordVariant("#String".into(), "UTF8".into()));
     }
 
     #[test]
     fn test_hashword_string_with_explicit_variant() {
-        let ty = parse_type("#String<utf8>").unwrap();
-        assert_eq!(ty, crate::ast::Type::HashWordVariant("#String".into(), "utf8".into()));
+        let ty = parse_type("#String<UTF8>").unwrap();
+        assert_eq!(ty, crate::ast::Type::HashWordVariant("#String".into(), "UTF8".into()));
     }
 
     #[test]
-    fn test_hashword_string_with_explicit_ascii_variant() {
-        let ty = parse_type("#String<ascii>").unwrap();
-        assert_eq!(ty, crate::ast::Type::HashWordVariant("#String".into(), "ascii".into()));
+    fn test_hashword_string_with_explicit_ASCII_variant() {
+        let ty = parse_type("#String<ASCII>").unwrap();
+        assert_eq!(ty, crate::ast::Type::HashWordVariant("#String".into(), "ASCII".into()));
     }
 
     #[test]
     fn test_hashword_float_with_explicit_variant() {
-        let ty = parse_type("#Float<ieee754>").unwrap();
-        assert_eq!(ty, crate::ast::Type::HashWordVariant("#Float".into(), "ieee754".into()));
+        let ty = parse_type("#Float<IEEE754>").unwrap();
+        assert_eq!(ty, crate::ast::Type::HashWordVariant("#Float".into(), "IEEE754".into()));
     }
 
     // ── Op declaration parsing ───────────────────────────────────────
@@ -1730,7 +1730,7 @@ mod tests {
     fn test_op_declarative_multiple_params() {
         let ops = parse_op_from_type_def("type T { op Add(#Float, #Float); };");
         assert_eq!(ops.len(), 1);
-        assert_eq!(ops[0].params[0], crate::ast::Type::HashWordVariant("#Float".into(), "ieee754".into()));
+        assert_eq!(ops[0].params[0], crate::ast::Type::HashWordVariant("#Float".into(), "IEEE754".into()));
     }
 
     #[test]
@@ -1758,13 +1758,13 @@ mod tests {
 
     #[test]
     fn test_protocol_def_edges_only() {
-        let pd = parse_protocol("proto ascii: #String { CastTo(#String<utf8>); };");
-        assert_eq!(pd.name, "ascii");
+        let pd = parse_protocol("proto ASCII: #String { CastTo(#String<UTF8>); };");
+        assert_eq!(pd.name, "ASCII");
         assert_eq!(pd.category, "String");
         assert_eq!(pd.cast_edges.len(), 1);
         assert_eq!(pd.cast_edges[0].direction, CastDirection::CastTo);
         assert_eq!(pd.cast_edges[0].target_category, "String");
-        assert_eq!(pd.cast_edges[0].target_variant, "utf8");
+        assert_eq!(pd.cast_edges[0].target_variant, "UTF8");
         assert!(pd.cross_ops.is_empty());
         assert!(pd.contract.is_none());
     }
@@ -1772,9 +1772,9 @@ mod tests {
     #[test]
     fn test_protocol_def_cross_op() {
         let pd = parse_protocol(
-            "proto ascii: #String { CastTo(#String<utf8>); op Add(#String<utf8>) = add_utf8_to_ascii(#L, #R); };"
+            "proto ASCII: #String { CastTo(#String<UTF8>); op Add(#String<UTF8>) = add_UTF8_to_ASCII(#L, #R); };"
         );
-        assert_eq!(pd.name, "ascii");
+        assert_eq!(pd.name, "ASCII");
         assert_eq!(pd.cast_edges.len(), 1);
         assert_eq!(pd.cross_ops.len(), 1);
         assert_eq!(pd.cross_ops[0].op, "Add");
@@ -1784,17 +1784,17 @@ mod tests {
     #[test]
     fn test_protocol_def_with_contract() {
         let pd = parse_protocol(
-            "proto ascii: #String [#Self < 128] { CastTo(#String<utf8>); };"
+            "proto ASCII: #String [#Self < 128] { CastTo(#String<UTF8>); };"
         );
-        assert_eq!(pd.name, "ascii");
+        assert_eq!(pd.name, "ASCII");
         assert!(pd.contract.is_some(), "contract should be parsed");
         assert_eq!(pd.cast_edges.len(), 1);
     }
 
     #[test]
     fn test_protocol_def_empty_body() {
-        let pd = parse_protocol("proto ascii: #String {};");
-        assert_eq!(pd.name, "ascii");
+        let pd = parse_protocol("proto ASCII: #String {};");
+        assert_eq!(pd.name, "ASCII");
         assert_eq!(pd.cast_edges.len(), 0);
         assert_eq!(pd.cross_ops.len(), 0);
     }
@@ -1802,7 +1802,7 @@ mod tests {
     #[test]
     fn test_protocol_def_both_edges() {
         let pd = parse_protocol(
-            "proto ascii: #String { CastTo(#String<utf8>); CastFrom(#String<utf8>); };"
+            "proto ASCII: #String { CastTo(#String<UTF8>); CastFrom(#String<UTF8>); };"
         );
         assert_eq!(pd.cast_edges.len(), 2);
         assert_eq!(pd.cast_edges[0].direction, CastDirection::CastTo);
@@ -1812,10 +1812,10 @@ mod tests {
     #[test]
     fn test_protocol_def_multiple_edges() {
         let pd = parse_protocol(
-            "proto multi: #String { CastTo(#String<utf8>); CastTo(#String<utf16>); };"
+            "proto multi: #String { CastTo(#String<UTF8>); CastTo(#String<UTF16>); };"
         );
         assert_eq!(pd.cast_edges.len(), 2);
-        assert_eq!(pd.cast_edges[0].target_variant, "utf8");
-        assert_eq!(pd.cast_edges[1].target_variant, "utf16");
+        assert_eq!(pd.cast_edges[0].target_variant, "UTF8");
+        assert_eq!(pd.cast_edges[1].target_variant, "UTF16");
     }
 }

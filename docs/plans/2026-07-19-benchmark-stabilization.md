@@ -36,7 +36,7 @@ A benchmark that fails due to a missing feature is a signal to implement that fe
 |------|--------|--------|
 | SSO Phase B flag, literal emission, 2-slot state, `{i64,i64}` type, `extractvalue`, AND-8 tag | (multiple) | ✅ Implemented |
 | SSO concat (`emit_sso_concat` in helpers.rs) | (committed) | ⚠️ **Orphaned** — never called from dispatch |
-| Utf8View, StaticString, SmallString64 decls + pure-Brief ops | (committed) | ✅ Implemented |
+| UTF8View, StaticString, SmallString64 decls + pure-Brief ops | (committed) | ✅ Implemented |
 | SVO S0-S4: flag, `is_vector_like`, `push_field_type`, literal, index | `aded093` | ✅ Implemented |
 | SVO S5-S6: heap path, index fix | `d079134` | ⚠️ **push/pop via `<-` always heap** |
 | Ptr Level 3: `is_local_provenance` fix, `PtrConst`, `(Type, Provenance)`, `is_mutable_location`, compile pipeline | `8d0e4d9`, `7cb6083` | ✅ 6/10 items |
@@ -52,7 +52,7 @@ A benchmark that fails due to a missing feature is a signal to implement that fe
 | **precompute_sum** | optimizer | ❌ **terminator bug** | — | — |
 | **async_counters_idio** | optimizer | ❌ **terminator bug** | — | — |
 | const_heavy | optimizer | ✅ builds | ✅ (precomputed) | ✅ |
-| utf8_ops | runtime | ? | ? | ? |
+| UTF8_ops | runtime | ? | ? | ? |
 | ring_buffer | runtime | ✅ builds | ? | ? |
 | float_math | runtime | ? | ? | ? |
 | float_math_nonzero | runtime | ? | ? | ? |

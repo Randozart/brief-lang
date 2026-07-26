@@ -16,7 +16,7 @@ Currently there are two separate systems:
 | `type` | Bit interpretation (metadata, operators, constraints) | TypeUniverse |
 | `struct` | Organized data bundles (named fields) | `struct_types` |
 
-A `type` can declare `bytes <~ 8;` and `codec <~ "Utf8"` but cannot declare
+A `type` can declare `bytes <~ 8;` and `codec <~ "UTF8"` but cannot declare
 that its bits are partitioned into `{ptr, len, codec}`. That requires either
 a hardcoded `struct_layout` hack (String at `type_universe.rs:488`) or a
 separate `struct` declaration.
@@ -38,7 +38,7 @@ type String {
     ptr: Ptr<UInt8>;      // slot: bits 0..63 → Ptr<UInt8>
     len: Int;             // slot: bits 64..127 → Int
     codec: UInt8;         // slot: bits 128..135 → UInt8
-    codec <~ "Utf8";      // property: default codec
+    codec <~ "UTF8";      // property: default codec
     alignment <~ 8;       // property: alignment
     op Concat(String) -> String = __string_concat#;
     [len >= 0];

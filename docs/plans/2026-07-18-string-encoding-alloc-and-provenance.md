@@ -34,7 +34,7 @@ These replace no existing functionality — they are additive layers on top of t
 
 Strings use a **3-slot header** format:
 ```
-handle (i64) → [data_ptr (i64), length (i64), utf8_data (N bytes)]
+handle (i64) → [data_ptr (i64), length (i64), UTF8_data (N bytes)]
 ```
 
 Every concatenation heap-allocates. No SSO. Every `Length#` pointer-chases through the handle.

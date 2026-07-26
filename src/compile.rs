@@ -393,7 +393,7 @@ pub fn compile_source(file_path: &str, source: &str, opts: &BuildOptions) -> Res
 
     // ── Build protocol graph from protocol declarations ────────────────
     // 2026-07-23: Builds variant-aware CastTo/CastFrom edges from
-    // TopLevel::ProtocolDef items (proto ascii: #String { ... }) and
+    // TopLevel::ProtocolDef items (proto ASCII: #String { ... }) and
     // TypeDef.protocol fields. Injects edges into the universe so the
     // existing BFS can find them.
     let protocol_graph = brief_compiler::analysis::protocol_graph::ProtocolGraph::build_from(&items);

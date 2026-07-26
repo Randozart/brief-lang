@@ -532,8 +532,8 @@ type = "EncodingError"
 code = "Int"
 message = "String"
 [[functions]]
-name = "__utf8_encode"
-location = "brief_ffi_native::__utf8_encode"
+name = "__UTF8_encode"
+location = "brief_ffi_native::__UTF8_encode"
 target = "native"
 mapper = "rust"
 description = "Encode to UTF-8 codepoints"
@@ -552,11 +552,11 @@ message = "String"
 
 
 # ==================================================
-# __utf8_encode - WASM implementation
+# __UTF8_encode - WASM implementation
 # ==================================================
 [[functions]]
-name = "__utf8_encode"
-location = "__utf8_encode"
+name = "__UTF8_encode"
+location = "__UTF8_encode"
 target = "wasm"
 mapper = "wasm"
 description = "Encode to UTF-8 codepoints (WASM)"
@@ -569,8 +569,8 @@ type = "EncodingError"
 code = "Int"
 message = "String"
 [[functions]]
-name = "__utf8_decode"
-location = "brief_ffi_native::__utf8_decode"
+name = "__UTF8_decode"
+location = "brief_ffi_native::__UTF8_decode"
 target = "native"
 mapper = "rust"
 description = "Decode from UTF-8 codepoints"
@@ -589,11 +589,11 @@ message = "String"
 
 
 # ==================================================
-# __utf8_decode - WASM implementation
+# __UTF8_decode - WASM implementation
 # ==================================================
 [[functions]]
-name = "__utf8_decode"
-location = "__utf8_decode"
+name = "__UTF8_decode"
+location = "__UTF8_decode"
 target = "wasm"
 mapper = "wasm"
 description = "Decode from UTF-8 codepoints (WASM)"

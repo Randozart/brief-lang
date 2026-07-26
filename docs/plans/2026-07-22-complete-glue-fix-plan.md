@@ -177,7 +177,7 @@ When a frgn is resolved as `ResolvedFrgn::Bridge`:
 For example, converting `{i64, i64}` (Brief SSO String) to `*mut u8` (Rust `&str`):
 - `MeldShuffle`: `extractvalue {i64, i64} %val, 0` (extract data pointer)
 - `Bitcast`: `bitcast i64 %ptr to ptr` (inttoptr)
-- `ProtocolTransform(#String<utf8>)`: Call the `CastTo(#String<utf8>)` func if registered
+- `ProtocolTransform(#String<UTF8>)`: Call the `CastTo(#String<UTF8>)` func if registered
 
 ### Implementation
 

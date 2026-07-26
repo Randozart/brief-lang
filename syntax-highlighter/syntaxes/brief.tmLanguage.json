@@ -306,7 +306,7 @@
       "patterns": [
         {
           "name": "support.type.property-name.hashword.brief",
-          "comment": "Positional markers (#L, #R, #T) and protocol category hashwords (#Int, #Float, #String, #Bool, #Char, #Bits, #UInt, #Ptr, #Link, #System). Optional <variant> suffix for parameterized protocols like #String<utf8>.",
+          "comment": "Positional markers (#L, #R, #T) and protocol category hashwords (#Int, #Float, #String, #Bool, #Char, #Bits, #UInt, #Ptr, #Link, #System). Optional <variant> suffix for parameterized protocols like #String<UTF8>.",
           "match": "#(L|R|T|Int|Float|String|Bool|Char|Bits|UInt|Ptr|Link|System)(<[a-zA-Z0-9_]+>)?"
         }
       ]

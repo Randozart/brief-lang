@@ -7,7 +7,7 @@
 
 ## The Core Insight: Brief Is Layout-Agnostic
 
-A type like `#String<utf8>` does NOT specify a memory layout. It says:
+A type like `#String<UTF8>` does NOT specify a memory layout. It says:
 
 > "I support the UTF-8 string protocol. I know how to decode bytes, measure
 >  my length, concatenate with another UTF-8 string, index by code point.
@@ -20,7 +20,7 @@ pressure, and usage patterns. This is not a future feature — it's baked
 into the type system:
 
 - `#Int` doesn't say `i64` — it says "I am a machine integer."
-- `#Float` doesn't say `ieee754` — it says "I am an IEEE 754 float."
+- `#Float` doesn't say `IEEE754` — it says "I am an IEEE 754 float."
 - `#Bits` doesn't say `{i8*}` — it says "I am raw memory."
 
 The `Cast(#Bits)` fallback exists precisely because any type CAN be treated
@@ -32,7 +32,7 @@ A hashword `#Category` is a **backend directive and a protocol identifier**:
 - Backend directive: "use your native implementation of this operation" (`op Add(#Int)`)
 - Protocol identifier: "I implement the operations of this category"
 
-Two types that both implement `#String<utf8>` can be converted between each
+Two types that both implement `#String<UTF8>` can be converted between each
 other through the protocol path — even if their memory layouts are completely
 different. The transform cost depends on the difference in layout:
 

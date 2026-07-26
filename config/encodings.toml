@@ -13,8 +13,8 @@
 
 ["encoding.UTF-8"]
 char_width = 0
-ops.index_at = "std.encoding.utf8.index_at"
-ops.char_len = "std.encoding.utf8.char_count"
+ops.index_at = "std.encoding.UTF8.index_at"
+ops.char_len = "std.encoding.UTF8.char_count"
 
 ["encoding.ASCII"]
 char_width = 1
@@ -24,8 +24,8 @@ char_width = 1
 
 ["encoding.UTF-16"]
 char_width = 0
-ops.index_at = "std.encoding.utf16.index_at"
-ops.char_len = "std.encoding.utf16.char_count"
+ops.index_at = "std.encoding.UTF16.index_at"
+ops.char_len = "std.encoding.UTF16.char_count"
 
 ["encoding.UTF-32"]
 char_width = 4

@@ -29,7 +29,7 @@ impl<'a> Parser<'a> {
                     "Data" => ("Data", Type::data()),
                     _ if name.starts_with('#') => {
                         // 2026-07-20: Hashword category: #Int, #Float, #String, etc.
-                        // Optional protocol variant: #String<utf8>, #Float<ieee754>
+                        // Optional protocol variant: #String<UTF8>, #Float<IEEE754>
                         if self.eat(&Token::Lt) {
                             let variant = self.expect_identifier()?;
                             if !self.eat_type_close() {
@@ -40,8 +40,8 @@ impl<'a> Parser<'a> {
                         // 2026-07-20: Bare hashwords resolve to their default variant.
                         // UTF-8 is the universal default for all files.
                         let variant = match name.as_str() {
-                            "#String" => "utf8",
-                            "#Float" => "ieee754",
+                            "#String" => "UTF8",
+                            "#Float" => "IEEE754",
                             "#Char" => "unicode",
                             _ => "",
                         };

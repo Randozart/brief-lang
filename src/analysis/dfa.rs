@@ -385,7 +385,7 @@ pub fn execute_dfa(dfa: &RegexPattern, input: &str) -> Option<(usize, usize, Vec
             }
             state = next;
             if state < dfa.accept_states.len() as u32 && dfa.accept_states[state as usize] {
-                return Some((start_pos, pos + ch.len_utf8(), vec![]));
+                return Some((start_pos, pos + ch.len_UTF8(), vec![]));
             }
         } else {
             return None; // Non-ASCII not supported

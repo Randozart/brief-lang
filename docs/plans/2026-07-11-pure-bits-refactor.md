@@ -457,8 +457,8 @@ fn concat_impl(args: Vec<Value>) -> Result<Value, RuntimeError> {
             _ => Err(TypeMismatch("expected Bits")),
         })
         .collect::<Result<Vec<_>, _>>()?;
-    let a = String::from_utf8_lossy(&bits[0]);
-    let b = String::from_utf8_lossy(&bits[1]);
+    let a = String::from_UTF8_lossy(&bits[0]);
+    let b = String::from_UTF8_lossy(&bits[1]);
     Ok(Value::Bits(format!("{}{}", a, b).into_bytes()))
 }
 ```
@@ -687,7 +687,7 @@ codec HexColor {
 
 codec StringCodec {
     formatting <~ Quoted;              // ← accepts "hello" as a quoted value
-    parse      <~ identity_utf8;       // stores quoted bytes as-is
+    parse      <~ identity_UTF8;       // stores quoted bytes as-is
 };
 
 codec DefaultDecimal {
@@ -717,7 +717,7 @@ The prelude defines three default codecs, one for each token form:
 ```brief
 codec DefaultQuoted {
     formatting <~ Quoted;
-    parse      <~ identity_utf8;
+    parse      <~ identity_UTF8;
 };
 
 codec DefaultDecimal {

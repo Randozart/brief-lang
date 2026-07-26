@@ -391,7 +391,7 @@ impl CirctBackend {
                         // physical address, emit as a constant integer. In HW synthesis this
                         // becomes a constant wire driving the address bus.
                         let id_str = args.first().and_then(|a| {
-                            if let Expr::Quoted(b) = a { Some(String::from_utf8_lossy(b).to_string()) } else { None }
+                            if let Expr::Quoted(b) = a { Some(String::from_UTF8_lossy(b).to_string()) } else { None }
                         }).unwrap_or_else(|| "unknown".to_string());
                         let addr = crate::address_resolver::resolve_address(&id_str);
                         let c = ng.fresh_const("addr");

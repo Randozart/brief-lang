@@ -33,7 +33,7 @@ pub fn prove_smt(formula: &Expr, _param_types: &[(String, Type)]) -> SmtResult {
             }
             match child.wait_with_output() {
                 Ok(output) => {
-                    let stdout = String::from_utf8_lossy(&output.stdout);
+                    let stdout = String::from_UTF8_lossy(&output.stdout);
                     if stdout.contains("unsat") {
                         SmtResult::Unsat
                     } else if stdout.contains("sat") {
@@ -70,7 +70,7 @@ pub fn prove_smt_formula(formula: &str, _timeout_ms: u64) -> SmtResult {
             drop(child.stdin.take());
             match child.wait_with_output() {
                 Ok(output) => {
-                    let stdout = String::from_utf8_lossy(&output.stdout);
+                    let stdout = String::from_UTF8_lossy(&output.stdout);
                     if stdout.contains("unsat") {
                         SmtResult::Unsat
                     } else if stdout.contains("sat") {

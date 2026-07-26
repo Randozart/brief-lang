@@ -2282,15 +2282,15 @@ set to `None`.
 
 ## 2026-07-18 — `__` prefix used for non-frgn functions
 
-**Issue**: `__memcmp`, `__utf8_find`, `__utf8_validate` used double-underscore prefix
+**Issue**: `__memcmp`, `__UTF8_find`, `__UTF8_validate` used double-underscore prefix
 convention which is reserved for `frgn` (foreign) functions.
 
 **Root Cause**: Author used C convention (`__function_name = internal`). Brief
 convention is: `__` prefix => `frgn` only.
 
-**Fix**: Renamed to `memcmp`, `utf8_find`, `utf8_validate` (no `__` prefix).
+**Fix**: Renamed to `memcmp`, `UTF8_find`, `UTF8_validate` (no `__` prefix).
 
-**Files**: `lib/std/types/utf8view.bv`
+**Files**: `lib/std/types/UTF8view.bv`
 
 ## 2026-07-18 — `else` keyword not supported
 

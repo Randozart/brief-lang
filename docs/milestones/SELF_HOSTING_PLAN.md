@@ -335,7 +335,7 @@ defn is_lower(c: Char) -> Bool
 defn is_symbol(c: Char) -> Bool
 defn is_punctuation(c: Char) -> Bool
 defn is_control(c: Char) -> Bool
-defn is_ascii(c: Char) -> Bool
+defn is_ASCII(c: Char) -> Bool
 ```
 
 **Files to modify:**
@@ -397,9 +397,9 @@ defn replace_all_char(s: String, old: Char, new: Char) -> String
 
 **Implementation:**
 ```brief
-defn utf8_decode(s: String, index: Int) -> Result<(Char, Int), UnicodeError>
-defn utf8_encode(c: Char) -> String
-defn utf8_len(s: String) -> Int
+defn UTF8_decode(s: String, index: Int) -> Result<(Char, Int), UnicodeError>
+defn UTF8_encode(c: Char) -> String
+defn UTF8_len(s: String) -> Int
 defn codepoint_to_int(c: Char) -> Int
 defn int_to_codepoint(n: Int) -> Option<Char>
 defn is_unicode_scalar(c: Char) -> Bool

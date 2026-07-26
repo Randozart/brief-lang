@@ -96,14 +96,14 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_utf8_from_config() {
+    fn test_UTF8_from_config() {
         let info = get_encoding_info("UTF-8");
         assert_eq!(info.char_width, 0);
         assert!(matches!(info.index_mode, IndexMode::Scan));
     }
 
     #[test]
-    fn test_ascii_from_config() {
+    fn test_ASCII_from_config() {
         let info = get_encoding_info("ASCII");
         assert_eq!(info.char_width, 1);
         assert!(matches!(info.index_mode, IndexMode::Direct));
@@ -116,14 +116,14 @@ mod tests {
     }
 
     #[test]
-    fn test_utf8_has_stdlib_ops() {
+    fn test_UTF8_has_stdlib_ops() {
         let info = get_encoding_info("UTF-8");
         assert!(info.ops.index_at.is_some());
         assert!(info.ops.char_len.is_some());
     }
 
     #[test]
-    fn test_ascii_no_stdlib_ops() {
+    fn test_ASCII_no_stdlib_ops() {
         let info = get_encoding_info("ASCII");
         assert!(info.ops.index_at.is_none());
         assert!(info.ops.char_len.is_none());

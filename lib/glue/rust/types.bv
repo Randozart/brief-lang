@@ -2,16 +2,16 @@
 // Rust uses LLVM LTO for interop — no C ABI boundary for scalars.
 // Types are defined for documentation and meld compatibility.
 
-type RstI64 <: Bits {
+type RstI64: #String {
     maxbits <~ 64;
     alignment <~ 8;
     op CastTo(#Int) = identity(#L);
     op CastFrom(#Int) = identity(#L);
 };
 
-type RstF64 <: Bits {
+type RstF64: #Float {
     maxbits <~ 64;
     alignment <~ 8;
-    op CastTo(#Float<ieee754>) = identity(#L);
-    op CastFrom(#Float<ieee754>) = identity(#L);
+    op CastTo(#Float<IEEE754>) = identity(#L);
+    op CastFrom(#Float<IEEE754>) = identity(#L);
 };

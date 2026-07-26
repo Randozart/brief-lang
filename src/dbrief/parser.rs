@@ -713,7 +713,7 @@ fn parse_address(&mut self) -> Result<DbriefAddress, String> {
             self.pos += 2;
             let mut hex_str = String::new();
             while let Some(c) = self.peek() {
-                if c.is_ascii_hexdigit() {
+                if c.is_ASCII_hexdigit() {
                     hex_str.push(c);
                     self.advance();
                 } else {
@@ -725,10 +725,10 @@ fn parse_address(&mut self) -> Result<DbriefAddress, String> {
         }
         
         if let Some(c) = self.peek() {
-            if c.is_ascii_digit() {
+            if c.is_ASCII_digit() {
                 let mut num_str = String::new();
                 while let Some(d) = self.peek() {
-                    if d.is_ascii_digit() {
+                    if d.is_ASCII_digit() {
                         num_str.push(d);
                         self.advance();
                     } else {
@@ -853,10 +853,10 @@ fn parse_address(&mut self) -> Result<DbriefAddress, String> {
             Some('"') => {
                 Ok(DbriefLiteral::String(self.parse_string_literal()?))
             }
-            Some(c) if c.is_ascii_digit() => {
+            Some(c) if c.is_ASCII_digit() => {
                 let mut num_str = String::new();
                 while let Some(d) = self.peek() {
-                    if d.is_ascii_digit() || d == '.' {
+                    if d.is_ASCII_digit() || d == '.' {
                         num_str.push(d);
                         self.advance();
                     } else {
@@ -924,10 +924,10 @@ fn parse_address(&mut self) -> Result<DbriefAddress, String> {
                 if self.starts_with("false") { self.pos += 5; } else { self.pos += 5; }
                 Ok(DbriefExpr::Bool(false))
             }
-            Some(c) if c.is_ascii_digit() => {
+            Some(c) if c.is_ASCII_digit() => {
                 let mut num_str = String::new();
                 while let Some(d) = self.peek() {
-                    if d.is_ascii_digit() || d == '.' {
+                    if d.is_ASCII_digit() || d == '.' {
                         num_str.push(d);
                         self.advance();
                     } else {
@@ -1008,7 +1008,7 @@ fn parse_address(&mut self) -> Result<DbriefAddress, String> {
         self.skip_whitespace();
         let mut num_str = String::new();
         while let Some(c) = self.peek() {
-            if c.is_ascii_digit() {
+            if c.is_ASCII_digit() {
                 num_str.push(c);
                 self.advance();
             } else {

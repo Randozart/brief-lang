@@ -9,14 +9,14 @@
 A protocol declaration defines **both** compatibility (edges) and transformation (functions).
 
 ```brief
-proto ascii: #String {
+proto ASCII: #String {
     // REQUIRED: Edge with binding — defines HOW layouts differ
-    CastTo(#String<utf8>) = ascii_to_utf8(#L);
-    CastFrom(#String<utf8>) = utf8_to_ascii(#L);
+    CastTo(#String<UTF8>) = ASCII_to_UTF8(#L);
+    CastFrom(#String<UTF8>) = UTF8_to_ASCII(#L);
 
     // OPTIONAL: Skip the CastTo→op→CastFrom round-trip
     // Must be proven equivalent to the round-trip
-    op Add(#String<utf8>) = ascii_add_with_utf8(#L, #R);
+    op Add(#String<UTF8>) = ASCII_add_with_UTF8(#L, #R);
 };
 ```
 
@@ -34,41 +34,41 @@ proto ascii: #String {
 The binding functions are `defn` declarations with bodies the compiler can inline:
 
 ```brief
-defn ascii_to_utf8(x: #String<ascii>) -> #String<utf8> {
-    // Bitwise ops — defines how the ascii layout maps to utf8
+defn ASCII_to_UTF8(x: #String<ASCII>) -> #String<UTF8> {
+    // Bitwise ops — defines how the ASCII layout maps to UTF8
     // The compiler inlines this body for proof purposes
 };
 
-defn utf8_to_ascii(x: #String<utf8>) -> #String<ascii> {
+defn UTF8_to_ASCII(x: #String<UTF8>) -> #String<ASCII> {
     // Inverse — compiler proves round-trip identity
 };
 
-proto ascii: #String {
-    CastTo(#String<utf8>) = ascii_to_utf8(#L);
-    CastFrom(#String<utf8>) = utf8_to_ascii(#L);
+proto ASCII: #String {
+    CastTo(#String<UTF8>) = ASCII_to_UTF8(#L);
+    CastFrom(#String<UTF8>) = UTF8_to_ASCII(#L);
 };
 ```
 
 The compiler finds the `defn` body by searching items for a matching function name. If the body is available, it inlines forward + inverse, builds the composition, and proves via symbolic eval or SMT. If the body is not available (`frgn` or external), the proof is skipped with a warning.
 
-The `#String<ascii>` parameter types in the `defn` are elegant — they declare the protocol variant as the parameter type, making the relationship explicit and typed.
+The `#String<ASCII>` parameter types in the `defn` are elegant — they declare the protocol variant as the parameter type, making the relationship explicit and typed.
 
 ### What gets proven
 
 ```brief
 // Given this protocol:
-CastTo(#String<utf8>) = ascii_to_utf8(#L);
-CastFrom(#String<utf8>) = utf8_to_ascii(#L);
+CastTo(#String<UTF8>) = ASCII_to_UTF8(#L);
+CastFrom(#String<UTF8>) = UTF8_to_ASCII(#L);
 
 // Proof 1: Round-trip identity
-utf8_to_ascii(ascii_to_utf8(x)) == x
+UTF8_to_ASCII(ASCII_to_UTF8(x)) == x
 
 // Given this cross-op:
-op Add(#String<utf8>) = ascii_add_with_utf8(#L, #R);
+op Add(#String<UTF8>) = ASCII_add_with_UTF8(#L, #R);
 
 // Proof 2: Equivalence to default-round-trip path
-ascii_add_with_utf8(ascii_value, utf8_value)
-    == utf8_to_ascii(ascii_to_utf8(ascii_value) + utf8_value)
+ASCII_add_with_UTF8(ASCII_value, UTF8_value)
+    == UTF8_to_ASCII(ASCII_to_UTF8(ASCII_value) + UTF8_value)
 ```
 
 ---
@@ -132,9 +132,9 @@ for item in &items {
 ### Part D: Cross-op equivalence proof
 
 **New function:** `verify_crossop_equivalence(pd, items) → Result`
-- For each cross-op (e.g., `op Add(#String<utf8>) = ascii_add_with_utf8(#L, #R)`)
+- For each cross-op (e.g., `op Add(#String<UTF8>) = ASCII_add_with_UTF8(#L, #R)`)
 - Build default round-trip path: `CastFrom(CastTo(x) + y)` — inlines both binding defns and the default Add
-- Build custom path: `ascii_add_with_utf8(x, y)` — inlines the cross-op defn
+- Build custom path: `ASCII_add_with_UTF8(x, y)` — inlines the cross-op defn
 - Compare both paths via symbolic/SMT
 - If not equivalent → compilation denied
 
@@ -145,9 +145,9 @@ for item in &items {
 // Non-default protocol variants with bindings.
 // The bindings define actual transformations between layouts.
 
-proto ascii: #String {
-    CastTo(#String<utf8>) = ascii_to_utf8(#L);
-    CastFrom(#String<utf8>) = utf8_to_ascii(#L);
+proto ASCII: #String {
+    CastTo(#String<UTF8>) = ASCII_to_UTF8(#L);
+    CastFrom(#String<UTF8>) = UTF8_to_ASCII(#L);
 };
 ```
 

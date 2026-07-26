@@ -414,7 +414,7 @@ impl LspServer {
                                     output.push('\n');
                                 } else {
                                     // Use same number of bytes as the character
-                                    for _ in 0..c.len_utf8() {
+                                    for _ in 0..c.len_UTF8() {
                                         output.push(' ');
                                     }
                                 }
@@ -430,11 +430,11 @@ impl LspServer {
                 if c == '\n' {
                     output.push('\n');
                 } else {
-                    for _ in 0..c.len_utf8() {
+                    for _ in 0..c.len_UTF8() {
                         output.push(' ');
                     }
                 }
-                current_pos += c.len_utf8();
+                current_pos += c.len_UTF8();
             } else {
                 if source[current_pos..].starts_with("</script>") {
                     in_script = false;
@@ -443,18 +443,18 @@ impl LspServer {
                         if c == '\n' {
                             output.push('\n');
                         } else {
-                            for _ in 0..c.len_utf8() {
+                            for _ in 0..c.len_UTF8() {
                                 output.push(' ');
                             }
                         }
-                        current_pos += c.len_utf8();
+                        current_pos += c.len_UTF8();
                     }
                     continue;
                 }
                 // Inside script, keep characters as they are
                 let c = source[current_pos..].chars().next().unwrap();
                 output.push(c);
-                current_pos += c.len_utf8();
+                current_pos += c.len_UTF8();
             }
         }
         output

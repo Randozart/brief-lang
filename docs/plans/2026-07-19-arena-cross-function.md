@@ -9,7 +9,7 @@
 
 ## Symptom
 
-Without the arena fix, every `Alloc#(8)` in the utf8_ops benchmark falls through to `@malloc(8)`, even though the reactive txn has a bounded scope where arena allocation should work. The arena init is emitted in `@txn_work`, but `memcmp_loop` calls `Alloc#(8)` and can't see `%arptr0`.
+Without the arena fix, every `Alloc#(8)` in the UTF8_ops benchmark falls through to `@malloc(8)`, even though the reactive txn has a bounded scope where arena allocation should work. The arena init is emitted in `@txn_work`, but `memcmp_loop` calls `Alloc#(8)` and can't see `%arptr0`.
 
 ## Architecture
 
@@ -115,6 +115,6 @@ Remove the alloca-based arena slot tracking (`arena_slots` field, `%arptr0`/`%ar
 
 ### Impact
 
-- utf8_ops: `Alloc#(8)` uses bump pointer instead of `@malloc(8)` — expected ~50-100× speedup
+- UTF8_ops: `Alloc#(8)` uses bump pointer instead of `@malloc(8)` — expected ~50-100× speedup
 - All other benchmarks: no change (arena is a no-op when `arena_slots` is `None`)
 - Only reactive txns with called helpers that use `Alloc#` benefit

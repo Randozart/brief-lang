@@ -378,8 +378,8 @@ type = "StringError"
 code = "Int"
 message = "String"
 [[functions]]
-name = "__utf8_len"
-location = "brief_ffi_native::__utf8_len"
+name = "__UTF8_len"
+location = "brief_ffi_native::__UTF8_len"
 target = "native"
 mapper = "rust"
 description = "Get UTF-8 length"
@@ -398,11 +398,11 @@ message = "String"
 
 
 # ==================================================
-# __utf8_len - WASM implementation
+# __UTF8_len - WASM implementation
 # ==================================================
 [[functions]]
-name = "__utf8_len"
-location = "__utf8_len"
+name = "__UTF8_len"
+location = "__UTF8_len"
 target = "wasm"
 mapper = "wasm"
 description = "Get UTF-8 length (WASM)"

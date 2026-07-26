@@ -160,7 +160,7 @@ Required Fix:
   Option A (Recommended): Use character iteration
     for ch in self.source[start..].chars() {
       if ch == '>' { break; }
-      byte_pos += ch.len_utf8();  // Always advances to next boundary
+      byte_pos += ch.len_UTF8();  // Always advances to next boundary
     }
   
   Option B: Add boundary validation
@@ -170,7 +170,7 @@ Code Changes:
   - 20-30 lines in scan_html_block()
   - Replace chars().nth() with proper iteration
   - Add is_char_boundary() helper (5 lines)
-  - Use char.len_utf8() for position advancement
+  - Use char.len_UTF8() for position advancement
 
 Testing:
   - Emoji in comments (🛍️, 😀, etc.)

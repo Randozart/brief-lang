@@ -156,7 +156,7 @@ mod tests {
         assert_eq!(extracted_beastpack, beastpack);
 
         let extracted_manifest = extract_section(&bounty, SECTION_MANIFEST).unwrap();
-        assert_eq!(String::from_utf8(extracted_manifest).unwrap(), manifest);
+        assert_eq!(String::from_UTF8(extracted_manifest).unwrap(), manifest);
     }
 
     #[test]

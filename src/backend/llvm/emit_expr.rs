@@ -1106,7 +1106,7 @@ impl LlvmBackend {
         indent: &str,
     ) -> TypedRegister {
         // 2026-07-22: Emit global constant if not already defined
-        let s_str = String::from_utf8_lossy(bytes);
+        let s_str = String::from_UTF8_lossy(bytes);
         let si = self.ctx.string_constants.iter()
             .position(|x| x.as_str() == s_str)
             .unwrap_or_else(|| {

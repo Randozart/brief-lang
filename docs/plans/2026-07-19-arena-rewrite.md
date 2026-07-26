@@ -46,4 +46,4 @@ Add `self.emit_arena_init(out, "  ")` before the body emission in the standard r
 
 ## Expected Impact
 
-utf8_ops `Alloc#(8)` switches from `@malloc(8)` (~100ns each) to bump pointer (~2ns). With the already-working auto-inline + memcmp fast path, 50M iterations should go from 2.2s to ~0.02s.
+UTF8_ops `Alloc#(8)` switches from `@malloc(8)` (~100ns each) to bump pointer (~2ns). With the already-working auto-inline + memcmp fast path, 50M iterations should go from 2.2s to ~0.02s.

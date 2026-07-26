@@ -237,7 +237,7 @@ calling_convention = "lto"
 
 ```brief
 // 2026-07-22: Python type declarations for Brief's type universe.
-// Types are defined against protocol haswords (#String<utf8>, #Int, etc.)
+// Types are defined against protocol haswords (#String<UTF8>, #Int, etc.)
 // so GLUE can find CastTo/CastFrom paths.
 
 type PyBytes <: Bits {
@@ -250,10 +250,10 @@ type PyBytes <: Bits {
 type PyString <: Bits {
     bytes <~ 16;
     alignment <~ 8;
-    op CastTo(#String<utf8>) = ucs4_to_utf8(#L);
-    op CastFrom(#String<utf8>) = utf8_to_ucs4(#L);
-    op CastTo(#String<ascii>) = ucs4_to_ascii(#L);
-    op CastFrom(#String<ascii>) = ascii_to_ucs4(#L);
+    op CastTo(#String<UTF8>) = ucs4_to_UTF8(#L);
+    op CastFrom(#String<UTF8>) = UTF8_to_ucs4(#L);
+    op CastTo(#String<ASCII>) = ucs4_to_ASCII(#L);
+    op CastFrom(#String<ASCII>) = ASCII_to_ucs4(#L);
 };
 
 type PyInt <: Bits {
@@ -287,15 +287,15 @@ type JsBuffer <: Bits {
 type JsString <: Bits {
     bytes <~ 8;
     alignment <~ 8;
-    op CastTo(#String<utf8>) = jsstring_to_utf8(#L);
-    op CastFrom(#String<utf8>) = utf8_to_jsstring(#L);
+    op CastTo(#String<UTF8>) = jsstring_to_UTF8(#L);
+    op CastFrom(#String<UTF8>) = UTF8_to_jsstring(#L);
 };
 
 type JsNumber <: Bits {
     bytes <~ 8;
     alignment <~ 8;
-    op CastTo(#Float<ieee754>) = jsnumber_to_f64(#L);
-    op CastFrom(#Float<ieee754>) = f64_to_jsnumber(#L);
+    op CastTo(#Float<IEEE754>) = jsnumber_to_f64(#L);
+    op CastFrom(#Float<IEEE754>) = f64_to_jsnumber(#L);
     op CastTo(#Int) = jsnumber_to_i64(#L);
     op CastFrom(#Int) = i64_to_jsnumber(#L);
 };
@@ -320,8 +320,8 @@ type RstI64 <: Bits {
 type RstF64 <: Bits {
     bytes <~ 8;
     alignment <~ 8;
-    op CastTo(#Float<ieee754>) = identity(#L);
-    op CastFrom(#Float<ieee754>) = identity(#L);
+    op CastTo(#Float<IEEE754>) = identity(#L);
+    op CastFrom(#Float<IEEE754>) = identity(#L);
 };
 ```
 
@@ -469,7 +469,7 @@ pub enum TransformKind {
     /// Meld shuffle — bit permutation, field reordering
     MeldShuffle,
     /// Protocol transform — CastTo/CastFrom with actual encoding work
-    ProtocolTransform(String),  // the hashword category, e.g., "#String<utf8>"
+    ProtocolTransform(String),  // the hashword category, e.g., "#String<UTF8>"
     /// Raw bitcast — implicit Cast(#Bits)
     Bitcast,
 }
@@ -1235,7 +1235,7 @@ disabled. Both must pass with identical output.
 
 | Requirement | How Phase 8 exercises it |
 |------------|-------------------------|
-| Protocol path resolution | Brief `String` ↔ Rust `String` via `#String<utf8>` |
+| Protocol path resolution | Brief `String` ↔ Rust `String` via `#String<UTF8>` |
 | Recursive type serialization | AST nodes contain sub-nodes (Expr in Expr) |
 | Fallback correctness | If GLUE bridge fails, Rust fallback must produce identical output |
 | Export wrapper generation | `brief export pp-bridge.bv rust --out ...` |

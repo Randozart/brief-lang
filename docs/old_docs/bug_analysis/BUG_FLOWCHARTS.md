@@ -95,13 +95,13 @@ Source: "// Comment emoji 🛍\n<div>..."
         0123456789...24..27..28
 
 UTF-8 Character Iteration:
-  Emoji length: char.len_utf8() = 4 bytes
+  Emoji length: char.len_UTF8() = 4 bytes
 
 Fixed Code:
   let byte_pos = start;
   for ch in self.source[start..].chars() {
     if ch == '>' { break; }
-    byte_pos += ch.len_utf8();  ← Properly advance by char width
+    byte_pos += ch.len_UTF8();  ← Properly advance by char width
   }
 
 Byte Loop (Fixed):
@@ -285,7 +285,7 @@ Effort Scale: ██░░░░░░░ (2/10)
 Changes Needed:
   1. Replace chars().nth() calls (5 lines)
   2. Add is_char_boundary() helper (5 lines)
-  3. Use char.len_utf8() (5 lines)
+  3. Use char.len_UTF8() (5 lines)
   4. Testing (30 lines)
   
 Total: ~45 lines of code changes

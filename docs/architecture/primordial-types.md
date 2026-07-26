@@ -114,7 +114,7 @@ commitments intact.
 | `String` | 16 | 8 | struct | %String | 2 fields: data, len |
 | `Data` | 8 | 8 | pointer | i8* | Typed pointer |
 | `Void` | 0 | 0 | void | void | Zero-width |
-| `Utf8View` | 16 | 8 | struct | `{ i64, i64 }` | Borrowed UTF-8 view (fat ptr: data, len) |
+| `UTF8View` | 16 | 8 | struct | `{ i64, i64 }` | Borrowed UTF-8 view (fat ptr: data, len) |
 | `StaticString` | 16 | 8 | struct | `{ i64, i64 }` | ROM string (ptr + len) |
 | `SmallString64` | 72 | 8 | struct | `{ i64 x 9 }` | 64-byte inline buffer, zero heap |
 
@@ -125,7 +125,7 @@ holds a heap pointer (tag bit 0 = 0). Handle[1] is the byte length.
 Codegen identifies string-like types via `is_string_like()` which checks
 shape (2 Int fields) + encoding property, not the name `"String"`.
 
-**Utf8View** is a borrowed, zero-allocation UTF-8 view. Same `{i64, i64}`
+**UTF8View** is a borrowed, zero-allocation UTF-8 view. Same `{i64, i64}`
 fat pointer format as String but never owns its buffer. Excluded from
 `type_is_heap_allocated`. Always `encoding <~ "UTF-8"` (guaranteed by
 construction). Cannot be stored in state (borrow — would dangle across ticks).

@@ -1192,7 +1192,7 @@ pub enum DeriveError {
     /// IO error reading/writing a file.
     Io { path: PathBuf, error: io::Error },
     /// File is not valid UTF-8.
-    InvalidUtf8 { path: PathBuf, error: FromUtf8Error },
+    InvalidUTF8 { path: PathBuf, error: FromUTF8Error },
     /// Parse failed on a file.
     ParseFailed { path: PathBuf, error: SyntaxError },
     /// Synthesis produced no valid program.
@@ -1616,8 +1616,8 @@ fn parse_file_with_offsets(path: &Path) -> Result<(Program, Vec<u8>), DeriveErro
         path: path.to_path_buf(),
         error: e,
     })?;
-    let source_str = String::from_utf8(source.clone())
-        .map_err(|e| DeriveError::InvalidUtf8 {
+    let source_str = String::from_UTF8(source.clone())
+        .map_err(|e| DeriveError::InvalidUTF8 {
             path: path.to_path_buf(),
             error: e,
         })?;
@@ -2950,8 +2950,8 @@ pub fn derive_file(path: &Path, depth: u8) -> Result<(), DeriveError> {
     // 4. Verify: re-parse the modified program in memory and run compile-time tests.
     //    This must happen BEFORE writing to disk to prevent corrupting the file
     //    if verification fails.
-    let temp_source = String::from_utf8(source.clone())
-        .map_err(|e| DeriveError::InvalidUtf8 {
+    let temp_source = String::from_UTF8(source.clone())
+        .map_err(|e| DeriveError::InvalidUTF8 {
             path: path.to_path_buf(),
             error: e,
         })?;

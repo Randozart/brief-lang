@@ -366,13 +366,13 @@ fn scan_html_block(&mut self, start: usize) -> Result<(String, usize), String> {
             char_pos = i;
             break;
         }
-        byte_pos += c.len_utf8();
+        byte_pos += c.len_UTF8();
     }
 
     // Scan to end of opening tag
     while byte_pos < source_bytes.len() && source_bytes[byte_pos] != b'>' {
         let ch = chars.get(char_pos).unwrap_or(&' ');
-        byte_pos += ch.len_utf8();
+        byte_pos += ch.len_UTF8();
         char_pos += 1;
     }
 

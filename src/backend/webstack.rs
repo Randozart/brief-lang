@@ -662,7 +662,7 @@ impl WebstackGenerator {
             }
             Expr::Bool(b) => b.to_string(),
             Expr::Quoted(s) => {
-                let s_str = String::from_utf8_lossy(s);
+                let s_str = String::from_UTF8_lossy(s);
                 format!("\"{}\"", s_str.replace('\\', "\\\\").replace('"', "\\\""))
             }
             Expr::Identifier(name) => self.ts_ident(name),
@@ -960,7 +960,7 @@ impl WebstackGenerator {
             Expr::Float(f) => f.to_string(),
             Expr::Bool(b) => b.to_string(),
             Expr::Quoted(s) => {
-                let s_str = String::from_utf8_lossy(s);
+                let s_str = String::from_UTF8_lossy(s);
                 format!("\"{}\"", s_str.replace('\\', "\\\\").replace('"', "\\\""))
             }
             Expr::Identifier(name) => format!("state.{}", name.replace('-', "_")),
@@ -1058,7 +1058,7 @@ impl WebstackGenerator {
                 }
             }
             Expr::Quoted(bytes) => {
-                let s = String::from_utf8_lossy(bytes);
+                let s = String::from_UTF8_lossy(bytes);
                 format!("JsValue::from_str(\"{}\")", s.escape_default())
             }
             _ => format!("JsValue::from_str(\"{:?}\")", expr),

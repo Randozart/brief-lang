@@ -47,7 +47,7 @@ defn is_lower(c: Char) -> Bool       // 'a'-'z'
 defn is_symbol(c: Char) -> Bool      // !@#$%^&*()
 defn is_punctuation(c: Char) -> Bool // punctuation marks
 defn is_control(c: Char) -> Bool     // control characters
-defn is_ascii(c: Char) -> Bool       // ASCII range (0-127)
+defn is_ASCII(c: Char) -> Bool       // ASCII range (0-127)
 
 // Unicode validation
 defn is_unicode_scalar(c: Char) -> Bool  // valid Unicode

@@ -41,7 +41,7 @@ A type's layout is determined by its fields — not by metadata properties:
 type ASCIIString {
     data: Bits<64>;     // pointer
     len: Bits<64>;      // length
-    op Add(#String) = ascii_concat(#L, #R);
+    op Add(#String) = ASCII_concat(#L, #R);
 };
 ```
 
@@ -68,8 +68,8 @@ type Bfloat16 {
 type Posit32 {
     data: Bits<32>;
     // No hashword ops — fully defined through explicit defn bindings
-    op Add(Posit32) = posit32_add(#L, #R);
-    op Mul(Posit32) = posit32_mul(#L, #R);
+    op Add(Posit32) = Posit32_add(#L, #R);
+    op Mul(Posit32) = Posit32_mul(#L, #R);
 };
 ```
 
@@ -124,7 +124,7 @@ currency. The backend's `Extract(#Char)` and `InsertAt(#Char)` decode/encode at 
 boundary, hiding the internal encoding.
 
 ```brief
-inline defn any_string_to_ascii(source: #String) -> ASCIIString {
+inline defn any_string_to_ASCII(source: #String) -> ASCIIString {
     let len = source :> Size;
     let result = ASCIIString::alloc(len);
     let mut i = 0;
@@ -150,7 +150,7 @@ inline defn any_float_to_posit(source: #Float) -> Posit32 {
 
 ```brief
 type ASCIIString <: String {
-    op Add(ASCIIString) = ascii_add(#L, #R);  // override String::Add
+    op Add(ASCIIString) = ASCII_add(#L, #R);  // override String::Add
 };
 ```
 
@@ -337,21 +337,21 @@ A type declaring `op Add(#MyCustomHashword)` on a backend that doesn't recognize
 ## Protocol Shapes and Variants
 
 Each hashword category can have multiple protocol variants. The file extension
-determines the default (`.bv` → utf8/unicode, `.ebv` → ascii).
+determines the default (`.bv` → UTF8/unicode, `.ebv` → ASCII).
 
 | Hashword | Variants | Default (`.bv`) | Default (`.ebv`) | Protocol ops |
 |---|---|---|---|---|
 | `#Int` | *(none)* | — | — | Add, Sub, Mul, Div, And, Or, Xor, Not, Shl, Shr |
-| `#Float` | `ieee754`, `bin32`, `bin64` | `ieee754` | `ieee754` | Add, Sub, Mul, Div, Sqrt, FMA, Cast(Float64) |
+| `#Float` | `IEEE754`, `bin32`, `bin64` | `IEEE754` | `IEEE754` | Add, Sub, Mul, Div, Sqrt, FMA, Cast(Float64) |
 | `#Bool` | *(none)* | — | — | And, Or, Not |
-| `#Char` | `unicode`, `ascii` | `unicode` | `ascii` | Cast(#Int), Eq, Lt |
-| `#String` | `utf8`, `ascii`, `hex`, `base64` | `utf8` | `ascii` | Extract(#Char), InsertAt(#Char), Concat(#String), `:> Size` |
+| `#Char` | `unicode`, `ASCII` | `unicode` | `ASCII` | Cast(#Int), Eq, Lt |
+| `#String` | `UTF8`, `ASCII`, `hex`, `base64` | `UTF8` | `ASCII` | Extract(#Char), InsertAt(#Char), Concat(#String), `:> Size` |
 | `#Bits` | *(none)* | — | — | And, Or, Xor, Not, Shl, Shr, Cast(N) |
 
 **Cross-variant calls require explicit protocol:**
 
 ```brief
-fn cross(a: #String<utf8>, b: #String<ascii>) { ... };
+fn cross(a: #String<UTF8>, b: #String<ASCII>) { ... };
 ```
 
 The compiler errors if a `.bv` file calls a `.ebv` function using `#String`
@@ -360,10 +360,10 @@ without specifying the variant. Backends declare supported protocols in
 
 ```toml
 [target.desktop]
-protocols = ["#String<utf8>", "#Float<ieee754>", "#Int", "#Bool", "#Bits"]
+protocols = ["#String<UTF8>", "#Float<IEEE754>", "#Int", "#Bool", "#Bits"]
 
 [target.embedded-riscv]
-protocols = ["#String<ascii>", "#Int", "#Bool", "#Bits"]
+protocols = ["#String<ASCII>", "#Int", "#Bool", "#Bits"]
 ```
 
 A function requiring a protocol the target doesn't support produces a compile

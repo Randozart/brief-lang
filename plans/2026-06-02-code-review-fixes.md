@@ -36,7 +36,7 @@ but won't close this gap.
 **Functions affected**:
 - `__contains_at` (line 353): `haystack[start as usize..]` — byte-index panics on multi-byte chars
 - `__find_from` (line 361): `s[start_idx..].find(&needle)` — same issue
-- `__utf8_len` (line 389): returns `s.len()` (byte count) not character count
+- `__UTF8_len` (line 389): returns `s.len()` (byte count) not character count
 
 **Fix**:
 ```rust
@@ -51,7 +51,7 @@ pub fn __contains_at(haystack: String, needle: String, start: i64) -> Result<boo
     Ok(haystack[start_usize..].contains(&needle))
 }
 ```
-For `__utf8_len`: `Ok(s.chars().count() as i64)` instead of `Ok(s.len() as i64)`.
+For `__UTF8_len`: `Ok(s.chars().count() as i64)` instead of `Ok(s.len() as i64)`.
 
 ### B2 — Entry-Point Analysis Returns Presence Not Value
 **File**: `src/analysis/entry_point.rs:99-108`
@@ -184,7 +184,7 @@ In priority order:
 1. **B1 — UTF-8 slicing fix** in `lib/ffi/native/src/lib.rs`
    - `__contains_at`: add `haystack.is_char_boundary(start_usize)` check
    - `__find_from`: same fix
-   - `__utf8_len`: change `s.len()` to `s.chars().count()`
+   - `__UTF8_len`: change `s.len()` to `s.chars().count()`
 
 2. **B2 — Entry-point value bug** in `src/analysis/entry_point.rs`
    - New `get_initial_value_numeric()` that evaluates `decl.expr` to i64

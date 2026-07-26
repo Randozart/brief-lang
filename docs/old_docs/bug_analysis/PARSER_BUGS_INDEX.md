@@ -141,7 +141,7 @@
 - **Location:** `src/parser.rs:639, 675, 680` - Character/byte indexing
 - **Impact:** Emoji in comments causes panic
 - **Symptom:** Panic on multi-byte UTF-8 character boundaries
-- **Fix:** Use UTF-8-aware iteration with `char.len_utf8()`
+- **Fix:** Use UTF-8-aware iteration with `char.len_UTF8()`
 
 ### Bug #3: WASM Method Names
 - **Location:** `src/wasm_gen.rs:337-390, 779` - JS glue code

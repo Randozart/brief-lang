@@ -152,7 +152,7 @@ fn run_command(cmd: &str, args: &[&str]) -> Result<(), String> {
     if output.status.success() {
         Ok(())
     } else {
-        let stderr = String::from_utf8_lossy(&output.stderr);
+        let stderr = String::from_UTF8_lossy(&output.stderr);
         Err(format!("'{}' failed: {}", cmd, stderr.trim()))
     }
 }

@@ -46,9 +46,9 @@ Source:  #String, op Add, op Length
 A protocol variant is declared with `proto` — a new top-level form:
 
 ```brief
-proto ascii: #String {
-    CastTo(#String<utf8>) = ascii_to_utf8(#L);
-    CastFrom(#String<utf8>) = utf8_to_ascii(#L);
+proto ASCII: #String {
+    CastTo(#String<UTF8>) = ASCII_to_UTF8(#L);
+    CastFrom(#String<UTF8>) = UTF8_to_ASCII(#L);
 };
 ```
 
@@ -65,14 +65,14 @@ The body is **difference-only** — you write only what differs from the default
 
 ### Defaults Are Primordial
 
-`#String` resolves to `#String<utf8>` by default. The defaults are hardcoded
+`#String` resolves to `#String<UTF8>` by default. The defaults are hardcoded
 in the parser and always available, even with `--no-stdlib`. Non-default
-variants (ascii, utf16, posit32) are provided by the prelude plugin.
+variants (ASCII, UTF16, Posit32) are provided by the prelude plugin.
 
 | Bare hashword | Resolves to | Source |
 |:---|---:|---:|
-| `#String` | `#String<utf8>` | Primordial (parser) |
-| `#Float` | `#Float<ieee754>` | Primordial (parser) |
+| `#String` | `#String<UTF8>` | Primordial (parser) |
+| `#Float` | `#Float<IEEE754>` | Primordial (parser) |
 | `#Char` | `#Char<unicode>` | Primordial (parser) |
 | `#Int` | `#Int` (no variant) | Primordial |
 
@@ -80,9 +80,9 @@ variants (ascii, utf16, posit32) are provided by the prelude plugin.
 
 | Layer | Declares | Example | Purpose |
 |---|---|---|---|
-| Protocol edge | Compatibility direction + transform | `CastTo(#String<utf8>) = fn(#L);` | Defines HOW two variants relate |
-| Protocol op | Optimization hint | `op Add(#String<utf8>) = fn(#L, #R);` | Skip CastTo→default→CastFrom round-trip |
-| Type override | Different method | `op CastTo(#String<utf8>) = my_way(#L);` | Override protocol-level default |
+| Protocol edge | Compatibility direction + transform | `CastTo(#String<UTF8>) = fn(#L);` | Defines HOW two variants relate |
+| Protocol op | Optimization hint | `op Add(#String<UTF8>) = fn(#L, #R);` | Skip CastTo→default→CastFrom round-trip |
+| Type override | Different method | `op CastTo(#String<UTF8>) = my_way(#L);` | Override protocol-level default |
 
 ### Prelude Declarations
 
@@ -90,13 +90,13 @@ Non-default variants are declared in `lib/std/protocols.bv`, auto-loaded by
 the prelude:
 
 ```brief
-proto ascii: #String {
-    CastTo(#String<utf8>) = ascii_to_utf8(#L);
-    CastFrom(#String<utf8>) = utf8_to_ascii(#L);
+proto ASCII: #String {
+    CastTo(#String<UTF8>) = ASCII_to_UTF8(#L);
+    CastFrom(#String<UTF8>) = UTF8_to_ASCII(#L);
 };
-proto utf16: #String {
-    CastTo(#String<utf8>) = utf16_to_utf8(#L);
-    CastFrom(#String<utf8>) = utf8_to_utf16(#L);
+proto UTF16: #String {
+    CastTo(#String<UTF8>) = UTF16_to_UTF8(#L);
+    CastFrom(#String<UTF8>) = UTF8_to_UTF16(#L);
 };
 ```
 
@@ -119,8 +119,8 @@ SourceType --[implicit Cast(#Bits)]--> #Bits --[CastFrom(TargetType)]--> TargetT
 ### Fewer Hops = Less Conversion
 
 Declaring a variant closer to the target means fewer BFS hops:
-- `#String<utf16>` on Windows → identity path, zero conversion code
-- `#String` → resolves through `utf8 → utf16` → one conversion edge
+- `#String<UTF16>` on Windows → identity path, zero conversion code
+- `#String` → resolves through `UTF8 → UTF16` → one conversion edge
 - Both compile correctly; the pinned variant gives the optimizer less work
 
 ## Inheritance
@@ -130,10 +130,10 @@ all edges from the `#String` category's protocol graph. A type only writes
 `op CastTo(...) = fn(...)` to **override** the protocol-level default.
 
 ```brief
-type MyString: #String;   // inherits CastTo(#String<utf8>), CastFrom, all ops
+type MyString: #String;   // inherits CastTo(#String<UTF8>), CastFrom, all ops
 
 type MySpecialString: #String {
-    op CastTo(#String<utf8>) = my_custom_way(#L);  // override
+    op CastTo(#String<UTF8>) = my_custom_way(#L);  // override
 };
 ```
 
@@ -144,9 +144,9 @@ For every protocol declaration, the compiler runs two proofs:
 ### Proof 1: Round-Trip Identity
 
 ```brief
-CastTo(#String<utf8>) = ascii_to_utf8(#L);
-CastFrom(#String<utf8>) = utf8_to_ascii(#L);
-// Proved: utf8_to_ascii(ascii_to_utf8(x)) == x
+CastTo(#String<UTF8>) = ASCII_to_UTF8(#L);
+CastFrom(#String<UTF8>) = UTF8_to_ASCII(#L);
+// Proved: UTF8_to_ASCII(ASCII_to_UTF8(x)) == x
 ```
 
 This uses the existing symbolic evaluation and SMT solver pipeline
@@ -156,8 +156,8 @@ denied — inconsistent transformations are bugs.
 ### Proof 2: Cross-Op Equivalence
 
 ```brief
-op Add(#String<utf8>) = ascii_add_with_utf8(#L, #R);
-// Proved: ascii_add_with_utf8(x, y) == utf8_to_ascii(ascii_to_utf8(x) + y)
+op Add(#String<UTF8>) = ASCII_add_with_UTF8(#L, #R);
+// Proved: ASCII_add_with_UTF8(x, y) == UTF8_to_ASCII(ASCII_to_UTF8(x) + y)
 ```
 
 The cross-op is an optimization hint — it says "skip the round-trip, I
@@ -170,8 +170,8 @@ If a protocol declares a contract `[expr]`, the compiler proves it at
 every boundary crossing via SMT:
 
 ```brief
-proto ascii: #String [#Self[i] < 128] {
-    CastTo(#String<utf8>) = ascii_to_utf8(#L);
+proto ASCII: #String [#Self[i] < 128] {
+    CastTo(#String<UTF8>) = ASCII_to_UTF8(#L);
 };
 // Every value entering or exiting this protocol must satisfy the contract
 ```
@@ -182,9 +182,9 @@ In protocol declarations, `#L` is always the protocol's own variant (self)
 and `#R` is the target variant parameter:
 
 ```brief
-// #L = self (ascii), #R = target (utf8)
-CastTo(#String<utf8>) = ascii_to_utf8(#L);
-op Add(#String<utf8>) = ascii_add_with_utf8(#L, #R);
+// #L = self (ASCII), #R = target (UTF8)
+CastTo(#String<UTF8>) = ASCII_to_UTF8(#L);
+op Add(#String<UTF8>) = ASCII_add_with_UTF8(#L, #R);
 ```
 
 This follows the same `#L`/`#R` convention used in type-level `op` bindings,

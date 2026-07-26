@@ -4,8 +4,8 @@
 // The compiler proves round-trip identity for each pair.
 
 proto ASCII: #String {
-    CastTo(#String<UTF8>) = ascii_to_UTF8(#L);
-    CastFrom(#String<UTF8>) = UTF8_to_ascii(#L);
+    CastTo(#String<UTF8>) = ASCII_to_UTF8(#L);
+    CastFrom(#String<UTF8>) = UTF8_to_ASCII(#L);
 };
 
 proto UTF16: #String {

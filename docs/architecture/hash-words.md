@@ -25,14 +25,14 @@ using your intrinsic knowledge of the `#Category` protocol.** The backend
 decides what `#Int` addition means in its own terms (LLVM → `add i64`,
 CIRCT → hardware adder, SPIR-V → `OpIAdd`).
 
-**Protocol variants** parameterize hashwords: `#String<utf8>`, `#String<ascii>`,
-`#Float<ieee754>`. The file extension determines the default (`.bv` → utf8,
-`.ebv` → ascii). Cross-variant calls require explicit protocol disambiguation
+**Protocol variants** parameterize hashwords: `#String<UTF8>`, `#String<ASCII>`,
+`#Float<IEEE754>`. The file extension determines the default (`.bv` → UTF8,
+`.ebv` → ASCII). Cross-variant calls require explicit protocol disambiguation
 — the compiler errors if a `.bv` file calls a `.ebv` function using `#String`
 without specifying the variant:
 
 ```brief
-fn cross(a: #String<utf8>, b: #String<ascii>) { ... };
+fn cross(a: #String<UTF8>, b: #String<ASCII>) { ... };
 ```
 
 Each backend declares supported protocols in `config/targets.toml`. A function

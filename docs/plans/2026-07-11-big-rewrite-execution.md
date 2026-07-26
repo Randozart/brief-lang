@@ -86,7 +86,7 @@ Extract using:
 value_as_i64(&val)          // Bits → Option<i64>
 value_as_f64(&val)          // Bits → Option<f64>
 value_as_bool(&val)         // Bits → Option<bool>
-String::from_utf8_lossy(b)  // Bits → Cow<str> (FFI string params)
+String::from_UTF8_lossy(b)  // Bits → Cow<str> (FFI string params)
 ```
 
 ### Rule 3: `formatting <~` Uses Identifiers, Not Strings
@@ -172,7 +172,7 @@ Value::String(s)` chains.
 Each impl function takes `&[Value]` and returns `Result<Value>`. Inside each:
 ```
 let bits = match &args[0] { Value::Bits(b) => b, _ => return Err(...) };
-// operate on bytes — use String::from_utf8_lossy() where strings needed
+// operate on bytes — use String::from_UTF8_lossy() where strings needed
 Ok(Value::Bits(result_bytes))
 ```
 
@@ -226,7 +226,7 @@ is independently testable, flat (max 2 levels), and has a doc comment.
 use Bits-only matching. The `resolve_deferred_literals` function is
 already flat (max 2 levels). `value_to_expr` needs the match arms updated
 from `Value::Int(i)` → `value_as_i64`, `Value::String(s)` →
-`String::from_utf8_lossy`, etc.
+`String::from_UTF8_lossy`, etc.
 
 ### 9. Token Form Refactor (AST rename pass)
 
@@ -236,7 +236,7 @@ After all files above compile, apply `Expr::String → Expr::Quoted` and
 1. Rename the variants in `src/ast.rs`
 2. Fix all match/construction sites — build will reveal every one (~200 hits)
 3. The `Expr::Integer` → `Expr::Decimal` rename is mechanical (same backing type)
-4. The `Expr::String` → `Expr::Quoted` rename changes the backing type from `String` to `Vec<u8>`. All sites must change from `s.to_string()` to `String::from_utf8_lossy(b)`
+4. The `Expr::String` → `Expr::Quoted` rename changes the backing type from `String` to `Vec<u8>`. All sites must change from `s.to_string()` to `String::from_UTF8_lossy(b)`
 5. Add `@` lexer rule in `src/lexer.rs` — reads the next token, produces `Expr::Quoted(raw_source_bytes)`
 
 ### 10. `formatting <~` Property Implementation

@@ -410,7 +410,7 @@ With Tier 1 complete, the foundation is laid for:
 - `is_lower(c)` - lowercase
 - `is_symbol(c)` - punctuation/symbols
 - `is_control(c)` - control characters
-- `is_ascii(c)` - ASCII range
+- `is_ASCII(c)` - ASCII range
 - `is_unicode_scalar(c)` - valid Unicode
 - `is_surrogate(c)` - surrogate pair
 

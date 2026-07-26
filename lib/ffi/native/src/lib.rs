@@ -390,7 +390,7 @@ pub fn __get_chars(s: String) -> Result<Vec<String>, String> {
 }
 
 #[wasm_bindgen]
-pub fn __utf8_len(s: String) -> Result<i64, String> {
+pub fn __UTF8_len(s: String) -> Result<i64, String> {
     Ok(s.chars().count() as i64)
 }
 
@@ -457,7 +457,7 @@ pub fn __bytes(s: String) -> Result<Vec<i64>, String> {
 #[wasm_bindgen]
 pub fn __from_bytes(list: Vec<i64>) -> Result<String, String> {
     let bytes: Vec<u8> = list.iter().map(|&b| b as u8).collect();
-    match String::from_utf8(bytes) {
+    match String::from_UTF8(bytes) {
         Ok(s) => Ok(s),
         Err(_) => Err("Invalid UTF-8".to_string()),
     }
@@ -943,12 +943,12 @@ pub fn __html_unescape(s: String) -> Result<String, String> {
 }
 
 #[wasm_bindgen]
-pub fn __utf8_encode(s: String) -> Result<Vec<i64>, String> {
+pub fn __UTF8_encode(s: String) -> Result<Vec<i64>, String> {
     Ok(s.chars().map(|c| c as i64).collect())
 }
 
 #[wasm_bindgen]
-pub fn __utf8_decode(list: Vec<i64>) -> Result<String, String> {
+pub fn __UTF8_decode(list: Vec<i64>) -> Result<String, String> {
     let chars: Vec<char> = list
         .iter()
         .filter_map(|&c| char::from_u32(c as u32))

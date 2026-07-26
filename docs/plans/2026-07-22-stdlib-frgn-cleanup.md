@@ -475,7 +475,7 @@ Check for any files importing from `std/out.bv` — if found, redirect to the ap
 
 ```brief
 frgn __hex_decode_bytes(s: String) -> Result<List<Int>, EncodingError>
-frgn __utf8_encode(s: String) -> Result<List<Int>, EncodingError>
+frgn __UTF8_encode(s: String) -> Result<List<Int>, EncodingError>
 ```
 
 Add `;` after each. Same fix in duplicate `lib/std/ffi/encoding.bv`.

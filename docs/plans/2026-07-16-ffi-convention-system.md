@@ -1306,7 +1306,7 @@ pub fn prove_smt_formula(formula: &str, timeout: Duration) -> SmtResult {
 
     match output {
         Ok(out) => {
-            let stdout = String::from_utf8_lossy(&out.stdout);
+            let stdout = String::from_UTF8_lossy(&out.stdout);
             if stdout.contains("unsat") {
                 SmtResult::Unsat
             } else if stdout.contains("sat") {

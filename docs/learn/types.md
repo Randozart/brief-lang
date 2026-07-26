@@ -85,11 +85,11 @@ These say: "Stack is like List but you can't index into it." The compiler synthe
 Codecs define how literals are translated to bytes at compile time:
 
 ```brief
-import { Utf8 } from "std/utf8.bv";
-Type String <: List<U8> { Codec = Utf8; };
+import { UTF8 } from "std/UTF8.bv";
+Type String <: List<U8> { Codec = UTF8; };
 ```
 
-When you write `"Hello"`, the compiler calls `Utf8::encode("Hello")` during compilation and embeds the result directly in the binary.
+When you write `"Hello"`, the compiler calls `UTF8::encode("Hello")` during compilation and embeds the result directly in the binary.
 
 ### Refinement Constraints
 

@@ -543,7 +543,7 @@ pub enum Type {
 pub enum Interpretation {
     SignedInt,
     UnsignedInt,
-    Ieee754Float,
+    IEEE754Float,
     Boolean,
     UnicodeScalar,
     RawData,
@@ -598,8 +598,8 @@ impl Type {
             Type::UInt16 => Some(BitsInfo { width: 16, interpretation: UnsignedInt }),
             Type::UInt32 => Some(BitsInfo { width: 32, interpretation: UnsignedInt }),
             Type::UInt => Some(BitsInfo { width: 64, interpretation: UnsignedInt }),
-            Type::Float => Some(BitsInfo { width: 32, interpretation: Ieee754Float }),
-            Type::Float64 => Some(BitsInfo { width: 64, interpretation: Ieee754Float }),
+            Type::Float => Some(BitsInfo { width: 32, interpretation: IEEE754Float }),
+            Type::Float64 => Some(BitsInfo { width: 64, interpretation: IEEE754Float }),
             Type::Bool => Some(BitsInfo { width: 1, interpretation: Boolean }),
             Type::Char => Some(BitsInfo { width: 32, interpretation: UnicodeScalar }),
             Type::Bits { width, interpretation } => Some(BitsInfo { width: *width, interpretation: *interpretation }),
@@ -639,8 +639,8 @@ Add the new variants to `Type` enum. No code uses them yet. Update `to_bits()` t
 Parser accepts:
 - `Int<8>`, `Int<16>`, `Int<32>`, `Int<64>` → resolve to `Type::Bits { width, SignedInt }`
 - `UInt<8>`, `UInt<16>`, `UInt<32>`, `UInt<64>` → `Type::Bits { width, UnsignedInt }`
-- `Float<32>` → `Type::Bits { 32, Ieee754Float }`
-- `Float<64>` → `Type::Bits { 64, Ieee754Float }`
+- `Float<32>` → `Type::Bits { 32, IEEE754Float }`
+- `Float<64>` → `Type::Bits { 64, IEEE754Float }`
 - `Bits<N>` → `Type::Bits { N, RawData }`
 - `Bool<1>` → `Type::Bits { 1, Boolean }` (warning: use bare `Bool`)
 
@@ -716,7 +716,7 @@ fn fallback_llvm_type(ty: &Type) -> &str {
                 // LLVM integer types are signless — i8 covers both i8 and u8
                 Cow::Owned(format!("i{}", bits.width))
             }
-            Ieee754Float => match bits.width {
+            IEEE754Float => match bits.width {
                 32 => "float",
                 64 => "double",
                 _ => panic!("unsupported float width: {}", bits.width),
@@ -788,7 +788,7 @@ Once `git grep` confirms zero references to the following (and VERIFYING they ar
   fallback types throughout the codebase. After migration, they are defined as:
   `Type::Int` ≡ `Type::Bits { 64, SignedInt }`
   `Type::UInt` ≡ `Type::Bits { 64, UnsignedInt }`
-  `Type::Float` ≡ `Type::Bits { 32, Ieee754Float }`
+  `Type::Float` ≡ `Type::Bits { 32, IEEE754Float }`
   They stay in the enum for ergonomics but all code should match through `to_bits()`.
 - `Type::Void`, `Type::String`, `Type::Data`, `Type::Bool`
 - `Type::Constrained`, `Type::LayoutPtr`, `Type::Custom`

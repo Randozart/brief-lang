@@ -443,7 +443,7 @@ fn test_library_mode_c_driver() {
     // 4. Assert output
     // let output = std::process::Command::new("./c_driver")
     //     .output().unwrap();
-    // assert_eq!(String::from_utf8_lossy(&output.stdout).trim(), "add(2, 3) = 5");
+    // assert_eq!(String::from_UTF8_lossy(&output.stdout).trim(), "add(2, 3) = 5");
 }
 ```
 

@@ -248,7 +248,7 @@ fn test_gpu_e2e_invocation_count() {
 }
 
 #[test]
-fn test_escape_non_ascii_string() {
+fn test_escape_non_ASCII_string() {
     let output = escape_llvm_string("héllo");
     assert!(output.contains("\\c3"), "Should hex-escape byte C3");
     assert!(output.contains("\\a9"), "Should hex-escape byte A9");

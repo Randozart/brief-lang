@@ -331,10 +331,10 @@ by external tools.
         .output()
         .map_err(|e| format!("ShellCmd$: failed to execute '{}': {}", cmd, e))?;
     if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr);
+        let stderr = String::from_UTF8_lossy(&output.stderr);
         return Err(format!("ShellCmd$: '{}' failed: {}", cmd, stderr));
     }
-    Ok(NavValue::Str(String::from_utf8_lossy(&output.stdout).to_string()))
+    Ok(NavValue::Str(String::from_UTF8_lossy(&output.stdout).to_string()))
 }
 ```
 

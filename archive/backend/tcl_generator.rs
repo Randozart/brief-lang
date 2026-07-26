@@ -102,7 +102,7 @@ impl TclGenerator {
                 .output()
                 .ok()
                 .and_then(|output| {
-                    let kb: u64 = String::from_utf8_lossy(&output.stdout)
+                    let kb: u64 = String::from_UTF8_lossy(&output.stdout)
                         .trim().parse().ok()?;
                     let gb = kb / 1024 / 1024;
                     if gb < 16 { Some(1) } else if gb < 32 { Some(4) } else { Some(8) }

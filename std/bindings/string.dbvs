@@ -5,7 +5,7 @@ import "std/types.dbvs";
 
 // Error type for string operations
 enum StringError {
-    InvalidUtf8,
+    InvalidUTF8,
     OutOfBounds,
     ParseError,
     EmptyString

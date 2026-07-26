@@ -76,7 +76,7 @@ pub fn deserialize(data: &[u8]) -> Result<(Vec<TopLevel>, TypeUniverse), String>
     };
 
     // 6. Parse BEAST text
-    let text = String::from_utf8(text_bytes)
+    let text = String::from_UTF8(text_bytes)
         .map_err(|_| String::from("beastpack: data is not valid UTF-8"))?;
     from_beast(&text)
 }

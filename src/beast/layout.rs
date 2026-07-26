@@ -42,7 +42,7 @@ fn tokenize(input: &str) -> Result<Vec<String>, String> {
                 chars.next();
                 let mut hex = String::from("0x");
                 while let Some(&c) = chars.peek() {
-                    if c.is_ascii_hexdigit() { hex.push(chars.next().unwrap()); } else { break; }
+                    if c.is_ASCII_hexdigit() { hex.push(chars.next().unwrap()); } else { break; }
                 }
                 tokens.push(hex);
             }

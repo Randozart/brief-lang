@@ -51,7 +51,7 @@ obj PyASCIIObject {
     ob_type: Int;    // offset 8,  8 bytes
     length: Int;     // offset 16, 8 bytes — number of code points
     hash: Int;       // offset 24, 8 bytes — cached hash (-1 if not computed)
-    state: Int;      // offset 32, 4 bytes — bitfield: interned:2, kind:3, compact:1, ascii:1, ready:1
+    state: Int;      // offset 32, 4 bytes — bitfield: interned:2, kind:3, compact:1, ASCII:1, ready:1
     wstr: Int;       // offset 40, 8 bytes — wide string pointer (null if not used)
 };
 
@@ -64,8 +64,8 @@ obj PyCompactUnicodeObject {
     hash: Int;          // offset 24, 8 bytes
     state: Int;         // offset 32, 4 bytes
     wstr: Int;          // offset 40, 8 bytes
-    utf8_length: Int;   // offset 48, 8 bytes
-    utf8: Int;          // offset 56, 8 bytes — pointer to UTF-8 buffer
+    UTF8_length: Int;   // offset 48, 8 bytes
+    UTF8: Int;          // offset 56, 8 bytes — pointer to UTF-8 buffer
     wstr_length: Int;   // offset 64, 8 bytes
 };
 
@@ -78,8 +78,8 @@ obj PyUnicodeObject {
     hash: Int;          // offset 24, 8 bytes
     state: Int;         // offset 32, 4 bytes
     wstr: Int;          // offset 40, 8 bytes
-    utf8_length: Int;   // offset 48, 8 bytes
-    utf8: Int;          // offset 56, 8 bytes
+    UTF8_length: Int;   // offset 48, 8 bytes
+    UTF8: Int;          // offset 56, 8 bytes
     wstr_length: Int;   // offset 64, 8 bytes
     data: Int;          // offset 72, 8 bytes — pointer to UCS1/UCS2/UCS4 buffer
 };
@@ -101,7 +101,7 @@ meld PyVarObject -> PyLongObject {
     ob_size -> ob_size;
 };
 
-// PyASCIIObject → PyCompactUnicodeObject: compact extends ascii
+// PyASCIIObject → PyCompactUnicodeObject: compact extends ASCII
 meld PyASCIIObject -> PyCompactUnicodeObject;
 
 // PyCompactUnicodeObject → PyUnicodeObject: full extends compact

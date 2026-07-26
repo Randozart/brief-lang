@@ -102,7 +102,7 @@ defn is_control(c: Char) [true][term == true || term == false] -> Bool {
     term false;
 };
 
-defn is_ascii(c: Char) [true][term == true || term == false] -> Bool {
+defn is_ASCII(c: Char) [true][term == true || term == false] -> Bool {
     when c <= '\x7F' {
         term true;
     };

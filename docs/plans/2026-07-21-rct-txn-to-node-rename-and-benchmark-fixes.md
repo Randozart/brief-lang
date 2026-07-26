@@ -999,7 +999,7 @@ fork+exec harness at `BOUND=50000000`. Single iteration per benchmark (not avera
 ### Correctness Summary
 
 All benchmarks match C reference output except:
-- `utf8_ops` — MISMATCH (pre-existing, line count 10 vs 1)
+- `UTF8_ops` — MISMATCH (pre-existing, line count 10 vs 1)
 
 No SysCall# warnings. All benchmarks compile (including queue_drain variants).
 

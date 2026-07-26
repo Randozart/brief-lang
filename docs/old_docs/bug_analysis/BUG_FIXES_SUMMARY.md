@@ -29,7 +29,7 @@ All three critical bugs have been **fixed and tested**.
 **Problem:** Parser mixed byte-position and character-position indexing. Emoji and multi-byte UTF-8 characters (2-4 bytes each) caused panic when byte indexing landed in the middle of a character boundary.
 
 **Solution:** Converted to UTF-8-aware byte iteration:
-- Uses `char.len_utf8()` to advance by correct byte count per character
+- Uses `char.len_UTF8()` to advance by correct byte count per character
 - Safely handles multi-byte characters without panicking
 - Works with emoji (4-byte) and other Unicode characters
 
@@ -172,7 +172,7 @@ while byte_pos < source_bytes.len() {
 ```rust
 // Use UTF-8-aware character iteration
 let ch = self.source[byte_pos..].chars().next().unwrap_or('\0');
-byte_pos += ch.len_utf8();  // ← Correct byte advancement
+byte_pos += ch.len_UTF8();  // ← Correct byte advancement
 ```
 
 ### Bug #3 Fix in `src/wasm_gen.rs`

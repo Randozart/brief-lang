@@ -59,8 +59,8 @@ Hashwords can be parameterized by protocol variant:
 type ASCIIString {
     data: Bits<64>;
     len: Bits<64>;
-    op CastTo(#String<utf8>) = ascii_to_utf8(#L);   // produce UTF-8
-    op CastFrom(#String<utf8>) = utf8_to_ascii(#L);  // consume UTF-8
+    op CastTo(#String<UTF8>) = ASCII_to_UTF8(#L);   // produce UTF-8
+    op CastFrom(#String<UTF8>) = UTF8_to_ASCII(#L);  // consume UTF-8
 };
 ```
 
@@ -68,9 +68,9 @@ Bare hashwords resolve to their default variant at parse time:
 
 | Hashword | Default variant | Also writable as |
 |---|---|---|
-| `#String` | `utf8` (for all files) | `#String<utf8>`, `#String<ascii>` |
-| `#Float` | `ieee754` | `#Float<ieee754>` |
-| `#Char` | `unicode` | `#Char<unicode>`, `#Char<ascii>` |
+| `#String` | `UTF8` (for all files) | `#String<UTF8>`, `#String<ASCII>` |
+| `#Float` | `IEEE754` | `#Float<IEEE754>` |
+| `#Char` | `unicode` | `#Char<unicode>`, `#Char<ASCII>` |
 
 Cross-variant calls require explicit protocol. A `.bv` file calling an `.ebv`
 function using `#String` produces a compile error if the default variants
@@ -117,8 +117,8 @@ protocol category:
 type Latin1String {
     data: Bits<64>;
     len: Bits<64>;
-    op CastTo(#String) = latin1_to_utf8(#L);       // Latin1 → UTF-8
-    op CastFrom(#String) = utf8_to_latin1(#L);      // UTF-8 → Latin1
+    op CastTo(#String) = latin1_to_UTF8(#L);       // Latin1 → UTF-8
+    op CastFrom(#String) = UTF8_to_latin1(#L);      // UTF-8 → Latin1
 };
 ```
 

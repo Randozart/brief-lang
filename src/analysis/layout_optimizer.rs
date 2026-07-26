@@ -337,7 +337,7 @@ pub(crate) fn find_cast_path(
 }
 
 /// Parse a node string into (category, variant) for protocol graph lookup.
-/// Supports formats: "#String<utf8>", "String", "#String".
+/// Supports formats: "#String<UTF8>", "String", "#String".
 fn parse_protocol_node(node: &str) -> Option<(String, String)> {
     let node = node.strip_prefix('#').unwrap_or(node);
     if let Some(bracket) = node.find('<') {

@@ -106,9 +106,9 @@ time to concrete registers. See `docs/architecture/hash-words.md`.
 "backend, use your intrinsic knowledge of integer addition" — no TOML config
 file needed.
 
-**Protocol variants** parameterize hashwords: `#String<UTF8>`, `#String<ascii>`,
+**Protocol variants** parameterize hashwords: `#String<UTF8>`, `#String<ASCII>`,
 `#Float<IEEE754>`. The file extension determines the default (`.bv` → UTF8,
-`.ebv` → ascii). Cross-variant calls require explicit protocol disambiguation
+`.ebv` → ASCII). Cross-variant calls require explicit protocol disambiguation
 at the call site. The compiler errors if a `.bv` file calls a `.ebv` function
 using `#String` without specifying the variant.
 

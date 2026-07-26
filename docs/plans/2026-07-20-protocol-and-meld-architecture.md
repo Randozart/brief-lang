@@ -12,7 +12,7 @@
 2. **A type is its fields + its ops.** Metadata is an optimization hint, not identity.
 3. **Hashwords are backend directives, not category tags.** `#Int` means "backend, emit your native integer addition." A type never *belongs* to a category — it *interacts* with one through its ops.
 4. **No TOML config.** Hashwords replace `llvm-ops.toml` and `ctd-llvm-mappings.toml`. Only `config/targets.toml` remains.
-5. **UTF-8 is the universal default for all files.** `.bv` and `.ebv` both default to UTF-8. ASCII is explicit opt-in via `#String<ascii>`.
+5. **UTF-8 is the universal default for all files.** `.bv` and `.ebv` both default to UTF-8. ASCII is explicit opt-in via `#String<ASCII>`.
 6. **Cast chains are inlined and optimized by LLVM.** An ASCIIString → UTF-8 → ASCIIString conversion (both directions through the protocol) folds to a no-op for the ASCII byte range.
 
 ---
@@ -67,8 +67,8 @@ type Bfloat16 {
 
 type Posit32 {
     data: Bits<32>;
-    op Add(Posit32) = posit32_add(#L, #R);  // no hashword — custom function
-    op Mul(Posit32) = posit32_mul(#L, #R);
+    op Add(Posit32) = Posit32_add(#L, #R);  // no hashword — custom function
+    op Mul(Posit32) = Posit32_mul(#L, #R);
     op Cast(#Bits);
 };
 ```
@@ -90,9 +90,9 @@ Functions bound to ops via `= fn(...)` are automatically emitted with `alwaysinl
 Hashwords can be parameterized by protocol variant:
 
 ```brief
-#String<utf8>         // UTF-8 encoding (default for all files)
-#String<ascii>        // ASCII (explicit opt-in)
-#Float<ieee754>       // IEEE 754 (default)
+#String<UTF8>         // UTF-8 encoding (default for all files)
+#String<ASCII>        // ASCII (explicit opt-in)
+#Float<IEEE754>       // IEEE 754 (default)
 #Char<unicode>        // Unicode scalar (default)
 ```
 
@@ -100,13 +100,13 @@ Bare hashwords resolve to their default variant at parse time:
 
 | Hashword | Resolved to |
 |---|---|
-| `#String` | `#String<utf8>` |
-| `#Float` | `#Float<ieee754>` |
+| `#String` | `#String<UTF8>` |
+| `#Float` | `#Float<IEEE754>` |
 | `#Char` | `#Char<unicode>` |
 | `#Int`, `#Bool`, `#Bits` | (no variants) |
 
 UTF-8 is the universal default for ALL files (both `.bv` and `.ebv`).
-ASCII is an explicit opt-in via `#String<ascii>`. No file-extension-based
+ASCII is an explicit opt-in via `#String<ASCII>`. No file-extension-based
 default switching.
 
 ---
@@ -130,7 +130,7 @@ no intermediate currency type. The compiler inlines both ops and LLVM
 eliminates any redundant transformations:
 
 ```brief
-inline defn any_string_to_ascii(source: #String) -> ASCIIString {
+inline defn any_string_to_ASCII(source: #String) -> ASCIIString {
     let bytes = source :> CastTo(#Bits);        // raw bytes
     let result = ASCIIString::from_bytes(bytes); // construct from bytes
     result
@@ -166,8 +166,8 @@ programmer writes `(TargetType)source`, the compiler internally emits
 
 ```brief
 type Latin1String {
-    op CastTo(#String) = latin1_to_utf8(#L);      // Latin1 → UTF-8 bytes
-    op CastFrom(#String) = utf8_to_latin1(#L);     // UTF-8 bytes → Latin1
+    op CastTo(#String) = latin1_to_UTF8(#L);      // Latin1 → UTF-8 bytes
+    op CastFrom(#String) = UTF8_to_latin1(#L);     // UTF-8 bytes → Latin1
 };
 ```
 
@@ -176,8 +176,8 @@ protocols. No `To`/`From` needed because both sides are concrete:
 
 ```brief
 type Posit32 {
-    op Cast(Int) = posit32_to_int(#L);             // Posit32 → Int
-    op Cast(Float) = posit32_to_float(#L);          // Posit32 → Float
+    op Cast(Int) = Posit32_to_int(#L);             // Posit32 → Int
+    op Cast(Float) = Posit32_to_float(#L);          // Posit32 → Float
 };
 ```
 
@@ -269,7 +269,7 @@ meld Meters -> Kilometers {
 };
 
 meld String -> PyString {
-    data = pyobj_from_utf8(#L);
+    data = pyobj_from_UTF8(#L);
 };
 ```
 
@@ -513,12 +513,12 @@ Same principle applies to Parse: `op Parse(Decimal) = fn(#L)` fires before
 `op Parse(#Int)` for numeric literals, because the concrete form is more
 specific.
 
-### Q3: Protocol variant directions — CastTo utf8, CastFrom ascii?
+### Q3: Protocol variant directions — CastTo UTF8, CastFrom ASCII?
 
-Valid. A transcoder type may `CastFrom(#String<utf8>)` and
-`CastTo(#String<ascii>)` — that's a meaningful conversion.
-The round-trip test handles it: `CastFrom(utf8) → CastTo(ascii)` is tested
-separately from `CastFrom(ascii) → CastTo(utf8)`.
+Valid. A transcoder type may `CastFrom(#String<UTF8>)` and
+`CastTo(#String<ASCII>)` — that's a meaningful conversion.
+The round-trip test handles it: `CastFrom(UTF8) → CastTo(ASCII)` is tested
+separately from `CastFrom(ASCII) → CastTo(UTF8)`.
 
 ### Q4: How tolerant is round-trip equality? Structural or literal?
 
@@ -555,7 +555,7 @@ A subtype may override with its own `op Parse(Form) = fn(#L)`.
 | 1. Bits as sole primitive | ✅ Implicit | Already foundational |
 | 2. Layout from structure | ✅ Complete | normalizer.rs, type_universe |
 | 3. Ops with hashwords | ✅ Complete | parser, OperatorDef |
-| 4. Protocol variants | ✅ Complete | HashWordVariant, utf8 default |
+| 4. Protocol variants | ✅ Complete | HashWordVariant, UTF8 default |
 | 5. Protocol currencies | ⏳ Specified | Need protocol ops in stdlib |
 | 6. Cast resolution | ⏳ Specified | Need Cast resolution in typechecker |
 | 7. Meld (explicit) | ⏳ Specified | Need updated meld parser + validation |

@@ -353,9 +353,9 @@ Several byte-string operations are implemented in pure Brief (no frgn) using
 
 | Function | File | Algorithm |
 |----------|------|-----------|
-| `memcmp(a, b, len)` | `lib/std/types/utf8view.bv` | Byte-by-byte loop via `txn [i < len][i == len]` |
-| `utf8_find(hay, hay_len, needle, needle_len)` | `lib/std/types/utf8view.bv` | Nested txns: `find_loop` calls `memcmp_at` per position |
-| `utf8_validate(data, len)` | `lib/std/types/utf8view.bv` | Single txn decodes lead byte, checks continuations, validates code points |
+| `memcmp(a, b, len)` | `lib/std/types/UTF8view.bv` | Byte-by-byte loop via `txn [i < len][i == len]` |
+| `UTF8_find(hay, hay_len, needle, needle_len)` | `lib/std/types/UTF8view.bv` | Nested txns: `find_loop` calls `memcmp_at` per position |
+| `UTF8_validate(data, len)` | `lib/std/types/UTF8view.bv` | Single txn decodes lead byte, checks continuations, validates code points |
 | `smallstring_get`, `push_byte`, etc. | `lib/std/types/small_string.bv` | `when`-chained slot selection for inline 64-byte buffer |
 
 These replace the earlier `frgn` declarations. The compiler can optimize

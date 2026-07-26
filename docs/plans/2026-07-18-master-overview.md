@@ -735,10 +735,10 @@ Record full output. Compare against pre-implementation baseline. Any regression 
 | `src/typechecker/mod.rs` | ✅ Done | Provenance threading, PtrConst, write-through guard |
 | `lib/std/memory/arena.bv` | ✅ Done | Pure-Brief arena type |
 | `lib/std/memory/crossword.bv` | ✅ Done | Pure-Brief crossword arena |
-| `lib/std/types/bootstrap.bv` | ✅ Done | Utf8View, StaticString, SmallString64 type decls |
-| `lib/std/types/utf8view.bv` | ✅ Done | Pure-Brief memcmp, utf8_find, utf8_validate |
+| `lib/std/types/bootstrap.bv` | ✅ Done | UTF8View, StaticString, SmallString64 type decls |
+| `lib/std/types/UTF8view.bv` | ✅ Done | Pure-Brief memcmp, UTF8_find, UTF8_validate |
 | `lib/std/types/small_string.bv` | ✅ Done | SmallString64 inline buffer operations |
-| `lib/runtime/brief_rt.c` | ✅ Done | __utf8_validate, __utf8_find (kept for ref, pure-Brief supersedes) |
+| `lib/runtime/brief_rt.c` | ✅ Done | __UTF8_validate, __UTF8_find (kept for ref, pure-Brief supersedes) |
 | `BUGS.md` | ✅ Done | All findings documented |
 
 ## Benchmark Baseline (July 18, 2026)
@@ -862,9 +862,9 @@ cargo test --lib -- --feature svo  → all pass (flag ON, new SVO tests)
 
 ---
 
-## Block 14: Utf8View & Embedded String Types (Design Plan)
+## Block 14: UTF8View & Embedded String Types (Design Plan)
 
-**Goal:** Add two new string-like types to Brief: `Utf8View` (borrowed, zero-allocation UTF-8 view) and `SmallString<N>` (stack-allocated inline buffer, no heap), plus `StaticString` (compile-time-known ROM data). These complete the string type family for systems, embedded, and bare-metal targets.
+**Goal:** Add two new string-like types to Brief: `UTF8View` (borrowed, zero-allocation UTF-8 view) and `SmallString<N>` (stack-allocated inline buffer, no heap), plus `StaticString` (compile-time-known ROM data). These complete the string type family for systems, embedded, and bare-metal targets.
 
 ### Architecture
 
@@ -882,7 +882,7 @@ String types in Brief:
          │  can borrow as
          ▼
   ┌──────────────────────────────────────────────────────────┐
-  │                 Utf8View (borrowed view)                  │
+  │                 UTF8View (borrowed view)                  │
   │  {data: Int, len: Int}                                    │
   │  encoding <~ "UTF-8" (HARDCODED — guaranteed by constr.)  │
   │  NO ownership, NO free, NO SSO, NOT stored in state      │
@@ -900,102 +900,102 @@ String types in Brief:
   └──────────────────────────┘  └──────────────────────────────┘
 ```
 
-### U1: Utf8View Type
+### U1: UTF8View Type
 
-**Definition** (`lib/std/types/utf8view.bv`):
+**Definition** (`lib/std/types/UTF8view.bv`):
 ```brief
-// 2026-07-18: Utf8View — borrowed, trusted-UTF-8 view of byte data.
+// 2026-07-18: UTF8View — borrowed, trusted-UTF-8 view of byte data.
 // Zero-allocation. Does NOT own the underlying buffer.
 // encoding <~ "UTF-8" is guaranteed by construction (validated at boundary).
 // Implements the same {data, len} fat-pointer format as String.
-type Utf8View {
+type UTF8View {
     data: Int;
     len: Int;
     encoding <~ "UTF-8";
-    tbaa <~ "Utf8View";
+    tbaa <~ "UTF8View";
 };
 ```
 
 **Semantics:**
-- **NOT stored in state** — Utf8View is a borrow, cannot survive tick boundaries
+- **NOT stored in state** — UTF8View is a borrow, cannot survive tick boundaries
 - **NOT heap-allocated** — `type_is_heap_allocated` returns false
-- **NOT SSO** — always a fat pointer `{ptr, len}`. Even with `feature_sso_strings=true`, Utf8View gets `{i64, i64}` LLVM type but the `data` field is always a pointer (never inline packed data)
+- **NOT SSO** — always a fat pointer `{ptr, len}`. Even with `feature_sso_strings=true`, UTF8View gets `{i64, i64}` LLVM type but the `data` field is always a pointer (never inline packed data)
 - **NOT freed** — no `Free#` on drop
-- **encoding is ALWAYS "UTF-8"** — not configurable. The contract is: if you have a Utf8View, the bytes are valid UTF-8. If you want a different encoding, use `String`.
+- **encoding is ALWAYS "UTF-8"** — not configurable. The contract is: if you have a UTF8View, the bytes are valid UTF-8. If you want a different encoding, use `String`.
 - **Passes `is_string_like()`** — matches Phase B (2 Int fields + encoding property)
 
 **Construction:**
 ```brief
 // From a String (borrow, no validation needed — String is already valid)
-defn Utf8View::from_string(s: &String) -> Utf8View {
-    term Utf8View { data: s.data, len: s.len };
+defn UTF8View::from_string(s: &String) -> UTF8View {
+    term UTF8View { data: s.data, len: s.len };
 };
 // From raw bytes + len (validates UTF-8 at runtime)
-defn Utf8View::from_bytes(ptr: Ptr<Byte>, len: Int) -> Utf8View [len >= 0] {
+defn UTF8View::from_bytes(ptr: Ptr<Byte>, len: Int) -> UTF8View [len >= 0] {
     // Runtime call to UTF-8 validator in brief_rt.c
-    let valid: Bool = __utf8_validate(ptr, len);
+    let valid: Bool = __UTF8_validate(ptr, len);
     [valid == true];  // contract: validation MUST pass
-    term Utf8View { data: ptr as Int, len: len };
+    term UTF8View { data: ptr as Int, len: len };
 };
 // From compile-time string literal (zero cost — data is in .rodata)
-defn Utf8View::from_literal(s: String) -> Utf8View {
+defn UTF8View::from_literal(s: String) -> UTF8View {
     // The compiler recognizes this pattern and optimizes to a direct view
     // without the String intermediate allocation.
-    term Utf8View { data: __literal_ptr(s), len: s.len };
+    term UTF8View { data: __literal_ptr(s), len: s.len };
 };
 ```
 
 **Operations:**
 ```brief
 // O(1) — byte length
-defn Utf8View::len(v: Utf8View) -> Int { term v.len; };
+defn UTF8View::len(v: UTF8View) -> Int { term v.len; };
 
 // O(1) — slice returns a new view over the same underlying data
-defn Utf8View::slice(v: Utf8View, start: Int, end: Int) -> Utf8View
+defn UTF8View::slice(v: UTF8View, start: Int, end: Int) -> UTF8View
     [start >= 0][start <= end][end <= v.len]
 {
     let new_ptr: Ptr<Byte> = (v.data as Ptr<Byte>) + start;
-    term Utf8View { data: new_ptr as Int, len: end - start };
+    term UTF8View { data: new_ptr as Int, len: end - start };
 };
 
 // O(n) — codepoint count via encoding dispatch
-defn Utf8View::char_len(v: Utf8View) -> Int {
+defn UTF8View::char_len(v: UTF8View) -> Int {
     // Dispatches through config/encodings.toml ops.char_len
     term EncodingLength#(v.data, v.len);
 };
 
 // O(n) — byte offset of substring (returns -1 if not found)
-defn Utf8View::find(haystack: Utf8View, needle: Utf8View) -> Int {
-    term __utf8_find(haystack.data, haystack.len, needle.data, needle.len);
+defn UTF8View::find(haystack: UTF8View, needle: UTF8View) -> Int {
+    term __UTF8_find(haystack.data, haystack.len, needle.data, needle.len);
 };
 
 // O(n) — equality comparison (byte-level)
-defn Utf8View::eq(a: Utf8View, b: Utf8View) -> Bool {
+defn UTF8View::eq(a: UTF8View, b: UTF8View) -> Bool {
     term a.len == b.len && __memcmp(a.data, b.data, a.len) == 0;
 };
 
 // Convert to owned String (allocates)
-defn String::from_utf8_view(v: Utf8View) -> String {
+defn String::from_UTF8_view(v: UTF8View) -> String {
     let buf: Ptr<Byte> = Alloc#(v.len) as Ptr<Byte>;
     __memcpy(buf, v.data as Ptr<Byte>, v.len);
     term String { data: buf as Int, len: v.len };
 };
 ```
 
-**Utf8View as `&str` sugar** — The compiler can recognize `&s` where `s: String` and automatically produce a Utf8View. This is syntactic sugar for `Utf8View::from_string(&s)`.
+**UTF8View as `&str` sugar** — The compiler can recognize `&s` where `s: String` and automatically produce a UTF8View. This is syntactic sugar for `UTF8View::from_string(&s)`.
 
-**Compiler changes for Utf8View:**
+**Compiler changes for UTF8View:**
 
 | File | Change |
 |------|--------|
-| `lib/std/types/utf8view.bv` | Add Utf8View type definition |
-| `lib/std/types/bootstrap.bv` | Add `import "std/types/utf8view.bv"` |
-| `src/type_universe/mod.rs` | Register Utf8View as string-like (auto-detected by `is_string_like` — no change needed) |
-| `src/backend/llvm/mod.rs` `type_is_heap_allocated` | Exclude Utf8View (never heap-allocated) — add explicit `!is_string_like &&` check OR add Utf8View to exclusion list |
-| `src/backend/llvm/emit_toplevel.rs` `llvm_type` | Utf8View always gets `{i64, i64}` LLVM type (regardless of `feature_sso_strings`), since it's always a fat pointer. The SSO override should check for Utf8View explicitly or the `is_string_like` check should differentiate String vs Utf8View. |
-| `src/backend/llvm/helpers.rs` `adapt_to_i64` | Utf8View → i64: extract handle[0] (same as SSO String) |
-| `src/backend/llvm/emit_stmt.rs` | Utf8View values cannot be stored to state fields — emit compile error |
-| `lib/runtime/brief_rt.c` | Add `__utf8_validate(ptr, len)` validation function |
+| `lib/std/types/UTF8view.bv` | Add UTF8View type definition |
+| `lib/std/types/bootstrap.bv` | Add `import "std/types/UTF8view.bv"` |
+| `src/type_universe/mod.rs` | Register UTF8View as string-like (auto-detected by `is_string_like` — no change needed) |
+| `src/backend/llvm/mod.rs` `type_is_heap_allocated` | Exclude UTF8View (never heap-allocated) — add explicit `!is_string_like &&` check OR add UTF8View to exclusion list |
+| `src/backend/llvm/emit_toplevel.rs` `llvm_type` | UTF8View always gets `{i64, i64}` LLVM type (regardless of `feature_sso_strings`), since it's always a fat pointer. The SSO override should check for UTF8View explicitly or the `is_string_like` check should differentiate String vs UTF8View. |
+| `src/backend/llvm/helpers.rs` `adapt_to_i64` | UTF8View → i64: extract handle[0] (same as SSO String) |
+| `src/backend/llvm/emit_stmt.rs` | UTF8View values cannot be stored to state fields — emit compile error |
+| `lib/runtime/brief_rt.c` | Add `__UTF8_validate(ptr, len)` validation function |
 | `config/encodings.toml` | UTF-8 ops already defined — no change needed |
 | Tests | Construction, slice, find, char_len, eq, conversion from String |
 
@@ -1065,8 +1065,8 @@ defn SmallString::push_char(s: SmallString<@N>, c: Char) [s.len < N] {
     s.len = s.len + char_width(c);
 };
 
-defn SmallString::as_utf8_view(s: SmallString<@N>) -> Utf8View {
-    term Utf8View { data: s as Ptr<Byte> as Int, len: s.len };
+defn SmallString::as_UTF8_view(s: SmallString<@N>) -> UTF8View {
+    term UTF8View { data: s as Ptr<Byte> as Int, len: s.len };
 };
 ```
 
@@ -1078,7 +1078,7 @@ defn SmallString::as_utf8_view(s: SmallString<@N>) -> Utf8View {
 | Normalizer: derive LLVM struct type `{[N]i8, i64, i64}` from `@bufsize` + `bytes <~` | ~2 hr |
 | `declare_struct_types`: register SmallString<N> structs | ~1 hr |
 | Codegen: emit inline buffer read/write via GEP | ~1 hr |
-| Utf8View conversion: cast SmallString ptr to Utf8View data ptr | ~30 min |
+| UTF8View conversion: cast SmallString ptr to UTF8View data ptr | ~30 min |
 
 ### U3: StaticString (ROM String)
 
@@ -1092,7 +1092,7 @@ type StaticString {
 };
 ```
 
-**Construction:** Automatically created by the compiler for all string literals. Every `"hello"` in source code produces a `StaticString` before being converted to `String` or `Utf8View`. The compiler:
+**Construction:** Automatically created by the compiler for all string literals. Every `"hello"` in source code produces a `StaticString` before being converted to `String` or `UTF8View`. The compiler:
 1. Places the bytes + null terminator in `.rodata`
 2. Sets `data` to the address (known at compile time via the `@` global)
 3. Sets `len` to the byte count
@@ -1101,9 +1101,9 @@ type StaticString {
 
 ### U4: Relationship to SSO Infrastructure
 
-Key interactions between Utf8View/SmallString and the existing SSO infrastructure:
+Key interactions between UTF8View/SmallString and the existing SSO infrastructure:
 
-| Concern | String | Utf8View | SmallString<N> |
+| Concern | String | UTF8View | SmallString<N> |
 |---------|--------|----------|----------------|
 | `is_string_like()` | ✅ passes | ✅ passes (2 Int + encoding) | ❌ doesn't pass (different field structure) |
 | `feature_sso_strings` | SSO ≤6B, heap >6B | Always fat pointer (no SSO) | Always inline (no SSO needed) |
@@ -1114,12 +1114,12 @@ Key interactions between Utf8View/SmallString and the existing SSO infrastructur
 | Free# on drop | ✅ yes (heap strings) | ❌ no | ❌ no |
 | Tag bits | 3-bit tag scheme | Not needed (always ptr+len) | Not needed (always inline) |
 
-**Critical cleanup**: The `is_string_like` check at `emit_toplevel.rs:331` currently has `if name == "String"` hardcoded before the `is_string_like` fallback. For Utf8View to get `{i64, i64}` even without `feature_sso_strings`, this needs to change to:
+**Critical cleanup**: The `is_string_like` check at `emit_toplevel.rs:331` currently has `if name == "String"` hardcoded before the `is_string_like` fallback. For UTF8View to get `{i64, i64}` even without `feature_sso_strings`, this needs to change to:
 
 ```rust
-// 2026-07-18: Utf8View always uses {i64, i64} (fat pointer), regardless of SSO.
+// 2026-07-18: UTF8View always uses {i64, i64} (fat pointer), regardless of SSO.
 if let Type::Custom(name) = ty {
-    if name == "Utf8View" || name == "String" && self.feature_sso_strings {
+    if name == "UTF8View" || name == "String" && self.feature_sso_strings {
         return "{ i64, i64 }".to_string();
     }
 }
@@ -1134,17 +1134,17 @@ if self.feature_sso_strings
 
 | Phase | What | Files | Effort |
 |-------|------|-------|--------|
-| U1a | Add Utf8View type declaration | `lib/std/types/utf8view.bv` | ~10 min |
-| U1b | Wire Utf8View into bootstrap | `lib/std/types.bv` or mod | ~5 min |
-| U1c | Update `llvm_type` for Utf8View (always `{i64,i64}`) | `emit_toplevel.rs` | ~5 min |
-| U1d | Exclude Utf8View from `type_is_heap_allocated` | `mod.rs` | ~5 min |
-| U1e | Add `__utf8_validate` to C runtime | `lib/runtime/brief_rt.c` | ~30 min |
-| U1f | Utf8View operations (slice, find, eq, char_len) | `.bv` files + encoding dispatch wiring | ~2 hr |
+| U1a | Add UTF8View type declaration | `lib/std/types/UTF8view.bv` | ~10 min |
+| U1b | Wire UTF8View into bootstrap | `lib/std/types.bv` or mod | ~5 min |
+| U1c | Update `llvm_type` for UTF8View (always `{i64,i64}`) | `emit_toplevel.rs` | ~5 min |
+| U1d | Exclude UTF8View from `type_is_heap_allocated` | `mod.rs` | ~5 min |
+| U1e | Add `__UTF8_validate` to C runtime | `lib/runtime/brief_rt.c` | ~30 min |
+| U1f | UTF8View operations (slice, find, eq, char_len) | `.bv` files + encoding dispatch wiring | ~2 hr |
 | U2a | Parser: accept `Type::Width` in generic type args | `src/parser/types.rs` | ~1 hr |
 | U2b | Normalizer: derive SmallString LLVM struct | `src/backend/llvm/normalizer.rs` | ~2 hr |
 | U2c | `declare_struct_types` for SmallString | `src/backend/llvm/types.rs` | ~1 hr |
-| U2d | SmallString operations (init, push, as_utf8_view) | `.bv` files + codegen | ~2 hr |
-| U2e | Write-through guard for Utf8View (no state store) | `emit_stmt.rs` | ~10 min |
+| U2d | SmallString operations (init, push, as_UTF8_view) | `.bv` files + codegen | ~2 hr |
+| U2e | Write-through guard for UTF8View (no state store) | `emit_stmt.rs` | ~10 min |
 | U3 | StaticString (compile-time ROM view) | `.bv` file (already works) | ~30 min |
 | UT | Tests for all new types | Various test files | ~2 hr |
 
@@ -1152,23 +1152,23 @@ if self.feature_sso_strings
 
 ### Key Design Decisions for Review
 
-1. **Utf8View `encoding` is ALWAYS UTF-8** — not configurable. This is the semantic contract: Utf8View guarantees valid UTF-8. If you need a borrowed view of a non-UTF-8 string, use the raw String type or a byte span.
+1. **UTF8View `encoding` is ALWAYS UTF-8** — not configurable. This is the semantic contract: UTF8View guarantees valid UTF-8. If you need a borrowed view of a non-UTF-8 string, use the raw String type or a byte span.
 
-2. **Utf8View NOT in state** — enforcing this at the typechecker level: any `statement::Assign` to a state field with type Utf8View is a compile error. This prevents dangling borrows.
+2. **UTF8View NOT in state** — enforcing this at the typechecker level: any `statement::Assign` to a state field with type UTF8View is a compile error. This prevents dangling borrows.
 
 3. **SmallString<N> uses custom LLVM struct** — not the `{i64,i64}` SSO pattern. It's a fundamentally different type: inline byte array + length + capacity. The LLVM type `{[N]i8, i64, i64}` is declared via `declare_struct_types` and not treated as string-like by the codegen.
 
-4. **SmallString<N> `as_utf8_view()` is zero-cost** — the SmallString's inline buffer address is cast directly to Utf8View's data pointer. The Utf8View borrows from the SmallString. Lifetime must be enforced by the borrow checker (same rule: SmallString must outlive all Utf8Views that borrow from it).
+4. **SmallString<N> `as_UTF8_view()` is zero-cost** — the SmallString's inline buffer address is cast directly to UTF8View's data pointer. The UTF8View borrows from the SmallString. Lifetime must be enforced by the borrow checker (same rule: SmallString must outlive all UTF8Views that borrow from it).
 
 5. **No heap fallback for SmallString** — unlike String (SSO → heap promotion), SmallString panics/contract-violates when `len > N`. This is intentional for embedded systems where allocation is not available.
 
-6. **Utf8View as function parameter convention** — Standard library functions should accept `Utf8View` for string parameters where ownership is not needed. This enables callers to pass either String (borrowed) or SmallString (borrowed) or StaticString (borrowed) without conversion.
+6. **UTF8View as function parameter convention** — Standard library functions should accept `UTF8View` for string parameters where ownership is not needed. This enables callers to pass either String (borrowed) or SmallString (borrowed) or StaticString (borrowed) without conversion.
 
 ---
 
 ## Fix Block: Pure-Brief Functions + txn Return Type + .#field Access
 
-**Motivation:** The pure-Brief `__memcmp`, `__utf8_find`, `__utf8_validate` functions in `utf8view.bv` compile but can't be tested because:
+**Motivation:** The pure-Brief `__memcmp`, `__UTF8_find`, `__UTF8_validate` functions in `UTF8view.bv` compile but can't be tested because:
 1. The parser doesn't accept `-> RetType` on `txn` declarations
 2. Non-SSO String field access via `.data`/`.len` uses `extractvalue` on `ptr` type, which fails
 
@@ -1204,9 +1204,9 @@ let byte_len: Int = s1.#len;
 - `txn -> RetType` → valid after F1
 - `if/else` expressions → `if cond { expr } else { expr }` (single-level only)
 
-### Test file: `test_utf8_pure.bv`
+### Test file: `test_UTF8_pure.bv`
 
-Inline all 3 functions, exercise `memcmp`, `utf8_find`, `utf8_validate` with known test vectors, compile and run, verify exit code = 0.
+Inline all 3 functions, exercise `memcmp`, `UTF8_find`, `UTF8_validate` with known test vectors, compile and run, verify exit code = 0.
 
 ### F4: Parser — add binary bitwise ops `&` `|` `^` `<<` `>>`
 
@@ -1227,7 +1227,7 @@ Each token already exists in the lexer: `Pipe` (`|`), `BitXor` (`^`), `Ampersand
 
 ### F5: Convention fixes
 
-- `__` prefix is frgn-only — `__memcmp` → `memcmp`, `__utf8_find` → `utf8_find`, `__utf8_validate` → `utf8_validate`
+- `__` prefix is frgn-only — `__memcmp` → `memcmp`, `__UTF8_find` → `UTF8_find`, `__UTF8_validate` → `UTF8_validate`
 - `defn` cannot mutate outside state — already correct (functions mutate their parameters, which is returned via `term`)
 - No `else` keyword exists — use `when` guards everywhere
 - Entry point uses `rct txn` or `[#]` marker, not `defn main()`

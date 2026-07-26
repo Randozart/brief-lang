@@ -73,19 +73,19 @@ fn scan_line(line: &str, line_num: usize) -> Vec<IntrinsicUse> {
             if abs_dollar > 0
                 && abs_dollar + 1 < bytes.len()
                 && bytes[abs_dollar + 1] == b'('
-                && bytes[abs_dollar - 1].is_ascii_alphanumeric()
+                && bytes[abs_dollar - 1].is_ASCII_alphanumeric()
             {
                 // Extract the identifier before '$'
                 let mut start = abs_dollar;
                 while start > 0 {
                     let c = bytes[start - 1];
-                    if c.is_ascii_alphanumeric() || c == b'_' {
+                    if c.is_ASCII_alphanumeric() || c == b'_' {
                         start -= 1;
                     } else {
                         break;
                     }
                 }
-                let name = String::from_utf8_lossy(&bytes[start..abs_dollar + 1]).to_string();
+                let name = String::from_UTF8_lossy(&bytes[start..abs_dollar + 1]).to_string();
 
                 // Walk forward to find the matching ')' for snippet extraction
                 let snippet_end = bytes.len().min(abs_dollar + 41);

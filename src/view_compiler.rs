@@ -199,7 +199,7 @@ impl ViewCompiler {
             if bytes[pos] == b'<'
                 && bytes
                     .get(pos + 1)
-                    .map(|&b| b.is_ascii_alphabetic() || b == b'!')
+                    .map(|&b| b.is_ASCII_alphabetic() || b == b'!')
                     .unwrap_or(false)
             {
                 if let Some((tag, end_pos)) = self.parse_tag(&html[pos..]) {
@@ -277,11 +277,11 @@ impl ViewCompiler {
             if bytes[pos] == b'<'
                 && bytes
                     .get(pos + 1)
-                    .map(|&b| b.is_ascii_alphabetic() || b == b'!')
+                    .map(|&b| b.is_ASCII_alphabetic() || b == b'!')
                     .unwrap_or(false)
             {
                 if let Some((tag, end_pos)) = self.parse_tag(&html[pos..]) {
-                    let tag_str = String::from_utf8_lossy(&bytes[pos..pos + end_pos]).to_string();
+                    let tag_str = String::from_UTF8_lossy(&bytes[pos..pos + end_pos]).to_string();
                     let tag_lower = tag_str.to_lowercase();
 
                     if tag_lower.starts_with('/') {

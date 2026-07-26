@@ -471,14 +471,14 @@ Properties not overridden are inherited from the base type. `Stack` inherits `El
 Codecs are imported structs with `encode`/`decode` signatures, validated in Pass 1:
 
 ```brief
-import { Utf8 } from "std/utf8.bv";
+import { UTF8 } from "std/UTF8.bv";
 
 Type String <: List<U8> {
-    Codec = Utf8;
+    Codec = UTF8;
 };
 ```
 
-The compiler uses the codec to translate string literals at compile time — `"Hello"` stored as `String` runs `Utf8::encode("Hello")` during compilation, emitting the encoded bytes directly into the binary.
+The compiler uses the codec to translate string literals at compile time — `"Hello"` stored as `String` runs `UTF8::encode("Hello")` during compilation, emitting the encoded bytes directly into the binary.
 
 ### 10.6 Refinement Constraints
 

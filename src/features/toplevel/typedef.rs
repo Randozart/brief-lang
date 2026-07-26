@@ -121,9 +121,9 @@ mod tests {
 
     #[test]
     fn test_type_binding_codec() {
-        let binding = make_binding("Codec", Expr::Quoted("Utf8".into()));
+        let binding = make_binding("Codec", Expr::Quoted("UTF8".into()));
         assert_eq!(binding.name, "Codec");
-        assert_eq!(binding.value.as_string(), Some("Utf8"));
+        assert_eq!(binding.value.as_string(), Some("UTF8"));
     }
 
     #[test]
@@ -222,11 +222,11 @@ mod kani_full_tests {
         let binding = TypeBinding {
             name: "Codec".into(),
             params: vec![],
-            value: Box::new(Expr::Quoted("Utf8".into())),
+            value: Box::new(Expr::Quoted("UTF8".into())),
             span: None,
         };
         match binding.value.as_ref() {
-            Expr::Quoted(s) => assert_eq!(s, "Utf8"),
+            Expr::Quoted(s) => assert_eq!(s, "UTF8"),
             _ => panic!("wrong expr variant"),
         }
     }

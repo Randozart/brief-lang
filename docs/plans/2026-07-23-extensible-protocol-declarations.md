@@ -6,7 +6,7 @@
 
 ## Summary
 
-Add user-declarable protocol variants (`proto ascii: #String { CastTo(#String<utf8>); };`) so programmers can define custom bit-layout assumptions and their compatibility edges — without modifying the compiler. Protocols remain a frontend-only abstraction; the compiler resolves them to concrete types before LLVM ever sees them.
+Add user-declarable protocol variants (`proto ASCII: #String { CastTo(#String<UTF8>); };`) so programmers can define custom bit-layout assumptions and their compatibility edges — without modifying the compiler. Protocols remain a frontend-only abstraction; the compiler resolves them to concrete types before LLVM ever sees them.
 
 ## Context
 
@@ -55,13 +55,13 @@ A type does not "declare protocol membership." A type has operations mapped to c
 ### Fewer hops = less conversion
 
 Declaring a variant closer to the target means fewer BFS hops:
-- `#String<utf16>` on Windows → identity path, zero conversion code
-- `#String` → resolves through `utf8 → utf16` → one conversion edge
+- `#String<UTF16>` on Windows → identity path, zero conversion code
+- `#String` → resolves through `UTF8 → UTF16` → one conversion edge
 - Both compile correctly; the pinned variant gives the optimizer less work
 
 ### Primordial defaults vs prelude variants
 
-Defaults (utf8, ieee754, unicode) are hardcoded in the parser — they work with `--no-stdlib`. Non-default variants (ascii, posit32, utf16) are provided by the prelude plugin. This matches the intrinsics-vs-stdlib dividing line.
+Defaults (UTF8, IEEE754, unicode) are hardcoded in the parser — they work with `--no-stdlib`. Non-default variants (ASCII, Posit32, UTF16) are provided by the prelude plugin. This matches the intrinsics-vs-stdlib dividing line.
 
 ## Design
 
@@ -69,26 +69,26 @@ Defaults (utf8, ieee754, unicode) are hardcoded in the parser — they work with
 
 ```brief
 // Minimal — just edges, no contract
-proto ascii: #String {
-    CastTo(#String<utf8>);
-    CastFrom(#String<utf8>);
+proto ASCII: #String {
+    CastTo(#String<UTF8>);
+    CastFrom(#String<UTF8>);
 };
 
 // With optional contract (recommended) using #Self hashword
-proto ascii: #String [forall(i in 0..#Self:>Size, #Self[i] < 128)] {
-    CastTo(#String<utf8>);
-    CastFrom(#String<utf8>);
+proto ASCII: #String [forall(i in 0..#Self:>Size, #Self[i] < 128)] {
+    CastTo(#String<UTF8>);
+    CastFrom(#String<UTF8>);
 };
 
 // With an optional cross-variant op override
-proto ascii: #String {
-    CastTo(#String<utf8>);
-    CastFrom(#String<utf8>);
-    op Add(#String<utf8>) = add_utf8_to_ascii(#L, #R);
+proto ASCII: #String {
+    CastTo(#String<UTF8>);
+    CastFrom(#String<UTF8>);
+    op Add(#String<UTF8>) = add_UTF8_to_ASCII(#L, #R);
 };
 ```
 
-A protocol declaration is primarily about **edges**. Self-referencing ops (e.g. adding `ascii` to `ascii`) are never declared — they fall through to the default protocol via CastTo. Ops are only declared for **cross-variant overrides**: `op Add(#String<utf8>) = fn(#L, #R)` means "if you ever need to add utf8 directly to me, no need to walk the graph — this is the way." The self-variant is implicit (the protocol's own variant).
+A protocol declaration is primarily about **edges**. Self-referencing ops (e.g. adding `ASCII` to `ASCII`) are never declared — they fall through to the default protocol via CastTo. Ops are only declared for **cross-variant overrides**: `op Add(#String<UTF8>) = fn(#L, #R)` means "if you ever need to add UTF8 directly to me, no need to walk the graph — this is the way." The self-variant is implicit (the protocol's own variant).
 
 - `proto variant: #Category { ... }` — new top-level form using `proto` keyword. Follows the same `: #Category` pattern as `type Name: #Protocol { ... }`. The `proto` keyword is contextual (like `type`, `fn`, `node`), not reserved.
 - `CastTo(#Other<Variant>)` / `CastFrom(#Other<Variant>)` — edges in the protocol graph
@@ -100,10 +100,10 @@ A protocol declaration is primarily about **edges**. Self-referencing ops (e.g. 
 
 | Tier | What you write | What the compiler does |
 |:---:|---|---|
-| 0 — Default delegation | Just the type definition, no protocol declaration | Everything uses the primordial default (`utf8`, `ieee754`) |
-| 1 — Edges only | `#String latin15 { CastTo(#String<utf8>); ... };` | Ops fall through to default via CastTo. No custom op code needed. |
+| 0 — Default delegation | Just the type definition, no protocol declaration | Everything uses the primordial default (`UTF8`, `IEEE754`) |
+| 1 — Edges only | `#String latin15 { CastTo(#String<UTF8>); ... };` | Ops fall through to default via CastTo. No custom op code needed. |
 | 2 — Edges + contract (recommended) | Tier 1 + `[forall(...)]` before the body | Proof engine checks boundary crossings. Denies compilation on unprovable paths. |
-| 3 — Edges + contract + custom ops | Tier 2 + `op Add(#String<utf8>) = fn(#L, #R);` | Cross-variant ops use explicit binding. Contract still enforced. |
+| 3 — Edges + contract + custom ops | Tier 2 + `op Add(#String<UTF8>) = fn(#L, #R);` | Cross-variant ops use explicit binding. Contract still enforced. |
 
 Tier 1 is the common case — most variants differ only in encoding/layout, not in operation semantics. Tier 2 adds safety with a compile-time enforceable invariant. Tier 3 is the escape hatch for genuinely different operation semantics.
 
@@ -113,7 +113,7 @@ Tier 1 is the common case — most variants differ only in encoding/layout, not 
 - Sharing a base category (`#String`) does NOT imply interoperability — edges must be explicitly declared
 - `#Bits` remains universally reachable (existing invariant)
 - BFS finds the shortest path through variant nodes
-- Undefined self-ops (e.g. `Length` for `ascii`) resolve by: CastTo default → run default op → CastFrom back. The compiler handles this transparently.
+- Undefined self-ops (e.g. `Length` for `ASCII`) resolve by: CastTo default → run default op → CastFrom back. The compiler handles this transparently.
 - If a protocol has a contract (`[expr]`), the proof engine checks it at every boundary crossing — data entering via CastTo and data exiting via CastFrom. If the contract cannot be proven at compile time for a given call site, compilation is denied. Without a contract, no boundary check is performed (trusts the programmer).
 
 ### Compiler proof — boundary enforcement
@@ -128,22 +128,22 @@ When a protocol has an optional contract `[expr]`, the proof engine checks it at
 The `#Self` hashword in the contract refers to the value at the boundary crossing. For example:
 
 ```brief
-proto ascii: #String [forall(i in 0..#Self:>Size, #Self[i] < 128)] { ... }
+proto ASCII: #String [forall(i in 0..#Self:>Size, #Self[i] < 128)] { ... }
 ```
 
-The compiler does not need to know what "ascii" means. It only knows: "data in this protocol must satisfy `forall(... < 128)`."
+The compiler does not need to know what "ASCII" means. It only knows: "data in this protocol must satisfy `forall(... < 128)`."
 
 ### Compiler proof of custom paths (aspirational)
 
 When a user declares a cross-variant override like:
 
 ```brief
-op Add(#String<utf8>) = add_utf8_to_ascii(#L, #R);
+op Add(#String<UTF8>) = add_UTF8_to_ASCII(#L, #R);
 ```
 
 The compiler should ideally verify equivalence:
-- **Graph path**: `CastTo(#String<utf8>)` on self → `Add(utf8, utf8)` → `CastFrom(#String<utf8>)`
-- **Custom path**: `add_utf8_to_ascii(#L, #R)`
+- **Graph path**: `CastTo(#String<UTF8>)` on self → `Add(UTF8, UTF8)` → `CastFrom(#String<UTF8>)`
+- **Custom path**: `add_UTF8_to_ASCII(#L, #R)`
 
 If the symbolic proof engine (`symbolic.rs`) can determine these produce the same result, the custom declaration is validated. If they diverge, the compiler warns. This is an aspirational feature — the initial implementation accepts the user's declaration without proof.
 
@@ -203,7 +203,7 @@ Before protocol declarations can work, fix the four gaps above:
 ```rust
 pub struct ProtocolDef {
     pub category: String,       // "String"
-    pub variant: String,        // "ascii"
+    pub variant: String,        // "ASCII"
     pub contract: Option<Contract>,  // optional, recommended — enforced at boundaries
     pub cast_edges: Vec<CastEdge>,
     /// Optional cross-variant op overrides.
@@ -234,8 +234,8 @@ New arm in `parse_top_level()`: when `peek()` is `Token::Identifier("proto")`, c
 The `proto` keyword is contextual (like `type`, `fn`, `node`) — it's only special in top-level position. No reserved word needed.
 
 Default primordial resolution in `src/parser/types.rs:40-48` is unchanged:
-- `#String` → `HashWordVariant("#String", "utf8")`
-- `#Float` → `HashWordVariant("#Float", "ieee754")`
+- `#String` → `HashWordVariant("#String", "UTF8")`
+- `#Float` → `HashWordVariant("#Float", "IEEE754")`
 - `#Char` → `HashWordVariant("#Char", "unicode")`
 - All others → `HashWord(name)` (no variant)
 
@@ -279,22 +279,22 @@ In `plugins/parsed/prelude.bv` (or a companion file discovered by the same plugi
 
 ```brief
 // Non-default protocol variants.
-// Defaults (utf8, ieee754, unicode) are primordial — no declaration needed.
+// Defaults (UTF8, IEEE754, unicode) are primordial — no declaration needed.
 // These only declare Cast edges; self-ops implicitly delegate to defaults.
 
-proto ascii: #String {
-    CastTo(#String<utf8>);
-    CastFrom(#String<utf8>);
+proto ASCII: #String {
+    CastTo(#String<UTF8>);
+    CastFrom(#String<UTF8>);
 };
 
-proto utf16: #String {
-    CastTo(#String<utf8>);
-    CastFrom(#String<utf8>);
+proto UTF16: #String {
+    CastTo(#String<UTF8>);
+    CastFrom(#String<UTF8>);
 };
 
-proto posit32: #Float {
-    CastTo(#Float<ieee754>);
-    CastFrom(#Float<ieee754>);
+proto Posit32: #Float {
+    CastTo(#Float<IEEE754>);
+    CastFrom(#Float<IEEE754>);
 };
 ```
 
@@ -323,7 +323,7 @@ After the protocol graph is built from Phase 2 and its edges are injected into t
 
 **Self-op resolution (implicit delegation):**
 
-When the compiler encounters `#String<ascii>` used with a self-referencing op (e.g. `Length`, `Add` to self) and no explicit binding exists on the variant:
+When the compiler encounters `#String<ASCII>` used with a self-referencing op (e.g. `Length`, `Add` to self) and no explicit binding exists on the variant:
 1. Query `ProtocolGraph::find_default_delegation` for path to default variant
 2. If the source variant has a contract, prove it at the CastTo boundary
 3. Emit: `CastTo(default) → default_op → CastFrom(variant)`
@@ -333,10 +333,10 @@ This is transparent — no source-level declaration needed. The protocol graph r
 
 **Cross-variant op overrides:**
 
-When `op Add(#String<utf8>) = add_utf8_to_ascii(#L, #R)` exists on `#String<ascii>`:
-- `#L` = left operand (the protocol's own variant, ascii); `#R` = right operand (the target, utf8). Add maps to `+`, so this follows the natural `left + right` ordering.
-- Store on `ProtocolGraph.cross_ops` as `(ascii, Add, utf8) → add_utf8_to_ascii`
-- When dispatching `Add(#String<ascii>, #String<utf8>)`, check for cross-op before walking graph
+When `op Add(#String<UTF8>) = add_UTF8_to_ASCII(#L, #R)` exists on `#String<ASCII>`:
+- `#L` = left operand (the protocol's own variant, ASCII); `#R` = right operand (the target, UTF8). Add maps to `+`, so this follows the natural `left + right` ordering.
+- Store on `ProtocolGraph.cross_ops` as `(ASCII, Add, UTF8) → add_UTF8_to_ASCII`
+- When dispatching `Add(#String<ASCII>, #String<UTF8>)`, check for cross-op before walking graph
 - The override is a direct declaration: "for this pair, use this path"
 - If the source variant has a contract, it is still enforced at the boundary — the override bypasses the graph walk but not the invariant check
 
@@ -353,8 +353,8 @@ Existing 4-step pipeline, unchanged in structure. Step 2 (protocol path via `try
 
 | Existing behavior | Impact |
 |---|---|
-| Parser defaults (`#String` → `utf8`) | Unchanged |
-| Type bodies with `op CastTo(#String<utf8>)` | Unchanged — still sets `Cast.#` properties (now injected into universe via Phase 0) |
+| Parser defaults (`#String` → `UTF8`) | Unchanged |
+| Type bodies with `op CastTo(#String<UTF8>)` | Unchanged — still sets `Cast.#` properties (now injected into universe via Phase 0) |
 | `lib/glue.toml` protocol mappings | Unchanged — TOML still wins over graph |
 | BFS path finding | Unchanged — graph is additional data |
 | `--no-stdlib` | Primordial defaults still work |
@@ -370,29 +370,29 @@ Existing 4-step pipeline, unchanged in structure. Step 2 (protocol path via `try
 - `test_bfs_consolidated`: verify single BFS finds edges from both universe and protocol graph
 
 ### Phase 1 (Parser)
-- `test_protocol_def_edges_only`: `proto ascii: #String { CastTo(#String<utf8>); };` parses with empty cross_ops
-- `test_protocol_def_cross_op`: `proto ascii: #String { CastTo(#String<utf8>); op Add(#String<utf8>) = fn(#L, #R); };`
-- `test_protocol_def_with_contract`: `proto ascii: #String [forall(...)] { CastTo(...); };`
-- `test_protocol_def_empty_body`: `proto ascii: #String {};` — valid, just no edges
-- `test_protocol_def_no_self_ops`: verify self-referencing ops like `op Length(#String<ascii>)` are rejected (self-ops delegate to default, never declared)
+- `test_protocol_def_edges_only`: `proto ASCII: #String { CastTo(#String<UTF8>); };` parses with empty cross_ops
+- `test_protocol_def_cross_op`: `proto ASCII: #String { CastTo(#String<UTF8>); op Add(#String<UTF8>) = fn(#L, #R); };`
+- `test_protocol_def_with_contract`: `proto ASCII: #String [forall(...)] { CastTo(...); };`
+- `test_protocol_def_empty_body`: `proto ASCII: #String {};` — valid, just no edges
+- `test_protocol_def_no_self_ops`: verify self-referencing ops like `op Length(#String<ASCII>)` are rejected (self-ops delegate to default, never declared)
 - `test_hash_self_token`: verify `#Self` is lexed as `Token::HashSelf`, not `Identifier("#Self")`
 
 ### Phase 2 (Protocol Graph)
-- `test_graph_single_edge`: utf8 → ascii path found
-- `test_graph_multi_hop`: utf8 → ascii → utf16 path found
-- `test_graph_default_delegation`: ascii → utf8 delegation path found for implicit self-ops
-- `test_graph_cross_op_lookup`: cross-variant override found for Add(ascii, utf8)
+- `test_graph_single_edge`: UTF8 → ASCII path found
+- `test_graph_multi_hop`: UTF8 → ASCII → UTF16 path found
+- `test_graph_default_delegation`: ASCII → UTF8 delegation path found for implicit self-ops
+- `test_graph_cross_op_lookup`: cross-variant override found for Add(ASCII, UTF8)
 - `test_graph_contract_retrieval`: contract stored and retrievable for a variant
 - `test_graph_no_path`: unrelated variants return None
 - `test_graph_fallback_to_bits`: every variant reaches `#Bits`
 
 ### Phase 4 (Boundary Enforcement)
-- `test_implicit_self_op_delegation`: `#String<ascii>` uses Length without declaration — resolves through CastTo → default Length → CastFrom
-- `test_cross_op_override`: Add between ascii and utf8 uses explicit binding instead of graph walk
+- `test_implicit_self_op_delegation`: `#String<ASCII>` uses Length without declaration — resolves through CastTo → default Length → CastFrom
+- `test_cross_op_override`: Add between ASCII and UTF8 uses explicit binding instead of graph walk
 - `test_boundary_contract_enforced`: protocol with contract denies compilation at boundary crossing when contract is unprovable
 - `test_boundary_contract_allowed`: protocol with contract allows crossing when contract is provable
 - `test_no_contract_allows_crossing`: protocol without contract allows crossing unconditionally
-- `test_prelude_variants_available`: ascii/utf16 present with stdlib, absent with `--no-stdlib`
+- `test_prelude_variants_available`: ASCII/UTF16 present with stdlib, absent with `--no-stdlib`
 - `test_existing_cast_paths_unchanged`: old `Cast.#` properties still resolve
 
 ## Summary

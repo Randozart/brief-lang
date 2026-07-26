@@ -38,7 +38,7 @@ pub fn synthesize_via_smt(
 
     match output {
         Ok(out) => {
-            let stdout = String::from_utf8_lossy(&out.stdout);
+            let stdout = String::from_UTF8_lossy(&out.stdout);
             if stdout.contains("unsat") {
                 Err(SynthesizeError::NoSolution(name.to_string()))
             } else {

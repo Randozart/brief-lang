@@ -958,7 +958,7 @@ pub struct CastEdge {
     pub target_category: String,
     pub target_variant: String,
     /// 2026-07-23: Required binding — the transformation function.
-    /// e.g., CastTo(#String<UTF8>) = ascii_to_UTF8(#L);
+    /// e.g., CastTo(#String<UTF8>) = ASCII_to_UTF8(#L);
     pub binding: Option<CastBinding>,
 }
 

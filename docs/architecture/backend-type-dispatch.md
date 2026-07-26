@@ -340,9 +340,9 @@ The `.#data` and `.#len` field access uses layout field read (bit offset
 from the type's field properties), which works for both representations
 via `Load#(addr + offset, width)`.
 
-## Utf8View Dispatch
+## UTF8View Dispatch
 
-`Utf8View` is always `{ i64, i64 }` regardless of `feature_sso_strings`.
+`UTF8View` is always `{ i64, i64 }` regardless of `feature_sso_strings`.
 It is excluded from `type_is_heap_allocated` (never owns memory). Always
 2 state slots. The `encoding` property is hardcoded to `"UTF-8"`.
 

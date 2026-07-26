@@ -187,8 +187,8 @@ No more PascalCase hardcoded table. The config specifies how the compiler emits 
 ```toml
 [encoding.UTF-8]
 char_width = 0
-ops.index_at  = "std.encoding.utf8.index_at"
-ops.char_len  = "std.encoding.utf8.char_count"
+ops.index_at  = "std.encoding.UTF8.index_at"
+ops.char_len  = "std.encoding.UTF8.char_count"
 
 [encoding.ASCII]
 char_width = 1
@@ -198,7 +198,7 @@ char_width = 1
 Dispatch logic in the compiler:
 
 - `char_width > 0` → `Index#(s, i)` emits `GEP s, i * char_width` (O(1))
-- `char_width == 0 + ops.index_at` → emits `call @std.encoding.utf8.index_at(ptr %s, i64 %i)`
+- `char_width == 0 + ops.index_at` → emits `call @std.encoding.UTF8.index_at(ptr %s, i64 %i)`
 - `char_width == 0 + no ops` → delegate to runtime scan (conservative default)
 
 `Length#` follows the same pattern: `char_len` op from config, or byte-length from handle[1].

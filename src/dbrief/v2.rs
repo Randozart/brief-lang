@@ -387,7 +387,7 @@ impl Parser {
             self.advance_n(4);
             if self.peek_char() == Some('[') {
                 self.advance();
-                let width_str = self.parse_while(|c| c.is_ascii_digit());
+                let width_str = self.parse_while(|c| c.is_ASCII_digit());
                 let width: usize = width_str
                     .parse()
                     .map_err(|_| format!("Invalid UInt width: {}", width_str))?;
@@ -846,8 +846,8 @@ impl Parser {
                 }
                 Ok(DataValue::List(list))
             }
-            Some(c) if c.is_ascii_digit() || c == '-' => {
-                let num_str = self.parse_while(|c| c.is_ascii_digit() || c == '.' || c == '-');
+            Some(c) if c.is_ASCII_digit() || c == '-' => {
+                let num_str = self.parse_while(|c| c.is_ASCII_digit() || c == '.' || c == '-');
                 if num_str.contains('.') {
                     let f: f64 = num_str
                         .parse()
@@ -1025,7 +1025,7 @@ impl Parser {
 
     fn advance(&mut self) -> Option<char> {
         let c = self.input[self.pos..].chars().next()?;
-        self.pos += c.len_utf8();
+        self.pos += c.len_UTF8();
         Some(c)
     }
 

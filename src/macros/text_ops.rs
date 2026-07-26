@@ -157,7 +157,7 @@ pub fn binary_run(bin_path: &Path, cmd_template: &str) -> Result<(), String> {
         .output()
         .map_err(|e| format!("cannot run '{}': {}", cmd_str, e))?;
     if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr);
+        let stderr = String::from_UTF8_lossy(&output.stderr);
         return Err(format!("command '{}' failed: {}", cmd_str, stderr.trim()));
     }
     Ok(())
