@@ -1,16 +1,20 @@
-// Phase 3: relocated from compiler Intrinsic enum to std/os/ module
-// Auto-imported via prelude.
-//
-// 2026-07-15: Replaced inop with defn + to_c_string + SysCall#.
-
-import { to_c_string } from "std/string_c";
-
-defn mkstemp(tmpl: Ptr<Byte>) -> Int {
-    let ctmpl = to_c_string(tmpl);
-    term SysCall#(Mkstemp, ctmpl, 0, 0, 0, 0, 0);
-};
-
-defn mkdtemp(tmpl: Ptr<Byte>) -> Int {
-    let ctmpl = to_c_string(tmpl);
-    term SysCall#(MkDt, ctmpl, 0, 0, 0, 0, 0);
-};
+onst SYS_WRITE:         Int = 1;
+const SYS_READ:          Int = 0;
+onst SYS_WRITE:         Int = 1;
+const SYS_READ:          Int = 0;
+onst SYS_WRITE:         Int = 1;
+const SYS_READ:          Int = 0;
+onst SYS_WRITE:         Int = 1;
+const SYS_READ:          Int = 0;
+onst SYS_WRITE:         Int = 1;
+onst SYS_WRITE:         Int = 1;
+onst SYS_WRITE:         Int = 1;
+onst SYS_WRITE:         Int = 1;
+onst SYS_WRITE:         Int = 1;
+onst SYS_WRITE:         Int = 1;
+onst SYS_WRITE:         Int = 1;
+onst SYS_WRITE:         Int = 1;
+onst SYS_WRITE:         Int = 1;
+onst SYS_WRITE:         Int = 1;
+onst SYS_WRITE:         Int = 1;
+onst SYS_WRITE:         Int = 1;

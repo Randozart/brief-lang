@@ -1,0 +1,1 @@
+export let FOO: Int = 42;

@@ -459,7 +459,7 @@ impl LlvmBackend {
                     .and_then(|idx| self.ctx.field_types.get(*idx))
                     .cloned().unwrap_or_else(|| "i64".to_string());
                 if field_ty == "float" || field_ty == "double" {
-                    writeln!(out, "  {} = add {} 0, {}", be_f, field_ty, val).ok();
+                    writeln!(out, "  {} = fadd {} 0.0, {}", be_f, field_ty, val).ok();
                 } else {
                     writeln!(out, "  {} = add i64 0, {}", be_f, val).ok();
                 }

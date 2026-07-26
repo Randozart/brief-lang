@@ -394,8 +394,9 @@ fn infer_intrinsic_call(
     args: &[Expr],
     ctx: &mut TypecheckContext,
 ) -> Result<Type, TypeError> {
-    // 2026-07-14: Empty parameters means type-inferred — skip count check
-    if !sig.parameters.is_empty() && args.len() != sig.parameters.len() {
+    // 2026-07-14: Empty parameters means type-inferred — skip count check.
+    // 2026-07-26: Variadic intrinsics (e.g., SysCall#) accept 1+ args.
+    if !sig.variadic && !sig.parameters.is_empty() && args.len() != sig.parameters.len() {
         return Err(TypeError::TypeMismatch {
             expected: format!("{} parameters", sig.parameters.len()),
             found: format!("{} arguments", args.len()),

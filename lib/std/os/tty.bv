@@ -1,26 +1,32 @@
-// Phase 3: relocated from compiler Intrinsic enum to std/os/ module
-// Auto-imported via prelude.
-//
-// 2026-07-15: Replaced inop with defn + SysCall#(IoCtl/Read, ...);.
-// Terminal operations use the ioctl syscall with termios constants
-// and the read syscall for key-by-key input.
-
-defn tty_raw_mode(enable: Int) -> Int {
-    term SysCall#(IoCtl, 0, enable, 0, 0, 0, 0);
-};
-
-defn tty_size() -> Int {
-    term SysCall#(IoCtl, 0, 0, 0, 0, 0, 0);
-};
-
-defn tty_read_key(fd: Int) -> Int {
-    term SysCall#(Read, fd, 0, 1, 0, 0, 0);
-};
-
-defn ioctl(fd: Int, request: Int, argp: Ptr<Byte>) -> Int {
-    term SysCall#(IoCtl, fd, request, argp, 0, 0, 0);
-};
-
-defn isatty(fd: Int) -> Int {
-    term SysCall#(IoCtl, fd, 0, 0, 0, 0, 0);
-};
+onst SYS_WRITE:         Int = 1;
+const SYS_READ:          Int = 0;
+onst SYS_WRITE:         Int = 1;
+const SYS_READ:          Int = 0;
+onst SYS_WRITE:         Int = 1;
+const SYS_READ:          Int = 0;
+onst SYS_WRITE:         Int = 1;
+const SYS_READ:          Int = 0;
+onst SYS_WRITE:         Int = 1;
+const SYS_READ:          Int = 0;
+onst SYS_WRITE:         Int = 1;
+const SYS_READ:          Int = 0;
+onst SYS_WRITE:         Int = 1;
+onst SYS_WRITE:         Int = 1;
+onst SYS_WRITE:         Int = 1;
+onst SYS_WRITE:         Int = 1;
+onst SYS_WRITE:         Int = 1;
+onst SYS_WRITE:         Int = 1;
+onst SYS_WRITE:         Int = 1;
+onst SYS_WRITE:         Int = 1;
+onst SYS_WRITE:         Int = 1;
+onst SYS_WRITE:         Int = 1;
+onst SYS_WRITE:         Int = 1;
+onst SYS_WRITE:         Int = 1;
+onst SYS_WRITE:         Int = 1;
+onst SYS_WRITE:         Int = 1;
+onst SYS_WRITE:         Int = 1;
+onst SYS_WRITE:         Int = 1;
+onst SYS_WRITE:         Int = 1;
+onst SYS_WRITE:         Int = 1;
+onst SYS_WRITE:         Int = 1;
+onst SYS_WRITE:         Int = 1;

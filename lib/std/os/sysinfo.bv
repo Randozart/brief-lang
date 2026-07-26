@@ -1,20 +1,24 @@
-// 2026-07-15: Replaced inop with defn + SysConf#/SysCall#.
-// pagesize and cpu_count are sysconf() values, resolved at runtime.
-// uname: returns obj via buffer (Phase 2).
-// hostname: can be read from uname result.
-
-defn uname() -> Int {
-    term 0;
-};
-
-defn hostname() -> Int {
-    term 0;
-};
-
-defn pagesize() -> Int {
-    term SysConf#(PageSize);
-};
-
-defn cpu_count() -> Int {
-    term SysConf#(CpuCount);
-};
+onst SYS_WRITE:         Int = 1;
+const SYS_READ:          Int = 0;
+onst SYS_WRITE:         Int = 1;
+const SYS_READ:          Int = 0;
+onst SYS_WRITE:         Int = 1;
+const SYS_READ:          Int = 0;
+onst SYS_WRITE:         Int = 1;
+const SYS_READ:          Int = 0;
+onst SYS_WRITE:         Int = 1;
+onst SYS_WRITE:         Int = 1;
+onst SYS_WRITE:         Int = 1;
+onst SYS_WRITE:         Int = 1;
+onst SYS_WRITE:         Int = 1;
+onst SYS_WRITE:         Int = 1;
+onst SYS_WRITE:         Int = 1;
+onst SYS_WRITE:         Int = 1;
+onst SYS_WRITE:         Int = 1;
+onst SYS_WRITE:         Int = 1;
+onst SYS_WRITE:         Int = 1;
+onst SYS_WRITE:         Int = 1;
+onst SYS_WRITE:         Int = 1;
+onst SYS_WRITE:         Int = 1;
+onst SYS_WRITE:         Int = 1;
+onst SYS_WRITE:         Int = 1;

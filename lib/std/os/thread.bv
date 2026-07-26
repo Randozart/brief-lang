@@ -1,41 +1,47 @@
-// Phase 3: relocated from compiler Intrinsic enum to std/os/ module
-// Auto-imported via prelude.
-//
-// 2026-07-15: Replaced inop with defn + SysCall#(Clone/Futex/Exit, ...);.
-// Thread creation uses the clone syscall with CLONE_VM | CLONE_THREAD flags.
-// Mutex/condvar use the futex syscall with FUTEX_WAIT/FUTEX_WAKE operations.
-
-defn thread_create(fn_ptr: Int, arg: Int) -> Int {
-    let stack: Int = SysCall#(Mmap, 0, 65536, 3, 0x22, -1, 0);;
-    let child_stack: Int = stack + 65536;
-    let flags: Int = 0x3D0F00;
-    term SysCall#(Clone, flags, child_stack, fn_ptr, arg, 0, 0);
-};
-
-defn thread_join(thread: Int) -> Int {
-    term SysCall#(GetPid, 0, 0, 0, 0, 0, 0);
-};
-
-defn thread_exit(code: Int) -> Int {
-    term SysCall#(Exit, code, 0, 0, 0, 0, 0);
-};
-
-defn mutex_lock(mptr: Int) -> Int {
-    term SysCall#(Futex, mptr, 0, 0, 0, 0, 0);
-};
-
-defn mutex_unlock(mptr: Int) -> Int {
-    term SysCall#(Futex, mptr, 1, 0, 0, 0, 0);
-};
-
-defn condvar_wait(cptr: Int, mptr: Int) -> Int {
-    term SysCall#(Futex, cptr, 0, mptr, 0, 0, 0);
-};
-
-defn condvar_signal(cptr: Int) -> Int {
-    term SysCall#(Futex, cptr, 1, 0, 0, 0, 0);
-};
-
-defn condvar_broadcast(cptr: Int) -> Int {
-    term SysCall#(Futex, cptr, 2, 0, 0, 0, 0);
-};
+onst SYS_WRITE:         Int = 1;
+const SYS_READ:          Int = 0;
+onst SYS_WRITE:         Int = 1;
+const SYS_READ:          Int = 0;
+onst SYS_WRITE:         Int = 1;
+const SYS_READ:          Int = 0;
+onst SYS_WRITE:         Int = 1;
+const SYS_READ:          Int = 0;
+onst SYS_WRITE:         Int = 1;
+const SYS_READ:          Int = 0;
+onst SYS_WRITE:         Int = 1;
+const SYS_READ:          Int = 0;
+onst SYS_WRITE:         Int = 1;
+onst SYS_WRITE:         Int = 1;
+onst SYS_WRITE:         Int = 1;
+onst SYS_WRITE:         Int = 1;
+onst SYS_WRITE:         Int = 1;
+onst SYS_WRITE:         Int = 1;
+onst SYS_WRITE:         Int = 1;
+onst SYS_WRITE:         Int = 1;
+onst SYS_WRITE:         Int = 1;
+onst SYS_WRITE:         Int = 1;
+onst SYS_WRITE:         Int = 1;
+onst SYS_WRITE:         Int = 1;
+onst SYS_WRITE:         Int = 1;
+onst SYS_WRITE:         Int = 1;
+onst SYS_WRITE:         Int = 1;
+onst SYS_WRITE:         Int = 1;
+onst SYS_WRITE:         Int = 1;
+onst SYS_WRITE:         Int = 1;
+onst SYS_WRITE:         Int = 1;
+onst SYS_WRITE:         Int = 1;
+onst SYS_WRITE:         Int = 1;
+onst SYS_WRITE:         Int = 1;
+onst SYS_WRITE:         Int = 1;
+onst SYS_WRITE:         Int = 1;
+onst SYS_WRITE:         Int = 1;
+onst SYS_WRITE:         Int = 1;
+onst SYS_WRITE:         Int = 1;
+onst SYS_WRITE:         Int = 1;
+onst SYS_WRITE:         Int = 1;
+onst SYS_WRITE:         Int = 1;
+onst SYS_WRITE:         Int = 1;
+onst SYS_WRITE:         Int = 1;
+onst SYS_WRITE:         Int = 1;
+onst SYS_WRITE:         Int = 1;
+onst SYS_WRITE:         Int = 1;

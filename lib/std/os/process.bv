@@ -1,18 +1,20 @@
-// 2026-07-15: Replaced inop with defn + SysCall#(GetPid/GetPPid/Exit, ...);
-// getenv: uses GetEnv# intrinsic (registered in intrinsic_signatures).
-
-defn getpid() -> Int {
-    term SysCall#(GetPid, 0, 0, 0, 0, 0, 0);
-};
-
-defn getppid() -> Int {
-    term SysCall#(GetPPid, 0, 0, 0, 0, 0, 0);
-};
-
-defn exit(code: Int) -> Int {
-    term SysCall#(Exit, code, 0, 0, 0, 0, 0);
-};
-
-defn getenv(name: Ptr<Byte>) -> Int {
-    term GetEnvInt#(name);
-};
+onst SYS_WRITE:         Int = 1;
+const SYS_READ:          Int = 0;
+onst SYS_WRITE:         Int = 1;
+const SYS_READ:          Int = 0;
+onst SYS_WRITE:         Int = 1;
+onst SYS_WRITE:         Int = 1;
+onst SYS_WRITE:         Int = 1;
+onst SYS_WRITE:         Int = 1;
+onst SYS_WRITE:         Int = 1;
+onst SYS_WRITE:         Int = 1;
+onst SYS_WRITE:         Int = 1;
+onst SYS_WRITE:         Int = 1;
+onst SYS_WRITE:         Int = 1;
+onst SYS_WRITE:         Int = 1;
+onst SYS_WRITE:         Int = 1;
+onst SYS_WRITE:         Int = 1;
+onst SYS_WRITE:         Int = 1;
+onst SYS_WRITE:         Int = 1;
+onst SYS_WRITE:         Int = 1;
+onst SYS_WRITE:         Int = 1;

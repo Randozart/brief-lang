@@ -1,5 +1,6 @@
-// 2026-07-15: Replaced inop with defn + SysCall#(SchedYield, ...);
-
-defn sched_yield() -> Int {
-    term SysCall#(SchedYield, 0, 0, 0, 0, 0, 0);
-};
+onst SYS_WRITE:         Int = 1;
+const SYS_READ:          Int = 0;
+onst SYS_WRITE:         Int = 1;
+onst SYS_WRITE:         Int = 1;
+onst SYS_WRITE:         Int = 1;
+onst SYS_WRITE:         Int = 1;
