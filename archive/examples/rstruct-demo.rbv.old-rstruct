@@ -1,0 +1,42 @@
+// rstruct-demo.rbv — rstruct component definition
+// This file is referenced by docs/architecture/features/rstruct.md
+
+// An rstruct is a self-contained component with state, transactions, and HTML.
+// It desugars to state declarations, top-level transactions, and a struct + render block.
+
+rstruct Greeter {
+    name: String = "World";
+    count: Int = 0;
+
+    // Transactions inside an rstruct become Greeter.set_name, Greeter.greet, etc.
+    txn Greeter.set_name [true][name == new_name] {
+        name = new_name;
+        term;
+    };
+
+    txn Greeter.greet [count < 100][count == @count + 1] {
+        count = count + 1;
+        term;
+    };
+
+    // View HTML with b-* directives
+    <div class="greeter">
+        <h1 b-text="'Hello, ' + name + '!'">Hello, World!</h1>
+        <p>Greeted <span b-text="count">0</span> times</p>
+        <button b-trigger:click="greet">Greet</button>
+        <input type="text" b-bind:value="name" />
+    </div>
+};
+
+// The rstruct is instantiated in the view as <Greeter />
+<view>
+    <div class="container">
+        <Greeter />
+    </div>
+</view>
+
+<style>
+.greeter { padding: 20px; border: 1px solid #ccc; border-radius: 8px; }
+button { padding: 8px 16px; background: #667eea; color: white; border: none; border-radius: 4px; cursor: pointer; }
+input { padding: 8px; border: 1px solid #ccc; border-radius: 4px; width: 100%; }
+</style>

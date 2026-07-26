@@ -1,7 +1,6 @@
 // physics.bv — pure compute, no view, no UI dependencies
-// 2026-07-26: Compiled to WASM via LlvmBackend(wasm32) when compiling parent .rbv
-// with --backend webstack. All .bv imports are WASM by default — no (wasm) annotation needed.
-// See docs/architecture/features/rendered-brief-wasm.md
+// Compiled to WASM via LLVM wasm32 target when imported with (wasm) from a .rbv file.
+// Runs as native WASM with WASI-linked intrinsics.
 
 frgn submit_triangles(verts: Ptr<Float>, count: Int) -> Bool ;
 
