@@ -168,6 +168,9 @@ pub struct BuildOptions {
     /// 2026-07-26: Phase 6b — CSS content from <style> block in .rbv files.
     /// Written as app.css alongside the compiled output for webstack backend.
     pub style_css: Option<String>,
+    /// 2026-07-26: Phase 6b — Raw HTML from <view> block in .rbv files.
+    /// Wrapped in index.html boilerplate for webstack backend.
+    pub view_html: Option<String>,
     /// 2026-07-26: Phase 6b — View bindings from processed <html> template.
     /// Passed to GlueWebGenerator for DOM binding table generation.
     pub view_bindings: Vec<brief_compiler::view_compiler::Binding>,
@@ -614,6 +617,37 @@ pub fn compile_source(file_path: &str, source: &str, opts: &BuildOptions) -> Res
                 println!("wrote {}", css_path);
             }
 
+            // 2026-07-26: Phase 6b — Write index.html from <view> block content.
+            // Wraps the raw view HTML in a minimal HTML5 boilerplate that
+            // links app.css and loads dom-shim.mjs via ES module import.
+            if let Some(ref html) = opts.view_html {
+                let index_path = format!("{}.html", binary_base);
+                let index_content = format!(
+                    "<!DOCTYPE html>\n\
+                     <html lang=\"en\">\n\
+                     <head>\n\
+                     <meta charset=\"UTF-8\">\n\
+                     <meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\">\n\
+                     <link rel=\"stylesheet\" href=\"app.css\">\n\
+                     <script type=\"module\" src=\"dom-shim.mjs\"></script>\n\
+                     </head>\n\
+                     <body>\n\
+                     {}\n\
+                     <script type=\"module\">\n\
+                     import {{ createApp }} from './dom-shim.mjs';\n\
+                     fetch('{}.wasm').then(r => r.arrayBuffer())\n\
+                       .then(bytes => createApp(new Uint8Array(bytes)));\n\
+                     </script>\n\
+                     </body>\n\
+                     </html>\n",
+                    html,
+                    binary_base,
+                );
+                std::fs::write(&index_path, &index_content)
+                    .map_err(|e| format!("cannot write '{}': {}", index_path, e))?;
+                println!("wrote {}", index_path);
+            }
+
             // 2026-07-26: Phase 6c — Generate dom-shim.mjs + .d.ts from frgn decls.
             let frgn_decls: Vec<brief_compiler::ast::ForeignBinding> = items.iter()
                 .filter_map(|item| {
@@ -739,6 +773,7 @@ pub fn check_source(file_path: &str, source: &str) -> Result<(), String> {
         sysquery_pairs: vec![],
         sysquery_files: vec![],
         style_css: None,
+        view_html: None,
         view_bindings: vec![],
     };
     let (_items, _universe) = parse_and_check(file_path, source, &default_opts)?;

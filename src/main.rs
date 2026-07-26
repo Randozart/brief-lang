@@ -335,6 +335,7 @@ fn parse_build_args(args: &[String]) -> Result<compile::BuildOptions, String> {
         sysquery_pairs,
         sysquery_files,
         style_css: None,
+        view_html: None,
         view_bindings: vec![],
     })
 }
@@ -381,6 +382,7 @@ fn run_bounty(args: &[String]) -> Result<(), String> {
         sysquery_pairs: vec![],
         sysquery_files: vec![],
         style_css: None,
+        view_html: None,
         view_bindings: vec![],
     };
     let source = std::fs::read_to_string(file_path)
