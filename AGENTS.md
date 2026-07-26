@@ -805,11 +805,12 @@ it. The more LLVM knows, the more aggressively it can optimize.
     library helpers), it is snake_case.
 
 
-12. **`<-` is statement-level** — it breaks the expression parser.
-    You cannot write `let x = &list <- val`. Use standalone statements:
-    - `&list <- val;` — push val onto list (destructive insert)
-    - `x <- &list;` — pop from list into x (destructive extract)
-    - `x <- list;` — read from list without removing (non-destructive copy)
+ 12. **`<-` is statement-level** — it breaks the expression parser.
+     You cannot write `let x = &list <- val`. Use standalone statements:
+     - `&list <- val;` — push val onto list (destructive insert)
+     - `x <- &list;` — pop from list into x (destructive extract)
+     - `x <- list;` — read from list without removing (non-destructive copy)
+     See item 33 for the `&` move/copy semantics on the RHS of `<-`.
 
 13. **`Byte` is defined in `lib/std/types.bv`** — do not assume it
     exists without importing. If the type isn't needed, use `Int`.
@@ -926,12 +927,31 @@ it. The more LLVM knows, the more aggressively it can optimize.
     level is only valid as a convergence gate (`[cond];`) or a guarded single
     statement (`[cond] stmt;`). Block bodies always require the `when` keyword.
 
-32. **No `main()` function** — Brief has no `main()` entry point. Programs start
-    via state-space triggers on `node` declarations. The compiler implicitly
-    creates an entry point by instantiating a node and wiring a corresponding
-    bootup variable. The scripting plugin (`script` pragma) is one way to
-    trigger this, but it is not `main()` — it creates a node + bootup variable
-    pair. There is no `defn main()` or `fn main()`.
+ 32. **No `main()` function** — Brief has no `main()` entry point. Programs start
+     via state-space triggers on `node` declarations. The compiler implicitly
+     creates an entry point by instantiating a node and wiring a corresponding
+     bootup variable. The scripting plugin (`script` pragma) is one way to
+     trigger this, but it is not `main()` — it creates a node + bootup variable
+     pair. There is no `defn main()` or `fn main()`.
+
+ 33. **`&` is pointer reference on LHS, move/copy discriminator on RHS** —
+     `&` on the left-hand side of any operator means "pointer reference" and
+     is never valid for mutation syntax. Old code used `&i = i + 1;` for
+     state variable mutation — this is incorrect. Use plain `i = i + 1;`
+     or `i += 1;` instead.
+
+     On the right-hand side of `<-` (arrow operator), `&` discriminates
+     move vs copy semantics:
+     - `target <- &source;` — **consume** (move): extracts value from source,
+       source is left in an empty/undefined state
+     - `target <- source;` — **copy**: extracts value from source, source
+       retains the value (non-destructive read)
+     - `<- &source;` — **discard**: extracts from source into void (fire-
+       and-forget pop)
+
+     `&` never appears on the LHS of any assignment or arrow syntax.
+     Pointer references on the LHS use the `Ptr<T>` type and `.` dereference
+     syntax instead.
 
 ## Commenting Mandate (Backend Updates)
 
