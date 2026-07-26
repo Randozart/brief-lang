@@ -159,11 +159,28 @@ fn register_typedefs(items: &[TopLevel], universe: &mut TypeUniverse) {
             TopLevel::TypeDef(td) => td,
             _ => continue,
         };
-        // 2026-07-25: Read "maxbits" from type metadata (bits), convert to bytes.
-        let bytes = td.body.metadata.get("maxbits")
-            .and_then(|pv| {
-                if let PropertyValue::Int(n) = pv { Some(*n as u64 / 8) } else { None }
-            })
+        // 2026-07-26: Read bits/maxbits/minbits metadata independently.
+        // bits <~ N → exact (min=max=N), maxbits <~ N → ceiling (min=0, max=N),
+        // minbits <~ N → floor (min=N, max=primordial). Fallback: primordial values.
+        let exact_bits = td.body.metadata.get("bits")
+            .and_then(|pv| if let PropertyValue::Int(n) = pv { Some(*n as u64) } else { None });
+        let ceiling = td.body.metadata.get("maxbits")
+            .and_then(|pv| if let PropertyValue::Int(n) = pv { Some(*n as u64) } else { None });
+        let floor = td.body.metadata.get("minbits")
+            .and_then(|pv| if let PropertyValue::Int(n) = pv { Some(*n as u64) } else { None });
+        let primordial = universe.get(&td.name);
+        let prim_max = primordial.map(|p| p.max_bits).unwrap_or(64);
+        let prim_min = primordial.map(|p| p.min_bits).unwrap_or(0);
+        let (min_bits, max_bits) = if let Some(bits) = exact_bits {
+            (bits, bits)
+        } else {
+            let f = floor.unwrap_or(prim_min);
+            let c = ceiling.unwrap_or(prim_max);
+            (f.min(c), c.max(f))
+        };
+        let bytes = ceiling
+            .map(|b| b / 8)
+            .or_else(|| exact_bits.map(|b| b / 8))
             .or_else(|| {
                 if td.body.slots.is_empty() { return None; }
                 let total: u64 = td.body.slots.iter().map(|slot| {
@@ -203,12 +220,12 @@ fn register_typedefs(items: &[TopLevel], universe: &mut TypeUniverse) {
                     } else { None }
                 })
             })
-            .unwrap_or(8);
+            .unwrap_or_else(|| primordial.map(|p| p.bytes).unwrap_or(8));
         let alignment = td.body.metadata.get("alignment")
             .and_then(|pv| {
                 if let PropertyValue::Int(n) = pv { Some(*n as u64) } else { None }
             })
-            .unwrap_or_else(|| bytes.min(8));
+            .unwrap_or_else(|| primordial.map(|p| p.alignment).unwrap_or_else(|| bytes.min(8)));
         let mut properties: std::collections::HashMap<String, PropertyValue> = td.body.metadata.clone();
         let base = td.parent.as_ref()
             .and_then(|e| match e.as_ref() { Expr::Identifier(n) => Some(n.clone()), _ => None })
@@ -220,26 +237,17 @@ fn register_typedefs(items: &[TopLevel], universe: &mut TypeUniverse) {
             name: td.name.clone(),
             base,
             bytes,
-            min_bits: bytes * 8,  // exact from declaration
-            max_bits: bytes * 8,  // exact from declaration
+            min_bits,
+            max_bits,
             alignment,
             properties,
             fields,
         };
-        // 2026-07-26: Preserve primordial properties when the declaration
-        // doesn't explicitly set maxbits metadata. This ensures Float stays
-        // at max_bits=32 (from PRIMORDIALS) rather than defaulting to 64 bits.
-        // Also preserves llvm_type (e.g. "float" for Float) that the normalizer
-        // would otherwise set to "i{N}" from bytes.
-        if let Some(prim) = universe.get(&td.name) {
-            if !td.body.metadata.contains_key("maxbits") {
-                rt.bytes = prim.bytes;
-                rt.max_bits = prim.max_bits;
-                rt.min_bits = prim.min_bits.min(rt.max_bits);
-                rt.alignment = prim.alignment;
-            }
-            if !td.body.metadata.contains_key("llvm_type")
-                && !rt.properties.contains_key("llvm_type")
+        // 2026-07-26: Preserve primordial llvm_type when the declaration
+        // doesn't explicitly set it. The normalizer would otherwise derive
+        // a raw "i{N}" from bytes, losing Float's "float" LLVM type.
+        if let Some(prim) = primordial {
+            if !rt.properties.contains_key("llvm_type")
                 && prim.properties.contains_key("llvm_type")
             {
                 rt.properties.insert("llvm_type".to_string(),
