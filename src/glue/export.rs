@@ -198,12 +198,6 @@ fn extract_melds(items: &[TopLevel]) -> Vec<MeldDecl> {
 
 fn format_type(ty: &crate::ast::Type) -> String {
     match ty {
-        crate::ast::Type::Custom(__t) if __t == "Int" => "Int".to_string(),
-        crate::ast::Type::Custom(__t) if __t == "Float" => "Float".to_string(),
-        crate::ast::Type::Custom(__t) if __t == "Bool" => "Bool".to_string(),
-        crate::ast::Type::Custom(__t) if __t == "Char" => "Char".to_string(),
-        crate::ast::Type::Custom(__t) if __t == "String" => "String".to_string(),
-        crate::ast::Type::Custom(__t) if __t == "Data" => "Data".to_string(),
         crate::ast::Type::Custom(name) => name.clone(),
         _ => format!("{:?}", ty),
     }
