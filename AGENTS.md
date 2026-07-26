@@ -278,12 +278,33 @@ This prevents "I'll fix it later" from fossilizing into architecture.
     it's a one-off. The second time, extract it. The third time is a bug
     waiting to happen. See `docs/plans/2026-07-19-dry-consolidation.md`.
 
-17. **MIGRATE WHEN TOUCHED**: Remaining pre-DRY sites should not be migrated
-    in bulk — that risks regression with low reward. Instead, when you modify
-    a file for any other reason, migrate its hand-rolled GEP+load/store
-    instances to the centralized `emit_state_load_*` / `emit_state_store_*`
-    helpers at the same time. The centralized helpers already exist; this rule
-    ensures they are adopted incrementally without dedicated refactoring passes.
+ 17. **MIGRATE WHEN TOUCHED**: Remaining pre-DRY sites should not be migrated
+     in bulk — that risks regression with low reward. Instead, when you modify
+     a file for any other reason, migrate its hand-rolled GEP+load/store
+     instances to the centralized `emit_state_load_*` / `emit_state_store_*`
+     helpers at the same time. The centralized helpers already exist; this rule
+     ensures they are adopted incrementally without dedicated refactoring passes.
+
+ 18. **NO TYPE NAME MATCHING**: Never match on Brief type names (`t == "Int"`,
+     `t == "Float"`, `s == "String"`) in Rust code. The type's LLVM representation,
+     protocol category, boxing behavior, and ABI width are derived from its
+     `ResolvedType` in the `TypeUniverse` — specifically the `llvm_type` property,
+     `max_bits`/`min_bits` bounds, and `Cast.#<Protocol>` properties. These are
+     populated by the PRIMORDIALS table and the normalizer. The only exceptions
+     are: (a) `Type::Ptr(_)` and `Type::Vector(_, _)` — compiler constructs not
+     stored in the universe, (b) `Type::Bits(N)` — a width construct, and
+     (c) the `tbaa_node` function — operates on LLVM IR type strings, not Brief
+     type names. Everything else must go through the universe.
+
+     **DO**:  `self.is_protocol_member(&ty, "#Float")`
+     **DON'T**: `t == "Float"` or `type_is(&universe, ty, "Float")`
+
+     **DO**:  `self.ctx.type_universe.and_then(|u| u.get(key)).map(|rt| rt.properties.get("llvm_type"))`
+     **DON'T**: `match s.as_str() { "Int" => "i64", "Float" => "float", ... }`
+
+     Violations are caught by code review and automated audit. A `git grep`
+     for `Type::Custom.*==` in `src/backend/llvm/` and `src/glue/` must return
+     zero results.
 
 ## Plan Directives
 
