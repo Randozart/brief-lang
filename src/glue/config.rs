@@ -47,12 +47,22 @@ pub struct GlueTarget {
 /// 2026-07-22: Each protocol category (#String, #Int, #Float) maps to
 /// the language's native type and its C ABI representation. The compiler
 /// uses this when the BFS finds a path through that protocol category.
+///
+/// 2026-07-26: Added wasm_abi for the web target (calling_convention = "wasm_import").
+/// When present, the target prefers wasm_abi over c_abi for FFI marshalling.
+/// wasm_abi values are WebAssembly value types: i32, i64, f32, f64.
 #[derive(Debug, Clone, serde::Deserialize)]
 pub struct ProtocolEntry {
-    /// Language-native type name (e.g., "str", "String", "int")
+    /// Language-native type name (e.g., "str", "String", "int", "number", "Element")
     pub native: String,
-    /// C ABI type name (e.g., "i64", "ctypes.c_int64")
-    pub c_abi: String,
+    /// C ABI type name (e.g., "i64", "ctypes.c_int64", "cstring")
+    #[serde(default)]
+    pub c_abi: Option<String>,
+    /// WASM ABI type name (e.g., "i32", "i64", "f32", "f64").
+    /// 2026-07-26: Used when calling_convention is "wasm_import".
+    /// Maps to WebAssembly import/export value types.
+    #[serde(default)]
+    pub wasm_abi: Option<String>,
 }
 
 // ── Serde helpers ─────────────────────────────────────────────────────
@@ -264,7 +274,7 @@ calling_convention = "lto"
         assert_eq!(py.calling_convention, "c_abi");
         assert!(py.protocols.contains_key("#String"));
         assert_eq!(py.protocols.get("#String").unwrap().native, "str");
-        assert_eq!(py.protocols.get("#String").unwrap().c_abi, "ctypes.c_void_p");
+        assert_eq!(py.protocols.get("#String").unwrap().c_abi.as_deref(), Some("ctypes.c_void_p"));
 
         assert!(targets.contains_key("rust"));
         let rust = &targets["rust"];

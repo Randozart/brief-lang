@@ -89,12 +89,12 @@ pub fn optimize_layouts(
 
             // 2026-07-22: Find the protocol category for this type via CastTo.
             let protocol_cat = find_protocol_category(universe, ty_key);
+            // 2026-07-26: c_abi is optional — fall back to derive_foreign_type_name
             let foreign_ty_name = match protocol_cat {
                 Some(cat) => {
-                    // Look up in the target's protocols map
                     let protocol_key = format!("#{}", cat);
                     target.protocols.get(&protocol_key)
-                        .map(|e| e.c_abi.clone())
+                        .and_then(|e| e.c_abi.clone())
                         .unwrap_or_else(|| derive_foreign_type_name(param_ty, &target.language))
                 }
                 None => derive_foreign_type_name(param_ty, &target.language),
