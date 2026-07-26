@@ -456,6 +456,10 @@ pub fn compile_source(file_path: &str, source: &str, opts: &BuildOptions) -> Res
     pm.run_ast(StageKind::Verified, &mut items, &mut universe)?;
     emit_beast_snapshot(file_path, BeastStage::Verify, BeastPosition::After, &items, &universe, opts)?;
 
+    // ── Slice narrowing ───────────────────────────────────────────────
+    // 2026-07-26: Convert constant-bounds Expr::Slice to direct array access.
+    brief_compiler::analysis::narrow_slice::narrow_slices(&mut items);
+
     // ── Allocation strategy analysis ──────────────────────────────────
     let alloc_strategies = brief_compiler::analysis::allocation::analyze_alloc_strategies(&mut items);
     emit_beast_snapshot(file_path, BeastStage::Alloc, BeastPosition::Before, &items, &universe, opts)?;

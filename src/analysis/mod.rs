@@ -7,6 +7,7 @@ pub mod dfa;
 pub mod entry_point;
 pub mod equality_saturation;
 pub mod pgo;
+pub mod narrow_slice;
 pub mod provenance;
 pub mod protocol;
 pub mod range;
