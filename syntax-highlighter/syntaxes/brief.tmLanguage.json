@@ -20,6 +20,15 @@
       "include": "#keywords"
     },
     {
+      "include": "#intrinsics"
+    },
+    {
+      "include": "#hash-words"
+    },
+    {
+      "include": "#compiletime-keywords"
+    },
+    {
       "include": "#types"
     },
     {
@@ -38,19 +47,10 @@
       "include": "#booleans"
     },
     {
-      "include": "#intrinsics"
-    },
-    {
-      "include": "#hash-words"
-    },
-    {
       "include": "#constants"
     },
     {
-      "include": "#identifiers"
-    },
-    {
-      "include": "#punctuation"
+      "include": "#macro-words"
     },
     {
       "include": "#stage-blocks"
@@ -68,10 +68,10 @@
       "include": "#targets"
     },
     {
-      "include": "#macro-words"
+      "include": "#identifiers"
     },
     {
-      "include": "#compiletime-keywords"
+      "include": "#punctuation"
     },
     {
       "include": "#metadata-properties"
