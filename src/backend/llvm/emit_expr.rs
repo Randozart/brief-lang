@@ -1786,6 +1786,26 @@ impl LlvmBackend {
         r: &TypedRegister,
         indent: &str,
     ) -> TypedRegister {
+        // 2026-07-26: SIMD vector ops — when both operands are Vector<T,N>,
+        // emit LLVM vector instructions (<N x T>).
+        if let Type::Vector(l_inner, l_dims) = &l.ty {
+            if let Type::Vector(r_inner, r_dims) = &r.ty {
+                if l_inner == r_inner && l_dims == r_dims {
+                    let op_name = match kind {
+                        crate::ast::BinaryOpKind::Add => "add",
+                        crate::ast::BinaryOpKind::Sub => "sub",
+                        crate::ast::BinaryOpKind::Mul => "mul",
+                        crate::ast::BinaryOpKind::Div => "sdiv",
+                        _ => { return TypedRegister { name: v.to_string(), ty: l.ty.clone() }; }
+                    };
+                    let vec_ty = self.llvm_type(&l.ty);
+                    writeln!(out, "{}{} = {} {} {}, {}",
+                        indent, v, op_name, vec_ty, l.name, r.name).ok();
+                    return TypedRegister { name: v.to_string(), ty: l.ty.clone() };
+                    return TypedRegister { name: v.to_string(), ty: l.ty.clone() };
+                }
+            }
+        }
         let is_float = l.ty == Type::float()
             || r.ty == Type::float()
             || l.ty == Type::float64()
