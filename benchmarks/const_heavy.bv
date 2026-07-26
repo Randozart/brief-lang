@@ -20,7 +20,7 @@ node tick [count < total][count == total] {
           + C10 + C11 + C12 + C13 + C14
           + C15 + C16 + C17 + C18 + C19;
     count = count + 1;
-    [count % 5000000 == 0] {
+    when count % 5000000 == 0 {
         PrintLn!(acc);
     };
     term;

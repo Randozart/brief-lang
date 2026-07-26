@@ -19,7 +19,7 @@ defn spawn_with_output_res(command: String, args: List<String>) -> Result<String
 // Replaced: frgn __env_var with GetEnv# intrinsic
 defn env_var_res(name: String) -> Result<String, String> {
     let val = GetEnv#(name);
-    [val != ""] {
+    when val != "" {
         term Ok(val);
     };
     term Err("env var not found");
@@ -28,7 +28,7 @@ defn env_var_res(name: String) -> Result<String, String> {
 // Replaced: frgn __set_env_var with SetEnv# intrinsic
 defn set_env_var_res(name: String, value: String) -> Result<Void, String> {
     let ret = SetEnv#(name, value);
-    [ret == 0] {
+    when ret == 0 {
         term Ok(void);
     };
     term Err("setenv failed");
@@ -37,7 +37,7 @@ defn set_env_var_res(name: String, value: String) -> Result<Void, String> {
 // Replaced: frgn __current_dir with GetCwd# intrinsic
 defn current_dir_res() -> Result<String, String> {
     let dir = GetCwd#();
-    [dir != ""] {
+    when dir != "" {
         term Ok(dir);
     };
     term Err("getcwd failed");
@@ -46,7 +46,7 @@ defn current_dir_res() -> Result<String, String> {
 // Replaced: frgn __set_current_dir with ChDir# intrinsic
 defn set_current_dir_res(path: String) -> Result<Void, String> {
     let ret = ChDir#(path);
-    [ret == 0] {
+    when ret == 0 {
         term Ok(void);
     };
     term Err("chdir failed");
@@ -56,7 +56,7 @@ defn set_current_dir_res(path: String) -> Result<Void, String> {
 
 defn spawn(command: String, args: List<String>) -> Int [command != ""][term >= -1] {
     let result = spawn_res(command, args);
-    [is_ok(result)] {
+    when is_ok(result) {
         term unwrap(result);
     };
     term -1;
@@ -64,7 +64,7 @@ defn spawn(command: String, args: List<String>) -> Int [command != ""][term >= -
 
 defn spawn_with_output(command: String, args: List<String>) -> String [command != ""][term :> Size >= 0] {
     let result = spawn_with_output_res(command, args);
-    [is_ok(result)] {
+    when is_ok(result) {
         term unwrap(result);
     };
     term "";
@@ -72,7 +72,7 @@ defn spawn_with_output(command: String, args: List<String>) -> String [command !
 
 defn env_var(name: String) -> String [name != ""][term :> Size >= 0] {
     let result = env_var_res(name);
-    [result.is_ok()] {
+    when result.is_ok() {
         term result.value;
     };
     term "";
@@ -80,7 +80,7 @@ defn env_var(name: String) -> String [name != ""][term :> Size >= 0] {
 
 defn set_env_var(name: String, value: String) -> Bool [name != ""][term == true || term == false] {
     let result = set_env_var_res(name, value);
-    [result.is_ok()] {
+    when result.is_ok() {
         term true;
     };
     term false;
@@ -88,7 +88,7 @@ defn set_env_var(name: String, value: String) -> Bool [name != ""][term == true 
 
 defn current_dir() -> String [true][term :> Size >= 0] {
     let result = current_dir_res();
-    [result.is_ok()] {
+    when result.is_ok() {
         term result.value;
     };
     term "";
@@ -96,7 +96,7 @@ defn current_dir() -> String [true][term :> Size >= 0] {
 
 defn set_current_dir(path: String) -> Bool [path != ""][term == true || term == false] {
     let result = set_current_dir_res(path);
-    [result.is_ok()] {
+    when result.is_ok() {
         term true;
     };
     term false;
@@ -106,7 +106,7 @@ defn set_current_dir(path: String) -> Bool [path != ""][term == true || term == 
 
 defn run_command(command: String) -> Bool [command != ""][term == true || term == false] {
     let result = spawn(command, []);
-    [result == 0] {
+    when result == 0 {
         term true;
     };
     term false;
@@ -114,7 +114,7 @@ defn run_command(command: String) -> Bool [command != ""][term == true || term =
 
 defn run_command_with_args(command: String, args: List<String>) -> Bool [command != ""][term == true || term == false] {
     let result = spawn(command, args);
-    [result == 0] {
+    when result == 0 {
         term true;
     };
     term false;
@@ -122,7 +122,7 @@ defn run_command_with_args(command: String, args: List<String>) -> Bool [command
 
 defn get_env_or_default(name: String, default: String) -> String [name != ""][term :> Size >= 0] {
     let val = env_var(name);
-    [val != ""] {
+    when val != "" {
         term val;
     };
     term default;

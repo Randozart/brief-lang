@@ -166,6 +166,9 @@ impl<'a> DataflowAnalyzer<'a> {
                     self.extract_ids_from_statement(s, ids);
                 }
             }
+            Statement::Gate(cond) => {
+                self.extract_ids_recursive(cond, ids);
+            }
             Statement::Expression(expr) => {
                 self.extract_ids_recursive(expr, ids);
             }

@@ -12,7 +12,7 @@ use std::fmt;
 impl fmt::Display for Expr {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Expr::Quoted(bytes) => write!(f, "\"{}\"", String::from_utf8_lossy(bytes)),
+            Expr::Quoted(bytes) => write!(f, "\"{}\"", String::from_UTF8_lossy(bytes)),
             Expr::Decimal(n) | Expr::TaggedLiteral(n, _) => write!(f, "{}", n),
             Expr::Bool(b) => write!(f, "{}", if *b { "true" } else { "false" }),
             Expr::Float(n) => write!(f, "{}", n),
@@ -266,12 +266,13 @@ impl fmt::Display for Statement {
                 }
             }
             Statement::Guarded(cond, body) => {
-                write!(f, "[{}] {{ ", cond)?;
+                write!(f, "when {} {{ ", cond)?;
                 for stmt in body {
                     write!(f, "{} ", stmt)?;
                 }
                 write!(f, "}}")
             }
+            Statement::Gate(cond) => write!(f, "[{}];", cond),
             Statement::Expression(expr) => write!(f, "{};", expr),
             Statement::If(cond, then, else_) => {
                 write!(f, "if {} {{ ", cond)?;
@@ -535,7 +536,7 @@ mod tests {
         assert_eq!(format!("{}", Type::Void), "void");
         assert_eq!(format!("{}", Type::Custom("Int".into())), "Int");
         assert_eq!(format!("{}", Type::HashWord("L".into())), "L");
-        assert_eq!(format!("{}", Type::HashWordVariant("String".into(), "utf8".into())), "String<utf8>");
+        assert_eq!(format!("{}", Type::HashWordVariant("String".into(), "UTF8".into())), "String<UTF8>");
         assert_eq!(
             format!("{}", Type::Generic("List".into(), vec![Type::Custom("Int".into())])),
             "List<Int>"

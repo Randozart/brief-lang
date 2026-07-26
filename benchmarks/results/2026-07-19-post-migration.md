@@ -14,7 +14,7 @@
 | precompute_sum | MATCH | MATCH | — |
 | const_heavy | MATCH | MATCH | — |
 | async_counters_idio | MISMATCH | MISMATCH | pre-existing |
-| utf8_ops | MISMATCH | MISMATCH | pre-existing |
+| UTF8_ops | MISMATCH | MISMATCH | pre-existing |
 | ring_buffer | MATCH | MATCH | — |
 | float_math | MATCH | MATCH | — |
 | float_math_nonzero | MATCH | MATCH | — |
@@ -65,4 +65,4 @@ nbody_newton is the only remaining performance gap — the memory loop (Phase 3 
 | Benchmarks | Status | Root Cause |
 |------------|--------|------------|
 | async_counters_idio | **MATCH** | Fixed by removing is_pure_body requirement from multi-txn fold; precomputation now applies. |
-| utf8_ops | MISMATCH | Performance issue: pure-Brief memcmp uses txn convergence loops for each byte, very slow. C reference completes 50M iterations faster than Brief completes 5. Known limitation. |
+| UTF8_ops | MISMATCH | Performance issue: pure-Brief memcmp uses txn convergence loops for each byte, very slow. C reference completes 50M iterations faster than Brief completes 5. Known limitation. |

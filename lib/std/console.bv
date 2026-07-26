@@ -40,12 +40,12 @@ cell! Console -> line: String, line_id: Int {
     trg raw: Char @ stdin#;
 
     node process [raw != prev_key]] {
-        [raw == '\n'] {
+        when raw == '\n' {
             &seq = seq + 1;
             &line_id = seq;
         };
 
-        [raw >= ' ' && raw != '\x7f'] {
+        when raw >= ' ' && raw != '\x7f' {
             &line = line + (String)raw;line = (String)raw;
         };
 

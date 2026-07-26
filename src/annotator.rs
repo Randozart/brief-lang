@@ -61,6 +61,7 @@ impl Annotator {
                     self.collect_calls_from_expr(condition, calls);
                     self.collect_calls_from_body(statements, calls);
                 }
+                Statement::Gate(cond) => self.collect_calls_from_expr(cond, calls),
                 Statement::Term(val) => {
                     if let Some(v) = val {
                         self.collect_calls_from_expr(v, calls);
@@ -375,12 +376,15 @@ impl Annotator {
                 )
             }
             Statement::Guarded(condition, statements) => {
-                let mut output = format!("{}[{}] {{\n", spaces, self.format_expr(condition));
+                let mut output = format!("{}when {} {{\n", spaces, self.format_expr(condition));
                 for s in statements {
                     output.push_str(&self.format_statement(s, indent + 2));
                 }
                 output.push_str(&format!("{}}}\n", spaces));
                 output
+            }
+            Statement::Gate(cond) => {
+                format!("{}[{}];\n", spaces, self.format_expr(cond))
             }
             Statement::Term(val) => {
                 let val_str = val.as_ref().map(|v| self.format_expr(v)).unwrap_or_default();
@@ -479,7 +483,7 @@ impl Annotator {
         match expr {
             Expr::Decimal(n) | Expr::TaggedLiteral(n, _) => n.to_string(),
             Expr::Float(f) => f.to_string(),
-            Expr::Quoted(s) => format!("\"{}\"", String::from_utf8_lossy(s)),
+            Expr::Quoted(s) => format!("\"{}\"", String::from_UTF8_lossy(s)),
             Expr::Bool(true) => "true".to_string(),
             Expr::Bool(false) => "false".to_string(),
             Expr::Identifier(n) => n.clone(),

@@ -309,6 +309,13 @@ pub fn eval_statement(
                 Ok(Value::Void)
             }
         }
+        Statement::Gate(cond) => {
+            // 2026-07-26: Convergence gate — evaluate condition.
+            // If false, the caller (txn runner) is expected to retry the body.
+            // The compile-time analysis must prove this eventually converges.
+            eval_expr(cond, heap, bindings)?;
+            Ok(Value::Void)
+        }
         Statement::If(cond, then, else_) => {
             let cv = eval_expr(cond, heap, bindings)?;
             if cv.is_true() {

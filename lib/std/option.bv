@@ -43,7 +43,7 @@ defn or_else<T>(opt: Option<T>, fallback: () -> Option<T>) -> Option<T> {
 };
 defn filter<T>(opt: Option<T>, pred: T -> Bool) -> Option<T> {
     uni opt(Some(v)) = {
-        [pred(v)] { term Some(v); };
+        when pred(v) { term Some(v); };
         term None;
     };
     uni opt(None) = { term None; };

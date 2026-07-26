@@ -28,7 +28,7 @@ defn is_empty<T>(stack: Stack<T>) -> Bool {
 defn to_list<T>(stack: Stack<T>) -> List<T> {
     let result: List<T> = [];
     let s: Stack<T> = stack;
-    [!s.is_empty()] {
+    when !s.is_empty() {
         let v: T = <- &s;
         &result = [v] + result;
     };

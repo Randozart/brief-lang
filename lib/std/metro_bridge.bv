@@ -48,29 +48,29 @@ defn metropolitan_rpc(
     term.is_ok() || term.is_err()
 ] {
     let ch = frgn__metro_create_channel(channel_id, 4096, 4096);
-    [ch.is_ok()] {
+    when ch.is_ok() {
         let ch_id = ch.value;
         let layout = frgn__metro_get_channel_layout(ch_id);
-        [layout.is_ok()] {
+        when layout.is_ok() {
             let layout_addr = layout.value;
             let written = frgn__mmap_write(layout_addr, 32, request, request .#Size);
-            [written.is_ok()] {
+            when written.is_ok() {
                 let signaled = frgn__atomic_store_u32(layout_addr, 0, 1);
-                [signaled.is_ok()] {
+                when signaled.is_ok() {
                     alka! {
                         // Poll for PROVIDER_RES (status = 3)
                         // Compiler trusts this intentional unbounded operation
                     };
                     let status = frgn__atomic_load_u32(layout_addr, 0);
-                    [status.is_ok()] {
-                        [status.value == 3] {
+                    when status.is_ok() {
+                        when status.value == 3 {
                             let response = frgn__mmap_read(layout_addr, 32, 4096);
-                            [response.is_ok()] {
+                            when response.is_ok() {
                                 term Ok(response.value);
                             };
                             term Err("read_failed");
                         };
-                        [status.value == 4] {
+                        when status.value == 4 {
                             term Err("foreign_error");
                         };
                         term Err("unexpected_status");

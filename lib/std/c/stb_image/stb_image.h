@@ -58,7 +58,7 @@ RECENT REVISION HISTORY:
       2.23  (2019-08-11) fix clang static analysis warning
       2.22  (2019-03-04) gif fixes, fix warnings
       2.21  (2019-02-25) fix typo in comment
-      2.20  (2019-02-07) support utf8 filenames in Windows; fix warnings and platform ifdefs
+      2.20  (2019-02-07) support UTF8 filenames in Windows; fix warnings and platform ifdefs
       2.19  (2018-02-11) fix warning
       2.18  (2018-01-30) fix warnings
       2.17  (2018-01-29) bugfix, 1-bit BMP, 16-bitness query, fix warnings
@@ -215,8 +215,8 @@ RECENT REVISION HISTORY:
 //   If compiling for Windows and you wish to use Unicode filenames, compile
 //   with
 //       #define STBI_WINDOWS_UTF8
-//   and pass utf8-encoded filenames. Call stbi_convert_wchar_to_utf8 to convert
-//   Windows wchar_t filenames to utf8.
+//   and pass UTF8-encoded filenames. Call stbi_convert_wchar_to_UTF8 to convert
+//   Windows wchar_t filenames to UTF8.
 //
 // ===========================================================================
 //
@@ -434,7 +434,7 @@ STBIDEF stbi_uc *stbi_load_gif_from_memory(stbi_uc const *buffer, int len, int *
 #endif
 
 #ifdef STBI_WINDOWS_UTF8
-STBIDEF int stbi_convert_wchar_to_utf8(char *buffer, size_t bufferlen, const wchar_t* input);
+STBIDEF int stbi_convert_wchar_to_UTF8(char *buffer, size_t bufferlen, const wchar_t* input);
 #endif
 
 ////////////////////////////////////
@@ -1328,7 +1328,7 @@ STBI_EXTERN __declspec(dllimport) int __stdcall WideCharToMultiByte(unsigned int
 #endif
 
 #if defined(_WIN32) && defined(STBI_WINDOWS_UTF8)
-STBIDEF int stbi_convert_wchar_to_utf8(char *buffer, size_t bufferlen, const wchar_t* input)
+STBIDEF int stbi_convert_wchar_to_UTF8(char *buffer, size_t bufferlen, const wchar_t* input)
 {
 	return WideCharToMultiByte(65001 /* UTF8 */, 0, input, -1, buffer, (int) bufferlen, NULL, NULL);
 }
@@ -7763,7 +7763,7 @@ STBIDEF int stbi_is_16_bit_from_callbacks(stbi_io_callbacks const *c, void *user
 
 /*
    revision history:
-      2.20  (2019-02-07) support utf8 filenames in Windows; fix warnings and platform ifdefs
+      2.20  (2019-02-07) support UTF8 filenames in Windows; fix warnings and platform ifdefs
       2.19  (2018-02-11) fix warning
       2.18  (2018-01-30) fix warnings
       2.17  (2018-01-29) change sbti__shiftsigned to avoid clang -O2 bug

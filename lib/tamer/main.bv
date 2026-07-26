@@ -11,7 +11,7 @@ export defn tame(lair_data: Ptr<Int>, lair_len: Int,
 
     let word0 = *(lair_data + 0);
     let magic = word0 & 0xFFFFFFFF;
-    [magic != 0x5249414C] { term 101; };
+    when magic != 0x5249414C { term 101; };
 
     let w4 = *(lair_data + 4);
     let fn_off = w4;
@@ -25,9 +25,9 @@ export defn tame(lair_data: Ptr<Int>, lair_len: Int,
     let bc_data = lair_data + bc_off;
     let fn_table = lair_data + fn_off;
 
-    [bc_off + bc_len > lair_len] { term 103; };
-    [fn_off + fn_size > lair_len] { term 104; };
-    [fn_count == 0] { term 105; };
+    when bc_off + bc_len > lair_len { term 103; };
+    when fn_off + fn_size > lair_len { term 104; };
+    when fn_count == 0 { term 105; };
 
     let _result = vm_loop(
         stack_data, 0, locals_data, 0, frames_data, 0,

@@ -349,10 +349,10 @@ node simulate [
     let energy: Float32 = epp + ekc;
     last_energy = energy;
 
-    [count % 5000000 == 0] {
+    when count % 5000000 == 0 {
         let __periodic: Bool = PrintLn!(energy);
     };
-    [count == bound] {
+    when count == bound {
         term! -> PrintLn!(last_energy);
     };
     term;

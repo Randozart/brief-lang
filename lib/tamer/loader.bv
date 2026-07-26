@@ -17,7 +17,7 @@ defn read_u8(bc: Ptr<Int>, addr: Int) -> Int {
 
 defn read_i8(bc: Ptr<Int>, addr: Int) -> Int {
     let val = read_u8(bc, addr);
-    [val >= 128] { term val - 256; };
+    when val >= 128 { term val - 256; };
     term val;
 };
 
@@ -32,7 +32,7 @@ defn read_u16(bc: Ptr<Int>, addr: Int) -> Int {
 
 defn read_i16(bc: Ptr<Int>, addr: Int) -> Int {
     let val = read_u16(bc, addr);
-    [val >= 32768] { term val - 65536; };
+    when val >= 32768 { term val - 65536; };
     term val;
 };
 
@@ -93,18 +93,18 @@ defn fn_arg_count(fn_table: Ptr<Int>, fn_idx: Int) -> Int {
 
 defn find_bounty_section(data: Ptr<Int>, type_id: Int) -> Ptr<Int> {
     let count = read_u32(data, 17);
-    [count >= 1] {
-        [read_u8(data, 21) == type_id] {
+    when count >= 1 {
+        when read_u8(data, 21) == type_id {
             term data + read_u64(data, 22);
         };
     };
-    [count >= 2] {
-        [read_u8(data, 38) == type_id] {
+    when count >= 2 {
+        when read_u8(data, 38) == type_id {
             term data + read_u64(data, 39);
         };
     };
-    [count >= 3] {
-        [read_u8(data, 55) == type_id] {
+    when count >= 3 {
+        when read_u8(data, 55) == type_id {
             term data + read_u64(data, 56);
         };
     };

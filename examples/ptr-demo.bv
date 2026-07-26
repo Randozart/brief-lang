@@ -25,7 +25,7 @@ node increment [counter < 10][counter == 10] {
 node peek [counter > 0 && counter < 10][counter >= 10] {
   // &counter gives us a Ptr<Int>. counter reads the value.
   let counter_val = counter;
-  [counter_val > 0] {  // guard ensures this only fires when there is a value
+  when counter_val > 0 {  // guard ensures this only fires when there is a value
     term! -> Print#(counter_val);
   };
 };

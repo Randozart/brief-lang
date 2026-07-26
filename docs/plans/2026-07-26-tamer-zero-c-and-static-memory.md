@@ -10,13 +10,14 @@ own LLVM backend, using `SysCall#` with inline assembly for OS interaction and
 `struct` with `Int[N]` fields for all buffers. No `malloc`, no `brief_rt.c`,
 no `tamer/*.c` — zero C.
 
-**Four phases, executed sequentially:**
+**Five phases, executed sequentially:**
 
 | Phase | Title | Dependencies | Outcome |
 |-------|-------|-------------|---------|
 | 0 | Foundation Fixes | None | CALL bug, `not` instruction, loader.bv cleanup work |
 | 1 | `#System` Protocol Wire-up | Phase 0 | `from #System` resolves end-to-end per target |
-| 2 | `SysCall#` Inline Asm + Runtime Port | Phase 1 | No `brief_rt.c` — all runtime in Brief using syscall asm |
+| 1.5 | Guard/When Syntax Convergence Gates | Phase 1 | Clean syntax across all `.bv` files; `[cond]{body}` replaced with `when cond { body }` |
+| 2 | `SysCall#` Inline Asm + Runtime Port | Phase 1.5 | No `brief_rt.c` — all runtime in Brief using syscall asm |
 | 3 | Tamer in Brief | Phase 2 | No `tamer/*.c` — pure Brief tamer with struct arrays, no `Alloc#` |
 | 4 | DAG-Based Size Inference | Phase 3 | Max buffer sizes proven by DAG, not guessed |
 
@@ -494,6 +495,130 @@ by project-local `.brief/registry/` and `--registry-dir` CLI flag.
 3. `briefc registry remove test` → file removed
 4. `import <test>` resolves to `~/.brief/registry/test.bv` when it exists
 5. `from <test.c>` resolves to `~/.brief/registry/test.c` when it exists
+
+---
+
+## Phase 1.5 — Guard/When Syntax Convergence Gates
+
+### 1.5a. Overview
+
+The bracket-guard syntax `[cond] { body }` is split into three distinct
+constructs with different semantics and AST representations:
+
+| Construct | AST | Semantics |
+|-----------|-----|-----------|
+| `[expr];` | `Statement::Gate(Expr)` | Convergence gate — static assertion (analysis must prove `expr` holds). In txn/node: runtime branch to convergence target if false. In `defn`: pure static assertion, no runtime code. |
+| `[expr] stmt;` | `Statement::Guarded(expr, vec![stmt])` | Prefix guarded single statement — evaluate `expr`, if true execute `stmt`, if false skip. |
+| `when expr { body };` | `Statement::Guarded(expr, body)` | Block guarded body — evaluate `expr`, if true execute `body`, if false skip. Preferred form for multi-statement guards. |
+| `[expr] { body };` | **Rejected** | Parser error: "use `when` keyword for block-body guards: `when {expr} {{ ... }}`" |
+
+**Semantic model for `[expr];` (Gate):**
+- **Runtime**: In a callable txn, if `expr` is false, branch to `loop:` header (re-check pre, retry body). In a reactive txn, branch to end-of-tick. In a `defn`, the compile-time analysis must prove the condition — no runtime code emitted.
+- **Compile-time**: The DAG/convergence analysis must prove the gate condition holds. If unprovable, compilation is **denied**.
+- **Relation to `[pre][post]`**: The contract `[pre][post]` drives the outer convergence loop. Inner `[expr];` gates are nested assertions that the convergence is monotonic (e.g., counter hasn't overshot its bound).
+
+### 1.5b. Implementation Steps
+
+**Step 1 — AST definition** (`src/ast/top.rs`):
+- Add `Statement::Gate(Expr)` variant after `Guarded`
+- Add `Gate` arm to the `PartialEq` impl
+- Update doc comment for `Guarded` to note it also represents `[expr] stmt;`
+
+**Step 2 — Parser** (`src/parser/statements.rs`):
+- Rewrite `parse_guard_statement_bracket()` with three-way dispatch:
+  - `[expr] { body }` → hard reject with error: "use `when` keyword"
+  - `[expr];` → `Statement::Gate(expr)` — standalone convergence gate
+  - `[expr] stmt;` → `Statement::Guarded(expr, vec![stmt])` — prefix form
+- No change to `parse_guard_statement_when()`
+
+**Step 3 — Display** (`src/ast/display.rs`):
+- `Gate(cond)` → `"[{cond}];"`
+- `Guarded(cond, body)` → `"when {cond} {{ ... }}"` (was `"[{cond}] {{ ... }}"`)
+
+**Step 4 — FunctionContext field** (`src/backend/llvm/context.rs`):
+- Add `convergence_target: Option<String>` to `FunctionContext`
+- Set to `Some("loop")` at callable txn loop header (emit_toplevel.rs:1680)
+- Set to `Some("<tick_end>")` at reactive txn body entry
+- Reset in `reset()` method
+
+**Step 5 — LLVM codegen** (`src/backend/llvm/emit_stmt.rs`):
+- `Gate(cond)`: emit `%cond_i1` → `br i1 %cond_i1, label %gate.pass.N, label %convergence_target`
+- Guarded body always branches to `guard.end{N}` after execution (same as current)
+
+**Step 6 — VM codegen** (`src/backend/vm/emit_stmt.rs`):
+- Add convergence target tracking (field on VM backend context)
+- `Gate(cond)`: `emit_expr(cond); emit_jz(&convergence_target);`
+
+**Step 7 — Other active backends** (`webstack.rs`, `circt.rs`, `gpu.rs`):
+- Add `Gate(cond)` match arm with backend-appropriate convergence semantics
+
+**Step 8 — Dead backends** (11 files: `c.rs`, `rust.rs`, `x86_64.rs`, etc.):
+- Add `Statement::Gate(_) => todo!()` with `// dead backend` comment
+
+**Step 9 — Interpreter** (`src/interpreter/eval.rs`):
+- Evaluate `Gate(cond)`:
+  - If cond is true, return Void (continue to next statement)
+  - If cond is false, the txn runner re-enters the body from the top
+- The txn runner (`reactor.rs`, `interpreter/mod.rs`) must catch a "gate blocked" sentinel and restart the body loop
+
+**Step 10 — Analysis passes (~53 Rust files, ~130 match sites):**
+- Add `Statement::Gate(cond)` arm to every file matching `Statement::Guarded`
+- **Simple recurse** (17 files): `self.walk_expr(cond)` — same as Guarded condition walk, no body to descend
+- **Transition graph** (`transition_graph.rs`): Gate introduces no new body statements; its condition may reference counter variables. Must be tracked for convergence-proof analysis. Gate bodies are not added to the statement list — the body is empty.
+- **Region analysis** (`region.rs`): Gate condition variables tracked for liveness/chains; no precomputation inside Gate (no body to precompute).
+- **Provenance** (`provenance.rs`): Gate is a new control-flow boundary for `check_convergence_safety`.
+- **Watchdog** (`watchdog.rs`): Gate references must be tracked for handler-write analysis.
+- **Dependency graph**: Gate condition variables are reads.
+- **Proof engine** (`proof_engine/mod.rs`): `stmt_cost(Gate(cond))` = `expr_cost(cond)`.
+
+**Step 11 — Feature module** (`src/features/stmt/gate.rs`):
+- `GateStmt` implementing `StmtTypecheck`, `StmtEval`, `StmtCodegenLLVM`, `StmtCodegenWebstack`
+
+**Step 12 — Serialization** (`src/beast/serialize.rs`, `deserialize.rs`):
+- Add `Gate(Expr)` variant serialization
+
+**Step 13 — Fuzzing** (`src/fuzzing/ast_generator.rs`):
+- Generate random `Gate` conditions
+
+**Step 14 — `.bv` file migration** (104 files, ~604 matches):
+- Replace `[cond] { body; }` with `when cond { body; };` at statement level
+- **Do NOT touch** `[pre][post]` contract syntax in `defn`/`txn`/`node` headers
+- Files: `lib/std/` (27 files, 326 matches), `lib/tamer/` (4 files, 98 matches), `benchmarks/` (36 files, 88 matches), `examples/` (37 files, 92 matches)
+
+**Step 15 — Tests:**
+- All 1014 existing tests pass after migration
+- New test cases:
+  - `[expr];` in callable txn body
+  - `[expr];` in reactive txn body
+  - `[expr];` in `defn` → compile error or static assertion
+  - `[expr] single_stmt;` prefix form
+  - `[expr] { body }` → clear rejection error
+  - Convergence analysis proving a gate in a simple counter loop
+  - Convergence analysis failing on an unprovable gate
+
+**Step 16 — Documentation:**
+- Update `AGENTS.md` items 25 and 30 (done in this commit)
+- Update `spec/SPEC.md` — document all three constructs
+- Update `learn-brief/` — update tutorial files
+
+### 1.5c. Files Changed
+
+| Category | Files | Match arms |
+|----------|-------|-----------|
+| AST/parser/display | 3 | 3 |
+| Parser | 1 | 3 |
+| Core LLVM codegen | 5+ | 10+ |
+| Analysis: simple recurse | 17 | 17-34 |
+| Analysis: complex | 10 | 20-40 |
+| VM codegen | 1 | 1 |
+| Active backends (webstack, circt) | 2 | 4 |
+| Dead backends (todo!) | 11 | 11 |
+| Feature module | 1 | (new module) |
+| Interpreter | 1 | 1 |
+| Reactor | 1 | 4 |
+| Fuzzing/concolic | 2 | 12 |
+| **Total Rust** | **~56** | **~130** |
+| `.bv` migration | 104 | ~604 |
 
 ---
 
@@ -1289,6 +1414,12 @@ table specifies which documents change in which phase:
 | `docs/architecture/conditional-ffi.md` | 1 | Document completed protocol_map resolution. Add `protocol_lib` field description. |
 | `docs/architecture/backend-type-dispatch.md` | 1 | If protocol resolution changes type dispatch, update. |
 | `config/targets.toml` | 1a | Add `protocol_map` entries for each target. |
+| `AGENTS.md` (items 25, 30) | 1.5 | Document the three guard forms (`[expr];`, `[expr] stmt;`, `when expr { body }`) and the `[cond]{body}` rejection rule. |
+| `spec/SPEC.md` | 1.5 | Add Gate semantics, update all guard/conditional syntax sections. |
+| `learn-brief/` | 1.5 | Update tutorial files to use `when` instead of `[cond]{body}`. |
+| `src/ast/top.rs` (doc comment) | 1.5 | Add `///` doc comment for `Statement::Gate` variant. |
+| `src/backend/llvm/context.rs` (doc comment) | 1.5 | Add `///` doc comment for `convergence_target` field. |
+| `src/features/stmt/gate.rs` (doc comment) | 1.5 | Module-level doc comment explaining GateStmt. |
 | `docs/plans/2026-07-25-memory-by-contract.md` | 3a | Update implementation status; note which steps are complete. |
 | `docs/architecture/features/backend-dispatch.md` | 2a | Document `SysCall#` inline asm dispatch by target triple. |
 | `docs/architecture/bounty-architecture.md` | 3b | Document the pure-Brief tamer's architecture. |
@@ -1311,6 +1442,7 @@ table specifies which documents change in which phase:
 | CALL bug fix breaks existing .lair programs | 0a | Low | High | Write test that calls function twice; run all cargo tests |
 | Inline asm `SysCall#` not portable | 2a | Medium | Medium | Keep C fallback for non-Linux targets |
 | Porting a C function to Brief introduces a subtle bug | 2b | Medium | Medium | Compare output of C and Brief versions side-by-side |
+| `[cond]{body}` migration (604 sites) misses some instances | 1.5 | Medium | Low | Grep `rg '\]\s*\{' --include '*.bv'` and inspect each hit; scripts catch most, manual review catches rest |
 | `Int[N]` syntax conflicts with existing `>>` token issue | 3a | Low | Low | Already handled: `>>` in nested generics requires space; `Int[1024]` uses brackets, not angle brackets |
 | Brief VM struct-array version is slower than pointer version | 3b | Low | Medium | Contracts prove bounds; LLVM optimizes proven-safe GEP chains |
 | Run-time of Phase 2b is too high (porting 15+ C functions) | 2b | Medium | Low | Each function is independent; parallelize porting |

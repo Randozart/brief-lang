@@ -51,11 +51,11 @@ txn run_all [true][all_passed] {
     
     let all_passed = t1 && t2 && t3 && t4 && t5 && t6;
     
-    [all_passed] {
+    when all_passed {
         Print#("ALL FFI TESTS PASSED!");
     };
     
-    [~all_passed] {
+    when ~all_passed {
         Print#("SOME TESTS FAILED!");
     };
     

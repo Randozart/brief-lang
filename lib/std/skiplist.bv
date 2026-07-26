@@ -45,7 +45,7 @@ defn sl_remove_fallback(list: List<Int>) -> (Int, List<Int>) {
 txn sl_contains_loop(list: List<Int>, val: Int, i: Int)
     [i < list :> Size][i == list :> Size] -> Bool
 {
-    [list[i] == val] { term true; };
+    when list[i] == val { term true; };
     &i = i + 1;
     term false;
 };

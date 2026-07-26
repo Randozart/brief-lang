@@ -13,7 +13,7 @@ node saxpy_loop
     [i == N]
 {
     // Each thread would compute y[i] = a * x[i] + y[i]
-    [i < N] {
+    when i < N {
         i = i + 1;
     };
     term;

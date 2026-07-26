@@ -28,7 +28,7 @@ defn is_empty<T>(queue: Queue<T>) -> Bool {
 defn to_list<T>(queue: Queue<T>) -> List<T> {
     let result: List<T> = [];
     let q: Queue<T> = queue;
-    [!q.is_empty()] {
+    when !q.is_empty() {
         let v: T = <- &q;
         &result = result + [v];
     };

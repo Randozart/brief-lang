@@ -108,7 +108,7 @@ defn pad_right(s: String, width: Int) -> String
 frgn __to_lower(s: String) -> Result<String, StringError>
 frgn __to_upper(s: String) -> Result<String, StringError>
 frgn __trim(s: String) -> Result<String, StringError>
-frgn __utf8_len(s: String) -> Result<Int, StringError>
+frgn __UTF8_len(s: String) -> Result<Int, StringError>
 ```
 
 ### Collections (`collections.bv`)

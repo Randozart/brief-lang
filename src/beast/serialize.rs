@@ -159,6 +159,7 @@ fn emit_statement(s: &Statement) -> SExpr {
             for s in body { children.push(emit_statement(s)); }
             SExpr::List(children)
         }
+        Statement::Gate(cond) => list(&[atom("gate"), emit_expr(cond)]),
         Statement::If(cond, then, els) => {
             let mut children = vec![atom("if"), emit_expr(cond)];
             children.push(list(&[atom("then")]));
@@ -187,7 +188,7 @@ fn emit_expr(e: &Expr) -> SExpr {
         Expr::Float(f) => SExpr::Atom(Atom::Float(*f)),
         Expr::Bool(b) => SExpr::Atom(Atom::Bool(*b)),
         Expr::Quoted(bytes) => {
-            let s = String::from_utf8_lossy(bytes).to_string();
+            let s = String::from_UTF8_lossy(bytes).to_string();
             list(&[atom("string"), atom(&s)])
         }
         Expr::Identifier(name) => list(&[atom("ident"), atom(name)]),

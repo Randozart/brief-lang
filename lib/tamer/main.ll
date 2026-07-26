@@ -6,7 +6,7 @@ target triple = "x86_64-unknown-linux-gnu"
 %SmallString64 = type { i64, i64, i64, i64, i64, i64, i64, i64, i64 }
 %StaticString = type { i64, i64 }
 %String = type { i64, i64 }
-%Utf8View = type { i64, i64 }
+%UTF8View = type { i64, i64 }
 
 declare void @llvm.assume(i1) #1
 declare void @llvm.trap() noreturn
@@ -891,6 +891,6 @@ attributes #10 = {
 !18 = !{!"UInt32", !0}
 !19 = !{!"UInt64", !0}
 !20 = !{!"UInt8", !0}
-!21 = !{!"Utf8View", !0}
+!21 = !{!"UTF8View", !0}
 !22 = !{!"Void", !0}
 !99 = distinct !{} ; StateAliasScope

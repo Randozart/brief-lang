@@ -40,7 +40,7 @@ node process [bound > 0 && count < bound][count == bound] {
     y1 = out;
 
     count = count + 1;
-    [count % 5000000 == 0] {
+    when count % 5000000 == 0 {
         PrintLn!(out);
     };
     term;

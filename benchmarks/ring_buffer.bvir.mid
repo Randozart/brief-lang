@@ -322,7 +322,7 @@
 )
   (
   "typedef"
-  "Utf8View"
+  "UTF8View"
   ("base" ("ident" "Bits"))
   ("slots" ("slot" "data" "Int") ("slot" "len" "Int"))
   ("metadata" "encoding" "UTF-8")

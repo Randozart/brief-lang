@@ -360,6 +360,10 @@ fn parse_statement(expr: &SExpr) -> Result<Statement, String> {
             for i in 2..parts.len() { body.push(parse_statement(&parts[i])?); }
             Ok(Statement::Guarded(cond, body))
         }
+        "gate" => {
+            let cond = parse_expr(&parts[1])?;
+            Ok(Statement::Gate(cond))
+        }
         "if" => {
             let cond = parse_expr(&parts[1])?;
             let (then, els) = parse_if_branches(parts)?;

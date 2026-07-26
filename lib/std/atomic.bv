@@ -41,7 +41,7 @@ defn atomic_fetch_and(ptr: Ptr<Int>, val: Int) -> Int
     [ptr as Int >= 0][true]
 {
     let old: Int = AtomicLoad#(ptr);
-    [AtomicCas#(ptr, old, old & val) == 1] { term old; };
+    when AtomicCas#(ptr, old, old & val) == 1 { term old; };
     term atomic_fetch_and(ptr, val);
 };
 
@@ -49,7 +49,7 @@ defn atomic_fetch_or(ptr: Ptr<Int>, val: Int) -> Int
     [ptr as Int >= 0][true]
 {
     let old: Int = AtomicLoad#(ptr);
-    [AtomicCas#(ptr, old, old | val) == 1] { term old; };
+    when AtomicCas#(ptr, old, old | val) == 1 { term old; };
     term atomic_fetch_or(ptr, val);
 };
 
@@ -57,6 +57,6 @@ defn atomic_fetch_xor(ptr: Ptr<Int>, val: Int) -> Int
     [ptr as Int >= 0][true]
 {
     let old: Int = AtomicLoad#(ptr);
-    [AtomicCas#(ptr, old, old ^ val) == 1] { term old; };
+    when AtomicCas#(ptr, old, old ^ val) == 1 { term old; };
     term atomic_fetch_xor(ptr, val);
 };

@@ -446,7 +446,7 @@ pub fn eval_nav_chain(
             Ok(NavValue::Bool(exists))
         }
         // 2026-07-23: String literal (Quoted) in macro DSL.
-        Expr::Quoted(bytes) => String::from_utf8(bytes.clone())
+        Expr::Quoted(bytes) => String::from_UTF8(bytes.clone())
             .map(NavValue::Str)
             .map_err(|_| "invalid UTF-8 string literal".into()),
         // 2026-07-23: Binary operators — arithmetic and comparison.
@@ -672,6 +672,11 @@ fn evaluate_stage_stmt(
                     }
                 }
             }
+            Ok(None)
+        }
+        Statement::Gate(guard) => {
+            // 2026-07-26: Convergence gate — evaluate condition.
+            eval_nav_chain(guard, program, universe, stage, scope, sandbox, pm)?;
             Ok(None)
         }
         // 2026-07-23: Term — evaluate and return the expression value.
@@ -1399,10 +1404,10 @@ fn eval_nav_call(
                 .output()
                 .map_err(|e| format!("{}: failed to execute '{}': {}", name, cmd, e))?;
             if !output.status.success() {
-                let stderr = String::from_utf8_lossy(&output.stderr);
+                let stderr = String::from_UTF8_lossy(&output.stderr);
                 return Err(format!("{}: '{}' failed: {}", name, cmd, stderr));
             }
-            Ok(NavValue::Str(String::from_utf8_lossy(&output.stdout).to_string()))
+            Ok(NavValue::Str(String::from_UTF8_lossy(&output.stdout).to_string()))
         }
 
         // ── Diagnostics (2026-07-23) ────────────────────────────────
@@ -1472,7 +1477,7 @@ fn eval_nav_call(
                             .ok()
                             .and_then(|o| {
                                 if o.status.success() {
-                                    String::from_utf8(o.stdout).ok()
+                                    String::from_UTF8(o.stdout).ok()
                                 } else {
                                     None
                                 }
@@ -1497,7 +1502,7 @@ fn eval_nav_call(
                             .ok()
                             .and_then(|o| {
                                 if o.status.success() {
-                                    String::from_utf8(o.stdout).ok()
+                                    String::from_UTF8(o.stdout).ok()
                                 } else {
                                     None
                                 }
@@ -1540,7 +1545,7 @@ fn eval_nav_call(
                             .ok()
                             .and_then(|o| {
                                 if o.status.success() {
-                                    String::from_utf8(o.stdout).ok()
+                                    String::from_UTF8(o.stdout).ok()
                                 } else {
                                     None
                                 }
@@ -1572,7 +1577,7 @@ fn eval_nav_call(
                 .ok()
                 .and_then(|o| {
                     if o.status.success() {
-                        let s = String::from_utf8_lossy(&o.stdout);
+                        let s = String::from_UTF8_lossy(&o.stdout);
                         s.trim().parse::<i64>().ok()
                     } else {
                         None
@@ -1672,7 +1677,7 @@ fn expect_str_arg(args: &[Expr], idx: usize, intrinsic: &str, scope: &Scope) -> 
     })?;
     // Quick path: simple literals and identifiers
     match arg {
-        Expr::Quoted(bytes) => return String::from_utf8(bytes.clone())
+        Expr::Quoted(bytes) => return String::from_UTF8(bytes.clone())
             .map_err(|_| format!("{}: arg {} is not valid UTF-8", intrinsic, idx)),
         Expr::Identifier(s) => {
             if let Some(val) = scope.get(s) {
@@ -1727,7 +1732,7 @@ fn expect_prop_arg(args: &[Expr], idx: usize, intrinsic: &str) -> Result<Propert
         Expr::Bool(b) => Ok(PropertyValue::Bool(*b)),
         Expr::Decimal(n) => Ok(PropertyValue::Int(*n)),
         Expr::Quoted(bytes) => {
-            let s = String::from_utf8(bytes.clone())
+            let s = String::from_UTF8(bytes.clone())
                 .map_err(|_| format!("{}: arg {} is not valid UTF-8", intrinsic, idx))?;
             // Quoted could be a string or identifier
             Ok(PropertyValue::String(s))
@@ -1739,7 +1744,7 @@ fn expect_prop_arg(args: &[Expr], idx: usize, intrinsic: &str) -> Result<Propert
 
 fn extract_str_lit(expr: &Expr) -> Option<String> {
     match expr {
-        Expr::Quoted(bytes) => String::from_utf8(bytes.clone()).ok(),
+        Expr::Quoted(bytes) => String::from_UTF8(bytes.clone()).ok(),
         _ => None,
     }
 }
@@ -2070,6 +2075,9 @@ fn resolve_dollar_refs_in_stmt(stmt: &mut Statement, scope: &Scope) -> Result<()
                 resolve_dollar_refs_in_stmt(s, scope)?;
             }
             Ok(())
+        }
+        Statement::Gate(cond) => {
+            resolve_dollar_refs_in_expr(cond, scope)
         }
         Statement::Block(stmts) | Statement::SyncBlock(stmts) => {
             for s in stmts.iter_mut() {

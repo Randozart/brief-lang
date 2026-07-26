@@ -217,6 +217,7 @@ impl LlvmBackend {
                     .map(|s| Self::rewrite_cell_stmt_identifiers(s, cell_name))
                     .collect(),
             ),
+            Statement::Gate(cond) => Statement::Gate(Self::rewrite_cell_identifiers(cond, cell_name)),
             Statement::Term(e) => Statement::Term(
                 e.as_ref()
                     .map(|e| Self::rewrite_cell_identifiers(e, cell_name)),
@@ -1852,7 +1853,7 @@ impl LlvmBackend {
                 .ok();
             }
             Expr::Quoted(llvm_op) => {
-                let llvm_op_str = String::from_utf8_lossy(llvm_op);
+                let llvm_op_str = String::from_UTF8_lossy(llvm_op);
                 writeln!(
                     out,
                     "{}{} = {} {} {}, {}",

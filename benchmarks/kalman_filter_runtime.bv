@@ -92,7 +92,7 @@ x0 = nx0;
 count = count + 1;
 
     // Structural liveness: FFI output keeps all float state live via DFE.
-    [count % 5000000 == 0] {
+    when count % 5000000 == 0 {
         let energy: Float = x0 * x0 + p00 + p11 + p22;
         let ei: Float = x1 * x1 + p01 + p12;
         let ej: Float = x2 * x2 + p02 + p21;

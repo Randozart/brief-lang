@@ -1,7 +1,7 @@
 // UTF-8 Operations — C reference for Brief LLVM backend
 //
-// Symmetric with utf8_ops.bv: Allocates buffers, stores loop
-// counter, compares via memcmp + validates via utf8_validate.
+// Symmetric with UTF8_ops.bv: Allocates buffers, stores loop
+// counter, compares via memcmp + validates via UTF8_validate.
 // Uses pre-allocated buffers to match Alloc# arena semantics.
 
 #include <stdio.h>
@@ -12,7 +12,7 @@
 static uint8_t buf_a[8];
 static uint8_t buf_b[8];
 
-static int utf8_validate(const uint8_t *data, int64_t len) {
+static int UTF8_validate(const uint8_t *data, int64_t len) {
     if (!data || len < 0) return 0;
     int64_t i = 0;
     while (i < len) {
@@ -52,7 +52,7 @@ int main(void) {
         memcpy(buf_b, &next, 8);
 
         int cmp = memcmp(buf_a, buf_b, 8);
-        int valid = utf8_validate(buf_a, 8);
+        int valid = UTF8_validate(buf_a, 8);
         checksum += cmp + valid;
 
         ops++;

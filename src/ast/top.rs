@@ -198,8 +198,10 @@ pub enum Statement {
     TermBang(Option<Expr>),
     /// return expr;
     Return(Option<Expr>),
-    /// [condition] { body } or when condition { body }
+    /// when condition { body } or [condition] stmt;
     Guarded(Expr, Vec<Statement>),
+    /// [condition]; — convergence gate (static assertion, re-convergence point)
+    Gate(Expr),
     /// expr;
     Expression(Expr),
     /// if expr { ... } else { ... }
@@ -281,6 +283,7 @@ impl PartialEq for Statement {
             (Statement::TermBang(e1), Statement::TermBang(e2)) => e1 == e2,
             (Statement::Return(e1), Statement::Return(e2)) => e1 == e2,
             (Statement::Guarded(c1, b1), Statement::Guarded(c2, b2)) => c1 == c2 && b1 == b2,
+            (Statement::Gate(c1), Statement::Gate(c2)) => c1 == c2,
             (Statement::Expression(e1), Statement::Expression(e2)) => e1 == e2,
             (Statement::If(c1, t1, e1), Statement::If(c2, t2, e2)) => c1 == c2 && t1 == t2 && e1 == e2,
             (Statement::Block(b1), Statement::Block(b2)) => b1 == b2,
@@ -514,7 +517,7 @@ impl Annotation {
     pub fn string_value(&self) -> Option<String> {
         self.value.as_ref().and_then(|v| {
             if let Expr::Quoted(bytes) = v {
-                Some(String::from_utf8_lossy(bytes).to_string())
+                Some(String::from_UTF8_lossy(bytes).to_string())
             } else {
                 None
             }
@@ -955,7 +958,7 @@ pub struct CastEdge {
     pub target_category: String,
     pub target_variant: String,
     /// 2026-07-23: Required binding — the transformation function.
-    /// e.g., CastTo(#String<utf8>) = ascii_to_utf8(#L);
+    /// e.g., CastTo(#String<UTF8>) = ascii_to_UTF8(#L);
     pub binding: Option<CastBinding>,
 }
 

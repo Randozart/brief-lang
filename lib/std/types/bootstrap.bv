@@ -75,7 +75,7 @@ type String {
     encoding <~ "UTF-8";
 };
 
-type Utf8View {
+type UTF8View {
     data: Int;
     len: Int;
     alignment <~ 8;

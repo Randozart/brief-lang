@@ -382,11 +382,11 @@ node simulate [
     let ek4c: Float32 = 0.5f32 * m4 * (vx4 * vx4 + vy4 * vy4 + vz4 * vz4);
     let energy: Float32 = epp + ek0c + ek1c + ek2c + ek3c + ek4c;
 
-    [count % 5000000 == 0] {
+    when count % 5000000 == 0 {
         let __printed: Bool = PrintLn!(energy);
     };
     count = count + 1;
-    [count == bound] {
+    when count == bound {
         term! -> PrintLn!(energy);
     };
     term;

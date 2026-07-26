@@ -344,6 +344,10 @@ pub struct FunctionContext {
     pub in_callable_txn: bool,
     pub callable_txn_result: Option<String>,
     pub callable_txn_post_label: Option<String>,
+    /// 2026-07-26: Target label for [expr]; convergence gates.
+    /// Set by callable-txn body entry. Gate emits `br i1 %cond, continue, convergence_target`
+    /// when the condition is false, branching back to the convergence loop for retry.
+    pub convergence_target: Option<String>,
 
     // SSA state
     pub ssa_state_reg: Option<String>,
@@ -542,6 +546,7 @@ impl FunctionContext {
             in_callable_txn: false,
             callable_txn_result: None,
             callable_txn_post_label: None,
+            convergence_target: None,
             ssa_state_reg: None,
             param_slots: HashMap::new(),
             state_reg_name: "%state".to_string(),
@@ -621,6 +626,7 @@ impl FunctionContext {
         self.in_callable_txn = false;
         self.callable_txn_result = None;
         self.callable_txn_post_label = None;
+        self.convergence_target = None;
         self.loop_exit_label = None;
         self.phi_induction_reg = None;
         self.arena_slots = None;

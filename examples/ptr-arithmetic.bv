@@ -62,7 +62,7 @@ let write_ok: Bool = false;
 let read_val: Int = 0;
 
 node run [tick < 1][tick == 1] {
-    [tick == 0] {
+    when tick == 0 {
         let result: Int = 0;
 
         // uart_tx should be UART0_BASE + 4

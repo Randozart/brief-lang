@@ -17,7 +17,7 @@ let result_lt = lt_fn(3, 5);    // true
 
 // Function pointer in state field (for dynamic dispatch)
 node comparator [done < 2][done == 2] {
-    [done == 0] {
+    when done == 0 {
         let cmp = cmp_int .#Ptr;
         let r = cmp(2, 2);
         term! -> __print_int(r); // prints 1 (true)

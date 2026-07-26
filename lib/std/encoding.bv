@@ -23,43 +23,43 @@
 import "std/ffi/encoding.bv";
 
 defn hex_digit_to_int(c: String) [c :> Size == 1][term >= 0 && term <= 15] -> Int {
-  [c == "0"] { term 0; };
-  [c == "1"] { term 1; };
-  [c == "2"] { term 2; };
-  [c == "3"] { term 3; };
-  [c == "4"] { term 4; };
-  [c == "5"] { term 5; };
-  [c == "6"] { term 6; };
-  [c == "7"] { term 7; };
-  [c == "8"] { term 8; };
-  [c == "9"] { term 9; };
-  [c == "a" || c == "A"] { term 10; };
-  [c == "b" || c == "B"] { term 11; };
-  [c == "c" || c == "C"] { term 12; };
-  [c == "d" || c == "D"] { term 13; };
-  [c == "e" || c == "E"] { term 14; };
-  [c == "f" || c == "F"] { term 15; };
+  when c == "0" { term 0; };
+  when c == "1" { term 1; };
+  when c == "2" { term 2; };
+  when c == "3" { term 3; };
+  when c == "4" { term 4; };
+  when c == "5" { term 5; };
+  when c == "6" { term 6; };
+  when c == "7" { term 7; };
+  when c == "8" { term 8; };
+  when c == "9" { term 9; };
+  when c == "a" || c == "A" { term 10; };
+  when c == "b" || c == "B" { term 11; };
+  when c == "c" || c == "C" { term 12; };
+  when c == "d" || c == "D" { term 13; };
+  when c == "e" || c == "E" { term 14; };
+  when c == "f" || c == "F" { term 15; };
   term 0;
 };
 
 // Int to hex digit
 defn int_to_hex_digit(n: Int) [n >= 0 && n <= 15][term :> Size == 1] -> String {
-  [n == 0] { term "0"; };
-  [n == 1] { term "1"; };
-  [n == 2] { term "2"; };
-  [n == 3] { term "3"; };
-  [n == 4] { term "4"; };
-  [n == 5] { term "5"; };
-  [n == 6] { term "6"; };
-  [n == 7] { term "7"; };
-  [n == 8] { term "8"; };
-  [n == 9] { term "9"; };
-  [n == 10] { term "a"; };
-  [n == 11] { term "b"; };
-  [n == 12] { term "c"; };
-  [n == 13] { term "d"; };
-  [n == 14] { term "e"; };
-  [n == 15] { term "f"; };
+  when n == 0 { term "0"; };
+  when n == 1 { term "1"; };
+  when n == 2 { term "2"; };
+  when n == 3 { term "3"; };
+  when n == 4 { term "4"; };
+  when n == 5 { term "5"; };
+  when n == 6 { term "6"; };
+  when n == 7 { term "7"; };
+  when n == 8 { term "8"; };
+  when n == 9 { term "9"; };
+  when n == 10 { term "a"; };
+  when n == 11 { term "b"; };
+  when n == 12 { term "c"; };
+  when n == 13 { term "d"; };
+  when n == 14 { term "e"; };
+  when n == 15 { term "f"; };
   term "0";
 };
 
@@ -75,7 +75,7 @@ txn url_encode_loop(s: String, result: String, i: Int)
     [i < s :> Size][i == s :> Size] -> String
 {
   let c: String = s[i..i+1];
-  [c == " "] {
+  when c == " " {
     &result = result + "%20";
   } {
     &result = result + c;
@@ -92,7 +92,7 @@ defn url_encode_simple(s: String) [true][term :> Size >= s :> Size] -> String {
 txn url_decode_loop(s: String, result: String, i: Int)
     [i < s :> Size][i == s :> Size] -> String
 {
-  [i + 2 < s :> Size && s[i..i+1] == "%" && s[i+1..i+3] == "20"] {
+  when i + 2 < s :> Size && s[i..i+1] == "%" && s[i+1..i+3] == "20" {
     &result = result + " ";
     &i = i + 3;
   } {
@@ -110,7 +110,7 @@ defn url_decode_simple(s: String) [true][term :> Size <= s :> Size] -> String {
 txn is_hex_loop(s: String, i: Int)
     [i < s :> Size][i == s :> Size] -> Bool
 {
-  [!is_hex_digit(s[i..i+1])] {
+  when !is_hex_digit(s[i..i+1]) {
     term false;
   };
   &i = i + 1;
@@ -118,7 +118,7 @@ txn is_hex_loop(s: String, i: Int)
 };
 
 defn is_hex_string(s: String) [true][term == true || term == false] -> Bool {
-  [s :> Size == 0] { term false; };
+  when s :> Size == 0 { term false; };
   term is_hex_loop(s, 0);
 };
 
@@ -132,7 +132,7 @@ txn reverse_string_loop(s: String, result: String, i: Int)
 };
 
 defn reverse_string(s: String) [true][term :> Size == s :> Size] -> String {
-  [s :> Size <= 1] { term s; };
+  when s :> Size <= 1 { term s; };
   term reverse_string_loop(s, "", s :> Size - 1);
 };
 
@@ -140,7 +140,7 @@ defn reverse_string(s: String) [true][term :> Size == s :> Size] -> String {
 txn count_char_loop(s: String, c: String, count: Int, i: Int)
     [i < s :> Size][i == s :> Size] -> Int
 {
-  [s[i..i+1] == c] {
+  when s[i..i+1] == c {
     &count = count + 1;
   };
   &i = i + 1;
@@ -159,8 +159,8 @@ defn count_char(s: String, c: String) [c :> Size == 1][term >= 0] -> Int {
 defn url_decode_simple(s: String) [true][term :> Size <= s :> Size] -> String {
   let result: String = "";
   let i: Int = 0;
-  [i < s :> Size] {
-    [i + 2 < s :> Size && s[i..i+1] == "%" && s[i+1..i+3] == "20"] {
+  when i < s :> Size {
+    when i + 2 < s :> Size && s[i..i+1] == "%" && s[i+1..i+3] == "20" {
       &result = result + " ";
       &i = i + 3;
     } {
@@ -173,19 +173,19 @@ defn url_decode_simple(s: String) [true][term :> Size <= s :> Size] -> String {
 
 // Check if char is hex digit
 defn is_hex_digit(c: String) [c :> Size == 1][term == true || term == false] -> Bool {
-  [c >= "0" && c <= "9"] { term true; };
-  [c >= "a" && c <= "f"] { term true; };
-  [c >= "A" && c <= "F"] { term true; };
+  when c >= "0" && c <= "9" { term true; };
+  when c >= "a" && c <= "f" { term true; };
+  when c >= "A" && c <= "F" { term true; };
   term false;
 };
 
 // Check if string is valid hex
 defn is_hex_string(s: String) [true][term == true || term == false] -> Bool {
-  [s :> Size == 0] { term false; };
+  when s :> Size == 0 { term false; };
   let i: Int = 0;
   let valid: Bool = true;
-  [i < s :> Size && valid] {
-    [is_hex_digit(s[i..i+1])] {
+  when i < s :> Size && valid {
+    when is_hex_digit(s[i..i+1]) {
       &valid = true;
     } {
       &valid = false;
@@ -197,10 +197,10 @@ defn is_hex_string(s: String) [true][term == true || term == false] -> Bool {
 
 // Reverse string (useful for some encodings)
 defn reverse_string(s: String) [true][term :> Size == s :> Size] -> String {
-  [s :> Size <= 1] { term s; };
+  when s :> Size <= 1 { term s; };
   let result: String = "";
   let i: Int = s :> Size - 1;
-  [i >= 0] {
+  when i >= 0 {
     &result = result + s[i..i+1];
     &i = i - 1;
   };
@@ -211,8 +211,8 @@ defn reverse_string(s: String) [true][term :> Size == s :> Size] -> String {
 defn count_char(s: String, c: String) [c :> Size == 1][term >= 0] -> Int {
   let count: Int = 0;
   let i: Int = 0;
-  [i < s :> Size] {
-    [s[i..i+1] == c] {
+  when i < s :> Size {
+    when s[i..i+1] == c {
       &count = count + 1;
     };
     &i = i + 1;

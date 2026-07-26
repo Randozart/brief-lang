@@ -32,7 +32,7 @@ defn append_int(builder: StringBuilder, n: Int) -> StringBuilder {
 };
 
 defn append_bool(builder: StringBuilder, b: Bool) -> StringBuilder {
-    [b] {
+    when b {
         term StringBuilder { buffer: builder.buffer + "true" };
     };
     term StringBuilder { buffer: builder.buffer + "false" };

@@ -361,6 +361,7 @@ fn collect_strings_stmt(stmt: &Statement, seen: &mut std::collections::HashSet<S
             collect_strings_expr(condition, seen, out);
             for s in statements { collect_strings_stmt(s, seen, out); }
         }
+        Statement::Gate(cond) => { collect_strings_expr(cond, seen, out); }
         Statement::If(_, then_body, else_body) => {
             for s in then_body { collect_strings_stmt(s, seen, out); }
             for s in else_body { collect_strings_stmt(s, seen, out); }
@@ -381,7 +382,7 @@ fn collect_strings_stmt(stmt: &Statement, seen: &mut std::collections::HashSet<S
 fn collect_strings_expr(expr: &Expr, seen: &mut std::collections::HashSet<String>, out: &mut Vec<String>) {
     match expr {
         Expr::Quoted(s) => {
-            let s_str = String::from_utf8_lossy(s).into_owned();
+            let s_str = String::from_UTF8_lossy(s).into_owned();
             if !seen.contains(&s_str) {
                 seen.insert(s_str.clone());
                 out.push(s_str);
@@ -894,8 +895,8 @@ impl LlvmBackend {
         // to always return "i64" for state fields — this keeps %State struct
         // layout uniform and avoids type mismatches in codegen paths that
         // assume i64 (load i64, store i64, add i64, icmp i64, etc.).
-        // 2026-07-18: SSO String / Utf8View fields occupy 2 consecutive i64 slots.
-        if matches!(ty, Type::Custom(name) if name == "Utf8View")
+        // 2026-07-18: SSO String / UTF8View fields occupy 2 consecutive i64 slots.
+        if matches!(ty, Type::Custom(name) if name == "UTF8View")
             || (self.feature_sso_strings
                 && self.ctx.type_universe.as_ref().map_or(false, |u| u.is_string_like(ty)))
         {
@@ -1527,8 +1528,8 @@ impl LlvmBackend {
     fn type_is_heap_allocated(&self, ty: &Type) -> bool {
         // 2026-07-18: Phase A — String check replaced with is_string_like.
         // Phase B (SSO) may make short strings non-heap; is_string_like stays.
-        // 2026-07-18: Utf8View, StaticString, SmallString64 are never heap-allocated.
-        if matches!(ty, Type::Custom(name) if name == "Utf8View" || name == "StaticString" || name == "SmallString64") {
+        // 2026-07-18: UTF8View, StaticString, SmallString64 are never heap-allocated.
+        if matches!(ty, Type::Custom(name) if name == "UTF8View" || name == "StaticString" || name == "SmallString64") {
             return false;
         }
         (self.ctx.type_universe.as_ref().map_or(false, |u| u.is_string_like(ty))

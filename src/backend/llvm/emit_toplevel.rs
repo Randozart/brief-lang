@@ -25,7 +25,7 @@ impl LlvmBackend {
             if tag.name == "export" {
                 let export_name = tag.value.as_ref().and_then(|v| {
                     if let Expr::Quoted(bytes) = v {
-                        Some(String::from_utf8_lossy(bytes).to_string())
+                        Some(String::from_UTF8_lossy(bytes).to_string())
                     } else {
                         None
                     }
@@ -248,11 +248,11 @@ impl LlvmBackend {
         if matches!(ty, Type::Ptr(_)) {
             return "ptr".to_string();
         }
-        // 2026-07-18: Utf8View always uses {i64, i64} (fat pointer), regardless of SSO.
-        // Must be checked BEFORE the general struct_types check because Utf8View is
+        // 2026-07-18: UTF8View always uses {i64, i64} (fat pointer), regardless of SSO.
+        // Must be checked BEFORE the general struct_types check because UTF8View is
         // also registered as a struct type but should be passed by value, not by pointer.
         if let Type::Custom(name) = ty {
-            if name == "Utf8View" {
+            if name == "UTF8View" {
                 return "{ i64, i64 }".to_string();
             }
         }
@@ -828,7 +828,7 @@ impl LlvmBackend {
             }
             Some(Expr::Quoted(s)) => {
                 // 2026-07-14: Store string constant pointer (Quoted replaces LiteralExpr::String).
-                let s_str = String::from_utf8_lossy(&s);
+                let s_str = String::from_UTF8_lossy(&s);
                 let si = self.ctx.string_constants.iter().position(|x| x.as_str() == s_str).unwrap_or(0);
                 let g = format!("@str.{}", si);
                 let str_p = field_reg("s");
@@ -1422,7 +1422,7 @@ impl LlvmBackend {
             .find(|m| m.name == "assume_shape")
             .and_then(|m| m.value.as_ref().and_then(|v| {
                 if let Expr::Quoted(bytes) = v {
-                    Some(String::from_utf8_lossy(bytes).to_string())
+                    Some(String::from_UTF8_lossy(bytes).to_string())
                 } else {
                     None
                 }
@@ -1678,6 +1678,9 @@ impl LlvmBackend {
 
         writeln!(out, "  br label %loop").ok();
         writeln!(out, "loop:").ok();
+        // 2026-07-26: Set convergence target so [expr]; gates inside the txn
+        // body branch back to loop: when their condition is false.
+        self.fun.convergence_target = Some("loop".to_string());
 
         for (i, (n, t)) in txn.parameters.iter().enumerate() {
             let slot = format!("%p{}_s", i);

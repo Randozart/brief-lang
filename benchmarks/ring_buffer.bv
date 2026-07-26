@@ -27,7 +27,7 @@ node enqueue [ops < TOTAL][ops == TOTAL] {
     data[tail % CAP] = ops;
     tail = tail + 1;
     ops = ops + 1;
-    [ops % 5000000 == 0] {
+    when ops % 5000000 == 0 {
         // 2026-07-21: Print a value DERIVED FROM the buffer to prevent
         // LLVM from DCEing the data store. Without this, LLVM proves
         // the buffer writes have no observable effect and eliminates
@@ -36,7 +36,7 @@ node enqueue [ops < TOTAL][ops == TOTAL] {
         let buf_val: Int = data[tail % CAP];
         PrintLn!(filled + buf_val);
     };
-    [ops == TOTAL] {
+    when ops == TOTAL {
         let chk: Int = data[0] + data[512];
         PrintLn!(chk);
     };

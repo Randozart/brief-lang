@@ -23,14 +23,14 @@ let N: Int = GetEnvInt!("BOUND");
 
 node inc_a [a < N][a == N] {
     a = a + 1;
-    [a % 5000000 == 0] {
+    when a % 5000000 == 0 {
         PrintLn!(a);
     };
     term;
 };
 node inc_b [b < N][b == N] {
     b = b + 1;
-    [b % 5000000 == 0] {
+    when b % 5000000 == 0 {
         PrintLn!(b);
     };
     term;

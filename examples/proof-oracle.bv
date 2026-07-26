@@ -6,7 +6,7 @@
 // via structural recursion checking (SPARK-style decreasing variant)
 ?# fact[n : Int] -> Int
 defn fact(n: Int) -> Int [n >= 0][term >= 1] {
-    [n <= 1] {
+    when n <= 1 {
         term 1;
     };
     term n * fact(n - 1);
@@ -16,7 +16,7 @@ defn fact(n: Int) -> Int [n >= 0][term >= 1] {
 // that ensures the loop terminates within ?# bound
 ?# countdown[n : Int, fuel: Int] -> Int
 txn countdown(n: Int) [n > 0][n == @n - 1] -> Int {
-    [n == 1] {
+    when n == 1 {
         term 0;
     };
     term countdown(n - 1);

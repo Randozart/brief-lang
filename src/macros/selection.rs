@@ -447,6 +447,7 @@ pub fn stmt_tag(stmt: &Statement) -> &str {
         Statement::TermBang(_) => "term!",
         Statement::Return(_) => "return",
         Statement::Guarded(_, _) => "when",
+        Statement::Gate(_) => "gate",
         Statement::Expression(_) => "expr",
         Statement::If(_, _, _) => "if",
         Statement::Block(_) => "block",

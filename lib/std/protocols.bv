@@ -3,17 +3,17 @@
 // Each CastTo/CastFrom requires a function that defines the transformation.
 // The compiler proves round-trip identity for each pair.
 
-proto ascii: #String {
-    CastTo(#String<utf8>) = ascii_to_utf8(#L);
-    CastFrom(#String<utf8>) = utf8_to_ascii(#L);
+proto ASCII: #String {
+    CastTo(#String<UTF8>) = ascii_to_UTF8(#L);
+    CastFrom(#String<UTF8>) = UTF8_to_ascii(#L);
 };
 
-proto utf16: #String {
-    CastTo(#String<utf8>) = utf16_to_utf8(#L);
-    CastFrom(#String<utf8>) = utf8_to_utf16(#L);
+proto UTF16: #String {
+    CastTo(#String<UTF8>) = UTF16_to_UTF8(#L);
+    CastFrom(#String<UTF8>) = UTF8_to_UTF16(#L);
 };
 
-proto posit32: #Float {
-    CastTo(#Float<ieee754>) = posit32_to_ieee754(#L);
-    CastFrom(#Float<ieee754>) = ieee754_to_posit32(#L);
+proto Posit32: #Float {
+    CastTo(#Float<IEEE754>) = Posit32_to_IEEE754(#L);
+    CastFrom(#Float<IEEE754>) = IEEE754_to_Posit32(#L);
 };

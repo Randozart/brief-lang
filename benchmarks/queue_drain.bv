@@ -27,7 +27,7 @@ node work [count < N][count == N] {
     &queue <- count;
 count = count + 1;
 
-    [count % 5000000 == 0] {
+    when count % 5000000 == 0 {
         PrintLn!(count);
     };
 

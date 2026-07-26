@@ -208,18 +208,33 @@ impl<'a> Parser<'a> {
         Ok(Statement::Block(stmts))
     }
 
-    /// [condition] { body }
+    /// [condition]; — convergence gate (Statement::Gate)
+    /// [condition] stmt; — prefix guarded single statement (Statement::Guarded)
+    /// [condition] { body } — REJECTED (use `when condition { body }`)
     fn parse_guard_statement_bracket(&mut self) -> Result<Statement, SyntaxError> {
         self.pos += 1; // consume '['
         let cond = self.parse_expression()?;
         self.expect(Token::RBracket)?;
-        let body = self.parse_block()?;
-        // 2026-07-17: Consume the trailing semicolon after `[cond] { body }`.
-        // Without this, the `;` after `}` becomes a bare Statement::Expression(Decimal(0))
-        // that sits after the Guarded in the body, preventing hoist_terminating_guard
-        // from finding the Guarded as the last element (it finds Expression instead).
-        self.expect(Token::Semicolon)?;
-        Ok(Statement::Guarded(cond, body))
+        match self.peek() {
+            Some(Token::LBrace) => {
+                // 2026-07-26: Hard reject — block bodies require `when` keyword.
+                // The bracket prefix [cond] is for gates ([cond];) and prefix
+                // guarded single statements ([cond] stmt;) only.
+                self.error_at_current(
+                    "block bodies require `when` keyword: use `when expr { ... }` instead of `[expr] { ... }`"
+                )
+            }
+            Some(Token::Semicolon) => {
+                // [cond]; — standalone convergence gate
+                self.pos += 1; // consume ';'
+                Ok(Statement::Gate(cond))
+            }
+            _ => {
+                // [cond] stmt; — prefix guarded single statement
+                let stmt = self.parse_statement()?;
+                Ok(Statement::Guarded(cond, vec![stmt]))
+            }
+        }
     }
 
     /// when condition { body }

@@ -206,8 +206,10 @@ pub fn arb_statement(max_depth: usize) -> impl Strategy<Value = Statement> {
         arb_assignment(max_depth),
         // Let binding: let x: Type = expr;
         arb_let_statement(max_depth),
-        // Guarded: [condition] { statements };
+        // Guarded: when condition { statements } or [condition] stmt;
         arb_guarded_statement(max_depth),
+        // Gate: [condition]; — convergence gate
+        arb_gate_statement(max_depth),
         // Term: term;
         arb_term_statement(max_depth),
         // Escape: escape;
@@ -254,6 +256,12 @@ fn arb_guarded_statement(max_depth: usize) -> impl Strategy<Value = Statement> {
     ).prop_map(|(condition, statements)| {
         Statement::Guarded(condition, statements)
     })
+}
+
+/// Generate a random convergence gate statement
+fn arb_gate_statement(max_depth: usize) -> impl Strategy<Value = Statement> {
+    let max_depth = max_depth.min(MAX_DEPTH);
+    arb_expr(max_depth).prop_map(Statement::Gate)
 }
 
 /// Generate a random term statement
@@ -499,6 +507,7 @@ mod tests {
                 Statement::Assign(_, _)
                     | Statement::Let { .. }
                     | Statement::Guarded(_, _)
+                    | Statement::Gate(_)
                     | Statement::Term(_) | Statement::TermBang(_)
                     | Statement::Escape(_)
                     | Statement::Expression(_)

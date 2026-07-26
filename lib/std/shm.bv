@@ -21,7 +21,7 @@ enum ShmError {
 
 defn shm_open_res(name: String, flags: Int, mode: Int) -> Result<Int, ShmError> {
     let fd = ShmOpen#(name, flags, mode);
-    [fd >= 0] {
+    when fd >= 0 {
         term Ok(fd);
     };
     term Err(ShmOther("shm_open failed"));
@@ -29,7 +29,7 @@ defn shm_open_res(name: String, flags: Int, mode: Int) -> Result<Int, ShmError> 
 
 defn shm_unlink_res(name: String) -> Result<Void, ShmError> {
     let ret = ShmUnlink#(name);
-    [ret == 0] {
+    when ret == 0 {
         term Ok(void);
     };
     term Err(ShmOther("shm_unlink failed"));
@@ -38,7 +38,7 @@ defn shm_unlink_res(name: String) -> Result<Void, ShmError> {
 // Replaced: frgn __ftruncate_shm with FTruncate# intrinsic
 defn shm_ftruncate(fd: Int, length: Int) -> Result<Void, ShmError> {
     let ret = FTruncate#(fd, length);
-    [ret == 0] {
+    when ret == 0 {
         term Ok(void);
     };
     term Err(ShmOther("ftruncate failed"));
@@ -55,7 +55,7 @@ let SHM_MODE_DEFAULT: Int = 420;  // 0o644 in decimal
 
 defn shm_create(name: String, size: Int) -> Result<Int, ShmError> {
     let fd = shm_open_res(name, O_CREAT_RDWR, SHM_MODE_DEFAULT);
-    [fd.is_ok()] {
+    when fd.is_ok() {
         shm_ftruncate(fd.value, size);
         term Ok(fd.value);
     };
@@ -73,7 +73,7 @@ defn shm_close(name: String) -> Result<Void, ShmError> {
 
 defn shm_exists(name: String) -> Bool {
     let result = frgn__shm_exists(name);
-    [result.is_ok()] {
+    when result.is_ok() {
         term result.value;
     };
     term false;
@@ -121,7 +121,7 @@ enum MmapError {
 
 defn munmap_res(addr: Int, length: Int) -> Result<Void, MmapError> {
     let ret = Munmap#(addr, length);
-    [ret == 0] {
+    when ret == 0 {
         term Ok(void);
     };
     term Err(MmapOther("munmap failed"));
@@ -130,7 +130,7 @@ defn munmap_res(addr: Int, length: Int) -> Result<Void, MmapError> {
 // Replaced: frgn __mmap_anonymous with Mmap# intrinsic
 defn mmap_anonymous_res(length: Int, prot: Int, flags: Int) -> Result<Int, MmapError> {
     let addr = Mmap#(0, length, prot, flags, -1, 0);
-    [addr != -1] {
+    when addr != -1 {
         term Ok(addr);
     };
     term Err(MmapOther("mmap failed"));
@@ -191,11 +191,11 @@ defn metro_write_max_capacity(addr: Int, capacity: Int) -> Result<Void, MmapErro
 // Initialize a Metropolitan channel header (set all fields to defaults)
 defn metro_init_header(addr: Int, capacity: Int) -> Result<Void, MmapError> {
     let s = metro_write_status(addr, METRO_STATUS_IDLE);
-    [s.is_ok()] {
+    when s.is_ok() {
         let p = metro_write_payload_size(addr, 0);
-        [p.is_ok()] {
+        when p.is_ok() {
             let c = metro_write_max_capacity(addr, capacity);
-            [c.is_ok()] {
+            when c.is_ok() {
                 term frgn__mmap_write_u32(addr, METRO_OFFSET_CAS_LOCK, 0);
             };
         };
@@ -206,10 +206,10 @@ defn metro_init_header(addr: Int, capacity: Int) -> Result<Void, MmapError> {
 // Wait for the channel to be idle (spin-wait with timeout)
 defn metro_wait_idle(addr: Int, timeout_ms: Int) -> Result<Void, MmapError> {
     let start: Int = 0;
-    [time.now() - start < timeout_ms] {
+    when time.now() - start < timeout_ms {
         let status = metro_read_status(addr);
-        [status.is_ok()] {
-            [status.value == METRO_STATUS_IDLE] {
+        when status.is_ok() {
+            when status.value == METRO_STATUS_IDLE {
                 term Ok();
             };
         };
@@ -255,7 +255,7 @@ defn atomic_load_u32(addr: Int, offset: Int) -> Result<Int, AtomicError> {
 
 defn atomic_store_u32(addr: Int, offset: Int, value: Int) -> Result<Void, AtomicError> {
     let ret = AtomicStore#(addr + offset, value, 0);
-    [ret == 0] {
+    when ret == 0 {
         term Ok(void);
     };
     term Err(AtomicOther("atomic_store failed"));
@@ -268,7 +268,7 @@ defn atomic_cas_u32(addr: Int, offset: Int, expected: Int, new_value: Int) -> Re
 
 defn atomic_fence_res() -> Result<Void, AtomicError> {
     let ret = Fence#(0);
-    [ret == 0] {
+    when ret == 0 {
         term Ok(void);
     };
     term Err(AtomicOther("fence failed"));
@@ -349,7 +349,7 @@ obj MetroChannel {
 defn metro_channel_create(name: String, capacity: Int) -> Result<MetroChannel, String> {
     let shm_name = "metro_" + name;
     let addr = mmap_alloc(METRO_HEADER_SIZE + capacity);
-    [addr.is_ok()] {
+    when addr.is_ok() {
         metro_init_header(addr.value, capacity)?;
         term Ok(MetroChannel {
             name: name,
@@ -366,7 +366,7 @@ defn metro_channel_destroy(channel: MetroChannel) -> Result<Void, String> {
 
 defn metro_channel_send(channel: MetroChannel, data: List<Int>) -> Result<Void, String> {
     let len = data :> Size;
-    [len <= channel.capacity] {
+    when len <= channel.capacity {
         metro_wait_idle(channel.addr, 5000)?;
         mmap_write_bytes(channel.addr, METRO_OFFSET_PAYLOAD, data)?;
         metro_write_payload_size(channel.addr, len)?;
@@ -378,14 +378,14 @@ defn metro_channel_send(channel: MetroChannel, data: List<Int>) -> Result<Void, 
 
 defn metro_channel_recv(channel: MetroChannel, timeout_ms: Int) -> Result<List<Int>, String> {
     let start: Int = 0;
-    [time.now() - start < timeout_ms] {
+    when time.now() - start < timeout_ms {
         let status = metro_read_status(channel.addr);
-        [status.is_ok()] {
-            [status.value == METRO_STATUS_CONSUMER_REQ] {
+        when status.is_ok() {
+            when status.value == METRO_STATUS_CONSUMER_REQ {
                 let size = metro_read_payload_size(channel.addr);
-                [size.is_ok()] {
+                when size.is_ok() {
                     let data = mmap_read_bytes(channel.addr, METRO_OFFSET_PAYLOAD, size.value);
-                    [data.is_ok()] {
+                    when data.is_ok() {
                         metro_reset(channel.addr)?;
                         term Ok(data.value);
                     };

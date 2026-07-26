@@ -25,7 +25,7 @@ node compute [count < total][count == total] {
     acc_a = acc_a + count;
     acc_b = acc_b + count;
     count = count + 1;
-    [count == total] {
+    when count == total {
         term! -> PrintLn!(acc_a + acc_b);
     };
     term;

@@ -62,7 +62,7 @@ defn merge<K,V>(a: HashMap<K,V>, b: HashMap<K,V>) -> HashMap<K,V> {
 txn filter_loop<K,V>(mk: List<K>, mv: List<V>, pred: (K, V) -> Bool, result: HashMap<K,V>, i: Int)
     [i < mk :> Size][i == mk :> Size] -> HashMap<K,V>
 {
-    [pred(mk[i], mv[i])] {
+    when pred(mk[i], mv[i]) {
         &result <- (mk[i], mv[i]);
     };
     &i = i + 1;

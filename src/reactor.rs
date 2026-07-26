@@ -269,6 +269,13 @@ impl Reactor {
             Statement::InlineAsm { .. } | Statement::InlineDefn(_) | Statement::InlineTxn(_) | Statement::Match { .. } => {
                 Ok(StmtResult::Continue)
             }
+            Statement::Gate(cond) => {
+                // 2026-07-26: Convergence gate — evaluate condition.
+                // The compile-time analysis proves convergence; at runtime
+                // the condition is evaluated for observable side effects.
+                interp.eval_expr(cond)?;
+                Ok(StmtResult::Continue)
+            }
             Statement::Expression(expr) => {
                 interp.eval_expr(expr)?;
                 Ok(StmtResult::Continue)

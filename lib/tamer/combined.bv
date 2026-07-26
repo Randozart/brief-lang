@@ -17,7 +17,7 @@ defn read_u8(bc: Ptr<Int>, addr: Int) -> Int {
 
 defn read_i8(bc: Ptr<Int>, addr: Int) -> Int {
     let val = read_u8(bc, addr);
-    [val >= 128] { term val - 256; };
+    when val >= 128 { term val - 256; };
     term val;
 };
 
@@ -32,7 +32,7 @@ defn read_u16(bc: Ptr<Int>, addr: Int) -> Int {
 
 defn read_i16(bc: Ptr<Int>, addr: Int) -> Int {
     let val = read_u16(bc, addr);
-    [val >= 32768] { term val - 65536; };
+    when val >= 32768 { term val - 65536; };
     term val;
 };
 
@@ -118,8 +118,8 @@ txn vm_loop(stack_data: Ptr<Int>, stack_len: Int,
         op, pc, saved_locals_base);
     let new_stack_len = *sl_out;
 
-    [new_pc < 0] { &running = 0; };
-    [new_pc >= 0 && new_pc < bc_len] { &pc = new_pc; };
+    when new_pc < 0 { &running = 0; };
+    when new_pc >= 0 && new_pc < bc_len { &pc = new_pc; };
     &stack_len = new_stack_len;
     term 0;
 };
@@ -141,12 +141,12 @@ defn exec_op(sd: Ptr<Int>, sl_out: Ptr<Int>,
         };
 
         0x01 => { // drop
-            [sl > 0] { *sl_out = sl - 1; term pc + 1; };
+            when sl > 0 { *sl_out = sl - 1; term pc + 1; };
             *sl_out = sl; term pc + 1;
         };
 
         0x02 => { // dup
-            [sl > 0] {
+            when sl > 0 {
                 let a = *(sd + sl - 1);
                 *(sd + sl) = a;
                 *sl_out = sl + 1; term pc + 1;
@@ -155,7 +155,7 @@ defn exec_op(sd: Ptr<Int>, sl_out: Ptr<Int>,
         };
 
         0x03 => { // swap
-            [sl >= 2] {
+            when sl >= 2 {
                 let a = *(sd + sl - 1);
                 let b = *(sd + sl - 2);
                 *(sd + sl - 2) = a;
@@ -166,7 +166,7 @@ defn exec_op(sd: Ptr<Int>, sl_out: Ptr<Int>,
         };
 
         0x06 => { // add
-            [sl >= 2] {
+            when sl >= 2 {
                 let a = *(sd + sl - 1);
                 let b = *(sd + sl - 2);
                 *(sd + sl - 2) = b + a;
@@ -176,7 +176,7 @@ defn exec_op(sd: Ptr<Int>, sl_out: Ptr<Int>,
         };
 
         0x07 => { // sub
-            [sl >= 2] {
+            when sl >= 2 {
                 let a = *(sd + sl - 1);
                 let b = *(sd + sl - 2);
                 *(sd + sl - 2) = b - a;
@@ -186,7 +186,7 @@ defn exec_op(sd: Ptr<Int>, sl_out: Ptr<Int>,
         };
 
          0x08 => { // mul
-            [sl >= 2] {
+            when sl >= 2 {
                 let a = *(sd + sl - 1);
                 let b = *(sd + sl - 2);
                 *(sd + sl - 2) = b * a;
@@ -196,7 +196,7 @@ defn exec_op(sd: Ptr<Int>, sl_out: Ptr<Int>,
         };
 
         0x0B => { // and
-            [sl >= 2] {
+            when sl >= 2 {
                 let a = *(sd + sl - 1);
                 let b = *(sd + sl - 2);
                 *(sd + sl - 2) = b & a;
@@ -206,7 +206,7 @@ defn exec_op(sd: Ptr<Int>, sl_out: Ptr<Int>,
         };
 
         0x0C => { // or
-            [sl >= 2] {
+            when sl >= 2 {
                 let a = *(sd + sl - 1);
                 let b = *(sd + sl - 2);
                 *(sd + sl - 2) = b | a;
@@ -216,7 +216,7 @@ defn exec_op(sd: Ptr<Int>, sl_out: Ptr<Int>,
         };
 
         0x0D => { // xor
-            [sl >= 2] {
+            when sl >= 2 {
                 let a = *(sd + sl - 1);
                 let b = *(sd + sl - 2);
                 *(sd + sl - 2) = b ^ a;
@@ -226,17 +226,17 @@ defn exec_op(sd: Ptr<Int>, sl_out: Ptr<Int>,
         };
 
         0x0E => { // not (logical NOT: 0→1, else→0)
-            [sl >= 1] {
+            when sl >= 1 {
                 let a = *(sd + sl - 1);
-                [a == 0] { *(sd + sl - 1) = 1; };
-                [a != 0] { *(sd + sl - 1) = 0; };
+                when a == 0 { *(sd + sl - 1) = 1; };
+                when a != 0 { *(sd + sl - 1) = 0; };
                 *sl_out = sl; term pc + 1;
             };
             *sl_out = sl; term pc + 1;
         };
 
         0x0F => { // shl
-            [sl >= 2] {
+            when sl >= 2 {
                 let a = *(sd + sl - 1);
                 let b = *(sd + sl - 2);
                 *(sd + sl - 2) = b << (a & 63);
@@ -246,7 +246,7 @@ defn exec_op(sd: Ptr<Int>, sl_out: Ptr<Int>,
         };
 
         0x10 => { // shr_s (arithmetic)
-            [sl >= 2] {
+            when sl >= 2 {
                 let a = *(sd + sl - 1);
                 let b = *(sd + sl - 2);
                 *(sd + sl - 2) = b >> (a & 63);
@@ -256,18 +256,18 @@ defn exec_op(sd: Ptr<Int>, sl_out: Ptr<Int>,
         };
 
         0x11 => { // eq
-            [sl >= 2] {
+            when sl >= 2 {
                 let a = *(sd + sl - 1);
                 let b = *(sd + sl - 2);
-                [b == a] { *(sd + sl - 2) = 1; };
-                [b != a] { *(sd + sl - 2) = 0; };
+                when b == a { *(sd + sl - 2) = 1; };
+                when b != a { *(sd + sl - 2) = 0; };
                 *sl_out = sl - 1; term pc + 1;
             };
             *sl_out = sl; term pc + 1;
         };
 
         0x17 => { // load
-            [sl >= 1] {
+            when sl >= 1 {
                 let addr = *(sd + sl - 1);
                 let val = *(addr as Ptr<Int>);
                 *(sd + sl - 1) = val;
@@ -277,7 +277,7 @@ defn exec_op(sd: Ptr<Int>, sl_out: Ptr<Int>,
         };
 
         0x18 => { // store
-            [sl >= 2] {
+            when sl >= 2 {
                 let val = *(sd + sl - 1);
                 let addr = *(sd + sl - 2);
                 *(addr as Ptr<Int>) = val;
@@ -296,7 +296,7 @@ defn exec_op(sd: Ptr<Int>, sl_out: Ptr<Int>,
 
         0x30 => { // push_i8
             let val = read_i8(bc, pc + 1);
-            [sl < 1024] {
+            when sl < 1024 {
                 *(sd + sl) = val;
                 *sl_out = sl + 1; term pc + 2;
             };
@@ -306,7 +306,7 @@ defn exec_op(sd: Ptr<Int>, sl_out: Ptr<Int>,
         0x31 => { // load_local
             let slot = read_u8(bc, pc + 1);
             let val = *(ld + sll + slot);
-            [sl < 1024] {
+            when sl < 1024 {
                 *(sd + sl) = val;
                 *sl_out = sl + 1; term pc + 2;
             };
@@ -315,7 +315,7 @@ defn exec_op(sd: Ptr<Int>, sl_out: Ptr<Int>,
 
         0x32 => { // store_local
             let slot = read_u8(bc, pc + 1);
-            [sl >= 1] {
+            when sl >= 1 {
                 let val = *(sd + sl - 1);
                 *(ld + sll + slot) = val;
                 *sl_out = sl - 1; term pc + 2;
@@ -325,7 +325,7 @@ defn exec_op(sd: Ptr<Int>, sl_out: Ptr<Int>,
 
         0x33 => { // push_frame
             let slots = read_u8(bc, pc + 1);
-            [fc < 256] {
+            when fc < 256 {
                 let base = fc * 4;
                 *(fd + base) = ll;
                 *(fd + base + 1) = slots;
@@ -337,7 +337,7 @@ defn exec_op(sd: Ptr<Int>, sl_out: Ptr<Int>,
         };
 
         0x34 => { // pop_frame
-            [fc > 0] {
+            when fc > 0 {
                 *sl_out = sl; term pc + 1;
             };
             *sl_out = sl; term pc + 1;
@@ -345,7 +345,7 @@ defn exec_op(sd: Ptr<Int>, sl_out: Ptr<Int>,
 
         0x50 => { // push_i16
             let val = read_i16(bc, pc + 1);
-            [sl < 1024] {
+            when sl < 1024 {
                 *(sd + sl) = val;
                 *sl_out = sl + 1; term pc + 3;
             };
@@ -359,9 +359,9 @@ defn exec_op(sd: Ptr<Int>, sl_out: Ptr<Int>,
 
         0x52 => { // jz
             let offset = read_i16(bc, pc + 1);
-            [sl >= 1] {
+            when sl >= 1 {
                 let cond = *(sd + sl - 1);
-                [cond == 0] { *sl_out = sl - 1; term pc + 3 + offset; };
+                when cond == 0 { *sl_out = sl - 1; term pc + 3 + offset; };
                 *sl_out = sl - 1; term pc + 3;
             };
             *sl_out = sl; term pc + 3;
@@ -369,9 +369,9 @@ defn exec_op(sd: Ptr<Int>, sl_out: Ptr<Int>,
 
         0x53 => { // jnz
             let offset = read_i16(bc, pc + 1);
-            [sl >= 1] {
+            when sl >= 1 {
                 let cond = *(sd + sl - 1);
-                [cond != 0] { *sl_out = sl - 1; term pc + 3 + offset; };
+                when cond != 0 { *sl_out = sl - 1; term pc + 3 + offset; };
                 *sl_out = sl - 1; term pc + 3;
             };
             *sl_out = sl; term pc + 3;
@@ -379,27 +379,27 @@ defn exec_op(sd: Ptr<Int>, sl_out: Ptr<Int>,
 
         0x54 => { // call
             let fn_idx = read_u16(bc, pc + 1);
-            [fn_idx < fnc] {
+            when fn_idx < fnc {
                 let callee_bc_off = fn_bc_offset(ft, fn_idx);
                 let callee_local_c = fn_local_count(ft, fn_idx);
                 let callee_arg_c = fn_arg_count(ft, fn_idx);
-                [fc < 256] {
+                when fc < 256 {
                     let base = fc * 4;
                     *(fd + base) = ll;
                     *(fd + base + 1) = callee_local_c;
                     *(fd + base + 2) = pc + 3;
                     *(fd + base + 3) = sll;
                     let new_ll = ll;
-                    [callee_arg_c >= 1] {
+                    when callee_arg_c >= 1 {
                         *(ld + new_ll + 0) = *(sd + sl - 1);
                     };
-                    [callee_arg_c >= 2] {
+                    when callee_arg_c >= 2 {
                         *(ld + new_ll + 1) = *(sd + sl - 2);
                     };
-                    [callee_arg_c >= 3] {
+                    when callee_arg_c >= 3 {
                         *(ld + new_ll + 2) = *(sd + sl - 3);
                     };
-                    [callee_arg_c >= 4] {
+                    when callee_arg_c >= 4 {
                         *(ld + new_ll + 3) = *(sd + sl - 4);
                     };
                     *sl_out = sl - callee_arg_c; term callee_bc_off;
@@ -411,7 +411,7 @@ defn exec_op(sd: Ptr<Int>, sl_out: Ptr<Int>,
 
         0x70 => { // push_i32
             let val = read_i32(bc, pc + 1);
-            [sl < 1024] {
+            when sl < 1024 {
                 *(sd + sl) = val;
                 *sl_out = sl + 1; term pc + 5;
             };
@@ -425,7 +425,7 @@ defn exec_op(sd: Ptr<Int>, sl_out: Ptr<Int>,
 
          0x90 => { // push_i64
             let val = read_i64(bc, pc + 1);
-            [sl < 1024] {
+            when sl < 1024 {
                 *(sd + sl) = val;
                 *sl_out = sl + 1; term pc + 9;
             };
@@ -433,7 +433,7 @@ defn exec_op(sd: Ptr<Int>, sl_out: Ptr<Int>,
         };
 
         0x1C => { // bnot (bitwise NOT: ~a)
-            [sl >= 1] {
+            when sl >= 1 {
                 let a = *(sd + sl - 1);
                 *(sd + sl - 1) = ~a;
                 *sl_out = sl; term pc + 1;
@@ -456,7 +456,7 @@ export defn tame(lair_data: Ptr<Int>, lair_len: Int,
 
     let word0 = *(lair_data + 0);
     let magic = word0 & 0xFFFFFFFF;
-    [magic != 0x5249414C] { term 101; };
+    when magic != 0x5249414C { term 101; };
 
     let w4 = *(lair_data + 4);
     let fn_off = w4;
@@ -470,9 +470,9 @@ export defn tame(lair_data: Ptr<Int>, lair_len: Int,
     let bc_data = lair_data + bc_off;
     let fn_table = lair_data + fn_off;
 
-    [bc_off + bc_len > lair_len] { term 103; };
-    [fn_off + fn_size > lair_len] { term 104; };
-    [fn_count == 0] { term 105; };
+    when bc_off + bc_len > lair_len { term 103; };
+    when fn_off + fn_size > lair_len { term 104; };
+    when fn_count == 0 { term 105; };
 
     let _result = vm_loop(
         stack_data, 0, locals_data, 0, frames_data, 0,

@@ -22,7 +22,7 @@ let reg: Int = initial_reg;
 node clear_bit [reg != 0][reg == 0] {
     let next_reg = reg & (reg - 1);
 
-    [next_reg % 100000 == 0] {
+    when next_reg % 100000 == 0 {
         PrintLn!(next_reg);
     };
 

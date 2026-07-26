@@ -16,7 +16,7 @@ let ops: Int = 0;
 
 node work [bound > 0 && ops < bound][ops == bound] {
     ops = ops + 1;
-    [ops % 5000000 == 0] {
+    when ops % 5000000 == 0 {
         PrintLn!(ops);
     };
     term;

@@ -616,6 +616,10 @@ pub fn infer_statement(stmt: &Statement, ctx: &mut TypecheckContext) -> Result<(
             }
             Ok(())
         }
+        Statement::Gate(cond) => {
+            infer_type_only(cond, ctx)?;
+            Ok(())
+        }
         Statement::Block(stmts) => {
             for stmt in stmts {
                 infer_statement(stmt, ctx)?;

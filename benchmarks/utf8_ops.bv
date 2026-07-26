@@ -1,18 +1,18 @@
-// UTF-8 Operations — Tests pure-Brief memcmp + utf8_validate
+// UTF-8 Operations — Tests pure-Brief memcmp + UTF8_validate
 //
 // Allocates runtime buffers with Alloc#, stores the loop counter
 // (runtime varying) via Store#, then compares/validates via
 // pure-Brief byte-string functions. The loop counter changes each
 // iteration, preventing compile-time folding.
 //
-// C reference: utf8_ops_c.c
+// C reference: UTF8_ops_c.c
 //
 // Note: Use environment variables BOUND and SEED to control iteration
 // count and data variation. Default BOUND is 50000000 but this
 // benchmark is slower (pure-Brief txn convergence loops),
 // so expect ~100 iterations/second at default budget.
 
-import "std/types/utf8view.bv";
+import "std/types/UTF8view.bv";
 
 const TOTAL: Int = GetEnvInt!("BOUND");
 const SEED: Int = GetEnvInt!("SEED");
@@ -28,10 +28,10 @@ node work [ops < TOTAL][ops == TOTAL] {
     Store#(b, ops + SEED + 1);
     
     let cmp: Int = memcmp(a, b, 8);
-    let valid: Int = utf8_validate(a, 8);
+    let valid: Int = UTF8_validate(a, 8);
     checksum = checksum + cmp + valid;
     ops = ops + 1;
-    [ops % 5000000 == 0] {
+    when ops % 5000000 == 0 {
         PrintLn!(checksum);
     };
     term;

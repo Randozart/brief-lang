@@ -28,8 +28,8 @@ frgn __url_decode_component(s: String) -> Result<String, EncodingError> as frgn_
 frgn __html_escape(s: String) -> Result<String, EncodingError> as frgn__html_escape from "lib/runtime/brief_rt.c" fallback "";
 frgn __html_unescape(s: String) -> Result<String, EncodingError> as frgn__html_unescape from "lib/runtime/brief_rt.c" fallback "";
 // Unicode
-frgn __utf8_encode(s: String) -> Result<List<Int>, EncodingError> as frgn__utf8_encode from "lib/runtime/brief_rt.c" fallback [];
-frgn __utf8_decode(list: List<Int>) -> Result<String, EncodingError> as frgn__utf8_decode from "lib/runtime/brief_rt.c" fallback "";
+frgn __UTF8_encode(s: String) -> Result<List<Int>, EncodingError> as frgn__UTF8_encode from "lib/runtime/brief_rt.c" fallback [];
+frgn __UTF8_decode(list: List<Int>) -> Result<String, EncodingError> as frgn__UTF8_decode from "lib/runtime/brief_rt.c" fallback "";
 frgn __codepoint_to_char(code: Int) -> Result<String, EncodingError> as frgn__codepoint_to_char from "lib/runtime/brief_rt.c" fallback "";
 frgn __char_to_codepoint(c: String) -> Result<Int, EncodingError> as frgn__char_to_codepoint from "lib/runtime/brief_rt.c" fallback 0;
 // Hashing

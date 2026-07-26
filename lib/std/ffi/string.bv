@@ -20,7 +20,7 @@ frgn __is_numeric(s: String) -> Result<Bool, StringError> as frgn__is_numeric fr
 frgn __rfind(s: String, needle: String) -> Result<Int, StringError> as frgn__rfind from "lib/runtime/brief_rt.c" fallback 0;
 // Character operations
 frgn __get_chars(s: String) -> Result<List<String>, StringError> as frgn__get_chars from "lib/runtime/brief_rt.c" fallback [];
-frgn __utf8_len(s: String) -> Result<Int, StringError> as frgn__utf8_len from "lib/runtime/brief_rt.c" fallback 0;
+frgn __UTF8_len(s: String) -> Result<Int, StringError> as frgn__UTF8_len from "lib/runtime/brief_rt.c" fallback 0;
 // Escaping
 frgn __escape(s: String) -> Result<String, StringError> as frgn__escape from "lib/runtime/brief_rt.c" fallback "";
 frgn __unescape(s: String) -> Result<String, StringError> as frgn__unescape from "lib/runtime/brief_rt.c" fallback "";

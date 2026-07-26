@@ -1,5 +1,5 @@
-// 2026-07-18: Utf8View operations — borrowed, trusted-UTF-8 view.
-// Import via `import "std/types/utf8view.bv"`.
+// 2026-07-18: UTF8View operations — borrowed, trusted-UTF-8 view.
+// Import via `import "std/types/UTF8view.bv"`.
 // All byte-string operations implemented in pure Brief using Load# for
 // per-byte access and convergent txns for iteration.
 
@@ -59,7 +59,7 @@ txn find_loop(hay: Int, hay_len: Int, needle: Int, needle_len: Int, i: Int)
     term -1;
 };
 
-defn utf8_find(hay: Int, hay_len: Int, needle: Int, needle_len: Int) -> Int {
+defn UTF8_find(hay: Int, hay_len: Int, needle: Int, needle_len: Int) -> Int {
     when needle_len == 0 { term 0; };
     when hay_len < needle_len { term -1; };
     term find_loop(hay, hay_len, needle, needle_len, 0);
@@ -82,7 +82,7 @@ defn decode_min_cp(lead: Int) -> Int {
     term 0;
 };
 
-txn utf8_validate_loop(data: Int, len: Int, i: Int, valid: Int)
+txn UTF8_validate_loop(data: Int, len: Int, i: Int, valid: Int)
     [i < len && valid == 1][i >= len || valid == 0] -> Int
 {
     let lead: Int = Load#(data + i, 1);
@@ -120,21 +120,21 @@ txn utf8_validate_loop(data: Int, len: Int, i: Int, valid: Int)
     term 1;
 };
 
-defn utf8_validate(data: Int, len: Int) -> Int {
+defn UTF8_validate(data: Int, len: Int) -> Int {
     when len == 0 { term 1; };
-    term utf8_validate_loop(data, len, 0, 1);
+    term UTF8_validate_loop(data, len, 0, 1);
 };
 
 // ── Type operations ───────────────────────────────────────────────
 
-defn utf8view_len(v: Utf8View) -> Int {
+defn UTF8view_len(v: UTF8View) -> Int {
     term v.len;
 };
 
-defn utf8view_find(haystack: Utf8View, needle: Utf8View) -> Int {
-    term utf8_find(haystack.data, haystack.len, needle.data, needle.len);
+defn UTF8view_find(haystack: UTF8View, needle: UTF8View) -> Int {
+    term UTF8_find(haystack.data, haystack.len, needle.data, needle.len);
 };
 
-defn utf8view_eq(a: Utf8View, b: Utf8View) -> Bool {
+defn UTF8view_eq(a: UTF8View, b: UTF8View) -> Bool {
     term a.len == b.len && memcmp(a.data, b.data, a.len) == 0;
 };

@@ -55,10 +55,10 @@ txn build_string [true][builder :> Size > 0] {
 
 // Char classification
 defn classify_char(c: Char) -> String {
-    [is_alpha(c)] {
+    when is_alpha(c) {
         term "letter";
     };
-    [is_digit(c)] {
+    when is_digit(c) {
         term "digit";
     };
     term "other";

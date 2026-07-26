@@ -47,11 +47,11 @@ node fan [count < N][count == N] {
     p10 = p11;
 
     let f: Int = p0;
-    [f == 0] {
+    when f == 0 {
         checksum = checksum - ns;
         term! -> PrintLn!(count);
     };
-    [f != 0] {
+    when f != 0 {
         checksum = checksum + ns;
     };
     count = count + 1;

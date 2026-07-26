@@ -244,6 +244,7 @@ fn collect_unsafe_ffi_stmt(stmt: &Statement, reasons: &mut Vec<String>) {
                 collect_unsafe_ffi_stmt(s, reasons);
             }
         }
+        Statement::Gate(cond) => collect_unsafe_ffi(cond, reasons),
         Statement::Block(stmts) => {
             for s in stmts {
                 collect_unsafe_ffi_stmt(s, reasons);
@@ -1054,7 +1055,7 @@ pub fn compile_to_spirv(ir: &str) -> Result<Vec<u8>, String> {
         .map_err(|e| format!("Failed to run llc: {}. Is llc installed?", e))?;
 
     if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr);
+        let stderr = String::from_UTF8_lossy(&output.stderr);
         return Err(format!("llc failed: {}", stderr));
     }
 

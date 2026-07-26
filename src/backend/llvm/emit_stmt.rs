@@ -340,6 +340,29 @@ pub fn emit_statement(backend: &mut LlvmBackend, out: &mut String, stmt: &Statem
             backend.fun.terminated = true;
             TypedRegister { name: backend.fun.gen_reg(), ty: Type::void() }
         }
+        Statement::Gate(cond) => {
+            // 2026-07-26: Convergence gate — if cond is true, continue;
+            // otherwise branch to convergence_target (the loop header for retry).
+            let cond_reg = backend.emit_expr(out, cond, indent);
+            let label_n = backend.fun.txn_counter;
+            backend.fun.txn_counter += 1;
+            let pass_lbl = format!("gate.pass{}", label_n);
+            let target = backend.fun.convergence_target.clone()
+                .unwrap_or_else(|| "loop".to_string());
+            let cond_i1 = if cond_reg.ty == Type::bool_() {
+                let b = backend.fun.gen_reg();
+                writeln!(out, "{}{} = trunc i8 {} to i1", indent, b, cond_reg.name).ok();
+                b
+            } else {
+                let i1_name = format!("%gi1_{}", label_n);
+                writeln!(out, "{}{} = icmp ne i64 {}, 0", indent, i1_name, cond_reg.name).ok();
+                i1_name
+            };
+            writeln!(out, "{}br i1 {}, label %{}, label %{}", indent, cond_i1, pass_lbl, target).ok();
+            writeln!(out, "{}{}:", indent, pass_lbl).ok();
+            backend.fun.terminated = false;
+            TypedRegister { name: backend.fun.gen_reg(), ty: Type::void() }
+        }
         _ => {
             TypedRegister { name: backend.fun.gen_reg(), ty: Type::void() }
         }

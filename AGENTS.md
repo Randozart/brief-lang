@@ -106,8 +106,8 @@ time to concrete registers. See `docs/architecture/hash-words.md`.
 "backend, use your intrinsic knowledge of integer addition" — no TOML config
 file needed.
 
-**Protocol variants** parameterize hashwords: `#String<utf8>`, `#String<ascii>`,
-`#Float<ieee754>`. The file extension determines the default (`.bv` → utf8,
+**Protocol variants** parameterize hashwords: `#String<UTF8>`, `#String<ascii>`,
+`#Float<IEEE754>`. The file extension determines the default (`.bv` → UTF8,
 `.ebv` → ascii). Cross-variant calls require explicit protocol disambiguation
 at the call site. The compiler errors if a `.bv` file calls a `.ebv` function
 using `#String` without specifying the variant.
@@ -853,11 +853,22 @@ it. The more LLVM knows, the more aggressively it can optimize.
 
 ### Control Flow
 
-25. **No `if`/`else`** — Brief has no `if` keyword. Use `[guard] { body }` (one-shot
-    conditional) and `when` for conditional branching within `txn`/`node` bodies.
-    Guard blocks can appear in sequence: `[cond1] { ... }; [cond2] { ... };`.
+25. **`[expr]` guard syntax — three distinct forms** — The bracket prefix
+    introduces a conditional or convergence gate, but must NOT be followed by
+    `{`:
+    - `[expr];` — **convergence gate** (`Statement::Gate`). Compile-time
+      assertion: the analysis must prove `expr` holds at this point, or
+      compilation is denied. At runtime, if false, execution branches back
+      to the convergence target (loop top in callable txns, end-of-tick in
+      reactive txns).
+    - `[expr] stmt;` — **guarded single statement** (`Statement::Guarded` with
+      1-item body). Evaluates `expr`; if true, executes `stmt`.
+    - `when expr { body };` — **block guarded body** (`Statement::Guarded` with
+      N-item body). The preferred form for multi-statement guards.
+
+    Guard blocks can appear in sequence: `when cond1 { ... }; when cond2 { ... };`.
     Each guard is checked in order; the first matching guard executes its body.
-    A trailing `{ body }` without `[guard]` serves as the else clause.
+    A trailing `{ body }` without `when` serves as the else clause.
 
 26. **`type` is for protocols, `struct` is for data** — The keywords have distinct
     roles:
@@ -882,6 +893,18 @@ it. The more LLVM knows, the more aggressively it can optimize.
 
 29. **`[true][true]` is rejected** — parser enforces at least one
     meaningful constraint. Use `[[post]` or `[pre]]` sugar instead.
+
+30. **`[cond] { body }` is rejected** — The parser produces an error telling you
+    to use `when cond { body }` instead. The bracket prefix `[cond]` at statement
+    level is only valid as a convergence gate (`[cond];`) or a guarded single
+    statement (`[cond] stmt;`). Block bodies always require the `when` keyword.
+
+31. **No `main()` function** — Brief has no `main()` entry point. Programs start
+    via state-space triggers on `node` declarations. The compiler implicitly
+    creates an entry point by instantiating a node and wiring a corresponding
+    bootup variable. The scripting plugin (`script` pragma) is one way to
+    trigger this, but it is not `main()` — it creates a node + bootup variable
+    pair. There is no `defn main()` or `fn main()`.
 
 ## Commenting Mandate (Backend Updates)
 
@@ -1181,6 +1204,6 @@ They are NOT commitments — they become active plans only when a
 
 | Feature | Document | Core Idea |
 |---------|----------|-----------|
-| **Target-Aware Protocol Resolution** | `docs/architecture/future/target-aware-protocols.md` | `#String` resolves to `#String<utf16>` on Windows, `#String<utf8>` on Linux — default variant depends on target. |
+| **Target-Aware Protocol Resolution** | `docs/architecture/future/target-aware-protocols.md` | `#String` resolves to `#String<UTF16>` on Windows, `#String<UTF8>` on Linux — default variant depends on target. |
 | **Operation Marshalling** | `docs/architecture/future/operation-marshalling.md` | Marshal operations at compile time instead of marshalling data at runtime — adapt to target ABI without source changes. |
 | **Memory Management by Proof** | `docs/architecture/future/memory-management-by-proof.md` | Automatically select stack arena vs heap based on compile-time proof of pointer escape. Extends provenance analysis. |
