@@ -248,7 +248,21 @@ pub fn infer_expression(
             ))
         }
         Expr::Cast(expr, target_ty) => {
-            let (_, prov) = infer_expression(expr, ctx)?;
+            let (src_ty, prov) = infer_expression(expr, ctx)?;
+            // 2026-07-26: Vector-to-Vector view cast validation.
+            if let (Type::Vector(src_inner, src_dims), Type::Vector(tgt_inner, tgt_dims)) = (&src_ty, target_ty) {
+                if src_inner != tgt_inner || src_dims != tgt_dims {
+                    let src_bytes = type_byte_size(&src_ty);
+                    let tgt_bytes = type_byte_size(target_ty);
+                    if src_bytes != tgt_bytes {
+                        return Err(TypeError::TypeMismatch {
+                            expected: format!("array of {} bytes", tgt_bytes),
+                            found: format!("{} ({} bytes)", src_ty, src_bytes),
+                            context: "view cast: source and target byte sizes must match".to_string(),
+                        });
+                    }
+                }
+            }
             Ok((target_ty.clone(), prov))
         }
         Expr::IsType(expr, _ty) => {
@@ -821,5 +835,26 @@ impl BinaryOpKind {
 
     fn is_logical(&self) -> bool {
         matches!(self, BinaryOpKind::And | BinaryOpKind::Or)
+    }
+}
+
+/// 2026-07-26: Compute byte size of a type for view-cast validation.
+fn type_byte_size(ty: &Type) -> u64 {
+    match ty {
+        Type::Vector(inner, dims) => {
+            let elem_size = type_byte_size(inner);
+            let count: u64 = dims.iter().map(|d| match d {
+                crate::ast::Dimension::Anonymous(n) => *n as u64,
+                _ => 1,
+            }).product();
+            elem_size * count
+        }
+        Type::Custom(s) if s == "Int" || s == "Int64" || s == "Ptr" => 8,
+        Type::Custom(s) if s == "Int32" || s == "Float" => 4,
+        Type::Custom(s) if s == "Int16" => 2,
+        Type::Custom(s) if s == "Byte" || s == "Bool" || s == "Int8" => 1,
+        Type::Custom(s) if s == "Float64" => 8,
+        Type::Ptr(_) => 8,
+        _ => 8, // default for unknown types
     }
 }
