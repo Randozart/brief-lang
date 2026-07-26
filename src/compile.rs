@@ -593,6 +593,13 @@ pub fn compile_source(file_path: &str, source: &str, opts: &BuildOptions) -> Res
             all_objects.extend(extra_objects);
             compile_ll_to_binary(&out_path, &binary_path, &all_objects, &protocol_libs, opts.shared)?;
         }
+        // 2026-07-26: Phase 5 — Compile LLVM IR to WASM binary for webstack backend.
+        // Uses llc to compile the .ll (emitted with wasm32 target triple) to .wasm.
+        // Skips C runtime linking — WASM modules are self-contained pure logic.
+        if opts.backend == BackendKind::Webstack {
+            let wasm_path = format!("{}.wasm", binary_base);
+            compile_wasm(&out_path, &wasm_path)?;
+        }
 
         // ── Linked stage: binary processing ───────────────────────────
         let bin_path = std::path::Path::new(&binary_path);
@@ -790,6 +797,7 @@ fn codegen(
             // 2026-07-26: Phase 4 — Webstack uses LlvmBackend(wasm32) + with_webstack().
             // The old TS emitter path is deprecated. Phase 6 will also invoke
             // GlueWebGenerator to produce the JS shim from view bindings.
+            // Phase 5: Extension is .ll — compile_wasm will produce .wasm from it.
             let mut b = LlvmBackend::new()
                 .with_webstack(true)
                 .with_int_bits(32)
@@ -805,7 +813,7 @@ fn codegen(
                 b = b.with_gpu_offload(true);
             }
             output = b.generate(items, None);
-            ".wasm"
+            ".ll"
         }
         BackendKind::Gpu => {
             let mut b = LlvmBackend::new()
@@ -1088,6 +1096,42 @@ fn compile_ll_to_binary(ll_path: &str, binary_path: &str, extra_objects: &[PathB
     }
 
     println!("wrote {}", binary_path);
+    Ok(())
+}
+
+/// Compile LLVM IR (.ll) to WASM binary (.wasm) using llc.
+/// 2026-07-26: Phase 5 — Called for BackendKind::Webstack after codegen.
+/// The .ll file must have been emitted with wasm32 target triple.
+/// Uses `llc -march=wasm32 -filetype=obj` to produce a .o, then
+/// `wasm-ld` to link into .wasm. This avoids needing a wasm32 clang.
+fn compile_wasm(ll_path: &str, wasm_path: &str) -> Result<(), String> {
+    // Step 1: compile .ll to .wasm object file
+    let obj_path = format!("{}.o", wasm_path);
+    let mut assemble = Command::new("llc");
+    assemble.args(["-march=wasm32", "-filetype=obj", ll_path, "-o", &obj_path]);
+    let status = assemble.status()
+        .map_err(|e| format!(
+            "failed to invoke llc: {} (install llvm-tools or use --emit-ir-only)",
+            e
+        ))?;
+    if !status.success() {
+        return Err(format!("llc failed to compile '{}' to WASM object", ll_path));
+    }
+    // Step 2: link .o to .wasm
+    let mut link = Command::new("wasm-ld");
+    link.args(["--no-entry", "--allow-undefined", "-o", wasm_path, &obj_path]);
+    let status = link.status()
+        .map_err(|e| format!(
+            "failed to invoke wasm-ld: {} (install wasm-ld or use --emit-ir-only)",
+            e
+        ))?;
+    if !status.success() {
+        let _ = std::fs::remove_file(&obj_path);
+        return Err(format!("wasm-ld failed to link '{}'", wasm_path));
+    }
+    // Clean up intermediate object
+    let _ = std::fs::remove_file(&obj_path);
+    println!("wrote {}", wasm_path);
     Ok(())
 }
 
