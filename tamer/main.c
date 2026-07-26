@@ -11,6 +11,8 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <unistd.h>
+#include <sys/wait.h>
 
 // ── .bounty format constants ─────────────────────────────────────────────
 #define BOUNTY_MAGIC       "BOUNDATA\0"
@@ -37,6 +39,66 @@ static void host_cpuid(uint64_t* args, int n) {
 static void host_os_abi(uint64_t* args, int n) {
     // Return OS identifier: 0 = Linux
     args[0] = 0;
+    (void)n;
+}
+
+// ── Host LLVM IR emission buffer ────────────────────────────────────────
+// Accumulates LLVM IR text segments and writes to .ll file at the end.
+
+#define LLVM_IR_BUFFER_SIZE (1024 * 1024)  // 1MB buffer
+static char ir_buffer[LLVM_IR_BUFFER_SIZE];
+static size_t ir_buffer_pos = 0;
+
+static void host_llvm_emit(uint64_t* args, int n) {
+    // args[0] = pointer to IR text string (null-terminated)
+    const char* text = (const char*)(uintptr_t)args[0];
+    size_t len = strlen(text);
+    if (ir_buffer_pos + len < LLVM_IR_BUFFER_SIZE) {
+        memcpy(ir_buffer + ir_buffer_pos, text, len);
+        ir_buffer_pos += len;
+    }
+    (void)n;
+}
+
+static void host_llvm_flush(uint64_t* args, int n) {
+    // args[0] = pointer to output path string (null-terminated)
+    const char* output_path = (const char*)(uintptr_t)args[0];
+    FILE* f = fopen(output_path, "w");
+    if (f) {
+        fwrite(ir_buffer, 1, ir_buffer_pos, f);
+        fclose(f);
+        printf("[tamer] Wrote LLVM IR: %s (%zu bytes)\n", output_path, ir_buffer_pos);
+    } else {
+        fprintf(stderr, "[tamer] Error: cannot write '%s'\n", output_path);
+    }
+    ir_buffer_pos = 0;
+    (void)n;
+}
+
+static void host_invoke_clang(uint64_t* args, int n) {
+    // args[0] = pointer to argv array (null-terminated pointer array)
+    // args[1] = pointer to environment (null)
+    // Forks and exec's clang, waits for completion.
+    // Returns exit status or -1 on error.
+
+    char** argv = (char**)(uintptr_t)args[0];
+    pid_t pid = fork();
+    if (pid == 0) {
+        // Child: exec clang
+        execvp(argv[0], argv);
+        _exit(127);
+    } else if (pid > 0) {
+        // Parent: wait for child
+        int status;
+        waitpid(pid, &status, 0);
+        if (WIFEXITED(status)) {
+            args[0] = WEXITSTATUS(status);
+        } else {
+            args[0] = -1;
+        }
+    } else {
+        args[0] = -1;  // fork failed
+    }
     (void)n;
 }
 
@@ -136,6 +198,9 @@ int main(int argc, char** argv) {
     vm_register_host(&vm, 0, host_log);
     vm_register_host(&vm, 1, host_cpuid);
     vm_register_host(&vm, 2, host_os_abi);
+    vm_register_host(&vm, 3, host_llvm_emit);
+    vm_register_host(&vm, 4, host_llvm_flush);
+    vm_register_host(&vm, 5, host_invoke_clang);
 
     // 5. Load .lair bytecode
     if (vm_load_lair(&vm, lair, lair_size) != 0) {

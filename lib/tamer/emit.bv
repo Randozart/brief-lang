@@ -1,0 +1,22 @@
+// ── LLVM IR Emission (via Host FFI) ────────────────────────────────
+// 2026-07-26: Host functions registered in tamer/main.c.
+//   3 = host_llvm_emit(ptr_to_text) — append IR text to buffer
+//   4 = host_llvm_flush(ptr_to_output_path) — write buffer to .ll file
+//   5 = host_invoke_clang(ptr_to_argv) — fork+exec clang
+
+// Host function declarations — these become HCALL instructions
+frgn host_llvm_emit(text: Int) -> Int as emit_ir from "host";
+frgn host_llvm_flush(path: Int) -> Int as flush_ir from "host";
+frgn host_invoke_clang(argv: Int) -> Int as invoke_clang from "host";
+
+export defn emit_ir_text(text: Ptr<Int>) -> Int {
+    term host_llvm_emit(text as Int);
+};
+
+export defn flush_ir_to_file(path: Ptr<Int>) -> Int {
+    term host_llvm_flush(path as Int);
+};
+
+export defn compile_with_clang(argv: Ptr<Int>) -> Int {
+    term host_invoke_clang(argv as Int);
+};
