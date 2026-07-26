@@ -2724,6 +2724,23 @@ impl LlvmBackend {
             // 2026-07-17: Ptr types are already represented as i64 (via
             // ptrtoint in emit_malloc). Store the i64 bits directly.
             Type::Ptr(_) => reg.name.clone(),
+            // 2026-07-26: With native %State widths, Int/UInt fields may be
+            // narrower than i64 (e.g., Int32→i32, Int8→i8). Widen via sext/zext.
+            Type::Custom(t) if t == "Int" || t == "UInt" => {
+                let llvm_ty = self.llvm_type(&reg.ty);
+                if llvm_ty != "i64" && llvm_ty.starts_with('i') {
+                    let tr = self.fun.gen_reg();
+                    let is_unsigned = t.starts_with('U');
+                    if is_unsigned {
+                        writeln!(out, "{}{} = zext {} {} to i64", indent, tr, llvm_ty, reg.name).ok();
+                    } else {
+                        writeln!(out, "{}{} = sext {} {} to i64", indent, tr, llvm_ty, reg.name).ok();
+                    }
+                    tr
+                } else {
+                    reg.name.clone()
+                }
+            }
             _ => reg.name.clone(),
         }
     }

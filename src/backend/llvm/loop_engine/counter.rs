@@ -355,18 +355,21 @@ impl LlvmBackend {
         let counter_name = self.fun.next_reg_with_prefix("cmc");
         let done_reg = self.fun.next_reg_with_prefix("cmd");
 
-        // Counter phi
+        // Counter phi — use the field's native LLVM type from field_types.
+        let counter_ty = self.ctx.field_types.get(counter_idx)
+            .cloned().unwrap_or_else(|| "i64".to_string());
         if is_decreasing {
-            writeln!(out, "  {} = phi i64 [ {}, %entry ], [ {}, %.cm_latch ]",
-                counter_name, init_name, next).ok();
+            writeln!(out, "  {} = phi {} [ {}, %entry ], [ {}, %.cm_latch ]",
+                counter_name, counter_ty, init_name, next).ok();
         } else {
-            writeln!(out, "  {} = phi i64 [ {}, %entry ], [ {}, %.cm_latch ]",
-                counter_name, init_name, next).ok();
+            writeln!(out, "  {} = phi {} [ {}, %entry ], [ {}, %.cm_latch ]",
+                counter_name, counter_ty, init_name, next).ok();
         }
 
         // 2026-07-17: Per-field phi nodes — one per written field.
-        // 2026-07-21: Skip phi when the field IS the counter variable
-        // (duplicate of the counter phi). Use native LLVM type for float fields.
+        // 2026-07-26: Phi type is read from field_types to match the native
+        // LLVM type stored by push_field_type (float/double for #Float types,
+        // iN for exact ints, i64 for flexible Int and everything else).
         self.fun.phi_field_regs.clear();
         self.fun.backedge_field_regs.clear();
         for fname in &sorted_fields {
@@ -383,11 +386,11 @@ impl LlvmBackend {
                 .cloned().unwrap_or_else(|| format!("%be_{}", fname));
             let init_f = phi_field_init.get(fname.as_str())
                 .cloned().unwrap_or_else(|| "0".to_string());
-            // 2026-07-26: Always use i64 for phi type — exit condition
-            // evaluation produces i64 for all types (Bool loads zext to i64,
-            // Int is already i64). The trunc/pack to native width happens
-            // during state field storage after the convergence loop.
-            let phi_ty = "i64".to_string();
+            // 2026-07-26: Read phi type from field_types — matches whatever
+            // push_field_type stored for this field (float, double, i8..i128).
+            let phi_ty = self.ctx.field_index_map.get(fname.as_str())
+                .and_then(|idx| self.ctx.field_types.get(*idx))
+                .cloned().unwrap_or_else(|| "i64".to_string());
             writeln!(out, "  {} = phi {} [ {}, %entry ], [ {}, %.cm_latch ]",
                 phi_f, phi_ty, init_f, be_f).ok();
             self.fun.phi_field_regs.insert((*fname).clone(), phi_f);
@@ -398,10 +401,19 @@ impl LlvmBackend {
         // `counter < bound` (continue while below the bound); for decreasing
         // counters we want `counter > 0` (continue while above the bound).
         // The br branches to .cm_body if done_reg is true.
-        if is_decreasing {
-            writeln!(out, "  {} = icmp sgt i64 {}, {}", done_reg, counter_name, bound_reg).ok();
+        // 2026-07-26: Counter may be narrower than 64 (native int width from
+        // field_types). sext to i64 for comparison with bound (always i64).
+        let cmp_counter = if counter_ty != "i64" {
+            let w = self.fun.next_reg_with_prefix("cmw");
+            writeln!(out, "  {} = sext {} {} to i64", w, counter_ty, counter_name).ok();
+            w
         } else {
-            writeln!(out, "  {} = icmp slt i64 {}, {}", done_reg, counter_name, bound_reg).ok();
+            counter_name.clone()
+        };
+        if is_decreasing {
+            writeln!(out, "  {} = icmp sgt i64 {}, {}", done_reg, cmp_counter, bound_reg).ok();
+        } else {
+            writeln!(out, "  {} = icmp slt i64 {}, {}", done_reg, cmp_counter, bound_reg).ok();
         }
         writeln!(out, "  br i1 {}, label %.cm_body, label %{}", done_reg, exit_label).ok();
         writeln!(out, ".cm_body:").ok();
@@ -433,10 +445,11 @@ impl LlvmBackend {
         self.emit_countable_body(out, body, write_set, &mut empty);
         writeln!(out, "  br label %.cm_latch").ok();
         writeln!(out, ".cm_latch:").ok();
+        // 2026-07-26: Counter increment uses the field's native type, not i64.
         if is_decreasing {
-            writeln!(out, "  {} = sub nuw nsw i64 {}, 1", next, counter_name).ok();
+            writeln!(out, "  {} = sub nuw nsw {} {}, 1", next, counter_ty, counter_name).ok();
         } else {
-            writeln!(out, "  {} = add nuw nsw i64 {}, 1", next, counter_name).ok();
+            writeln!(out, "  {} = add nuw nsw {} {}, 1", next, counter_ty, counter_name).ok();
         }
 
         // 2026-07-17: Per-field backedges. Modified fields use the written value;
@@ -459,10 +472,12 @@ impl LlvmBackend {
                 let field_ty = self.ctx.field_index_map.get(fname.as_str())
                     .and_then(|idx| self.ctx.field_types.get(*idx))
                     .cloned().unwrap_or_else(|| "i64".to_string());
+                // 2026-07-26: The backedge identity must match the phi type.
+                // Float fields use fadd, integer fields use the field's native width.
                 if field_ty == "float" || field_ty == "double" {
                     writeln!(out, "  {} = fadd {} 0.0, {}", be_f, field_ty, val).ok();
                 } else {
-                    writeln!(out, "  {} = add i64 0, {}", be_f, val).ok();
+                    writeln!(out, "  {} = add {} 0, {}", be_f, field_ty, val).ok();
                 }
             }
         }

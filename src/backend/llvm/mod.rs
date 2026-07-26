@@ -980,19 +980,41 @@ impl LlvmBackend {
                 }
             }
         }
-        // 2026-07-21: Float/float64 fields use native LLVM types in %State.
-        // This eliminates trunc+bitcast overhead (7 insns per access) and lets
-        // LLVM's SROA promote float phis to SSA registers directly. The phi
-        // emission and backedge paths have been updated to handle float types.
-        // Ptr<T> stays as i64 — existing codegen loads it and uses inttoptr.
-        let llvm_ty = if *ty == Type::float64() {
-            "double"
-        } else if *ty == Type::float() {
-            "float"
+        // 2026-07-26: Derive %State field type from protocol + maxbits.
+        // Float types get native float/double. Exact integer types (Int8..Int128)
+        // get native iN width. Everything else (flexible Int, Bool, Ptr, String)
+        // stores as i64 — adapt_to_i64/ensure_typed_value handle conversion.
+        let llvm_ty = if let Some(ref universe) = self.ctx.type_universe {
+            if let Some(rt) = ty.universe_key().and_then(|k| universe.get(k)) {
+                let is_float = rt.properties.contains_key("Cast.#Float")
+                    || rt.properties.get("llvm_type")
+                        .and_then(|pv| match pv {
+                            crate::ast::PropertyValue::String(s) => Some(s.as_str()),
+                            _ => None,
+                        })
+                        .map_or(false, |s| matches!(s, "half" | "float" | "double" | "bfloat" | "fp128" | "x86_fp80"));
+                if is_float {
+                    if rt.max_bits <= 32 { "float".to_string() }
+                    else if rt.max_bits <= 64 { "double".to_string() }
+                    else { "i64".to_string() }
+                } else if rt.min_bits == rt.max_bits && rt.max_bits > 0 {
+                    // Exact integer types get native iN width.
+                    let bits = if rt.max_bits <= 8 { 8 }
+                        else if rt.max_bits <= 16 { 16 }
+                        else if rt.max_bits <= 32 { 32 }
+                        else if rt.max_bits <= 64 { 64 }
+                        else { 128 };
+                    format!("i{}", bits)
+                } else {
+                    "i64".to_string()
+                }
+            } else {
+                "i64".to_string()
+            }
         } else {
-            "i64"
+            "i64".to_string()
         };
-        self.ctx.field_types.push(llvm_ty.to_string());
+        self.ctx.field_types.push(llvm_ty);
         self.ctx.field_brief_types.push(ty.clone());
     }
 

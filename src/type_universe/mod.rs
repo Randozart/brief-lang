@@ -86,30 +86,43 @@ impl TypeUniverse {
         // Table: (name, bytes, min_bits, max_bits, alignment, llvm_type)
         // bytes is the exact width for fixed types; min_bits/max_bits is
         // the range for flexible types (Int has max_bits=64, min_bits=0).
-        const PRIMORDIALS: &[(&str, u64, u64, u64, u64, &str)] = &[
-            ("Int",    8, 0, 64, 8, "i64"),     // flexible: up to 64 bits
-            ("UInt",   8, 0, 64, 8, "i64"),     // flexible: up to 64 bits
-            ("Int8",   1, 8, 8,  1, "i8"),      // exact: 8 bits
-            ("UInt8",  1, 8, 8,  1, "i8"),      // exact: 8 bits
-            ("Int16",  2, 16, 16, 2, "i16"),    // exact: 16 bits
-            ("UInt16", 2, 16, 16, 2, "i16"),    // exact: 16 bits
-            ("Int32",  4, 32, 32, 4, "i32"),    // exact: 32 bits
-            ("UInt32", 4, 32, 32, 4, "i32"),    // exact: 32 bits
-            ("Int64",  8, 64, 64, 8, "i64"),    // exact: 64 bits
-            ("UInt64", 8, 64, 64, 8, "i64"),    // exact: 64 bits
-            ("Float",  4, 32, 32, 4, "float"),  // exact: 32 bits
-            ("Float32",4, 32, 32, 4, "float"),  // exact: 32 bits
-            ("Float64",8, 64, 64, 8, "double"), // exact: 64 bits
-            ("Double", 8, 64, 64, 8, "double"), // exact: 64 bits
-            ("Bool",   1, 8, 8,  1, "i8"),      // exact: 8 bits
-            ("Char",   4, 32, 32, 4, "i32"),    // exact: 32 bits
-            ("Data",   8, 64, 64, 8, "i8*"),    // exact: 64 bits
-            ("Void",   0, 0,  0,  0, "void"),   // zero bits
+        const PRIMORDIALS: &[(&str, u64, u64, u64, u64, &str, &[(&str, &str)])] = &[
+            // Flexible integer types (min=0, max=ceiling, narrowing shrinks SSA values)
+            ("Int",    8, 0, 64, 8, "i64", &[]),
+            ("UInt",   8, 0, 64, 8, "i64", &[]),
+            // Exact integer types
+            ("Int8",   1, 8, 8,  1, "i8", &[]),
+            ("UInt8",  1, 8, 8,  1, "i8", &[]),
+            ("Int16",  2, 16, 16, 2, "i16", &[]),
+            ("UInt16", 2, 16, 16, 2, "i16", &[]),
+            ("Int32",  4, 32, 32, 4, "i32", &[]),
+            ("UInt32", 4, 32, 32, 4, "i32", &[]),
+            ("Int64",  8, 64, 64, 8, "i64", &[]),
+            ("UInt64", 8, 64, 64, 8, "i64", &[]),
+            ("Int128", 16, 128, 128, 16, "i128", &[]),
+            ("UInt128",16, 128, 128, 16, "i128", &[]),
+            // Floating-point types (exact)
+            ("Half",   2, 16, 16, 2, "half", &[]),
+            ("BFloat", 2, 16, 16, 2, "bfloat", &[("disamb", "bfloat")]),
+            ("Float",  4, 32, 32, 4, "float", &[]),
+            ("Float32",4, 32, 32, 4, "float", &[]),
+            ("Float64",8, 64, 64, 8, "double", &[]),
+            ("Double", 8, 64, 64, 8, "double", &[]),
+            ("X86_FP80",10, 80, 80, 4, "x86_fp80", &[]),
+            ("FP128",  16, 128, 128, 16, "fp128", &[]),
+            // Other
+            ("Bool",   1, 8, 8,  1, "i8", &[]),
+            ("Char",   4, 32, 32, 4, "i32", &[]),
+            ("Data",   8, 64, 64, 8, "i8*", &[]),
+            ("Void",   0, 0,  0,  0, "void", &[]),
         ];
-        for &(name, bytes, min_bits, max_bits, alignment, llvm_ty) in PRIMORDIALS {
+        for &(name, bytes, min_bits, max_bits, alignment, llvm_ty, extras) in PRIMORDIALS {
             let mut properties = std::collections::HashMap::new();
             properties.insert("llvm_type".into(), crate::ast::PropertyValue::String(llvm_ty.to_string()));
             properties.insert("alignment".into(), crate::ast::PropertyValue::Int(alignment as i64));
+            for &(k, v) in extras {
+                properties.insert(k.to_string(), crate::ast::PropertyValue::String(v.to_string()));
+            }
             self.types.insert(name.to_string(), ResolvedType {
                 name: name.to_string(),
                 base: "Bits".to_string(),

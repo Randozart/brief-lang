@@ -226,6 +226,26 @@ fn register_typedefs(items: &[TopLevel], universe: &mut TypeUniverse) {
             properties,
             fields,
         };
+        // 2026-07-26: Preserve primordial properties when the declaration
+        // doesn't explicitly set maxbits metadata. This ensures Float stays
+        // at max_bits=32 (from PRIMORDIALS) rather than defaulting to 64 bits.
+        // Also preserves llvm_type (e.g. "float" for Float) that the normalizer
+        // would otherwise set to "i{N}" from bytes.
+        if let Some(prim) = universe.get(&td.name) {
+            if !td.body.metadata.contains_key("maxbits") {
+                rt.bytes = prim.bytes;
+                rt.max_bits = prim.max_bits;
+                rt.min_bits = prim.min_bits.min(rt.max_bits);
+                rt.alignment = prim.alignment;
+            }
+            if !td.body.metadata.contains_key("llvm_type")
+                && !rt.properties.contains_key("llvm_type")
+                && prim.properties.contains_key("llvm_type")
+            {
+                rt.properties.insert("llvm_type".to_string(),
+                    prim.properties.get("llvm_type").unwrap().clone());
+            }
+        }
         if let Some(PropertyValue::String(layout_str)) = rt.properties.get("layout") {
             let cleaned = layout_str.strip_prefix('<').unwrap_or(layout_str);
             if let Ok(pat) = crate::beast::layout::parse_layout_pattern(cleaned) {
