@@ -42,14 +42,29 @@ standalone schema-only `.dbv` files).
 
 ## 3. Lexical Rules (Both Formats)
 
-### 3.1 Tokens
+### 3.1 Token Roles by Format
+
+The `>` symbol serves two different roles depending on the format:
+
+| Format | Role | Example | Context |
+|--------|------|---------|---------|
+| `.dbvl` | **Directive prefix** | `>schema Person from "person.dbv"` | Start of any line |
+| `.dbv` | **Positional entry marker** | `> Alice Smith; 30;` | Inside `as { }` block, after `{` or `;` |
+
+The symbol's disambiguation is contextual: in `.dbvl` all `>`-lines are directives;
+in `.dbv` `>` marks a new entry only within `as { }` blocks. Inside sub-record
+blocks (`{ }` values within an entry), `>` has no special meaning — it is
+treated as a literal character and produces an error message pointing the user
+to the correct positional form (bare values without `>`).
+
+### 3.2 Tokens
 
 | Token | Role |
 |-------|------|
 | `;` | Field terminator and entry terminator |
 | `:` | Key-value binder (entry level and map level) |
 | `{ }` | Groups a nested sub-record or map |
-| `>` | **Line-start**: directive prefix (`.dbvl`) / **Block-scoped**: marks a positional entry (`.dbv`) |
+| `>` | **Line-start**: directive prefix (`.dbvl`) / **Block-scoped**: marks a positional entry inside `as { }` blocks (`.dbv`). Invalid inside sub-record `{ }` blocks — use bare positional values instead. |
 | `" "` | Quoted string (opt-in via parser flag) |
 
 ### 3.2 Whitespace
@@ -744,6 +759,23 @@ Line-oriented format means one entry per line. Nested blocks belong in `.dbv`
 where braces and multiple lines are expected. A `.dbvl` line with `{ }` would
 require the parser to track brace depth across line boundaries, defeating the
 purpose of the line-per-record design.
+
+### 12.5 Parser Error Messages
+
+The DBrief parser produces contextual errors for common mistakes. Each error
+must include: file path, line number, offending byte range, and what was
+expected vs found.
+
+| Error condition | Error text | When it fires |
+|----------------|------------|---------------|
+| `>` inside `{ }` sub-record | `'>' is only valid as an entry marker inside 'as { }' blocks. Remove the '>' — sub-records use bare positional values: { val; val; }` | A positional entry marker appears inside a nested `{ }` block, where values are always positional by context |
+| `;` in bare token (non-quoted) | `Field contains ';' at byte N — this terminates the value. Use --quoted mode to include ';': "val;with;semicolons"` | A bare token value contains a `;` which acts as a field separator. In non-quoted mode `;` is always syntax, never data |
+| `.dbvs` extension used | `'.dbvs' extension is removed. Use '.dbv' with inline schema, or 'schema Name from "file.dbv"' to import.` | Any import or `schema` declaration references a `.dbvs` file |
+| Stray `}` at top level | `Unexpected '}' at position N — unmatched closing brace` | A `}` appears outside any `{ }` block |
+| Schema not found before `as` | `Schema 'X' not defined. Declare with 'schema X { ... }' or import with 'schema X from "path".'` | An `as X` block is encountered with no preceding `schema X` definition or import |
+| Field count mismatch | `Entry has N fields but schema 'X' expects M fields.` | An entry contains a different number of fields than its schema declares |
+| `>` at line start in `.dbv` | `'>' at line start is only valid in .dbvl files for directives. In .dbv, use '>' inside 'as { }' blocks for positional entries.` | A `>` directive form is used in a `.dbv` file context |
+| Numeric prefix ambiguity | `Token '0x4000' starts with digits but is not a valid number — treated as a bare string.` | A token starts with `0` but is not a valid integer (e.g. hex `0x4000`). The parser silently treats it as a string; the schema validator catches type mismatches |
 
 ---
 

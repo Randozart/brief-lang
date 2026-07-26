@@ -368,7 +368,7 @@ mod tests {
     fn test_data_conversion_basic() {
         let doc = parse(
             r#"as Item {
-    rusty_key { "Rusty Key", "An old iron key", 5, true }
+    rusty_key: Rusty Key; An old iron key; 5; true;
 }
 "#,
         );
@@ -461,14 +461,14 @@ mod tests {
     fn test_schema_and_data() {
         let input = r#"
 schema Item {
-    name: String
-    desc: String
-    hp: Int
-    takeable: Bool
+    name: String;
+    desc: String;
+    hp: Int;
+    takeable: Bool;
 }
 
 as Item {
-    rusty_key { "Rusty Key", "An old iron key", 5, true }
+    rusty_key: Rusty Key; An old iron key; 5; true;
 }
 "#;
         let doc = parse(input);
