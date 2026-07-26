@@ -24,9 +24,14 @@ impl VmBackend {
     fn emit_definition(&mut self, d: &Definition) {
         // Map parameters to local slots
         self.local_slots.clear();
+        self.ptr_slots.clear();
         self.next_local_slot = 0;
-        for (name, _ty) in &d.parameters {
+        for (name, ty) in &d.parameters {
             self.local_slots.insert(name.clone(), self.next_local_slot);
+            // 2026-07-25: Track Ptr<Int> slots for pointer arithmetic scaling.
+            if matches!(ty, Type::Ptr(_) | Type::PtrConst(_)) {
+                self.ptr_slots.insert(self.next_local_slot);
+            }
             self.next_local_slot += 1;
         }
         // 2026-07-25: Count total needed locals (params + let bindings in body)
@@ -56,15 +61,22 @@ impl VmBackend {
     fn emit_transaction(&mut self, t: &Transaction) {
         // Transactions are like definitions with contracts
         self.local_slots.clear();
+        self.ptr_slots.clear();
         self.next_local_slot = 0;
-        for (name, _ty) in &t.parameters {
+        for (name, ty) in &t.parameters {
             self.local_slots.insert(name.clone(), self.next_local_slot);
+            // 2026-07-25: Track Ptr<Int> slots for pointer arithmetic scaling.
+            if matches!(ty, Type::Ptr(_) | Type::PtrConst(_)) {
+                self.ptr_slots.insert(self.next_local_slot);
+            }
             self.next_local_slot += 1;
         }
+        // 2026-07-25: Count total needed locals (params + let bindings in body)
+        let total_locals = count_let_bindings(&t.body) as u16 + t.parameters.len() as u16;
 
         self.asm.define_function(
             &t.name,
-            self.next_local_slot as u16,
+            total_locals,
             t.parameters.len() as u16,
         );
 

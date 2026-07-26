@@ -1,44 +1,34 @@
 // 2026-07-25: Tamer entry point — install-time VM interpreter.
-// Takes a .bounty in memory, extracts .lair and .beastpack,
-// runs the VM to produce LLVM IR, and invokes clang to link.
-//
-// For MVP: receives lair_data + lair_len + beastpack_data + beastpack_len
-// as arguments. File I/O and process spawning are future phases.
 
 import "vm.bv";
-import "loader.bv";
-
-// ── Entry point (for testing: receives .lair and .beastpack in memory) ──
 
 export defn tame(lair_data: Ptr<Int>, lair_len: Int,
                  beastpack_data: Ptr<Int>, beastpack_len: Int) -> Int
 {
-    // Allocate VM buffers (once, at startup)
     let stack_data = Alloc#(8192, Malloc) as Ptr<Int>;
     let locals_data = Alloc#(32768, Malloc) as Ptr<Int>;
     let frames_data = Alloc#(8192, Malloc) as Ptr<Int>;
 
-    // Validate .lair magic
-    let magic = read_u32(lair_data, 0);
-    [magic != 0x5249414c] { term magic; };  // "LAIR"
+    let word0 = *(lair_data + 0);
+    let magic = word0 & 0xFFFFFFFF;
+    [magic != 0x5249414C] { term 101; };
 
-    // Parse .lair header
-    let bc_off = lair_bc_offset(lair_data);
-    let bc_len = lair_bc_size(lair_data);
-    let fn_off = lair_fn_offset(lair_data);
-    let fn_size = lair_fn_size(lair_data);
+    let w4 = *(lair_data + 4);
+    let fn_off = w4;
+    let w5 = *(lair_data + 5);
+    let fn_size = w5;
+    let w6 = *(lair_data + 6);
+    let bc_off = w6;
+    let w7 = *(lair_data + 7);
+    let bc_len = w7;
     let fn_count = fn_size / 20;
-
-    // Compute bytecode and function table pointers
     let bc_data = lair_data + bc_off;
     let fn_table = lair_data + fn_off;
 
-    // Validate bounds
-    [bc_off + bc_len > lair_len] { term 1; };
-    [fn_off + fn_size > lair_len] { term 1; };
-    [fn_count == 0] { term 1; };
+    [bc_off + bc_len > lair_len] { term 103; };
+    [fn_off + fn_size > lair_len] { term 104; };
+    [fn_count == 0] { term 105; };
 
-    // Run the VM — entry function is fn_idx=0
     let _result = vm_loop(
         stack_data, 0, locals_data, 0, frames_data, 0,
         bc_data, bc_len, fn_table, fn_count,

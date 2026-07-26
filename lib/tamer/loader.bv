@@ -2,17 +2,147 @@
 // Pure Brief, no Alloc# needed. Uses Ptr<Int> for raw byte access.
 
 // ── Bytecode read helpers ────────────────────────────────────────────────
-// All multi-byte reads use shifts and masks for unaligned safety.
+// NOTE: Inline implementation to avoid VM call mechanism bugs.
+// Function calls within the VM don't properly return values for
+// subsequent calls from the same caller. All reads are inlined.
 
 defn read_u8(bc: Ptr<Int>, addr: Int) -> Int {
-    // Avoid Ptr<Int> arithmetic (VM + is unscaled). Cast to Int for
-    // raw byte address computation, then cast back to Ptr for load.
-    let word_idx = addr / 8;
     let base: Int = bc as Int;
+    let word_idx = addr / 8;
     let byte_addr: Int = base + word_idx * 8;
-    let byte_off = addr % 8;
     let word = *(byte_addr as Ptr<Int>);
+    let byte_off = addr % 8;
     term (word >> (byte_off * 8)) & 0xFF;
+};
+
+defn read_i8(bc: Ptr<Int>, addr: Int) -> Int {
+    let val = read_u8(bc, addr);
+    [val >= 128] { term val - 256; };
+    term val;
+};
+
+defn read_u16(bc: Ptr<Int>, addr: Int) -> Int {
+    let base: Int = bc as Int;
+    let word_idx = addr / 8;
+    let byte_addr: Int = base + word_idx * 8;
+    let word = *(byte_addr as Ptr<Int>);
+    let byte_off = addr % 8;
+    term (word >> (byte_off * 8)) & 0xFFFF;
+};
+
+defn read_i16(bc: Ptr<Int>, addr: Int) -> Int {
+    let val = read_u16(bc, addr);
+    [val >= 32768] { term val - 65536; };
+    term val;
+};
+
+defn read_u32(bc: Ptr<Int>, addr: Int) -> Int {
+    let base: Int = bc as Int;
+    let word_idx = addr / 8;
+    let byte_addr: Int = base + word_idx * 8;
+    let word = *(byte_addr as Ptr<Int>);
+    let byte_off = addr % 8;
+    term (word >> (byte_off * 8)) & 0xFFFFFFFF;
+};
+
+defn read_i64(bc: Ptr<Int>, addr: Int) -> Int {
+    let base: Int = bc as Int;
+    let word_idx = addr / 8;
+    let byte_addr: Int = base + word_idx * 8;
+    let word = *(byte_addr as Ptr<Int>);
+    let byte_off = addr % 8;
+    term (word >> (byte_off * 8));
+};
+
+defn read_i8(bc: Ptr<Int>, addr: Int) -> Int {
+    let val = read_u8(bc, addr);
+    [val >= 128] { term val - 256; };
+    term val;
+};
+
+defn read_u16(bc: Ptr<Int>, addr: Int) -> Int {
+    let word = *(bc as Ptr<Int> + addr / 8);
+    let byte_off = addr % 8;
+    let val = (word >> (byte_off * 8)) & 0xFFFF;
+    term val;
+};
+
+defn read_i16(bc: Ptr<Int>, addr: Int) -> Int {
+    let val = read_u16(bc, addr);
+    [val >= 32768] { term val - 65536; };
+    term val;
+};
+
+defn read_u32(bc: Ptr<Int>, addr: Int) -> Int {
+    let word = *(bc as Ptr<Int> + addr / 8);
+    let byte_off = addr % 8;
+    let val = (word >> (byte_off * 8)) & 0xFFFFFFFF;
+    term val;
+};
+
+defn read_i64(bc: Ptr<Int>, addr: Int) -> Int {
+    let word = *(bc as Ptr<Int> + addr / 8);
+    let byte_off = addr % 8;
+    term (word >> (byte_off * 8));
+};
+
+// ── .lair header fields ──────────────────────────────────────────────────
+
+defn lair_version(bc: Ptr<Int>) -> Int { term read_u32(bc, 4); };
+
+defn lair_fn_offset(bc: Ptr<Int>) -> Int { term read_u64(bc, 32); };
+
+defn lair_fn_size(bc: Ptr<Int>) -> Int { term read_u64(bc, 40); };
+
+defn lair_bc_offset(bc: Ptr<Int>) -> Int { term read_u64(bc, 48); };
+
+defn lair_bc_size(bc: Ptr<Int>) -> Int { term read_u64(bc, 56); };
+
+// ── Function table entries ───────────────────────────────────────────────
+// Each entry: name_idx(4) + bc_offset(8) + bc_len(4) + local_count(2) + arg_count(2) = 20 bytes
+
+defn fn_bc_offset(fn_table: Ptr<Int>, fn_idx: Int) -> Int {
+    let entry_word = *(fn_table as Ptr<Int> + fn_idx * 20 / 8 + 0);
+    let entry_extra = *(fn_table as Ptr<Int> + fn_idx * 20 / 8 + 1);
+    term read_i64(fn_table, fn_idx * 20 + 4);
+};
+
+defn fn_bc_len(fn_table: Ptr<Int>, fn_idx: Int) -> Int {
+    term read_u32(fn_table, fn_idx * 20 + 12);
+};
+
+defn fn_local_count(fn_table: Ptr<Int>, fn_idx: Int) -> Int {
+    term read_u16(fn_table, fn_idx * 20 + 16);
+};
+
+defn fn_arg_count(fn_table: Ptr<Int>, fn_idx: Int) -> Int {
+    term read_u16(fn_table, fn_idx * 20 + 18);
+};
+
+// ── .bounty section extraction ─────────────────────────────────────────
+// The .bounty file format:
+//   magic(9) + version(4) + flags(4) + count(4) = 21 bytes header
+//   section table: entries of type(1) + offset(8) + size(8)
+//   section data follows
+
+defn find_bounty_section(data: Ptr<Int>, type_id: Int) -> Ptr<Int> {
+    let count = read_u32(data, 17);
+    [count >= 1] {
+        [read_u8(data, 21) == type_id] {
+            term data + read_u64(data, 22);
+        };
+    };
+    [count >= 2] {
+        [read_u8(data, 38) == type_id] {
+            term data + read_u64(data, 39);
+        };
+    };
+    [count >= 3] {
+        [read_u8(data, 55) == type_id] {
+            term data + read_u64(data, 56);
+        };
+    };
+    term 0;
 };
 
 defn read_i8(bc: Ptr<Int>, addr: Int) -> Int {

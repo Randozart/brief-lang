@@ -380,11 +380,15 @@ uint64_t vm_execute(VmState* vm, uint32_t fn_idx) {
             // ── Memory operations ───────────────────────────────────────
             case OP_LOAD: {
                 uint64_t addr = stack_pop(vm);
-                if (!vm->has_error && addr != 0) {
-                    uint64_t val; memcpy(&val, (void*)(uintptr_t)addr, 8);
-                    stack_push(vm, val);
-                } else if (!vm->has_error) {
-                    stack_push(vm, 0);
+                if (!vm->has_error) {
+                    // 2026-07-25: Bounds check to prevent segfaults in MVP.
+                    if (addr < 4096 || addr > 0x7FFFFFFFFFFF) {
+                        // Suspicious address — push 0 instead of crashing
+                        stack_push(vm, 0);
+                    } else {
+                        uint64_t val; memcpy(&val, (void*)(uintptr_t)addr, 8);
+                        stack_push(vm, val);
+                    }
                 }
                 pc += 1; break;
             }
@@ -598,8 +602,20 @@ uint64_t vm_execute(VmState* vm, uint32_t fn_idx) {
                 // Convention: host functions with ID < 32 take 1 arg,
                 // ID >= 32 take 0 args. This is a placeholder for MVP.
                 // The real arity is encoded in the .lair host function table.
-                // For now, pass 0 args and let the host read what it needs.
-                vm->host_table[host_id](vm->stack, (int)vm->stack_len);
+                // For now, host functions take 1 argument from the top of stack.
+                // 2026-07-25: Copy top N args to a temp buffer so host_fn gets them.
+                uint64_t host_args[8];
+                int host_n = 0;
+                if (vm->stack_len > 0) {
+                    host_args[0] = vm->stack[vm->stack_len - 1];
+                    host_n = 1;
+                }
+                vm->host_table[host_id](host_args, host_n);
+                // Push return value (host writes to host_args[0])
+                // For now, replace the top of stack with the return value
+                if (vm->stack_len > 0) {
+                    vm->stack[vm->stack_len - 1] = host_args[0];
+                }
                 pc += 5; break;
             }
 

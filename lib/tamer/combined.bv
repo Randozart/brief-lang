@@ -2,17 +2,147 @@
 // Pure Brief, no Alloc# needed. Uses Ptr<Int> for raw byte access.
 
 // ── Bytecode read helpers ────────────────────────────────────────────────
-// All multi-byte reads use shifts and masks for unaligned safety.
+// NOTE: Inline implementation to avoid VM call mechanism bugs.
+// Function calls within the VM don't properly return values for
+// subsequent calls from the same caller. All reads are inlined.
 
 defn read_u8(bc: Ptr<Int>, addr: Int) -> Int {
-    // Avoid Ptr<Int> arithmetic (VM + is unscaled). Cast to Int for
-    // raw byte address computation, then cast back to Ptr for load.
-    let word_idx = addr / 8;
     let base: Int = bc as Int;
+    let word_idx = addr / 8;
     let byte_addr: Int = base + word_idx * 8;
-    let byte_off = addr % 8;
     let word = *(byte_addr as Ptr<Int>);
+    let byte_off = addr % 8;
     term (word >> (byte_off * 8)) & 0xFF;
+};
+
+defn read_i8(bc: Ptr<Int>, addr: Int) -> Int {
+    let val = read_u8(bc, addr);
+    [val >= 128] { term val - 256; };
+    term val;
+};
+
+defn read_u16(bc: Ptr<Int>, addr: Int) -> Int {
+    let base: Int = bc as Int;
+    let word_idx = addr / 8;
+    let byte_addr: Int = base + word_idx * 8;
+    let word = *(byte_addr as Ptr<Int>);
+    let byte_off = addr % 8;
+    term (word >> (byte_off * 8)) & 0xFFFF;
+};
+
+defn read_i16(bc: Ptr<Int>, addr: Int) -> Int {
+    let val = read_u16(bc, addr);
+    [val >= 32768] { term val - 65536; };
+    term val;
+};
+
+defn read_u32(bc: Ptr<Int>, addr: Int) -> Int {
+    let base: Int = bc as Int;
+    let word_idx = addr / 8;
+    let byte_addr: Int = base + word_idx * 8;
+    let word = *(byte_addr as Ptr<Int>);
+    let byte_off = addr % 8;
+    term (word >> (byte_off * 8)) & 0xFFFFFFFF;
+};
+
+defn read_i64(bc: Ptr<Int>, addr: Int) -> Int {
+    let base: Int = bc as Int;
+    let word_idx = addr / 8;
+    let byte_addr: Int = base + word_idx * 8;
+    let word = *(byte_addr as Ptr<Int>);
+    let byte_off = addr % 8;
+    term (word >> (byte_off * 8));
+};
+
+defn read_i8(bc: Ptr<Int>, addr: Int) -> Int {
+    let val = read_u8(bc, addr);
+    [val >= 128] { term val - 256; };
+    term val;
+};
+
+defn read_u16(bc: Ptr<Int>, addr: Int) -> Int {
+    let word = *(bc as Ptr<Int> + addr / 8);
+    let byte_off = addr % 8;
+    let val = (word >> (byte_off * 8)) & 0xFFFF;
+    term val;
+};
+
+defn read_i16(bc: Ptr<Int>, addr: Int) -> Int {
+    let val = read_u16(bc, addr);
+    [val >= 32768] { term val - 65536; };
+    term val;
+};
+
+defn read_u32(bc: Ptr<Int>, addr: Int) -> Int {
+    let word = *(bc as Ptr<Int> + addr / 8);
+    let byte_off = addr % 8;
+    let val = (word >> (byte_off * 8)) & 0xFFFFFFFF;
+    term val;
+};
+
+defn read_i64(bc: Ptr<Int>, addr: Int) -> Int {
+    let word = *(bc as Ptr<Int> + addr / 8);
+    let byte_off = addr % 8;
+    term (word >> (byte_off * 8));
+};
+
+// ── .lair header fields ──────────────────────────────────────────────────
+
+defn lair_version(bc: Ptr<Int>) -> Int { term read_u32(bc, 4); };
+
+defn lair_fn_offset(bc: Ptr<Int>) -> Int { term read_u64(bc, 32); };
+
+defn lair_fn_size(bc: Ptr<Int>) -> Int { term read_u64(bc, 40); };
+
+defn lair_bc_offset(bc: Ptr<Int>) -> Int { term read_u64(bc, 48); };
+
+defn lair_bc_size(bc: Ptr<Int>) -> Int { term read_u64(bc, 56); };
+
+// ── Function table entries ───────────────────────────────────────────────
+// Each entry: name_idx(4) + bc_offset(8) + bc_len(4) + local_count(2) + arg_count(2) = 20 bytes
+
+defn fn_bc_offset(fn_table: Ptr<Int>, fn_idx: Int) -> Int {
+    let entry_word = *(fn_table as Ptr<Int> + fn_idx * 20 / 8 + 0);
+    let entry_extra = *(fn_table as Ptr<Int> + fn_idx * 20 / 8 + 1);
+    term read_i64(fn_table, fn_idx * 20 + 4);
+};
+
+defn fn_bc_len(fn_table: Ptr<Int>, fn_idx: Int) -> Int {
+    term read_u32(fn_table, fn_idx * 20 + 12);
+};
+
+defn fn_local_count(fn_table: Ptr<Int>, fn_idx: Int) -> Int {
+    term read_u16(fn_table, fn_idx * 20 + 16);
+};
+
+defn fn_arg_count(fn_table: Ptr<Int>, fn_idx: Int) -> Int {
+    term read_u16(fn_table, fn_idx * 20 + 18);
+};
+
+// ── .bounty section extraction ─────────────────────────────────────────
+// The .bounty file format:
+//   magic(9) + version(4) + flags(4) + count(4) = 21 bytes header
+//   section table: entries of type(1) + offset(8) + size(8)
+//   section data follows
+
+defn find_bounty_section(data: Ptr<Int>, type_id: Int) -> Ptr<Int> {
+    let count = read_u32(data, 17);
+    [count >= 1] {
+        [read_u8(data, 21) == type_id] {
+            term data + read_u64(data, 22);
+        };
+    };
+    [count >= 2] {
+        [read_u8(data, 38) == type_id] {
+            term data + read_u64(data, 39);
+        };
+    };
+    [count >= 3] {
+        [read_u8(data, 55) == type_id] {
+            term data + read_u64(data, 56);
+        };
+    };
+    term 0;
 };
 
 defn read_i8(bc: Ptr<Int>, addr: Int) -> Int {
@@ -424,44 +554,35 @@ defn exec_op(sd: Ptr<Int>, sl_out: Ptr<Int>,
     };
 };
 // 2026-07-25: Tamer entry point — install-time VM interpreter.
-// Takes a .bounty in memory, extracts .lair and .beastpack,
-// runs the VM to produce LLVM IR, and invokes clang to link.
-//
-// For MVP: receives lair_data + lair_len + beastpack_data + beastpack_len
-// as arguments. File I/O and process spawning are future phases.
 
-
-// ── Entry point (for testing: receives .lair and .beastpack in memory) ──
 
 export defn tame(lair_data: Ptr<Int>, lair_len: Int,
                  beastpack_data: Ptr<Int>, beastpack_len: Int) -> Int
 {
-    // Allocate VM buffers (once, at startup)
     let stack_data = Alloc#(8192, Malloc) as Ptr<Int>;
     let locals_data = Alloc#(32768, Malloc) as Ptr<Int>;
     let frames_data = Alloc#(8192, Malloc) as Ptr<Int>;
 
-    // Validate .lair magic
-    let magic = read_u32(lair_data, 0);
-    [magic != 0x5249414c] { term magic; };  // "LAIR"
+    let word0 = *(lair_data + 0);
+    let magic = word0 & 0xFFFFFFFF;
+    [magic != 0x5249414C] { term 101; };
 
-    // Parse .lair header
-    let bc_off = lair_bc_offset(lair_data);
-    let bc_len = lair_bc_size(lair_data);
-    let fn_off = lair_fn_offset(lair_data);
-    let fn_size = lair_fn_size(lair_data);
+    let w4 = *(lair_data + 4);
+    let fn_off = w4;
+    let w5 = *(lair_data + 5);
+    let fn_size = w5;
+    let w6 = *(lair_data + 6);
+    let bc_off = w6;
+    let w7 = *(lair_data + 7);
+    let bc_len = w7;
     let fn_count = fn_size / 20;
-
-    // Compute bytecode and function table pointers
     let bc_data = lair_data + bc_off;
     let fn_table = lair_data + fn_off;
 
-    // Validate bounds
-    [bc_off + bc_len > lair_len] { term 1; };
-    [fn_off + fn_size > lair_len] { term 1; };
-    [fn_count == 0] { term 1; };
+    [bc_off + bc_len > lair_len] { term 103; };
+    [fn_off + fn_size > lair_len] { term 104; };
+    [fn_count == 0] { term 105; };
 
-    // Run the VM — entry function is fn_idx=0
     let _result = vm_loop(
         stack_data, 0, locals_data, 0, frames_data, 0,
         bc_data, bc_len, fn_table, fn_count,

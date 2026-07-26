@@ -9,7 +9,7 @@ pub mod emit_toplevel;
 
 pub use assembler::Assembler;
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 /// VM backend: compiles typed AST to .lair bytecode.
 ///
@@ -20,6 +20,9 @@ use std::collections::HashMap;
 pub struct VmBackend {
     pub(crate) asm: Assembler,
     pub(crate) local_slots: HashMap<String, u8>,
+    /// 2026-07-25: Track which local slots hold Ptr<Int> values.
+    /// Used by BinaryOp(Add) to scale Int offsets by 8.
+    pub(crate) ptr_slots: HashSet<u8>,
     pub(crate) next_local_slot: u8,
     pub(crate) host_fn_ids: HashMap<String, u32>,
     pub(crate) fn_indices: HashMap<String, u16>,
@@ -32,6 +35,7 @@ impl VmBackend {
         VmBackend {
             asm: Assembler::new(),
             local_slots: HashMap::new(),
+            ptr_slots: HashSet::new(),
             next_local_slot: 0,
             host_fn_ids: HashMap::new(),
             fn_indices: HashMap::new(),

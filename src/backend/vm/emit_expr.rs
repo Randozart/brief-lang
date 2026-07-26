@@ -56,6 +56,24 @@ impl VmBackend {
 
             // ── Binary operations ──────────────────────────────────────
             Expr::BinaryOp(kind, lhs, rhs) => {
+                // 2026-07-25: Ptr<Int> + Int — scale Int by 8 before adding.
+                // In Brief, Ptr arithmetic is scaled by element size.
+                // The VM's add is unscaled, so we multiply the offset by 8.
+                if matches!(kind, BinaryOpKind::Add) {
+                    if let Expr::Identifier(name) = lhs.as_ref() {
+                        if let Some(&slot) = self.local_slots.get(name.as_str()) {
+                            if self.ptr_slots.contains(&slot) {
+                                // Ptr<Int> + Int: emit ptr, emit offset, mul 8, add
+                                self.emit_expr(lhs);
+                                self.emit_expr(rhs);
+                                self.asm.emit_push_i8(3); // shift left 3 = multiply by 8
+                                self.asm.emit_shl();
+                                self.asm.emit_add();
+                                return;
+                            }
+                        }
+                    }
+                }
                 self.emit_expr(lhs);
                 self.emit_expr(rhs);
                 match kind {
@@ -65,7 +83,7 @@ impl VmBackend {
                     BinaryOpKind::Div    => self.asm.emit_div_s(),
                     BinaryOpKind::Mod    => self.asm.emit_rem_s(),
                     BinaryOpKind::Eq     => self.asm.emit_eq(),
-                    BinaryOpKind::Neq    => { self.asm.emit_eq(); self.asm.emit_not(); },
+                    BinaryOpKind::Neq    => { self.asm.emit_eq(); self.asm.emit_push_i8(1); self.asm.emit_xor(); },
                     BinaryOpKind::Lt     => self.asm.emit_lt_s(),
                     BinaryOpKind::Gt     => self.asm.emit_gt_s(),
                     BinaryOpKind::Le     => self.asm.emit_le_s(),
