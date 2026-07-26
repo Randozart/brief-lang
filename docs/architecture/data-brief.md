@@ -244,15 +244,28 @@ schema Person (name) {
 
 Arrays are declared with `[]` appended to any type:
 
-| Declaration | Meaning |
-|-------------|---------|
-| `String[]` | Array of strings |
-| `Int[]` | Array of integers |
-| `Person[]` | Array of Person entries |
+| Declaration | Meaning | Example data |
+|-------------|---------|--------------|
+| `String[]` | Array of strings | `{ a; b; c; }` |
+| `Int[]` | Array of integers | `{ 1; 2; 3; }` |
+| `Person[]` | Array of Person entries | `{ > Alice Smith; 30; > Bob; 25; }` |
 
-At the value site, arrays use `{ }` with positional or keyed entries:
+At the value site, arrays use `{ }` with elements separated by `;`:
+
+- **Primitive arrays** (String, Int, Float, Bool): bare elements separated by `;`
+- **Schema arrays** (Person[], Address[]): positional entries using `>`
 
 ```
+// Primitive array: bare elements in {}
+schema Tags {
+    values: String[];
+};
+
+as Tags {
+    > { alpha; beta; gamma; };
+};
+
+// Schema array: positional entries with >
 schema Team {
     name: String;
     members: Person[];
@@ -262,6 +275,10 @@ as Team {
     alpha: Alpha Team; { > Alice Smith; 30; > Bob; 25; };
 };
 ```
+
+For primitive arrays, the `{ }` block contains a flat list separated by `;`.
+For schema arrays, the `{ }` block contains positional entries with `>`
+markers (same syntax as an `as {}` block body).
 
 ### 5.5 Why Only Six Primitives
 

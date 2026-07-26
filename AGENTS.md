@@ -1246,6 +1246,9 @@ for current benchmark results and architecture decisions.
 | **Granular pipeline + AST navigation DSL** | `docs/plans/2026-07-21-granular-pipeline-and-ast-navigation.md` |
 | **Compile-time meta + plugin architecture** | `docs/plans/2026-07-15-compiletime-meta-and-plugin-architecture.md` |
 | **Layout DSL** | `docs/architecture/layout-dsl.md` |
+| **Data Brief spec** | `docs/architecture/data-brief.md` — `.dbv` and `.dbvl` format specification |
+| **Data Brief cheat sheet** | `docs/architecture/data-brief-cheat-sheet.md` — one-page syntax reference |
+| **TOML → DBV conversion** | `docs/architecture/applications/toml-to-dbv-guide.md` — patterns for replacing TOML config with DBV |
 
 ## Hypothesised Features
 
