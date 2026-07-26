@@ -34,7 +34,7 @@ pub fn encoding_hex_encode_impl(args: Vec<Value>) -> Result<Value, RuntimeError>
 pub fn encoding_hex_decode_impl(args: Vec<Value>) -> Result<Value, RuntimeError> {
     match args.first() {
         Some(Value::Bits(data)) => {
-            let s = String::from_UTF8_lossy(data);
+            let s = String::from_utf8_lossy(data);
             let hex = s.trim();
             let bytes: Vec<u8> = (0..hex.len())
                 .step_by(2)
@@ -50,7 +50,7 @@ pub fn encoding_hex_decode_impl(args: Vec<Value>) -> Result<Value, RuntimeError>
 pub fn encoding_url_encode_impl(args: Vec<Value>) -> Result<Value, RuntimeError> {
     match args.first() {
         Some(Value::Bits(data)) => {
-            let s = String::from_UTF8_lossy(data);
+            let s = String::from_utf8_lossy(data);
             let encoded = s.replace(' ', "%20");
             Ok(Value::Bits(encoded.into_bytes()))
         }
@@ -62,7 +62,7 @@ pub fn encoding_url_encode_impl(args: Vec<Value>) -> Result<Value, RuntimeError>
 pub fn encoding_url_decode_impl(args: Vec<Value>) -> Result<Value, RuntimeError> {
     match args.first() {
         Some(Value::Bits(data)) => {
-            let s = String::from_UTF8_lossy(data);
+            let s = String::from_utf8_lossy(data);
             let decoded = s.replace("%20", " ");
             Ok(Value::Bits(decoded.into_bytes()))
         }
@@ -74,7 +74,7 @@ pub fn encoding_url_decode_impl(args: Vec<Value>) -> Result<Value, RuntimeError>
 pub fn encoding_html_escape_impl(args: Vec<Value>) -> Result<Value, RuntimeError> {
     match args.first() {
         Some(Value::Bits(data)) => {
-            let s = String::from_UTF8_lossy(data);
+            let s = String::from_utf8_lossy(data);
             let escaped = s.replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;");
             Ok(Value::Bits(escaped.into_bytes()))
         }
@@ -86,7 +86,7 @@ pub fn encoding_html_escape_impl(args: Vec<Value>) -> Result<Value, RuntimeError
 pub fn encoding_html_unescape_impl(args: Vec<Value>) -> Result<Value, RuntimeError> {
     match args.first() {
         Some(Value::Bits(data)) => {
-            let s = String::from_UTF8_lossy(data);
+            let s = String::from_utf8_lossy(data);
             let unescaped = s.replace("&amp;", "&").replace("&lt;", "<").replace("&gt;", ">");
             Ok(Value::Bits(unescaped.as_bytes().to_vec()))
         }
@@ -205,7 +205,7 @@ mod tests {
         assert!(result.is_ok());
         match result.unwrap() {
             Value::Bits(b) => {
-                let uuid = String::from_UTF8_lossy(&b);
+                let uuid = String::from_utf8_lossy(&b);
                 assert_eq!(uuid.len(), 36, "UUID should be 36 chars");
                 assert_eq!(uuid.chars().nth(8), Some('-'));
                 assert_eq!(uuid.chars().nth(14), Some('4'), "UUID v4 should have version nibble 4");

@@ -59,7 +59,7 @@ fn resolve_const_env_vars(program: &mut [TopLevel]) {
 /// Extract a string literal argument from a PluginIntercept call.
 fn extract_string_arg(args: &[Expr]) -> Option<String> {
     if let Some(Expr::Quoted(bytes)) = args.first() {
-        String::from_UTF8(bytes.clone()).ok()
+        String::from_utf8(bytes.clone()).ok()
     } else {
         None
     }

@@ -349,7 +349,7 @@ impl MetroCli {
                     }
                     match self.request(line.as_bytes(), 5000) {
                         Ok(response) => {
-                            match std::str::from_UTF8(&response) {
+                            match std::str::from_utf8(&response) {
                                 Ok(text) => println!("Response ({} bytes): {}", response.len(), text),
                                 Err(_) => println!("Response ({} bytes): {:02x?}", response.len(), response),
                             }
@@ -526,7 +526,7 @@ pub fn run_metro_cli(args: &[String]) -> Result<(), Box<dyn std::error::Error>> 
         println!("Sending to {}...", metro.shm_path);
         match metro.request(payload.as_bytes(), 5000) {
             Ok(response) => {
-                match std::str::from_UTF8(&response) {
+                match std::str::from_utf8(&response) {
                     Ok(text) => println!("Response ({} bytes): {}", response.len(), text),
                     Err(_) => println!("Response ({} bytes): {:02x?}", response.len(), response),
                 }

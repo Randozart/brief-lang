@@ -791,42 +791,54 @@ it. The more LLVM knows, the more aggressively it can optimize.
     frontend-intrinsic PascalCase identifier.
 
 ### Common Syntax Traps
+11. **PascalCase vs snake_case convention** — Protocol identifiers, hashwords,
+    and intrinsics use PascalCase. User-defined functions in `.bv` files and
+    Rust standard library calls use snake_case.
+    - **PascalCase**: `#String<UTF8>`, `#Float<IEEE754>`, `Sqrt#`, `PrintInt#`,
+      `#Int`, `#Bits`, `Posit32`, `CastTo(#String<UTF8>)`
+    - **snake_case**: `ascii_to_utf8()`, `from_utf8_lossy()`, `jsstring_to_utf8()`,
+      `array_map()`, `utf8_to_utf16()`
+    The dividing line: if the compiler MUST know the name to function (intrinsic
+    registry entries, protocol hashwords), it is PascalCase. If a user could
+    rename it and the compiler still works (stdlib functions, Rust calls,
+    library helpers), it is snake_case.
 
-11. **`<-` is statement-level** — it breaks the expression parser.
+
+12. **`<-` is statement-level** — it breaks the expression parser.
     You cannot write `let x = &list <- val`. Use standalone statements:
     - `&list <- val;` — push val onto list (destructive insert)
     - `x <- &list;` — pop from list into x (destructive extract)
     - `x <- list;` — read from list without removing (non-destructive copy)
 
-12. **`Byte` is defined in `lib/std/types.bv`** — do not assume it
+13. **`Byte` is defined in `lib/std/types.bv`** — do not assume it
     exists without importing. If the type isn't needed, use `Int`.
 
-13. **`frgn` is an import** — first name after `frgn` is the C/foreign symbol,
+14. **`frgn` is an import** — first name after `frgn` is the C/foreign symbol,
     `as` gives the Brief name. `from` is required. Example:
     `frgn XXH64(data_ptr: Int, len: Int, seed: Int) -> Int as frgn__xxh64 from "link/xxhash/xxhash.c" fallback 0;`
 
-14. **`>>` in nested generics** — `Ptr<Ptr<Int>>` triggers the shift-right token.
+15. **`>>` in nested generics** — `Ptr<Ptr<Int>>` triggers the shift-right token.
     Always add a space: `Ptr<Ptr<Int> >`. This is a lexer limitation.
 
-15. **`_` discard binding** — `let _ = expr;` discards the value. The
+16. **`_` discard binding** — `let _ = expr;` discards the value. The
     `_` identifier binds nothing. Also works in tuple destructuring:
     `let (_, value) = get_pair();` ignores the first element.
 
-16. **Post-body loops `{ body; &i = i + 1; } [condition];` only work in `txn`/`node`** —
+17. **Post-body loops `{ body; &i = i + 1; } [condition];` only work in `txn`/`node`** —
     NOT in `defn`. Use `txn` for iteration; `defn` is straight-line.
 
-17. **One precondition, one postcondition** — A txn contract has exactly
+18. **One precondition, one postcondition** — A txn contract has exactly
     `[pre][post]` with one block each. Combine multiple conditions with `&&`:
     `[a < N && b < M && running != 0][running == 0]`.
 
-18. **Flat import namespace** — Imports bring names directly into scope.
+19. **Flat import namespace** — Imports bring names directly into scope.
     No `::` module path syntax. `loader::read_u8(x)` is invalid; use `read_u8(x)`.
 
-19. **No tuple destructuring in `let`** — `let (a, b) = expr;` IS supported.
+20. **No tuple destructuring in `let`** — `let (a, b) = expr;` IS supported.
     The parser accepts `let (name1, name2, ...) = expr;` for tuple return values.
     `_` may be used as a placeholder: `let (_, value) = result;`.
 
-20. **`Int` narrowing is protocol-based** — `defn f() -> Int` may emit LLVM
+21. **`Int` narrowing is protocol-based** — `defn f() -> Int` may emit LLVM
     `i8` for small constants. This is intended — the narrowing pass proves
     value ranges through contracts, then propagates the narrowed width through
     ALL SSA values consistently (`add i8 0, 42` rather than `add i64 0, 42`
@@ -834,26 +846,26 @@ it. The more LLVM knows, the more aggressively it can optimize.
     floor via `bits <~ N` metadata so `Int64` never narrows below 64 bits.
     Narrowing operates on `#Int`/`#UInt` protocol membership, not type names.
 
-21. **Import resolution uses file-relative paths** — `import "foo.bv"` resolves
+22. **Import resolution uses file-relative paths** — `import "foo.bv"` resolves
     relative to the **file's own directory**, not the parent directory.
     `"<foo>"` (angle brackets) is a registry lookup, not a file path.
 
-22. **Tuples are heap-allocated** — `(1, 2)` calls `@malloc`. LLVM SROA should
+23. **Tuples are heap-allocated** — `(1, 2)` calls `@malloc`. LLVM SROA should
     promote small tuples to SSA registers in optimized builds.
 
 ### Type System
 
-23. **`type Foo <: List { ... }` creates a TypeDef** — but `Foo<Int>`
+24. **`type Foo <: List { ... }` creates a TypeDef** — but `Foo<Int>`
     is NOT automatically assignable to `List<Int>` in the type checker.
     Projections like `:> Size` and index `foo[i]` may fail on `Foo<Int>`
     even though the runtime representation is identical.
 
-24. **No implicit `Copy` on enums with `String`** — `InsertStrategy::Custom(String)`
+25. **No implicit `Copy` on enums with `String`** — `InsertStrategy::Custom(String)`
     requires removing `Copy` and adjusting comparison code.
 
 ### Control Flow
 
-25. **`[expr]` guard syntax — three distinct forms** — The bracket prefix
+26. **`[expr]` guard syntax — three distinct forms** — The bracket prefix
     introduces a conditional or convergence gate, but must NOT be followed by
     `{`:
     - `[expr];` — **convergence gate** (`Statement::Gate`). Compile-time
@@ -870,7 +882,7 @@ it. The more LLVM knows, the more aggressively it can optimize.
     Each guard is checked in order; the first matching guard executes its body.
     A trailing `{ body }` without `when` serves as the else clause.
 
-26. **`type` is for protocols, `struct` is for data** — The keywords have distinct
+27. **`type` is for protocols, `struct` is for data** — The keywords have distinct
     roles:
     - `type`: Protocol definitions, operator bindings (`#Int`, `#Float`),
       type system extensibility. `type Int: #Int { op Add(#Int); };`
@@ -881,25 +893,39 @@ it. The more LLVM knows, the more aggressively it can optimize.
       visibility modifiers.
     Migrating `type { field: T }` patterns to `struct { field: T }` is in progress.
 
-27. **Bracket array syntax with SIMD** — `Int[1024]` declares a fixed-size array
+28. **Bracket array syntax with SIMD** — `Int[1024]` declares a fixed-size array
     known at compile time. The compiler embeds it as `[1024 x i64]` in LLVM IR.
-    Planned extensions include:
-    - Slicing: `arr[0:1024:2]` — strided view with compile-time bounds
-    - SIMD operations: `arr1 + arr2`, `arr.map(f)` → auto-vectorized over `[N x T]`
-    - Contract-bound safety: `[idx < arr.len]` proves every access in bounds
+    `MyType[N]` works for any type. Currently supports:
+    - **Slice syntax**: `arr[start:end:stride]` — zero-copy view with compile-time
+      bounds. Any component is optional → `arr[:]`, `arr[4:]`, `arr[:8]`,
+      `arr[2:8]` (stride 1), `arr[2:8:2]` (stride 2), `arr[i:j:k]` (dynamic bounds).
+      All bounds may be variables — the type narrows to `Vector<T, M>` when
+      constant, or `Slice<T>` (runtime descriptor) with variable bounds.
+    - **SIMD operators**: `arr1 + arr2`, `arr1 * arr2`, `arr * 2` (scalar
+      broadcast) on both `Vector<T, N>` and `Slice<T>` types. Emits `<N x T>`
+      vector add/mul or auto-vectorized loop.
+    - **Slice as lvalue**: `arr[2:8] = src` — contiguous slices use `memcpy`,
+      strided slices use element-by-element loop (LLVM vectorizes).
+    - **Contract-bound safety**: `[i >= 0 && i < arr :> Size]` proves every
+      access in bounds for both `Vector<T, N>` and `Slice<T>`. Slice length
+      is proven by contracts, not runtime checks.
+    - **Stdlib, not magic**: `map`, `filter`, `fold`, `any`, `all`, `sum`,
+      `product` are regular txn functions in `lib/std/array.bv`. The LLVM
+      auto-vectorizer recognizes the `[i < N]` convergence contract and
+      vectorizes the load-apply-store loop automatically.
 
-28. **`[[post]` = `[true][post]`** — postcondition-only.
+29. **`[[post]` = `[true][post]`** — postcondition-only.
     **`[pre]]` = `[pre][true]`** — precondition-only.
 
-29. **`[true][true]` is rejected** — parser enforces at least one
+30. **`[true][true]` is rejected** — parser enforces at least one
     meaningful constraint. Use `[[post]` or `[pre]]` sugar instead.
 
-30. **`[cond] { body }` is rejected** — The parser produces an error telling you
+31. **`[cond] { body }` is rejected** — The parser produces an error telling you
     to use `when cond { body }` instead. The bracket prefix `[cond]` at statement
     level is only valid as a convergence gate (`[cond];`) or a guarded single
     statement (`[cond] stmt;`). Block bodies always require the `when` keyword.
 
-31. **No `main()` function** — Brief has no `main()` entry point. Programs start
+32. **No `main()` function** — Brief has no `main()` entry point. Programs start
     via state-space triggers on `node` declarations. The compiler implicitly
     creates an entry point by instantiating a node and wiring a corresponding
     bootup variable. The scripting plugin (`script` pragma) is one way to

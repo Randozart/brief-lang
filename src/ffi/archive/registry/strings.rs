@@ -3,7 +3,7 @@ use crate::interpreter::{bool_to_bits, i64_to_bits, Value};
 
 fn value_to_string(val: &Value) -> Result<String, RuntimeError> {
     match val {
-        Value::Bits(b) => Ok(String::from_UTF8_lossy(b).to_string()),
+        Value::Bits(b) => Ok(String::from_utf8_lossy(b).to_string()),
         _ => Err(RuntimeError::TypeError {
             expected: "String".into(),
             found: format!("{:?}", val),

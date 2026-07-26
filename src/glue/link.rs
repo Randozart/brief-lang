@@ -92,11 +92,11 @@ fn extract_symbols(path: &Path) -> Result<Vec<String>, String> {
         .map_err(|e| format!("Failed to execute nm: {}", e))?;
 
     if !output.status.success() {
-        let stderr = String::from_UTF8_lossy(&output.stderr);
+        let stderr = String::from_utf8_lossy(&output.stderr);
         return Err(format!("nm failed: {}", stderr.lines().next().unwrap_or("unknown error")));
     }
 
-    let stdout = String::from_UTF8_lossy(&output.stdout);
+    let stdout = String::from_utf8_lossy(&output.stdout);
     let symbols: Vec<String> = stdout.lines()
         .filter_map(|line| {
             // nm output format: <address> <type> <name>

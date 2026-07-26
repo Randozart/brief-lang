@@ -352,7 +352,7 @@ fn emit_alloc_with_strategy(
             }
         }
         Expr::Quoted(bytes) => {
-            let strategy_name = String::from_UTF8_lossy(bytes).to_string();
+            let strategy_name = String::from_utf8_lossy(bytes).to_string();
             // Look up in config/alloc-strategies.toml.
             let found = emit_alloc_from_config(backend, out, v, &strategy_name, size, indent);
             if !found {
@@ -639,7 +639,7 @@ fn emit_address_of(
     };
     // The argument must be a string literal at compile time
     let id = match arg {
-        Expr::Quoted(bytes) => String::from_UTF8_lossy(bytes).to_string(),
+        Expr::Quoted(bytes) => String::from_utf8_lossy(bytes).to_string(),
         _ => {
             // If not a literal, try emitting as expression and warn
             let reg = emit_arg(backend, out, &args[0], indent);

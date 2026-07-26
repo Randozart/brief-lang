@@ -382,7 +382,7 @@ fn collect_strings_stmt(stmt: &Statement, seen: &mut std::collections::HashSet<S
 fn collect_strings_expr(expr: &Expr, seen: &mut std::collections::HashSet<String>, out: &mut Vec<String>) {
     match expr {
         Expr::Quoted(s) => {
-            let s_str = String::from_UTF8_lossy(s).into_owned();
+            let s_str = String::from_utf8_lossy(s).into_owned();
             if !seen.contains(&s_str) {
                 seen.insert(s_str.clone());
                 out.push(s_str);

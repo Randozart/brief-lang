@@ -10,8 +10,8 @@ type JsBuffer {
 type JsString: Bits #String {
     maxbits <~ 64;
     alignment <~ 8;
-    op CastTo(#String<UTF8>) = jsstring_to_UTF8(#L);
-    op CastFrom(#String<UTF8>) = UTF8_to_jsstring(#L);
+    op CastTo(#String<UTF8>) = jsstring_to_utf8(#L);
+    op CastFrom(#String<UTF8>) = utf8_to_jsstring(#L);
 };
 
 type JsNumber: Bits #Int {

@@ -112,7 +112,7 @@ impl ReactorTransitionGraph {
                         .filter(|m| m.name == "assume_event")
                         .filter_map(|m| m.value.as_ref().and_then(|v| {
                             if let Expr::Quoted(bytes) = v {
-                                Some(String::from_UTF8_lossy(bytes).to_string())
+                                Some(String::from_utf8_lossy(bytes).to_string())
                             } else {
                                 None
                             }
@@ -123,7 +123,7 @@ impl ReactorTransitionGraph {
                         .find(|m| m.name == "assume_shape")
                         .and_then(|m| m.value.as_ref().and_then(|v| {
                             if let Expr::Quoted(bytes) = v {
-                                let s = String::from_UTF8_lossy(bytes);
+                                let s = String::from_utf8_lossy(bytes);
                                 let parts: Vec<&str> = s.splitn(2, ", ").collect();
                                 if parts.len() == 2 {
                                     let action = parts[1].trim();

@@ -25,7 +25,7 @@ impl LlvmBackend {
             if tag.name == "export" {
                 let export_name = tag.value.as_ref().and_then(|v| {
                     if let Expr::Quoted(bytes) = v {
-                        Some(String::from_UTF8_lossy(bytes).to_string())
+                        Some(String::from_utf8_lossy(bytes).to_string())
                     } else {
                         None
                     }
@@ -828,7 +828,7 @@ impl LlvmBackend {
             }
             Some(Expr::Quoted(s)) => {
                 // 2026-07-14: Store string constant pointer (Quoted replaces LiteralExpr::String).
-                let s_str = String::from_UTF8_lossy(&s);
+                let s_str = String::from_utf8_lossy(&s);
                 let si = self.ctx.string_constants.iter().position(|x| x.as_str() == s_str).unwrap_or(0);
                 let g = format!("@str.{}", si);
                 let str_p = field_reg("s");
@@ -1422,7 +1422,7 @@ impl LlvmBackend {
             .find(|m| m.name == "assume_shape")
             .and_then(|m| m.value.as_ref().and_then(|v| {
                 if let Expr::Quoted(bytes) = v {
-                    Some(String::from_UTF8_lossy(bytes).to_string())
+                    Some(String::from_utf8_lossy(bytes).to_string())
                 } else {
                     None
                 }

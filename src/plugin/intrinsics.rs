@@ -76,7 +76,7 @@ fn expect_string_arg(args: &[Expr], idx: usize, intrinsic: &str) -> Result<Strin
         Expr::Quoted(bytes) => {
             // Quoted bytes may contain non-UTF-8 data; for imports the path
             // must be valid UTF-8.
-            String::from_UTF8(bytes.clone()).map_err(|_| {
+            String::from_utf8(bytes.clone()).map_err(|_| {
                 format!("{}: argument {} is not a valid UTF-8 string", intrinsic, idx)
             })
         }

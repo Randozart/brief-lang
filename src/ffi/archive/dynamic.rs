@@ -89,7 +89,7 @@ pub fn call_foreign_by_name(
                 c_ints.push(c as i64);
             }
             FrgnType::String => {
-                let s = match val { Value::Bits(b) => String::from_UTF8_lossy(b).to_string(), _ => String::new() };
+                let s = match val { Value::Bits(b) => String::from_utf8_lossy(b).to_string(), _ => String::new() };
                 c_strings.push(CString::new(s).unwrap_or_else(|_| CString::new("").unwrap()));
             }
             FrgnType::Void => {}

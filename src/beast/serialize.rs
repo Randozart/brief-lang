@@ -188,7 +188,7 @@ fn emit_expr(e: &Expr) -> SExpr {
         Expr::Float(f) => SExpr::Atom(Atom::Float(*f)),
         Expr::Bool(b) => SExpr::Atom(Atom::Bool(*b)),
         Expr::Quoted(bytes) => {
-            let s = String::from_UTF8_lossy(bytes).to_string();
+            let s = String::from_utf8_lossy(bytes).to_string();
             list(&[atom("string"), atom(&s)])
         }
         Expr::Identifier(name) => list(&[atom("ident"), atom(name)]),

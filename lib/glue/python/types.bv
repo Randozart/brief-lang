@@ -12,10 +12,10 @@ type PyBytes {
 type PyString: #String {
     maxbits <~ 128;
     alignment <~ 8;
-    op CastTo(#String<UTF8>) = ucs4_to_UTF8(#L);
-    op CastFrom(#String<UTF8>) = UTF8_to_ucs4(#L);
-    op CastTo(#String<ASCII>) = ucs4_to_ASCII(#L);
-    op CastFrom(#String<ASCII>) = ASCII_to_ucs4(#L);
+    op CastTo(#String<UTF8>) = ucs4_to_utf8(#L);
+    op CastFrom(#String<UTF8>) = utf8_to_ucs4(#L);
+    op CastTo(#String<ASCII>) = ucs4_to_ascii(#L);
+    op CastFrom(#String<ASCII>) = ascii_to_ucs4(#L);
 };
 
 type PyInt: #Int {

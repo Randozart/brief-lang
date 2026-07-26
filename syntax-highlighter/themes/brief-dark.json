@@ -79,10 +79,6 @@
       "settings": { "foreground": "#C586C0", "fontStyle": "bold" }
     },
     {
-      "scope": "variable.language.prior-state.brief",
-      "settings": { "foreground": "#DCDCAA", "fontStyle": "italic" }
-    },
-    {
       "scope": "keyword.operator.comparison.brief",
       "settings": { "foreground": "#D4D4D4" }
     },
@@ -125,10 +121,6 @@
     {
       "scope": "text.plain",
       "settings": { "foreground": "#D4D4D4" }
-    },
-    {
-      "scope": "keyword.declaration.compiletime.brief",
-      "settings": { "foreground": "#4EC9B0", "fontStyle": "bold" }
     },
     {
       "scope": "keyword.other.property.brief",

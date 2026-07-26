@@ -96,9 +96,9 @@ fn bits_to_string(val: &Value) -> String {
             if bytes.len() == 8 {
                 val.as_i64()
                     .map(|n| n.to_string())
-                    .unwrap_or_else(|| String::from_UTF8_lossy(bytes).to_string())
+                    .unwrap_or_else(|| String::from_utf8_lossy(bytes).to_string())
             } else {
-                String::from_UTF8_lossy(bytes).to_string()
+                String::from_utf8_lossy(bytes).to_string()
             }
         }
         _ => String::new(),

@@ -16,7 +16,7 @@ fn eval_mask_condition(ctx: &mut Interpreter, mask_expr: &Expr, item_value: &Val
             Ok(crate::analysis::dfa::execute_dfa(dfa, &s).is_some())
         }
         Value::Bits(ref bytes) => {
-            let pattern = String::from_UTF8_lossy(bytes);
+            let pattern = String::from_utf8_lossy(bytes);
             match crate::analysis::dfa::compile_to_dfa(&pattern) {
                 Ok(dfa) => {
                     let s = ctx.value_to_string(item_value)?;
@@ -45,7 +45,7 @@ fn decompose_atomic_to_chars(val: &Value) -> Option<Vec<char>> {
             char::from_u32(u32::from_le_bytes(arr)).map(|c| vec![c])
         }
         Value::Bits(b) => {
-            let s = String::from_UTF8_lossy(b);
+            let s = String::from_utf8_lossy(b);
             Some(s.chars().collect())
         }
         _ => None,
@@ -162,7 +162,7 @@ impl ExprEval for ListIndexExpr {
                 // Non-integer index: try DbvlTable string key
                 // 2026-07-11: Expr::String produces Value::Bits; check both.
                 let dbvl_key = match &index_val {
-                    Value::Bits(b) => String::from_UTF8(b.clone()).ok(),
+                    Value::Bits(b) => String::from_utf8(b.clone()).ok(),
                     _ => None,
                 };
                 match (&list_val, dbvl_key) {
@@ -209,7 +209,7 @@ impl ExprEval for SliceExpr {
 
         // Handle String atomically via Bits
         if let Value::Bits(ref s_bytes) = list_val {
-            let s = String::from_UTF8_lossy(s_bytes);
+            let s = String::from_utf8_lossy(s_bytes);
             let len = s.len();
             let start_idx = eval_idx(&self.start, len).unwrap_or(0);
             let end_idx = eval_idx(&self.end, len).unwrap_or(len);
@@ -269,7 +269,7 @@ impl ExprEval for MultiSliceExpr {
                     // 2026-07-11: Expr::String produces Value::Bits; check both.
                     let coord_val = ctx.eval_expr(coord_expr)?;
                     let pattern = match &coord_val {
-                        Value::Bits(b) => String::from_UTF8(b.clone()).ok(),
+                        Value::Bits(b) => String::from_utf8(b.clone()).ok(),
                         _ => None,
                     };
                     if let Some(ref pattern) = pattern {

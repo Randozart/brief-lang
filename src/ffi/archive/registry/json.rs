@@ -42,7 +42,7 @@ fn value_to_json_value(val: &Value) -> serde_json::Value {
                 let n = i64::from_le_bytes(b[..8].try_into().unwrap_or([0u8; 8]));
                 serde_json::Value::Number(serde_json::Number::from(n))
             } else {
-                serde_json::Value::String(String::from_UTF8_lossy(b).to_string())
+                serde_json::Value::String(String::from_utf8_lossy(b).to_string())
             }
         }
         Value::List(items) => {
@@ -97,7 +97,7 @@ fn json_get_by_index_body(args: Vec<Value>) -> Result<Value, RuntimeError> {
 pub fn json_parse_impl(args: Vec<Value>) -> Result<Value, RuntimeError> {
     match args.first() {
         Some(Value::Bits(data)) => {
-            let s = String::from_UTF8_lossy(data);
+            let s = String::from_utf8_lossy(data);
             match serde_json::from_str::<serde_json::Value>(&s) {
                 Ok(json) => Ok(json_value_to_value(json)),
                 Err(e) => Err(RuntimeError::HeapError(format!("json::parse failed: {}", e))),

@@ -1853,7 +1853,7 @@ impl LlvmBackend {
                 .ok();
             }
             Expr::Quoted(llvm_op) => {
-                let llvm_op_str = String::from_UTF8_lossy(llvm_op);
+                let llvm_op_str = String::from_utf8_lossy(llvm_op);
                 writeln!(
                     out,
                     "{}{} = {} {} {}, {}",

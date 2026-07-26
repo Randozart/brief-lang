@@ -424,7 +424,7 @@ pub fn execute_intrinsic(
                 .ok()
                 .and_then(|o| {
                     if o.status.success() {
-                        String::from_UTF8_lossy(&o.stdout).trim().parse::<i64>().ok()
+                        String::from_utf8_lossy(&o.stdout).trim().parse::<i64>().ok()
                     } else { None }
                 })
                 .unwrap_or_else(|| {
@@ -465,10 +465,10 @@ pub fn execute_intrinsic(
                 .output()
                 .map_err(|e| RuntimeError::HeapError(format!("ShellCmd#: {}", e)))?;
             if !output.status.success() {
-                let stderr = String::from_UTF8_lossy(&output.stderr);
+                let stderr = String::from_utf8_lossy(&output.stderr);
                 return Err(RuntimeError::HeapError(format!("ShellCmd#: '{}' failed: {}", cmd, stderr)));
             }
-            let body = String::from_UTF8_lossy(&output.stdout).to_string();
+            let body = String::from_utf8_lossy(&output.stdout).to_string();
             let bytes = body.into_bytes();
             let len = bytes.len() as i64;
             let mut header = len.to_le_bytes().to_vec();
@@ -557,7 +557,7 @@ fn arg_as_f64(args: &[Value], index: usize) -> Result<f64, RuntimeError> {
 
 fn arg_as_string(args: &[Value], index: usize) -> Result<String, RuntimeError> {
     match args.get(index) {
-        Some(Value::Bits(bytes)) => Ok(String::from_UTF8_lossy(bytes).to_string()),
+        Some(Value::Bits(bytes)) => Ok(String::from_utf8_lossy(bytes).to_string()),
         _ => Err(RuntimeError::TypeError {
             expected: "String".into(),
             found: format!("{:?}", args.get(index)),

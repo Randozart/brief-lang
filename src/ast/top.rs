@@ -517,7 +517,7 @@ impl Annotation {
     pub fn string_value(&self) -> Option<String> {
         self.value.as_ref().and_then(|v| {
             if let Expr::Quoted(bytes) = v {
-                Some(String::from_UTF8_lossy(bytes).to_string())
+                Some(String::from_utf8_lossy(bytes).to_string())
             } else {
                 None
             }

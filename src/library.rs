@@ -37,7 +37,7 @@ pub fn run_library_mode(args: &[String]) -> Result<(), String> {
         .output()
         .map_err(|e| format!("llc not found: {}", e))?;
     if !llc_result.status.success() {
-        let stderr = String::from_UTF8_lossy(&llc_result.stderr);
+        let stderr = String::from_utf8_lossy(&llc_result.stderr);
         return Err(format!("llc failed: {}", stderr));
     }
 
@@ -48,7 +48,7 @@ pub fn run_library_mode(args: &[String]) -> Result<(), String> {
         .output()
         .map_err(|e| format!("ar not found: {}", e))?;
     if !ar_result.status.success() {
-        let stderr = String::from_UTF8_lossy(&ar_result.stderr);
+        let stderr = String::from_utf8_lossy(&ar_result.stderr);
         return Err(format!("ar failed: {}", stderr));
     }
 

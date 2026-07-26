@@ -271,7 +271,7 @@ fn format_value(val: &Value) -> String {
             n.to_string()
         }
         Value::Bits(d) => {
-            let s = String::from_UTF8_lossy(d);
+            let s = String::from_utf8_lossy(d);
             format!("\"{}\"", s)
         }
         Value::Void => "void".to_string(),
