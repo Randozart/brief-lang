@@ -347,6 +347,13 @@ fn collect_strings_tl(tl: &TopLevel, seen: &mut std::collections::HashSet<String
             for d in &c.definitions { for s in &d.body { collect_strings_stmt(s, seen, out); } }
             for trg in &c.internal_triggers { collect_strings_expr(&Expr::Identifier(trg.name.clone()), seen, out); }
         }
+        // 2026-07-26: TopLevel::Statement wraps top-level let bindings
+        // that contain string literals (e.g. GetEnvInt!("BOUND")).
+        // Without this arm, the string is never collected and @str.N is
+        // referenced but undefined, causing clang to fail.
+        TopLevel::Statement(stmt) => {
+            collect_strings_stmt(stmt, seen, out);
+        }
         _ => {}
     }
 }
