@@ -156,6 +156,8 @@ impl LlvmBackend {
             crate::ast::BinaryOpKind::And => {
                 let left = self.emit_exit_expr(out, l, indent);
                 let right = self.emit_exit_expr(out, r, indent);
+                // 2026-07-26: Use i64 for all exit-typed values.
+                // Bool fields go through zext i8 to i64 in emit_exit_identifier.
                 writeln!(out, "{}{} = and i64 {}, {}", indent, v, left, right).ok();
             }
             crate::ast::BinaryOpKind::Or => {
