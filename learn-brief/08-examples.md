@@ -6,34 +6,36 @@ Real-world Brief programs demonstrating all features.
 
 ```brief
 // counter.rbv
-rstruct Counter {
-    count: Int = 0;
-    
-    txn increment() [count < 100][count == @count + 1] {
-        &count = count + 1;
-        term;
-    };
-    
-    txn decrement() [count > 0][count == @count - 1] {
-        &count = count - 1;
-        term;
-    };
-    
-    txn reset() [true][count == 0] {
-        &count = 0;
-        term;
-    };
-    
-    view {
-        <div class="counter">
-            <h1 b-text="count"></h1>
-            <button b-trigger:click="increment">+</button>
-            <button b-trigger:click="decrement">-</button>
-            <button b-trigger:click="reset">Reset</button>
-        </div>
-    }
-}
+let count: Int = 0;
+
+txn increment [count < 100][@count + 1 == count] {
+    count = count + 1;
+    term;
+};
+
+txn decrement [count > 0][@count - 1 == count] {
+    count = count - 1;
+    term;
+};
+
+txn reset [count != 0][0 == count] {
+    count = 0;
+    term;
+};
+
+render struct Counter {
+    <div class="counter">
+        <h1 b-text="count"></h1>
+        <button b-trigger:click="increment">+</button>
+        <button b-trigger:click="decrement">-</button>
+        <button b-trigger:click="reset">Reset</button>
+    </div>
+};
 ```
+
+See `examples/counter.rbv` for the full file with `<view>` and `<style>` blocks.
+State variables are declared with `let` at the top level; `render struct` attaches
+the HTML template that binds to those variables via `b-*` directives.
 
 ## 2. Bank Account System
 
@@ -89,148 +91,143 @@ txn enable_overdraft()
 
 ```brief
 // shopping_cart.rbv
-rstruct ShoppingCart {
-    items: Int = 0,
-    total: Float = 0.0,
-    discount_applied: Bool = false;
-    
-    txn add_item(name: String, price: Float, quantity: Int)
-        [price > 0 && quantity > 0]
-        [items == @items + quantity && total == @total + (price * quantity)]
-    {
-        &items = items + quantity;
-        &total = total + (price * quantity);
-        term;
-    };
-    
-    txn remove_item(quantity: Int)
-        [quantity > 0 && quantity <= items]
-        [items == @items - quantity]
-    {
-        &items = items - quantity;
-        term;
-    };
-    
-    txn clear_cart() [items > 0][items == 0 && total == 0.0] {
-        &items = 0;
-        &total = 0.0;
-        &discount_applied = false;
-        term;
-    };
-    
-    node apply_bulk_discount() 
-        [items > 10 && total > 100.0 && !discount_applied]
-        [total < @total && discount_applied == true]
-    {
-        let discount: Float = total * 0.1;
-        &total = total - discount;
-        &discount_applied = true;
-        term;
-    };
-    
-    view {
-        <div class="shopping-cart">
-            <h1>Shopping Cart</h1>
-            
-            <div class="stats">
-                <p>Items: <span b-text="items"></span></p>
-                <p>Total: $<span b-text="total"></span></p>
-                <p b-show="discount_applied">Discount Applied! (10% off)</p>
-            </div>
-            
-            <div class="actions">
-                <button b-trigger:click="add_item('Laptop', 999.99, 1)">
-                    Add Laptop
-                </button>
-                <button b-trigger:click="add_item('Mouse', 29.99, 1)">
-                    Add Mouse
-                </button>
-            </div>
-            
-            <div class="controls">
-                <button b-trigger:click="remove_item(1)">Remove One</button>
-                <button b-trigger:click="clear_cart()">Clear Cart</button>
-            </div>
+let items: Int = 0;
+let total: Float = 0.0;
+let discount_applied: Bool = false;
+
+txn add_item(price: Float, quantity: Int)
+    [price > 0 && quantity > 0]
+    [items == @items + quantity && total == @total + (price * quantity)]
+{
+    items = items + quantity;
+    total = total + (price * quantity);
+    term;
+};
+
+txn remove_item(quantity: Int)
+    [quantity > 0 && quantity <= items]
+    [items == @items - quantity]
+{
+    items = items - quantity;
+    term;
+};
+
+txn clear_cart [items > 0][items == 0 && total == 0.0] {
+    items = 0;
+    total = 0.0;
+    discount_applied = false;
+    term;
+};
+
+node apply_bulk_discount 
+    [items > 10 && total > 100.0 && !discount_applied]
+    [total < @total && discount_applied == true]
+{
+    let discount: Float = total * 0.1;
+    total = total - discount;
+    discount_applied = true;
+    term;
+};
+
+render struct ShoppingCart {
+    <div class="shopping-cart">
+        <h1>Shopping Cart</h1>
+        
+        <div class="stats">
+            <p>Items: <span b-text="items"></span></p>
+            <p>Total: $<span b-text="total"></span></p>
+            <p b-show="discount_applied">Discount Applied! (10% off)</p>
         </div>
-    }
-}
+        
+        <div class="actions">
+            <button b-trigger:click="add_item(999.99, 1)">
+                Add Laptop
+            </button>
+            <button b-trigger:click="add_item(29.99, 1)">
+                Add Mouse
+            </button>
+        </div>
+        
+        <div class="controls">
+            <button b-trigger:click="remove_item(1)">Remove One</button>
+            <button b-trigger:click="clear_cart">Clear Cart</button>
+        </div>
+    </div>
+};
 ```
 
 ## 4. Todo List
 
 ```brief
 // todo.rbv
-rstruct TodoList {
-    todos: List<Todo> = [],
-    filter: String = "all";
-    
-    struct Todo {
-        id: Int,
-        text: String,
-        completed: Bool
+struct Todo {
+    id: Int;
+    text: String;
+    completed: Bool;
+};
+
+let todos: List<Todo> = [];
+let filter: String = "all";
+
+txn add_todo(text: String) [text :> Size > 0][todos :> Size == @todos :> Size + 1] {
+    let new_todo = Todo {
+        id: todos :> Size,
+        text: text,
+        completed: false
     };
-    
-    txn add_todo(text: String) [text .#Size > 0][todos .#Size == @todos .#Size + 1] {
-        let new_todo = Todo {
-            id: todos .#Size,
-            text: text,
-            completed: false
+    todos = todos.append(new_todo);
+    term;
+};
+
+txn toggle_todo(id: Int) [id >= 0 && id < todos :> Size][true] {
+    let todo = todos[id];
+    todos = todos.set(id, Todo {
+        id: todo.id,
+        text: todo.text,
+        completed: !todo.completed
+    });
+    term;
+};
+
+txn remove_todo(id: Int) [id >= 0 && id < todos :> Size][todos :> Size == @todos :> Size - 1] {
+    todos = todos.remove(id);
+    term;
+};
+
+txn clear_completed [true][true] {
+    let filtered: List<Todo> = [];
+    let i: Int = 0;
+    [i < todos :> Size] {
+        [!todos[i].completed] {
+            filtered = filtered.append(todos[i]);
         };
-        &todos = todos.append(new_todo);
-        term;
+        i = i + 1;
     };
-    
-    txn toggle_todo(id: Int) [id >= 0 && id < todos .#Size][true] {
-        let todo = todos[id];
-        &todos = todos.set(id, Todo {
-            id: todo.id,
-            text: todo.text,
-            completed: !todo.completed
-        });
-        term;
-    };
-    
-    txn remove_todo(id: Int) [id >= 0 && id < todos .#Size][todos .#Size == @todos .#Size - 1] {
-        &todos = todos.remove(id);
-        term;
-    };
-    
-    txn clear_completed() [true][true] {
-        let mut filtered: List<Todo> = [];
-        let i: Int = 0;
-        [i < todos .#Size] {
-            [!todos[i].completed] {
-                filtered = filtered.append(todos[i]);
-            };
-            i = i + 1;
-        };
-        &todos = filtered;
-        term;
-    };
-    
-    view {
-        <div class="todo-app">
-            <h1>Todo List</h1>
-            
-            <input type="text" b-model="newTodoText" placeholder="Add todo..." />
-            <button b-trigger:click="add_todo(newTodoText)">Add</button>
-            
-            <ul>
-                <li b-for="todo in todos">
-                    <input 
-                        type="checkbox" 
-                        b-model="todo.completed"
-                        b-trigger:change="toggle_todo(todo.id)"
-                    />
-                    <span b-text="todo.text"></span>
-                    <button b-trigger:click="remove_todo(todo.id)">Delete</button>
-                </li>
-            </ul>
-            
-            <button b-trigger:click="clear_completed()">Clear Completed</button>
-        </div>
-    }
-}
+    todos = filtered;
+    term;
+};
+
+render struct TodoList {
+    <div class="todo-app">
+        <h1>Todo List</h1>
+        
+        <input type="text" b-bind:value="filter" placeholder="Filter..." />
+        <button b-trigger:click="add_todo('New task')">Add</button>
+        
+        <ul>
+            <li b-each:item="todos">
+                <input 
+                    type="checkbox" 
+                    b-trigger:change="toggle_todo(item.id)"
+                />
+                <span b-text="item.text"></span>
+                <button b-trigger:click="remove_todo(item.id)">Delete</button>
+            </li>
+        </ul>
+        
+        <button b-trigger:click="clear_completed">Clear Completed</button>
+    </div>
+};
 ```
 
 ## 5. Traffic Light System
@@ -316,8 +313,8 @@ defn process(item: Int) {
 import "std/io";
 import "std/string";
 
-frgn sig read_file(path: String) -> Result<String, IOError> from "io.toml";
-frgn sig write_file(path: String, content: String) -> Result<Void, IOError> from "io.toml";
+frgn read_file(path: String) -> Result<String, IOError> from "std/io.bv" fallback "";
+frgn write_file(path: String, content: String) -> Result<Void, IOError> from "std/io.bv";
 
 txn process_file(input_path: String, output_path: String) 
     [true]
@@ -399,65 +396,63 @@ node refund()
 
 ```brief
 // dashboard.rbv
-rstruct Dashboard {
-    temperature: Float = 20.0,
-    humidity: Float = 50.0,
-    alerts: List<String> = [],
-    last_updated: Int = 0;
-    
-    node update_sensor_data() [true][last_updated == current_time()] {
-        &temperature = read_temperature();
-        &humidity = read_humidity();
-        &last_updated = current_time();
-        term;
-    };
-    
-    node check_temperature_alert() 
-        [temperature > 30.0 || temperature < 10.0]
-        [alerts.contains("Temperature warning")]
-    {
-        &alerts = alerts.append("Temperature warning: " + String(temperature) + "°C");
-        term;
-    };
-    
-    node check_humidity_alert() 
-        [humidity > 80.0 || humidity < 20.0]
-        [alerts.contains("Humidity warning")]
-    {
-        &alerts = alerts.append("Humidity warning: " + String(humidity) + "%");
-        term;
-    };
-    
-    node clear_old_alerts() [alerts .#Size > 10][alerts .#Size <= 10] {
-        &alerts = alerts.drop(1);
-        term;
-    };
-    
-    view {
-        <div class="dashboard">
-            <h1>Environmental Dashboard</h1>
-            
-            <div class="sensor">
-                <h2>Temperature</h2>
-                <p b-text="temperature + '°C'"></p>
-            </div>
-            
-            <div class="sensor">
-                <h2>Humidity</h2>
-                <p b-text="humidity + '%'"></p>
-            </div>
-            
-            <div class="alerts" b-show="alerts .#Size > 0">
-                <h2>Alerts</h2>
-                <ul>
-                    <li b-for="alert in alerts" b-text="alert"></li>
-                </ul>
-            </div>
-            
-            <p class="updated" b-text="'Last updated: ' + last_updated"></p>
+let temperature: Float = 20.0;
+let humidity: Float = 50.0;
+let alerts: List<String> = [];
+let last_updated: Int = 0;
+
+node update_sensor_data [true][last_updated == current_time()] {
+    temperature = read_temperature();
+    humidity = read_humidity();
+    last_updated = current_time();
+    term;
+};
+
+node check_temperature_alert 
+    [temperature > 30.0 || temperature < 10.0]
+    [alerts.contains("Temperature warning")]
+{
+    alerts = alerts.append("Temperature warning: " + String(temperature) + "°C");
+    term;
+};
+
+node check_humidity_alert 
+    [humidity > 80.0 || humidity < 20.0]
+    [alerts.contains("Humidity warning")]
+{
+    alerts = alerts.append("Humidity warning: " + String(humidity) + "%");
+    term;
+};
+
+node clear_old_alerts [alerts :> Size > 10][alerts :> Size <= 10] {
+    alerts = alerts.drop(1);
+    term;
+};
+
+render struct Dashboard {
+    <div class="dashboard">
+        <h1>Environmental Dashboard</h1>
+        
+        <div class="sensor">
+            <h2>Temperature</h2>
+            <p b-text="temperature + '°C'"></p>
         </div>
-    }
-}
+        
+        <div class="sensor">
+            <h2>Humidity</h2>
+            <p b-text="humidity + '%'"></p>
+        </div>
+        
+        <div class="alerts" b-show="alerts :> Size > 0">
+            <h2>Alerts</h2>
+            <ul>
+                <li b-each:item="alerts" b-text="item"></li>
+            </ul>
+        </div>
+        
+        <p class="updated" b-text="'Last updated: ' + last_updated"></p>
+    </div>
+};
 ```
 
 ## 10. Compile-Time Metaprogramming
