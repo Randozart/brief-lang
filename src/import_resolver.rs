@@ -365,8 +365,8 @@ impl ImportResolver {
             }
         }
 
-        // Check for DBrief import (.dbv, .dbvl, .dbvs)
-        if import.path().ends_with(".dbv") || import.path().ends_with(".dbvl") || import.path().ends_with(".dbvs") {
+        // Check for DBrief import (.dbv, .dbvl)
+        if import.path().ends_with(".dbv") || import.path().ends_with(".dbvl") {
             let dbrief_src_dir = source_file
                 .parent()
                 .map(|p| p.to_path_buf())

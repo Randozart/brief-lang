@@ -217,12 +217,12 @@ pub fn preview_generated(result: &AnalysisResult) -> String {
     output
 }
 
-/// Generate DBVS bindings from analysis results (replaces TOML)
-pub fn generate_bindings_dbvs(result: &AnalysisResult) -> String {
+/// Generate .dbv bindings from analysis results (replaces TOML)
+pub fn generate_bindings_dbv(result: &AnalysisResult) -> String {
     let mut output = String::new();
 
     output.push_str(&format!(
-        "// Auto-generated DBVS bindings for {}\n// Mapper: {}\n\n",
+        "// Auto-generated .dbv bindings for {}\n// Mapper: {}\n\n",
         result.library_name, result.mapper,
     ));
 
@@ -449,21 +449,21 @@ pub fn write_bind_files(
             .map_err(|e| format!("Failed to create output directory: {}", e))?;
     }
 
-    let dbvs_path = output_dir.join("bindings.dbvs");
+    let dbvs_path = output_dir.join("bindings.dbv");
     let bridge_path = output_dir.join("bridge.bv");
 
     if dbvs_path.exists() && !force {
-        return Err(format!("bindings.dbvs already exists (use --force to overwrite)"));
+        return Err(format!("bindings.dbv already exists (use --force to overwrite)"));
     }
     if bridge_path.exists() && !force {
         return Err(format!("bridge.bv already exists (use --force to overwrite)"));
     }
 
-    let dbvs_content = generate_bindings_dbvs(result);
+    let dbvs_content = generate_bindings_dbv(result);
     let bridge_content = generate_bridge_bv(result);
 
     fs::write(&dbvs_path, dbvs_content)
-        .map_err(|e| format!("Failed to write bindings.dbvs: {}", e))?;
+        .map_err(|e| format!("Failed to write bindings.dbv: {}", e))?;
 
     fs::write(&bridge_path, bridge_content)
         .map_err(|e| format!("Failed to write bridge.bv: {}", e))?;
@@ -474,8 +474,8 @@ pub fn write_bind_files(
 /// Preview bind files without writing
 pub fn preview_bind(result: &AnalysisResult) -> String {
     let mut output = String::new();
-    output.push_str("=== bindings.dbvs (preview) ===\n\n");
-    output.push_str(&generate_bindings_dbvs(result));
+    output.push_str("=== bindings.dbv (preview) ===\n\n");
+    output.push_str(&generate_bindings_dbv(result));
     output.push_str("\n=== bridge.bv (preview) ===\n\n");
     output.push_str(&generate_bridge_bv(result));
     output

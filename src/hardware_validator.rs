@@ -21,7 +21,8 @@
 // or embeds the Work.
 
 use crate::ast::{Expr, Statement, TopLevel, Type, UnaryOpKind};
-use crate::dbrief::DbvsEngine;
+// 2026-07-26: DbvsEngine removed — V2 parser replaces .dbvs format
+// use crate::dbrief::DbvsEngine;
 use crate::errors::{Diagnostic, Severity};
 use crate::target_spec::TargetSpec;
 use std::collections::HashSet;
@@ -35,7 +36,6 @@ impl HardwareValidator {
         _target: &str,
         is_embedded: bool,
         target_spec: Option<&TargetSpec>,
-        dbvs_engine: Option<&DbvsEngine>,
     ) -> Vec<Diagnostic> {
         let write_graph = WriteGraph::build(items);
         let trigger_graph = TriggerGraph::build(items);
@@ -63,7 +63,7 @@ impl HardwareValidator {
         ));
 
         if let Some(spec) = target_spec {
-            diagnostics.extend(Self::check_memory_overlaps(items, hw_config, spec, dbvs_engine));
+            diagnostics.extend(Self::check_memory_overlaps(items, hw_config, spec));
         }
 
         // .cbv / .ebv-specific checks (circuit/embedded tier)
@@ -179,7 +179,6 @@ impl HardwareValidator {
         items: &[TopLevel],
         _hw_config: Option<&()>,
         spec: &TargetSpec,
-        dbvs_engine: Option<&DbvsEngine>,
     ) -> Vec<Diagnostic> {
         let mut diagnostics = Vec::new();
         let mut occupied_regions: Vec<(u64, u64, String)> = Vec::new();
@@ -219,22 +218,7 @@ impl HardwareValidator {
             }
         }
 
-        // 3. Use DbvsEngine to check for overflows and add to occupied regions
-        if let Some(engine) = dbvs_engine {
-            for item in items {
-                if let TopLevel::StateDecl(decl) = item {
-                    if let Some(alias) = engine.get_alias(&decl.name) {
-                        let size = get_dbrief_type_size(&alias.alias_type, engine);
-                        if size > 0 {
-                            let addr = decl.span.map(|s| s.line as u64).unwrap_or(0);
-                            occupied_regions.push((addr, addr + size, format!("StateDecl '{}'", decl.name)));
-                        }
-                    }
-                }
-            }
-        }
-
-        // 4. Check for overlaps between defined sections
+        // 3. Check for overlaps between defined sections
         for i in 0..occupied_regions.len() {
             for j in i + 1..occupied_regions.len() {
                 let (s1, e1, n1) = &occupied_regions[i];
@@ -396,7 +380,7 @@ impl HardwareValidator {
         for item in program {
             if let TopLevel::Import(import) = item {
                 let path_str = import.path().to_string();
-                if path_str.ends_with(".dbvs") {
+                if path_str.ends_with(".dbv") || path_str.ends_with(".dbvl") {
                     if let Some(parent) = source_file.parent() {
                         schema_files.push((path_str.clone(), parent.join(&path_str)));
                     }
@@ -413,11 +397,11 @@ impl HardwareValidator {
         for (schema_path, full_path) in &schema_files {
             match std::fs::read_to_string(full_path) {
                 Ok(content) => {
-                    match crate::dbrief::parse_dbvs(&content) {
-                        Ok(dbvs) => {
-                            for alias in &dbvs.aliases {
-                                schema_aliases.insert(alias.name.clone(), schema_path.clone());
-                            }
+                    match crate::dbrief::v2::parse_document(&content) {
+                        Ok(_doc) => {
+                            // 2026-07-26: V2 parser produces DbriefDocument with schemas.
+                            // Schema-to-alias mapping will be re-added with proper V2 support.
+                            // For now, collect schema paths for existence checking.
                         }
                         Err(e) => {
                             diagnostics.push(Diagnostic {
@@ -479,7 +463,7 @@ impl HardwareValidator {
                                 source_snippet: None,
                                 proof_chain: Vec::new(),
                                 examples: Vec::new(),
-                                hints: vec!["Add ALIAS declaration to .dbvs schema file".to_string()],
+                                hints: vec!["Add ALIAS declaration to .dbv schema file".to_string()],
                                 notes: Vec::new(),
                             });
                         }
@@ -699,30 +683,5 @@ use std::collections::HashMap;
         let diags = HardwareValidator::check_hebv_restrictions(&items);
         let type_errors: Vec<_> = diags.iter().filter(|d| d.code.starts_with("B500")).collect();
         assert_eq!(type_errors.len(), 0, "Bool + bounded txns should be OK");
-    }
-}
-
-fn get_dbrief_type_size(db_type: &crate::dbrief::ast::DbriefType, engine: &DbvsEngine) -> u64 {
-    use crate::dbrief::ast::DbriefType;
-    match db_type {
-        DbriefType::Bool => 1,
-        DbriefType::Int(bits) | DbriefType::UInt(bits) => (bits / 8) as u64,
-        DbriefType::Float => 8,
-        DbriefType::Vector(inner, Some(size)) => {
-            get_dbrief_type_size(inner, engine) * (*size as u64)
-        }
-        DbriefType::Named(name) => {
-            if let Some(s) = engine.get_struct(name) {
-                s.fields.iter().map(|(_, f_type)| get_dbrief_type_size(f_type, engine)).sum()
-            } else if let Some(e) = engine.get_enum(name) {
-                4
-            } else {
-                0
-            }
-        }
-        DbriefType::Struct(fields) => {
-            fields.iter().map(|(_, f_type)| get_dbrief_type_size(f_type, engine)).sum()
-        }
-        _ => 0,
     }
 }

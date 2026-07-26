@@ -24,6 +24,5 @@
 pub mod bridge;
 pub mod config;
 pub mod dbvl_reader;
-pub mod dbvs_validator;
 pub mod export;
 pub mod link;

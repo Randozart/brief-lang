@@ -101,14 +101,8 @@ impl FunctionRegistry {
                     } else {
                         loaded_count += 1;
                     }
-                } else if ext == Some("dbvs") {
-                    if let Err(e) = self.load_from_dbvs(&path) {
-                        eprintln!("[WARN] Failed to load DBVS binding {}: {}", path.display(), e);
-                    } else {
-                        loaded_count += 1;
-                    }
                 } else if ext == Some("toml") {
-                    eprintln!("[WARN] TOML bindings are deprecated, use .dbv or .dbvs: {}", path.display());
+                    eprintln!("[WARN] TOML bindings are deprecated, use .dbv: {}", path.display());
                     if let Err(e) = self.load_from_toml(&path) {
                         eprintln!("[WARN] Failed to load legacy TOML binding {}: {}", path.display(), e);
                     }
@@ -148,14 +142,10 @@ impl FunctionRegistry {
         Ok(())
     }
 
+    // 2026-07-26: load_from_dbvs removed — .dbvs format is replaced by .dbv
+    // Register parsing is now handled by load_from_dbv with V2 parser.
     fn load_from_dbvs(&mut self, path: &std::path::Path) -> Result<(), String> {
-        let content = std::fs::read_to_string(path)
-            .map_err(|e| format!("Failed to read file: {}", e))?;
-        let program = crate::dbrief::parse_dbvs(&content)
-            .map_err(|e| format!("Failed to parse DBVS: {}", e))?;
-        for register in &program.registers {
-            let name = register.name.as_ref()
-                .ok_or_else(|| "Register missing 'as' name".to_string())?;
+        Err(format!(".dbvs format removed — convert {} to .dbv format", path.display()))                .ok_or_else(|| "Register missing 'as' name".to_string())?;
             let location = register.location.as_ref()
                 .ok_or_else(|| format!("Register '{}' missing 'location' field", name))?;
             self.fn_locations_by_name.insert(name.clone(), location.clone());
