@@ -1612,11 +1612,19 @@ impl LlvmBackend {
                     name
                 ));
             }
-            // Scan reordered body for FFI guards that can be outlined with scalars.
-            // Only outline when ALL FFI guards can be outlined — if any guard
-            // references non-state identifiers (constants, let bindings), skip
-            // outlining entirely and keep #0 = memory(readwrite).
-            let outlined_info: Vec<(usize, String, Vec<(String, usize)>)> = {
+            // 2026-07-27: Three-category outlining — identifiers can be state
+            // fields (GEP+load), let bindings (lookup at emission time), or
+            // compile-time constants (ctx.constants). Only `Unknown` blocks
+            // outlining. This lets ring_buffer (references CAP) and nbody
+            // (references energy) get #11 = memory(argmem: readwrite).
+            #[derive(Debug, Clone)]
+            enum ParamSrc {
+                StateField(usize),
+                LetBinding(String), // LLVM type string ("float" or "i64")
+                Constant(Expr, Type), // value expression + Brief type
+            }
+            // Scan reordered body for FFI guards that can be outlined.
+            let outlined_info: Vec<(usize, String, Vec<(String, String, ParamSrc)>)> = {
                 let mut ffi_guard_indices: Vec<usize> = Vec::new();
                 let mut guard_bodies: Vec<&[Statement]> = Vec::new();
                 for (ri, s) in reordered.iter().enumerate() {
@@ -1627,9 +1635,25 @@ impl LlvmBackend {
                         }
                     }
                 }
-                // Check if ALL guards can be outlined
                 let mut can_outline_all = true;
-                let mut field_sets: Vec<Vec<(String, usize)>> = Vec::new();
+                let mut param_sets: Vec<Vec<(String, String, ParamSrc)>> = Vec::new();
+                // Collect let-names defined in the txn body before each guard
+                // (pre-scan: which identifiers are let bindings?)
+                let mut txn_let_names: Vec<String> = Vec::new();
+                let mut txn_let_types: std::collections::HashMap<String, String> = std::collections::HashMap::new();
+                for s in &reordered {
+                    collect_let_names(s, &mut txn_let_names);
+                    if let Statement::Let { name, ty: Some(t), .. } = s {
+                        let llvm_ty = match t {
+                            Type::Custom(s) if s == "Float" || s == "Float32" => "float",
+                            Type::Custom(s) if s == "Float64" => "double",
+                            _ => "i64",
+                        };
+                        txn_let_types.insert(name.clone(), llvm_ty.to_string());
+                    }
+                }
+                txn_let_names.sort();
+                txn_let_names.dedup();
                 for body in &guard_bodies {
                     let mut idents: Vec<String> = Vec::new();
                     let mut local_lets: Vec<String> = Vec::new();
@@ -1640,26 +1664,44 @@ impl LlvmBackend {
                     idents.sort(); idents.dedup();
                     local_lets.sort(); local_lets.dedup();
                     idents.retain(|i| !local_lets.contains(i));
-                    let mut fields: Vec<(String, usize)> = Vec::new();
+                    let mut params: Vec<(String, String, ParamSrc)> = Vec::new();
                     for ident in &idents {
                         if let Some(&idx) = self.ctx.field_index_map.get(ident) {
-                            fields.push((ident.clone(), idx));
+                            // Ptr<T> fields are stored as i64 in %State (opaque handles).
+                            // Float fields use the native float type. All others use i64.
+                            let brief_ty = self.ctx.field_brief_types.get(idx).cloned().unwrap_or(Type::int());
+                            let llvm_ty = if matches!(brief_ty, Type::Ptr(_)) {
+                                "i64".to_string()
+                            } else {
+                                self.llvm_type(&brief_ty)
+                            };
+                            params.push((ident.clone(), llvm_ty, ParamSrc::StateField(idx)));
+                        } else if txn_let_names.contains(ident) {
+                            let llvm_ty = txn_let_types.get(ident).cloned().unwrap_or_else(|| "i64".to_string());
+                            params.push((ident.clone(), llvm_ty.clone(), ParamSrc::LetBinding(llvm_ty)));
+                        } else if let Some((const_ty, val_expr)) = self.ctx.constants.get(ident.as_str()) {
+                            let llvm_ty = if matches!(const_ty, Type::Custom(s) if s == "Float") {
+                                "float".to_string()
+                            } else {
+                                self.llvm_type(const_ty)
+                            };
+                            params.push((ident.clone(), llvm_ty, ParamSrc::Constant(val_expr.clone(), const_ty.clone())));
                         } else {
                             can_outline_all = false;
                             break;
                         }
                     }
                     if !can_outline_all { break; }
-                    if !fields.is_empty() {
-                        field_sets.push(fields);
+                    if !params.is_empty() {
+                        param_sets.push(params);
                     }
                 }
                 if !can_outline_all { Vec::new() }
                 else {
-                    ffi_guard_indices.into_iter().zip(field_sets.into_iter())
+                    ffi_guard_indices.into_iter().zip(param_sets.into_iter())
                         .enumerate()
-                        .map(|(ci, (ri, fields))| {
-                            (ri, format!("txn_{}_cold_{}", name, ci), fields)
+                        .map(|(ci, (ri, params))| {
+                            (ri, format!("txn_{}_cold_{}", name, ci), params)
                         })
                         .collect()
                 }
@@ -1684,13 +1726,8 @@ impl LlvmBackend {
             // Emission loop with guard substitution
             for (ri, s) in reordered.iter().enumerate() {
                 if self.fun.terminated { break; }
-                if let Some((_, cold_name, fields)) = outlined_info.iter().find(|(idx, _, _)| *idx == ri) {
-                    // 2026-07-27: Guarded cold call — emit guard condition check
-                    // then GEP+load + cold call in the `then` branch.
-                    // This mirrors emit_stmt.rs's Statement::Guarded handler but
-                    // replaces the body with a cold function call.
+                if let Some((_, cold_name, params)) = outlined_info.iter().find(|(idx, _, _)| *idx == ri) {
                     if let Statement::Guarded(cond, _) = s {
-                        // Emit condition
                         let cond_reg = self.emit_expr(out, cond, "  ");
                         let label_n = self.fun.txn_counter;
                         self.fun.txn_counter += 1;
@@ -1705,19 +1742,50 @@ impl LlvmBackend {
                         };
                         writeln!(out, "  br i1 {}, label %{}, label %{}", cond_i1, then_lbl, end_lbl).ok();
                         writeln!(out, "  {}:", then_lbl).ok();
-                        // Emit GEP+load for each field
+                        // Emit load for each param — handles three cases:
+                        // StateField: GEP+load from %state
+                        // LetBinding: lookup register from let_bindings table
+                        // Constant: emit literal value (Expr::Decimal or Expr::Float)
                         let mut param_regs: Vec<String> = Vec::new();
-                        for (_, field_idx) in fields {
-                            let gep_reg = self.fun.gen_reg();
-                            let load_reg = self.fun.gen_reg();
-                            let llvm_ty = self.ctx.field_types.get(*field_idx).cloned().unwrap_or_else(|| "i64".to_string());
-                            writeln!(out, "    {} = getelementptr inbounds %State, ptr %state, i32 0, i32 {}", gep_reg, field_idx).ok();
-                            writeln!(out, "    {} = load {}, ptr {}", load_reg, llvm_ty, gep_reg).ok();
-                            param_regs.push(load_reg);
+                        for (p_name, llvm_ty, src) in params {
+                            match src {
+                                ParamSrc::StateField(idx) => {
+                                    let gep_reg = self.fun.gen_reg();
+                                    let load_reg = self.fun.gen_reg();
+                                    writeln!(out, "    {} = getelementptr inbounds %State, ptr %state, i32 0, i32 {}", gep_reg, idx).ok();
+                                    writeln!(out, "    {} = load {}, ptr {}", load_reg, llvm_ty, gep_reg).ok();
+                                    param_regs.push(load_reg);
+                                }
+                                ParamSrc::LetBinding(_) => {
+                                    if let Some(reg) = self.fun.let_bindings.get(p_name) {
+                                        param_regs.push(reg.clone());
+                                    } else {
+                                        // Fallback: load from state (may fail)
+                                        let fallback = self.fun.gen_reg();
+                                        writeln!(out, "    {} = add i64 0, 0", fallback).ok();
+                                        param_regs.push(fallback);
+                                    }
+                                }
+                                ParamSrc::Constant(val_expr, _) => {
+                                    let const_reg = self.fun.gen_reg();
+                                    match val_expr {
+                                        Expr::Decimal(v) => {
+                                            writeln!(out, "    {} = add i64 0, {}", const_reg, v).ok();
+                                        }
+                                        Expr::Float(v) => {
+                                            let hex = crate::backend::llvm::float_to_llvm_hex(*v);
+                                            writeln!(out, "    {} = bitcast i32 {} to float", const_reg, hex).ok();
+                                        }
+                                        _ => {
+                                            writeln!(out, "    {} = add i64 0, 0", const_reg).ok();
+                                        }
+                                    }
+                                    param_regs.push(const_reg);
+                                }
+                            }
                         }
                         let mut typed_args: Vec<String> = Vec::new();
-                        for (fi, (_, idx)) in fields.iter().enumerate() {
-                            let llvm_ty = self.ctx.field_types.get(*idx).cloned().unwrap_or_else(|| "i64".to_string());
+                        for (fi, (_, llvm_ty, _)) in params.iter().enumerate() {
                             typed_args.push(format!("{} {}", llvm_ty, param_regs[fi]));
                         }
                         writeln!(out, "    call void @{}({})", cold_name, typed_args.join(", ")).ok();
@@ -1752,16 +1820,23 @@ impl LlvmBackend {
                 self.fun.reg_float_cache.clear();
                 self.fun.reg_type_cache.clear();
 
-                // Build param list — register param names as local let bindings
-                // so emit_statement resolves them to LLVM registers (not globals).
-                let field_names: Vec<String> = fields.iter().map(|(f, _)| f.clone()).collect();
-                let cp_names: Vec<String> = fields.iter().map(|(f_name, _)| format!("__cp_{}", f_name)).collect();
+                // Build param list — register with correct Brief type so that
+                // emit_statement uses pointer semantics (inttoptr+GEP+load) rather
+                // than vector semantics (extractelement) for Ptr<Int> fields.
+                let field_names: Vec<String> = fields.iter().map(|(f, _, _)| f.clone()).collect();
+                let cp_names: Vec<String> = fields.iter().map(|(f_name, _, _)| format!("__cp_{}", f_name)).collect();
                 let mut param_sig: Vec<String> = Vec::new();
-                for (fi, (f_name, idx)) in fields.iter().enumerate() {
-                    let llvm_ty = self.ctx.field_types.get(*idx).cloned().unwrap_or_else(|| "i64".to_string());
+                for (fi, (f_name, llvm_ty, src)) in fields.iter().enumerate() {
                     param_sig.push(format!("{} %{}", llvm_ty, cp_names[fi]));
-                    // Register as local let binding with the correct Brief type
-                    let brief_ty = self.ctx.field_brief_types.get(*idx).cloned().unwrap_or(Type::int());
+                    let brief_ty = match src {
+                        ParamSrc::StateField(idx) => {
+                            self.ctx.field_brief_types.get(*idx).cloned().unwrap_or(Type::int())
+                        }
+                        ParamSrc::LetBinding(llvm_ty) => {
+                            if llvm_ty == "float" { Type::float() } else { Type::int() }
+                        }
+                        ParamSrc::Constant(_, brief_ty) => brief_ty.clone(),
+                    };
                     self.fun.let_bindings.insert(cp_names[fi].clone(), format!("%{}", cp_names[fi]));
                     self.fun.let_binding_types.insert(cp_names[fi].clone(), brief_ty.clone());
                     self.fun.let_original_types.insert(cp_names[fi].clone(), brief_ty);
