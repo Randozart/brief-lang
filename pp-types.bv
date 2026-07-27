@@ -1,0 +1,8 @@
+// pp-types.bv — Bridge test file for GLUE export round-trip
+// 2026-07-27: Simple string pointer echo for bridge_glue benchmark.
+// Python ctypes calls brief_test_cstr_roundtrip(state, input_ptr)
+// and reads the returned pointer as a C string via memmove.
+
+export defn brief_test_cstr_roundtrip(state: Int, input_ptr: Int) -> Int {
+    term input_ptr;
+};

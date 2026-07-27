@@ -535,10 +535,10 @@ for name in "${BENCHMARKS[@]}"; do
     build_bench "$name"
     if [ "$name" = "bridge_glue" ]; then
         echo "  bridge_glue: building C + Brief .so files..."
-        make -C benchmarks/bridge PROJECT_ROOT="$PWD" BRIDGE_DIR="$PWD/target/bridge_bench" all 2>&1 | sed 's/^/    /'
+        make -C benchmarks/bridge PROJECT_ROOT="$PWD" BRIDGE_DIR="$PWD/target/bridge_bench" BRIEFC="./target/release/briefc" all 2>&1 | sed 's/^/    /'
     elif [ "$name" = "bridge_multi" ]; then
         echo "  bridge_multi: building Brief .so + protocol shim..."
-        make -C benchmarks/multi_lang PROJECT_ROOT="$PWD" BUILD_DIR="$PWD/target/multi_lang" all 2>&1 | sed 's/^/    /'
+        make -C benchmarks/multi_lang PROJECT_ROOT="$PWD" BUILD_DIR="$PWD/target/multi_lang" BRIEFC="./target/release/briefc" all 2>&1 | sed 's/^/    /'
     else
         build_c "$name" || true
     fi
