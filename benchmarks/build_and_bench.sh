@@ -141,6 +141,12 @@ build_bench() {
     local bin="benchmarks/${name}"
     rm -f "$bin" "benchmarks/${name}.o" "benchmarks/${name}.ll"
 
+    # 2026-07-27: Skip if no .bv file (e.g. bridge_glue uses Makefile).
+    if [ ! -f "benchmarks/${name}.bv" ]; then
+        echo "  No .bv source — custom build"
+        return 0
+    fi
+
     local budget=256
     local gpu_flag=""
     case "$name" in
