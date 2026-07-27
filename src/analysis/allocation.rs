@@ -284,7 +284,7 @@ impl<'a> DagBuilder<'a> {
             Expr::If(cond, then, else_) => { self.walk_expr(cond); self.walk_expr(then); if let Some(e) = else_ { self.walk_expr(e); } }
             Expr::Match(expr, arms) => { self.walk_expr(expr); for arm in arms.iter_mut() { self.walk_expr(&mut arm.body); } }
             Expr::Block(stmts) => { self.walk_stmts(stmts); }
-            Expr::Quoted(_) | Expr::Decimal(_) | Expr::TaggedLiteral(_, _) | Expr::Bool(_) | Expr::Float(_)
+            Expr::Quoted(_) | Expr::TaggedQuotedLiteral(_, _) | Expr::Decimal(_) | Expr::TaggedLiteral(_, _) | Expr::Bool(_) | Expr::Float(_)
             | Expr::Identifier(_) | Expr::Lambda(_, _) | Expr::Within(_, _)
             | Expr::DerivationBlock(_) | Expr::PropertyGet(_) | Expr::FormattingAnnotation(_) | Expr::StructLiteral { .. } => {}
             Expr::PluginIntercept { args, .. } => {

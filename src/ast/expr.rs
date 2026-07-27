@@ -15,6 +15,9 @@ pub enum Expr {
     /// Second field is the discriminator tag: "0x", "h", "bf", etc.
     /// Used by op Parse(Decimal, pre: "0x") for routing.
     TaggedLiteral(i64, String), // 0xFF00FF, FF00FFh, 1.5bf
+    /// 2026-07-27: Tagged quoted string: sql"SELECT", my"hello"
+    /// First field is the string content, second is the prefix tag.
+    TaggedQuotedLiteral(Vec<u8>, String),
     Bool(bool),      // true, false
     Float(f64),      // 3.14
 

@@ -80,7 +80,7 @@ impl LlvmBackend {
                     ty: Type::bool_(),
                 }
             }
-            Expr::Quoted(bytes) => self.emit_string_literal(out, v, bytes, indent),
+            Expr::Quoted(bytes) | Expr::TaggedQuotedLiteral(bytes, _) => self.emit_string_literal(out, v, bytes, indent),
 
             // ── Identifier ───────────────────────────────────────────
             Expr::Identifier(name) => {

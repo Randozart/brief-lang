@@ -51,7 +51,7 @@ impl LlvmBackend {
             Expr::Decimal(_)
             | Expr::Bool(_)
             | Expr::Float(_)
-            | Expr::Quoted(_)
+            | Expr::Quoted(_) | Expr::TaggedQuotedLiteral(_, _)
             | Expr::PropertyGet(_) | Expr::StructLiteral { .. }
             | Expr::FormattingAnnotation(_)
             | Expr::TaggedLiteral(_, _) => expr.clone(),

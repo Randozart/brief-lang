@@ -131,7 +131,7 @@ pub fn eval_symbolic(expr: &Expr, state: &SymbolicState) -> SymbolicValue {
         Expr::Decimal(n) | Expr::TaggedLiteral(n, _) => SymbolicValue::Literal(*n, "int".to_string()),
         Expr::Float(_) => SymbolicValue::Unknown,
         Expr::Bool(b) => SymbolicValue::bool_literal(*b),
-        Expr::Quoted(_) => SymbolicValue::Unknown,
+        Expr::Quoted(_) | Expr::TaggedQuotedLiteral(_, _) => SymbolicValue::Unknown,
 
         // Variable references
         Expr::Identifier(name) => {

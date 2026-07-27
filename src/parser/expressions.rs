@@ -391,7 +391,21 @@ impl<'a> Parser<'a> {
             }
 
             // ── Identifiers (including # names like Sqrt#) ──────────
-            Some((Token::Identifier(name), _)) => {
+            Some((Token::Identifier(name), span)) => {
+                // 2026-07-27: Prefix discriminator: identifier directly before a
+                // string (no whitespace gap). e.g., sql"SELECT", my"hello".
+                // Check if next token is an adjacent string literal.
+                if let Some((next_tok, next_span)) = self.tokens.get(self.pos) {
+                    if next_span.start == span.end {
+                        if let Token::String(s) = next_tok {
+                            self.pos += 1; // consume string token
+                            return Ok(Expr::TaggedQuotedLiteral(
+                                s.clone().into_bytes(),
+                                name,
+                            ));
+                        }
+                    }
+                }
                 // 2026-07-24: Struct literal: TypeName { field: expr; ... }
                 // Only parse as struct literal when the name starts with
                 // uppercase (PascalCase type names). This prevents `!first { ... }`

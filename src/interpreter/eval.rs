@@ -23,7 +23,7 @@ pub fn eval_expr(
         Expr::TaggedLiteral(n, _) => Ok(i64_to_bits(*n)),
         Expr::Float(f) => Ok(f64_to_bits(*f)),
         Expr::Bool(b) => Ok(bool_to_bits(*b)),
-        Expr::Quoted(bytes) => Ok(Value::bits(bytes.clone())),
+        Expr::Quoted(bytes) | Expr::TaggedQuotedLiteral(bytes, _) => Ok(Value::bits(bytes.clone())),
 
         // ── References ──────────────────────────────────────────
         Expr::Identifier(name) => bindings

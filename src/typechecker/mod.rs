@@ -31,6 +31,10 @@ pub struct TypecheckContext<'a> {
     /// Populated from AST TypeDef bodies in check_program.
     /// Key: type_name → Vec of Parse OperatorDefs.
     parse_ops: HashMap<String, Vec<crate::ast::top::OperatorDef>>,
+    /// 2026-07-27: Type parent relationships for hierarchy walking.
+    /// Populated from TypeDef.parent fields in check_program.
+    /// type_parents[child] == parent_name.
+    type_parents: HashMap<String, String>,
     /// 2026-07-25: Function return types for user-defined functions.
     /// Populated by check_program before type-checking bodies.
     fn_return_types: HashMap<String, Type>,
@@ -43,6 +47,7 @@ impl<'a> TypecheckContext<'a> {
             state_keys: std::collections::HashSet::new(),
             universe,
             parse_ops: HashMap::new(),
+            type_parents: HashMap::new(),
             fn_return_types: HashMap::new(),
         }
     }
@@ -52,42 +57,50 @@ impl<'a> TypecheckContext<'a> {
     /// discriminator: optional prefix/suffix hint ("0x", "h", "bf", etc.)
     /// Returns the OperatorDef if a matching Parse op exists.
     /// Qualified ops (with pre:/suf:) win over unqualified ops.
+    /// 2026-07-27: Walks the type hierarchy (type → parent → grandparent).
     pub fn find_parse_op(
         &self,
         type_name: &str,
         form: &str,
         discriminator: Option<&str>,
     ) -> Option<&crate::ast::top::OperatorDef> {
-        let defs = self.parse_ops.get(type_name)?;
-        // First: try to find an exact discriminator match
-        if let Some(d) = discriminator {
-            if let Some(def) = defs.iter().find(|op| {
-                matches_form(&op.params, form)
-                    && (op.pre.as_deref() == Some(d) || op.suf.as_deref() == Some(d))
-            }) {
-                return Some(def);
+        let mut current = Some(type_name.to_string());
+        while let Some(tn) = current {
+            if let Some(defs) = self.parse_ops.get(&tn) {
+                // 1. Exact discriminator match (pre or suf matches discriminator)
+                if let Some(d) = discriminator {
+                    if let Some(def) = defs.iter().find(|op| {
+                        matches_form(&op.params, form)
+                            && (op.pre.as_deref() == Some(d) || op.suf.as_deref() == Some(d))
+                    }) {
+                        return Some(def);
+                    }
+                }
+                // 2. Qualified match (has pre: or suf:, no discriminator given)
+                if discriminator.is_none() {
+                    if let Some(def) = defs
+                        .iter()
+                        .find(|op| matches_form(&op.params, form) && (op.pre.is_some() || op.suf.is_some()))
+                    {
+                        return Some(def);
+                    }
+                }
+                // 3. Unqualified match (no pre:/suf:)
+                if let Some(def) = defs
+                    .iter()
+                    .find(|d| matches_form(&d.params, form) && d.pre.is_none() && d.suf.is_none())
+                {
+                    return Some(def);
+                }
+                // 4. Hashword identity (e.g., Parse(#Int) for Decimal)
+                if let Some(def) = defs.iter().find(|d| matches_parse_identity(&d.params, form)) {
+                    return Some(def);
+                }
             }
+            // Move to parent type
+            current = self.type_parents.get(&tn).cloned();
         }
-        // Second: find a qualified match (has pre: or suf: but not matching discriminator)
-        // Only use this if the literal has no discriminator and the op has one
-        if discriminator.is_none() {
-            if let Some(def) = defs
-                .iter()
-                .find(|op| matches_form(&op.params, form) && (op.pre.is_some() || op.suf.is_some()))
-            {
-                return Some(def);
-            }
-        }
-        // Third: find an unqualified match (no pre:/suf:)
-        if let Some(def) = defs
-            .iter()
-            .find(|d| matches_form(&d.params, form) && d.pre.is_none() && d.suf.is_none())
-        {
-            return Some(def);
-        }
-        // Fallback: hashword identity (e.g., Parse(#Int) for Decimal)
-        defs.iter()
-            .find(|d| matches_parse_identity(&d.params, form))
+        None
     }
 
     /// 2026-07-20: Register Parse ops from a type's definitions.
@@ -95,6 +108,39 @@ impl<'a> TypecheckContext<'a> {
         let parse_ops: Vec<_> = ops.into_iter().filter(|d| d.op == "Parse").collect();
         if !parse_ops.is_empty() {
             self.parse_ops.insert(type_name.to_string(), parse_ops);
+        }
+    }
+
+    /// 2026-07-27: Register Parse bindings from a type's OperatorBinding entries.
+    /// Converts OperatorBinding to OperatorDef and stores in parse_ops.
+    /// Also records parent type relationship for hierarchy walking.
+    pub fn register_parse_bindings(
+        &mut self,
+        type_name: &str,
+        bindings: Vec<OperatorBinding>,
+        parent: Option<&Expr>,
+    ) {
+        let defs: Vec<crate::ast::top::OperatorDef> = bindings
+            .iter()
+            .filter(|b| b.name == "Parse")
+            .map(|b| crate::ast::top::OperatorDef {
+                op: "Parse".to_string(),
+                params: match &b.protocol_variant {
+                    Some(pv) => vec![Type::Custom(pv.clone())],
+                    None => vec![],
+                },
+                pre: b.pre.clone(),
+                suf: b.suf.clone(),
+                impl_args: None,
+                impl_name: b.name.clone(),
+                span: b.span.clone(),
+            })
+            .collect();
+        if !defs.is_empty() {
+            self.parse_ops.insert(type_name.to_string(), defs);
+        }
+        if let Some(Expr::Identifier(pname)) = parent {
+            self.type_parents.insert(type_name.to_string(), pname.clone());
         }
     }
 
@@ -106,7 +152,13 @@ impl<'a> TypecheckContext<'a> {
 }
 
 /// Check if an op's params match a literal form (Decimal, Quoted, Bare, #Int, etc.)
+/// Empty params = wildcard (matches all forms). Single param = exact match.
 fn matches_form(params: &[Type], form: &str) -> bool {
+    // 2026-07-27: Empty params means wildcard (matches any form).
+    // This handles op Parse: parse_string(#L); (no protocol variant).
+    if params.is_empty() {
+        return true;
+    }
     if params.len() != 1 {
         return false;
     }
@@ -152,7 +204,7 @@ pub fn infer_expression(
         Expr::Decimal(_) | Expr::TaggedLiteral(_, _) => Ok((Type::int(), Provenance::Unknown)),
         Expr::Float(_) => Ok((Type::float(), Provenance::Unknown)),
         Expr::Bool(_) => Ok((Type::bool_(), Provenance::Unknown)),
-        Expr::Quoted(_) => Ok((Type::string(), Provenance::Unknown)),
+        Expr::Quoted(_) | Expr::TaggedQuotedLiteral(_, _) => Ok((Type::string(), Provenance::Unknown)),
 
         // ── References ──────────────────────────────────────────
         Expr::Identifier(name) => {
@@ -332,6 +384,8 @@ pub fn infer_expression(
 /// 2026-07-20: Try to coerce a value from its inferred type to a target type
 /// via Parse ops. Returns true if the value can be accepted via Parse.
 /// Only works for literal expressions (Decimal, Quoted, Identifier).
+/// 2026-07-27: Handles TaggedLiteral (suffix/prefix discriminators) and
+/// TaggedQuotedLiteral (prefix-tagged strings like sql"...").
 fn try_coerce_via_parse(
     expr: &Expr,
     arg_ty: &Type,
@@ -341,7 +395,9 @@ fn try_coerce_via_parse(
     let (form, discriminator) = match expr {
         Expr::Decimal(_) => ("Decimal", None),
         Expr::Float(_) => ("Decimal", None),
+        Expr::TaggedLiteral(_, tag) => ("Decimal", Some(tag.as_str())),
         Expr::Quoted(_) => ("Quoted", None),
+        Expr::TaggedQuotedLiteral(_, prefix) => ("Quoted", Some(prefix.as_str())),
         Expr::Identifier(_) => ("Bare", None),
         _ => return (false),
     };
@@ -758,8 +814,24 @@ pub fn check_program(items: &[TopLevel], universe: &TypeUniverse) -> Result<(), 
         }
     }).collect();
 
+    // 2026-07-27: Pre-collect Parse bindings and type parents from ALL TypeDef items.
+    let mut all_parse_bindings: HashMap<String, Vec<OperatorBinding>> = HashMap::new();
+    let mut all_type_parents: HashMap<String, String> = HashMap::new();
     for item in items {
-        if let Err(e) = check_top_level(item, universe, &state_bindings, &fn_return_types) {
+        if let TopLevel::TypeDef(td) = item {
+            if !td.body.op_bindings.is_empty() {
+                all_parse_bindings.insert(td.name.clone(), td.body.op_bindings.clone());
+            }
+            if let Some(parent) = &td.parent {
+                if let Expr::Identifier(pname) = parent.as_ref() {
+                    all_type_parents.insert(td.name.clone(), pname.clone());
+                }
+            }
+        }
+    }
+
+    for item in items {
+        if let Err(e) = check_top_level(item, universe, &state_bindings, &fn_return_types, &all_parse_bindings, &all_type_parents) {
             errors.push(e);
         }
     }
@@ -776,8 +848,15 @@ fn check_top_level(
     universe: &TypeUniverse,
     state_bindings: &HashMap<String, Type>,
     fn_return_types: &HashMap<String, Type>,
+    all_parse_bindings: &HashMap<String, Vec<OperatorBinding>>,
+    all_type_parents: &HashMap<String, String>,
 ) -> Result<(), TypeError> {
     let mut ctx = TypecheckContext::new(universe);
+    // 2026-07-27: Inject pre-collected parse bindings and type parents.
+    for (type_name, bindings) in all_parse_bindings {
+        ctx.register_parse_bindings(type_name, bindings.clone(), None);
+    }
+    ctx.type_parents = all_type_parents.clone();
     // 2026-07-14: Inject state variable bindings so transactions/defns can reference them.
     for (name, ty) in state_bindings {
         ctx.bindings.insert(name.clone(), ty.clone());
@@ -805,7 +884,7 @@ fn check_top_level(
             Ok(())
         }
         // 2026-07-25: Unwrap exports so exported defns are type-checked.
-        TopLevel::Export(e) => check_top_level(&e.inner, universe, state_bindings, fn_return_types),
+        TopLevel::Export(e) => check_top_level(&e.inner, universe, state_bindings, fn_return_types, all_parse_bindings, all_type_parents),
         TopLevel::Transaction(txn) => {
             for (name, ty) in &txn.parameters {
                 ctx.bindings.insert(name.clone(), ty.clone());

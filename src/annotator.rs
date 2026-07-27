@@ -184,7 +184,7 @@ impl Annotator {
             }
             Expr::PropertyGet(..)
             | Expr::FormattingAnnotation(..)
-            | Expr::Quoted(..)
+            | Expr::Quoted(..) | Expr::TaggedQuotedLiteral(..)
             | Expr::Decimal(..) | Expr::TaggedLiteral(..)
             | Expr::Bool(..)
             | Expr::Float(..)
@@ -489,7 +489,7 @@ impl Annotator {
         match expr {
             Expr::Decimal(n) | Expr::TaggedLiteral(n, _) => n.to_string(),
             Expr::Float(f) => f.to_string(),
-            Expr::Quoted(s) => format!("\"{}\"", String::from_utf8_lossy(s)),
+            Expr::Quoted(s) | Expr::TaggedQuotedLiteral(s, _) => format!("\"{}\"", String::from_utf8_lossy(s)),
             Expr::Bool(true) => "true".to_string(),
             Expr::Bool(false) => "false".to_string(),
             Expr::Identifier(n) => n.clone(),

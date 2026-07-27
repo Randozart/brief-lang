@@ -92,7 +92,7 @@ impl<'a> DataflowAnalyzer<'a> {
     fn extract_ids_recursive(&self, expr: &Expr, ids: &mut HashSet<String>) {
         match expr {
             Expr::Identifier(name) => { ids.insert(name.clone()); }
-            Expr::Decimal(_) | Expr::TaggedLiteral(_, _) | Expr::Float(_) | Expr::Quoted(_) | Expr::Bool(_) => {}
+            Expr::Decimal(_) | Expr::TaggedLiteral(_, _) | Expr::Float(_) | Expr::Quoted(_) | Expr::TaggedQuotedLiteral(_, _) | Expr::Bool(_) => {}
             Expr::BinaryOp(_, l, r) => {
                 self.extract_ids_recursive(l, ids);
                 self.extract_ids_recursive(r, ids);

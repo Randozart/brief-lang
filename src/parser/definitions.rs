@@ -1833,7 +1833,6 @@ mod tests {
     }
 
     #[test]
-    #[test]
     fn test_op_declarative_hashword() {
         let ops = parse_op_from_type_def("type T { op Add: int_add(#L, #R); };");
         assert_eq!(ops.len(), 1);
@@ -2101,5 +2100,141 @@ mod tests {
         let mut p = Parser::new(tokens, src);
         let result = p.parse_top_level();
         assert!(result.is_err(), "bare 'render foo' should be rejected");
+    }
+
+    // ── Tagged literal + Parse op discriminator tests ────────────────────
+
+    #[test]
+    fn test_tagged_literal_suffix() {
+        let src = "42km";
+        let tokens = tokenize(src).unwrap();
+        let mut p = Parser::new(tokens, src);
+        let expr = p.parse_expression().unwrap();
+        match expr {
+            crate::ast::Expr::TaggedLiteral(n, ref tag) => {
+                assert_eq!(n, 42);
+                assert_eq!(tag, "km");
+            }
+            _ => panic!("expected TaggedLiteral(42, \"km\")"),
+        }
+    }
+
+    #[test]
+    fn test_tagged_literal_hex_suffix() {
+        let src = "0xFFh";
+        let tokens = tokenize(src).unwrap();
+        let mut p = Parser::new(tokens, src);
+        let expr = p.parse_expression().unwrap();
+        match expr {
+            crate::ast::Expr::TaggedLiteral(n, ref tag) => {
+                assert_eq!(n, 0xFF);
+                assert_eq!(tag, "h");
+            }
+            _ => panic!("expected TaggedLiteral(255, \"h\")"),
+        }
+    }
+
+    #[test]
+    fn test_tagged_literal_no_suffix_with_space() {
+        // Space between literal and identifier: not a suffix
+        let src = "42 km";
+        let tokens = tokenize(src).unwrap();
+        let mut p = Parser::new(tokens, src);
+        let expr = p.parse_expression().unwrap();
+        match expr {
+            crate::ast::Expr::Decimal(n) => assert_eq!(n, 42),
+            _ => panic!("expected Decimal(42) with space separator"),
+        }
+    }
+
+    #[test]
+    fn test_tagged_quoted_prefix() {
+        let src = r#"sql"SELECT * FROM users""#;
+        let tokens = tokenize(src).unwrap();
+        let mut p = Parser::new(tokens, src);
+        let expr = p.parse_expression().unwrap();
+        match expr {
+            crate::ast::Expr::TaggedQuotedLiteral(ref bytes, ref prefix) => {
+                assert_eq!(bytes, b"SELECT * FROM users");
+                assert_eq!(prefix, "sql");
+            }
+            _ => panic!("expected TaggedQuotedLiteral, got {:?}", expr),
+        }
+    }
+
+    #[test]
+    fn test_tagged_quoted_prefix_no_false_positive_with_space() {
+        // Space between identifier and string: not a prefix
+        let src = r#"my "hello""#;
+        let tokens = tokenize(src).unwrap();
+        let mut p = Parser::new(tokens, src);
+        let expr = p.parse_expression().unwrap();
+        match expr {
+            crate::ast::Expr::Identifier(ref name) => {
+                assert_eq!(name, "my");
+                // The string "hello" is a separate expression — not consumed
+            }
+            _ => panic!("expected Identifier(\"my\") with space separator, got {:?}", expr),
+        }
+    }
+
+    #[test]
+    fn test_op_parse_with_pre_discriminator() {
+        let ops = parse_op_from_type_def(
+            "type T { op Parse(Decimal, pre:\"0x\"): parse_hex(#L); };"
+        );
+        assert_eq!(ops.len(), 1);
+        assert_eq!(ops[0].name, "Parse");
+        assert_eq!(ops[0].protocol_variant.as_deref(), Some("Decimal"));
+        assert_eq!(ops[0].pre.as_deref(), Some("0x"));
+        assert!(ops[0].suf.is_none());
+        assert!(ops[0].reg.is_none());
+    }
+
+    #[test]
+    fn test_op_parse_with_suf_discriminator() {
+        let ops = parse_op_from_type_def(
+            "type T { op Parse(Decimal, suf:\"km\"): parse_km(#L); };"
+        );
+        assert_eq!(ops.len(), 1);
+        assert_eq!(ops[0].name, "Parse");
+        assert_eq!(ops[0].suf.as_deref(), Some("km"));
+    }
+
+    #[test]
+    fn test_op_parse_with_regex_discriminator() {
+        let ops = parse_op_from_type_def(
+            "type T { op Parse(Decimal, reg:\"[0-9]+\"): parse_num(#L); };"
+        );
+        assert_eq!(ops.len(), 1);
+        assert_eq!(ops[0].reg.as_deref(), Some("[0-9]+"));
+    }
+
+    #[test]
+    fn test_op_parse_multiple_discriminators() {
+        let ops = parse_op_from_type_def(
+            "type T { op Parse(Decimal, pre:\"0x\", suf:\"h\"): parse_hex(#L); };"
+        );
+        assert_eq!(ops.len(), 1);
+        assert_eq!(ops[0].pre.as_deref(), Some("0x"));
+        assert_eq!(ops[0].suf.as_deref(), Some("h"));
+    }
+
+    #[test]
+    fn test_op_parse_quoted_form() {
+        let ops = parse_op_from_type_def(
+            "type T { op Parse(Quoted): parse_string(#L); };"
+        );
+        assert_eq!(ops.len(), 1);
+        assert_eq!(ops[0].protocol_variant.as_deref(), Some("Quoted"));
+    }
+
+    #[test]
+    fn test_op_parse_bare_form() {
+        let ops = parse_op_from_type_def(
+            "type T { op Parse(Bare): parse_bool(#L); };"
+        );
+        assert_eq!(ops.len(), 1);
+        assert_eq!(ops[0].protocol_variant.as_deref(), Some("Bare"));
     }
 }
