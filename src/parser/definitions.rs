@@ -1062,7 +1062,7 @@ impl<'a> Parser<'a> {
                     metadata: metadata.clone(),
                     projections: vec![],
                     bindings: vec![],
-                    operators: operators.clone(),
+                    operators: operators.clone(), op_bindings: vec![],
                     props: props.clone(),
                     constraints: vec![],
                     span: None,
@@ -1084,6 +1084,7 @@ impl<'a> Parser<'a> {
                 projections: vec![],
                 bindings: vec![],
                 operators,
+                op_bindings: vec![],
                 props,
                 constraints: vec![],
                 span: None,
@@ -1201,6 +1202,7 @@ impl<'a> Parser<'a> {
                 projections: vec![],
                 bindings: vec![],
                 operators,
+                op_bindings: vec![],
                 props,
                 constraints: vec![],
                 span: None,
@@ -1344,7 +1346,7 @@ impl<'a> Parser<'a> {
             bit_range: None, span: None,
             body: TypeDefBody {
                 slots, metadata: std::collections::HashMap::new(),
-                projections: vec![], bindings: vec![], operators: vec![], props: vec![], constraints: vec![], span: None,
+                projections: vec![], bindings: vec![], operators: vec![], op_bindings: vec![], props: vec![], constraints: vec![], span: None,
             },
         }))
     }
@@ -1421,7 +1423,7 @@ impl<'a> Parser<'a> {
             bit_range: None, span: None,
             body: TypeDefBody {
                 slots, metadata: std::collections::HashMap::new(),
-                projections: vec![], bindings: vec![], operators: vec![], props: vec![], constraints: vec![], span: None,
+                projections: vec![], bindings: vec![], operators: vec![], op_bindings: vec![], props: vec![], constraints: vec![], span: None,
             },
         }))
     }

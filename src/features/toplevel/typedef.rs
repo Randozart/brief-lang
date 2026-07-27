@@ -165,7 +165,7 @@ mod tests {
                     make_binding("Bytes", Expr::Decimal(8)),
                     make_binding("Alignment", Expr::Decimal(8)),
                 ],
-                operators: vec![], constraints: vec![],
+                operators: vec![], op_bindings: vec![], constraints: vec![],
                 span: None,
             },
             span: None,
@@ -244,7 +244,7 @@ mod kani_full_tests {
                 value: Box::new(Expr::Decimal(8)),
                 span: None,
             }],
-            operators: vec![], constraints: vec![],
+            operators: vec![], op_bindings: vec![], constraints: vec![],
             span: None,
         };
         assert_eq!(body.bindings.len(), 1);

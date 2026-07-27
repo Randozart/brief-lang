@@ -308,7 +308,7 @@ impl<'a> Parser<'a> {
             Token::From => "from".into(), Token::As => "as".into(),
             Token::Frgn => "frgn".into(), Token::FrgnBang => "frgn!".into(),
             Token::Meld => "meld".into(), Token::Reg => "reg".into(),
-            Token::Op => "op".into(), Token::Type => "type".into(),
+            Token::Op => "op".into(), Token::Prop => "prop".into(), Token::Type => "type".into(),
             Token::Cell => "cell".into(), Token::Struct => "struct".into(),
             Token::Rstruct => "rstruct".into(), Token::Render => "render".into(),
             Token::Enum => "enum".into(), Token::Trg => "trg".into(),

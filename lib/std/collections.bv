@@ -1,12 +1,38 @@
-// Standard List/Collection Library
+// ── Brief Collections ───────────────────────────────────────────────
+// 2026-07-26: User-defined collection types. No compiler magic.
+// Protocol bindings let the <- operator work for any collection
+// via InsertAt <~ push(#L, #R) and ExtractFrom <~ pop(#L).
 
-// Append item to list
-defn append(list: List<Int>, item: Int) [true][term .#Size == list .#Size + 1] -> List<Int> {
-    &list <- item;
-    term list;
-}
+// ── RingBuffer<T> — fixed-size circular buffer ──────────────────────
 
-// Get list length
-defn len(list: List<Int>) [true][term >= 0] -> Int {
-    term list .#Size;
-}
+export defn new_ring_buffer<T>(val: T) -> RingBuffer<T> {
+    let mut rb: RingBuffer<T>;
+    rb.data[0] = val;
+    rb.read = 0;
+    rb.write = 1;
+    term rb;
+};
+
+obj RingBuffer<T> {
+    data: T[256];
+    read: Int;
+    write: Int;
+
+    InsertAt <~ push(#L, #R);
+    ExtractFrom <~ pop(#L);
+
+    txn push(val: T) [write - read < 256][write - read <= 256] {
+        data[write % 256] = val;
+        write = write + 1;
+    };
+
+    txn pop() -> T [write > read][write >= read] {
+        let i = read % 256;
+        read = read + 1;
+        term data[i];
+    };
+
+    defn size() -> Int {
+        term write - read;
+    };
+};

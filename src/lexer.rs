@@ -115,6 +115,9 @@ pub enum Token {
     #[token("op")]
     Op,
 
+    #[token("prop")]
+    Prop,
+
     #[token("type")]
     Type,
 
@@ -569,6 +572,7 @@ impl std::fmt::Display for Token {
             Token::Meld => write!(f, "meld"),
             Token::Reg => write!(f, "reg"),
             Token::Op => write!(f, "op"),
+            Token::Prop => write!(f, "prop"),
             Token::Type => write!(f, "type"),
             Token::Cell => write!(f, "cell"),
             Token::Obj => write!(f, "obj"),

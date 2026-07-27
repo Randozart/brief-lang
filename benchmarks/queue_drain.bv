@@ -19,8 +19,8 @@
 
 let N: Int = GetEnvInt!("BOUND");
 let count: Int = 0;
-import "std/core/ring_buffer.bv";
-let queue: RingBuffer<Int> = [0];
+import { RingBuffer, new_ring_buffer } from "std/collections.bv";
+let queue: RingBuffer<Int> = new_ring_buffer(0);
 
 node work [count < N][count == N] {
     <- &queue;

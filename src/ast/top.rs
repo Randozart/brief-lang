@@ -896,7 +896,8 @@ pub struct TypeDefBody {
     pub projections: Vec<ProjectionDef>,
     pub bindings: Vec<TypeBinding>,
     pub operators: Vec<OperatorDef>,
-    /// 2026-07-26: Metaproperty declarations: prop Name = expr;
+    /// 2026-07-26: Operator bindings: op Name(Proto?): expr;
+    pub op_bindings: Vec<OperatorBinding>,
     pub props: Vec<PropDef>,
     pub constraints: Vec<Expr>,
     pub span: Option<Span>,
@@ -947,6 +948,18 @@ pub struct OperatorDef {
 #[derive(Debug, Clone)]
 pub struct PropDef {
     pub name: String,
+    pub expr: Expr,
+    pub span: Option<Span>,
+}
+
+/// 2026-07-26: Operator binding: op Name(Proto?): expr;
+/// Replaces the old op Name(Types) -> Type = fn(#L, #R) form.
+/// protocol_variant is None for concrete bindings (InsertAt, Init, etc.)
+/// or Some("#Int") / Some("MyType") for overloaded operators.
+#[derive(Debug, Clone)]
+pub struct OperatorBinding {
+    pub name: String,
+    pub protocol_variant: Option<String>,
     pub expr: Expr,
     pub span: Option<Span>,
 }

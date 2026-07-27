@@ -173,7 +173,7 @@ fn parse_typedef(parts: &[SExpr]) -> Result<Box<TypeDef>, String> {
         name, type_params: vec![], parent: None, protocol: None,
         bit_range: None, span: None,
         body: TypeDefBody { slots, metadata, projections: vec![], bindings: vec![],
-            operators: vec![],
+            operators: vec![], op_bindings: vec![],
             props: vec![], constraints: vec![], span: None },
     }))
 }

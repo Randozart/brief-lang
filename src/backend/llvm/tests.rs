@@ -604,7 +604,7 @@ fn test_type_with_slots_populates_struct_types() {
                 metadata: HashMap::new(),
                 projections: vec![],
                 bindings: vec![],
-                operators: vec![],
+                operators: vec![], op_bindings: vec![],
             props: vec![],
                 constraints: vec![],
                 span: None,

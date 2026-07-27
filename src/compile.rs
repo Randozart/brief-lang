@@ -1184,7 +1184,12 @@ fn get_ffi_cache_dir() -> PathBuf {
 fn compile_source_to_object(source_path: &Path, cache_dir: &Path) -> Result<PathBuf, String> {
     let content = std::fs::read(source_path)
         .map_err(|e| format!("cannot read '{}': {}", source_path.display(), e))?;
-    let hash = blake3::hash(&content);
+    // 2026-07-26: Include compiler flags in the cache key so flag changes
+    // (e.g. -flto) produce fresh cache entries instead of reusing stale ones.
+    let mut hasher = blake3::Hasher::new();
+    hasher.update(&content);
+    hasher.update(b":flto");
+    let hash = hasher.finalize();
     let cache_path = cache_dir.join(format!("{}.o", hash.to_hex()));
     if cache_path.exists() {
         return Ok(cache_path);
@@ -1197,7 +1202,7 @@ fn compile_source_to_object(source_path: &Path, cache_dir: &Path) -> Result<Path
     };
     let status = Command::new("clang")
         .args([
-            "-O3", "-march=native", "-ffast-math",
+            "-O3", "-flto", "-march=native", "-ffast-math",
             "-x", lang_flag,
             "-c",
             source_path.to_str().unwrap(),
