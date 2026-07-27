@@ -379,6 +379,10 @@ bench_self_term() {
     local name="$1"
     local brief_bin="benchmarks/${name}"
     local c_bin="benchmarks/${name}_c"
+    # 2026-07-27: Cross-reference C binary — for benchmarks like queue_drain_idio
+    # that compare against a different benchmark's C reference (queue_drain_sym_c).
+    local ref_name="${BRIEF_CROSS_REF[$name]:-$name}"
+    local ref_c_bin="benchmarks/${ref_name}_c"
 
     echo ""
     echo "=== $name ==="
@@ -426,8 +430,8 @@ bench_self_term() {
         if [ -f "$brief_bin" ]; then
             brief_text=$(size "$brief_bin" 2>/dev/null | tail -1 | awk '{print $1}')
         fi
-        if [ -f "$c_bin" ]; then
-            c_text=$(size "$c_bin" 2>/dev/null | tail -1 | awk '{print $1}')
+        if [ -f "$ref_c_bin" ]; then
+            c_text=$(size "$ref_c_bin" 2>/dev/null | tail -1 | awk '{print $1}')
         fi
     fi
     if [ -f "$brief_bin" ]; then
@@ -447,8 +451,6 @@ bench_self_term() {
         return
     fi
     # 2026-07-18: Cross-benchmark reference check
-    local ref_name="${BRIEF_CROSS_REF[$name]:-$name}"
-    local ref_c_bin="benchmarks/${ref_name}_c"
     if [ "$name" != "$ref_name" ] && [ -f "$ref_c_bin" ]; then
         # Cross-benchmark: C ref exists under a different name
         :
@@ -469,7 +471,7 @@ bench_self_term() {
 
     for i in 1 2 3 4 5; do
         local bt=$(env BOUND=50000000 "$TIMER_BIN" "$brief_bin")
-        local ct=$(env BOUND=50000000 "$TIMER_BIN" "$c_bin")
+        local ct=$(env BOUND=50000000 "$TIMER_BIN" "$ref_c_bin")
         brief_sum=$(echo "$brief_sum + $bt" | bc)
         c_sum=$(echo "$c_sum + $ct" | bc)
         if (( $(echo "$bt < $brief_min" | bc -l) )); then brief_min=$bt; fi

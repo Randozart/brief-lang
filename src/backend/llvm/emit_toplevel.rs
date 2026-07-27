@@ -1313,6 +1313,75 @@ impl LlvmBackend {
         }
     }
 
+    /// 2026-07-27: Rewrite identifier references in a statement to use cold-function
+    /// parameter names. Each Expr::Identifier matching a field_name is replaced with
+    /// the corresponding parameter name (__cp_{field}).
+    fn rewrite_stmt_idents(stmt: &Statement, field_names: &[String], param_names: &[String]) -> Statement {
+        use crate::ast::*;
+        match stmt {
+            Statement::Let { name, names, ty, expr, modifiers } => {
+                Statement::Let {
+                    name: name.clone(),
+                    names: names.clone(),
+                    ty: ty.clone(),
+                    expr: expr.as_ref().map(|e| Self::rewrite_expr_idents(e, field_names, param_names)),
+                    modifiers: modifiers.clone(),
+                }
+            }
+            Statement::Expression(e) => Statement::Expression(Self::rewrite_expr_idents(e, field_names, param_names)),
+            Statement::Assign(lhs, rhs) => {
+                Statement::Assign(
+                    Self::rewrite_expr_idents(lhs, field_names, param_names),
+                    Self::rewrite_expr_idents(rhs, field_names, param_names),
+                )
+            }
+            Statement::Term(Some(e)) => Statement::Term(Some(Self::rewrite_expr_idents(e, field_names, param_names))),
+            Statement::TermBang(Some(e)) => Statement::TermBang(Some(Self::rewrite_expr_idents(e, field_names, param_names))),
+            Statement::Guarded(cond, body) => {
+                Statement::Guarded(
+                    Self::rewrite_expr_idents(cond, field_names, param_names),
+                    body.iter().map(|s| Self::rewrite_stmt_idents(s, field_names, param_names)).collect(),
+                )
+            }
+            _ => stmt.clone(),
+        }
+    }
+
+    fn rewrite_expr_idents(expr: &Expr, field_names: &[String], param_names: &[String]) -> Expr {
+        use crate::ast::*;
+        match expr {
+            Expr::Identifier(name) => {
+                if let Some(pos) = field_names.iter().position(|f| f == name) {
+                    Expr::Identifier(param_names[pos].clone())
+                } else {
+                    Expr::Identifier(name.clone())
+                }
+            }
+            Expr::Call(name, args, id) => {
+                Expr::Call(name.clone(),
+                    args.iter().map(|a| Self::rewrite_expr_idents(a, field_names, param_names)).collect(),
+                    *id)
+            }
+            Expr::BinaryOp(op, lhs, rhs) => {
+                Expr::BinaryOp(*op,
+                    Box::new(Self::rewrite_expr_idents(lhs, field_names, param_names)),
+                    Box::new(Self::rewrite_expr_idents(rhs, field_names, param_names)))
+            }
+            Expr::UnaryOp(op, e) => Expr::UnaryOp(*op, Box::new(Self::rewrite_expr_idents(e, field_names, param_names))),
+            Expr::Cast(inner, target) => Expr::Cast(Box::new(Self::rewrite_expr_idents(inner, field_names, param_names)), target.clone()),
+            Expr::Field(obj, f) => Expr::Field(Box::new(Self::rewrite_expr_idents(obj, field_names, param_names)), f.clone()),
+            Expr::Index(obj, idx) => Expr::Index(Box::new(Self::rewrite_expr_idents(obj, field_names, param_names)), Box::new(Self::rewrite_expr_idents(idx, field_names, param_names))),
+            Expr::Block(stmts) => Expr::Block(stmts.iter().map(|s| Self::rewrite_stmt_idents(s, field_names, param_names)).collect()),
+            Expr::List(elems) | Expr::Tuple(elems) => {
+                let n: Vec<Expr> = elems.iter().map(|e| Self::rewrite_expr_idents(e, field_names, param_names)).collect();
+                if let Expr::List(_) = expr { Expr::List(n) } else { Expr::Tuple(n) }
+            }
+            Expr::Deref(inner) => Expr::Deref(Box::new(Self::rewrite_expr_idents(inner, field_names, param_names))),
+            Expr::AddrOf(inner) => Expr::AddrOf(Box::new(Self::rewrite_expr_idents(inner, field_names, param_names))),
+            _ => expr.clone(),
+        }
+    }
+
     pub(super) fn emit_transaction(&mut self, out: &mut String, txn: &crate::ast::Transaction, name: &str, range_meta: &mut Vec<String>) {
         let has_output = txn.output_type.is_some() || !txn.outputs.is_empty();
         if !txn.is_reactive && (!txn.parameters.is_empty() || has_output) {
@@ -1392,12 +1461,66 @@ impl LlvmBackend {
                 }
             }
         };
-        // 2026-07-27: TODO — FFI-aware attribute selection via cold-path outlining.
-        // Currently disabled: cold functions passing ptr %state block SROA. The fix
-        // requires passing scalar values instead of %state, which needs AST rewriting
-        // (collect_used_fields → GEP+load in hot path → scalar args to cold function).
-        // For now, use #0 = memory(readwrite) for all reactive txns.
+        // 2026-07-27: txn_attr for assume_action path (no outlining — rare path).
+        // The non-assume_action path below computes its own attr from reordered body.
         let txn_attr = self.slp_attr(name, "#0");
+
+        // ── Helper: collect identifiers from a statement ────────────────
+        fn collect_let_names(stmt: &Statement, names: &mut Vec<String>) {
+            match stmt {
+                Statement::Let { name, names: extra, .. } => {
+                    names.push(name.clone());
+                    for n in extra { names.push(n.clone()); }
+                }
+                Statement::Guarded(_, body) => { for s in body { collect_let_names(s, names); } }
+                Statement::Block(body) => { for s in body { collect_let_names(s, names); } }
+                _ => {}
+            }
+        }
+        fn has_ffi_call(stmt: &Statement) -> bool {
+            match stmt {
+                Statement::Let { expr: Some(e), .. } => is_ffi_call(e),
+                Statement::Expression(e) => is_ffi_call(e),
+                Statement::Term(Some(e)) | Statement::TermBang(Some(e)) | Statement::Return(Some(e)) => is_ffi_call(e),
+                Statement::Assign(_, e) => is_ffi_call(e),
+                Statement::Guarded(_, body) => body.iter().any(|s| has_ffi_call(s)),
+                Statement::Block(body) => body.iter().any(|s| has_ffi_call(s)),
+                _ => false,
+            }
+        }
+        fn is_ffi_call(expr: &Expr) -> bool {
+            match expr {
+                Expr::Call(name, _, _) => !name.ends_with('#'),
+                Expr::Block(stmts) => stmts.iter().any(|s| has_ffi_call(s)),
+                _ => false,
+            }
+        }
+        fn collect_idents(stmt: &Statement, names: &mut Vec<String>) {
+            match stmt {
+                Statement::Let { expr: Some(e), .. } => collect_expr_idents(e, names),
+                Statement::Expression(e) => collect_expr_idents(e, names),
+                Statement::Term(Some(e)) | Statement::TermBang(Some(e)) | Statement::Return(Some(e)) => collect_expr_idents(e, names),
+                Statement::Assign(lhs, rhs) => { collect_expr_idents(lhs, names); collect_expr_idents(rhs, names); }
+                Statement::Guarded(_, body) => { for s in body { collect_idents(s, names); } }
+                Statement::Block(body) => { for s in body { collect_idents(s, names); } }
+                _ => {}
+            }
+        }
+        fn collect_expr_idents(expr: &Expr, names: &mut Vec<String>) {
+            match expr {
+                Expr::Identifier(name) => { names.push(name.clone()); }
+                Expr::Call(_, args, _) => { for a in args { collect_expr_idents(a, names); } }
+                Expr::BinaryOp(_, lhs, rhs) => { collect_expr_idents(lhs, names); collect_expr_idents(rhs, names); }
+                Expr::UnaryOp(_, e) => collect_expr_idents(e, names),
+                Expr::Cast(inner, _) => collect_expr_idents(inner, names),
+                Expr::Field(obj, _) => collect_expr_idents(obj, names),
+                Expr::Index(obj, idx) => { collect_expr_idents(obj, names); collect_expr_idents(idx, names); }
+                Expr::Block(stmts) => { for s in stmts { collect_idents(s, names); } }
+                Expr::List(elems) | Expr::Tuple(elems) => { for e in elems { collect_expr_idents(e, names); } }
+                Expr::Deref(inner) | Expr::AddrOf(inner) | Expr::IsType(inner, _) => collect_expr_idents(inner, names),
+                _ => {}
+            }
+        }
 
         let assume_action: Option<String> = txn.modifiers.iter()
             .find(|m| m.name == "assume_shape")
@@ -1481,28 +1604,7 @@ impl LlvmBackend {
             }
             writeln!(out, "}}").ok();
         } else {
-            // 2026-07-17: Use @txn_<name> prefix (same rationale as assume_action path).
-            writeln!(out, "define void @txn_{}(ptr noalias nocapture align 8 %state) local_unnamed_addr {}{} {{", name, txn_attr, alwaysinline).ok();
-            writeln!(out, "  entry:").ok();
-            self.fun.ssa_old_int_regs.clear();
-            self.fun.ssa_old_float_regs.clear();
-            // 2026-06-28: Do NOT reset txn_counter here — functions marked
-            // alwaysinline may be inlined into the caller, causing register
-            // collisions. Let the counter keep incrementing globally.
-            self.fun.let_bindings.clear(); self.fun.let_binding_types.clear(); self.fun.let_original_types.clear(); self.fun.reg_float_cache.clear(); self.fun.reg_type_cache.clear();
-            self.fun.terminated = false;
-            // 2026-06-26: Reset in_callable_txn — same rationale as the
-            // assume_action path above (emit_definition leaks into txn).
-            self.fun.in_callable_txn = false;
-            self.fun.returns_i64 = false;
-            self.fun.fn_ret_ty = "void".to_string();
-            // 2026-07-19: Arena init — uses next_reg_with_prefix (txn_counter)
-            // for unique names, stored in %State system fields. Cross-function
-            // accessible via emit_arena_alloc's load_state_ptr macro.
-            self.emit_arena_init(out, "  ");
-            if !matches!(txn.contract.pre_condition, Expr::Bool(true)) {
-                self.emit_precondition_check(out, &txn.contract.pre_condition, "  ");
-            }
+            // 2026-07-27: Reorder + compute outlining info in one pass.
             let (reordered, has_cycle) = super::reorder::reorder_body_statements(&txn.body);
             if has_cycle {
                 self.warnings.push(format!(
@@ -1510,17 +1612,153 @@ impl LlvmBackend {
                     name
                 ));
             }
-            for s in &reordered {
+            // Scan reordered body for FFI guards that can be outlined with scalars.
+            // Only outline when ALL FFI guards can be outlined — if any guard
+            // references non-state identifiers (constants, let bindings), skip
+            // outlining entirely and keep #0 = memory(readwrite).
+            let outlined_info: Vec<(usize, String, Vec<(String, usize)>)> = {
+                let mut ffi_guard_indices: Vec<usize> = Vec::new();
+                let mut guard_bodies: Vec<&[Statement]> = Vec::new();
+                for (ri, s) in reordered.iter().enumerate() {
+                    if let Statement::Guarded(_, body) = s {
+                        if body.iter().any(|s| has_ffi_call(s)) {
+                            ffi_guard_indices.push(ri);
+                            guard_bodies.push(body);
+                        }
+                    }
+                }
+                // Check if ALL guards can be outlined
+                let mut can_outline_all = true;
+                let mut field_sets: Vec<Vec<(String, usize)>> = Vec::new();
+                for body in &guard_bodies {
+                    let mut idents: Vec<String> = Vec::new();
+                    let mut local_lets: Vec<String> = Vec::new();
+                    for stmt in *body {
+                        collect_idents(stmt, &mut idents);
+                        collect_let_names(stmt, &mut local_lets);
+                    }
+                    idents.sort(); idents.dedup();
+                    local_lets.sort(); local_lets.dedup();
+                    idents.retain(|i| !local_lets.contains(i));
+                    let mut fields: Vec<(String, usize)> = Vec::new();
+                    for ident in &idents {
+                        if let Some(&idx) = self.ctx.field_index_map.get(ident) {
+                            fields.push((ident.clone(), idx));
+                        } else {
+                            can_outline_all = false;
+                            break;
+                        }
+                    }
+                    if !can_outline_all { break; }
+                    if !fields.is_empty() {
+                        field_sets.push(fields);
+                    }
+                }
+                if !can_outline_all { Vec::new() }
+                else {
+                    ffi_guard_indices.into_iter().zip(field_sets.into_iter())
+                        .enumerate()
+                        .map(|(ci, (ri, fields))| {
+                            (ri, format!("txn_{}_cold_{}", name, ci), fields)
+                        })
+                        .collect()
+                }
+            };
+            let local_outlined = !outlined_info.is_empty();
+            let local_txn_attr = if local_outlined { "#11".to_string() } else { txn_attr.clone() };
+
+            // Emit the txn function
+            writeln!(out, "define void @txn_{}(ptr noalias nocapture align 8 %state) local_unnamed_addr {}{} {{", name, local_txn_attr, alwaysinline).ok();
+            writeln!(out, "  entry:").ok();
+            self.fun.ssa_old_int_regs.clear();
+            self.fun.ssa_old_float_regs.clear();
+            self.fun.let_bindings.clear(); self.fun.let_binding_types.clear(); self.fun.let_original_types.clear(); self.fun.reg_float_cache.clear(); self.fun.reg_type_cache.clear();
+            self.fun.terminated = false;
+            self.fun.in_callable_txn = false;
+            self.fun.returns_i64 = false;
+            self.fun.fn_ret_ty = "void".to_string();
+            self.emit_arena_init(out, "  ");
+            if !matches!(txn.contract.pre_condition, Expr::Bool(true)) {
+                self.emit_precondition_check(out, &txn.contract.pre_condition, "  ");
+            }
+            // Emission loop with guard substitution
+            for (ri, s) in reordered.iter().enumerate() {
                 if self.fun.terminated { break; }
-                emit_statement(self, out, s, "  ");
+                if let Some((_, cold_name, fields)) = outlined_info.iter().find(|(idx, _, _)| *idx == ri) {
+                    // Emit GEP+load for each field + call cold function
+                    let mut param_regs: Vec<String> = Vec::new();
+                    for (field_name, field_idx) in fields {
+                        let gep_reg = self.fun.gen_reg();
+                        let load_reg = self.fun.gen_reg();
+                        let llvm_ty = self.ctx.field_types.get(*field_idx).cloned().unwrap_or_else(|| "i64".to_string());
+                        writeln!(out, "  {} = getelementptr inbounds %State, ptr %state, i32 0, i32 {}", gep_reg, field_idx).ok();
+                        writeln!(out, "  {} = load {}, ptr {}", load_reg, llvm_ty, gep_reg).ok();
+                        param_regs.push(load_reg.clone());
+                    }
+                    let mut typed_args: Vec<String> = Vec::new();
+                    for (fi, (_, idx)) in fields.iter().enumerate() {
+                        let llvm_ty = self.ctx.field_types.get(*idx).cloned().unwrap_or_else(|| "i64".to_string());
+                        typed_args.push(format!("{} {}", llvm_ty, param_regs[fi]));
+                    }
+                    writeln!(out, "  call void @{}({})", cold_name, typed_args.join(", ")).ok();
+                } else {
+                    emit_statement(self, out, s, "  ");
+                }
             }
             if !self.fun.terminated {
                 self.emit_arena_fini(out, "  ");
             }
-            // 2026-07-15: Always emit ret void — terminates the function
-            // even when the last block was a guard end label.
             writeln!(out, "  ret void").ok();
             writeln!(out, "}}").ok();
+
+            // Emit cold functions after the txn function
+            for (ri, cold_name, fields) in &outlined_info {
+                let body = match &reordered[*ri] {
+                    Statement::Guarded(_, body) => body.clone(),
+                    _ => continue,
+                };
+                let saved_let_bindings = self.fun.let_bindings.clone();
+                let saved_let_binding_types = self.fun.let_binding_types.clone();
+                let saved_let_original_types = self.fun.let_original_types.clone();
+                let saved_reg_float_cache = self.fun.reg_float_cache.clone();
+                let saved_reg_type_cache = self.fun.reg_type_cache.clone();
+                self.fun.let_bindings.clear();
+                self.fun.let_binding_types.clear();
+                self.fun.let_original_types.clear();
+                self.fun.reg_float_cache.clear();
+                self.fun.reg_type_cache.clear();
+
+                // Build param list — register param names as local let bindings
+                // so emit_statement resolves them to LLVM registers (not globals).
+                let field_names: Vec<String> = fields.iter().map(|(f, _)| f.clone()).collect();
+                let cp_names: Vec<String> = fields.iter().map(|(f_name, _)| format!("__cp_{}", f_name)).collect();
+                let mut param_sig: Vec<String> = Vec::new();
+                for (fi, (f_name, idx)) in fields.iter().enumerate() {
+                    let llvm_ty = self.ctx.field_types.get(*idx).cloned().unwrap_or_else(|| "i64".to_string());
+                    param_sig.push(format!("{} %{}", llvm_ty, cp_names[fi]));
+                    // Register as local let binding with the correct Brief type
+                    let brief_ty = self.ctx.field_brief_types.get(*idx).cloned().unwrap_or(Type::int());
+                    self.fun.let_bindings.insert(cp_names[fi].clone(), format!("%{}", cp_names[fi]));
+                    self.fun.let_binding_types.insert(cp_names[fi].clone(), brief_ty.clone());
+                    self.fun.let_original_types.insert(cp_names[fi].clone(), brief_ty);
+                }
+                writeln!(out, "define void @{}({}) local_unnamed_addr #0 {{", cold_name, param_sig.join(", ")).ok();
+
+                // Rewrite guard body: replace ident references with param names
+                for stmt in &body {
+                    let rewritten = Self::rewrite_stmt_idents(stmt, &field_names, &cp_names);
+                    emit_statement(self, out, &rewritten, "  ");
+                }
+                writeln!(out, "  ret void").ok();
+                writeln!(out, "}}").ok();
+                writeln!(out).ok();
+
+                self.fun.let_bindings = saved_let_bindings;
+                self.fun.let_binding_types = saved_let_binding_types;
+                self.fun.let_original_types = saved_let_original_types;
+                self.fun.reg_float_cache = saved_reg_float_cache;
+                self.fun.reg_type_cache = saved_reg_type_cache;
+            }
         }
 
         // Collect GPU kernel for this transaction if it has #gpu / #!gpu / #?gpu.
