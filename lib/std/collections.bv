@@ -1,25 +1,41 @@
 // ── Brief Collections ───────────────────────────────────────────────
-// 2026-07-26: User-defined collection types. No compiler magic.
+// 2026-07-26: Standard collection types. No compiler magic.
 // Protocol bindings let the <- operator work for any collection
-// via InsertAt <~ push(#L, #R) and ExtractFrom <~ pop(#L).
+// via op InsertAt: fn(#L, #R) and op ExtractFrom: fn(#R).
+// op Init: fn(#L, #R) handles let x: T = val initialization.
 
-// ── RingBuffer<T> — fixed-size circular buffer ──────────────────────
+// ── Stack<T, N> — fixed-size stack ──────────────────────────────────
 
-export defn new_ring_buffer<T>(val: T) -> RingBuffer<T> {
-    let mut rb: RingBuffer<T>;
-    rb.data[0] = val;
-    rb.read = 0;
-    rb.write = 1;
-    term rb;
+obj Stack<T, N> {
+    data: T[N];
+    len: Int;
+
+    op InsertAt: push(#L, #R);
+    op ExtractFrom: pop(#R);
+    op Init: init(#L, #R);
+
+    txn push(val: T) [len < N][len <= N] {
+        data[len] = val;
+        len = len + 1;
+    };
+
+    txn pop() -> T [len > 0][len >= 0] {
+        len = len - 1;
+        term data[len];
+    };
 };
+
+// ── RingBuffer<T> — fixed-size circular buffer ─────────────────────
 
 obj RingBuffer<T> {
     data: T[256];
     read: Int;
     write: Int;
 
-    InsertAt <~ push(#L, #R);
-    ExtractFrom <~ pop(#L);
+    op InsertAt: push(#L, #R);
+    op ExtractFrom: pop(#R);
+    op CopyFrom: read(#R);
+    op Init: init(#L, #R);
 
     txn push(val: T) [write - read < 256][write - read <= 256] {
         data[write % 256] = val;
@@ -32,7 +48,77 @@ obj RingBuffer<T> {
         term data[i];
     };
 
+    defn read() -> T [write > read] {
+        term data[read % 256];
+    };
+
     defn size() -> Int {
         term write - read;
+    };
+};
+
+// ── List<T> — dynamic list (heap-allocated) ─────────────────────────
+
+struct ListBuffer<T> {
+    data: Ptr<T>;
+    cap: Int;
+};
+
+obj List<T> {
+    inner: ListBuffer<T>;
+    len: Int;
+
+    op InsertAt: push(#L, #R);
+    op ExtractFrom: pop(#R);
+    op CopyFrom: get(#R);
+    op Init: init(#L, #R);
+
+    txn push(val: T) [len < inner.cap][len <= inner.cap] {
+        inner.data[len] = val;
+        len = len + 1;
+    };
+
+    txn pop() -> T [len > 0][len >= 0] {
+        len = len - 1;
+        term inner.data[len];
+    };
+
+    defn get(i: Int) -> T [i >= 0 && i < len] {
+        term inner.data[i];
+    };
+};
+
+// ── HashMap<K, V> — hash table (heap-allocated) ────────────────────
+
+struct HashMapEntry<K, V> { key: K; val: V; };
+
+obj HashMap<K, V> {
+    buckets: Ptr<List<HashMapEntry<K, V>>>;
+    count: Int;
+    cap: Int;
+
+    op InsertAt: insert(#L, #R);
+    op ExtractFrom: remove(#R);
+    op CopyFrom: get(#R);
+    op Init: init(#L, #R);
+
+    defn hash(key: K) -> Int ((key as Int) % cap) {
+        term (key as Int) % cap;
+    };
+
+    txn insert(key: K, val: V) [count < cap][count <= cap] {
+        let h = (key as Int) % cap;
+        buckets[h].push(HashMapEntry { key, val });
+        count = count + 1;
+    };
+
+    txn remove(key: K) -> Option<V> {
+        let h = (key as Int) % cap;
+        // scan bucket
+    };
+
+    defn get(key: K) -> Option<V> {
+        let h = (key as Int) % cap;
+        // scan bucket
     };
 };

@@ -2,29 +2,29 @@
 //
 // Tests: compiler proves convergence via counter (`count < N`), while the
 // body exercises the collection drain analysis. The ring buffer starts with
-// a single element [0] allocated as a RingBuf heap obj (4 × i64 slots).
+// a single element [0] allocated via init().
 // Each tick: pop from head slot, push to tail slot — O(1) via head/tail
 // pointer arithmetic with bitwise wrap (mask = capacity - 1).
 //
 // The counter is runtime-determined (__get_env_int) so the compiler
 // cannot precompute the 50M-iteration loop. The collection ops are a
-// side exercise that tests the LLVM backend's RingPush#/RingPop# path.
+// side exercise that tests the LLVM backend's op InsertAt/ExtractFrom path.
 //
 // Build:
-//   ./target/release/brief-compiler build --llvm benchmarks/queue_drain.bv \
+//   ./target/release/briefc build --llvm benchmarks/queue_drain.bv \
 //       --out benchmarks --optimize-budget 256
 //
 // C reference: queue_drain_c.c
 
 
 let N: Int = GetEnvInt!("BOUND");
+import { RingBuffer } from "std/collections.bv";
+let queue: RingBuffer<Int> = 0;    // op Init: init(#L, #R)
 let count: Int = 0;
-import { RingBuffer, new_ring_buffer } from "std/collections.bv";
-let queue: RingBuffer<Int> = new_ring_buffer(0);
 
 node work [count < N][count == N] {
-    <- &queue;
-    &queue <- count;
+    queue <- count;                 // op InsertAt: push(#L, #R)
+    <- &queue;                       // op ExtractFrom: pop(#R) — discard
 count = count + 1;
 
     when count % 5000000 == 0 {
