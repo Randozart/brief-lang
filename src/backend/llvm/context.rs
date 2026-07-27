@@ -124,6 +124,10 @@ pub struct CompilerContext {
     pub dead_info_disabled: bool,
     pub emit_remarks: bool,
     pub has_cycles: bool,
+    /// 2026-07-27: Set of function names proven to need arena initialization.
+    /// Populated pre-codegen by analyze_arena_need. When empty for a given
+    /// function, arena fields in %State and emit_arena_init/fini are skipped.
+    pub needs_arena: HashSet<String>,
     pub slp_hazard_fns: HashSet<String>,
 
     // 2026-07-26: Native integer width for #Int protocol (default 64).
@@ -240,6 +244,7 @@ impl CompilerContext {
             dead_info_disabled: false,
             emit_remarks: false,
             has_cycles: false,
+            needs_arena: HashSet::new(),
             slp_hazard_fns: HashSet::new(),
             int_bits: 64,
             target_triple: "x86_64-unknown-linux-gnu".to_string(),
@@ -334,6 +339,9 @@ pub struct FunctionContext {
 
     // Function-level state flags
     pub terminated: bool,
+    /// 2026-07-27: Name of the transaction/function being compiled.
+    /// Used as key for CompilerContext.needs_arena lookup.
+    pub txn_name: String,
     pub returns_i64: bool,
     pub fn_ret_ty: String,
     pub main_body: bool,
@@ -536,6 +544,7 @@ impl FunctionContext {
             phi_induction_reg: None,
             loop_exit_label: None,
             terminated: false,
+            txn_name: String::new(),
             returns_i64: false,
             fn_ret_ty: "void".to_string(),
             main_body: false,

@@ -9,10 +9,18 @@ use std::collections::{HashMap, HashSet};
 /// Backends query `has_cycle()` to decide codegen strategy:
 /// - Acyclic: can use static dispatch, no recursion guards
 /// - Cyclic: must use dynamic dispatch, recursion guards, or bounded execution
+///
+/// 2026-07-27: Extended with `defn_names` and `defn_edges` for Arena-By-Proof.
+/// `defn_edges` tracks what each definition calls (both txns and other defns),
+/// enabling transitive arena-need propagation through the call graph.
 #[derive(Clone)]
 pub struct CallGraph {
     graph: HashMap<String, Vec<String>>,
     txn_names: HashSet<String>,
+    /// 2026-07-27: Names of all definition functions in the program.
+    defn_names: HashSet<String>,
+    /// 2026-07-27: Edges from defn names to functions they call (txns + defns).
+    defn_edges: HashMap<String, Vec<String>>,
     cycles: Vec<Vec<String>>,
 }
 
@@ -21,21 +29,35 @@ impl CallGraph {
         CallGraph {
             graph: HashMap::new(),
             txn_names: HashSet::new(),
+            defn_names: HashSet::new(),
+            defn_edges: HashMap::new(),
             cycles: Vec::new(),
         }
     }
 
-    /// Build call graph from top-level items, analyzing all transactions
+    /// Build call graph from top-level items, analyzing all transactions and definitions
+    /// 2026-07-27: Extended to also collect definition names and their callee edges
+    /// for transitive arena-need propagation.
     pub fn build_from_program(&mut self, items: &[TopLevel]) {
         self.graph.clear();
         self.txn_names.clear();
+        self.defn_names.clear();
+        self.defn_edges.clear();
         self.cycles.clear();
 
         for item in items {
-            if let TopLevel::Transaction(txn) = item {
-                self.txn_names.insert(txn.name.clone());
-                let called = extract_called_transactions(&txn.body);
-                self.graph.entry(txn.name.clone()).or_default().extend(called);
+            match item {
+                TopLevel::Transaction(txn) => {
+                    self.txn_names.insert(txn.name.clone());
+                    let called = extract_called_functions(&txn.body);
+                    self.graph.entry(txn.name.clone()).or_default().extend(called);
+                }
+                TopLevel::Definition(defn) => {
+                    self.defn_names.insert(defn.name.clone());
+                    let called = extract_called_functions(&defn.body);
+                    self.defn_edges.entry(defn.name.clone()).or_default().extend(called);
+                }
+                _ => {}
             }
         }
     }
@@ -73,6 +95,18 @@ impl CallGraph {
         self.graph.get(txn_name)
     }
 
+    /// Get the adjacency list for a given definition
+    /// 2026-07-27: Returns callees of a definition function.
+    pub fn defn_edges_from(&self, defn_name: &str) -> Option<&Vec<String>> {
+        self.defn_edges.get(defn_name)
+    }
+
+    /// Check if a name is a known definition
+    /// 2026-07-27: Used by transitive arena propagation to distinguish defns from txns.
+    pub fn is_defn(&self, name: &str) -> bool {
+        self.defn_names.contains(name)
+    }
+
     /// Total number of transactions in the graph
     pub fn node_count(&self) -> usize {
         self.txn_names.len()
@@ -84,8 +118,48 @@ impl CallGraph {
     }
 }
 
-/// Extract all transaction names called from a list of statements
-pub fn extract_called_transactions(body: &[Statement]) -> Vec<String> {
+/// Propagate arena need transitively through the call graph.
+/// 2026-07-27: Given a set of functions that directly need arena (because they
+/// contain Arena-strategy Alloc# calls), returns the closure of all functions
+/// that need arena — including those that call arena-needing functions.
+pub fn propagate_arena_need(
+    arena_set: &HashSet<String>,
+    call_graph: &CallGraph,
+) -> HashSet<String> {
+    let mut result: HashSet<String> = arena_set.clone();
+    let mut changed = true;
+    while changed {
+        changed = false;
+        // Check transactions: if a txn calls any function in result, add it
+        for txn_name in &call_graph.txn_names {
+            if result.contains(txn_name) {
+                continue;
+            }
+            if let Some(edges) = call_graph.edges_from(txn_name) {
+                if edges.iter().any(|callee| result.contains(callee)) {
+                    result.insert(txn_name.clone());
+                    changed = true;
+                }
+            }
+        }
+        // Check definitions: if a defn calls any function in result, add it
+        for defn_name in &call_graph.defn_names {
+            if result.contains(defn_name) {
+                continue;
+            }
+            if let Some(edges) = call_graph.defn_edges_from(defn_name) {
+                if edges.iter().any(|callee| result.contains(callee)) {
+                    result.insert(defn_name.clone());
+                    changed = true;
+                }
+            }
+        }
+    }
+    result
+}
+
+/// Extract all function/transaction names called from a list of statements
+pub fn extract_called_functions(body: &[Statement]) -> Vec<String> {
     let mut called = Vec::new();
     for stmt in body {
         match stmt {
@@ -101,7 +175,7 @@ pub fn extract_called_transactions(body: &[Statement]) -> Vec<String> {
                 collect_call_names(e, &mut called);
             }
             Statement::Guarded(_, statements) => {
-                called.extend(extract_called_transactions(statements));
+                called.extend(extract_called_functions(statements));
             }
             _ => {}
         }

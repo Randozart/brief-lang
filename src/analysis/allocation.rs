@@ -95,11 +95,15 @@ struct DagBuilder<'a> {
     result: &'a mut HashMap<usize, AllocStrategy>,
     in_txn: bool,
     in_bounded: bool,
+    /// 2026-07-27: Track whether ANY Alloc# in this function uses Arena strategy.
+    /// Set during walk_expr when default_strategy() returns Arena for an Alloc# call.
+    /// Used by analyze_arena_need for transitive call-graph propagation.
+    needs_arena: bool,
 }
 
 impl<'a> DagBuilder<'a> {
     fn new(counter: &'a mut usize, result: &'a mut HashMap<usize, AllocStrategy>, in_txn: bool, in_bounded: bool) -> Self {
-        DagBuilder { graph: DataflowGraph::new(), counter, result, in_txn, in_bounded }
+        DagBuilder { graph: DataflowGraph::new(), counter, result, in_txn, in_bounded, needs_arena: false }
     }
 
     fn default_strategy(&self) -> AllocStrategy {
@@ -269,9 +273,22 @@ impl<'a> DagBuilder<'a> {
                     self.graph.alloc_sizes.insert(analysis_id, size_expr.clone());
                 }
                 let producer = format!("%alloc_{}", analysis_id);
-                self.result.insert(analysis_id, self.default_strategy());
+                let strategy = self.default_strategy();
+                // 2026-07-27: If this Alloc# defaults to Arena, mark needs_arena.
+                // Strategy may later be upgraded to Malloc (escape detected) but
+                // the conservative initial marking catches all cases where arena
+                // might be required.
+                if strategy == AllocStrategy::Arena {
+                    self.needs_arena = true;
+                }
+                self.result.insert(analysis_id, strategy);
                 let nid = self.graph.add_producer(DagNode::Alloc { id: analysis_id, producer: producer.clone() }, &producer);
                 self.graph.alloc_nodes.push(nid);
+                for a in args.iter_mut() { self.walk_expr(a); }
+            }
+            // 2026-07-27: Realloc# and AllocArena# always need arena.
+            Expr::Call(name, args, _) if name == "Realloc#" || name == "AllocArena#" => {
+                self.needs_arena = true;
                 for a in args.iter_mut() { self.walk_expr(a); }
             }
             Expr::Call(_, args, _) => { for a in args.iter_mut() { self.walk_expr(a); } }
@@ -324,6 +341,52 @@ pub fn analyze_alloc_strategies(items: &mut [TopLevel]) -> HashMap<usize, AllocS
         }
     }
     result
+}
+
+/// 2026-07-27: Compute which transactions/definitions need arena initialization.
+/// Uses a per-function DAG walk to detect Arena-strategy Alloc# calls, then
+/// propagates results transitively through the call graph via propagate_arena_need.
+///
+/// Returns a HashSet of function names that require arena init.
+///
+/// Propagation rule: if function A calls function B, and B needs arena,
+/// then A also needs arena. Repeat until fixed point.
+pub fn analyze_arena_need(items: &mut [TopLevel]) -> HashSet<String> {
+    let mut cg = crate::analysis::call_graph::CallGraph::new();
+    cg.build_from_program(items);
+
+    let mut direct_needs: HashSet<String> = HashSet::new();
+    for item in items.iter_mut() {
+        let name = match item {
+            TopLevel::Transaction(txn) => Some(txn.name.clone()),
+            TopLevel::Definition(defn) => Some(defn.name.clone()),
+            _ => None,
+        };
+        let Some(name) = name else { continue };
+
+        let mut counter = 0usize;
+        let mut result_map = HashMap::new();
+        let mut builder = DagBuilder::new(&mut counter, &mut result_map, false, false);
+        match item {
+            TopLevel::Transaction(txn) => {
+                builder.in_txn = true;
+                builder.in_bounded = !matches!(txn.contract.post_condition, Expr::Bool(true));
+                builder.walk_stmts(&mut txn.body);
+            }
+            TopLevel::Definition(defn) => {
+                builder.in_txn = false;
+                builder.in_bounded = false;
+                builder.walk_stmts(&mut defn.body);
+            }
+            _ => {}
+        }
+        if builder.needs_arena {
+            direct_needs.insert(name);
+        }
+    }
+
+    // Propagate transitively through call graph
+    crate::analysis::call_graph::propagate_arena_need(&direct_needs, &cg)
 }
 
 #[cfg(test)]

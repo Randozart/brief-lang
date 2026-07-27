@@ -871,6 +871,14 @@ impl LlvmBackend {
         self
     }
 
+    /// 2026-07-27: Set the set of function names that need arena initialization.
+    /// Populated by analyze_arena_need before codegen. When empty, arena fields
+    /// in %State and all arena init/fini calls are skipped.
+    pub fn with_needs_arena(mut self, needs_arena: std::collections::HashSet<String>) -> Self {
+        self.ctx.needs_arena = needs_arena;
+        self
+    }
+
     // 2026-07-18: Enable SVO (Small Vector Optimization) for List types.
     pub fn with_svo(mut self, enabled: bool) -> Self {
         self.feature_svo = enabled;
@@ -1445,6 +1453,13 @@ impl LlvmBackend {
     /// Emit arena initialization at scope entry. Allocates the initial
     /// 64KB arena buffer, sets up ptr/end/base alloca slots.
     pub(crate) fn emit_arena_init(&mut self, out: &mut String, indent: &str) {
+        // 2026-07-27: Global gate — if no function in the program needs arena,
+        // skip emission entirely. The field-injection guard ensures arena_ptr_idx
+        // is None when needs_arena is empty, but this early return avoids even
+        // entering the function dispatch logic.
+        if self.ctx.needs_arena.is_empty() {
+            return;
+        }
         let Some(aptr_idx) = self.arena_ptr_idx else { return; };
         let Some(aend_idx) = self.arena_end_idx else { return; };
         let Some(abase_idx) = self.arena_base_idx else { return; };
@@ -1472,6 +1487,10 @@ impl LlvmBackend {
     /// the allocated memory for reuse in the next scope iteration.
     /// 2026-07-19: Arena state is in %State — reload base from there.
     pub(crate) fn emit_arena_reset(&mut self, out: &mut String, indent: &str) {
+        // 2026-07-27: Global gate — skip if no function needs arena.
+        if self.ctx.needs_arena.is_empty() {
+            return;
+        }
         let Some(aptr_idx) = self.arena_ptr_idx else { return; };
         let Some(abase_idx) = self.arena_base_idx else { return; };
         let (base_val, _) = self.emit_state_load_i64_by_idx(out, indent, abase_idx);
@@ -1482,6 +1501,10 @@ impl LlvmBackend {
 
     /// Emit arena teardown at program exit. Frees the arena buffer.
     pub(crate) fn emit_arena_fini(&mut self, out: &mut String, indent: &str) {
+        // 2026-07-27: Global gate — skip if no function needs arena.
+        if self.ctx.needs_arena.is_empty() {
+            return;
+        }
         let Some(abase_idx) = self.arena_base_idx else { return; };
         let (base_val, _) = self.emit_state_load_i64_by_idx(out, indent, abase_idx);
         let base_ptr = self.fun.next_reg_with_prefix("afp");
@@ -1780,10 +1803,11 @@ impl LlvmBackend {
             self.ctx.field_brief_types.push(Type::int());
             self.ctx.field_initializers.insert("cycle_count".to_string(), Some(Expr::Decimal(0)));
         }
-        // 2026-07-19: Arena system fields — arena_ptr, arena_end, arena_base.
-        // Stored as i64 (pointers cast to int) in %State. Any function that
-        // receives %state can access the arena via these fields.
-        {
+        // 2026-07-27: Arena system fields — injected only when program needs arena.
+        // Skipping these saves 24 bytes in %State and eliminates the 64KB malloc
+        // for benchmarks with no Alloc# calls. When needs_arena is empty, no function
+        // code references these fields so they are safely omitted.
+        if !self.ctx.needs_arena.is_empty() {
             let aptr = self.ctx.field_index_map.len();
             self.ctx.field_index_map.insert("__arena_ptr".to_string(), aptr);
             self.ctx.field_types.push("i64".to_string());

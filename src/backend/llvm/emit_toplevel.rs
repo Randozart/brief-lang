@@ -1319,6 +1319,8 @@ impl LlvmBackend {
             self.emit_callable_txn(out, txn, name);
             return;
         }
+        // 2026-07-27: Set txn_name for per-function arena gating.
+        self.fun.txn_name = name.to_string();
         self.fun.pending_cleanup.clear();
         self.ctx.range_bounds = Self::extract_ranges(&txn.contract.pre_condition);
         self.ctx.field_to_meta_idx.clear();
@@ -1525,6 +1527,8 @@ impl LlvmBackend {
     }
 
     pub(super) fn emit_callable_txn(&mut self, out: &mut String, txn: &crate::ast::Transaction, name: &str) {
+        // 2026-07-27: Set txn_name for per-function arena gating.
+        self.fun.txn_name = name.to_string();
         self.fun.pending_cleanup.clear();
         self.fun.let_bindings.clear();
         self.fun.let_binding_types.clear();

@@ -473,6 +473,11 @@ pub fn compile_source(file_path: &str, source: &str, opts: &BuildOptions) -> Res
 
     // ── Allocation strategy analysis ──────────────────────────────────
     let alloc_strategies = brief_compiler::analysis::allocation::analyze_alloc_strategies(&mut items);
+    // 2026-07-27: Compute transitive arena need from the same allocation walk.
+    // This determines which functions need the 64KB arena buffer. When empty,
+    // arena fields in %State and all arena init/fini calls are skipped — saving
+    // 64KB malloc and 24 bytes of %State for benchmarks with no Alloc# calls.
+    let needs_arena = brief_compiler::analysis::allocation::analyze_arena_need(&mut items);
     emit_beast_snapshot(file_path, BeastStage::Alloc, BeastPosition::Before, &items, &universe, opts)?;
     pm.run_ast(StageKind::Allocated, &mut items, &mut universe)?;
     emit_beast_snapshot(file_path, BeastStage::Alloc, BeastPosition::After, &items, &universe, opts)?;
@@ -559,7 +564,7 @@ pub fn compile_source(file_path: &str, source: &str, opts: &BuildOptions) -> Res
     // 2026-07-23: Check if any glue target requests native module init.
     let enable_module_init = glue_targets.values().any(|t| t.module_init);
 
-    let (codegen_output, ext) = codegen(&items, &mut universe, &pm, opts, alloc_strategies, resolved_frgns, enable_module_init)?;
+    let (codegen_output, ext) = codegen(&items, &mut universe, &pm, opts, alloc_strategies, needs_arena, resolved_frgns, enable_module_init)?;
 
     // BEAST/IR snapshot at Codegen stage
     emit_beast_snapshot(file_path, BeastStage::Codegen, BeastPosition::After, &items, &universe, opts)?;
@@ -862,6 +867,7 @@ fn codegen(
     pm: &PluginManager,
     opts: &BuildOptions,
     alloc_strategies: std::collections::HashMap<usize, brief_compiler::backend::llvm::AllocStrategy>,
+    needs_arena: std::collections::HashSet<String>,
     resolved_frgns: std::collections::HashMap<String, brief_compiler::analysis::frgn_dispatch::ResolvedFrgn>,
     enable_module_init: bool,
 ) -> Result<(String, &'static str), String> {
@@ -881,9 +887,47 @@ fn codegen(
             let mut b = LlvmBackend::new()
                 .with_int_bits(opts.int_bits)
                 .with_alloc_strategies(alloc_strategies)
+                .with_needs_arena(needs_arena.clone())
                 .with_sso_strings(opts.feature_sso_strings)
                 .with_svo(opts.feature_svo)
                 .with_shared_lib(opts.shared)
+                .with_stack_threshold(opts.stack_threshold)
+                .with_optimize_budget(opts.optimize_budget)
+                .with_type_universe(universe.clone())
+                .with_operator_defs(operator_defs)
+                .with_resolved_frgns(resolved_frgns.clone())
+                .with_trg_unresolved_action(opts.trg_unresolved_action)
+                .with_module_init(enable_module_init);
+            if opts.gpu_offload {
+                b = b.with_gpu_offload(true);
+                b = b.with_svo(opts.feature_svo);
+            }
+            // Apply target config if available
+            let ext = get_extension(&opts.file_path);
+            let target_config = load_target_config(opts);
+            if let Some(entry) = target_config.lookup(&ext) {
+                if let Some(ref triple) = entry.target_triple {
+                    b = b.with_target_triple(triple);
+                }
+                if let Some(ref dl) = entry.data_layout {
+                    b = b.with_data_layout(dl);
+                }
+            }
+            output = b.generate(items, None);
+            ".ll"
+        }
+        BackendKind::Webstack => {
+            // 2026-07-26: Phase 4 — Webstack uses LlvmBackend(wasm32) + with_webstack().
+            // The old TS emitter path is deprecated. Phase 6 will also invoke
+            // GlueWebGenerator to produce the JS shim from view bindings.
+            // Phase 5: Extension is .ll — compile_wasm will produce .wasm from it.
+            let mut b = LlvmBackend::new()
+                .with_webstack(true)
+                .with_int_bits(32)
+                .with_target_triple("wasm32-unknown-wasi")
+                .with_type_universe(universe.clone())
+                .with_alloc_strategies(alloc_strategies)
+                .with_needs_arena(needs_arena)
                 .with_stack_threshold(opts.stack_threshold)
                 .with_optimize_budget(opts.optimize_budget)
                 .with_type_universe(universe.clone())
