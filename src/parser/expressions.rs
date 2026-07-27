@@ -331,13 +331,48 @@ impl<'a> Parser<'a> {
     }
 
     /// Primary: literals, identifiers, parenthesized, blocks, if/match/lambda
+    /// 2026-07-27: After parsing a literal token at `end_pos`, check if the
+    /// next token is an adjacent identifier (no whitespace). If so, it's a
+    /// suffix discriminator (e.g., `f` in `3.14f`, `km` in `42km`).
+    /// Returns the suffix string if found, advancing past the suffix token.
+    fn peek_suffix(&mut self, end_pos: usize) -> Option<String> {
+        // self.pos is already past the literal token (advance() incremented it).
+        let next_idx = self.pos;
+        if next_idx >= self.tokens.len() { return None; }
+        let (next_tok, next_span) = &self.tokens[next_idx];
+        // Check adjacency: next token starts right where current ends
+        if next_span.start != end_pos { return None; }
+        match next_tok {
+            Token::Identifier(s) => {
+                // Consume the suffix token (skip past it)
+                self.pos = next_idx + 1;
+                Some(s.clone())
+            }
+            _ => None,
+        }
+    }
+
     fn parse_primary(&mut self) -> Result<Expr, SyntaxError> {
         match self.advance() {
             // ── Literals ────────────────────────────────────────────
-            Some((Token::Integer(n), _)) => Ok(Expr::Decimal(n)),
-            Some((Token::Float(f), _))
-            | Some((Token::Float32(f), _))
-            | Some((Token::Float64(f), _)) => Ok(Expr::Float(f)),
+            Some((Token::Integer(n), span)) => {
+                // 2026-07-27: Check for adjacent suffix identifier (e.g., 42km, 0xFFh)
+                if let Some(suf) = self.peek_suffix(span.end) {
+                    Ok(Expr::TaggedLiteral(n, suf))
+                } else {
+                    Ok(Expr::Decimal(n))
+                }
+            }
+            Some((Token::Float(f), span))
+            | Some((Token::Float32(f), span))
+            | Some((Token::Float64(f), span)) => {
+                // 2026-07-27: Check for adjacent suffix identifier (e.g., 3.14f, 16.2bf)
+                if let Some(suf) = self.peek_suffix(span.end) {
+                    Ok(Expr::TaggedLiteral(f as i64, suf))
+                } else {
+                    Ok(Expr::Float(f))
+                }
+            }
             Some((Token::String(s), _)) => Ok(Expr::Quoted(s.into_bytes())),
             Some((Token::Char(c), _)) => Ok(Expr::Decimal(c as i64)),
             Some((Token::BoolTrue, _)) => Ok(Expr::Bool(true)),
