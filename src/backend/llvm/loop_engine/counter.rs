@@ -620,15 +620,26 @@ impl LlvmBackend {
                 let match_group = self.fun.slp_groups.iter()
                     .find(|g| g.base_index == i).cloned();
                 if let Some(ref group) = match_group {
-                    let should_vec = group.width >= 4
-                        || (group.width >= 3
+                    // 2026-07-27: SLP profitability — total_work = tree_depth * width.
+                    // Each SLP group incurs ~8-10 insertelement/extractelement overhead.
+                    // Vectorization is profitable when total computational work exceeds this.
+                    // Additionally, cap width at 8 (max native AVX2 width) — wider groups
+                    // force LLVM to split vectors (e.g. <12 x float> → <8> + <4>), adding
+                    // split/join overhead without corresponding compute benefit.
+                    //   width=3, depth=3 (9<10) — blocked (float_math_nonzero)
+                    //   width=3, depth=4 (12>=10) — allowed (deep expressions)
+                    //   width=5, depth=2 (10>=10) — allowed (nbody merged pairs)
+                    //   width=12, depth=3 (36>=10, but 12>8) — blocked (kalman)
+                    let should_vec = group.width >= 4 && group.width <= 8
+                        || (group.width >= 3 && group.width <= 8
                             && body.get(i).map_or(false, |s| {
                                 let expr = match s {
                                     Statement::Let { expr: Some(e), .. } => &*e,
                                     Statement::Assign(_, e) => &*e,
                                     _ => return false,
                                 };
-                                crate::backend::llvm::vector_codegen::tree_depth(expr) >= 2
+                                crate::backend::llvm::vector_codegen::tree_depth(expr)
+                                    * group.width >= 10
                             }));
                     if should_vec {
                         let result = crate::backend::llvm::vector_codegen::emit_slp_group(
