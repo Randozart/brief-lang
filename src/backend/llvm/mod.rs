@@ -3241,19 +3241,10 @@ impl LlvmBackend {
         writeln!(out, "attributes #1 = {{ nocallback nofree nosync nounwind willreturn memory(readwrite) }}").ok();
         writeln!(out, "attributes #2 = {{ mustprogress nofree norecurse nosync nounwind memory(readwrite) }}").ok();
         writeln!(out, "attributes #3 = {{ nofree norecurse nosync nounwind memory(readwrite) }}").ok();
-        // SLP-safe attribute variants: #4 = #0 + disable-slp, #5 = #3 + disable-slp.
-        // Dual attributes (disable-slp-vectorize + no-vectorize-slp) ensure LLVM
-        // compatibility across versions 15–22+. Emitted only when needed.
-        if !self.ctx.slp_hazard_fns.is_empty() {
-            writeln!(out, "attributes #4 = {{").ok();
-            writeln!(out, "    mustprogress nofree norecurse nosync nounwind memory(readwrite)").ok();
-            writeln!(out, "    \"disable-slp-vectorize\"=\"true\" \"no-vectorize-slp\"=\"true\"").ok();
-            writeln!(out, "}}").ok();
-            writeln!(out, "attributes #5 = {{").ok();
-            writeln!(out, "    nofree norecurse nosync nounwind memory(readwrite)").ok();
-            writeln!(out, "    \"disable-slp-vectorize\"=\"true\" \"no-vectorize-slp\"=\"true\"").ok();
-            writeln!(out, "}}").ok();
-        }
+        // 2026-07-27: SLP hazard attribute variants #4/#5 removed — manual SLP
+        // vector emission is disabled (counter.rs), so there's no conflict with
+        // LLVM's auto-vectorizer. All functions use #0 or #3 without disable-slp.
+        // The hazard analysis code in hazard.rs is retained for future re-evaluation.
         writeln!(out, "attributes #6 = {{ nounwind }}").ok();
         // 2026-07-04: #7 = readonly for @pre_* functions.
         // Precondition expressions never write to %State — they only read
@@ -3277,16 +3268,18 @@ impl LlvmBackend {
         writeln!(out, "attributes #8 = {{").ok();
         writeln!(out, "    mustprogress nofree norecurse nosync nounwind willreturn memory(argmem: readwrite)").ok();
         writeln!(out, "}}").ok();
-        // 2026-07-04: #9 = argmem:readwrite variant of #3 for @main.
-        // 2026-07-05: #9 = memory(readwrite) for main functions.
-        // Main accesses @stdout (a global, not argmem) through fprintf
-        // calls. Using memory(readwrite) prevents LLVM from eliminating
-        // side-effectful I/O calls during opt's ipsccp/globalopt passes.
+        // 2026-07-27: #9 = argmem:readwrite variant of #3 for @main.
+        // Main allocates %state = alloca %State and passes it as ptr %state to
+        // reactor_tick and each txn function. All memory access is through this
+        // argument pointer — no global memory (beyond @stdout for print FFI calls,
+        // which are themselves foreign function calls, not direct writes).
+        // argmem:readwrite lets LLVM SROA promote %State fields to SSA registers.
+        // Previously used memory(readwrite) which blocked SROA.
         // This attribute is deliberately HIGH-numbered (#9) to avoid
         // collision with clang-generated bitcode attributes (#0-#8)
         // during LTO merging (llvm-link renumbers but keeps #9).
         writeln!(out, "attributes #9 = {{").ok();
-        writeln!(out, "    nofree norecurse nosync nounwind memory(readwrite)").ok();
+        writeln!(out, "    nofree norecurse nosync nounwind memory(argmem: readwrite)").ok();
         writeln!(out, "}}").ok();
         // 2026-07-04: #10 = argmem:read + willreturn for @pre_* functions.
         // Precondition functions only read state through %state and never

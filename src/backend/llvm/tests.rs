@@ -1139,8 +1139,11 @@ fn test_slp_hazard_large_field_count() {
     let program = make_slp_float_program(20, body, None);
     let mut backend = LlvmBackend::new();
     let output = backend.generate(&program, None);
-    assert!(output.contains("disable-slp-vectorize"),
-        "20 float fields with cross-ops should disable SLP on SSE");
+    // 2026-07-27: SLP hazard attribute emission removed — manual SLP vector
+    // codegen was disabled so there's no conflict with LLVM's auto-vectorizer.
+    // The hazard analysis still runs but produces no attribute output.
+    assert!(!output.contains("disable-slp-vectorize"),
+        "SLP hazard attributes no longer emitted after SLP codegen removal");
 }
 
 #[test]
@@ -1209,8 +1212,10 @@ fn test_slp_hazard_avx_target() {
     };
     backend = backend.with_spec(spec);
     let output = backend.generate(&program, None);
-    assert!(output.contains("disable-slp-vectorize"),
-        "AVX2: 12 fields with 32 cross-ops should disable SLP (peak=28 >= 16)");
+    // 2026-07-27: SLP hazard attribute emission removed — same rationale as
+    // test_slp_hazard_large_field_count.
+    assert!(!output.contains("disable-slp-vectorize"),
+        "SLP hazard attributes no longer emitted after SLP codegen removal");
 }
 
 // ── Schema alias tests ────────────────────────────────────

@@ -342,25 +342,12 @@ impl LlvmBackend {
             t.modifiers.iter().any(|m| m.name == "inline")
                 || !self.ctx.has_cycles
         });
-        if peak >= r {
-            if !all_alwaysinline {
-                self.ctx.slp_hazard_fns.insert("main".to_string());
-            }
-            for (txn_name, _) in txns {
-                self.ctx.slp_hazard_fns.insert(txn_name.clone());
-            }
-        } else if total_cross_ops > 0 {
-            let total_float_ops = self.count_all_float_ops(txns);
-            if total_float_ops > 0 && n > 0 {
-                let ops_per_field = total_float_ops as f64 / n as f64;
-                if ops_per_field < 1.5 {
-                    self.ctx.slp_hazard_fns.insert("main".to_string());
-                    for (txn_name, _) in txns {
-                        self.ctx.slp_hazard_fns.insert(txn_name.clone());
-                    }
-                }
-            }
-        }
+        // 2026-07-27: SLP hazard registration disabled — manual SLP vector
+        // emission is removed (see counter.rs). LLVM's auto-vectorizer handles
+        // all vectorization now, so disabling SLP would be counterproductive.
+        // The analysis is retained for future re-evaluation. Keep the locals
+        // alive to suppress unused-variable warnings.
+        let _ = (peak, r, all_alwaysinline);
     }
 
     pub(super) fn count_all_float_ops(
