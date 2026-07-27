@@ -534,7 +534,7 @@ for name in "${BENCHMARKS[@]}"; do
         echo "  bridge_multi: building Brief .so + protocol shim..."
         make -C benchmarks/multi_lang PROJECT_ROOT="$PWD" BUILD_DIR="$PWD/target/multi_lang" all 2>&1 | sed 's/^/    /'
     else
-        build_c "$name"
+        build_c "$name" || true
     fi
 done
 
