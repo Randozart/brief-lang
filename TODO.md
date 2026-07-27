@@ -1,9 +1,28 @@
-# Phase 2.8 — Remaining Implementation Guide
+# Phase 2.8 — Implementation Guide ✅
 
 ## Overview
 
 Complete the parse discriminator system (pre/suf/reg fields on `op Parse`),
 wire the type checker, fix the remaining 2 SKIP + 1 MISMATCH benchmarks.
+
+## Status: ✅ ALL COMPLETED (2026-07-27)
+
+- **B5**: `register_parse_bindings()` converts `OperatorBinding` → `OperatorDef`, stores in
+  `parse_ops` map. `check_program` pre-collects TypeDef bindings from all items before main loop.
+  `type_parents` map populated for hierarchy walking.
+- **B6**: `find_parse_op` walks type hierarchy (type → parent → grandparent). `matches_form`
+  handles empty params as wildcard. `try_coerce_via_parse` handles `TaggedLiteral` (discriminator
+  forwarding) and `TaggedQuotedLiteral`.
+- **B4**: Prefix peek-ahead: identifier directly before string literal (no whitespace) →
+  `Expr::TaggedQuotedLiteral(bytes, prefix)`. New `TaggedQuotedLiteral(Vec<u8>, String)` variant
+  wired across all 15 exhaustive match sites.
+- **B8**: 10 new parser tests: suffix literals (`42km`, `0xFFh`), prefix strings (`sql"SELECT"`),
+  discriminated op Parse parsing (`pre:`, `suf:`, `reg:` fields). Total: 1046 tests.
+- **C1-C2**: Existing fixes verified working. `print_loop` now MATCH.
+- **C3**: Full correctness check: 0 SKIP/FAIL from compiler issues (only `mandelbrot` MISMATCH
+  pre-existing, 2 SKIP from missing binaries).
+- **Documentation**: AGENTS.md syntax trap added for `op Parse` discriminator syntax.
+  TODO.md updated to reflect completion.
 
 ---
 

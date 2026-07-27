@@ -979,6 +979,19 @@ it. The more LLVM knows, the more aggressively it can optimize.
      Pointer references on the LHS use the `Ptr<T>` type and `.` dereference
      syntax instead.
 
+ 34. **`op Parse` discriminator syntax** — Parse ops can have optional `pre:`,
+     `suf:`, and `reg:` discriminator fields:
+     - `op Parse(Decimal, pre:"0x"): parse_hex(#L);` — literals starting with `0x`
+     - `op Parse(Decimal, suf:"km"): parse_km(#L);` — literals ending with `km`
+     - `op Parse(Decimal, reg:"[0-9a-fA-F]+"): parse_hex(#L);` — regex match
+     - `op Parse(Quoted): parse_string(#L);` — string literals
+     - `op Parse(Bare): parse_ident(#L);` — bare identifiers
+     Multiple `op Parse` can be declared on the same type with different
+     discriminators. The compiler resolves by checking (1) form match,
+     (2) pre/suf match, (3) regex match. Ambiguity = error.
+     Prefix-tagged strings (`sql"SELECT"`) produce `Expr::TaggedQuotedLiteral`.
+     Suffix-tagged numbers (`42km`, `3.14f`) produce `Expr::TaggedLiteral`.
+
 ## Commenting Mandate (Backend Updates)
 
 **Never delete rationale comments when refactoring.** When consolidating
