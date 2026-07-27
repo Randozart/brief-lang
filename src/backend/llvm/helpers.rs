@@ -2827,16 +2827,19 @@ impl LlvmBackend {
         )
         .ok();
         let val = self.fun.gen_reg();
-        writeln!(
+        write!(
             out,
             "{}{} = load {}, ptr {}, align {}",
-            indent,
-            val,
-            llvm_ty,
-            gep,
-            self.align_of(&llvm_ty)
-        )
-        .ok();
+            indent, val, llvm_ty, gep, self.align_of(&llvm_ty)
+        ).ok();
+        // 2026-07-27: Append !range metadata if this field has contract-driven or
+        // type-driven bounds. The metadata node was created in emit_transaction.
+        if let Some(field_name) = self.ctx.idx_to_field_name.get(&idx) {
+            if let Some(mi) = self.ctx.field_to_meta_idx.get(field_name) {
+                write!(out, ", !range !{}", mi).ok();
+            }
+        }
+        writeln!(out).ok();
         Some((val, brief_ty))
     }
 

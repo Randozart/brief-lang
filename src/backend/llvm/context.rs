@@ -76,6 +76,9 @@ pub struct CompilerContext {
     pub cache_slots: HashMap<String, HashMap<String, (usize, usize)>>,
     pub range_bounds: HashMap<String, (i64, i64)>,
     pub field_to_meta_idx: HashMap<String, usize>,
+    /// 2026-07-27: Reverse index from state field position to field name.
+    /// Used by load_field_type() to look up !range metadata by field index.
+    pub idx_to_field_name: HashMap<usize, String>,
     // 2026-07-04: Metadata ID for the !StateAliasScope used by !noalias
     // on Ptr<T> volatile accesses. Set during IR emission, then read-only
     // by intrinsics.rs volatile_load#/volatile_store# emission.
@@ -214,6 +217,7 @@ impl CompilerContext {
             cache_slots: HashMap::new(),
             range_bounds: HashMap::new(),
             field_to_meta_idx: HashMap::new(),
+            idx_to_field_name: HashMap::new(),
             state_alias_scope_md: 0,
             exit_condition: None,
             has_natural_exit: false,

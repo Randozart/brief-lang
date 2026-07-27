@@ -1391,8 +1391,13 @@ impl LlvmBackend {
         // 2026-07-27: Set txn_name for per-function arena gating.
         self.fun.txn_name = name.to_string();
         self.fun.pending_cleanup.clear();
-        self.ctx.range_bounds = Self::extract_ranges(&txn.contract.pre_condition);
+        self.ctx.range_bounds = Self::extract_ranges_with_constants(
+            &txn.contract.pre_condition, &self.ctx.constants);
         self.ctx.field_to_meta_idx.clear();
+        self.ctx.idx_to_field_name.clear();
+        for (name, &idx) in &self.ctx.field_index_map {
+            self.ctx.idx_to_field_name.insert(idx, name.clone());
+        }
         for (f, &(lo, hi)) in &self.ctx.range_bounds {
             if hi < i64::MAX {
                 // 2026-07-18: Offset by 50 to avoid collision with TBAA metadata nodes

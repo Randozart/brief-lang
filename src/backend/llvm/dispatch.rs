@@ -167,7 +167,23 @@ impl LlvmBackend {
     // The ranges are consumed by emit_precondition_check in emit_toplevel.rs.
     pub(crate) fn extract_ranges(pre: &Expr) -> HashMap<String, (i64, i64)> {
         let mut r = HashMap::new();
-        Self::extract_ranges_inner(pre, &mut r);
+        // Empty constants map — extract_ranges is called from emit_transaction
+        // where constants are resolved via ctx.constants if needed.
+        // The actual constants lookup happens in the emit-to-plevel wrapper.
+        Self::extract_ranges_inner(pre, &mut r, None);
+        r
+    }
+
+    /// 2026-07-27: Extract ranges with constant resolution. When the RHS is an
+    /// Expr::Identifier (e.g., `[ops < TOTAL]` where TOTAL is a const), resolve
+    /// the constant value from the provided map. Falls back to no range if the
+    /// constant isn't in the map.
+    pub(crate) fn extract_ranges_with_constants(
+        pre: &Expr,
+        constants: &HashMap<String, (Type, Expr)>,
+    ) -> HashMap<String, (i64, i64)> {
+        let mut r = HashMap::new();
+        Self::extract_ranges_inner(pre, &mut r, Some(constants));
         r
     }
     // 2026-07-04: Unwrap Cast(inner, Int) to find the underlying field name.
@@ -187,39 +203,62 @@ impl LlvmBackend {
             _ => None,
         }
     }
-    pub(crate) fn extract_ranges_inner(expr: &Expr, r: &mut HashMap<String, (i64, i64)>) {
+    /// 2026-07-27: Resolve an Expr to a decimal value, either directly (Decimal)
+    /// or via constant lookup (Identifier). Returns None if not resolvable.
+    fn resolve_to_i64(expr: &Expr, constants: Option<&HashMap<String, (Type, Expr)>>) -> Option<i64> {
+        match expr {
+            Expr::Decimal(v) => Some(*v),
+            Expr::Identifier(name) => {
+                if let Some(cm) = constants {
+                    if let Some((_, Expr::Decimal(v))) = cm.get(name.as_str()) {
+                        return Some(*v);
+                    }
+                }
+                None
+            }
+            _ => None,
+        }
+    }
+
+    pub(crate) fn extract_ranges_inner(
+        expr: &Expr,
+        r: &mut HashMap<String, (i64, i64)>,
+        constants: Option<&HashMap<String, (Type, Expr)>>,
+    ) {
         match expr {
             Expr::BinaryOp(BinaryOpKind::And, l, rgt) => {
-                Self::extract_ranges_inner(l, r);
-                Self::extract_ranges_inner(rgt, r);
+                Self::extract_ranges_inner(l, r, constants);
+                Self::extract_ranges_inner(rgt, r, constants);
             }
             Expr::BinaryOp(BinaryOpKind::Lt, l, rgt) => {
                 if let Some(n) = Self::unwrap_cast_to_ident(l.as_ref()) {
-                    if let Expr::Decimal(v) = rgt.as_ref() {
+                    if let Some(v) = Self::resolve_to_i64(rgt.as_ref(), constants) {
                         let e = r.entry(n.to_string()).or_insert((i64::MIN, i64::MAX));
-                        if *v < e.1 {
-                            e.1 = *v;
-                        }
+                        if v < e.1 { e.1 = v; }
+                    }
+                }
+            }
+            Expr::BinaryOp(BinaryOpKind::Le, l, rgt) => {
+                if let Some(n) = Self::unwrap_cast_to_ident(l.as_ref()) {
+                    if let Some(v) = Self::resolve_to_i64(rgt.as_ref(), constants) {
+                        let e = r.entry(n.to_string()).or_insert((i64::MIN, i64::MAX));
+                        if v + 1 < e.1 { e.1 = v + 1; }
                     }
                 }
             }
             Expr::BinaryOp(BinaryOpKind::Ge, l, rgt) => {
                 if let Some(n) = Self::unwrap_cast_to_ident(l.as_ref()) {
-                    if let Expr::Decimal(v) = rgt.as_ref() {
+                    if let Some(v) = Self::resolve_to_i64(rgt.as_ref(), constants) {
                         let e = r.entry(n.to_string()).or_insert((i64::MIN, i64::MAX));
-                        if *v > e.0 {
-                            e.0 = *v;
-                        }
+                        if v > e.0 { e.0 = v; }
                     }
                 }
             }
             Expr::BinaryOp(BinaryOpKind::Gt, l, rgt) => {
                 if let Some(n) = Self::unwrap_cast_to_ident(l.as_ref()) {
-                    if let Expr::Decimal(v) = rgt.as_ref() {
+                    if let Some(v) = Self::resolve_to_i64(rgt.as_ref(), constants) {
                         let e = r.entry(n.to_string()).or_insert((i64::MIN, i64::MAX));
-                        if v + 1 > e.0 {
-                            e.0 = v + 1;
-                        }
+                        if v + 1 > e.0 { e.0 = v + 1; }
                     }
                 }
             }
