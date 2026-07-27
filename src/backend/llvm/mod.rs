@@ -3268,18 +3268,17 @@ impl LlvmBackend {
         writeln!(out, "attributes #8 = {{").ok();
         writeln!(out, "    mustprogress nofree norecurse nosync nounwind willreturn memory(argmem: readwrite)").ok();
         writeln!(out, "}}").ok();
-        // 2026-07-27: #9 = argmem:readwrite variant of #3 for @main.
-        // Main allocates %state = alloca %State and passes it as ptr %state to
-        // reactor_tick and each txn function. All memory access is through this
-        // argument pointer — no global memory (beyond @stdout for print FFI calls,
-        // which are themselves foreign function calls, not direct writes).
-        // argmem:readwrite lets LLVM SROA promote %State fields to SSA registers.
-        // Previously used memory(readwrite) which blocked SROA.
+        // 2026-07-27: #9 = memory(readwrite) for @main.
+        // Main calls FFI functions (__print_int, __print_float, __print_str) that
+        // access @stdout (a global). memory(argmem: readwrite) would be a lie —
+        // telling LLVM main only accesses %state causes incorrect alias analysis
+        // and spurious register spill across FFI calls. Per-txn functions (#8)
+        // can safely use argmem:readwrite since they only access %state.
         // This attribute is deliberately HIGH-numbered (#9) to avoid
         // collision with clang-generated bitcode attributes (#0-#8)
         // during LTO merging (llvm-link renumbers but keeps #9).
         writeln!(out, "attributes #9 = {{").ok();
-        writeln!(out, "    nofree norecurse nosync nounwind memory(argmem: readwrite)").ok();
+        writeln!(out, "    nofree norecurse nosync nounwind memory(readwrite)").ok();
         writeln!(out, "}}").ok();
         // 2026-07-04: #10 = argmem:read + willreturn for @pre_* functions.
         // Precondition functions only read state through %state and never
