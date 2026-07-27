@@ -608,11 +608,39 @@ impl LlvmBackend {
     ) {
         let mut i = 0;
         while i < body.len() {
-            // 2026-07-27: SLP vector emission DISABLED — the manual insertelement/
-            // extractelement chains created artificial dependencies that blocked
-            // SROA while hazard.rs simultaneously disabled LLVM's SLP vectorizer.
-            // Now emit scalar code and let LLVM auto-vectorize naturally with
-            // proper dependency analysis and alias information.
+            // 2026-07-27: Hazard-gated SLP — skip vectorization for txns that
+            // would suffer from artificial insertelement/extractelement chains.
+            // The hazard_spec analysis in hazard.rs populates slp_hazard_fns
+            // when register pressure (peak) exceeds available registers (r).
+            // The #4/#5 attributes (disable-slp-vectorize) are NOT emitted, so
+            // LLVM's auto-vectorizer runs freely for all benchmarks.
+            let is_hazardous = !self.fun.txn_name.is_empty()
+                && self.ctx.slp_hazard_fns.contains(&self.fun.txn_name);
+            if !is_hazardous {
+                let match_group = self.fun.slp_groups.iter()
+                    .find(|g| g.base_index == i).cloned();
+                if let Some(ref group) = match_group {
+                    let should_vec = group.width >= 4
+                        || (group.width >= 3
+                            && body.get(i).map_or(false, |s| {
+                                let expr = match s {
+                                    Statement::Let { expr: Some(e), .. } => &*e,
+                                    Statement::Assign(_, e) => &*e,
+                                    _ => return false,
+                                };
+                                crate::backend::llvm::vector_codegen::tree_depth(expr) >= 2
+                            }));
+                    if should_vec {
+                        let result = crate::backend::llvm::vector_codegen::emit_slp_group(
+                            self, out, body, group, write_set);
+                        if result.is_ok() {
+                            i = group.lane_positions.iter().max()
+                                .copied().unwrap_or(i + group.width) + 1;
+                            continue;
+                        }
+                    }
+                }
+            }
             let stmt = &body[i];
             match stmt {
                 Statement::Let { name, expr: Some(e), .. } => {

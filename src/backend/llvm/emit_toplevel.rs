@@ -1685,22 +1685,46 @@ impl LlvmBackend {
             for (ri, s) in reordered.iter().enumerate() {
                 if self.fun.terminated { break; }
                 if let Some((_, cold_name, fields)) = outlined_info.iter().find(|(idx, _, _)| *idx == ri) {
-                    // Emit GEP+load for each field + call cold function
-                    let mut param_regs: Vec<String> = Vec::new();
-                    for (field_name, field_idx) in fields {
-                        let gep_reg = self.fun.gen_reg();
-                        let load_reg = self.fun.gen_reg();
-                        let llvm_ty = self.ctx.field_types.get(*field_idx).cloned().unwrap_or_else(|| "i64".to_string());
-                        writeln!(out, "  {} = getelementptr inbounds %State, ptr %state, i32 0, i32 {}", gep_reg, field_idx).ok();
-                        writeln!(out, "  {} = load {}, ptr {}", load_reg, llvm_ty, gep_reg).ok();
-                        param_regs.push(load_reg.clone());
+                    // 2026-07-27: Guarded cold call — emit guard condition check
+                    // then GEP+load + cold call in the `then` branch.
+                    // This mirrors emit_stmt.rs's Statement::Guarded handler but
+                    // replaces the body with a cold function call.
+                    if let Statement::Guarded(cond, _) = s {
+                        // Emit condition
+                        let cond_reg = self.emit_expr(out, cond, "  ");
+                        let label_n = self.fun.txn_counter;
+                        self.fun.txn_counter += 1;
+                        let then_lbl = format!("guard.then{}", label_n);
+                        let end_lbl = format!("guard.end{}", label_n);
+                        let cond_i1 = if cond_reg.ty == Type::bool_() {
+                            let b = self.fun.gen_reg();
+                            writeln!(out, "  {} = trunc i8 {} to i1", b, cond_reg.name).ok();
+                            b
+                        } else {
+                            cond_reg.name.clone()
+                        };
+                        writeln!(out, "  br i1 {}, label %{}, label %{}", cond_i1, then_lbl, end_lbl).ok();
+                        writeln!(out, "  {}:", then_lbl).ok();
+                        // Emit GEP+load for each field
+                        let mut param_regs: Vec<String> = Vec::new();
+                        for (_, field_idx) in fields {
+                            let gep_reg = self.fun.gen_reg();
+                            let load_reg = self.fun.gen_reg();
+                            let llvm_ty = self.ctx.field_types.get(*field_idx).cloned().unwrap_or_else(|| "i64".to_string());
+                            writeln!(out, "    {} = getelementptr inbounds %State, ptr %state, i32 0, i32 {}", gep_reg, field_idx).ok();
+                            writeln!(out, "    {} = load {}, ptr {}", load_reg, llvm_ty, gep_reg).ok();
+                            param_regs.push(load_reg);
+                        }
+                        let mut typed_args: Vec<String> = Vec::new();
+                        for (fi, (_, idx)) in fields.iter().enumerate() {
+                            let llvm_ty = self.ctx.field_types.get(*idx).cloned().unwrap_or_else(|| "i64".to_string());
+                            typed_args.push(format!("{} {}", llvm_ty, param_regs[fi]));
+                        }
+                        writeln!(out, "    call void @{}({})", cold_name, typed_args.join(", ")).ok();
+                        writeln!(out, "    br label %{}", end_lbl).ok();
+                        writeln!(out, "  {}:", end_lbl).ok();
+                        self.fun.terminated = false;
                     }
-                    let mut typed_args: Vec<String> = Vec::new();
-                    for (fi, (_, idx)) in fields.iter().enumerate() {
-                        let llvm_ty = self.ctx.field_types.get(*idx).cloned().unwrap_or_else(|| "i64".to_string());
-                        typed_args.push(format!("{} {}", llvm_ty, param_regs[fi]));
-                    }
-                    writeln!(out, "  call void @{}({})", cold_name, typed_args.join(", ")).ok();
                 } else {
                     emit_statement(self, out, s, "  ");
                 }
