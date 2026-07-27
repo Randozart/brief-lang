@@ -1745,7 +1745,64 @@ impl LlvmBackend {
                         } else {
                             cond_reg.name.clone()
                         };
-                        writeln!(out, "  br i1 {}, label %{}, label %{}", cond_i1, then_lbl, end_lbl).ok();
+                        // 2026-07-27: Compute !prof branch weights from guard
+                        // condition and postcondition bound. For a modulo condition
+                        // like `count % N == C` with postcondition `[count == total]`,
+                        // the guard fires `ceil(total / N)` times out of `total`.
+                        let prof_meta = {
+                            // Extract postcondition bound: [x == N]
+                            let post_bound: Option<i64> = (|| {
+                                let (lhs, rhs) = match &txn.contract.post_condition {
+                                    Expr::BinaryOp(BinaryOpKind::Eq, l, r) => (l.as_ref(), r.as_ref()),
+                                    _ => return None,
+                                };
+                                let n = match rhs {
+                                    Expr::Decimal(n) => Some(*n),
+                                    Expr::Identifier(id) => self.ctx.constants.get(id.as_str())
+                                        .and_then(|(_, e)| if let Expr::Decimal(v) = e { Some(*v) } else { None }),
+                                    _ => None,
+                                };
+                                n.filter(|&n| n > 0)
+                            })();
+                            // Extract modulo divisor from guard condition: x % N == C
+                            let mod_div: Option<i64> = (|| {
+                                let lhs = match cond {
+                                    Expr::BinaryOp(BinaryOpKind::Eq, l, _) => l.as_ref(),
+                                    _ => return None,
+                                };
+                                match lhs {
+                                    Expr::BinaryOp(BinaryOpKind::Mod, _, d) => match d.as_ref() {
+                                        Expr::Decimal(n) if *n > 0 => Some(*n),
+                                        _ => None,
+                                    },
+                                    _ => None,
+                                }
+                            })();
+                            match (post_bound, mod_div) {
+                                (Some(bound), Some(mod_n)) => {
+                                    let taken = (bound as f64 / mod_n as f64).ceil() as u64;
+                                    let not_taken = (bound as u64).saturating_sub(taken);
+                                    let max_w = 1000u64;
+                                    let total = taken + not_taken;
+                                    let (wt, wn) = if total <= max_w {
+                                        (taken as u32, not_taken as u32)
+                                    } else {
+                                        let ratio = total as f64 / max_w as f64;
+                                        ((taken as f64 / ratio).ceil() as u32,
+                                         (not_taken as f64 / ratio).ceil() as u32)
+                                    };
+                                    // Only emit if weights are meaningful
+                                    if wt > 0 && wn > 0 {
+                                        // First weight = true branch (guard fires, cold),
+                                        // second weight = false branch (guard doesn't fire, hot)
+                                        format!(", !prof !{{!\"branch_weights\", i32 {}, i32 {}}}", wt, wn)
+                                    } else { String::new() }
+                                }
+                                _ => String::new(),
+                            }
+                        };
+                        writeln!(out, "  br i1 {}, label %{}, label %{}{}",
+                            cond_i1, then_lbl, end_lbl, prof_meta).ok();
                         writeln!(out, "  {}:", then_lbl).ok();
                         // Emit load for each param — handles three cases:
                         // StateField: GEP+load from %state
