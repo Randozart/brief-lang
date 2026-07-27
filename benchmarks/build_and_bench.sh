@@ -181,6 +181,11 @@ build_c() {
     if [ -f "benchmarks/${name}_c.c" ]; then
         src="benchmarks/${name}_c.c"
     else
+        # 2026-07-27: No direct C source — check for cross-reference.
+        local ref_name="${BRIEF_CROSS_REF[$name]:-}"
+        if [ -n "$ref_name" ]; then
+            echo "  No C source — uses ${ref_name}_c for cross-reference timing"
+        fi
         return 1
     fi
 
