@@ -61,6 +61,7 @@ type Double: #Float { bits <~ 64; };
 
 type Bool: #Bool {
     bits <~ 8;
+    op Parse: parse_bool(#L);
     op Eq: eq(#L, #R);
     op Ne: ne(#L, #R);
     op And: band(#L, #R);
@@ -68,13 +69,18 @@ type Bool: #Bool {
     op Not: bnot(#L);
 };
 
-type Char: Int { bits <~ 32; };
+type Char: #Char { bits <~ 32;
+    op Parse: parse_char(#L);
+};
 
-type String {
+type String: #String {
     data: Int;
     len: Int;
     alignment <~ 8;
     encoding <~ "UTF-8";
+    op Parse(Quoted): parse_string(#L);
+    prop Size: chars(#L);
+    prop Bytes: byte_len(#L);
 };
 
 type UTF8View {
