@@ -1,4 +1,3 @@
-use crate::analysis::transition_graph;
 use crate::ast::{BinaryOpKind, Expr, OutputType, Statement, TopLevel, Type};
 use crate::backend::llvm::emit_stmt::emit_statement;
 use crate::backend::llvm::{float_to_llvm_hex, float64_to_llvm_hex, LlvmBackend, TypedRegister};
@@ -1314,30 +1313,6 @@ impl LlvmBackend {
         }
     }
 
-    /// 2026-07-27: Emit a cold function for an FFI-containing guard block.
-    /// The cold function takes ptr %state and contains the guard body statements.
-    /// Annotated with #0 = memory(readwrite) since cold functions may call FFI.
-    fn emit_cold_fn(&mut self, out: &mut String, cold_name: &str, guard_body: &[Statement]) {
-        let saved_terminated = self.fun.terminated;
-        self.fun.terminated = false;
-        writeln!(out, "define void @{}(ptr noalias nocapture align 8 %state) local_unnamed_addr #0 {{", cold_name).ok();
-        for stmt in guard_body {
-            if self.fun.terminated { break; }
-            emit_statement(self, out, stmt, "  ");
-        }
-        if !self.fun.terminated {
-            writeln!(out, "  ret void").ok();
-        }
-        writeln!(out, "}}").ok();
-        writeln!(out).ok();
-        self.fun.terminated = saved_terminated;
-    }
-
-    /// 2026-07-27: Emit a call to an outlined cold function.
-    fn call_cold_fn(out: &mut String, cold_name: &str, indent: &str) {
-        writeln!(out, "{}call void @{}(ptr %state)", indent, cold_name).ok();
-    }
-
     pub(super) fn emit_transaction(&mut self, out: &mut String, txn: &crate::ast::Transaction, name: &str, range_meta: &mut Vec<String>) {
         let has_output = txn.output_type.is_some() || !txn.outputs.is_empty();
         if !txn.is_reactive && (!txn.parameters.is_empty() || has_output) {
@@ -1417,18 +1392,12 @@ impl LlvmBackend {
                 }
             }
         };
-        // 2026-07-27: Pre-scan for FFI-containing guard blocks. If any guard body
-        // contains FFI calls, the hot txn body will be cleaned via cold-path outlining
-        // and can use #11 = memory(argmem: readwrite) instead of #0 = memory(readwrite).
-        // This unblocks SROA on %State fields in the hot loop.
-        let has_ffi_guard = txn.body.iter().any(|s| {
-            if let Statement::Guarded(_, body) = s {
-                body.iter().any(|stmt| transition_graph::statement_contains_ffi(stmt))
-            } else {
-                false
-            }
-        });
-        let txn_attr = if has_ffi_guard { "#11".to_string() } else { self.slp_attr(name, "#0") };
+        // 2026-07-27: TODO — FFI-aware attribute selection via cold-path outlining.
+        // Currently disabled: cold functions passing ptr %state block SROA. The fix
+        // requires passing scalar values instead of %state, which needs AST rewriting
+        // (collect_used_fields → GEP+load in hot path → scalar args to cold function).
+        // For now, use #0 = memory(readwrite) for all reactive txns.
+        let txn_attr = self.slp_attr(name, "#0");
 
         let assume_action: Option<String> = txn.modifiers.iter()
             .find(|m| m.name == "assume_shape")
@@ -1488,33 +1457,9 @@ impl LlvmBackend {
                     name
                 ));
             }
-            // 2026-07-27: Cold-path outlining — identify FFI-containing guard
-            // blocks and emit them as separate cold functions. The hot txn gets
-            // memory(argmem: readwrite) instead of memory(readwrite), unblocking
-            // SROA on %State fields. Cold functions retain memory(readwrite).
-            let outlined_guards: Vec<(usize, String)> = {
-                let mut counter = 0usize;
-                reordered.iter().enumerate()
-                    .filter(|(_, s)| matches!(s, Statement::Guarded(_, body) if body.iter().any(|stmt| transition_graph::statement_contains_ffi(stmt))))
-                    .map(|(i, _)| {
-                        let cold = format!("txn_{}_cold_{}", name, counter);
-                        counter += 1;
-                        (i, cold)
-                    })
-                    .collect()
-            };
-            for (guard_idx, cold_name) in &outlined_guards {
-                if let Statement::Guarded(_, body) = &reordered[*guard_idx] {
-                    self.emit_cold_fn(out, cold_name, body);
-                }
-            }
-            for (i, s) in reordered.iter().enumerate() {
+            for s in &reordered {
                 if self.fun.terminated { break; }
-                if let Some((_, cold_name)) = outlined_guards.iter().find(|(idx, _)| *idx == i) {
-                    Self::call_cold_fn(out, cold_name, "  ");
-                } else {
-                    emit_statement(self, out, s, "  ");
-                }
+                emit_statement(self, out, s, "  ");
             }
             if !self.fun.terminated {
                 self.emit_arena_fini(out, "  ");
@@ -1565,30 +1510,9 @@ impl LlvmBackend {
                     name
                 ));
             }
-            // 2026-07-27: Cold-path outlining — same as assume_action path above.
-            let outlined_guards: Vec<(usize, String)> = {
-                let mut counter = 0usize;
-                reordered.iter().enumerate()
-                    .filter(|(_, s)| matches!(s, Statement::Guarded(_, body) if body.iter().any(|stmt| transition_graph::statement_contains_ffi(stmt))))
-                    .map(|(i, _)| {
-                        let cold = format!("txn_{}_cold_{}", name, counter);
-                        counter += 1;
-                        (i, cold)
-                    })
-                    .collect()
-            };
-            for (guard_idx, cold_name) in &outlined_guards {
-                if let Statement::Guarded(_, body) = &reordered[*guard_idx] {
-                    self.emit_cold_fn(out, cold_name, body);
-                }
-            }
-            for (i, s) in reordered.iter().enumerate() {
+            for s in &reordered {
                 if self.fun.terminated { break; }
-                if let Some((_, cold_name)) = outlined_guards.iter().find(|(idx, _)| *idx == i) {
-                    Self::call_cold_fn(out, cold_name, "  ");
-                } else {
-                    emit_statement(self, out, s, "  ");
-                }
+                emit_statement(self, out, s, "  ");
             }
             if !self.fun.terminated {
                 self.emit_arena_fini(out, "  ");
