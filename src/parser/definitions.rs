@@ -959,6 +959,7 @@ impl<'a> Parser<'a> {
         let mut slots = Vec::new();
         let mut metadata = std::collections::HashMap::new();
         let mut operators: Vec<OperatorDef> = Vec::new();
+        let mut op_bindings: Vec<OperatorBinding> = Vec::new();
         let mut props: Vec<PropDef> = Vec::new();
         if self.eat(&Token::LBrace) {
             while !self.check(&Token::RBrace) && !self.is_at_end() {
@@ -1003,33 +1004,11 @@ impl<'a> Parser<'a> {
                     continue;
                 }
                 if slot_name == "op" {
-                    let op_name = self.expect_identifier()?;
-                    self.expect(Token::TildeArrow)?;
-                    // 2026-07-18: Accept string ("int.add") or identifier (int_add)
-                    // for the generic op identifier. Parenthesized param list is
-                    // optional syntactic sugar (currently discarded — the generic
-                    // ID uniquely identifies the operation).
-                    let impl_val = if self.check(&Token::String(String::new())) {
-                        self.expect_string()?
-                    } else {
-                        self.expect_identifier()?
-                    };
-                    if self.eat(&Token::LParen) {
-                        // Skip parameter types (documentation only)
-                        while !self.check(&Token::RParen) {
-                            if self.check(&Token::Identifier(String::new())) || self.check(&Token::String(String::new())) {
-                                self.advance();
-                            } else { break; }
-                            if !self.check(&Token::RParen) { self.eat(&Token::Comma); }
-                        }
-                        self.expect(Token::RParen)?;
-                    }
-                    self.eat(&Token::Semicolon);
-                    metadata.insert(format!("op.{}", op_name), PropertyValue::String(impl_val));
+                    self.parse_op_definition(&mut op_bindings)?;
                     continue;
                 }
                 if slot_name == "prop" {
-                    self.parse_prop_binding(&mut props)?;
+                    self.parse_prop_definition(&mut props)?;
                     continue;
                 }
                 let slot_ty = if self.eat(&Token::TildeArrow) {
@@ -1062,7 +1041,7 @@ impl<'a> Parser<'a> {
                     metadata: metadata.clone(),
                     projections: vec![],
                     bindings: vec![],
-                    operators: operators.clone(), op_bindings: vec![],
+                    operators: operators.clone(), op_bindings: op_bindings.clone(),
                     props: props.clone(),
                     constraints: vec![],
                     span: None,
@@ -1084,7 +1063,7 @@ impl<'a> Parser<'a> {
                 projections: vec![],
                 bindings: vec![],
                 operators,
-                op_bindings: vec![],
+                op_bindings,
                 props,
                 constraints: vec![],
                 span: None,
@@ -1123,6 +1102,7 @@ impl<'a> Parser<'a> {
         let mut slots = Vec::new();
         let mut metadata = std::collections::HashMap::new();
         let mut operators: Vec<OperatorDef> = Vec::new();
+        let mut op_bindings: Vec<OperatorBinding> = Vec::new();
         let mut props: Vec<PropDef> = Vec::new();
         if self.eat(&Token::LBrace) {
             while !self.check(&Token::RBrace) && !self.is_at_end() {
@@ -1167,11 +1147,11 @@ impl<'a> Parser<'a> {
                     continue;
                 }
                 if slot_name == "op" {
-                    self.parse_op_binding(&mut operators)?;
+                    self.parse_op_definition(&mut op_bindings)?;
                     continue;
                 }
                 if slot_name == "prop" {
-                    self.parse_prop_binding(&mut props)?;
+                    self.parse_prop_definition(&mut props)?;
                     continue;
                 }
                 // 2026-07-20: Slot-name property binding via <~ (general metadata).
@@ -1202,7 +1182,7 @@ impl<'a> Parser<'a> {
                 projections: vec![],
                 bindings: vec![],
                 operators,
-                op_bindings: vec![],
+                op_bindings,
                 props,
                 constraints: vec![],
                 span: None,
@@ -1280,6 +1260,81 @@ impl<'a> Parser<'a> {
         self.expect(Token::Semicolon)?;
         props.push(PropDef { name, expr, span: None });
         Ok(())
+    }
+
+    /// 2026-07-26: Parse prop Name: expr;
+    /// Declares a metaproperty with an implementation expression.
+    /// `:` replaces the old `=` syntax.
+    fn parse_prop_definition(&mut self, props: &mut Vec<PropDef>) -> Result<(), SyntaxError> {
+        let name = self.expect_identifier()?;
+        self.expect(Token::Colon)?;
+        // Parse method call with #L placeholder
+        let fn_name = self.expect_identifier()?;
+        self.expect(Token::LParen)?;
+        let mut args = Vec::new();
+        while !self.check(&Token::RParen) && !self.is_at_end() {
+            args.push(self.parse_hash_marker()?);
+            if !self.check(&Token::RParen) {
+                self.eat(&Token::Comma);
+            }
+        }
+        self.expect(Token::RParen)?;
+        self.expect(Token::Semicolon)?;
+        let expr = Expr::Call(fn_name, args, None);
+        props.push(PropDef { name, expr, span: None });
+        Ok(())
+    }
+
+    /// 2026-07-26: Parse op Name(Proto?): expr;
+    /// Declares an operator binding. protocol_variant is optional.
+    /// Examples:
+    ///   op InsertAt: push(#L, #R);
+    ///   op Add(#Int): int_add(#L, #R);
+    ///   op Add(MyType): custom_add(#L, #R);
+    fn parse_op_definition(&mut self, op_bindings: &mut Vec<OperatorBinding>) -> Result<(), SyntaxError> {
+        let name = self.expect_identifier()?;
+        // Optional protocol variant: (#Proto) or (ConcreteType)
+        let protocol_variant = if self.eat(&Token::LParen) {
+            let variant = self.expect_identifier()?;
+            self.expect(Token::RParen)?;
+            Some(variant)
+        } else {
+            None
+        };
+        self.expect(Token::Colon)?;
+        // Parse method call with #L, #R, #T placeholders as a raw expression
+        let fn_name = self.expect_identifier()?;
+        self.expect(Token::LParen)?;
+        let mut args = Vec::new();
+        while !self.check(&Token::RParen) && !self.is_at_end() {
+            args.push(self.parse_hash_marker()?);
+            if !self.check(&Token::RParen) {
+                self.eat(&Token::Comma);
+            }
+        }
+        self.expect(Token::RParen)?;
+        self.expect(Token::Semicolon)?;
+        let expr = Expr::Call(fn_name, args, None);
+        op_bindings.push(OperatorBinding {
+            name,
+            protocol_variant,
+            expr,
+            span: None,
+        });
+        Ok(())
+    }
+
+    /// 2026-07-26: Parse a hash marker (#L, #R, #T) or an identifier.
+    fn parse_hash_marker(&mut self) -> Result<Expr, SyntaxError> {
+        match self.peek() {
+            Some(Token::HashL) => { self.pos += 1; Ok(Expr::Identifier("#L".to_string())) }
+            Some(Token::HashR) => { self.pos += 1; Ok(Expr::Identifier("#R".to_string())) }
+            Some(Token::HashT) => { self.pos += 1; Ok(Expr::Identifier("#T".to_string())) }
+            _ => {
+                let ident = self.expect_identifier()?;
+                Ok(Expr::Identifier(ident))
+            }
+        }
     }
 
     /// 2026-07-20: Validate a pre:/suf: discriminator string.
@@ -1779,42 +1834,40 @@ mod tests {
 
     // ── Op declaration parsing ───────────────────────────────────────
 
-    fn parse_op_from_type_def(src: &str) -> Vec<crate::ast::top::OperatorDef> {
+    fn parse_op_from_type_def(src: &str) -> Vec<crate::ast::top::OperatorBinding> {
         let tokens = crate::lexer::tokenize(src).unwrap();
         let mut p = Parser::new(tokens, src);
         match p.parse_top_level() {
-            Ok(crate::ast::TopLevel::TypeDef(td)) => td.body.operators,
+            Ok(crate::ast::TopLevel::TypeDef(td)) => td.body.op_bindings,
             _ => panic!("expected TypeDef"),
         }
     }
 
     #[test]
+    #[test]
     fn test_op_declarative_hashword() {
-        let ops = parse_op_from_type_def("type T { op Add(#Int, #Int); };");
+        let ops = parse_op_from_type_def("type T { op Add: int_add(#L, #R); };");
         assert_eq!(ops.len(), 1);
-        assert_eq!(ops[0].op, "Add");
-        assert_eq!(ops[0].params.len(), 2);
-        assert_eq!(ops[0].params[0], crate::ast::Type::HashWord("#Int".into()));
-        assert_eq!(ops[0].params[1], crate::ast::Type::HashWord("#Int".into()));
-        assert!(ops[0].impl_args.is_none());
+        assert_eq!(ops[0].name, "Add");
+        assert!(ops[0].protocol_variant.is_none());
     }
 
     #[test]
-    fn test_op_declarative_multiple_params() {
-        let ops = parse_op_from_type_def("type T { op Add(#Float, #Float); };");
+    fn test_op_declarative_protocol_variant() {
+        let ops = parse_op_from_type_def("type T { op Add(#Int): int_add(#L, #R); };");
         assert_eq!(ops.len(), 1);
-        assert_eq!(ops[0].params[0], crate::ast::Type::HashWordVariant("#Float".into(), "IEEE754".into()));
+        assert_eq!(ops[0].name, "Add");
+        assert_eq!(ops[0].protocol_variant.as_deref(), Some("#Int"));
     }
 
     #[test]
     fn test_op_binding_with_markers() {
         let ops = parse_op_from_type_def(
-            "type T { op InsertAt(T) = ring_push(#L, #R); };"
+            "type T { op InsertAt: push(#L, #R); };"
         );
         assert_eq!(ops.len(), 1);
-        assert_eq!(ops[0].op, "InsertAt");
-        assert_eq!(ops[0].params.len(), 1);
-        assert!(ops[0].impl_args.is_some());
+        assert_eq!(ops[0].name, "InsertAt");
+        assert!(ops[0].protocol_variant.is_none());
     }
 
     // ── Protocol declaration parsing ──────────────────────────────
@@ -1990,7 +2043,7 @@ mod tests {
 
     #[test]
     fn test_parse_prop_declaration() {
-        let props = parse_prop_from_type_def("type T { prop Size = 42; };");
+        let props = parse_prop_from_type_def("type T { prop Size: chars(#L); };");
         assert_eq!(props.len(), 1);
         assert_eq!(props[0].name, "Size");
     }
@@ -1998,7 +2051,7 @@ mod tests {
     #[test]
     fn test_parse_multiple_props() {
         let props = parse_prop_from_type_def(
-            "type T { prop Size = 42; prop Bytes = 128; };");
+            "type T { prop Size: chars(#L); prop Bytes: len(#L); };");
         assert_eq!(props.len(), 2);
         assert_eq!(props[0].name, "Size");
         assert_eq!(props[1].name, "Bytes");
