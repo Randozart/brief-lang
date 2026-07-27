@@ -4,8 +4,7 @@
 // These types use operator→intrinsic declarations to define their
 // behavior.
 //
-// Phase 7B: These files will compile once the operator→intrinsic
-// pipeline is fully wired through the typechecker.
+// 2026-07-26: Updated to new op syntax — no more -> or =.
 
 // 16-bit half-precision float (hardware on some GPUs)
 type Float16 : Bits {
@@ -13,9 +12,9 @@ type Float16 : Bits {
     alignment <~ 2;
     tbaa <~ "FloatNode";
 
-    op Add(Float16) -> Float16 = FAdd16#;
-    op Sub(Float16) -> Float16 = FSub16#;
-    op Mul(Float16) -> Float16 = FMul16#;
+    op Add: FAdd16(#L, #R);
+    op Sub: FSub16(#L, #R);
+    op Mul: FMul16(#L, #R);
 };
 
 // 4-lane SIMD float vector
@@ -24,7 +23,7 @@ type Float4 : Bits {
     alignment <~ 16;
     tbaa <~ "FloatNode";
 
-    op Add(Float4) -> Float4 = FAddV4F32#;
-    op Sub(Float4) -> Float4 = FSubV4F32#;
-    op Mul(Float4) -> Float4 = FMulV4F32#;
+    op Add: FAddV4F32(#L, #R);
+    op Sub: FSubV4F32(#L, #R);
+    op Mul: FMulV4F32(#L, #R);
 };

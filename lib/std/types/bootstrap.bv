@@ -7,22 +7,25 @@
 // The compiler uses protocol information to drive all operation
 // dispatch. Backends know how to add, subtract, etc. for each
 // protocol without per-type configuration.
+//
+// op declarations use the new `:` binding syntax. The expr
+// body is documentation for bootstrap types; the backend uses
+// hardcoded codegen based on protocol membership.
 
 type Int: #Int {
-    op Parse(#Int);
-    op Parse(Decimal);
-    op Add(#Int, #Int);
-    op Sub(#Int, #Int);
-    op Mul(#Int, #Int);
-    op Div(#Int, #Int);
-    op Mod(#Int, #Int);
-    op Neg(#Int);
-    op Eq(#Int, #Int);
-    op Ne(#Int, #Int);
-    op Lt(#Int, #Int);
-    op Le(#Int, #Int);
-    op Gt(#Int, #Int);
-    op Ge(#Int, #Int);
+    op Parse: parse(#L);
+    op Add: add(#L, #R);
+    op Sub: sub(#L, #R);
+    op Mul: mul(#L, #R);
+    op Div: div(#L, #R);
+    op Mod: mod(#L, #R);
+    op Neg: neg(#L);
+    op Eq: eq(#L, #R);
+    op Ne: ne(#L, #R);
+    op Lt: lt(#L, #R);
+    op Le: le(#L, #R);
+    op Gt: gt(#L, #R);
+    op Ge: ge(#L, #R);
 };
 
 type UInt: Int;
@@ -40,30 +43,29 @@ type Int64: Int { bits <~ 64; };
 type UInt64: Int { bits <~ 64; };
 
 type Float: #Float {
-    op Parse(#Float);
-    op Parse(Decimal);
-    op Add(#Int, #Int);
-    op Sub(#Int, #Int);
-    op Mul(#Int, #Int);
-    op Div(#Int, #Int);
-    op Neg(#Int);
-    op Eq(#Int, #Int);
-    op Ne(#Int, #Int);
-    op Lt(#Int, #Int);
-    op Le(#Int, #Int);
-    op Gt(#Int, #Int);
-    op Ge(#Int, #Int);
+    op Parse: parse(#L);
+    op Add: add(#L, #R);
+    op Sub: sub(#L, #R);
+    op Mul: mul(#L, #R);
+    op Div: div(#L, #R);
+    op Neg: neg(#L);
+    op Eq: eq(#L, #R);
+    op Ne: ne(#L, #R);
+    op Lt: lt(#L, #R);
+    op Le: le(#L, #R);
+    op Gt: gt(#L, #R);
+    op Ge: ge(#L, #R);
 };
 
 type Double: #Float { bits <~ 64; };
 
 type Bool: #Bool {
     bits <~ 8;
-    op Eq(#Int, #Int);
-    op Ne(#Int, #Int);
-    op And(#Bits, #Bits);
-    op Or(#Bits, #Bits);
-    op Not(#Bits);
+    op Eq: eq(#L, #R);
+    op Ne: ne(#L, #R);
+    op And: band(#L, #R);
+    op Or: bor(#L, #R);
+    op Not: bnot(#L);
 };
 
 type Char: Int { bits <~ 32; };
