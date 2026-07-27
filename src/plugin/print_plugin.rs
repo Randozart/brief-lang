@@ -147,7 +147,56 @@ fn kind_from_expr(expr: &Expr, known_types: &HashMap<String, Type>) -> &'static 
                 None => "Int", // default fallback
             }
         }
-        _ => "Int", // complex expression — default to Int
+        // 2026-07-27: For complex expressions (BinaryOp, UnaryOp, Call, Cast,
+        // etc.), recurse into the expression tree to find leaf-type information.
+        // Previously defaulted all non-trivial exprs to "Int", causing __print_int
+        // to be called on float values — an ABI mismatch.
+        _ => kind_from_expr_deep(expr, known_types),
+    }
+}
+
+/// 2026-07-27: Recursive expression type inference for print dispatch.
+/// Walks BinaryOp/UnaryOp/Call trees to find leaf types. If any operand
+/// is a float literal or float-typed variable, the result is float.
+/// Conservative: errs on the side of Float (call __print_float instead of
+/// __print_int) because __print_float will still print the value correctly.
+fn kind_from_expr_deep(expr: &Expr, known_types: &HashMap<String, Type>) -> &'static str {
+    match expr {
+        Expr::Float(_) => "Float",
+        Expr::Decimal(_) => "Int",
+        Expr::Quoted(_) => "String",
+        Expr::Identifier(name) => {
+            match known_types.get(name) {
+                Some(t) => kind_from_type(t),
+                None => "Int",
+            }
+        }
+        Expr::BinaryOp(_, lhs, rhs) => {
+            let lk = kind_from_expr_deep(lhs, known_types);
+            let rk = kind_from_expr_deep(rhs, known_types);
+            // If either side is float, result is float (float arithmetic propagates).
+            if lk == "Float" || rk == "Float" { "Float" }
+            else { "Int" }
+        }
+        Expr::UnaryOp(_, e) => kind_from_expr_deep(e, known_types),
+        Expr::Call(_, args, _) => {
+            // Heuristic: check argument types. If any arg is float, result may be float.
+            // This is conservative — some functions take float and return Int, but
+            // for the print plugin, being wrong on the side of Float is safe (we'll
+            // call __print_float instead of __print_int, which still prints the value).
+            for arg in args {
+                let ak = kind_from_expr_deep(arg, known_types);
+                if ak == "Float" { return "Float"; }
+            }
+            "Int"
+        }
+        Expr::Cast(_, target) => kind_from_type(target),
+        Expr::Field(_, _) | Expr::Index(_, _) => {
+            // Conservative: field access may return float, but we can't
+            // determine the type without deeper analysis.
+            "Int"
+        }
+        _ => "Int",
     }
 }
 
