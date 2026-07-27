@@ -139,7 +139,7 @@ build_bench() {
     echo "================================================"
 
     local bin="benchmarks/${name}"
-    rm -f "$bin" "benchmarks/${name}.o" "benchmarks/${name}.ll"
+    rm -f "$bin" "benchmarks/${name}.o" "benchmarks/${name}.ll" "benchmarks/${name}_c" "benchmarks/${name}_c.o"
 
     # 2026-07-27: Skip if no .bv file (e.g. bridge_glue uses Makefile).
     if [ ! -f "benchmarks/${name}.bv" ]; then

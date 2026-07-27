@@ -1,4 +1,5 @@
 
+use crate::analysis::transition_graph;
 use crate::ast::{BinaryOpKind, Expr, Statement, TopLevel, Type};
 use crate::backend::llvm::emit_stmt::emit_statement;
 use crate::backend::llvm::{
@@ -59,9 +60,20 @@ impl LlvmBackend {
             }
         }
 
+        // 2026-07-27: Select reactor_tick attribute based on whether any
+        // reactive txn has unguarded FFI. Guarded FFI (inside `when` blocks)
+        // is outlined into cold functions — the hot path stays argmem: readwrite.
+        // Unguarded FFI (top-level prints, FFI calls outside guards) forces
+        // memory(readwrite) because the call is in the hot path of every tick.
+        let rct_attr = if txns.iter().any(|(_, t)| {
+            t.is_reactive && t.body.iter().any(|stmt| match stmt {
+                Statement::Guarded(_, _) => false,
+                _ => transition_graph::statement_contains_ffi(stmt),
+            })
+        }) { "#2" } else { "#12" };
         writeln!(
             out,
-            "define void @reactor_tick(ptr noalias nocapture %state) local_unnamed_addr #2 {{"
+            "define void @reactor_tick(ptr noalias nocapture %state) local_unnamed_addr {} {{", rct_attr
         )
         .ok();
         writeln!(out, "  entry:").ok();
@@ -302,9 +314,16 @@ impl LlvmBackend {
             }
         }
 
+        // 2026-07-27: Same FFI-aware attribute selection as emit_reactor.
+        let rct_attr = if txns.iter().any(|(_, t)| {
+            t.is_reactive && t.body.iter().any(|stmt| match stmt {
+                Statement::Guarded(_, _) => false,
+                _ => transition_graph::statement_contains_ffi(stmt),
+            })
+        }) { "#2" } else { "#12" };
         writeln!(
             out,
-            "define void @reactor_tick(ptr noalias nocapture %state) local_unnamed_addr #2 {{"
+            "define void @reactor_tick(ptr noalias nocapture %state) local_unnamed_addr {} {{", rct_attr
         )
         .ok();
         writeln!(out, "  entry:").ok();

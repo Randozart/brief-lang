@@ -3287,6 +3287,20 @@ impl LlvmBackend {
         writeln!(out, "attributes #10 = {{").ok();
         writeln!(out, "    mustprogress nofree norecurse nosync nounwind willreturn memory(argmem: read)").ok();
         writeln!(out, "}}").ok();
+        // 2026-07-27: #11 = argmem:readwrite for reactive txns after cold-path
+        // outlining. When FFI-containing guard blocks are outlined into separate
+        // cold functions, the remaining hot body is pure-Brief (only accesses %state).
+        // Unlike #8, does NOT include willreturn — reactive txns may loop forever
+        // if their convergence condition is never met (though all benchmarks converge).
+        writeln!(out, "attributes #11 = {{").ok();
+        writeln!(out, "    mustprogress nofree norecurse nosync nounwind memory(argmem: readwrite)").ok();
+        writeln!(out, "}}").ok();
+        // 2026-07-27: #12 = argmem:readwrite for reactor_tick when all txns are
+        // FFI-free after outlining. Includes willreturn because the reactor loop
+        // always converges (all txns converge).
+        writeln!(out, "attributes #12 = {{").ok();
+        writeln!(out, "    mustprogress nofree norecurse nosync nounwind willreturn memory(argmem: readwrite)").ok();
+        writeln!(out, "}}").ok();
         // Range metadata
         if !range_meta.is_empty() {
             writeln!(out).ok();
