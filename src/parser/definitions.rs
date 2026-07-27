@@ -1195,72 +1195,6 @@ impl<'a> Parser<'a> {
     /// Two forms:
     ///   op Add(#Int, #Int);                                     — declarative hashword dispatch
     ///   op Add(Posit32) = Posit32_add(#L, #R);                  — binding with explicit function
-    fn parse_op_binding(&mut self, operators: &mut Vec<OperatorDef>) -> Result<(), SyntaxError> {
-        let op_name = self.expect_identifier()?;
-        self.expect(Token::LParen)?;
-        self.parse_op_with_params(op_name, operators)
-    }
-
-    /// 2026-07-20: Parse op Add(#Int, #Int) or op Add(Posit32) = fn(#L, #R).
-    /// Also parses optional discriminator qualifiers:
-    ///   op Parse(Decimal, pre: "0x")
-    ///   op Parse(Decimal, suf: "h")
-    fn parse_op_with_params(&mut self, op_name: String,
-                            operators: &mut Vec<OperatorDef>) -> Result<(), SyntaxError> {
-        let mut params = Vec::new();
-        let mut pre: Option<String> = None;
-        let mut suf: Option<String> = None;
-        if !self.check(&Token::RParen) {
-            loop {
-                let pty = self.parse_type()?;
-                params.push(pty);
-                // 2026-07-20: Check for discriminator qualifiers after the type
-                if self.eat_identifier("pre") {
-                    self.eat(&Token::Colon);
-                    let val = self.expect_string()?;
-                    self.validate_discriminator(&val)?;
-                    pre = Some(val);
-                }
-                if self.eat_identifier("suf") {
-                    self.eat(&Token::Colon);
-                    let val = self.expect_string()?;
-                    self.validate_discriminator(&val)?;
-                    suf = Some(val);
-                }
-                if !self.eat(&Token::Comma) { break; }
-            }
-        }
-        self.expect(Token::RParen)?;
-        // Declarative: op Add(#Int, #Int);
-        if self.eat(&Token::Semicolon) {
-            operators.push(OperatorDef {
-                op: op_name, params, pre, suf,
-                impl_args: None, impl_name: String::new(), span: None,
-            });
-            return Ok(());
-        }
-        // Binding: op InsertAt(#RingBuffer, #T) = ring_push(#L, #R);
-        self.expect(Token::Eq)?;
-        let impl_args = self.parse_metadata_value_standalone()?;
-        self.expect(Token::Semicolon)?;
-        operators.push(OperatorDef {
-            op: op_name, params, pre, suf,
-            impl_args: Some(impl_args),
-            impl_name: String::new(), span: None,
-        });
-        Ok(())
-    }
-
-    /// 2026-07-26: Parse prop Name = expr;
-    /// Declares a metaproperty with an implementation expression.
-    fn parse_prop_binding(&mut self, props: &mut Vec<PropDef>) -> Result<(), SyntaxError> {
-        let name = self.expect_identifier()?;
-        self.expect(Token::Eq)?;
-        let expr = self.parse_expression()?;
-        self.expect(Token::Semicolon)?;
-        props.push(PropDef { name, expr, span: None });
-        Ok(())
-    }
 
     /// 2026-07-26: Parse prop Name: expr;
     /// Declares a metaproperty with an implementation expression.
@@ -1287,17 +1221,41 @@ impl<'a> Parser<'a> {
 
     /// 2026-07-26: Parse op Name(Proto?): expr;
     /// Declares an operator binding. protocol_variant is optional.
+    /// Optional discriminator fields: pre:"0x", suf:"f", reg:"[0-9]+"
     /// Examples:
     ///   op InsertAt: push(#L, #R);
     ///   op Add(#Int): int_add(#L, #R);
-    ///   op Add(MyType): custom_add(#L, #R);
+    ///   op Parse(Decimal, pre:"0x"): parse_hex(#L);
+    ///   op Parse(Decimal, suf:"h"): to_f16(#L);
     fn parse_op_definition(&mut self, op_bindings: &mut Vec<OperatorBinding>) -> Result<(), SyntaxError> {
         let name = self.expect_identifier()?;
         // Optional protocol variant: (#Proto) or (ConcreteType)
         let protocol_variant = if self.eat(&Token::LParen) {
+            // Parse the protocol variant or concrete type
             let variant = self.expect_identifier()?;
+            // Check for discriminator key-value pairs: pre:"0x", suf:"f", reg:"..."
+            let mut pre: Option<String> = None;
+            let mut suf: Option<String> = None;
+            let mut reg: Option<String> = None;
+            while self.eat(&Token::Comma) {
+                let key = self.expect_identifier()?;
+                self.expect(Token::Colon)?;
+                let val = self.expect_string()?;
+                match key.as_str() {
+                    "pre" => { pre = Some(val); }
+                    "suf" => { suf = Some(val); }
+                    "reg" => { reg = Some(val); }
+                    _ => {
+                        let msg = format!(
+                            "unknown discriminator '{}', expected 'pre', 'suf', or 'reg'", key);
+                        return self.error_at_current(&msg);
+                    }
+                }
+            }
             self.expect(Token::RParen)?;
-            Some(variant)
+            // Store discriminator fields on the OperatorBinding
+            self.parse_discriminated_op(name, Some(variant), pre, suf, reg, op_bindings)?;
+            return Ok(());
         } else {
             None
         };
@@ -1318,9 +1276,40 @@ impl<'a> Parser<'a> {
         op_bindings.push(OperatorBinding {
             name,
             protocol_variant,
+            pre: None,
+            suf: None,
+            reg: None,
             expr,
             span: None,
         });
+        Ok(())
+    }
+
+    /// 2026-07-27: Parse the expression part of a discriminated op binding
+    /// (the part after the `:`) and push to op_bindings with discriminator fields.
+    fn parse_discriminated_op(
+        &mut self,
+        name: String,
+        protocol_variant: Option<String>,
+        pre: Option<String>,
+        suf: Option<String>,
+        reg: Option<String>,
+        op_bindings: &mut Vec<OperatorBinding>,
+    ) -> Result<(), SyntaxError> {
+        self.expect(Token::Colon)?;
+        let fn_name = self.expect_identifier()?;
+        self.expect(Token::LParen)?;
+        let mut args = Vec::new();
+        while !self.check(&Token::RParen) && !self.is_at_end() {
+            args.push(self.parse_hash_marker()?);
+            if !self.check(&Token::RParen) {
+                self.eat(&Token::Comma);
+            }
+        }
+        self.expect(Token::RParen)?;
+        self.expect(Token::Semicolon)?;
+        let expr = Expr::Call(fn_name, args, None);
+        op_bindings.push(OperatorBinding { name, protocol_variant, pre, suf, reg, expr, span: None });
         Ok(())
     }
 

@@ -956,10 +956,15 @@ pub struct PropDef {
 /// Replaces the old op Name(Types) -> Type = fn(#L, #R) form.
 /// protocol_variant is None for concrete bindings (InsertAt, Init, etc.)
 /// or Some("#Int") / Some("MyType") for overloaded operators.
+/// pre/suf/reg are discriminator fields for op Parse:
+///   op Parse(Decimal, pre:"0x", reg:"[0-9a-fA-F]+"): parse_hex(#L);
 #[derive(Debug, Clone)]
 pub struct OperatorBinding {
     pub name: String,
     pub protocol_variant: Option<String>,
+    pub pre: Option<String>,
+    pub suf: Option<String>,
+    pub reg: Option<String>,
     pub expr: Expr,
     pub span: Option<Span>,
 }
