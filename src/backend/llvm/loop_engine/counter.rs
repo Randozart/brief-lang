@@ -599,6 +599,27 @@ impl LlvmBackend {
 
     /// Emit the body of a countable loop. Converts each Statement to the
     /// appropriate SSA load + op + store sequence.
+    /// 2026-07-27: Collect state field indices referenced by an expression.
+    fn collect_field_indices(expr: &Expr, field_map: &HashMap<String, usize>, out: &mut Vec<usize>) {
+        match expr {
+            Expr::Identifier(name) => {
+                if let Some(&idx) = field_map.get(name) {
+                    out.push(idx);
+                }
+            }
+            Expr::Call(_, args, _) => {
+                for a in args { Self::collect_field_indices(a, field_map, out); }
+            }
+            Expr::BinaryOp(_, lhs, rhs) => {
+                Self::collect_field_indices(lhs, field_map, out);
+                Self::collect_field_indices(rhs, field_map, out);
+            }
+            Expr::UnaryOp(_, e) => Self::collect_field_indices(e, field_map, out),
+            Expr::Cast(inner, _) => Self::collect_field_indices(inner, field_map, out),
+            _ => {}
+        }
+    }
+
     fn emit_countable_body(
         &mut self,
         out: &mut String,
@@ -614,33 +635,50 @@ impl LlvmBackend {
             // when register pressure (peak) exceeds available registers (r).
             // The #4/#5 attributes (disable-slp-vectorize) are NOT emitted, so
             // LLVM's auto-vectorizer runs freely for all benchmarks.
+            // 2026-07-27: Hazard gate — skip SLP for txns flagged by hazard_spec.
+            // The cross_per_field > 3 check (added 2026-07-27) applies to ALL txns;
+            // register-pressure checks (peak >= r) apply only to non-alwaysinline.
             let is_hazardous = !self.fun.txn_name.is_empty()
                 && self.ctx.slp_hazard_fns.contains(&self.fun.txn_name);
             if !is_hazardous {
                 let match_group = self.fun.slp_groups.iter()
                     .find(|g| g.base_index == i).cloned();
                 if let Some(ref group) = match_group {
-                    // 2026-07-27: SLP profitability — total_work = tree_depth * width.
-                    // Each SLP group incurs ~8-10 insertelement/extractelement overhead.
-                    // Vectorization is profitable when total computational work exceeds this.
-                    // Additionally, cap width at 8 (max native AVX2 width) — wider groups
-                    // force LLVM to split vectors (e.g. <12 x float> → <8> + <4>), adding
-                    // split/join overhead without corresponding compute benefit.
-                    //   width=3, depth=3 (9<10) — blocked (float_math_nonzero)
-                    //   width=3, depth=4 (12>=10) — allowed (deep expressions)
-                    //   width=5, depth=2 (10>=10) — allowed (nbody merged pairs)
-                    //   width=12, depth=3 (36>=10, but 12>8) — blocked (kalman)
-                    let should_vec = group.width >= 4 && group.width <= 8
-                        || (group.width >= 3 && group.width <= 8
-                            && body.get(i).map_or(false, |s| {
-                                let expr = match s {
-                                    Statement::Let { expr: Some(e), .. } => &*e,
-                                    Statement::Assign(_, e) => &*e,
-                                    _ => return false,
-                                };
-                                crate::backend::llvm::vector_codegen::tree_depth(expr)
-                                    * group.width >= 10
-                            }));
+                    // 2026-07-27: SLP profitability — three gates:
+                    //   1. Max field stride: continuous field accesses (stride <= 1) let
+                    //      LLVM merge scalar loads into vector loads. Strided access
+                    //      (e.g. p00, p10, p20 at indices 0, 3, 6) forces scalar loads
+                    //      + inserts, dominating the shuffle cost.
+                    //   2. Depth * width >= 10: total compute work must exceed the
+                    //      ~8-10 insertelement/extractelement overhead.
+                    //   3. Width <= 8: wider groups force LLVM to split vectors,
+                    //      adding split/join overhead.
+                    let template_expr = body.get(i).and_then(|s| match s {
+                        Statement::Let { expr: Some(e), .. } => Some(&*e),
+                        Statement::Assign(_, e) => Some(&*e),
+                        _ => None,
+                    });
+                    let mut stride_ok = true;
+                    if let Some(expr) = template_expr {
+                        let mut field_indices: Vec<usize> = Vec::new();
+                        Self::collect_field_indices(expr, &self.ctx.field_index_map, &mut field_indices);
+                        field_indices.sort();
+                        if field_indices.len() >= 2 {
+                            let max_stride = field_indices.windows(2)
+                                .map(|w| w[1] - w[0]).max().unwrap_or(0);
+                            if max_stride > 1 {
+                                // Strided access — inserts can't be merged
+                                stride_ok = false;
+                            }
+                        }
+                    }
+                    let should_vec = stride_ok
+                        && (group.width >= 4 && group.width <= 8
+                            || (group.width >= 3 && group.width <= 8
+                                && template_expr.map_or(false, |expr| {
+                                    crate::backend::llvm::vector_codegen::tree_depth(expr)
+                                        * group.width >= 10
+                                })));
                     if should_vec {
                         let result = crate::backend::llvm::vector_codegen::emit_slp_group(
                             self, out, body, group, write_set);

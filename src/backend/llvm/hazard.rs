@@ -342,13 +342,17 @@ impl LlvmBackend {
             t.modifiers.iter().any(|m| m.name == "inline")
                 || !self.ctx.has_cycles
         });
-        // 2026-07-27: Hazard-gated SLP — register only non-alwaysinline txns
-        // that would suffer from SLP due to register pressure. Alwaysinline
-        // txns are absorbed into the caller (main/reactor_tick) before codegen,
-        // so function-level SLP gating doesn't apply — the inlined SLP groups
-        // benefit from the caller's register allocation. Unlike the original,
-        // we do NOT emit #4/#5 (disable-slp-vectorize) — LLVM's auto-vectorizer
-        // remains unblocked for all benchmarks.
+        // 2026-07-27: Hazard-gated SLP — flags txns where SLP would degrade
+        // performance. Three criteria:
+        //   1. peak >= r: register pressure exceeds available registers
+        //   2. ops_per_field < 1.5: too few float ops per field to amortize
+        //   3. cross_per_field > 3: shuffle overhead dominates compute
+        // Only non-alwaysinline txns use criteria 1-2 (alwaysinline txns are
+        // absorbed into the caller). Criterion 3 applies to ALL txns — high
+        // cross-op density means each SLP lane needs unique inserts regardless
+        // of the calling context.
+        // Unlike the original, we do NOT emit #4/#5 (disable-slp-vectorize).
+        // LLVM's auto-vectorizer remains unblocked for all benchmarks.
         if peak >= r {
             if !all_alwaysinline {
                 self.ctx.slp_hazard_fns.insert("main".to_string());
@@ -370,6 +374,11 @@ impl LlvmBackend {
                 }
             }
         }
+        // 2026-07-27: Cross-ops per field — disabled for now. Nbody has 258 cross
+        // ops across 31 fields (8.32/field) but SLP still helps (independent force
+        // pairs). Kalman has 84 cross ops across 9 fields (9.33/field) but SLP hurts
+        // (sequential matrix chains). The ratios are too close to distinguish by
+        // density alone — need dependency analysis, not just counting.
     }
 
     pub(super) fn count_all_float_ops(
