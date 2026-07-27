@@ -1154,7 +1154,6 @@ impl LlvmBackend {
         self
     }
 
-    /// Emit a ptrtoint instruction with the correct pointer-width integer type.
     /// Emit an inttoptr instruction with the correct pointer-width integer type.
     /// Uses int_bits (from data layout or CLI --int-bits) for the integer side.
     /// 2026-07-27: DataLayout-driven int_bits replaces pointer_llvm_type().
@@ -1759,6 +1758,13 @@ impl LlvmBackend {
 
         let cg = &analysis.call_graph;
         self.ctx.has_cycles = cg.has_cycle();
+        let sb = self.compute_state_size_bytes() as u64;
+        self.ctx.state_size_bytes = sb;
+        self.ctx.state_ptr_param = if sb > 0 {
+            format!("ptr noundef dereferenceable({}) noalias nocapture align 8 %state", sb)
+        } else {
+            "ptr noundef noalias nocapture align 8 %state".to_string()
+        };
 
         if self.ctx.is_embedded {
             self.check_embedded_restrictions(items);
@@ -3104,7 +3110,7 @@ impl LlvmBackend {
                 }
                 self.emit_thread_pool_metadata(&mut out);
             } else {
-        writeln!(out, "define void @reactor_tick(ptr noalias nocapture %state) local_unnamed_addr #2 {{").ok();
+        writeln!(out, "define void @reactor_tick({}) local_unnamed_addr #2 {{", self.ctx.state_ptr_param).ok();
                 writeln!(out, "  entry:").ok();
                 writeln!(out, "  ret void").ok();
                 writeln!(out, "}}").ok();

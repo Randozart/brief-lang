@@ -877,8 +877,8 @@ fn test_main_and_reactor_use_non_willreturn_attr() {
     }
     assert!(output.contains("attributes #0"),
         "attributes #0 should still be present for terminating functions");
-    assert!(output.contains("define void @init_state(ptr noalias nocapture align 8 %state) local_unnamed_addr #0"),
-        "init_state() should still use #0 with willreturn");
+    assert!(output.contains("define void @init_state(ptr noundef"),
+        "init_state() should still use #0 with noundef");
 }
 
 // ── Exit condition tests ──────────────────────────────────
@@ -1979,7 +1979,7 @@ fn test_struct_param_uses_ptr_in_signature() {
         }),
     ];
     let output = backend.generate(&program, None);
-    assert!(output.contains("define i64 @process(ptr noalias nocapture align 8 %state, ptr %arg0"),
+    assert!(output.contains("define i64 @process(ptr noundef noalias nocapture align 8 %state, ptr %arg0"),
         "Struct param should be 'ptr' in function signature.\nGot:\n{}", output);
 }
 

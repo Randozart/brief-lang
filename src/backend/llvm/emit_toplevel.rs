@@ -861,7 +861,7 @@ impl LlvmBackend {
     }
 
     pub(super) fn emit_init_state(&mut self, out: &mut String) {
-        writeln!(out, "define void @init_state(ptr noalias nocapture align 8 %state) local_unnamed_addr #0 {{").ok();
+        writeln!(out, "define void @init_state({}) local_unnamed_addr #0 {{", self.ctx.state_ptr_param).ok();
         writeln!(out, "  entry:").ok();
         let mut fields: Vec<(String, usize, String)> = self.ctx.field_index_map.iter()
             .map(|(name, &idx)| (name.clone(), idx, self.ctx.field_types[idx].clone()))
@@ -1141,7 +1141,7 @@ impl LlvmBackend {
             write!(out, "define {} @{}(", ll_ret_ty, ll_name).ok();
         }
         if needs_state {
-            write!(out, "ptr noalias nocapture align 8 %state").ok();
+            write!(out, "{}", self.ctx.state_ptr_param).ok();
         }
         for (i, (n, t)) in d.parameters.iter().enumerate() {
             if needs_state || i > 0 {
@@ -1274,7 +1274,7 @@ impl LlvmBackend {
         // Phase 4.5: Emit dso_local export wrapper if #export modifier present
         if let Some(export_name) = Self::get_export_name(&d.modifiers) {
             writeln!(out, "define dso_local {} @{}(" , ll_ret_ty, export_name).ok();
-            write!(out, "ptr %state").ok();
+            write!(out, "{}", self.ctx.state_ptr_param).ok();
             for (i, (n, t)) in d.parameters.iter().enumerate() {
                 write!(out, ", {} %arg{}", self.llvm_type(t), i).ok();
             }
@@ -1551,7 +1551,7 @@ impl LlvmBackend {
             // and emit_folded_multi_main can reference the function (they call
             // @txn_{name}). Without this, the definition is @<name> but the
             // call is @txn_<name> — undefined reference error at link time.
-            writeln!(out, "define void @txn_{}(ptr noalias nocapture align 8 %state) local_unnamed_addr {}{} {{", name, txn_attr, alwaysinline).ok();
+            writeln!(out, "define void @txn_{}({}) local_unnamed_addr {}{} {{", name, self.ctx.state_ptr_param, txn_attr, alwaysinline).ok();
             writeln!(out, "  entry:").ok();
             // Arena for body emission — same rationale as the standard path:
             // the reactor dispatch calls @txn_name as a separate function,
@@ -1715,7 +1715,7 @@ impl LlvmBackend {
             let local_txn_attr = if local_outlined { "#11".to_string() } else { txn_attr.clone() };
 
             // Emit the txn function
-            writeln!(out, "define void @txn_{}(ptr noalias nocapture align 8 %state) local_unnamed_addr {}{} {{", name, local_txn_attr, alwaysinline).ok();
+            writeln!(out, "define void @txn_{}({}) local_unnamed_addr {}{} {{", name, self.ctx.state_ptr_param, local_txn_attr, alwaysinline).ok();
             writeln!(out, "  entry:").ok();
             self.fun.ssa_old_int_regs.clear();
             self.fun.ssa_old_float_regs.clear();
@@ -1999,7 +1999,7 @@ impl LlvmBackend {
         let inline_str = inline_attr.as_deref().unwrap_or(auto_inline);
 
         write!(out, "define {} @{}(", ret_llvm, name).ok();
-        write!(out, "ptr noalias nocapture align 8 %state").ok();
+        write!(out, "{}", self.ctx.state_ptr_param).ok();
         for (i, (n, t)) in txn.parameters.iter().enumerate() {
             // 2026-07-04: Parameter-level attributes are omitted because
             // Ptr<T> is i64 at the LLVM level (not a pointer type). LLVM
@@ -2249,7 +2249,7 @@ impl LlvmBackend {
         // @link trigger globals. argmemonly + readonly is the tightest
         // constraint — tells LLVM the function only reads memory through
         // its pointer arguments.
-        writeln!(out, "define internal i8 @pre_{}(ptr noalias nocapture align 8 %state) #10 {{", name).ok();
+        writeln!(out, "define internal i8 @pre_{}({}) #10 {{", name, self.ctx.state_ptr_param).ok();
         writeln!(out, "  entry:").ok();
         self.fun.txn_counter = 0;
         self.fun.let_bindings.clear(); self.fun.let_binding_types.clear(); self.fun.let_original_types.clear(); self.fun.reg_float_cache.clear(); self.fun.reg_type_cache.clear();
@@ -2299,7 +2299,7 @@ impl LlvmBackend {
     pub(super) fn emit_async_body(&mut self, out: &mut String, txn: &crate::ast::Transaction, name: &str) {
         let async_name = format!("async_body_{}", name);
         let async_attr = self.slp_attr(&async_name, "#0");
-        writeln!(out, "define void @{}(ptr noalias nocapture align 8 %state) local_unnamed_addr {} {{", async_name, async_attr).ok();
+        writeln!(out, "define void @{}({}) local_unnamed_addr {} {{", async_name, self.ctx.state_ptr_param, async_attr).ok();
         writeln!(out, "  entry:").ok();
         self.fun.txn_counter = 0;
         self.fun.let_bindings.clear(); self.fun.let_binding_types.clear(); self.fun.let_original_types.clear(); self.fun.reg_float_cache.clear(); self.fun.reg_type_cache.clear();
@@ -2380,7 +2380,7 @@ impl LlvmBackend {
 
     pub(super) fn emit_shape_guarded_body(&mut self, out: &mut String, body: &[Statement], name: &str, action: &str) {
         let fused_attr = self.slp_attr(name, "#0");
-        writeln!(out, "define void @{}(ptr noalias nocapture align 8 %state) local_unnamed_addr {} {{", name, fused_attr).ok();
+        writeln!(out, "define void @{}({}) local_unnamed_addr {} {{", name, self.ctx.state_ptr_param, fused_attr).ok();
         writeln!(out, "  entry:").ok();
         writeln!(out, "  br i1 true, label %body, label %rollback").ok();
         writeln!(out, "  body:").ok();
@@ -2418,7 +2418,7 @@ impl LlvmBackend {
     //   straight-line IR and both share the ptr rationale above.
     pub(super) fn emit_fused_composed(&mut self, out: &mut String, body: &[Statement], name: &str) {
         let fused_attr = self.slp_attr(name, "#0");
-        writeln!(out, "define void @{}(ptr noalias nocapture align 8 %state) local_unnamed_addr {} {{", name, fused_attr).ok();
+        writeln!(out, "define void @{}({}) local_unnamed_addr {} {{", name, self.ctx.state_ptr_param, fused_attr).ok();
         writeln!(out, "  entry:").ok();
         self.fun.txn_counter = 0; self.fun.let_bindings.clear(); self.fun.let_binding_types.clear(); self.fun.let_original_types.clear(); self.fun.reg_float_cache.clear(); self.fun.reg_type_cache.clear(); self.fun.terminated = false; self.fun.returns_i64 = false;
             self.fun.fn_ret_ty = "void".to_string();
@@ -2488,7 +2488,7 @@ impl LlvmBackend {
                 }
             }
         }
-        writeln!(out, "define dso_local void @__brief_init_state(ptr %state) #0 {{").ok();
+        writeln!(out, "define dso_local void @__brief_init_state({}) #0 {{", self.ctx.state_ptr_param).ok();
         writeln!(out, "  ret void").ok();
         writeln!(out, "}}").ok();
         writeln!(out, "define void @__brief_init() #0 {{").ok();
@@ -2546,7 +2546,7 @@ impl LlvmBackend {
         // it reads/writes the same %State struct as the rest of the program,
         // using the cell$name$field prefixed slots registered in
         // build_field_index.
-        writeln!(out, "define void @cell_persistent_ticks(ptr noalias nocapture align 8 %state) local_unnamed_addr #2 {{").ok();
+        writeln!(out, "define void @cell_persistent_ticks({}) local_unnamed_addr #2 {{", self.ctx.state_ptr_param).ok();
         writeln!(out, "  entry:").ok();
 
         let prev_state = self.fun.state_reg_name.clone();

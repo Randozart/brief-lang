@@ -362,7 +362,8 @@ impl LlvmBackend {
         }) { "#2" } else { "#12" };
         writeln!(
             out,
-            "define void @reactor_tick(ptr noalias nocapture %state) local_unnamed_addr {} {{", rct_attr
+            "define void @reactor_tick({}) local_unnamed_addr {} {{",
+            self.ctx.state_ptr_param, rct_attr
         )
         .ok();
         writeln!(out, "  entry:").ok();

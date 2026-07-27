@@ -127,6 +127,12 @@ pub struct CompilerContext {
     pub dead_info_disabled: bool,
     pub emit_remarks: bool,
     pub has_cycles: bool,
+    /// 2026-07-27: Byte size of the %State struct. Computed after field index
+    /// population in generate(), used as dereferenceable(N) on ptr %state params.
+    pub state_size_bytes: u64,
+    /// 2026-07-27: Pre-computed parameter string for `ptr %state` with noundef
+    /// and conditional dereferenceable(N). Set by set_state_ptr_param().
+    pub state_ptr_param: String,
     /// 2026-07-27: Set of function names proven to need arena initialization.
     /// Populated pre-codegen by analyze_arena_need. When empty for a given
     /// function, arena fields in %State and emit_arena_init/fini are skipped.
@@ -254,6 +260,8 @@ impl CompilerContext {
             dead_info_disabled: false,
             emit_remarks: false,
             has_cycles: false,
+            state_size_bytes: 0,
+            state_ptr_param: "ptr noundef noalias nocapture align 8 %state".to_string(),
             needs_arena: HashSet::new(),
             slp_hazard_fns: HashSet::new(),
             int_bits: 64,
