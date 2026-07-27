@@ -171,32 +171,38 @@ pub struct CompilerContext {
 }
 
 impl CompilerContext {
-    /// Check if the target is WASM (32-bit).
-    /// 2026-07-11: Phase 6 — used to adjust pointer width and calling convention.
-    pub fn is_wasm(&self) -> bool {
-        self.target_triple.starts_with("wasm32")
+    /// 2026-07-27: Parse the default pointer width (in bits) from a target data
+    /// layout string. Looks for `-p:<abi>:<pref>-` (unqualified) or the largest
+    /// `-p<num>:<abi>:<pref>-` (qualified address space). Falls back to 64.
+    pub fn parse_pointer_width(dl: &str) -> u64 {
+        // Match unqualified: -p:32:32- or -p:64:64-
+        if let Some(cap) = dl.split('-').find_map(|seg| {
+            let seg = seg.trim();
+            if seg.starts_with("p:") {
+                seg.split(':').nth(1).and_then(|s| s.parse::<u64>().ok())
+            } else {
+                None
+            }
+        }) {
+            return cap;
+        }
+        // Fallback: find qualified p<num>:<abi>:<pref>, take largest abi
+        let mut max_abi = 64u64;
+        for seg in dl.split('-') {
+            let seg = seg.trim();
+            if let Some(rest) = seg.strip_prefix('p') {
+                if let Some(abi) = rest.split(':').nth(1).and_then(|s| s.parse::<u64>().ok()) {
+                    if abi > max_abi { max_abi = abi; }
+                }
+            }
+        }
+        max_abi
     }
 
     /// Get the pointer width in bytes for the current target.
-    /// WASM32 uses 32-bit pointers; x86_64 uses 64-bit.
-    /// 2026-07-11: Phase 6.
+    /// Derived from int_bits (set by data layout or CLI override).
     pub fn pointer_bytes(&self) -> u64 {
-        if self.is_wasm() {
-            4
-        } else {
-            8
-        }
-    }
-
-    /// Get the LLVM integer type name for pointer-width integers.
-    /// Used in ptrtoint/inttoptr casts: `i64` on x86_64, `i32` on wasm32.
-    /// 2026-07-11: Phase 6.
-    pub fn pointer_llvm_type(&self) -> &'static str {
-        if self.is_wasm() {
-            "i32"
-        } else {
-            "i64"
-        }
+        self.int_bits / 8
     }
 
     pub fn new() -> Self {
@@ -737,28 +743,17 @@ mod tests {
     fn test_compiler_context_default_triple() {
         let ctx = CompilerContext::new();
         assert_eq!(ctx.target_triple, "x86_64-unknown-linux-gnu");
-        assert!(!ctx.is_wasm());
+        assert_eq!(ctx.int_bits, 64);
         assert_eq!(ctx.pointer_bytes(), 8);
-        assert_eq!(ctx.pointer_llvm_type(), "i64");
-    }
-
-    #[test]
-    fn test_compiler_context_wasm_triple() {
-        let mut ctx = CompilerContext::new();
-        ctx.target_triple = "wasm32-unknown-wasi".to_string();
-        assert!(ctx.is_wasm());
-        assert_eq!(ctx.pointer_bytes(), 4);
-        assert_eq!(ctx.pointer_llvm_type(), "i32");
     }
 
     #[test]
     fn test_compiler_context_wasm_data_layout() {
-        let ctx = CompilerContext::new();
-        // Default x86_64 data layout
-        assert!(ctx.data_layout.as_ref().unwrap().contains("p270:32:32"));
-        // WASM would have different data layout
         let wasm_dl =
-            Some("e-m:e-p:32:32-p10:8:8-p20:8:8-i64:64-n32:64-S128-ni:1:10:20".to_string());
-        assert_ne!(ctx.data_layout, wasm_dl);
+            "e-m:e-p:32:32-p10:8:8-p20:8:8-i64:64-n32:64-S128-ni:1:10:20".to_string();
+        assert_eq!(CompilerContext::parse_pointer_width(&wasm_dl), 32);
+        assert_eq!(CompilerContext::parse_pointer_width(
+            &"e-m:e-p270:32:32-p271:32:32-p272:64:64-i64:64-i128:128-f80:128-n8:16:32:64-S128"),
+            64);
     }
 }

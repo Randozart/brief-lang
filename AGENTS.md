@@ -219,7 +219,7 @@ This prevents "I'll fix it later" from fossilizing into architecture.
     --release` + `bash benchmarks/build_and_bench.sh --runtime` run.
 
 11b. **PERSISTENT BASELINE WORKTREE**: A permanent git worktree at
-    `../brief-compiler-baseline` holds the current baseline commit (`cd4edded`)
+    `../brief-compiler-baseline` holds the current baseline commit (`9ff835ac`)
     for regression detection. Always compare against this baseline before
     committing performance-sensitive changes:
 

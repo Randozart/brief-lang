@@ -1155,23 +1155,12 @@ impl LlvmBackend {
     }
 
     /// Emit a ptrtoint instruction with the correct pointer-width integer type.
-    /// Uses i64 on x86_64, i32 on wasm32.
-    /// Uses `&dyn Display` for dest/src so any Display-able type (String, &str,
-    /// u64, TypedRegister, etc.) can be passed without manual conversion.
-    /// 2026-07-11: Phase 6 — WASM pointer width.
-    pub(super) fn emit_ptrtoint(&self, out: &mut String, indent: &str, dest: &dyn Display, src: &dyn Display) {
-        let ptr_ty = self.ctx.pointer_llvm_type();
-        writeln!(out, "{}{} = ptrtoint {} {} to ptr", indent, dest, ptr_ty, src).ok();
-    }
-
     /// Emit an inttoptr instruction with the correct pointer-width integer type.
-    /// Uses i64 on x86_64, i32 on wasm32.
-    /// Uses `&dyn Display` for dest/src so any Display-able type (String, &str,
-    /// u64, TypedRegister, etc.) can be passed without manual conversion.
-    /// 2026-07-11: Phase 6 — WASM pointer width.
+    /// Uses int_bits (from data layout or CLI --int-bits) for the integer side.
+    /// 2026-07-27: DataLayout-driven int_bits replaces pointer_llvm_type().
     pub(super) fn emit_inttoptr(&self, out: &mut String, indent: &str, dest: &dyn Display, src: &dyn Display) {
-        let ptr_ty = self.ctx.pointer_llvm_type();
-        writeln!(out, "{}{} = inttoptr {} {} to ptr", indent, dest, ptr_ty, src).ok();
+        let int_ty = format!("i{}", self.ctx.int_bits);
+        writeln!(out, "{}{} = inttoptr {} {} to ptr", indent, dest, int_ty, src).ok();
     }
 
     /// Produce a human-readable layout summary for all state fields.
