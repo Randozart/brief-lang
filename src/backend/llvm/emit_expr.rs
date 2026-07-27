@@ -1387,6 +1387,88 @@ impl LlvmBackend {
         }
     }
 
+    /// 2026-07-27: Coerce argument LLVM type to match declared parameter type.
+    /// Emits the appropriate LLVM cast instruction (fptosi, sitofp, trunc, zext,
+    /// bitcast) when the argument's SSA type differs from the parameter's LLVM type.
+    /// This prevents ABI mismatches like `call i64 @__print_int(float %x)`.
+    fn coerce_to_param_type(
+        &mut self,
+        out: &mut String,
+        arg_reg: &TypedRegister,
+        param_llvm_ty: &str,
+        indent: &str,
+    ) -> TypedRegister {
+        let src_llvm = self.llvm_type(&arg_reg.ty);
+        if src_llvm == param_llvm_ty {
+            return arg_reg.clone();
+        }
+        let result = self.fun.gen_reg();
+        match (src_llvm.as_str(), param_llvm_ty) {
+            // float → i64: bitcast to i32, zext to i64
+            ("float", "i64") => {
+                let b32 = self.fun.gen_reg();
+                writeln!(out, "{}  {} = bitcast float {} to i32", indent, b32, arg_reg.name).ok();
+                writeln!(out, "{}  {} = zext i32 {} to i64", indent, result, b32).ok();
+                TypedRegister { name: result, ty: Type::int() }
+            }
+            // double → i64: bitcast
+            ("double", "i64") => {
+                writeln!(out, "{}  {} = bitcast double {} to i64", indent, result, arg_reg.name).ok();
+                TypedRegister { name: result, ty: Type::int() }
+            }
+            // i64 → float: trunc to i32, bitcast to float
+            ("i64", "float") => {
+                let tr = self.fun.gen_reg();
+                writeln!(out, "{}  {} = trunc i64 {} to i32", indent, tr, arg_reg.name).ok();
+                writeln!(out, "{}  {} = bitcast i32 {} to float", indent, result, tr).ok();
+                TypedRegister { name: result, ty: Type::float() }
+            }
+            // i64 → double: bitcast
+            ("i64", "double") => {
+                writeln!(out, "{}  {} = bitcast i64 {} to double", indent, result, arg_reg.name).ok();
+                TypedRegister { name: result, ty: Type::float64() }
+            }
+            // float ↔ double: fpext/fptrunc
+            ("float", "double") => {
+                writeln!(out, "{}  {} = fpext float {} to double", indent, result, arg_reg.name).ok();
+                TypedRegister { name: result, ty: Type::float64() }
+            }
+            ("double", "float") => {
+                writeln!(out, "{}  {} = fptrunc double {} to float", indent, result, arg_reg.name).ok();
+                TypedRegister { name: result, ty: Type::float() }
+            }
+            // ptr ↔ i64: inttoptr/ptrtoint
+            ("i64", "ptr") => {
+                writeln!(out, "{}  {} = inttoptr i64 {} to ptr", indent, result, arg_reg.name).ok();
+                TypedRegister { name: result, ty: arg_reg.ty.clone() }
+            }
+            ("ptr", "i64") => {
+                writeln!(out, "{}  {} = ptrtoint ptr {} to i64", indent, result, arg_reg.name).ok();
+                TypedRegister { name: result, ty: Type::int() }
+            }
+            // Integer widening: i8/i16/i32 → i64 (zext for unsigned, sext for signed)
+            (src, "i64") if src.starts_with('i') && src.len() > 1 => {
+                let bits: u32 = src[1..].parse().unwrap_or(64);
+                if bits < 64 {
+                    writeln!(out, "{}  {} = zext {} {} to i64", indent, result, src, arg_reg.name).ok();
+                    TypedRegister { name: result, ty: Type::int() }
+                } else {
+                    arg_reg.clone()
+                }
+            }
+            // Integer narrowing: i64 → iN
+            ("i64", dst) if dst.starts_with('i') && dst.len() > 1 => {
+                writeln!(out, "{}  {} = trunc i64 {} to {}", indent, result, arg_reg.name, dst).ok();
+                TypedRegister { name: result, ty: arg_reg.ty.clone() }
+            }
+            // Fallback: use a bitcast (may still be wrong, but preserves compilation)
+            _ => {
+                writeln!(out, "{}  {} = bitcast {} {} to {}", indent, result, src_llvm, arg_reg.name, param_llvm_ty).ok();
+                TypedRegister { name: result, ty: arg_reg.ty.clone() }
+            }
+        }
+    }
+
     /// 2026-07-22: Emit a direct foreign function call (Inline path).
     /// Uses the `symbol` parameter (from `as_name` or brief_name) as the
     /// callee, applies meld extension conversion to arguments, and emits
@@ -1482,9 +1564,18 @@ impl LlvmBackend {
                 }
             })
             .collect();
+        // 2026-07-27: Coerce each argument to match the declared parameter type.
+        // Previously used arg's own LLVM type (via self.llvm_type(&reg.ty)), which
+        // produced ABI mismatches for float↔int, ptr↔i64, and integer width differences.
+        // The frgn declaration specifies the expected C type; we must cast to match.
         let arg_strs: Vec<String> = final_args
             .iter()
-            .map(|reg| format!("{} {}", self.llvm_type(&reg.ty), reg.name))
+            .zip(sig.inputs.iter())
+            .map(|(arg, (_, param_ty))| {
+                let param_llvm = self.llvm_type(param_ty);
+                let coerced = self.coerce_to_param_type(out, arg, &param_llvm, indent);
+                format!("{} {}", param_llvm, coerced.name)
+            })
             .collect();
         let ret_type = sig.result_type.return_type().unwrap_or(Type::int());
         // 2026-07-19: Void-returning functions must not have a name assignment.
