@@ -4,7 +4,7 @@
 // Flat code: each function max 2 levels of nesting.
 
 use crate::derive::engine::SynthesizedProgram;
-use crate::ast::DerivationBlock;
+use crate::ast::{DerivationBlock, Expr};
 use std::path::{Path, PathBuf};
 
 /// 2026-07-28: Phase E.0 — Doppelganger file management.
@@ -47,6 +47,38 @@ impl Doppelganger {
         }
         out
     }
+
+    /// 2026-07-28: Format an ite chain (Expr::If) as `when` guards with `term`.
+    /// The if-then-else chain from SMT ite is converted to valid Brief:
+    ///   when cond1 { term val1; };
+    ///   when cond2 { term val2; };
+    ///   term else_val;
+    /// Returns None if the body is not an ite chain (use format_body instead).
+    pub fn format_ite_body(prog: &SynthesizedProgram) -> Option<String> {
+        let expr = prog.body.first()?;
+        if !matches!(expr, Expr::If(_, _, _)) {
+            return None;
+        }
+        let mut out = String::new();
+        fn decompose_ite(expr: &Expr, out: &mut String, indent: usize) {
+            match expr {
+                Expr::If(cond, then, else_) => {
+                    let pad = "    ".repeat(indent);
+                    out.push_str(&format!("{}when {} {{\n{}        term {};\n{}}};\n",
+                        pad, cond, pad, then, pad));
+                    if let Some(e) = else_ {
+                        decompose_ite(e, out, indent);
+                    }
+                }
+                _ => {
+                    let pad = "    ".repeat(indent);
+                    out.push_str(&format!("{}term {};\n", pad, expr));
+                }
+            }
+        }
+        decompose_ite(expr, &mut out, 1);
+        Some(out)
+    }
 }
 
 /// Write the doppelganger file with synthesized bodies injected.
@@ -65,10 +97,16 @@ pub fn write_doppelganger(
     let mut insertions: Vec<(usize, String)> = Vec::new();
     for ((name, prog), (_, block)) in syntheses.iter().zip(derivations.iter()) {
         let insert_at = block.span.start as usize;
-        // 2026-07-28: Use `return expr;` so synthesized bodies produce the correct
-        // function result. Bare `expr;` is an expression statement — LLVM backend
-        // evaluates and discards it, then returns the default %result = 0.
-        let body_str = format!(" {{\n    return {};\n}} ", Doppelganger::format_body(prog));
+        // 2026-07-28: Use `term expr;` — Brief's termination statement.
+        // In a callable txn / defn, `term expr` stores the value to %result and
+        // branches to the convergence check. This is the correct way to return
+        // a value from a synthesized body.
+        // For ite chains (SMT results), use when-guard format instead.
+        let body_str = if let Some(ite_body) = Doppelganger::format_ite_body(prog) {
+            format!(" {{\n{}}} ", ite_body)
+        } else {
+            format!(" {{\n    term {};\n}} ", Doppelganger::format_body(prog))
+        };
         eprintln!("[derive] {}: inserting body at byte {}", name, insert_at);
         insertions.push((insert_at, body_str));
     }
