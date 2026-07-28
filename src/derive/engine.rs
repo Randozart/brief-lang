@@ -474,8 +474,7 @@ fn generate_typed_expressions_lazy(
     // Variables that match the return type
     for (name, ty) in param_names.iter().zip(param_types.iter()) {
         if ty == ret_type {
-            let expr = Expr::Identifier(name.clone());
-            if callback(&expr) { return; }
+            if callback(&Expr::Identifier(name.clone())) { return; }
         }
     }
 
@@ -677,11 +676,11 @@ fn generate_next_level(
     // Constants at any depth
     push_typed_constants(ret_type, &mut result);
 
-    // Variables that match the return type
-    for (name, ty) in param_names.iter().zip(param_types.iter()) {
-        if ty == ret_type {
-            result.push(Expr::Identifier(name.clone()));
-        }
+    // 2026-07-28: Phase 5 — Add ALL parameter names, regardless of type.
+    // Compound-type params (e.g., Expr) are needed for cross-type extraction
+    // via Match expressions (Expr → Int).
+    for (name, _ty) in param_names.iter().zip(param_types.iter()) {
+        result.push(Expr::Identifier(name.clone()));
     }
 
     // Unary ops on the previous level's expressions
@@ -776,25 +775,76 @@ fn generate_next_level(
         }
     }
 
-    // Match generation: if we have compound type expressions in the prev level,
-    // produce Match expressions over them with simple arms.
+    // Match generation: produce Match expressions over compound type expressions.
+    // Works for both same-type (Expr → Expr) and cross-type (Expr → Int) extraction.
+    // For each compound type expression in prev level, generate a Match with
+    // EnumVariant arms. Arm bodies use the bound field variables — for cross-type
+    // extraction, the first field is assumed to be the value (correct for Const).
     for (type_name, exprs) in &prev.compound_exprs {
-        if type_name != ret_type {
-            // Only generate matches that return the same type
-            continue;
+        if type_name == ret_type {
+            // Same-type match: arms return the same type (reconstruct)
+            for scrutinee in exprs {
+                let arms = vec![
+                    crate::ast::MatchArm {
+                        pattern: crate::ast::Pattern::EnumVariant("Const".into(), vec![
+                            crate::ast::Pattern::Binding("_v".into()),
+                        ]),
+                        guard: None,
+                        body: Box::new(Expr::Call("Const".into(), vec![
+                            Expr::Identifier("_v".into()),
+                        ], None)),
+                    },
+                    crate::ast::MatchArm {
+                        pattern: crate::ast::Pattern::EnumVariant("Add".into(), vec![
+                            crate::ast::Pattern::Binding("_l".into()),
+                            crate::ast::Pattern::Binding("_r".into()),
+                        ]),
+                        guard: None,
+                        body: Box::new(Expr::Call("Add".into(), vec![
+                            Expr::Identifier("_l".into()),
+                            Expr::Identifier("_r".into()),
+                        ], None)),
+                    },
+                    crate::ast::MatchArm {
+                        pattern: crate::ast::Pattern::Wildcard,
+                        guard: None,
+                        body: Box::new(scrutinee.clone()),
+                    },
+                ];
+                result.push(Expr::Match(Box::new(scrutinee.clone()), arms));
+            }
         }
-        for scrutinee in exprs {
-            // Generate a match with default (wildcard) arm returning scrutinee itself
-            // This is the simplest valid Match: identity with fallback
-            let wildcard_arm = crate::ast::MatchArm {
-                pattern: crate::ast::Pattern::Wildcard,
-                guard: None,
-                body: Box::new(scrutinee.clone()),
-            };
-            result.push(Expr::Match(
-                Box::new(scrutinee.clone()),
-                vec![wildcard_arm],
-            ));
+        if ret_type == "Int" {
+            // Cross-type extraction: Expr → Int.
+            // Arm bodies return the first field (assumed Int for Const).
+            for scrutinee in exprs {
+                let arms = vec![
+                    // Const(val) → val (extract Int)
+                    crate::ast::MatchArm {
+                        pattern: crate::ast::Pattern::EnumVariant("Const".into(), vec![
+                            crate::ast::Pattern::Binding("_v".into()),
+                        ]),
+                        guard: None,
+                        body: Box::new(Expr::Identifier("_v".into())),
+                    },
+                    // Add(l, r) → 0 (fallback — first field is Expr, return 0)
+                    crate::ast::MatchArm {
+                        pattern: crate::ast::Pattern::EnumVariant("Add".into(), vec![
+                            crate::ast::Pattern::Binding("_l".into()),
+                            crate::ast::Pattern::Binding("_r".into()),
+                        ]),
+                        guard: None,
+                        body: Box::new(Expr::Decimal(0)),
+                    },
+                    // Wildcard → 0
+                    crate::ast::MatchArm {
+                        pattern: crate::ast::Pattern::Wildcard,
+                        guard: None,
+                        body: Box::new(Expr::Decimal(0)),
+                    },
+                ];
+                result.push(Expr::Match(Box::new(scrutinee.clone()), arms));
+            }
         }
     }
 
@@ -827,10 +877,23 @@ fn prune_level(
                 Ok(Value::Int(n)) => (n, 1),  // (value, kind discriminator)
                 Ok(Value::Float(f)) => (f as i64, 2),
                 Ok(Value::Bits(b)) => (b.iter().fold(0i64, |acc, &x| (acc << 1) | x as i64), 3),
-                // 2026-07-28: Phase 5 — Hash constructor values by (name_hash, field_count)
+                // 2026-07-28: Phase 5 — Hash constructor values recursively.
+                // Include name and all field values in the fingerprint so
+                // different constructor instances (e.g., Const(5) vs Const(42))
+                // are not incorrectly pruned as redundant.
                 Ok(Value::Constructor(ref name, ref fields)) => {
                     let name_hash = name.bytes().fold(0i64, |acc, b| acc.wrapping_mul(31).wrapping_add(b as i64));
-                    (name_hash, 10 + fields.len() as i64)
+                    let fields_hash = fields.iter().fold(0i64, |acc, f| match f {
+                        Value::Int(n) => acc.wrapping_mul(31).wrapping_add(*n),
+                        Value::Float(fv) => acc.wrapping_mul(31).wrapping_add(fv.to_bits() as i64),
+                        Value::Bits(b) => acc.wrapping_mul(31).wrapping_add(b.first().copied().unwrap_or(0) as i64),
+                        Value::Constructor(n, fs) => {
+                            let h = n.bytes().fold(0i64, |a, b| a.wrapping_mul(31).wrapping_add(b as i64));
+                            acc.wrapping_mul(31).wrapping_add(h).wrapping_add(fs.len() as i64)
+                        }
+                        _ => acc.wrapping_mul(31),
+                    });
+                    (name_hash, 10 + fields_hash)
                 }
                 _ => (0, 0),
             }
@@ -857,9 +920,20 @@ fn prune_level(
             continue;
         }
 
-        // Determine type and add to cache
-        if let Some(ty) = expr_type_hint_with_params(expr, param_names, param_types) {
+        // 2026-07-28: Phase 5 — Determine type and add to cache.
+        // Check if the expression is an identifier whose parameter is a compound type.
+        let is_compound_param = matches!(expr, Expr::Identifier(name) if {
+            param_names.iter().position(|n| n == name)
+                .and_then(|i| param_types.get(i))
+                .map(|s| crate::derive::engine::is_compound_type(s.as_str()))
+                .unwrap_or(false)
+        });
+        if is_compound_param {
+            cache.compound_exprs.entry("Expr".to_string()).or_default().push(expr.clone());
+        } else if let Some(ty) = expr_type_hint_with_params(expr, param_names, param_types) {
             cache.push(expr.clone(), ty);
+        } else {
+            cache.compound_exprs.entry("Expr".to_string()).or_default().push(expr.clone());
         }
     }
 
@@ -1051,8 +1125,19 @@ fn candidate_matches_all_examples(
 
 /// Convert the input expressions in a DerivationExample to Values.
 /// Uses `expr_to_value` to evaluate each input expression.
-fn example_inputs_to_values(ex: &DerivationExample, _param_names: &[String]) -> Vec<Value> {
-    ex.inputs.iter().map(|e| expr_to_value(e)).collect()
+fn example_inputs_to_values(ex: &DerivationExample, param_names: &[String]) -> Vec<Value> {
+    // 2026-07-28: Phase 5 — Use evaluate_synthesized for compound types.
+    // The old expr_to_value only handles constants (Decimal, Float, Bool)
+    // and returns Value::Int(0) for constructors like Call("Const", ...).
+    // evaluate_synthesized handles all expression types including constructors.
+    ex.inputs.iter().map(|e| {
+        if matches!(e, Expr::Call(_, _, _)) {
+            let mut ctx = SynthesisEvalContext::new();
+            evaluate_synthesized(e, &mut ctx).unwrap_or(Value::Int(0))
+        } else {
+            expr_to_value(e)
+        }
+    }).collect()
 }
 
 /// Convert an expression to a Value (for constant inputs from examples).
@@ -1422,5 +1507,33 @@ mod tests {
         let params = vec![("x0".into(), Type::int())];
         let result = enumerative_search("f", &params, &Type::int(), &examples, 2).unwrap();
         assert!(result.is_none());
+    }
+
+    #[test]
+    fn test_enumerative_search_expr_field() {
+        // Test that compound type (Expr) synthesis works.
+        // Input: Expr value Const(5), expected output: Int(5)
+        // The engine needs to find a Match that extracts the field from Const.
+        let const5 = Expr::Call("Const".into(), vec![Expr::Decimal(5)], None);
+        let const42 = Expr::Call("Const".into(), vec![Expr::Decimal(42)], None);
+        fn make_ex(inputs: Vec<Expr>, output: Expr) -> DerivationExample {
+            DerivationExample {
+                inputs, output: Box::new(output), tolerance: None, span: crate::errors::Span::dummy()
+            }
+        }
+        let examples = vec![
+            make_ex(vec![const5.clone()], Expr::Decimal(5)),
+            make_ex(vec![const42.clone()], Expr::Decimal(42)),
+        ];
+        let params = vec![("e".into(), Type::Custom("Expr".into()))];
+        // Int return type, Expr param — the engine should find Const extraction
+        let result = enumerative_search("eval", &params, &Type::int(), &examples, 3);
+        match &result {
+            Ok(Some(expr)) => eprintln!("  DIAG: found expr: {:?}", expr),
+            Ok(None) => eprintln!("  DIAG: no solution found at depth 3"),
+            Err(e) => eprintln!("  DIAG: error: {:?}", e),
+        }
+        assert!(result.is_ok(), "compound type search should succeed: {:?}", result);
+        assert!(result.unwrap().is_some(), "should find a solution");
     }
 }
