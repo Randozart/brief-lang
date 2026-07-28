@@ -20,12 +20,144 @@ pub struct SlpIsomorphicGroup {
     pub lane_positions: Vec<usize>,
     /// The vector element type.
     pub element_type: Type,
+    /// 2026-07-28: Indices of SLP groups that consume this group's outputs.
+    /// Populated by `build_consumer_graph` after all groups are formed.
+    /// Non-empty means the extract→insert chain creates overhead that may
+    /// exceed compute gain. Used by `chain_pass_ok` in the second pass.
+    pub consumer_group_indices: Vec<usize>,
 }
 
 impl SlpIsomorphicGroup {
     pub fn is_viable(&self) -> bool {
-        // Need at least 2 lanes for vectorization to be worthwhile
         self.width >= 2
+    }
+
+    /// Number of unique variable references in the template expression.
+    /// Used by chain cost calculation — each unique variable needs one insert per lane.
+    pub fn template_var_count(&self) -> usize {
+        // lane_mappings[0] is the template identity mapping.
+        // The number of entries is the number of unique variables in the template.
+        self.lane_mappings.first().map_or(0, |m| m.len())
+    }
+}
+
+/// 2026-07-28: Build the consumer graph after all SLP groups are formed.
+/// For each group, walk later body statements and find which groups consume
+/// its outputs (identified by lhs_names). Populates consumer_group_indices.
+pub fn build_consumer_graph(body: &[Statement], groups: &mut [SlpIsomorphicGroup]) {
+    // Build a map: lhs_name → group_index for quick lookup
+    let mut lhs_to_group: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
+    for (gi, g) in groups.iter().enumerate() {
+        for name in &g.lhs_names {
+            lhs_to_group.insert(name.clone(), gi);
+        }
+    }
+    
+    // For each group, walk body statements after its last position
+    for gi in 0..groups.len() {
+        let last_pos = groups[gi].lane_positions.iter().max().copied().unwrap_or(0);
+        let lhs_names = &groups[gi].lhs_names;
+        // Scan body from last_pos + 1
+        for pos in (last_pos + 1)..body.len() {
+            if let Some(stmt) = body.get(pos) {
+                let mut refs: Vec<String> = Vec::new();
+                collect_idents_from_stmt(stmt, &mut refs);
+                // Check if any reference matches this group's lhs_names
+                let is_match = refs.iter().any(|r| lhs_names.contains(r));
+                if is_match {
+                    // Find which group this consumer belongs to
+                    // by checking if the statement at pos is the base_index of some group
+                    if let Some(&ci) = lhs_to_group.get(&refs[0]) {
+                        if ci != gi {  // Don't consume from yourself
+                            if !groups[gi].consumer_group_indices.contains(&ci) {
+                                groups[gi].consumer_group_indices.push(ci);
+                            }
+                        }
+                    }
+                    // Also check all references
+                    for r in &refs {
+                        if let Some(&ci) = lhs_to_group.get(r) {
+                            if ci != gi && !groups[gi].consumer_group_indices.contains(&ci) {
+                                groups[gi].consumer_group_indices.push(ci);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// 2026-07-28: Compute whether a group's consumer chain passes the cost-gain check.
+/// Returns false when the extract→insert overhead of the consumer chain exceeds
+/// the compute gain of the group. This is the principled kalman-vs-nbody gate.
+pub fn chain_pass_ok(groups: &[SlpIsomorphicGroup], gi: usize) -> bool {
+    let group = &groups[gi];
+    if group.consumer_group_indices.is_empty() {
+        return true;  // No consumers — no chain overhead
+    }
+    
+    let mut visited = std::collections::HashSet::new();
+    let total_cost = compute_chain_cost(groups, gi, &mut visited);
+    
+    let vars_per_lane = group.template_var_count().max(1) as u32;
+    let compute_gain = (group.width * estimate_template_depth(groups, gi).max(1)) as u32;
+    let insert_cost = (group.width as u32) * vars_per_lane;
+    let extract_cost = group.width as u32;
+    
+    // Allow vectorization if total chain cost doesn't exceed double the compute gain
+    (total_cost as u64) < (compute_gain as u64 * 2)
+}
+
+fn compute_chain_cost(groups: &[SlpIsomorphicGroup], gi: usize, visited: &mut std::collections::HashSet<usize>) -> u32 {
+    if !visited.insert(gi) { return 0; }
+    let group = &groups[gi];
+    let vars_per_lane = group.template_var_count().max(1);
+    let insert_cost = group.width as u32 * vars_per_lane as u32;
+    let extract_cost = group.width as u32;
+    
+    let mut total = insert_cost + extract_cost;
+    for &ci in &group.consumer_group_indices {
+        if let Some(consumer) = groups.get(ci) {
+            let consumer_vars = consumer.template_var_count().max(1);
+            total += consumer.width as u32 * consumer_vars as u32;  // consumer inserts
+            total += consumer.width as u32;  // consumer extracts
+            total += compute_chain_cost(groups, ci, visited);
+        }
+    }
+    total
+}
+
+fn estimate_template_depth(groups: &[SlpIsomorphicGroup], gi: usize) -> usize {
+    // We don't have the actual expression tree depth here (it's in counter.rs),
+    // so estimate from group characteristics. Width > 3 indicates merged groups
+    // which have depth >= 2. Width <= 3 pre-merge groups have depth >= 1.
+    // The actual depth is computed by tree_depth() at dispatch time.
+    groups.get(gi).map_or(1, |g| if g.width > 3 { 2 } else { 1 })
+}
+
+fn collect_idents_from_stmt(stmt: &Statement, names: &mut Vec<String>) {
+    match stmt {
+        Statement::Let { expr: Some(e), .. } => collect_idents_from_expr(e, names),
+        Statement::Expression(e) => collect_idents_from_expr(e, names),
+        Statement::Assign(lhs, rhs) => {
+            collect_idents_from_expr(lhs, names);
+            collect_idents_from_expr(rhs, names);
+        }
+        _ => {}
+    }
+}
+
+fn collect_idents_from_expr(expr: &Expr, names: &mut Vec<String>) {
+    match expr {
+        Expr::Identifier(name) => { names.push(name.clone()); }
+        Expr::Call(_, args, _) => { for a in args { collect_idents_from_expr(a, names); } }
+        Expr::BinaryOp(_, lhs, rhs) => {
+            collect_idents_from_expr(lhs, names);
+            collect_idents_from_expr(rhs, names);
+        }
+        Expr::UnaryOp(_, e) => collect_idents_from_expr(e, names),
+        _ => {}
     }
 }
 
@@ -36,6 +168,10 @@ pub struct SlpAnalysisResult {
     pub groups: Vec<SlpIsomorphicGroup>,
     /// Whether any viable groups were found.
     pub has_slp_opportunities: bool,
+    /// 2026-07-28: Per-group consumer chain analysis results.
+    /// `chain_pass_ok[i]` is true if group i's consumer chain passes the
+    /// cost-gain check. False means the group should use scalar fallback.
+    pub chain_pass_ok: Vec<bool>,
 }
 
 /// Check if two expressions are structurally isomorphic under a variable mapping.
@@ -230,13 +366,19 @@ fn find_isomorphic_groups(
 
     if mappings.len() >= 2 {
         let width = mappings.len();
+        let element_type = match template {
+            Statement::Let { ty: Some(t), .. } => t.clone(),
+            _ => Type::float(),
+        };
+        let elem_ty = element_type.clone();
         groups.push(SlpIsomorphicGroup {
             base_index: start_idx,
-            width,
-            lane_mappings: mappings,
+            width: mappings.len(),
+            lane_mappings: mappings.clone(),
             lhs_names,
-            lane_positions: (start_idx..start_idx + width).collect(),
-            element_type: Type::int(), // will be refined later
+            lane_positions: (start_idx..start_idx + mappings.len()).collect(),
+            element_type: elem_ty,
+            consumer_group_indices: Vec::new(),
         });
     }
 
@@ -458,6 +600,7 @@ fn merge_groups(body: &[Statement], groups: Vec<SlpIsomorphicGroup>) -> Vec<SlpI
                 lhs_names: merged_lhs_names,
                 lane_positions: merged_lane_positions,
                 element_type: template_group.element_type.clone(),
+                consumer_group_indices: Vec::new(),
             });
         }
     }
@@ -497,8 +640,20 @@ pub fn analyze_body(body: &[Statement]) -> SlpAnalysisResult {
     }
 
     result.has_slp_opportunities = !result.groups.is_empty();
+    
+    // 2026-07-28: Two-pass consumer analysis — build consumer graph and run
+    // cost-gain check. This is the principled kalman-vs-nbody gate.
+    if result.has_slp_opportunities {
+        build_consumer_graph(body, &mut result.groups);
+        for gi in 0..result.groups.len() {
+            result.chain_pass_ok.push(chain_pass_ok(&result.groups, gi));
+        }
+    }
+    
     result
 }
+
+
 
 #[cfg(test)]
 mod tests {

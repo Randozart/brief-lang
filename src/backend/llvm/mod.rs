@@ -2381,6 +2381,7 @@ impl LlvmBackend {
                         name, result.groups.len(), total_lanes));
                     // Store groups on FunctionContext for codegen
                     self.fun.slp_groups = result.groups;
+                    self.fun.slp_chain_pass_ok = result.chain_pass_ok;
                 }
             }
         }

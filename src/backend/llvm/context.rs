@@ -511,6 +511,9 @@ pub struct FunctionContext {
     pub vector_phi_current: HashMap<String, String>,
     /// 2026-07-21: SLP isomorphism groups detected in the current txn body.
     pub slp_groups: Vec<crate::analysis::slp_isomorphism::SlpIsomorphicGroup>,
+    /// 2026-07-28: Per-group consumer chain pass/fail from two-pass analysis.
+    /// `slp_chain_pass_ok[i]` is true if group i passes the cost-gain check.
+    pub slp_chain_pass_ok: Vec<bool>,
 
     // Chimera tracking
 
@@ -603,6 +606,7 @@ impl FunctionContext {
             vector_phi_groups: HashMap::new(),
             vector_phi_current: HashMap::new(),
             slp_groups: Vec::new(),
+            slp_chain_pass_ok: Vec::new(),
             chimera_map: HashMap::new(),
             expr_dedup_cache: HashMap::new(),
             alloc_strategies: HashMap::new(),
