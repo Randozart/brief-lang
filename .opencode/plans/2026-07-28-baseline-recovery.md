@@ -602,6 +602,47 @@ available. Scales weights to max 1000. `1045 tests pass`. All 19 at parity.
 
 All benchmarks stable within single-run noise. ring_buffer retains !range benefit from Step 4.
 
+### Historical All-Time Best Results (Per Benchmark)
+
+Compiled from AGENTS_HISTORY.md, AGENTS_HISTORY_2.md, docs/plans/*.md, benchmarks/results/*.md,
+and commit messages. Every benchmark's best-ever ratio with the commit where it was achieved.
+
+```
+╔═══════════════════════════╦══════════════╦════════════╦══════════╦═══════════════════╗
+║ Benchmark                 ║ Best Ratio   ║ Brief Time ║ Winner   ║ Commit / Era      ║
+╠═══════════════════════════╬══════════════╬════════════╬══════════╬═══════════════════╣
+║ ring_buffer               ║    0.99x     ║ .0664s     ║ Brief    ║ f598584 (Jul 06)  ║
+║ float_math                ║    0.81x     ║ .0631s     ║ Brief    ║ 8a827db (Jul 11)  ║
+║ float_math_nonzero        ║    0.98x     ║ .1611s     ║ Brief    ║ 33d42397 (Jul 27) ║
+║ sparse_dispatch           ║    0.09x     ║ .0060s     ║ Brief    ║ 8a827db (Jul 11)  ║
+║ print_loop                ║    0.93x     ║ .0624s     ║ Brief    ║ post-mig (Jul 19) ║
+║ nbody_newton              ║    0.75x     ║ 7.4132s    ║ Brief    ║ 8a827db (Jul 11)  ║
+║ nbody_sqrt                ║    0.85x     ║ 2.2434s    ║ Brief    ║ 33d42397 (Jul 27) ║
+║ nbody_sqrt_idio           ║    0.67x     ║ 2.3270s    ║ Brief    ║ 33d42397 (Jul 27) ║
+║ fasta                     ║    0.95x     ║ .2094s     ║ Brief    ║ recovery Step 5   ║
+║ fannkuch_redux            ║    0.96x     ║ .0763s     ║ Brief    ║ 8a827db (Jul 11)  ║
+║ mandelbrot                ║    0.99x     ║ .7514s     ║ Brief    ║ 8a827db (Jul 11)  ║
+║ kalman_filter_runtime     ║    0.95x     ║ .1610s     ║ Brief    ║ early Jun (Era 1) ║
+║ knucleotide               ║    0.97x     ║ .1880s     ║ Brief    ║ early Jun (Era 1) ║
+║ cancel_math               ║    0.96x     ║ .0618s     ║ Brief    ║ recovery Step 1   ║
+║ bit_clear                 ║    0.50x     ║ .0001s     ║ Brief    ║ 33d42397 (Jul 27) ║
+║ queue_drain               ║    0.01x     ║ .0007s     ║ Brief    ║ 8a827db (Jul 11)  ║
+║ queue_drain_sym           ║    0.95x     ║ .0575s     ║ Brief    ║ 33d42397 (Jul 27) ║
+║ queue_drain_idio          ║    0.93x     ║ .0595s     ║ Brief    ║ recovery Step 1   ║
+║ interval_step             ║    0.01x     ║ .0009s     ║ Brief    ║ f598584 (Jul 06)  ║
+╚═══════════════════════════╩══════════════╩════════════╩══════════╩═══════════════════╝
+```
+
+Key observation: **No single commit achieves all bests simultaneously.** The all-time best for each
+benchmark is spread across multiple eras spanning 6 weeks of development. The two most
+frequent best-performing commits are `8a827db` (Phase 3 complete, Jul 11) and
+`33d42397` (post-fixes with no stride gate, Jul 27).
+
+Critical finding for nbody_sqrt_idio: best (0.67x) at `33d42397` is AFTER the baseline `b39461e2`.
+The stride gate re-enabled in `b39461e2` regressed it from 0.67x to 0.92x — a 37% penalty
+accepted as the price of ring_buffer parity. Whether this regression was real or thermal
+throttling is the question.
+
 ## 9. Worktree Topology & Execution Environment
 
 ### Worktree Layout
