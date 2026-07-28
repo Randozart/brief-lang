@@ -54,7 +54,13 @@ impl CostModel {
             Expr::Decimal(_) | Expr::Float(_) | Expr::Bool(_) => self.constant,
             Expr::Identifier(_) => self.variable,
             Expr::UnaryOp(_, inner) => self.unary_op + self.cost_of_expr(inner),
-            Expr::BinaryOp(_, lhs, rhs) => self.binary_op + self.cost_of_expr(lhs) + self.cost_of_expr(rhs),
+            Expr::BinaryOp(op, lhs, rhs) => {
+                let base = self.binary_op + self.cost_of_expr(lhs) + self.cost_of_expr(rhs);
+                // 2026-07-28: Equality penalty — Eq/Neq add +2 cost to discourage
+                // table-lookup ite chains (x0 == 5, x0 == -3) in favor of general
+                // formulas using comparison operators (<, >, <=, >=).
+                if matches!(op, BinaryOpKind::Eq | BinaryOpKind::Neq) { base + 2 } else { base }
+            }
             Expr::If(cond, then_, else_) => {
                 let else_cost = else_.as_ref().map(|e| self.cost_of_expr(e)).unwrap_or(0);
                 self.branch + self.cost_of_expr(cond) + self.cost_of_expr(then_) + else_cost
@@ -762,9 +768,9 @@ fn generate_next_level(
         }
         for op in &[
             BinaryOpKind::Add, BinaryOpKind::Sub, BinaryOpKind::Mul,
-            BinaryOpKind::Div, BinaryOpKind::Mod, BinaryOpKind::Eq,
-            BinaryOpKind::Neq, BinaryOpKind::Lt, BinaryOpKind::Gt,
-            BinaryOpKind::Le, BinaryOpKind::Ge,
+            BinaryOpKind::Div, BinaryOpKind::Mod,
+            BinaryOpKind::Lt, BinaryOpKind::Gt, BinaryOpKind::Le, BinaryOpKind::Ge,
+            BinaryOpKind::Eq, BinaryOpKind::Neq,
             BinaryOpKind::BitAnd, BinaryOpKind::BitOr, BinaryOpKind::BitXor,
             BinaryOpKind::Shl, BinaryOpKind::Shr,
         ] {
@@ -817,6 +823,7 @@ fn generate_next_level(
     let bool_exprs_exist = !prev.level.bool_exprs.is_empty();
     let int_exprs_exist = !prev.level.int_exprs.is_empty() || !prev.level.float_exprs.is_empty();
     if bool_exprs_exist && (ret_type == "Int" || ret_type == "Float" || ret_type == "Bool") {
+
         let then_else_sources: Vec<Expr> = {
             let mut s = Vec::new();
             s.extend(prev.level.int_exprs.iter().cloned());
@@ -1017,9 +1024,13 @@ fn prune_level(
         // Store eval results in the cache (Expr as Vec key, pointer-based lookup)
         eval_results.push((expr.clone(), eval_outputs));
 
+        let expr_ty = expr_type_hint_with_params(expr, param_names, param_types);
         if is_compound_param {
             level_cache.compound_exprs.entry("Expr".to_string()).or_default().push(expr.clone());
-        } else if let Some(ty) = expr_type_hint_with_params(expr, param_names, param_types) {
+        } else if let Some(ty) = expr_ty {
+            if ty == "Bool" {
+
+            }
             level_cache.push(expr.clone(), ty);
         } else {
             level_cache.compound_exprs.entry("Expr".to_string()).or_default().push(expr.clone());
@@ -1154,27 +1165,33 @@ pub fn synthesize_enumerative(
             continue;
         }
 
-        // Evaluate each candidate, check for solution, and collect for pruning
+
+        // 2026-07-28: Evaluate in cost order — cheapest first.
+        // Sorting by cost ensures general formulas (e.g., If(x0<0, -x0, x0)
+        // at cost ~14) are evaluated before table-lookup ite chains (cost ~56).
+        // This eliminates the generation-order bias where x0==5 appears before x0<0.
+        let mut sorted: Vec<(u64, &Expr)> = candidates.iter().map(|c| (cost_model.cost_of_expr(c), c)).collect();
+        sorted.sort_by_key(|(cost, _)| *cost);
+
         let mut next_level: Vec<Expr> = Vec::new();
-        for candidate in &candidates {
-            let cost = cost_model.cost_of_expr(candidate);
-            if best.as_ref().map_or(false, |b| cost >= b.cost) {
-                next_level.push(candidate.clone());
+        for (cost, candidate) in &sorted {
+            if best.as_ref().map_or(false, |b| *cost >= b.cost) {
+                next_level.push((*candidate).clone());
                 continue;
             }
-            if candidate_matches_all_examples(candidate, param_names, examples, &prev_cache) {
+
+            if candidate_matches_all_examples(*candidate, param_names, examples, &prev_cache) {
+
                 best = Some(SynthesizedProgram {
-                    body: vec![candidate.clone()],
-                    cost,
+                    body: vec![(*candidate).clone()],
+                    cost: *cost,
                     depth,
                 });
-                // Found a match — keep it but continue searching for lower cost
-                // Stop early if this is depth >= 3 (good enough for benchmarks)
                 if depth >= 3 {
                     return Ok(best.unwrap());
                 }
             }
-            next_level.push(candidate.clone());
+            next_level.push((*candidate).clone());
         }
 
         // Checkpoint: prune the candidates to unique, non-constant outputs
