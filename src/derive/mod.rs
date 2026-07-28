@@ -26,18 +26,24 @@ pub use equivalence::*;
 pub use pareto::*;
 pub use accept::*;
 
-use crate::ast::{DerivationBlock, DerivationExample, Expr};
+use crate::ast::{DerivationBlock, DerivationExample, Expr, Type};
 
 /// Synthesize a function body from a derivation block.
 /// Tries the fast enumerative engine first, falls back to SMT if needed.
 /// Returns a `SynthesizedProgram` with cost for doppelganger/MCMC pipelines.
 /// 2026-07-28: Phase I.0 — Changed return type from `Expr` to `SynthesizedProgram`.
-pub fn synthesize(name: &str, block: &DerivationBlock, max_depth: usize) -> Result<engine::SynthesizedProgram, SynthesizeError> {
+/// 2026-07-28: Added `params` so synthesized expressions use actual param names.
+pub fn synthesize(
+    name: &str,
+    block: &DerivationBlock,
+    params: &[(String, Type)],
+    max_depth: usize,
+) -> Result<engine::SynthesizedProgram, SynthesizeError> {
     if block.examples.is_empty() {
         return Err(SynthesizeError::NoExamples(name.to_string()));
     }
     // Try enumerative search first
-    match engine::enumerative_search(name, &block.examples, max_depth) {
+    match engine::enumerative_search(name, params, &block.examples, max_depth) {
         Ok(Some(expr)) => {
             let cost = engine::CostModel::default().cost_of_expr(&expr);
             return Ok(engine::SynthesizedProgram { body: vec![expr], cost, depth: max_depth as u8 });
@@ -46,10 +52,9 @@ pub fn synthesize(name: &str, block: &DerivationBlock, max_depth: usize) -> Resu
         Err(e) => return Err(e),
     }
     // Fall back to SMT solver
-    match smt::synthesize_via_smt(name, &block.examples) {
+    match smt::synthesize_via_smt(name, params, &block.examples) {
         Ok(expr) => {
             let cost = engine::CostModel::default().cost_of_expr(&expr);
-            eprintln!("  DIAG: SMT returned body={:?}, cost={}", expr, cost);
             Ok(engine::SynthesizedProgram { body: vec![expr], cost, depth: max_depth as u8 })
         }
         Err(e) => Err(e),

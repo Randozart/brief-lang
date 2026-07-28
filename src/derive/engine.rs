@@ -4,7 +4,7 @@
 // evaluation, Occam cost model with constant burden, cost-pruned search.
 // Flat code: each function max 2 levels of nesting.
 
-use crate::ast::{BinaryOpKind, DerivationExample, Expr, UnaryOpKind};
+use crate::ast::{BinaryOpKind, DerivationExample, Expr, Type, UnaryOpKind};
 use crate::derive::SynthesizeError;
 use crate::interpreter::values_within_tolerance;
 use crate::interpreter::Value;
@@ -515,24 +515,24 @@ fn expr_to_value(expr: &Expr) -> Value {
 
 // ── Legacy Compatibility ──────────────────────────────────────────────
 
-/// Legacy compatibility wrapper. Infers all parameters as Int, return as Int.
-/// 2026-07-12: Original entry point. 2026-07-28: Delegates to synthesize_enumerative.
+/// Enumerative search using actual parameter names and types.
+/// 2026-07-12: Original entry point. 2026-07-28: Accepts params instead of hardcoding.
 pub fn enumerative_search(
     name: &str,
+    params: &[(String, Type)],
     examples: &[DerivationExample],
     max_depth: usize,
 ) -> Result<Option<Expr>, SynthesizeError> {
     if examples.is_empty() {
         return Err(SynthesizeError::NoExamples(name.to_string()));
     }
-    let param_names: Vec<String> = (0..examples[0].inputs.len())
-        .map(|i| format!("x{}", i))
-        .collect();
-    let param_types: Vec<String> = vec!["Int".to_string(); param_names.len()];
+    let param_names: Vec<String> = params.iter().map(|(n, _): &(String, Type)| n.clone()).collect();
+    let param_types: Vec<String> = params.iter().map(|(_, t): &(String, Type)| t.to_string()).collect();
+    let ret_type_str = "Int".to_string(); // derivation blocks return Int by default
     let max_depth_u8 = max_depth.min(8) as u8;
     let cost_model = CostModel::default();
 
-    match synthesize_enumerative(&param_types, "Int", &param_names, examples, &cost_model, max_depth_u8) {
+    match synthesize_enumerative(&param_types, &ret_type_str, &param_names, examples, &cost_model, max_depth_u8) {
         Ok(prog) => Ok(prog.body.into_iter().next()),
         Err(SynthesizeError::NoSolution(_)) => Ok(None),
         Err(e) => Err(e),
@@ -839,13 +839,15 @@ mod tests {
         let examples = vec![
             example(vec![Expr::Decimal(42)], Expr::Decimal(42), None),
         ];
-        let result = enumerative_search("id", &examples, 3).unwrap();
+        let params = vec![("x0".into(), Type::int())];
+        let result = enumerative_search("id", &params, &examples, 3).unwrap();
         assert!(result.is_some());
     }
 
     #[test]
     fn test_empty_examples() {
-        let result = enumerative_search("f", &[], 3);
+        let params = vec![("x".into(), Type::int())];
+        let result = enumerative_search("f", &params, &[], 3);
         assert!(result.is_err());
     }
 
@@ -854,7 +856,8 @@ mod tests {
         let examples = vec![
             example(vec![Expr::Decimal(1)], Expr::Decimal(999), None),
         ];
-        let result = enumerative_search("f", &examples, 2).unwrap();
+        let params = vec![("x0".into(), Type::int())];
+        let result = enumerative_search("f", &params, &examples, 2).unwrap();
         assert!(result.is_none());
     }
 }

@@ -544,22 +544,19 @@ fn smt_boolean_op(
 
 // ── Legacy Compatibility ──────────────────────────────────────────────
 
-/// Legacy compatibility wrapper. Infers all params as Int, return as Int.
-/// 2026-07-12: Original entry point. 2026-07-28: Delegates to new path.
+/// SMT synthesis using actual parameter names and types.
+/// 2026-07-12: Original entry point. 2026-07-28: Accepts params instead of hardcoding x0/x1.
 pub fn synthesize_via_smt(
     name: &str,
+    params: &[(String, Type)],
     examples: &[DerivationExample],
 ) -> Result<Expr, SynthesizeError> {
     if examples.is_empty() {
         return Err(SynthesizeError::NoExamples(name.to_string()));
     }
-    let param_count = examples[0].inputs.len();
-    let params: Vec<(String, Type)> = (0..param_count)
-        .map(|i| (format!("x{}", i), Type::int()))
-        .collect();
     let ret_type = Type::int();
 
-    match synthesize_via_smt_typed(&params, &ret_type, examples, "z3") {
+    match synthesize_via_smt_typed(params, &ret_type, examples, "z3") {
         Ok(prog) => {
             let expr = prog.body.into_iter().next().unwrap_or(Expr::Decimal(0));
             Ok(expr)

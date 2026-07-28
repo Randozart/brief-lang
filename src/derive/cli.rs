@@ -3,7 +3,7 @@
 // 2026-07-28: Phase I.0 — Added DeriveConfig, flag parsing, MCMC + doppelganger output.
 // Flat code: max 2 levels of nesting.
 
-use crate::ast::{DerivationBlock, Expr, TopLevel};
+use crate::ast::{DerivationBlock, Expr, TopLevel, Type};
 use crate::derive::engine::{CostModel, SynthesizedProgram};
 use crate::derive::{synthesize, SynthesizeError};
 use std::fs;
@@ -91,18 +91,19 @@ pub fn handle_derive_command(config: &DeriveConfig, file_path: &str) -> Result<(
     let token_spans = lex_source_with_spans(&source)?;
     let program = parse_tokens(&token_spans, &source)?;
 
-    // Collect derivation blocks with their names
-    let mut derivations: Vec<(String, DerivationBlock)> = Vec::new();
+    // Collect derivation blocks with their names and parameter types
+    // 2026-07-28: Include params so synthesized expressions use actual param names
+    let mut derivations: Vec<(String, Vec<(String, Type)>, DerivationBlock)> = Vec::new();
     for item in &program {
         match item {
             TopLevel::Definition(d) => {
                 if let Some(ref block) = d.derivation {
-                    derivations.push((d.name.clone(), block.clone()));
+                    derivations.push((d.name.clone(), d.parameters.clone(), block.clone()));
                 }
             }
             TopLevel::Transaction(t) => {
                 if let Some(ref block) = t.derivation {
-                    derivations.push((t.name.clone(), block.clone()));
+                    derivations.push((t.name.clone(), t.parameters.clone(), block.clone()));
                 }
             }
             _ => {}
@@ -116,9 +117,9 @@ pub fn handle_derive_command(config: &DeriveConfig, file_path: &str) -> Result<(
 
     // Synthesize each derivation block
     let mut syntheses: Vec<(String, SynthesizedProgram)> = Vec::new();
-    for (name, block) in &derivations {
+    for (name, params, block) in &derivations {
         eprintln!("[derive] synthesizing '{}' (depth={})...", name, config.enumerative_depth);
-        match synthesize(name, block, config.enumerative_depth) {
+        match synthesize(name, block, params, config.enumerative_depth) {
             Ok(prog) => {
                 eprintln!("[derive] '{}': synthesized body with cost {}", name, prog.cost);
                 syntheses.push((name.clone(), prog));
@@ -133,6 +134,11 @@ pub fn handle_derive_command(config: &DeriveConfig, file_path: &str) -> Result<(
         return Err("synthesis failed for all derivation blocks".into());
     }
 
+    // 2026-07-28: Extract (name, block) pairs for doppelganger writer
+    let derivations_blocks: Vec<(String, DerivationBlock)> = derivations.iter()
+        .map(|(n, _, b)| (n.clone(), b.clone()))
+        .collect();
+
     // Optionally run MCMC superoptimization
     if config.stochastic {
         eprintln!("[derive] running MCMC superoptimization...");
@@ -145,8 +151,8 @@ pub fn handle_derive_command(config: &DeriveConfig, file_path: &str) -> Result<(
         for (name, prog) in &syntheses {
             // Find the derivation block for examples
             let block = derivations.iter()
-                .find(|(n, _)| n == name)
-                .map(|(_, b)| b);
+                .find(|(n, _, _)| n == name)
+                .map(|(_, _, b)| b);
             if let Some(block) = block {
                 match crate::derive::mcmc::optimize(prog.clone(), &block.examples, &mcmc_config) {
                     Ok(improved) => {
@@ -162,12 +168,12 @@ pub fn handle_derive_command(config: &DeriveConfig, file_path: &str) -> Result<(
         }
         // Write .opt.bv with MCMC results
         let opt_path = crate::derive::doppelganger::Doppelganger::opt_path_for(path);
-        crate::derive::doppelganger::write_doppelganger(path, source.as_bytes(), &mcmc_syntheses, &derivations, &opt_path)?;
+        crate::derive::doppelganger::write_doppelganger(path, source.as_bytes(), &mcmc_syntheses, &derivations_blocks, &opt_path)?;
         eprintln!("[derive] wrote {}", opt_path.display());
     } else {
         // Write .derive.bv with synthesis results
         let derive_path = crate::derive::doppelganger::Doppelganger::derive_path_for(path);
-        crate::derive::doppelganger::write_doppelganger(path, source.as_bytes(), &syntheses, &derivations, &derive_path)?;
+        crate::derive::doppelganger::write_doppelganger(path, source.as_bytes(), &syntheses, &derivations_blocks, &derive_path)?;
         eprintln!("[derive] wrote {}", derive_path.display());
     }
 
