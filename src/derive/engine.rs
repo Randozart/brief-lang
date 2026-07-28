@@ -775,7 +775,10 @@ fn generate_next_level(
             BinaryOpKind::Shl, BinaryOpKind::Shr,
         ] {
             if let Some(ty) = op_result_type(op, ty_str, ty_str) {
-                if ty != ret_type {
+                // 2026-07-28: Keep Bool-returning operators even when ret_type
+                // is Int. Comparison ops (Lt, Gt, Le, Ge, Eq, Neq) return Bool;
+                // these are needed as IF conditions at the next depth.
+                if ty != ret_type && ty != "Bool" {
                     continue;
                 }
                 for lhs in *exprs {
@@ -1028,9 +1031,7 @@ fn prune_level(
         if is_compound_param {
             level_cache.compound_exprs.entry("Expr".to_string()).or_default().push(expr.clone());
         } else if let Some(ty) = expr_ty {
-            if ty == "Bool" {
 
-            }
             level_cache.push(expr.clone(), ty);
         } else {
             level_cache.compound_exprs.entry("Expr".to_string()).or_default().push(expr.clone());

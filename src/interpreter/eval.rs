@@ -292,10 +292,16 @@ pub fn eval_statement(
         }
         Statement::Expression(expr) => eval_expr(expr, heap, bindings),
         Statement::Term(val) => {
-            if let Some(val) = val {
-                eval_expr(val, heap, bindings)
-            } else {
-                Ok(Value::Void)
+            match val {
+                Some(val) => {
+                    // 2026-07-28: Term with value signals early return.
+                    let result = eval_expr(val, heap, bindings)?;
+                    Err(RuntimeError::TermReturn(result))
+                }
+                None => {
+                    // Term without value is a convergence checkpoint — continue.
+                    Ok(Value::Void)
+                }
             }
         }
         Statement::Guarded(cond, body) => {
@@ -341,10 +347,14 @@ pub fn eval_statement(
             Ok(result)
         }
         Statement::TermBang(val) => {
-            if let Some(val) = val {
-                eval_expr(val, heap, bindings)
-            } else {
-                Ok(Value::Void)
+            match val {
+                Some(val) => {
+                    let result = eval_expr(val, heap, bindings)?;
+                    Err(RuntimeError::TermReturn(result))
+                }
+                None => {
+                    Ok(Value::Void)
+                }
             }
         }
         Statement::Return(val) => {

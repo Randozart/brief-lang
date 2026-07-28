@@ -125,9 +125,17 @@ impl Interpreter {
         }
 
         // Execute body statements
+        // 2026-07-28: Term with value signals early return via TermReturn error.
         let mut result = Value::Void;
         for stmt in &defn.body {
-            result = eval_statement(stmt, &mut self.heap, &mut self.state)?;
+            match eval_statement(stmt, &mut self.heap, &mut self.state) {
+                Ok(v) => result = v,
+                Err(RuntimeError::TermReturn(v)) => {
+                    result = v;
+                    break;
+                }
+                Err(e) => return Err(e),
+            }
         }
 
         // Restore saved state

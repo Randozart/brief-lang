@@ -1072,6 +1072,9 @@ pub enum RuntimeError {
     TypeError { expected: String, found: String },
     UndefinedForeignFunction { name: String, source: String },
     ContractViolation(String),
+    /// 2026-07-28: Term statement evaluated — early return with value.
+    /// Used by the interpreter's call_function to detect termination.
+    TermReturn(crate::interpreter::Value),
 }
 
 impl fmt::Display for RuntimeError {
@@ -1095,6 +1098,7 @@ impl fmt::Display for RuntimeError {
                 write!(f, "undefined foreign function '{}' from {}", name, source)
             }
             RuntimeError::ContractViolation(msg) => write!(f, "contract violation: {}", msg),
+            RuntimeError::TermReturn(_) => write!(f, "term return"),
         }
     }
 }
