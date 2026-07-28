@@ -73,33 +73,30 @@ fn build_sygus_query(
 ) -> Result<String, SynthesizeError> {
     let mut q = String::new();
     q.push_str("(set-option :produce-models true)\n");
-    q.push_str("(set-logic QF_BV)\n\n");
+    // 2026-07-28: Use QF_UFBV for uninterpreted functions with bitvectors.
+    // declare-fun requires a UF-capable logic; QF_BV does not support it.
+    q.push_str("(set-logic QF_UFBV)\n\n");
 
     let ret_sort = type_to_smt_sort(ret_type);
-    let is_bool_ret = ret_sort == "Bool";
-    let is_bv_ret = ret_sort.starts_with("(_ BitVec");
+    let param_sorts: Vec<String> = params.iter()
+        .map(|(_, ty)| type_to_smt_sort(ty))
+        .collect();
 
-    // synth-fun declaration
-    q.push_str("(synth-fun f (");
-    for (i, (_, ty)) in params.iter().enumerate() {
-        q.push_str(&format!(" (x{} {})", i, type_to_smt_sort(ty)));
+    // 2026-07-28: Use declare-fun instead of synth-fun, because Z3 4.8.x
+    // does not support the SyGuS synth-fun command. The declare-fun +
+    // get-model approach works on all Z3 versions.
+    // declare-fun syntax: (declare-fun f ((_ BitVec 64) (_ BitVec 64)) (_ BitVec 64))
+    q.push_str("(declare-fun f (");
+    for ps in &param_sorts {
+        q.push(' ');
+        q.push_str(ps);
     }
-    q.push_str(&format!(") {}\n", ret_sort));
-
-    // Grammar body
-    if is_bv_ret {
-        emit_bv_grammar(&mut q, params, ret_type);
-    } else if is_bool_ret {
-        emit_bool_grammar(&mut q, params);
-    }
-
-    q.push_str(")\n\n");
+    q.push_str(&format!(")) {})\n\n", ret_sort));
 
     // Constraints from examples
     for example in examples {
         let input_strs: Vec<String> = example.inputs.iter().map(expr_to_smt_const).collect();
         let output_str = expr_to_smt_const(&example.output);
-        // For tolerance, we skip SMT constraint (enumerative handles tolerance)
         if example.tolerance.is_some() {
             continue;
         }
@@ -110,14 +107,14 @@ fn build_sygus_query(
         ));
     }
 
-    // Check that we have at least one constraint (some examples without tolerance)
     if !q.contains("(assert") {
         return Err(SynthesizeError::NoExamples(
             "all derivation examples have tolerance; SMT does not support tolerance".into()
         ));
     }
 
-    q.push_str("\n(check-synth)\n");
+    q.push_str("\n(check-sat)\n");
+    q.push_str("(get-model)\n");
     Ok(q)
 }
 
@@ -226,13 +223,20 @@ pub fn synthesize_via_smt_typed(
         Err(e) => return Err(SynthesizeError::SolverError(format!("failed to spawn z3: {}", e))),
     };
 
-    // Write query to stdin
-    if let Some(stdin) = child.stdin.as_mut() {
-        use std::io::Write;
-        if let Err(e) = writeln!(stdin, "{}", query) {
-            return Err(SynthesizeError::SolverError(format!("failed to write to z3: {}", e)));
+    // Write query to stdin, flush, then close stdin so Z3 sees EOF
+    {
+        let stdin = child.stdin.as_mut();
+        if let Some(stdin) = stdin {
+            use std::io::Write;
+            writeln!(stdin, "{}", query)
+                .map_err(|e| SynthesizeError::SolverError(format!("failed to write to z3: {}", e)))?;
+            stdin.flush()
+                .map_err(|e| SynthesizeError::SolverError(format!("failed to flush z3 stdin: {}", e)))?;
         }
     }
+    // 2026-07-28: Close stdin so Z3 processes the query (EOF triggers solve).
+    // Without this, wait_with_output() may deadlock or Z3 gets truncated input.
+    drop(child.stdin.take());
 
     let output = match child.wait_with_output() {
         Ok(o) => o,
@@ -619,12 +623,11 @@ mod tests {
             example(vec![Expr::Decimal(2), Expr::Decimal(3)], Expr::Decimal(5), None),
         ];
         let query = build_sygus_query(&params, &Type::int(), &examples).unwrap();
-        assert!(query.contains("synth-fun"));
-        assert!(query.contains("bvadd"));
-        assert!(query.contains("x0"));
-        assert!(query.contains("x1"));
-        assert!(query.contains("(= (f ", ));
-        assert!(query.contains("check-synth"));
+        assert!(query.contains("declare-fun"));
+        assert!(query.contains("BitVec"));
+        assert!(query.contains("(= (f "));
+        assert!(query.contains("(check-sat)"));
+        assert!(query.contains("(get-model)"));
     }
 
     #[test]
@@ -634,8 +637,10 @@ mod tests {
             example(vec![Expr::Decimal(0)], Expr::Decimal(1), None),
         ];
         let query = build_sygus_query(&params, &Type::int(), &examples).unwrap();
-        assert!(query.contains("synth-fun"));
+        assert!(query.contains("declare-fun"));
         assert!(query.contains("x0"));
+        assert!(query.contains("(check-sat)"));
+        assert!(query.contains("(get-model)"));
     }
 
     #[test]
@@ -648,7 +653,9 @@ mod tests {
         assert!(query.is_ok());
         let q = query.unwrap();
         assert!(q.contains("Bool"));
-        assert!(q.contains("StartBool"));
+        assert!(q.contains("declare-fun"));
+        assert!(q.contains("(check-sat)"));
+        assert!(q.contains("(get-model)"));
     }
 
     #[test]

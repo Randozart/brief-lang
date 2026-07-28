@@ -143,7 +143,7 @@ pub fn evaluate_synthesized(
 fn eval_unary(kind: &UnaryOpKind, val: Value) -> Result<Value, SynthesisEvalError> {
     match kind {
         UnaryOpKind::Neg => match val {
-            Value::Int(n) => Ok(Value::Int(-n)),
+            Value::Int(n) => Ok(Value::Int(n.wrapping_neg())),
             Value::Float(f) => Ok(Value::Float(-f)),
             _ => Err(SynthesisEvalError::TypeMismatch("negation requires numeric type".into())),
         },
@@ -187,7 +187,7 @@ fn eval_binary_int(kind: &BinaryOpKind, a: i64, b: i64) -> Result<Value, Synthes
             if b == 0 {
                 return Err(SynthesisEvalError::DivisionByZero);
             }
-            Ok(Value::Int(a % b))
+            Ok(Value::Int(a.wrapping_rem(b)))
         }
         BinaryOpKind::Eq => Ok(Value::Bits(vec![if a == b { 1 } else { 0 }])),
         BinaryOpKind::Neq => Ok(Value::Bits(vec![if a != b { 1 } else { 0 }])),
@@ -247,8 +247,17 @@ fn op_result_type(op: &BinaryOpKind, lhs_ty: &str, rhs_ty: &str) -> Option<&'sta
         BinaryOpKind::Eq | BinaryOpKind::Neq
         | BinaryOpKind::Lt | BinaryOpKind::Gt
         | BinaryOpKind::Le | BinaryOpKind::Ge => Some("Bool"),
-        BinaryOpKind::And | BinaryOpKind::Or | BinaryOpKind::BitXor => {
+        BinaryOpKind::And | BinaryOpKind::Or => {
             if lhs_ty == "Bool" {
+                Some("Bool")
+            } else {
+                None
+            }
+        }
+        BinaryOpKind::BitXor => {
+            if lhs_ty == "Int" {
+                Some("Int")
+            } else if lhs_ty == "Bool" {
                 Some("Bool")
             } else {
                 None
@@ -261,7 +270,16 @@ fn op_result_type(op: &BinaryOpKind, lhs_ty: &str, rhs_ty: &str) -> Option<&'sta
                 None
             }
         }
-        BinaryOpKind::BitAnd | BinaryOpKind::BitOr | BinaryOpKind::Concat => None,
+        BinaryOpKind::BitAnd | BinaryOpKind::BitOr => {
+            if lhs_ty == "Int" {
+                Some("Int")
+            } else if lhs_ty == "Bool" {
+                Some("Bool")
+            } else {
+                None
+            }
+        }
+        BinaryOpKind::Concat => None,
         _ => None,
     }
 }
@@ -327,6 +345,8 @@ fn generate_typed_expressions(
             BinaryOpKind::Div, BinaryOpKind::Mod, BinaryOpKind::Eq,
             BinaryOpKind::Neq, BinaryOpKind::Lt, BinaryOpKind::Gt,
             BinaryOpKind::Le, BinaryOpKind::Ge,
+            BinaryOpKind::BitAnd, BinaryOpKind::BitOr, BinaryOpKind::BitXor,
+            BinaryOpKind::Shl, BinaryOpKind::Shr,
         ] {
             if let Some(ty) = op_result_type(op, lhs_ty_str, lhs_ty_str) {
                 if ty != ret_type {
