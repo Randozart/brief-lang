@@ -222,6 +222,22 @@ fn emit_vector_expr(
             Ok(TypedRegister { name: shuf, ty: scalar.ty })
         }
 
+        // ── Intrinsic calls (Sqrt#, etc.) — emit as vector call ───
+        // LLVM scalarizes the vector call during opt, removing the
+        // insertelement/extractelement overhead that the scalar fallback
+        // would produce. Only matches #-suffixed intrinsics (not FFI calls).
+        (Expr::Call(name, args, _), _) if name.ends_with('#') && !args.is_empty() => {
+            let vec_args: Result<Vec<_>, _> = args.iter()
+                .map(|a| emit_vector_expr(backend, out, a, lane_exprs, lane_mappings, width, indent))
+                .collect();
+            let vec_args = vec_args?;
+            let v = backend.fun.next_reg_with_prefix("sv");
+            let vec_ty = vector_type_str(&vec_args[0].ty, width);
+            writeln!(out, "{}{} = call {} @{}({} {})",
+                indent, v, vec_ty, name, vec_ty, vec_args[0].name).ok();
+            Ok(TypedRegister { name: v, ty: vec_args[0].ty.clone() })
+        }
+
         // ── Non-vectorizable fallback ─────────────────────────
         _ => {
             // Fall back: emit each lane as scalar, build vector from results

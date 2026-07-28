@@ -448,7 +448,7 @@ fn merge_groups(body: &[Statement], groups: Vec<SlpIsomorphicGroup>) -> Vec<SlpI
             let mut merged_lane_positions = template_group.lane_positions.clone();
             for src in sorted.iter().skip(1) {
                 for lane_idx in 0..src.width {
-                    merged_lane_positions.push(src.base_index + lane_idx);
+                    merged_lane_positions.push(src.lane_positions[lane_idx]);
                 }
             }
             merged.push(SlpIsomorphicGroup {
@@ -468,8 +468,6 @@ fn merge_groups(body: &[Statement], groups: Vec<SlpIsomorphicGroup>) -> Vec<SlpI
 /// Analyze a transaction body for SLP vectorization opportunities.
 pub fn analyze_body(body: &[Statement]) -> SlpAnalysisResult {
     let mut result = SlpAnalysisResult::default();
-
-    // Scan through the body for consecutive Let/Assign sequences
     let mut i = 0;
     while i < body.len() {
         match &body[i] {

@@ -599,27 +599,6 @@ impl LlvmBackend {
 
     /// Emit the body of a countable loop. Converts each Statement to the
     /// appropriate SSA load + op + store sequence.
-    /// 2026-07-27: Collect state field indices referenced by an expression.
-    fn collect_field_indices(expr: &Expr, field_map: &HashMap<String, usize>, out: &mut Vec<usize>) {
-        match expr {
-            Expr::Identifier(name) => {
-                if let Some(&idx) = field_map.get(name) {
-                    out.push(idx);
-                }
-            }
-            Expr::Call(_, args, _) => {
-                for a in args { Self::collect_field_indices(a, field_map, out); }
-            }
-            Expr::BinaryOp(_, lhs, rhs) => {
-                Self::collect_field_indices(lhs, field_map, out);
-                Self::collect_field_indices(rhs, field_map, out);
-            }
-            Expr::UnaryOp(_, e) => Self::collect_field_indices(e, field_map, out),
-            Expr::Cast(inner, _) => Self::collect_field_indices(inner, field_map, out),
-            _ => {}
-        }
-    }
-
     fn emit_countable_body(
         &mut self,
         out: &mut String,
@@ -644,41 +623,35 @@ impl LlvmBackend {
                 let match_group = self.fun.slp_groups.iter()
                     .find(|g| g.base_index == i).cloned();
                 if let Some(ref group) = match_group {
-                    // 2026-07-27: SLP profitability — three gates:
-                    //   1. Max field stride: continuous field accesses (stride <= 1) let
-                    //      LLVM merge scalar loads into vector loads. Strided access
-                    //      (e.g. p00, p10, p20 at indices 0, 3, 6) forces scalar loads
-                    //      + inserts, dominating the shuffle cost.
-                    //   2. Depth * width >= 10: total compute work must exceed the
+                    // 2026-07-28: SLP profitability — three gates:
+                    //   1. Width >= 3: fewer lanes can't amortize overhead.
+                    //   2. Depth * width >= 10: compute work must exceed the
                     //      ~8-10 insertelement/extractelement overhead.
-                    //   3. Width <= 8: wider groups force LLVM to split vectors,
-                    //      adding split/join overhead.
+                    //   3. Total lane gap >= 5 (merged groups only): sum of
+                    //      consecutive gaps between lane_positions. Large gaps
+                    //      indicate independent lanes (nbody force pairs are
+                    //      interleaved with other computations, gap ~5+).
+                    //      Small gaps indicate dense matrix (kalman's ap rows
+                    //      are consecutive, gap ~1-2).
                     let template_expr = body.get(i).and_then(|s| match s {
                         Statement::Let { expr: Some(e), .. } => Some(&*e),
                         Statement::Assign(_, e) => Some(&*e),
                         _ => None,
                     });
-                    let mut stride_ok = true;
-                    if let Some(expr) = template_expr {
-                        let mut field_indices: Vec<usize> = Vec::new();
-                        Self::collect_field_indices(expr, &self.ctx.field_index_map, &mut field_indices);
-                        field_indices.sort();
-                        if field_indices.len() >= 2 {
-                            let max_stride = field_indices.windows(2)
-                                .map(|w| w[1] - w[0]).max().unwrap_or(0);
-                            if max_stride > 1 {
-                                // Strided access — inserts can't be merged
-                                stride_ok = false;
-                            }
+                    let mut gaps_ok = true;
+                    if group.lane_positions.len() >= 2 {
+                        let total_gap: usize = group.lane_positions.windows(2)
+                            .map(|w| w[1] - w[0]).sum();
+                        if total_gap < 10 {
+                            gaps_ok = false;
                         }
                     }
-                    let should_vec = stride_ok
-                        && (group.width >= 4 && group.width <= 8
-                            || (group.width >= 3 && group.width <= 8
-                                && template_expr.map_or(false, |expr| {
-                                    crate::backend::llvm::vector_codegen::tree_depth(expr)
-                                        * group.width >= 10
-                                })));
+                    let should_vec = group.width >= 3
+                        && gaps_ok
+                        && template_expr.map_or(false, |expr| {
+                            crate::backend::llvm::vector_codegen::tree_depth(expr)
+                                * group.width >= 10
+                        });
                     if should_vec {
                         let result = crate::backend::llvm::vector_codegen::emit_slp_group(
                             self, out, body, group, write_set);
