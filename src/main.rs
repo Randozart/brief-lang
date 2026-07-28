@@ -430,8 +430,19 @@ fn run_bounty(args: &[String]) -> Result<(), String> {
 
 fn run_build(args: &[String]) -> Result<(), String> {
     let opts = parse_build_args(args)?;
-    let source = std::fs::read_to_string(&opts.file_path)
-        .map_err(|e| format!("cannot read '{}': {}", opts.file_path, e))?;
+
+    // 2026-07-28: Phase E.2 — doppelganger resolution: .opt.bv > .derive.bv > .bv
+    // Read source from the doppelganger if it exists, but pass opts.file_path
+    // to compile functions so error messages and output paths use the original name.
+    let doppelganger_path = brief_compiler::derive::Doppelganger::resolve(std::path::Path::new(&opts.file_path));
+    let source = if doppelganger_path != std::path::Path::new(&opts.file_path) {
+        eprintln!("[derive] using {}", doppelganger_path.display());
+        std::fs::read_to_string(&doppelganger_path)
+            .map_err(|e| format!("cannot read '{}': {}", doppelganger_path.display(), e))?
+    } else {
+        std::fs::read_to_string(&opts.file_path)
+            .map_err(|e| format!("cannot read '{}': {}", opts.file_path, e))?
+    };
 
     // 2026-07-23: Resolve SysQuery$ overrides from three sources (low→high):
     //   1. --target <name> loads per-target overrides from brief.toml profiles
@@ -528,8 +539,17 @@ fn run_build(args: &[String]) -> Result<(), String> {
 
 fn run_check(args: &[String]) -> Result<(), String> {
     let file_path = args.first().ok_or("missing file argument")?;
-    let source = std::fs::read_to_string(file_path)
-        .map_err(|e| format!("cannot read '{}': {}", file_path, e))?;
+    let source = {
+        let p = std::path::Path::new(file_path);
+        let doppel = brief_compiler::derive::Doppelganger::resolve(p);
+        if doppel != p {
+            std::fs::read_to_string(&doppel)
+                .map_err(|e| format!("cannot read '{}': {}", doppel.display(), e))?
+        } else {
+            std::fs::read_to_string(file_path)
+                .map_err(|e| format!("cannot read '{}': {}", file_path, e))?
+        }
+    };
     compile::check_source(file_path, &source)
 }
 

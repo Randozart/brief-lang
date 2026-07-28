@@ -1,0 +1,226 @@
+// ── Phase E — Doppelganger Write-Back ─────────────────────────────────
+// 2026-07-28: Phase E.0 — Doppelganger file management (path resolution,
+// full-source writer, build system integration).
+// Flat code: each function max 2 levels of nesting.
+
+use crate::derive::engine::SynthesizedProgram;
+use crate::ast::DerivationBlock;
+use std::path::{Path, PathBuf};
+
+/// 2026-07-28: Phase E.0 — Doppelganger file management.
+pub struct Doppelganger;
+
+impl Doppelganger {
+    /// Determine the doppelganger path for a given source file.
+    /// Replaces `.bv` with `.derive.bv`.
+    pub fn derive_path_for(source: &Path) -> PathBuf {
+        let stem = source.file_stem().unwrap_or_default();
+        source.with_file_name(format!("{}.derive.bv", stem.to_string_lossy()))
+    }
+
+    /// Determine the optimized doppelganger path for a given source file.
+    /// Replaces `.bv` with `.opt.bv`.
+    pub fn opt_path_for(source: &Path) -> PathBuf {
+        let stem = source.file_stem().unwrap_or_default();
+        source.with_file_name(format!("{}.opt.bv", stem.to_string_lossy()))
+    }
+
+    /// Resolve the best available source for a given file path.
+    /// Order: .opt.bv > .derive.bv > .bv
+    pub fn resolve(source: &Path) -> PathBuf {
+        let opt = Self::opt_path_for(source);
+        if opt.exists() {
+            return opt;
+        }
+        let derive = Self::derive_path_for(source);
+        if derive.exists() {
+            return derive;
+        }
+        source.to_path_buf()
+    }
+
+    /// Format a synthesized program body as a Brief source string.
+    pub fn format_body(prog: &SynthesizedProgram) -> String {
+        let mut out = String::new();
+        for expr in &prog.body {
+            out.push_str(&format!("{}", expr));
+        }
+        out
+    }
+}
+
+/// Write the doppelganger file with synthesized bodies injected.
+/// 2026-07-28: Phase E.1 — full-source doppelganger writer.
+pub fn write_doppelganger(
+    source_path: &Path,
+    source_bytes: &[u8],
+    syntheses: &[(String, SynthesizedProgram)],
+    derivations: &[(String, DerivationBlock)],
+    output_path: &Path,
+) -> Result<(), String> {
+    let mut bytes = source_bytes.to_vec();
+
+    // Collect insertions: (byte_offset, body_string)
+    // Insert body BEFORE the derivation block's opening position
+    let mut insertions: Vec<(usize, String)> = Vec::new();
+    for ((name, prog), (_, block)) in syntheses.iter().zip(derivations.iter()) {
+        let insert_at = block.span.start as usize;
+        let body_str = format!(" {{\n    {};\n}} ", Doppelganger::format_body(prog));
+        eprintln!("[derive] {}: inserting body at byte {}", name, insert_at);
+        insertions.push((insert_at, body_str));
+    }
+
+    // Sort in reverse byte order to preserve offsets during insertion
+    insertions.sort_by_key(|(offset, _)| std::cmp::Reverse(*offset));
+
+    for (offset, body_str) in insertions {
+        let mut new = Vec::with_capacity(bytes.len() + body_str.len());
+        new.extend_from_slice(&bytes[..offset]);
+        new.extend_from_slice(body_str.as_bytes());
+        new.extend_from_slice(&bytes[offset..]);
+        bytes = new;
+    }
+
+    std::fs::write(output_path, &bytes).map_err(|e| format!("cannot write '{}': {}", output_path.display(), e))?;
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::ast::{BinaryOpKind, Expr};
+    use crate::errors::Span;
+    use std::path::Path;
+
+    fn dummy_span() -> Span { Span::dummy() }
+
+    fn make_prog(body: Vec<Expr>, cost: u64) -> SynthesizedProgram {
+        SynthesizedProgram { body, cost, depth: 0 }
+    }
+
+    #[test]
+    fn test_derive_path_for() {
+        let p = Path::new("foo.bv");
+        assert_eq!(Doppelganger::derive_path_for(p), Path::new("foo.derive.bv"));
+    }
+
+    #[test]
+    fn test_opt_path_for() {
+        let p = Path::new("foo.bv");
+        assert_eq!(Doppelganger::opt_path_for(p), Path::new("foo.opt.bv"));
+    }
+
+    #[test]
+    fn test_resolve_source_only() {
+        // No actual files exist, so resolve should return the original
+        let p = Path::new("nonexistent.bv");
+        let resolved = Doppelganger::resolve(p);
+        assert_eq!(resolved, p);
+    }
+
+    #[test]
+    fn test_write_doppelganger_draft() {
+        // Use a temporary directory for the output
+        let dir = std::env::temp_dir().join("derive_test_write");
+        let _ = std::fs::create_dir_all(&dir);
+        let source_path = dir.join("test.bv");
+        let output_path = Doppelganger::derive_path_for(&source_path);
+
+        let source = "defn add(x: Int, y: Int) -> Int := { 2, 2 -> 4; };";
+        std::fs::write(&source_path, source).unwrap();
+
+        // Create a derivation block with span pointing to the `:=` area
+        let block = DerivationBlock {
+            examples: vec![],
+            synthesized: None,
+            span: dummy_span(),
+        };
+
+        let prog = make_prog(
+            vec![Expr::BinaryOp(
+                BinaryOpKind::Add,
+                Box::new(Expr::Identifier("x".into())),
+                Box::new(Expr::Identifier("y".into())),
+            )],
+            3,
+        );
+
+        write_doppelganger(
+            &source_path,
+            source.as_bytes(),
+            &[("add".to_string(), prog)],
+            &[("add".to_string(), block)],
+            &output_path,
+        )
+        .unwrap();
+
+        assert!(output_path.exists(), "doppelganger file should exist");
+        let content = std::fs::read_to_string(&output_path).unwrap();
+        assert!(content.contains("x + y"), "should contain synthesized body");
+        assert!(content.contains(":="), "should still contain derivation block");
+
+        // Cleanup
+        let _ = std::fs::remove_file(&source_path);
+        let _ = std::fs::remove_file(&output_path);
+    }
+
+    #[test]
+    fn test_write_doppelganger_multi_function() {
+        let dir = std::env::temp_dir().join("derive_test_multi");
+        let _ = std::fs::create_dir_all(&dir);
+        let source_path = dir.join("multi.bv");
+        let output_path = Doppelganger::derive_path_for(&source_path);
+
+        let source = "defn add(x: Int, y: Int) -> Int := { 2, 2 -> 4; };\ndefn double(x: Int) -> Int := { 3, 3 -> 6; };";
+        std::fs::write(&source_path, source).unwrap();
+
+        let block1 = DerivationBlock {
+            examples: vec![],
+            synthesized: None,
+            span: dummy_span(),
+        };
+        let block2 = DerivationBlock {
+            examples: vec![],
+            synthesized: None,
+            span: dummy_span(),
+        };
+        let block2 = DerivationBlock {
+            examples: vec![],
+            synthesized: None,
+            span: dummy_span(),
+        };
+
+        let prog1 = make_prog(
+            vec![Expr::BinaryOp(
+                BinaryOpKind::Add,
+                Box::new(Expr::Identifier("x".into())),
+                Box::new(Expr::Identifier("y".into())),
+            )],
+            3,
+        );
+        let prog2 = make_prog(
+            vec![Expr::BinaryOp(
+                BinaryOpKind::Mul,
+                Box::new(Expr::Identifier("x".into())),
+                Box::new(Expr::Decimal(2)),
+            )],
+            4,
+        );
+
+        write_doppelganger(
+            &source_path,
+            source.as_bytes(),
+            &[("add".to_string(), prog1), ("double".to_string(), prog2)],
+            &[("add".to_string(), block1), ("double".to_string(), block2)],
+            &output_path,
+        )
+        .unwrap();
+
+        let content = std::fs::read_to_string(&output_path).unwrap();
+        assert!(content.contains("x + y"));
+        assert!(content.contains("x * 2"));
+
+        let _ = std::fs::remove_file(&source_path);
+        let _ = std::fs::remove_file(&output_path);
+    }
+}

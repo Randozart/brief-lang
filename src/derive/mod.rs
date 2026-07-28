@@ -8,11 +8,13 @@ mod engine;
 mod smt;
 mod cli;
 mod assert;
+mod doppelganger;
 
 pub use engine::*;
 pub use smt::*;
 pub use cli::*;
 pub use assert::*;
+pub use doppelganger::*;
 
 use crate::ast::{DerivationBlock, DerivationExample, Expr};
 
