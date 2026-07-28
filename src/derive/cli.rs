@@ -189,19 +189,6 @@ fn parse_tokens(
     parser.parse_program().map_err(|e| format!("parse error: {}", e))
 }
 
-// ── Phase I.1 — `brief accept` subcommand ──────────────────────────────
-
-/// Handle the `brief accept` command.
-/// Folds doppelganger bodies from `.derive.bv` or `.opt.bv` into the source.
-/// 2026-07-28: Phase I.1 — Stub; full implementation pending.
-pub fn handle_accept_command(file_path: &str, _use_opt: bool) -> Result<(), String> {
-    eprintln!("[accept] not yet implemented — folding doppelganger back into source");
-    eprintln!("[accept] planned: 'brief accept {}' will merge .derive.bv bodies", file_path);
-    eprintln!("[accept] the source file will never be mutated automatically");
-    eprintln!("[accept] run 'brief derive {}' first if you haven't", file_path);
-    Ok(())
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;

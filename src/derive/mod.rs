@@ -13,6 +13,7 @@ mod mcmc;
 mod mutate;
 mod equivalence;
 mod pareto;
+mod accept;
 
 pub use engine::*;
 pub use smt::*;
@@ -23,6 +24,7 @@ pub use mcmc::*;
 pub use mutate::*;
 pub use equivalence::*;
 pub use pareto::*;
+pub use accept::*;
 
 use crate::ast::{DerivationBlock, DerivationExample, Expr};
 

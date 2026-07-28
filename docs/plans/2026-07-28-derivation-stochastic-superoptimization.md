@@ -216,6 +216,25 @@ pub tolerance: Option<f64>,
 - `test_existing_derivation_ast_fields`: All fields on DerivationBlock accessible
 - `test_existing_colon_eq_token`: `:=` lexes to `Token::ColonEq`
 
+### Derivation Syntax — Three Forms
+
+A function or transaction with a derivation block takes one of three forms:
+
+| Form | Example | Meaning |
+|------|---------|---------|
+| **Body only** | `defn f(x) -> T { body }` | Regular function definition |
+| **Derivation only** | `defn f(x) -> T := { examples }` | **Synthesis target** — no body provided, compiler synthesizes one |
+| **Body + Derivation** | `defn f(x) -> T { body } := { examples }` | Existing body checked against examples at compile time |
+
+In the **derivation only** form, `:= { examples }` appears directly where a
+`{ body }` would normally go. The parser must not error on `:=` — it checks
+for `{` first, and if absent, leaves `body` empty and delegates to the
+derivation block. This is the primary `brief derive` target.
+
+In the **body + derivation** form, the body is written by the developer and
+the derivation examples serve as assertions. This is the "build gate" mode
+(Phase B) — the compiler verifies the body against the examples at every build.
+
 ### Step A.1 — Add tolerance syntax to parser
 
 **File**: `src/parser.rs` — `parse_derivation_example()`

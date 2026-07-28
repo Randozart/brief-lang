@@ -374,7 +374,12 @@ impl<'a> Parser<'a> {
         };
         let output_type = self.parse_output_type()?;
         let contract = self.parse_contract()?;
-        let body = self.parse_block()?;
+        // 2026-07-28: Body is optional — `defn f(x) -> T := { ... }` has no { body }.
+        let body = if self.check(&Token::LBrace) {
+            self.parse_block()?
+        } else {
+            Vec::new()
+        };
         let derivation = self.parse_derivation_block()?;
         let metadata = self.parse_body_metadata()?;
         Ok(Definition {
@@ -432,7 +437,12 @@ impl<'a> Parser<'a> {
         } else {
             None
         };
-        let body = self.parse_block()?;
+        // 2026-07-28: Body is optional — `txn f -> T := { ... }` has no { body }.
+        let body = if self.check(&Token::LBrace) {
+            self.parse_block()?
+        } else {
+            Vec::new()
+        };
         let derivation = self.parse_derivation_block()?;
         let doc = self.take_doc();
         Ok(Transaction {
@@ -465,7 +475,12 @@ impl<'a> Parser<'a> {
         let name = self.expect_identifier()?;
         // node has no parameters and no return value (purely reactive)
         let contract = self.parse_contract()?;
-        let body = self.parse_block()?;
+        // 2026-07-28: Body is optional for consistency with defn/txn.
+        let body = if self.check(&Token::LBrace) {
+            self.parse_block()?
+        } else {
+            Vec::new()
+        };
         let derivation = self.parse_derivation_block()?;
         Ok(Transaction {
             name,
@@ -1514,7 +1529,12 @@ impl<'a> Parser<'a> {
         };
         let output_type = self.parse_output_type()?;
         let contract = self.parse_contract()?;
-        let body = self.parse_block()?;
+        // 2026-07-28: Body is optional for consistency with defn/txn.
+        let body = if self.check(&Token::LBrace) {
+            self.parse_block()?
+        } else {
+            Vec::new()
+        };
         let derivation = self.parse_derivation_block()?;
         let metadata = self.parse_body_metadata()?;
         Ok(TopLevel::CompileTimeDefn(Definition {
@@ -1541,7 +1561,12 @@ impl<'a> Parser<'a> {
         };
         let output_type = self.parse_output_type()?;
         let contract = self.parse_contract()?;
-        let body = self.parse_block()?;
+        // 2026-07-28: Body is optional for consistency with defn/txn.
+        let body = if self.check(&Token::LBrace) {
+            self.parse_block()?
+        } else {
+            Vec::new()
+        };
         let derivation = self.parse_derivation_block()?;
         let metadata = self.parse_body_metadata()?;
         Ok(TopLevel::CompileTimeTxn(Transaction {
