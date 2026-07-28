@@ -598,6 +598,36 @@ Before every refactoring change:
 9. **Update architecture comments** to reflect the new structure. Delete
    no rationale comments; rewrite them to explain the current design.
 
+### System-Level Change Checklist (every optimization or analysis change)
+
+Before designing or committing any system-level optimization fix:
+
+1. **Trace the full data flow.** From analysis → storage → dispatch → emission.
+   Every struct field that gets written and every line that reads it.
+   If a field is computed but never consumed, that's dead code — flag it.
+
+2. **Verify every claim in source code (file:line), not memory or comments.**
+   Comments lie, code doesn't. If you assert a comment is wrong, prove it
+   with `git diff` or with the actual field layout from the running system.
+
+3. **Check git history for the ACTUAL evolution.** `git diff --stat` between
+   the two eras that bracket a change. Don't assume a feature was added in
+   a particular commit — verify.
+
+4. **Map ALL benchmarks, not just the regressed one.** Every optimization
+   decision affects all 19 benchmarks. Build the interaction matrix before
+   designing any fix. A fix that makes nbody faster but breaks ring_buffer
+   is not a fix — it's a trade-off you haven't understood yet.
+
+5. **Identify all gates/filters/decisions on the path.** An optimization
+   passes through N independent decision points before reaching emitted code.
+   List all N, trace which are active for which benchmarks, and find the
+   SINGLE decision point that separates "beneficial" from "harmful."
+
+6. **State the hypothesis and its verification test before proposing.**
+   "X is the root cause" means nothing without "building Y and testing Z
+   would confirm it, while building A and testing B would refute it."
+
 ### LLVM Diagnostic Commands (when optimizer fails)
 
 ```bash
