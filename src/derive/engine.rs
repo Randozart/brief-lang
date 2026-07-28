@@ -811,6 +811,36 @@ fn generate_next_level(
         }
     }
 
+    // 2026-07-28: If generation — conditional expressions (if cond then then else else)
+    // Generate If(Bool, T, T) → T where T = ret_type. For Int return type, this enables
+    // min = if x0 < x1 then x0 else x1 and abs = if x0 < 0 then -x0 else x0.
+    let bool_exprs_exist = !prev.level.bool_exprs.is_empty();
+    let int_exprs_exist = !prev.level.int_exprs.is_empty() || !prev.level.float_exprs.is_empty();
+    if bool_exprs_exist && (ret_type == "Int" || ret_type == "Float" || ret_type == "Bool") {
+        let then_else_sources: Vec<Expr> = {
+            let mut s = Vec::new();
+            s.extend(prev.level.int_exprs.iter().cloned());
+            s.extend(prev.level.float_exprs.iter().cloned());
+            if ret_type == "Bool" {
+                s.extend(prev.level.bool_exprs.iter().cloned());
+            }
+            s
+        };
+        if !then_else_sources.is_empty() {
+            for cond in &prev.level.bool_exprs {
+                for then_expr in &then_else_sources {
+                    for else_expr in &then_else_sources {
+                        result.push(Expr::If(
+                            Box::new(cond.clone()),
+                            Box::new(then_expr.clone()),
+                            Some(Box::new(else_expr.clone())),
+                        ));
+                    }
+                }
+            }
+        }
+    }
+
     // 2026-07-28: Phase 5 — Call and Match generation for compound types
     if is_compound_type(ret_type) {
         // Call generation: Const(Int), Add(Expr, Expr), Sub(Expr, Expr), Mul(Expr, Expr)
