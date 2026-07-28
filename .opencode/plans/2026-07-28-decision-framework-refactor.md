@@ -4,6 +4,22 @@
 **Commits:** 5 commits, one per axis. Each independently verifiable.
 **Location:** `DispatchStrategy` on `FunctionContext` (per-txn).
 
+## Gaps Identified (Outside the 5 Axes)
+
+| # | Gap | What's missing | Blocker for | Priority |
+|---|-----|---------------|-------------|----------|
+| G1 | **Fold pass** | sparse_dispatch/queue_drain/interval_step need runtime-bound fold. NOT a dispatch strategy choice — it's a missing feature requiring a new analysis pass (`two-phase purity`). | Those 3 benchmarks | Medium |
+| G2 | **`has_newton_iteration` detection** | Axis B references this for attribute selection (#11 vs #12). Needs a heuristic: does the body have nested guards or convergence gates that indicate an inner iterative loop? Simple check: `body.iter().any(|s| matches!(s, Statement::Gate(_)))`. | Axis B | High |
+| G3 | **Precise `has_unguarded_ffi` detection** | Current impl false-positives on `sqrt()` math calls. Must use `ForeignBinding` table instead of `statement_contains_ffi`. Fix: scan `TopLevel::ForeignBinding` items for known FFI names (like `__print_*`, `__getenv_*`), then check if any txn body calls these names outside `when` guards. | Axis B | High |
+| G4 | **PureCounter not a strategy choice** | It's not one of the 3 dispatch paths. It's a SEPARATE pass that eliminates the loop entirely. Should NOT be in `LoopStyle` enum. | None (separate feature) | Low |
+
+## Changes from v1
+
+- Removed `PureCounter` from `LoopStyle` enum (G4 — it's a separate pass)
+- Added `has_newton_iteration` detection (G2 — simple gate pattern check)
+- Added `has_unguarded_ffi` via `ForeignBinding` scan (G3 — precise FFI detection)
+- Added Section 6: missing features (G1 — fold pass is outside scope)
+
 ---
 
 ## Architecture
@@ -69,7 +85,9 @@ pub enum LoopStyle {
     WhileLoop,      // GEP+load+store, no phis. Best for register pressure ≥ 16.
     PerFieldPhi,    // Per-field phi nodes. Default for most programs.
     InlineSsa,      // EmitInlineSsa: insertvalue chain. Best for dense small states.
-    PureCounter,    // Pure-counter fold: O(1) store, no loop.
+    // NOTE: PureCounter fold is NOT a loop style — it's a separate pass that
+    // eliminates the loop entirely (single store, O(1)). Handled by the fold
+    // detection at mod.rs:2676, independent of the 5-axis strategy.
 }
 
 pub enum HotLoopAttr {
@@ -100,53 +118,112 @@ pub enum MetadataMode {
 
 ```rust
 /// Computes DispatchStrategy for each reactive txn before any emission begins.
-/// Called once from `generate()` after all analysis (hazard, SLP, fold) is complete.
+/// Called once from `generate()` after all analysis (hazard, SLP) is complete.
+/// The fold detection (pure-counter) runs BEFORE this function — if the txn
+/// is foldable, it's handled by the separate fold pass at mod.rs:2676.
 pub struct StrategyAnalyzer;
 
 impl StrategyAnalyzer {
     pub fn analyze(txn: &Transaction, ctx: &CompilerContext) -> DispatchStrategy {
-        let has_unguarded_ffi = !txn.body.iter().all(|s| match s {
-            Statement::Guarded(_, _) => true,
-            _ => !crate::analysis::transition_graph::statement_contains_ffi(s),
+        // G3: Precise has_unguarded_ffi via ForeignBinding table. NOT using
+        // statement_contains_ffi (which false-positives on sqrt(), sin(), etc.).
+        // Instead, collect known FFI names from ForeignBinding declarations:
+        //   frgn __print_float(x: Float32) -> Int from "link/brief_rt.c";
+        // Then check if any txn body calls these names OUTSIDE a `when` guard.
+        let ffi_names: HashSet<String> = ctx.foreign_bindings.iter()
+            .map(|fb| fb.brief_name.as_ref().unwrap_or(&fb.foreign_name).clone())
+            .collect();
+        let has_unguarded_ffi = txn.body.iter().any(|stmt| match stmt {
+            Statement::Guarded(_, _) => false,  // skip guard bodies
+            _ => stmt_has_ffi_call(stmt, &ffi_names),
         });
+
+        // G2: has_newton_iteration detection — simple check: does the body
+        // have a Statement::Gate (convergence assertion)? Newton's method
+        // uses `[dx < epsilon];` inner gates for its iteration convergence.
+        // If present, the body has inner loops that willreturn would affect.
+        let has_newton = txn.body.iter().any(|s| matches!(s, Statement::Gate(_)));
+
         let peak_live = ctx.peak_live_floats;
         let has_body_ffi = txn.body.iter().any(|s| {
             crate::analysis::transition_graph::statement_contains_ffi(s)
         });
         let total_fields = ctx.field_index_map.len() as u32;
-        let write_density = /* existing computation */;
+        let write_density = if total_fields > 0 {
+            ctx.write_count as f64 / total_fields as f64
+        } else { 1.0 };
+
+        // Determine loop_style first — other axes depend on it
+        let loop_style: LoopStyle;
+        let inline_mode: InlineMode;
+
+        if peak_live >= 16 && has_body_ffi {
+            loop_style = LoopStyle::WhileLoop;
+            inline_mode = InlineMode::NoFunction;  // body directly in @main
+        } else if write_density >= 0.5 && total_fields < 8 && !has_body_ffi {
+            loop_style = LoopStyle::InlineSsa;
+            inline_mode = InlineMode::AlwaysInline;
+        } else {
+            loop_style = LoopStyle::PerFieldPhi;
+            inline_mode = if ctx.has_cycles {
+                InlineMode::NoInline
+            } else {
+                InlineMode::AlwaysInline
+            };
+        }
 
         DispatchStrategy {
-            // A: Dispatch — principled by peak register pressure
-            loop_style: if peak_live >= 16 && has_body_ffi {
-                LoopStyle::WhileLoop
-            } else if write_density >= 0.5 && total_fields < 8 && !has_body_ffi {
-                LoopStyle::InlineSsa
-            } else {
-                LoopStyle::PerFieldPhi
-            },
+            loop_style,
 
             // B: Attribute — principled by FFI location + Newton detection
             hot_loop_attr: if has_unguarded_ffi {
-                HotLoopAttr::MemoryReadWrite        // #9
-            } else if /* has_newton_iteration */ {
-                HotLoopAttr::ArgMemReadWrite         // #11
+                HotLoopAttr::MemoryReadWrite        // #9 — conservative
+            } else if has_newton {
+                HotLoopAttr::ArgMemReadWrite         // #11 — SROA, no willreturn
             } else {
-                HotLoopAttr::ArgMemReadWriteWillReturn // #12
+                HotLoopAttr::ArgMemReadWriteWillReturn // #12 — SROA + loop opts
             },
 
-            // C: SLP — uses existing chain_pass_ok + is_reduction_pattern
-            slp_mode: SlpMode::Enabled,  // gated later by per-group checks
+            // C: SLP — gates per-group checks (chain_pass_ok + reduction)
+            slp_mode: SlpMode::Enabled,
 
-            // D: Inline — principled: if while-loop, no function needed
-            inline_mode: match loop_style {
-                WhileLoop | PureCounter => InlineMode::NoFunction,
-                _ => if ctx.has_cycles { NoInline } else { AlwaysInline },
-            },
+            inline_mode,
 
-            // E: Metadata — principled: while-loop needs clean IR for SLP
+            // E: Metadata — while-loop needs clean IR for SLP discovery
             metadata_mode: match loop_style {
                 WhileLoop => MetadataMode::None,
+                _ => MetadataMode::All,
+            },
+        }
+    }
+
+    /// Check if a statement calls a known foreign function (from the
+    /// ForeignBinding table). This is the PRECISE FFI check — unlike
+    /// statement_contains_ffi which catches ALL Expr::Call (including sqrt).
+    fn stmt_has_ffi_call(stmt: &Statement, ffi_names: &HashSet<String>) -> bool {
+        match stmt {
+            Statement::Let { expr: Some(e), .. }
+            | Statement::Expression(e)
+            | Statement::Assign(_, e) => expr_has_ffi_call(e, ffi_names),
+            _ => false,
+        }
+    }
+
+    fn expr_has_ffi_call(expr: &Expr, ffi_names: &HashSet<String>) -> bool {
+        match expr {
+            Expr::Call(name, args, _) => {
+                ffi_names.contains(name.as_str())
+                    || args.iter().any(|a| expr_has_ffi_call(a, ffi_names))
+            }
+            Expr::BinaryOp(_, l, r) => {
+                expr_has_ffi_call(l, ffi_names) || expr_has_ffi_call(r, ffi_names)
+            }
+            Expr::UnaryOp(_, e) => expr_has_ffi_call(e, ffi_names),
+            _ => false,
+        }
+    }
+}
+```
                 _ => MetadataMode::All,
             },
         }
