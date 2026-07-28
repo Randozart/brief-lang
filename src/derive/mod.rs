@@ -15,6 +15,7 @@ mod equivalence;
 mod pareto;
 mod accept;
 mod verify;
+mod verify_smt;
 
 pub use engine::*;
 pub use smt::*;
@@ -27,6 +28,7 @@ pub use equivalence::*;
 pub use pareto::*;
 pub use accept::*;
 pub use verify::*;
+pub use verify_smt::*;
 
 use crate::ast::{DerivationBlock, DerivationExample, Expr, Type};
 
