@@ -30,17 +30,17 @@ type Int: #Int {
 
 type UInt: Int;
 
-type Int8: Int { bits <~ 8; };
-type UInt8: Int { bits <~ 8; };
+type Int8: Int { !> bits: 8; };
+type UInt8: Int { !> bits: 8; };
 
-type Int16: Int { bits <~ 16; };
-type UInt16: Int { bits <~ 16; };
+type Int16: Int { !> bits: 16; };
+type UInt16: Int { !> bits: 16; };
 
-type Int32: Int { bits <~ 32; };
-type UInt32: Int { bits <~ 32; };
+type Int32: Int { !> bits: 32; };
+type UInt32: Int { !> bits: 32; };
 
-type Int64: Int { bits <~ 64; };
-type UInt64: Int { bits <~ 64; };
+type Int64: Int { !> bits: 64; };
+type UInt64: Int { !> bits: 64; };
 
 type Float: #Float {
     op Parse: parse(#L);
@@ -57,10 +57,10 @@ type Float: #Float {
     op Ge: ge(#L, #R);
 };
 
-type Double: #Float { bits <~ 64; };
+type Double: #Float { !> bits: 64; };
 
 type Bool: #Bool {
-    bits <~ 8;
+    !> bits: 8;
     op Parse: parse_bool(#L);
     op Eq: eq(#L, #R);
     op Ne: ne(#L, #R);
@@ -69,15 +69,15 @@ type Bool: #Bool {
     op Not: bnot(#L);
 };
 
-type Char: #Char { bits <~ 32;
+type Char: #Char { !> bits: 32;
     op Parse: parse_char(#L);
 };
 
 type String: #String {
     data: Int;
     len: Int;
-    alignment <~ 8;
-    encoding <~ "UTF-8";
+    !> alignment: 8;
+    !> encoding: "UTF-8";
     op Parse(Quoted): parse_string(#L);
     prop Size: chars(#L);
     prop Bytes: byte_len(#L);
@@ -86,8 +86,8 @@ type String: #String {
 type UTF8View {
     data: Int;
     len: Int;
-    alignment <~ 8;
-    encoding <~ "UTF-8";
+    !> alignment: 8;
+    !> encoding: "UTF-8";
 };
 
 type StaticString {
@@ -105,8 +105,8 @@ type SmallString64 {
     slot6: Int;
     slot7: Int;
     len: Int;
-    alignment <~ 8;
-    encoding <~ "UTF-8";
+    !> alignment: 8;
+    !> encoding: "UTF-8";
 };
 
-type Data: Int { bits <~ 64; };
+type Data: Int { !> bits: 64; };

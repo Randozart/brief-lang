@@ -305,7 +305,7 @@ impl fmt::Display for Statement {
                 write!(f, "}}")
             }
             Statement::MetadataAssignment(key, val) => {
-                write!(f, "{} <~ {:?};", key, val)
+                write!(f, "!> {}: {:?};", key, val)
             }
             Statement::Escape(val) => {
                 if let Some(val) = val {

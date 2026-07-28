@@ -2,6 +2,6 @@
 // These are low-level types that the compiler can cast to/from Int.
 
 type Byte : Bits @/0..7 {
-    IsZero <~ _ == 0;
-    IsOne  <~ _ == 1;
+    !> IsZero: _ == 0;
+    !> IsOne: _ == 1;
 };

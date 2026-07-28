@@ -19,9 +19,9 @@
 
 type Int: #Int {
     // Silent defaults (you don't need to write these):
-    maxbits <~ 64;
-    alignment <~ 8;
-    endian <~ 0;         // 0 = little, 1 = big
+    !> maxbits: 64;
+    !> alignment: 8;
+    !> endian: 0;         // 0 = little, 1 = big
 
     // Operator projections (conceptual — compiler fast-paths these):
     Add(rhs)   = _ + rhs;
@@ -40,8 +40,8 @@ type Int: #Int {
     BitXor(rhs) = _ ^ rhs;
     Shl(rhs)    = _ << rhs;
     Shr(rhs)    = _ >> rhs;
-    Neg         <~ - _;
-    BitNot      <~ ~ _;
+    !> Neg: - _;
+    !> BitNot: ~ _;
 };
 
 // ─────────────────────────────────────────────────────────────
@@ -51,15 +51,15 @@ type Int: #Int {
 // ─────────────────────────────────────────────────────────────
 
 type Float: #Float {
-    maxbits <~ 32;
-    alignment <~ 8;
+    !> maxbits: 32;
+    !> alignment: 8;
 
     // Arithmetic via #-intrinsics (compiler provides these):
     Add(rhs)  = _.# FAdd#(rhs);
     Sub(rhs)  = _.# FSub#(rhs);
     Mul(rhs)  = _.# FMul#(rhs);
     Div(rhs)  = _.# FDiv#(rhs);
-    Neg       <~ _.# FNeg#;
+    !> Neg: _.# FNeg#;
     Eq(rhs)   = _.# FCmpOq#(rhs);
     Lt(rhs)   = _.# FCmpOlt#(rhs);
     Gt(rhs)   = _.# FCmpOgt#(rhs);
@@ -72,14 +72,14 @@ type Float: #Float {
 // ─────────────────────────────────────────────────────────────
 
 type String : Bits @/0..127 {
-    maxbits <~ 128;
+    !> maxbits: 128;
 
     //    field         offset    width
-    Ptr          <~ _ @/0..63;     // Pointer to UTF-8 data
-    Len          <~ _ @/64..127;   // Length in bytes
+    !> Ptr: _ @/0..63;     // Pointer to UTF-8 data
+    !> Len: _ @/64..127;   // Length in bytes
 
-    Size         <~ _.# Len;         // Number of bytes
-    IsEmpty      <~ _.# Size == 0;
+    !> Size: _.# Len;         // Number of bytes
+    !> IsEmpty: _.# Size == 0;
     At(i)        = _.# Ptr :> LoadU8#(i);   // Read char at index
 };
 
@@ -88,20 +88,20 @@ type String : Bits @/0..127 {
 // ─────────────────────────────────────────────────────────────
 
 type List : Bits @/0..191 {
-    maxbits <~ 192;
+    !> maxbits: 192;
 
     //    field         offset    width
-    Ptr          <~ _ @/0..63;     // Element data pointer
-    Len          <~ _ @/64..127;   // Element count
-    Cap          <~ _ @/128..191;  // Allocated capacity
+    !> Ptr: _ @/0..63;     // Element data pointer
+    !> Len: _ @/64..127;   // Element count
+    !> Cap: _ @/128..191;  // Allocated capacity
 
-    Size         <~ _.# Len;
-    IsEmpty      <~ _.# Size == 0;
+    !> Size: _.# Len;
+    !> IsEmpty: _.# Size == 0;
     At(i)        = _.# Ptr :> LoadElem#(i);
 
     // 2026-07-18: SVO — inline storage for ≤3 Int elements.
     // Tag bit 0: 0 = heap (existing ptr/len/cap), 1 = inline (packed in state).
-    svo          <~ 3;
+    !> svo: 3;
 };
 
 // ─────────────────────────────────────────────────────────────
@@ -119,11 +119,11 @@ $ slot(n) {
 
 // Example: a 3-field obj using slot(n)
 type Point : Bits @/0..191 {
-    maxbits <~ 192;
+    !> maxbits: 192;
 
-    X <~ slot(0);   // _ @/0..7
-    Y <~ slot(1);   // _ @/8..15
-    Z <~ slot(2);   // _ @/16..23
+    !> X: slot(0);   // _ @/0..7
+    !> Y: slot(1);   // _ @/8..15
+    !> Z: slot(2);   // _ @/16..23
 };
 
 // ─────────────────────────────────────────────────────────────
@@ -134,8 +134,8 @@ type Point : Bits @/0..191 {
 // ─────────────────────────────────────────────────────────────
 
 type HashMap_KV : Bits @/0..(BUCKETS * ENTRY_SIZE * 8) {
-    maxbits      <~ (BUCKETS * ENTRY_SIZE as Int) * 8;
-    fixedsize  <~ true;
+    !> maxbits: (BUCKETS * ENTRY_SIZE as Int) * 8;
+    !> fixedsize: true;
 
     // Uses a Lookup# intrinsic for O(1) hashed access
     Contains(k)  = _.# Lookup#(k) > -1;
@@ -148,7 +148,7 @@ type HashMap_KV : Bits @/0..(BUCKETS * ENTRY_SIZE * 8) {
 // Both views compile to the same LLVM IR for matching shapes.
 
 type HashMap : List {
-    elementtype <~ (K, V);
+    !> elementtype: (K, V);
     Contains(k)  = _.# Lookup#(k) > -1;
     Get(k)       = _.# Lookup#(k) :> At;
 };
@@ -162,8 +162,8 @@ type HashMap : List {
 // ─────────────────────────────────────────────────────────────
 
 type SkipList<T> : List<T> {
-    insertat <~ _sl_insert;
-    extractfrom <~ _sl_remove;
+    !> insertat: _sl_insert;
+    !> extractfrom: _sl_remove;
     Contains(v) = _.# sl_contains(v);
 };
 
@@ -172,14 +172,14 @@ type SkipList<T> : List<T> {
 // ─────────────────────────────────────────────────────────────
 
 type Matrix4x4 : Bits @/0..(16 * 8 - 1) {
-    maxbits <~ 512;   // 16 floats × 4 bytes
+    !> maxbits: 512;   // 16 floats × 4 bytes
 
     // Column-major access
     At(col, row) = _ @/((col * 4 + row) * 32)..((col * 4 + row) * 32 + 31);
 
     // Custom projections
-    Transpose    <~ _.# TransposeMatrix#;
-    Determinant  <~ _.# DetMatrix#;
+    !> Transpose: _.# TransposeMatrix#;
+    !> Determinant: _.# DetMatrix#;
     Multiply(m)  <~ _.# MulMatrix#(m);
 };
 
@@ -190,19 +190,19 @@ type Matrix4x4 : Bits @/0..(16 * 8 - 1) {
 // ─────────────────────────────────────────────────────────────
 
 type RV32I : Bits @/0..31 {
-    maxbits <~ 32;
+    !> maxbits: 32;
 
     // RISC-V R-type instruction layout:
-    Opcode    <~ _ @/0..6;       // bits 0-6:  always 0x33 for R-type
-    Rd        <~ _ @/7..11;      // bits 7-11: destination register
-    Funct3    <~ _ @/12..14;     // bits 12-14: function selector
-    Rs1       <~ _ @/15..19;     // bits 15-19: source register 1
-    Rs2       <~ _ @/20..24;     // bits 20-24: source register 2
-    Funct7    <~ _ @/25..31;     // bits 25-31: function selector
+    !> Opcode: _ @/0..6;       // bits 0-6:  always 0x33 for R-type
+    !> Rd: _ @/7..11;      // bits 7-11: destination register
+    !> Funct3: _ @/12..14;     // bits 12-14: function selector
+    !> Rs1: _ @/15..19;     // bits 15-19: source register 1
+    !> Rs2: _ @/20..24;     // bits 20-24: source register 2
+    !> Funct7: _ @/25..31;     // bits 25-31: function selector
 
-    IsAdd      <~ Funct7 == 0 && Funct3 == 0 && Opcode == 0x33;
-    IsSub      <~ Funct7 == 0x20 && Funct3 == 0 && Opcode == 0x33;
-    IsXor      <~ Funct7 == 0 && Funct3 == 4 && Opcode == 0x33;
+    !> IsAdd: Funct7 == 0 && Funct3 == 0 && Opcode == 0x33;
+    !> IsSub: Funct7 == 0x20 && Funct3 == 0 && Opcode == 0x33;
+    !> IsXor: Funct7 == 0 && Funct3 == 4 && Opcode == 0x33;
 };
 
 // ─────────────────────────────────────────────────────────────
@@ -214,14 +214,14 @@ type RV32I : Bits @/0..31 {
 // ─────────────────────────────────────────────────────────────
 
 type Counter : Bits @/0..7 {
-    maxbits <~ 8;
+    !> maxbits: 8;
     // These bindings have no effect in CBV:
-    codec        <~ "binary";     // Ignored by CBV
-    elementtype  <~ "Int";        // Ignored by CBV
-    allowindex   <~ false;        // Ignored by CBV — no index instr in HW
+    !> codec: "binary";     // Ignored by CBV
+    !> elementtype: "Int";        // Ignored by CBV
+    !> allowindex: false;        // Ignored by CBV — no index instr in HW
 
-    Incr         <~ _.# CountInc#;
-    Reset        <~ _.# CountRst#;
+    !> Incr: _.# CountInc#;
+    !> Reset: _.# CountRst#;
 };
 
 // ─────────────────────────────────────────────────────────────
@@ -232,15 +232,15 @@ type Counter : Bits @/0..7 {
 // ─────────────────────────────────────────────────────────────
 
 type CString : Bits @/0..63 {
-    maxbits <~ 64;       // Just a pointer
+    !> maxbits: 64;       // Just a pointer
 
     // Zero-cost: reads char via pointer arithmetic, no strlen
     At(i)     = _.# Ptr :> LoadU8#(i);
 
     // O(N) cost: strlen only when Size is explicitly queried
-    Size      <~ _.# Ptr :> StrLen#;
+    !> Size: _.# Ptr :> StrLen#;
 
-    IsEmpty   <~ _.# Ptr :> LoadU8#(0) == '\0';
+    !> IsEmpty: _.# Ptr :> LoadU8#(0) == '\0';
 };
 
 // ─────────────────────────────────────────────────────────────

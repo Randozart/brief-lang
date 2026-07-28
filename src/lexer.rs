@@ -332,9 +332,9 @@ pub enum Token {
     #[token("<-")]
     ArrowLeft,
 
-    /// <~ — metadata assignment operator
-    #[token("<~")]
-    TildeArrow,
+/// !> — metadata assignment operator
+#[token("!>")]
+ExclaimArrow,
 
     #[token("_")]
     Underscore,
@@ -640,7 +640,7 @@ impl std::fmt::Display for Token {
             Token::BitXor => write!(f, "^"),
             Token::Arrow => write!(f, "->"),
             Token::ArrowLeft => write!(f, "<-"),
-            Token::TildeArrow => write!(f, "<~"),
+            Token::ExclaimArrow => write!(f, "!>"),
             Token::Underscore => write!(f, "_"),
             Token::HashBracket => write!(f, "#["),
             Token::HashBangBracket => write!(f, "#!["),
@@ -810,10 +810,10 @@ mod tests {
     }
 
     #[test]
-    fn test_tilde_arrow_as_single_token() {
-        let mut lexer = Token::lexer("x <~ 5");
+    fn test_exclaim_arrow_as_single_token() {
+        let mut lexer = Token::lexer("x !> 5");
         assert_eq!(lexer.next(), Some(Ok(Token::Identifier("x".to_string()))));
-        assert_eq!(lexer.next(), Some(Ok(Token::TildeArrow)));
+        assert_eq!(lexer.next(), Some(Ok(Token::ExclaimArrow)));
         assert_eq!(lexer.next(), Some(Ok(Token::Integer(5))));
         assert_eq!(lexer.next(), None);
 

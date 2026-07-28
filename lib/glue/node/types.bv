@@ -1,22 +1,22 @@
 // 2026-07-22: Node.js type declarations for Brief's type universe.
 
 type JsBuffer {
-    maxbits <~ 64;
-    alignment <~ 8;
+    !> maxbits: 64;
+    !> alignment: 8;
     op CastTo(#Bits) = identity(#L);
     op CastFrom(#Bits) = identity(#L);
 };
 
 type JsString: Bits #String {
-    maxbits <~ 64;
-    alignment <~ 8;
+    !> maxbits: 64;
+    !> alignment: 8;
     op CastTo(#String<UTF8>) = jsstring_to_utf8(#L);
     op CastFrom(#String<UTF8>) = utf8_to_jsstring(#L);
 };
 
 type JsNumber: Bits #Int {
-    maxbits <~ 64;
-    alignment <~ 8;
+    !> maxbits: 64;
+    !> alignment: 8;
     op CastTo(#Float<IEEE754>) = jsnumber_to_f64(#L);
     op CastFrom(#Float<IEEE754>) = f64_to_jsnumber(#L);
     op CastTo(#Int) = jsnumber_to_i64(#L);

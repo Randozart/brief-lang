@@ -5,8 +5,8 @@
 
 // Define a unit-of-measure wrapper
 type Meters : Bits @/0..63 {
-    maxbits <~ 64;
-    alignment <~ 8;
+    !> maxbits: 64;
+    !> alignment: 8;
 };
 
 meld Meters -> Int;  // bidirectional cast compatibility

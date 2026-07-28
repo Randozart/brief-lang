@@ -44,7 +44,7 @@ impl<'a> Parser<'a> {
                     self.parse_inline_defn()
                 } else if self.check_identifier("$txn") {
                     self.parse_inline_txn()
-                } else if self.check(&Token::TildeArrow) {
+                } else if self.check(&Token::ExclaimArrow) {
                     self.parse_metadata_statement()
                 } else {
                     self.parse_expression_statement()
@@ -247,10 +247,11 @@ impl<'a> Parser<'a> {
         Ok(Statement::Guarded(cond, body))
     }
 
-    /// key <~ value;
+    /// !> key: value;
     fn parse_metadata_statement(&mut self) -> Result<Statement, SyntaxError> {
-        self.expect(Token::TildeArrow)?;
+        self.expect(Token::ExclaimArrow)?;
         let key = self.expect_identifier()?;
+        self.expect(Token::Colon)?;
         let val = self.parse_metadata_value_standalone()?;
         self.expect(Token::Semicolon)?;
         Ok(Statement::MetadataAssignment(key, val))

@@ -8,9 +8,9 @@
 
 // 16-bit half-precision float (hardware on some GPUs)
 type Float16 : Bits {
-    maxbits <~ 16;
-    alignment <~ 2;
-    tbaa <~ "FloatNode";
+    !> maxbits: 16;
+    !> alignment: 2;
+    !> tbaa: "FloatNode";
 
     op Add: FAdd16(#L, #R);
     op Sub: FSub16(#L, #R);
@@ -19,9 +19,9 @@ type Float16 : Bits {
 
 // 4-lane SIMD float vector
 type Float4 : Bits {
-    maxbits <~ 128;
-    alignment <~ 16;
-    tbaa <~ "FloatNode";
+    !> maxbits: 128;
+    !> alignment: 16;
+    !> tbaa: "FloatNode";
 
     op Add: FAddV4F32(#L, #R);
     op Sub: FSubV4F32(#L, #R);

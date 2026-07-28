@@ -963,46 +963,49 @@ impl<'a> Parser<'a> {
         let mut props: Vec<PropDef> = Vec::new();
         if self.eat(&Token::LBrace) {
             while !self.check(&Token::RBrace) && !self.is_at_end() {
-                let slot_name = self.expect_identifier()?;
-                // 2026-07-17: CTD replaces primitive; ALU is a new slot
-                if slot_name == "ctd" && self.check(&Token::TildeArrow) {
+                // !> key: value; — metadata assignment (new syntax)
+                if self.check(&Token::ExclaimArrow) {
                     self.advance();
-                    let ctd_name = self.expect_identifier()?;
-                    self.eat(&Token::Semicolon);
-                    metadata.insert("ctd".into(), PropertyValue::Identifier(ctd_name));
-                    continue;
-                }
-                if slot_name == "alu" && self.check(&Token::TildeArrow) {
-                    self.advance();
-                    // PascalCase identifier → known built-in ALU
-                    // Lowercase quoted string → backend/plugin-specific
-                    match self.peek() {
-                        Some(Token::Identifier(_)) => {
-                            let alu_name = self.expect_identifier()?;
+                    let key = self.expect_identifier()?;
+                    self.expect(Token::Colon)?;
+                    match key.as_str() {
+                        "ctd" => {
+                            let ctd_name = self.expect_identifier()?;
                             self.eat(&Token::Semicolon);
-                            metadata.insert("alu".into(), PropertyValue::Identifier(alu_name));
+                            metadata.insert("ctd".into(), PropertyValue::Identifier(ctd_name));
+                        }
+                        "alu" => {
+                            match self.peek() {
+                                Some(Token::Identifier(_)) => {
+                                    let alu_name = self.expect_identifier()?;
+                                    metadata.insert("alu".into(), PropertyValue::Identifier(alu_name));
+                                }
+                                _ => {
+                                    let alu_str = self.expect_string()?;
+                                    metadata.insert("alu".into(), PropertyValue::String(alu_str));
+                                }
+                            }
+                            self.eat(&Token::Semicolon);
+                        }
+                        "layout" => {
+                            if self.check(&Token::LBrace) {
+                                let fields = self.parse_layout_struct_body()?;
+                                metadata.insert("layout_struct".into(), fields);
+                            } else {
+                                let raw = self.read_layout_body()?;
+                                metadata.insert("layout".into(), PropertyValue::String(raw));
+                            }
+                            self.eat(&Token::Semicolon);
                         }
                         _ => {
-                            let alu_str = self.expect_string()?;
+                            let pv = self.parse_metadata_value_standalone()?;
                             self.eat(&Token::Semicolon);
-                            metadata.insert("alu".into(), PropertyValue::String(alu_str));
+                            metadata.insert(key, pv);
                         }
                     }
                     continue;
                 }
-                if slot_name == "layout" && self.check(&Token::TildeArrow) {
-                    self.advance();
-                    // 2026-07-16: Two syntaxes: { field: Type } (struct) or <...> (angle explicit)
-                    if self.check(&Token::LBrace) {
-                        let fields = self.parse_layout_struct_body()?;
-                        metadata.insert("layout_struct".into(), fields);
-                    } else {
-                        let raw = self.read_layout_body()?;
-                        metadata.insert("layout".into(), PropertyValue::String(raw));
-                    }
-                    self.eat(&Token::Semicolon);
-                    continue;
-                }
+                let slot_name = self.expect_identifier()?;
                 if slot_name == "op" {
                     self.parse_op_definition(&mut op_bindings)?;
                     continue;
@@ -1011,13 +1014,8 @@ impl<'a> Parser<'a> {
                     self.parse_prop_definition(&mut props)?;
                     continue;
                 }
-                let slot_ty = if self.eat(&Token::TildeArrow) {
-                    self.parse_expression()?;
-                    Type::int()
-                } else {
-                    self.expect(Token::Colon)?;
-                    self.parse_type()?
-                };
+                self.expect(Token::Colon)?;
+                let slot_ty = self.parse_type()?;
                 self.eat(&Token::Semicolon);
                 slots.push(TypeDefSlot { name: slot_name, ty: slot_ty, bit_range: None });
             }
@@ -1106,61 +1104,55 @@ impl<'a> Parser<'a> {
         let mut props: Vec<PropDef> = Vec::new();
         if self.eat(&Token::LBrace) {
             while !self.check(&Token::RBrace) && !self.is_at_end() {
-                let slot_name = self.expect_identifier()?;
-                // 2026-07-17: CTD replaces primitive; ALU is a new slot
-                if slot_name == "ctd" && self.check(&Token::TildeArrow) {
+                // !> key: value; — metadata assignment (new syntax)
+                if self.check(&Token::ExclaimArrow) {
                     self.advance();
-                    let ctd_name = self.expect_identifier()?;
-                    self.eat(&Token::Semicolon);
-                    metadata.insert("ctd".into(), PropertyValue::Identifier(ctd_name));
-                    continue;
-                }
-                if slot_name == "alu" && self.check(&Token::TildeArrow) {
-                    self.advance();
-                    // PascalCase identifier → known built-in ALU
-                    // Lowercase quoted string → backend/plugin-specific
-                    match self.peek() {
-                        Some(Token::Identifier(_)) => {
-                            let alu_name = self.expect_identifier()?;
+                    let key = self.expect_identifier()?;
+                    self.expect(Token::Colon)?;
+                    match key.as_str() {
+                        "ctd" => {
+                            let ctd_name = self.expect_identifier()?;
                             self.eat(&Token::Semicolon);
-                            metadata.insert("alu".into(), PropertyValue::Identifier(alu_name));
+                            metadata.insert("ctd".into(), PropertyValue::Identifier(ctd_name));
+                        }
+                        "alu" => {
+                            match self.peek() {
+                                Some(Token::Identifier(_)) => {
+                                    let alu_name = self.expect_identifier()?;
+                                    metadata.insert("alu".into(), PropertyValue::Identifier(alu_name));
+                                }
+                                _ => {
+                                    let alu_str = self.expect_string()?;
+                                    metadata.insert("alu".into(), PropertyValue::String(alu_str));
+                                }
+                            }
+                            self.eat(&Token::Semicolon);
+                        }
+                        "layout" => {
+                            if self.check(&Token::LBrace) {
+                                let fields = self.parse_layout_struct_body()?;
+                                metadata.insert("layout_struct".into(), fields);
+                            } else {
+                                let raw = self.read_layout_body()?;
+                                metadata.insert("layout".into(), PropertyValue::String(raw));
+                            }
+                            self.eat(&Token::Semicolon);
                         }
                         _ => {
-                            let alu_str = self.expect_string()?;
+                            let pv = self.parse_metadata_value_standalone()?;
                             self.eat(&Token::Semicolon);
-                            metadata.insert("alu".into(), PropertyValue::String(alu_str));
+                            metadata.insert(key, pv);
                         }
                     }
                     continue;
                 }
-                if slot_name == "layout" && self.check(&Token::TildeArrow) {
-                    self.advance();
-                    // 2026-07-16: Two syntaxes: { field: Type } (struct) or <...> (angle explicit)
-                    if self.check(&Token::LBrace) {
-                        let fields = self.parse_layout_struct_body()?;
-                        metadata.insert("layout_struct".into(), fields);
-                    } else {
-                        let raw = self.read_layout_body()?;
-                        metadata.insert("layout".into(), PropertyValue::String(raw));
-                    }
-                    self.eat(&Token::Semicolon);
-                    continue;
-                }
+                let slot_name = self.expect_identifier()?;
                 if slot_name == "op" {
                     self.parse_op_definition(&mut op_bindings)?;
                     continue;
                 }
                 if slot_name == "prop" {
                     self.parse_prop_definition(&mut props)?;
-                    continue;
-                }
-                // 2026-07-20: Slot-name property binding via <~ (general metadata).
-                // InsertAt/ExtractFrom are now parsed via `op InsertAt(T) = fn(#L,#R)`
-                // in the op handler above. They no longer get special "op." prefix treatment.
-                if self.eat(&Token::TildeArrow) {
-                    let pv = self.parse_metadata_value_standalone()?;
-                    self.eat(&Token::Semicolon);
-                    metadata.insert(slot_name, pv);
                     continue;
                 }
                 self.expect(Token::Colon)?;

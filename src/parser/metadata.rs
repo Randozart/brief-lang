@@ -14,10 +14,11 @@ impl<'a> Parser<'a> {
     /// Stops when it encounters a non-metadata token.
     pub fn parse_body_metadata(&mut self) -> Result<HashMap<String, PropertyValue>, SyntaxError> {
         let mut metadata = HashMap::new();
-        while self.check(&Token::TildeArrow) || self.check_identifier_prefix("#") {
-            let key = if self.eat(&Token::TildeArrow) {
-                // key <~ value; — inline metadata
+        while self.check(&Token::ExclaimArrow) || self.check_identifier_prefix("#") {
+            let key = if self.eat(&Token::ExclaimArrow) {
+                // !> key: value; — inline metadata
                 let key = self.expect_identifier()?;
+                self.expect(Token::Colon)?;
                 self.parse_metadata_value().map(|val| (key, val))?
             } else {
                 // #key value; or #key(value) — annotation syntax

@@ -10,8 +10,8 @@
 // the defn declarations below.
 
 type SkipList<T> : List<T> {
-    InsertAt <~ sl_insert;
-    ExtractFrom <~ sl_remove;
+    !> InsertAt: sl_insert;
+    !> ExtractFrom: sl_remove;
 };
 
 // -- Defn wrappers (replacing former inop declarations) --

@@ -15,11 +15,11 @@ codec Fahrenheit {
 };
 
 type TempC : Float {
-    codec <~ Celsius;
+    !> codec: Celsius;
 };
 
 type TempF : Float {
-    codec <~ Fahrenheit;
+    !> codec: Fahrenheit;
 };
 
 codec WaterLiquid {
@@ -28,7 +28,7 @@ codec WaterLiquid {
 };
 
 type WaterTempC : Float {
-    codec <~ WaterLiquid;
+    !> codec: WaterLiquid;
 };
 
 // Compound codec: combines multiple constraint sets.
@@ -39,8 +39,8 @@ codec ReactionTemp {
 };
 
 type ReactorTemp : Float {
-    maxbits  <~ 64;
-    codec  <~ ReactionTemp;
+    !> maxbits: 64;
+    !> codec: ReactionTemp;
 };
 
 txn monitor_reactor() [true][true] {
