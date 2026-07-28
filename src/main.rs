@@ -25,6 +25,7 @@ fn main() {
         "build" => run_build(&args[2..]),
         "check" => run_check(&args[2..]),
         "derive" => run_derive(&args[2..]),
+        "accept" => run_accept(&args[2..]),
         "library" | "lib" => library::run_library_mode(&args[2..]),
         "export" => run_export(&args[2..]),
         "doc" => run_doc(&args[2..]),
@@ -88,6 +89,8 @@ fn print_usage(program: &str) {
     eprintln!("  {} audit [file.bv]                Scan for $ intrinsic usage and capability requirements", name);
     eprintln!("  {} check <file.bv>               Type-check only", name);
     eprintln!("  {} derive <file.bv>              Synthesize derivation blocks", name);
+    eprintln!("  {} derive --stochastic <file.bv> Synthesize + MCMC superoptimize (writes .opt.bv)", name);
+    eprintln!("  {} accept <file.bv>              Fold synthesized bodies into source", name);
     eprintln!("  {} library <file.bv>             Compile to .a library", name);
     eprintln!("  {} export <file.bv> <lang> [--out <dir>]  Generate a GLUE bridge for <lang>", name);
     eprintln!("  {} doc <file.bv>                  Generate HTML documentation from doc comments", name);
@@ -615,8 +618,16 @@ fn run_register(_args: &[String]) -> Result<(), String> {
 }
 
 fn run_derive(args: &[String]) -> Result<(), String> {
-    let file_path = args.first().ok_or("missing file argument")?;
-    brief_compiler::derive::handle_derive_command(file_path)
+    let (config, positional) = brief_compiler::derive::parse_derive_flags(args)?;
+    let file_path = positional.first().ok_or("missing file argument\nusage: brief derive [--stochastic] [--iterations N] [--temperature T] [--enumerative-depth N] <file.bv>")?;
+    brief_compiler::derive::handle_derive_command(&config, file_path)
+}
+
+fn run_accept(args: &[String]) -> Result<(), String> {
+    let use_opt = args.iter().any(|a| a == "--opt");
+    let file_path = args.iter().find(|a| !a.starts_with("--"))
+        .ok_or("missing file argument\nusage: brief accept [--opt] <file.bv>")?;
+    brief_compiler::derive::handle_accept_command(file_path, use_opt)
 }
 
 /// Load TargetConfig with optional --config-dir override.

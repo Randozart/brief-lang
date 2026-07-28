@@ -15,7 +15,7 @@ vocabulary reference.
 
 ## Overview
 
-This plan adds a **four-phase derivation pipeline** to Brief, with non-destructive doppelganger
+This plan adds a **nine-phase implementation** (A–I) implementing a four-stage derivation pipeline, with non-destructive doppelganger
 output files and an optional stochastic superoptimization pass. The `brief derive` command
 synthesizes function bodies from `:= { ... }` examples, then optionally optimizes them via
 STOKE-style MCMC random search at the normalized IR layer.
@@ -30,6 +30,8 @@ STOKE-style MCMC random search at the normalized IR layer.
 | **Stochastic Superoptimization** | MCMC Metropolis-Hastings on normalized IR | `--stochastic` |
 | **Doppelganger Output** | Full-source shadow files, never mutates originals | Always-on |
 | **!> Metadata Vocabulary** | Cross-backend optimization hints | First-class language |
+| **Metadata-Driven Codegen** | Backends consume `!>` via `MetadataRegistry` | Automatic (Phase H) |
+| **`brief accept`** | Fold synthesized bodies into source | User-initiated (Phase I) |
 
 ### Pipeline
 
@@ -2304,6 +2306,168 @@ Enumerative: `c * 1.8 + 32.0` (cost: ~10)
 MCMC might try: `c * 9.0/5.0 + 32.0` (same cost) or `(c*9 + 160)/5` (more ops,
 rejected).
 
+## Phase H — Metadata-Driven Optimization Hints (3 sub-steps)
+
+**Goal**: Wire the `MetadataRegistry` (created in Phase G) into each active backend so
+`!>` metadata annotations on functions, loops, and instructions produce real
+LLVM IR attributes, Webstack flags, and CIRCT options. Currently, Phase G only
+created the vocabulary and lookup functions — no backend consumes them.
+
+### Step H.0 — LLVM Fast-Math Flag Emission
+
+**File**: `src/backend/llvm/mod.rs`
+
+**What**: During function emission, read the function's `!>` metadata entries
+(`fp_math`, `fp_contract`, `associative`, `commutative`, `overflow`) and emit
+the corresponding LLVM attributes via `MetadataRegistry::llvm_attr()`.
+
+| `!>` metadata | LLVM attribute | Emitted on |
+|---|---|---|
+| `fp_math: "fast"` | `"fast"` | `fadd`/`fmul`/etc. |
+| `fp_contract: "*"` | `"contract"` | `fadd`/`fmul` |
+| `associative: "*"` | `"reassoc"` | function |
+| `overflow: "wrapping"` | `"nuw nsw"` | `add`/`sub`/`mul` |
+| `overflow: "checked"` | `"nsw"` | `add`/`sub`/`mul` |
+| `readonly: "*"` | `"readonly"` | function |
+| `inline_hint: "always"` | `"alwaysinline"` | function |
+| `inline_hint: "never"` | `"noinline"` | function |
+| `unroll_hint: N` | `"unroll"` | loop |
+
+**Tests**: `test_llvm_fast_math_fp_math`, `test_llvm_overflow_flag`,
+`test_llvm_unroll_hint_loop` — verify emitted `.ll` contains the expected
+string attributes.
+
+### Step H.1 — Webstack Options
+
+**File**: `src/backend/webstack.rs`
+
+**What**: During Webstack code generation, read `!>` metadata and emit
+WebAssembly-level options via `MetadataRegistry::webstack_option()`.
+
+| `!>` metadata | Webstack option |
+|---|---|
+| `convergence: "tight"` | `no_subnormals` |
+| `alloc_scope: "stack"` | `stack_allocation` |
+| `fp_contract: "*"` | `fma_fuse` |
+
+**Tests**: `test_webstack_convergence_option`,
+`test_webstack_alloc_scope_stack` — verify option string appears in generated
+JS glue.
+
+### Step H.2 — CIRCT Options
+
+**File**: `src/backend/circt.rs`
+
+**What**: During CIRCT code generation, read `!>` metadata and emit
+CIRCT-level options via `MetadataRegistry::circt_option()`.
+
+| `!>` metadata | CIRCT option |
+|---|---|
+| `overflow: "wrapping"` | `comb.add` |
+| `convergence: "tight"` | `single_cycle` |
+| `unroll_hint: N` | `unroll_factor` |
+
+**Tests**: `test_circt_overflow_wrapping`, `test_circt_convergence_tight`
+— verify option emitted in `.mlir` output.
+
+---
+
+## Phase I — CLI Completion (`brief derive` flags + `brief accept`)
+
+**Goal**: Complete the phase E sub-steps that were deferred. Phase E committed
+the doppelganger infrastructure and a bare `brief derive` command, but omitted
+flag parsing (`--stochastic`, `--iterations`, etc.) and the `brief accept`
+subcommand. Phase I finishes both.
+
+### Step I.0 — `brief derive` CLI Flags
+
+**File**: `src/derive/cli.rs`, `src/main.rs`
+
+**What**: Add flag parsing to the `brief derive` command:
+
+```
+brief derive <file>                # enumerative + SMT → foo.derive.bv
+brief derive --stochastic <file>   # also run MCMC → foo.opt.bv
+brief derive --iterations N        # MCMC iterations (default: 10000)
+brief derive --temperature T       # initial temperature (default: 1.0)
+brief derive --enumerative-depth N # max depth (default: 5)
+brief derive --all                 # process all transitive imports
+```
+
+Flags are parsed with a simple hand-written loop (no clap dependency in
+`src/main.rs`). The handler passes them to `handle_derive_command` which
+currently ignores them — extend the function signature to accept a config
+struct.
+
+**`DeriveConfig` struct** (new, in `src/derive/cli.rs`):
+
+```rust
+pub struct DeriveConfig {
+    pub stochastic: bool,
+    pub iterations: usize,
+    pub temperature: f64,
+    pub enumerative_depth: usize,
+    pub process_all: bool,
+}
+```
+
+Default: `DeriveConfig { stochastic: false, iterations: 10_000,
+temperature: 1.0, enumerative_depth: 5, process_all: false }`.
+
+**Flow**:
+1. CLI parses flags, builds `DeriveConfig`
+2. `synthesize()` receives config — uses `enumerative_depth` for depth cap
+3. If `stochastic: true`, calls `mcmc_superoptimize()` (Phase F) after synthesis
+4. Writes to `foo.opt.bv` instead of `foo.derive.bv` when `stochastic`
+
+**Tests**:
+- `test_derive_with_stochastic_flag`: `--stochastic` → MCMC runs
+- `test_derive_with_custom_depth`: `--enumerative-depth 3` → limited search
+- `test_derive_with_iterations`: Non-default iteration count passed to MCMC
+- `test_derive_all_flag`: Imported derivation blocks also processed
+
+### Step I.1 — `brief accept` Subcommand
+
+**File**: `src/derive/accept.rs` (new), `src/main.rs`, `src/derive/mod.rs`
+
+**What**: Add `brief accept <file>` that folds doppelganger bodies back into
+the source `.bv` file. The compiler NEVER mutates source — `brief accept` is
+an intentional user action after reviewing the generated `foo.derive.bv`.
+
+```
+brief accept <file>              # fold foo.derive.bv bodies into foo.bv
+brief accept <file> --opt        # fold from foo.opt.bv instead (MCMC result)
+brief accept <file> --all        # accept all derivation blocks in file
+```
+
+**Algorithm**:
+1. Read the shadow file (`foo.derive.bv` or `foo.opt.bv`)
+2. Parse it to find synthesized bodies
+3. Read the original `foo.bv`, find each `:= { ... }` block
+4. Replace the derivation comment with the actual body
+5. Write `foo.bv` (with `.bak` backup of original)
+
+**Why separate from `brief derive`**: The derive step is automatic and lossless
+(original file untouched). The accept step is an explicit review gate — the
+developer inspects `foo.derive.bv`, decides "this looks correct," then folds it in.
+
+**Why no `--all` default**: A large file may have multiple derivation blocks.
+The developer should review each synthesized body before accepting. `--all`
+is available for CI/scripted workflows.
+
+**Relation to assertion mode**: After acceptance, `brief build foo.bv` runs in
+assertion mode (`verify_derivation_assertions` in compile pipeline) — if the
+body and examples disagree, the build fails. This ensures accepted results
+stay correct after source changes.
+
+**Tests**:
+- `test_accept_basic`: derive → accept → `foo.bv` has inlined bodies
+- `test_accept_opt`: accept from `foo.opt.bv` → MCMC-optimized bodies
+- `test_accept_no_shadow`: no `.derive.bv` → error points to `brief derive`
+- `test_accept_preserves_derivation_block`: `// := { ... }` comment retained
+- `test_accept_without_derivation`: source has no `:=` blocks → no-op
+- `test_accept_idempotent`: accept twice → second run sees no `:=` → no-op
+
 ---
 
 ## Documentation Requirements
@@ -2312,7 +2476,7 @@ Every phase must update the following documentation in the same commit:
 
 | Phase | Document to update |
 |-------|-------------------|
-| All | `docs/architecture/overview.md` — mention the four-phase pipeline |
+| All | `docs/architecture/overview.md` — mention the nine-phase (A–I) pipeline |
 | A | `docs/architecture/features/derivation-blocks.md` — tolerance syntax |
 | B | `docs/architecture/features/derivation-blocks.md` — assertion build gate |
 | C | `docs/architecture/features/derivation-blocks.md` — enumerative synthesis |
@@ -2320,6 +2484,8 @@ Every phase must update the following documentation in the same commit:
 | E | `docs/architecture/features/derivation-blocks.md` — doppelganger system + `brief accept` |
 | F | `docs/architecture/features/mcmc-superoptimizer.md` — new doc |
 | G | `docs/architecture/optimization-hints.md` — new vocabulary reference |
+| H | `docs/architecture/optimization-hints.md` — backend wiring section |
+| I | `docs/architecture/features/derivation-blocks.md` — `brief accept` docs |
 
 ---
 
@@ -2330,12 +2496,14 @@ Every phase must update the following documentation in the same commit:
  2. Phase B: Assertion build gate + interpreter call_function
  3. Phase C: Full enumerative synthesis (type-aware, interpreter-backed)
  4. Phase D: Full SMT synthesis (SyGuS, Z3 integration)
-  5. Phase E: Doppelganger write-back + build resolution + `brief accept`
+ 5. Phase E: Doppelganger write-back + build resolution (E.0–E.3)
  6. Phase F: MCMC superoptimizer (mutations, equivalence, sampler, Pareto)
  7. Phase G: Metadata vocabulary reference + backend mappings
- 8. Integration tests: end-to-end pipeline
- 9. Benchmark baseline + MCMC comparison
+ 8. Phase H: Metadata-driven codegen (LLVM, Webstack, CIRCT wiring)
+ 9. Phase I: CLI completion (`brief derive` flags + `brief accept`)
+10. Integration tests: end-to-end pipeline
+11. Benchmark baseline + MCMC comparison
 ```
 
 Each commit must pass `cargo test --lib` and `cargo build --release`.
-After commit 9, run the full benchmark suite and compare to baseline.
+After commit 11, run the full benchmark suite and compare to baseline.

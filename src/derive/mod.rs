@@ -28,18 +28,29 @@ use crate::ast::{DerivationBlock, DerivationExample, Expr};
 
 /// Synthesize a function body from a derivation block.
 /// Tries the fast enumerative engine first, falls back to SMT if needed.
-pub fn synthesize(name: &str, block: &DerivationBlock, max_depth: usize) -> Result<Expr, SynthesizeError> {
+/// Returns a `SynthesizedProgram` with cost for doppelganger/MCMC pipelines.
+/// 2026-07-28: Phase I.0 — Changed return type from `Expr` to `SynthesizedProgram`.
+pub fn synthesize(name: &str, block: &DerivationBlock, max_depth: usize) -> Result<engine::SynthesizedProgram, SynthesizeError> {
     if block.examples.is_empty() {
         return Err(SynthesizeError::NoExamples(name.to_string()));
     }
     // Try enumerative search first
     match engine::enumerative_search(name, &block.examples, max_depth) {
-        Ok(Some(expr)) => return Ok(expr),
+        Ok(Some(expr)) => {
+            let cost = engine::CostModel::default().cost_of_expr(&expr);
+            return Ok(engine::SynthesizedProgram { body: vec![expr], cost, depth: max_depth as u8 });
+        }
         Ok(None) => {} // fall through to SMT
         Err(e) => return Err(e),
     }
     // Fall back to SMT solver
-    smt::synthesize_via_smt(name, &block.examples)
+    match smt::synthesize_via_smt(name, &block.examples) {
+        Ok(expr) => {
+            let cost = engine::CostModel::default().cost_of_expr(&expr);
+            Ok(engine::SynthesizedProgram { body: vec![expr], cost, depth: max_depth as u8 })
+        }
+        Err(e) => Err(e),
+    }
 }
 
 /// Error types for the synthesis engine.
