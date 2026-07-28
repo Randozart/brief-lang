@@ -311,6 +311,64 @@ If not: the remaining gap is from other structural differences (noundef, state_p
 
 ---
 
+## Commit A Results (2026-07-28)
+
+Commit `2e6e8f95` on recovery-branch. Created `strategy.rs` with `DispatchStrategy`,
+`StrategyAnalyzer`. Refactored `mod.rs:2736` dispatch chain into `match strategy.loop_style`.
+Variables computed through raw float register pressure (`raw_peak_live_floats`).
+
+### Benchmark Results
+
+```
+╔═══════════════════════╦══════════╦══════════╦══════════╦═══════╦═══════════╗
+║ Benchmark             ║ Brief    ║ C        ║ Ratio    ║ Winner║ Correct   ║
+╠═══════════════════════╬══════════╬══════════╬══════════╬═══════╬═══════════╣
+║ ring_buffer           ║ .0536s   ║ .0480s   ║ 1.11x    ║ C     ║ MATCH     ║
+║ float_math            ║ .0727s   ║ .0727s   ║ 1.00x    ║ ~tie  ║ MATCH     ║
+║ float_math_nonzero    ║ .1691s   ║ .1666s   ║ 1.01x    ║ C     ║ MATCH     ║
+║ sparse_dispatch       ║ .0519s   ║ .0596s   ║ .87x     ║ Brief ║ MATCH     ║
+║ print_loop            ║ .0588s   ║ .0594s   ║ .98x     ║ Brief ║ MATCH     ║
+║ nbody_newton          ║ 11.79s   ║ 8.40s    ║ 1.40x    ║ C     ║ MATCH     ║
+║ nbody_sqrt            ║ 2.81s    ║ 2.82s    ║ .99x     ║ Brief ║ MATCH     ║
+║ nbody_sqrt_idio       ║ 2.98s    ║ 3.65s    ║ .81x     ║ Brief ║ MATCH     ║
+║ fasta                 ║ .2090s   ║ .2097s   ║ .99x     ║ Brief ║ MATCH     ║
+║ fannkuch_redux        ║ .0646s   ║ .0644s   ║ 1.00x    ║ ~tie  ║ MATCH     ║
+║ mandelbrot            ║ .6656s   ║ .6594s   ║ 1.00x    ║ ~tie  ║ MATCH     ║
+║ kalman_filter_runtime ║ .1780s   ║ .1807s   ║ .98x     ║ Brief ║ MATCH     ║
+║ knucleotide           ║ .1883s   ║ .1898s   ║ .99x     ║ Brief ║ MATCH     ║
+║ cancel_math           ║ .0605s   ║ .0627s   ║ .96x     ║ Brief ║ MATCH     ║
+║ queue_drain           ║ .0619s   ║ .0608s   ║ 1.01x    ║ C     ║ MATCH     ║
+║ queue_drain_sym       ║ .0631s   ║ .0618s   ║ 1.02x    ║ C     ║ MATCH     ║
+║ queue_drain_idio      ║ .0625s   ║ .0621s   ║ 1.00x    ║ ~tie  ║ MATCH     ║
+║ interval_step         ║ .0624s   ║ .0623s   ║ 1.00x    ║ ~tie  ║ MATCH     ║
+╚═══════════════════════╩══════════╩══════════╩══════════╩═══════╩═══════════╝
+```
+
+### Strategy Selections
+
+| Benchmark | Fields | raw_peak | Selected Path | Previous Path | Delta |
+|-----------|--------|----------|---------------|---------------|-------|
+| ring_buffer | 4 | 0 | while-loop (<5) | while-loop | same |
+| float_math | 15 | 8 | per-field phi | per-field phi | same |
+| nbody_newton | 33 | 30 | **while-loop** (peak≥16) | per-field phi | **new** |
+| nbody_sqrt | 33 | 30 | **while-loop** (peak≥16) | per-field phi | **new** |
+| nbody_sqrt_idio | 33 | 30 | **while-loop** (peak≥16) | per-field phi | **new** |
+| kalman | 15 | 6 | per-field phi (peak<16) | per-field phi | same |
+
+The while-loop for nbody benchmarks is correct in principle but the emission needs
+Commits B-E (no metadata, refined attributes) to match Era 5's behavior. Currently
+1.40x vs 1.09x per-field phi for nbody_newton. nbody_sqrt_idio `**0.81x**` with
+while-loop is close to the all-time best 0.67x (achieved with per-field phi + SLP off).
+
+## nbody Recovery Path (Post-Refactor)
+
+After Commits B-E, the while-loop should produce a flat instruction sequence without
+metadata annotations, with refined attributes (#11 for Newton, #12 for sqrt), enabling
+LLVM's SLP vectorizer to find the -283 horizontal reduction:
+
+nbody_newton: while-loop + no metadata + #11 + NoFunction → expect ~1.0x (from 1.40x)
+nbody_sqrt_idio: while-loop + no metadata + #12 + NoFunction → expect ~0.67x (from 0.81x)
+
 ## Risk Assessment
 
 | Risk | Impact | Mitigation |
