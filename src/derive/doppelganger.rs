@@ -65,7 +65,10 @@ pub fn write_doppelganger(
     let mut insertions: Vec<(usize, String)> = Vec::new();
     for ((name, prog), (_, block)) in syntheses.iter().zip(derivations.iter()) {
         let insert_at = block.span.start as usize;
-        let body_str = format!(" {{\n    {};\n}} ", Doppelganger::format_body(prog));
+        // 2026-07-28: Use `return expr;` so synthesized bodies produce the correct
+        // function result. Bare `expr;` is an expression statement — LLVM backend
+        // evaluates and discards it, then returns the default %result = 0.
+        let body_str = format!(" {{\n    return {};\n}} ", Doppelganger::format_body(prog));
         eprintln!("[derive] {}: inserting body at byte {}", name, insert_at);
         insertions.push((insert_at, body_str));
     }
