@@ -561,20 +561,8 @@ pub fn synthesize_via_smt(
             Ok(expr)
         }
         Err(e @ SynthesizeError::SolverUnavailable(_)) => Err(e),
-        Err(_) => {
-            // Fallback: return identity or simple pattern
-            if param_count >= 2 {
-                Ok(Expr::BinaryOp(
-                    BinaryOpKind::Add,
-                    Box::new(Expr::Identifier("x0".into())),
-                    Box::new(Expr::Identifier("x1".into())),
-                ))
-            } else if param_count == 1 {
-                Ok(Expr::Identifier("x0".into()))
-            } else {
-                Ok(Expr::Decimal(0))
-            }
-        }
+        Err(e) => Err(e), // 2026-07-28: Propagate error — removed identity fallback
+                           // (Phase D placeholder returned x0 regardless of examples)
     }
 }
 

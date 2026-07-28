@@ -49,6 +49,7 @@ pub fn synthesize(name: &str, block: &DerivationBlock, max_depth: usize) -> Resu
     match smt::synthesize_via_smt(name, &block.examples) {
         Ok(expr) => {
             let cost = engine::CostModel::default().cost_of_expr(&expr);
+            eprintln!("  DIAG: SMT returned body={:?}, cost={}", expr, cost);
             Ok(engine::SynthesizedProgram { body: vec![expr], cost, depth: max_depth as u8 })
         }
         Err(e) => Err(e),
