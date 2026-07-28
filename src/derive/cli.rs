@@ -26,7 +26,11 @@ impl Default for DeriveConfig {
             stochastic: false,
             iterations: 10_000,
             temperature: 1.0,
-            enumerative_depth: 5,
+            // 2026-07-28: Default depth 3 (not 5) to keep synthesis fast.
+            // Depth 5 generates ~10k+ candidates for (Int, Int) -> Int,
+            // causing multi-minute CPU hangs. Users who need deeper search
+            // can pass --enumerative-depth 5 explicitly.
+            enumerative_depth: 3,
             process_all: false,
         }
     }
@@ -222,7 +226,8 @@ mod tests {
         assert!(!config.stochastic);
         assert_eq!(config.iterations, 10_000);
         assert_eq!(config.temperature, 1.0);
-        assert_eq!(config.enumerative_depth, 5);
+        // 2026-07-28: Default depth changed from 5 to 3 for performance
+        assert_eq!(config.enumerative_depth, 3);
         assert!(!config.process_all);
         assert_eq!(positional, vec!["foo.bv"]);
     }

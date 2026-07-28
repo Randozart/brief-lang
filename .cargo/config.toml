@@ -8,3 +8,10 @@
 # use: RUSTFLAGS="-C link-args=-Wl,-z,stack-size=33554432" cargo build
 [target.x86_64-unknown-linux-gnu]
 rustflags = ["-C", "link-args=-Wl,-z,stack-size=33554432"]
+
+# 2026-07-28: Limit parallel build jobs to prevent CPU saturation on
+# memory-constrained systems. The synthesis engine at depth 5 generates
+# ~10k+ expression candidates for (Int, Int) -> Int, and 8 parallel
+# rustc instances + test execution can saturate all cores.
+[build]
+jobs = 2
