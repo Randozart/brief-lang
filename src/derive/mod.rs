@@ -14,6 +14,7 @@ mod mutate;
 mod equivalence;
 mod pareto;
 mod accept;
+mod verify;
 
 pub use engine::*;
 pub use smt::*;
@@ -25,6 +26,7 @@ pub use mutate::*;
 pub use equivalence::*;
 pub use pareto::*;
 pub use accept::*;
+pub use verify::*;
 
 use crate::ast::{DerivationBlock, DerivationExample, Expr, Type};
 
@@ -33,29 +35,60 @@ use crate::ast::{DerivationBlock, DerivationExample, Expr, Type};
 /// Returns a `SynthesizedProgram` with cost for doppelganger/MCMC pipelines.
 /// 2026-07-28: Phase I.0 — Changed return type from `Expr` to `SynthesizedProgram`.
 /// 2026-07-28: Added `params` so synthesized expressions use actual param names.
+/// 2026-07-28: Added `verify_samples` for Tier 2/3 overfitting prevention.
 pub fn synthesize(
     name: &str,
     block: &DerivationBlock,
     params: &[(String, Type)],
     max_depth: usize,
+    verify_samples: usize,
 ) -> Result<engine::SynthesizedProgram, SynthesizeError> {
     if block.examples.is_empty() {
         return Err(SynthesizeError::NoExamples(name.to_string()));
     }
     // Try enumerative search first
-    match engine::enumerative_search(name, params, &block.examples, max_depth) {
-        Ok(Some(expr)) => {
-            let cost = engine::CostModel::default().cost_of_expr(&expr);
-            return Ok(engine::SynthesizedProgram { body: vec![expr], cost, depth: max_depth as u8 });
+    if let Ok(Some(expr)) = engine::enumerative_search(name, params, &block.examples, max_depth) {
+        // Tier 2 + 3: Verify candidate against random inputs + postcondition
+        if verify_samples > 0 {
+            match verify::verify_candidate(&expr, params, None, verify_samples) {
+                verify::VerifyResult::Pass => { /* accept */ }
+                verify::VerifyResult::Fail(_, reason) => {
+                    // Candidate overfitted — reject and fall through to SMT
+                    eprintln!("  verify: '{}' rejected ({}) — trying SMT", name, reason);
+                    // Fall through to SMT below
+                    return synthesize_via_smt_with_verify(name, params, &block.examples, verify_samples);
+                }
+            }
         }
-        Ok(None) => {} // fall through to SMT
-        Err(e) => return Err(e),
+        let cost = engine::CostModel::default().cost_of_expr(&expr);
+        return Ok(engine::SynthesizedProgram { body: vec![expr], cost, depth: max_depth as u8 });
     }
     // Fall back to SMT solver
-    match smt::synthesize_via_smt(name, params, &block.examples) {
+    synthesize_via_smt_with_verify(name, params, &block.examples, verify_samples)
+}
+
+/// Call SMT synthesis then verify the result.
+fn synthesize_via_smt_with_verify(
+    name: &str,
+    params: &[(String, Type)],
+    examples: &[DerivationExample],
+    verify_samples: usize,
+) -> Result<engine::SynthesizedProgram, SynthesizeError> {
+    match smt::synthesize_via_smt(name, params, examples) {
         Ok(expr) => {
+            if verify_samples > 0 {
+                match verify::verify_candidate(&expr, params, None, verify_samples) {
+                    verify::VerifyResult::Pass => { /* accept */ }
+                    verify::VerifyResult::Fail(_, reason) => {
+                        eprintln!("  verify: SMT result for '{}' rejected ({})", name, reason);
+                        return Err(SynthesizeError::NoSolution(
+                            format!("SMT result for '{}' rejected by verification: {}", name, reason)
+                        ));
+                    }
+                }
+            }
             let cost = engine::CostModel::default().cost_of_expr(&expr);
-            Ok(engine::SynthesizedProgram { body: vec![expr], cost, depth: max_depth as u8 })
+            Ok(engine::SynthesizedProgram { body: vec![expr], cost, depth: 0 })
         }
         Err(e) => Err(e),
     }

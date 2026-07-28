@@ -542,6 +542,42 @@ fn is_constant_zero(expr: &Expr) -> bool {
     }
 }
 
+/// 2026-07-28: Check if an expression is constant one (for identity pruning).
+fn is_constant_one(expr: &Expr) -> bool {
+    match expr {
+        Expr::Decimal(n) => *n == 1,
+        Expr::UnaryOp(UnaryOpKind::Neg, inner) => match inner.as_ref() {
+            Expr::Decimal(n) => *n == -1,
+            _ => false,
+        },
+        _ => false,
+    }
+}
+
+/// 2026-07-28: Check if an expression is all-ones (0xFFFF...FFFF = -1 for i64).
+fn is_all_ones(expr: &Expr) -> bool {
+    match expr {
+        Expr::Decimal(n) => *n == -1,
+        _ => false,
+    }
+}
+
+/// 2026-07-28: Tier 1 — Check if a binary operation is semantically redundant.
+/// Identity operations like 0+X, X*1, X>>0 produce the same result as the
+/// non-identity operand. Pruning them reduces search space and overfitting.
+fn is_identity_op(op: BinaryOpKind, lhs: &Expr, rhs: &Expr) -> bool {
+    match op {
+        BinaryOpKind::Add => is_constant_zero(lhs) || is_constant_zero(rhs),
+        BinaryOpKind::Sub => is_constant_zero(rhs),
+        BinaryOpKind::Mul => is_constant_one(lhs) || is_constant_one(rhs),
+        BinaryOpKind::Div => is_constant_one(rhs),
+        BinaryOpKind::Shl | BinaryOpKind::Shr => is_constant_zero(rhs),
+        BinaryOpKind::BitAnd => is_all_ones(rhs),
+        BinaryOpKind::BitOr | BinaryOpKind::BitXor => is_constant_zero(rhs),
+        _ => false,
+    }
+}
+
 /// 2026-07-28: Generate the next depth's candidates from the pruned previous level.
 /// Uses LevelCache (per-type pruned sets from the previous depth) instead of
 /// recursively generating all sub-expressions. This enables checkpoint pruning.
@@ -608,6 +644,12 @@ fn generate_next_level(
                             if is_constant_zero(rhs) {
                                 continue;
                             }
+                        }
+                        // 2026-07-28: Tier 1 — Skip identity operations that add
+                        // no semantic value (0+X, X*1, X>>0, etc.). These inflate
+                        // the search space and produce overfitted formulas.
+                        if is_identity_op(*op, lhs, rhs) {
+                            continue;
                         }
                         result.push(Expr::BinaryOp(*op, Box::new(lhs.clone()), Box::new(rhs.clone())));
                     }

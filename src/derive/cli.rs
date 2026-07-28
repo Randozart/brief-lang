@@ -18,6 +18,8 @@ pub struct DeriveConfig {
     pub temperature: f64,
     pub enumerative_depth: usize,
     pub process_all: bool,
+    // 2026-07-28: Tier 2/3 — verification samples (0 = disable verification)
+    pub verify_samples: usize,
 }
 
 impl Default for DeriveConfig {
@@ -32,6 +34,10 @@ impl Default for DeriveConfig {
             // can pass --enumerative-depth 5 explicitly.
             enumerative_depth: 3,
             process_all: false,
+            // 2026-07-28: Default 50 verification samples. Disable with 0.
+            // Each sample evaluates the candidate against random inputs and
+            // checks for evaluation errors, constant-output, and postconditions.
+            verify_samples: 50,
         }
     }
 }
@@ -68,6 +74,12 @@ pub fn parse_derive_flags(args: &[String]) -> Result<(DeriveConfig, Vec<String>)
             let val = args.get(i).ok_or("--enumerative-depth requires a value")?;
             config.enumerative_depth = val.parse::<usize>()
                 .map_err(|_| format!("invalid --enumerative-depth value '{}'", val))?;
+            i += 1;
+        } else if arg == "--verify-samples" {
+            i += 1;
+            let val = args.get(i).ok_or("--verify-samples requires a value")?;
+            config.verify_samples = val.parse::<usize>()
+                .map_err(|_| format!("invalid --verify-samples value '{}'", val))?;
             i += 1;
         } else if arg.starts_with("--") {
             return Err(format!("unknown flag '{}'", arg));
@@ -119,7 +131,7 @@ pub fn handle_derive_command(config: &DeriveConfig, file_path: &str) -> Result<(
     let mut syntheses: Vec<(String, SynthesizedProgram)> = Vec::new();
     for (name, params, block) in &derivations {
         eprintln!("[derive] synthesizing '{}' (depth={})...", name, config.enumerative_depth);
-        match synthesize(name, block, params, config.enumerative_depth) {
+        match synthesize(name, block, params, config.enumerative_depth, config.verify_samples) {
             Ok(prog) => {
                 eprintln!("[derive] '{}': synthesized body with cost {}", name, prog.cost);
                 syntheses.push((name.clone(), prog));
