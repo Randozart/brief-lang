@@ -1987,71 +1987,93 @@ The machine-readable source is `config/meta-vocab.dbv`.
 
 1. **`MetaField` schema** — what metadata keys exist, their types, descriptions
 2. **`BackendMapping` schema** — how a (key, value) pair maps to a backend IR attribute
-3. **Data entries** under `as MetaField { ... }` — one per metadata key
-4. **Data entries** under `as BackendMapping { ... }` — one per mapping rule
+3. **Data entries** under `as MetaField { ... }` — keyed entries using `(name)` key field
+4. **Data entries** under `as BackendMapping { ... }` — positional `>` entries
+
+**Grammar note**: `MetaField` uses `(name)` as its key field annotation. This marks
+the `name` field as the logical lookup key but does NOT change the entry syntax —
+entries in `as MetaField { ... }` use the keyed entry form `key: ty; "description";`
+where `key` is the name, and the remaining fields are positional by schema order.
+
+**DBV parser fix (2026-07-28)**: `parse_schema()` and `parse_grouped_data()` now
+consume the optional trailing `;` after `}`. Previously the `;` fell through to the
+main loop's `_ =>` arm and was misparsed as an empty positional value. Both
+`schema Name { ... };` and `as SchemaName { ... };` work with or without `;`.
 
 ```dbv
 // config/meta-vocab.dbv — Phase G metadata vocabulary
-// Inline schemas define the structure; > entries are positional data.
+// MetaField uses keyed entries with (name) key field.
+// BackendMapping uses positional > entries with (meta_key) key field.
 
-schema MetaField {
+schema MetaField (name) {
     name: String;
-    type: String;
+    ty: String;
     description: String;
 };
 
-schema BackendMapping {
+schema BackendMapping (meta_key) {
     backend: String;
-    metadata_key: String;
+    meta_key: String;
     value_pattern: String;
-    ir_attribute: String;
-    applies_to: String;  // "function", "instruction", "module"
+    attr: String;
+    scope: String;  // "function", "instruction", "module", "loop", "option"
 };
 
 as MetaField {
-    > overflow; String; "Integer overflow behavior for arithmetic ops";
-    > associative; Bool; "May the optimizer reassociate FP operations";
-    > commutative; Bool; "May the optimizer swap operands";
-    > fp_contract; String; "May the optimizer form FMA (fast, strict)";
-    > fp_math; String; "Floating-point compliance model (ieee754, fast)";
-    > readonly; Bool; "Function has no observable side effects";
-    > inline_hint; String; "Inlining hint (always, never, hint)";
-    > alloc_scope; String; "Allocation scope (heap, stack)";
-    > convergence; String; "Hardware convergence mode (tight, loose)";
-    > unroll_hint; Int; "Loop unroll factor hint";
-    > search_space; String; "MCMC search space (linear, bitwise, all)";
-    > cost_model; String; "MCMC cost function (latency, throughput, size)";
-    > tolerance; Float; "FP equivalence tolerance for MCMC";
-    > allowed_mutations; String[]; "MCMC allowed mutation names";
+    overflow: String; "Integer overflow behavior for arithmetic ops";
+    associative: Bool; "May the optimizer reassociate FP operations";
+    commutative: Bool; "May the optimizer swap commutative operands";
+    fp_contract: String; "May the optimizer form FP contractions (FMA)";
+    fp_math: String; "Floating-point compliance: ieee754 | fast";
+    readonly: Bool; "Function has no observable side effects";
+    alloc_scope: String; "Allocation scope: heap | stack";
+    inline_hint: String; "Inlining hint: always | never | hint";
+    convergence: String; "Hardware convergence mode: tight | loose";
+    unroll_hint: Int; "Loop unroll factor hint";
+    search_space: String; "MCMC search space: linear | bitwise | all";
+    cost_model: String; "MCMC cost function: latency | throughput | size";
+    tolerance: Float; "FP equivalence tolerance for MCMC";
+    allowed_mutations: Vec[String]; "Restrict MCMC to named mutations only";
 };
 
 as BackendMapping {
     // LLVM mappings
     > llvm; overflow; "wrapping"; "nuw nsw"; instruction;
-    > llvm; fp_math; "fast"; "fast"; instruction;
-    > llvm; fp_contract; "fast"; "contract"; instruction;
-    > llvm; associative; "true"; "reassoc"; instruction;
-    > llvm; readonly; "true"; "readonly"; function;
+    > llvm; overflow; "checked"; "nsw"; instruction;
+    > llvm; overflow; "saturating"; "nuw"; instruction;
+    > llvm; associative; "*"; "reassoc"; function;
+    > llvm; fp_contract; "*"; "contract"; function;
+    > llvm; fp_math; "fast"; "fast"; function;
+    > llvm; fp_math; "ieee754"; ""; function;
+    > llvm; readonly; "*"; "readonly"; function;
     > llvm; inline_hint; "always"; "alwaysinline"; function;
     > llvm; inline_hint; "never"; "noinline"; function;
-    > llvm; alloc_scope; "stack"; "allockind(alloc)"; instruction;
-    > llvm; unroll_hint; "*"; "unroll"; instruction;
+    > llvm; unroll_hint; "*"; "unroll"; loop;
 
     // Webstack mappings
-    > webstack; alloc_scope; "stack"; "stack_allocation"; function;
-    > webstack; fp_contract; "fast"; "fma_fusion"; function;
+    > webstack; convergence; "tight"; "no_subnormals"; option;
+    > webstack; alloc_scope; "stack"; "stack_allocation"; option;
+    > webstack; fp_contract; "*"; "fma_fuse"; option;
 
     // CIRCT mappings
-    > circt; convergence; "tight"; "single_cycle"; function;
-    > circt; unroll_hint; "*"; "unroll_factor"; function;
+    > circt; overflow; "wrapping"; "comb.add"; option;
+    > circt; convergence; "tight"; "single_cycle"; option;
+    > circt; unroll_hint; "*"; "unroll_factor"; option;
 };
 ```
 
 **Loading**: The `MetadataRegistry` uses `include_str!("../../config/meta-vocab.dbv")`
 and `dbrief::v2::parse_document_quoted()`. The `parse_document_quoted` variant is
-required because mapping values use `"...`" quotation (e.g., `"wrapping"`, `"fast"`).
+required because mapping values use `"..."` quotation (e.g., `"wrapping"`, `"fast"`).
 Parse failure at compile time is a hard error (invariant: the `.dbv` file is always
 valid in a working copy).
+
+**MetaField parsing**: `MetadataRegistry::parse_meta_field` reads `entry.key` as
+the field name, `fields[0]` as the type string, `fields[1]` as the description.
+
+**BackendMapping parsing**: `MetadataRegistry::parse_backend_mapping` reads
+`fields[0..4]` as positional `(backend, meta_key, value_pattern, attr, scope)`.
+The `entry.key` is `None` for `>` positional entries.
 
 ### Step G.2 — MetadataRegistry
 

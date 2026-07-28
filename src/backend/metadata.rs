@@ -39,6 +39,7 @@ impl MetaType {
 }
 
 /// A backend mapping rule from the vocabulary.
+/// Parsed positionally from as BackendMapping { > backend; meta_key; value_pattern; attr; scope; };
 #[derive(Debug, Clone)]
 struct BackendMapping {
     backend: String,
@@ -168,18 +169,18 @@ impl MetadataRegistry {
     }
 
     fn parse_backend_mapping(entry: &DataEntry) -> Option<BackendMapping> {
-        // Keyed entry: key = backend name, positional fields: [metadata_key, value_pattern, ir_attribute, applies_to]
-        let backend = entry.key.as_ref()?.clone();
+        // Positional entry: fields = [backend, meta_key, value_pattern, attr, scope]
+        // (entry.key is None for positional > entries)
         let fields = &entry.fields;
-        if fields.len() < 4 {
+        if fields.len() < 5 {
             return None;
         }
         Some(BackendMapping {
-            backend,
-            metadata_key: value_as_string(&fields[0])?,
-            value_pattern: value_as_string(&fields[1])?,
-            ir_attribute: value_as_string(&fields[2])?,
-            applies_to: value_as_string(&fields[3])?,
+            backend: value_as_string(&fields[0])?,
+            metadata_key: value_as_string(&fields[1])?,
+            value_pattern: value_as_string(&fields[2])?,
+            ir_attribute: value_as_string(&fields[3])?,
+            applies_to: value_as_string(&fields[4])?,
         })
     }
 }
@@ -308,11 +309,10 @@ mod tests {
     }
 
     #[test]
-    fn test_llvm_mismatched_value() {
+    fn test_llvm_overflow_checked() {
         let reg = test_registry();
-        // "overflow" has mapping for "wrapping" but not "checked"
         let result = reg.llvm_attr("overflow", "checked");
-        assert_eq!(result, None);
+        assert_eq!(result, Some("nsw"));
     }
 
     #[test]

@@ -1,121 +1,55 @@
-schema MetaField {
+// config/meta-vocab.dbv — Phase G metadata vocabulary
+// Inline schemas define the structure. Keyed entries in as MetaField
+// use the (name) key field for named lookup. Positional > entries in
+// as BackendMapping use field order for table-style data.
+
+schema MetaField (name) {
     name: String;
-    type: String;
+    ty: String;
     description: String;
-}
+};
 
-schema BackendMapping {
+schema BackendMapping (meta_key) {
     backend: String;
-    metadata_key: String;
+    meta_key: String;
     value_pattern: String;
-    ir_attribute: String;
-    applies_to: String;
-}
+    attr: String;
+    scope: String;  // "function", "instruction", "module", "loop", "option"
+};
 
 as MetaField {
-    overflow: String; "Integer overflow behavior for arithmetic ops"
-}
-
-as MetaField {
-    associative: Bool; "May the optimizer reassociate FP operations"
-}
-
-as MetaField {
-    commutative: Bool; "May the optimizer swap operands"
-}
-
-as MetaField {
-    fp_contract: String; "May the optimizer form FMA (fast, strict)"
-}
-
-as MetaField {
-    fp_math: String; "Floating-point compliance model (ieee754, fast)"
-}
-
-as MetaField {
-    readonly: Bool; "Function has no observable side effects"
-}
-
-as MetaField {
-    inline_hint: String; "Inlining hint (always, never, hint)"
-}
-
-as MetaField {
-    alloc_scope: String; "Allocation scope (heap, stack)"
-}
-
-as MetaField {
-    convergence: String; "Hardware convergence mode (tight, loose)"
-}
-
-as MetaField {
-    unroll_hint: Int; "Loop unroll factor hint"
-}
-
-as MetaField {
-    search_space: String; "MCMC search space (linear, bitwise, all)"
-}
-
-as MetaField {
-    cost_model: String; "MCMC cost function (latency, throughput, size)"
-}
-
-as MetaField {
-    tolerance: Float; "FP equivalence tolerance for MCMC"
-}
-
-as MetaField {
-    allowed_mutations: String; "MCMC allowed mutation names"
-}
+    overflow: String; "Integer overflow behavior for arithmetic ops";
+    associative: Bool; "May the optimizer reassociate FP operations";
+    commutative: Bool; "May the optimizer swap commutative operands";
+    fp_contract: String; "May the optimizer form FP contractions (FMA)";
+    fp_math: String; "Floating-point compliance: ieee754 | fast";
+    readonly: Bool; "Function has no observable side effects";
+    alloc_scope: String; "Allocation scope: heap | stack";
+    inline_hint: String; "Inlining hint: always | never | hint";
+    convergence: String; "Hardware convergence mode: tight | loose";
+    unroll_hint: Int; "Loop unroll factor hint";
+    search_space: String; "MCMC search space: linear | bitwise | all";
+    cost_model: String; "MCMC cost function: latency | throughput | size";
+    tolerance: Float; "FP equivalence tolerance for MCMC";
+    allowed_mutations: Vec[String]; "Restrict MCMC to named mutations only";
+};
 
 as BackendMapping {
-    llvm: overflow; "wrapping"; "nuw nsw"; instruction
-}
-
-as BackendMapping {
-    llvm: fp_math; "fast"; "fast"; instruction
-}
-
-as BackendMapping {
-    llvm: fp_contract; "fast"; "contract"; instruction
-}
-
-as BackendMapping {
-    llvm: associative; "true"; "reassoc"; instruction
-}
-
-as BackendMapping {
-    llvm: readonly; "true"; "readonly"; function
-}
-
-as BackendMapping {
-    llvm: inline_hint; "always"; "alwaysinline"; function
-}
-
-as BackendMapping {
-    llvm: inline_hint; "never"; "noinline"; function
-}
-
-as BackendMapping {
-    llvm: alloc_scope; "stack"; "allockind(alloc)"; instruction
-}
-
-as BackendMapping {
-    llvm: unroll_hint; "*"; "unroll"; instruction
-}
-
-as BackendMapping {
-    webstack: alloc_scope; "stack"; "stack_allocation"; function
-}
-
-as BackendMapping {
-    webstack: fp_contract; "fast"; "fma_fusion"; function
-}
-
-as BackendMapping {
-    circt: convergence; "tight"; "single_cycle"; function
-}
-
-as BackendMapping {
-    circt: unroll_hint; "*"; "unroll_factor"; function
-}
+    > llvm; overflow; "wrapping"; "nuw nsw"; instruction;
+    > llvm; overflow; "checked"; "nsw"; instruction;
+    > llvm; overflow; "saturating"; "nuw"; instruction;
+    > llvm; associative; "*"; "reassoc"; function;
+    > llvm; fp_contract; "*"; "contract"; function;
+    > llvm; fp_math; "fast"; "fast"; function;
+    > llvm; fp_math; "ieee754"; ""; function;
+    > llvm; readonly; "*"; "readonly"; function;
+    > llvm; inline_hint; "always"; "alwaysinline"; function;
+    > llvm; inline_hint; "never"; "noinline"; function;
+    > llvm; unroll_hint; "*"; "unroll"; loop;
+    > webstack; convergence; "tight"; "no_subnormals"; option;
+    > webstack; alloc_scope; "stack"; "stack_allocation"; option;
+    > webstack; fp_contract; "*"; "fma_fuse"; option;
+    > circt; overflow; "wrapping"; "comb.add"; option;
+    > circt; convergence; "tight"; "single_cycle"; option;
+    > circt; unroll_hint; "*"; "unroll_factor"; option;
+};
