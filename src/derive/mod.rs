@@ -9,12 +9,20 @@ mod smt;
 mod cli;
 mod assert;
 mod doppelganger;
+mod mcmc;
+mod mutate;
+mod equivalence;
+mod pareto;
 
 pub use engine::*;
 pub use smt::*;
 pub use cli::*;
 pub use assert::*;
 pub use doppelganger::*;
+pub use mcmc::*;
+pub use mutate::*;
+pub use equivalence::*;
+pub use pareto::*;
 
 use crate::ast::{DerivationBlock, DerivationExample, Expr};
 
