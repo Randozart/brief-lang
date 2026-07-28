@@ -4,7 +4,7 @@
 // evaluation, Occam cost model with constant burden, cost-pruned search.
 // Flat code: each function max 2 levels of nesting.
 
-use crate::ast::{BinaryOpKind, DerivationExample, Expr, Type, UnaryOpKind};
+use crate::ast::{BinaryOpKind, DerivationExample, Expr, Pattern, Type, UnaryOpKind};
 use crate::derive::SynthesizeError;
 use crate::interpreter::values_within_tolerance;
 use crate::interpreter::Value;
@@ -131,6 +131,69 @@ pub fn evaluate_synthesized(
                 evaluate_synthesized(e, ctx)
             } else {
                 Ok(Value::Bits(vec![0]))
+            }
+        }
+        Expr::Call(name, args, _) => {
+            // Treat calls as constructors for compound types.
+            // A constructor call like Add(Const(5), Const(3)) is represented
+            // as Call("Add", [Call("Const", [Decimal(5)]), ...], None).
+            let mut values = Vec::new();
+            for arg in args {
+                values.push(evaluate_synthesized(arg, ctx)?);
+            }
+            Ok(Value::Constructor(name.clone(), values))
+        }
+        Expr::Field(inner, field_name) => {
+            let val = evaluate_synthesized(inner, ctx)?;
+            match val {
+                Value::Constructor(_, ref fields) => {
+                    if let Ok(idx) = field_name.parse::<usize>() {
+                        fields.get(idx).cloned().ok_or(
+                            SynthesisEvalError::TypeMismatch(
+                                format!("field '{}' not found (index {})", field_name, idx)
+                            )
+                        )
+                    } else {
+                        Err(SynthesisEvalError::TypeMismatch(
+                            format!("named fields not yet supported in synthesis: '{}'", field_name)
+                        ))
+                    }
+                }
+                _ => Err(SynthesisEvalError::TypeMismatch(
+                    format!("field access on non-constructor: {:?}", val)
+                )),
+            }
+        }
+        Expr::Match(expr, arms) => {
+            let val = evaluate_synthesized(expr, ctx)?;
+            match val {
+                Value::Constructor(ref name, ref fields) => {
+                    for arm in arms {
+                        if let Pattern::EnumVariant(ref arm_name, ref pat_fields) = arm.pattern {
+                            if arm_name == name {
+                                for (i, pat) in pat_fields.iter().enumerate() {
+                                    match pat {
+                                        Pattern::Binding(binding_name) => {
+                                            if let Some(f) = fields.get(i) {
+                                                let val: crate::interpreter::Value = f.clone();
+                                                ctx.bind(binding_name, val);
+                                            }
+                                        }
+                                        Pattern::Wildcard => {}
+                                        _ => {}
+                                    }
+                                }
+                                return evaluate_synthesized(&arm.body, ctx);
+                            }
+                        }
+                    }
+                    Err(SynthesisEvalError::TypeMismatch(
+                        format!("no matching arm for constructor '{}'", name)
+                    ))
+                }
+                _ => Err(SynthesisEvalError::TypeMismatch(
+                    format!("match on non-constructor: {:?}", val)
+                )),
             }
         }
         _ => Err(SynthesisEvalError::TypeMismatch(format!(

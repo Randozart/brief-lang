@@ -235,6 +235,12 @@ pub enum Value {
     Void,
     Ref(Box<Value>),
 
+    // ── Compound types (synthesis engine) ────────────────────────────
+    // 2026-07-28: Constructor for enum variants and struct-like values.
+    // Produced by Expr::Constructor during synthesis evaluation.
+    // Used by the CEGIS loop to represent expressions in value space.
+    Constructor(String, Vec<Value>),
+
     // ── FFI bridge variants ─────────────────────────────────────────
     // 2026-07-14: These are produced/consumed only by the FFI layer
     // when marshalling structured data to/from native libraries.

@@ -4,6 +4,7 @@
 // This is the core of the CEGIS verification loop.
 
 use crate::ast::{BinaryOpKind, Expr, Type, UnaryOpKind};
+use crate::ast::Pattern;
 use crate::derive::SynthesizeError;
 use std::process::Command;
 use std::io::Write;
@@ -52,6 +53,45 @@ pub fn expr_to_smt_term(expr: &Expr, param_names: &[String]) -> String {
                 .map(|e| expr_to_smt_term(e, param_names))
                 .unwrap_or_else(|| "#x0000000000000000".into());
             format!("(ite {} {} {})", c, t, e_str)
+        }
+        // 2026-07-28: Phase 2 — Constructor (via Call), Field, Match
+        Expr::Call(name, args, _) => {
+            let arg_strs: Vec<String> = args.iter()
+                .map(|a| expr_to_smt_term(a, param_names))
+                .collect();
+            format!("({} {})", name, arg_strs.join(" "))
+        }
+        Expr::Field(inner, field_name) => {
+            let inner_str = expr_to_smt_term(inner, param_names);
+            format!("({} {})", field_name, inner_str)
+        }
+        Expr::Match(expr, arms) => {
+            let scrutinee = expr_to_smt_term(expr, param_names);
+            // Convert match to nested ite: (ite (is-Variant scrutinee) body ...)
+            let mut result = String::new();
+            for (i, arm) in arms.iter().enumerate() {
+                match &arm.pattern {
+                    Pattern::EnumVariant(name, _) => {
+                        let arm_body = expr_to_smt_term(&arm.body, param_names);
+                        if i == 0 {
+                            result = format!("(ite (is-{}) {} {}", name, scrutinee, arm_body);
+                        } else {
+                            result = format!("{} {}", result, arm_body);
+                        }
+                    }
+                    Pattern::Wildcard => {
+                        let arm_body = expr_to_smt_term(&arm.body, param_names);
+                        result = format!("{} {}", result, arm_body);
+                    }
+                    _ => {}
+                }
+            }
+            // Close all ite expressions (one for each arm except wildcard)
+            let arm_count = arms.iter().filter(|a| matches!(a.pattern, Pattern::EnumVariant(_, _))).count();
+            for _ in 0..arm_count {
+                result.push(')');
+            }
+            result
         }
         // Fallback for unsupported expression types
         _ => "#x0000000000000000".into(),
