@@ -30,6 +30,8 @@ pub struct CirctBackend {
     /// Cell definitions encountered during program traversal.
     /// Key is cell name, value is the CellDef AST node.
     cell_defs: HashMap<String, crate::ast::CellDef>,
+    // 2026-07-28: Phase H.2 — !> metadata registry for optimization hints.
+    metadata_registry: crate::backend::metadata::MetadataRegistry,
 }
 
 /// Per-generation counters for unique MLIR value names.
@@ -67,6 +69,7 @@ impl CirctBackend {
             mmio_vars: Vec::new(),
             fn_arity: HashMap::new(),
             cell_defs: HashMap::new(),
+            metadata_registry: crate::backend::metadata::MetadataRegistry::load(),
         }
     }
 
