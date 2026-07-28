@@ -896,6 +896,10 @@ impl<'a> Parser<'a> {
 
     /// Parse optional derivation block: := { ... }
     fn parse_derivation_block(&mut self) -> Result<Option<DerivationBlock>, SyntaxError> {
+        // 2026-07-28: Save current position — if ColonEq is not next, return None.
+        let colon_eq_span = self.tokens.get(self.pos)
+            .map(|(_, s)| s.clone())
+            .unwrap_or(0..0);
         if !self.eat(&Token::ColonEq) {
             return Ok(None);
         }
@@ -906,8 +910,17 @@ impl<'a> Parser<'a> {
             examples.push(example);
             self.eat(&Token::Semicolon);
         }
+        // 2026-07-28: Use the actual byte span so doppelganger writer inserts
+        // at the correct position (not position 0 from Span::dummy()).
+        // expect(RBrace) advances past it; look up the consumed token's span via
+        // tokens[self.pos - 1] (since expect incremented pos).
         self.expect(Token::RBrace)?;
-        let span = Span::dummy();
+        let rbrace_end = self.tokens.get(self.pos - 1)
+            .map(|(_, s)| s.end)
+            .unwrap_or(colon_eq_span.start + 2);
+        // After RBrace, there may be an optional semicolon — consume it
+        self.eat(&Token::Semicolon);
+        let span = Span::new(colon_eq_span.start, rbrace_end, 0, 0);
         Ok(Some(DerivationBlock {
             examples,
             synthesized: None,

@@ -21,6 +21,7 @@ MODE="all"
 SELECTED_BENCH=""
 FUZZ_N=""
 CORRECTNESS_ONLY=false
+DERIVE_MODE=false
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -28,6 +29,7 @@ while [[ $# -gt 0 ]]; do
         --runtime)   MODE="runtime"; shift ;;
         --optimizer) MODE="optimizer"; shift ;;
         --correctness) CORRECTNESS_ONLY=true; shift ;;
+        --derive)    DERIVE_MODE=true; MODE="derive"; shift ;;
         all)   MODE="all"; shift ;;
         *)     SELECTED_BENCH="$1"; MODE="single"; shift ;;
     esac
@@ -128,6 +130,17 @@ BENCHMARKS=(
     # "meld-bridge-sym"  # no .bv file exists
 )
 
+# ── DERIVE BENCHMARKS ─────────────────────────────────────────────────
+# These benchmarks use derivation-only .bv files (:= { ... } without body).
+# The pipeline: brief derive --stochastic → .opt.bv → compile → time.
+# Results appear in a separate "MCMC Optimized" column.
+
+DERIVE_BENCHMARKS=(
+    "popcount_derive"
+    "minmax_derive"
+    "abs_derive"
+)
+
 # ── BUILD FUNCTIONS ───────────────────────────────────────────────────
 
 build_bench() {
@@ -178,6 +191,50 @@ build_bench() {
         echo "  Brief binary ready."
     else
         echo "  (no binary — linking deferred)"
+    fi
+}
+
+# ── DERIVE BUILD ──────────────────────────────────────────────────────
+
+# Build a derivation benchmark: run brief derive --stochastic, then compile .opt.bv
+build_derive_bench() {
+    local name="$1"
+    local bv_file="benchmarks/${name}.bv"
+    local derive_opt="benchmarks/${name}.opt.bv"
+
+    if [ ! -f "$bv_file" ]; then
+        echo "  SKIP — no .bv source: $bv_file"
+        return 1
+    fi
+
+    echo "  Deriving: $name"
+
+    # Step 1: Run derivation + MCMC to produce .opt.bv
+    BOUND=50000000 ./target/release/briefc derive --stochastic --iterations 10000 "$bv_file" 2>&1 | sed 's/^/    /'
+
+    if [ ! -f "$derive_opt" ]; then
+        echo "  SKIP — no .opt.bv produced (derive step may have failed)"
+        return 1
+    fi
+
+    # Step 2: Build the .opt.bv into a binary
+    echo "  Building MCMC-optimized binary..."
+    rm -f ~/.cache/brief-compiler/ffi/*.o /tmp/brief_rt*.o 2>/dev/null || true
+    BOUND=50000000 ./target/release/briefc build "$derive_opt" --out benchmarks 2>&1 | sed 's/^/    /'
+
+    local bin="benchmarks/${name}_mcmc"
+    if [ -f "benchmarks/${name}.ll" ]; then
+        clang -O3 -flto -march=native -ffast-math -fdata-sections -ffunction-sections \
+            -Wl,--gc-sections "benchmarks/${name}.ll" "lib/runtime/brief_rt.c" \
+            -o "$bin" -lm 2>&1 | sed 's/^/    /'
+    fi
+
+    if [ -f "$bin" ]; then
+        echo "  MCMC binary ready."
+        return 0
+    else
+        echo "  SKIP — no MCMC binary produced"
+        return 1
     fi
 }
 
@@ -505,6 +562,94 @@ bench_self_term() {
     record_result "$name" "${brief_avg}s" "${c_avg}s" "${ratio}x" "$winner" "$LAST_CORRECTNESS"
 }
 
+# ── DERIVE BENCHMARK TIMING ───────────────────────────────────────────
+
+bench_derive_self_term() {
+    local name="$1"
+    local mcmc_bin="benchmarks/${name}_mcmc"
+    local c_bin="benchmarks/${name}_c"
+
+    echo ""
+    echo "=== ${name} (MCMC) ==="
+
+    # Build C reference
+    build_c "$name" || {
+        echo "  SKIP — no C reference"
+        record_result "$name" "SKIP" "SKIP" "" "" "SKIP"
+        return
+    }
+
+    if [ ! -f "$mcmc_bin" ]; then
+        echo "  SKIP — no MCMC binary"
+        record_result "$name" "SKIP" "SKIP" "" "" "SKIP"
+        return
+    fi
+
+    if [ "$CORRECTNESS_ONLY" = true ]; then
+        # Check MCMC output against C reference
+        local mcmc_out c_out
+        mcmc_out=$(BOUND=5 timeout 10 "$mcmc_bin" 2>&1 || echo "__FAIL__")
+        c_out=$(BOUND=5 timeout 10 "$c_bin" 2>&1 || echo "__FAIL__")
+        if [ "$mcmc_out" = "$c_out" ]; then
+            echo "  correctness: MATCH"
+            record_result "$name" "" "" "" "" "MATCH"
+        else
+            echo "  correctness: MISMATCH (mcmc='${mcmc_out:0:40}' c='${c_out:0:40}')"
+            record_result "$name" "" "" "" "" "MISMATCH"
+        fi
+        return
+    fi
+
+    local mcmc_sum=0; local mcmc_min=999999; local mcmc_max=0
+    local c_sum=0
+
+    for i in 1 2 3 4 5; do
+        local mt=$(env BOUND=50000000 "$TIMER_BIN" "$mcmc_bin")
+        local ct=$(env BOUND=50000000 "$TIMER_BIN" "$c_bin")
+        mcmc_sum=$(echo "$mcmc_sum + $mt" | bc)
+        c_sum=$(echo "$c_sum + $ct" | bc)
+        if (( $(echo "$mt < $mcmc_min" | bc -l) )); then mcmc_min=$mt; fi
+        if (( $(echo "$mt > $mcmc_max" | bc -l) )); then mcmc_max=$mt; fi
+    done
+
+    local mcmc_avg=$(echo "scale=4; $mcmc_sum / 5" | bc)
+    local c_avg=$(echo "scale=4; $c_sum / 5" | bc)
+
+    local winner="—"
+    local ratio="N/A"
+    if [ "$c_avg" != "0.0000" ] && [ "$mcmc_avg" != "0.0000" ]; then
+        ratio=$(echo "scale=2; $mcmc_avg / $c_avg" | bc)
+        if (( $(echo "$ratio < 1.0" | bc -l) )); then
+            winner="MCMC"
+        elif (( $(echo "$ratio > 1.0" | bc -l) )); then
+            winner="C"
+        else
+            winner="~tie"
+        fi
+    elif [ "$mcmc_avg" = "0.0000" ] && [ "$c_avg" != "0.0000" ]; then
+        ratio="MCMC wins (O(1) fold)"
+        winner="MCMC"
+    fi
+
+    echo "  MCMC: ${mcmc_avg}s  (min ${mcmc_min}s, max ${mcmc_max}s)"
+    echo "  C:    ${c_avg}s"
+    echo "  Ratio: ${ratio}x  →  ${winner} wins"
+
+    # Check correctness
+    local mcmc_out c_out
+    mcmc_out=$(BOUND=5 timeout 10 "$mcmc_bin" 2>&1 || echo "__FAIL__")
+    c_out=$(BOUND=5 timeout 10 "$c_bin" 2>&1 || echo "__FAIL__")
+    if [ "$mcmc_out" = "$c_out" ]; then
+        echo "  correctness: MATCH"
+        record_result "$name" "${mcmc_avg}s" "${c_avg}s" "${ratio}x" "$winner" "MATCH"
+    else
+        echo "  correctness: MISMATCH"
+        echo "    mcmc: '${mcmc_out:0:60}'"
+        echo "    c:    '${c_out:0:60}'"
+        record_result "$name" "${mcmc_avg}s" "${c_avg}s" "${ratio}x" "$winner" "MISMATCH"
+    fi
+}
+
 # ── FILTER ────────────────────────────────────────────────────────────
 
 filter_name() {
@@ -516,6 +661,16 @@ filter_name() {
         return 1
     fi
     if [ "$MODE" = "optimizer" ] && [ "${TAG[$name]}" != "optimizer" ]; then
+        return 1
+    fi
+    return 0
+}
+
+# ── DERIVE BENCHMARK FILTER ──────────────────────────────────────────
+
+filter_derive_name() {
+    local name="$1"
+    if [ "$MODE" = "single" ] && [ "$name" != "$SELECTED_BENCH" ]; then
         return 1
     fi
     return 0
@@ -565,6 +720,28 @@ if [ -n "$FUZZ_N" ]; then
         filter_name "$name" || continue
         echo ""
         bash benchmarks/fuzz.sh "$name" --mode runtime --runs "$FUZZ_N"
+    done
+fi
+
+# ── DERIVE MAIN LOOP ──────────────────────────────────────────────────
+
+if [ "$DERIVE_MODE" = true ]; then
+    echo ""
+    echo "================================================"
+    echo "  BUILDING DERIVE BENCHMARKS (MCMC)"
+    echo "================================================"
+    for name in "${DERIVE_BENCHMARKS[@]}"; do
+        filter_derive_name "$name" || continue
+        build_derive_bench "$name"
+    done
+
+    echo ""
+    echo "================================================"
+    echo "  BENCHMARKING DERIVE BENCHMARKS (MCMC)"
+    echo "================================================"
+    for name in "${DERIVE_BENCHMARKS[@]}"; do
+        filter_derive_name "$name" || continue
+        bench_derive_self_term "$name"
     done
 fi
 

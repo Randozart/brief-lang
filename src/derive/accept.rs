@@ -22,8 +22,8 @@ pub fn handle_accept_command(file_path: &str, use_opt: bool) -> Result<(), Strin
     // Read and parse original source to find derivation blocks
     let source = fs::read_to_string(path)
         .map_err(|e| format!("cannot read '{}': {}", file_path, e))?;
-    let tokens = lex_source(&source)?;
-    let program = parse_tokens(&tokens, &source)?;
+    let token_spans = lex_source_with_spans(&source)?;
+    let program = parse_tokens(&token_spans, &source)?;
 
     // Collect derivation blocks: (name, start_byte_of_:=, end_byte_after_;)
     let mut derivations: Vec<(String, usize, usize)> = Vec::new();
@@ -68,8 +68,8 @@ pub fn handle_accept_command(file_path: &str, use_opt: bool) -> Result<(), Strin
     }
     let shadow_source = fs::read_to_string(&shadow_path)
         .map_err(|e| format!("cannot read '{}': {}", shadow_path.display(), e))?;
-    let shadow_tokens = lex_source(&shadow_source)?;
-    let shadow_program = parse_tokens(&shadow_tokens, &shadow_source)?;
+    let shadow_spans = lex_source_with_spans(&shadow_source)?;
+    let shadow_program = parse_tokens(&shadow_spans, &shadow_source)?;
 
     // For each derivation, find the body text in the doppelganger.
     // The doppelganger has `{ body; } := { derivation; };` — extract body by
@@ -135,23 +135,29 @@ pub fn handle_accept_command(file_path: &str, use_opt: bool) -> Result<(), Strin
     Ok(())
 }
 
-/// Lex a Brief source file into tokens.
-fn lex_source(source: &str) -> Result<Vec<crate::lexer::Token>, String> {
+/// Lex a Brief source file into (Token, byte_range) pairs.
+fn lex_source_with_spans(source: &str) -> Result<Vec<(crate::lexer::Token, std::ops::Range<usize>)>, String> {
     use logos::Logos;
-    let lexer = crate::lexer::Token::lexer(source);
-    let tokens: Result<Vec<_>, _> = lexer.collect();
-    tokens.map_err(|_| "lex error".to_string())
+    let mut lexer = crate::lexer::Token::lexer(source);
+    let mut result = Vec::new();
+    while let Some(token_result) = lexer.next() {
+        match token_result {
+            Ok(token) => {
+                let span = lexer.span();
+                result.push((token, span));
+            }
+            Err(_) => return Err("lex error".to_string()),
+        }
+    }
+    Ok(result)
 }
 
-/// Parse tokens into a program.
+/// Parse tokens with spans into a program.
 fn parse_tokens(
-    tokens: &[crate::lexer::Token],
+    token_spans: &[(crate::lexer::Token, std::ops::Range<usize>)],
     source: &str,
 ) -> Result<Vec<TopLevel>, String> {
-    let token_spans: Vec<_> = tokens.iter()
-        .map(|t| (t.clone(), 0..0))
-        .collect();
-    let mut parser = crate::parser::Parser::new(token_spans, source);
+    let mut parser = crate::parser::Parser::new(token_spans.to_vec(), source);
     parser.parse_program().map_err(|e| format!("parse error: {}", e))
 }
 

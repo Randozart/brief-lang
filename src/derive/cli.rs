@@ -88,8 +88,8 @@ pub fn handle_derive_command(config: &DeriveConfig, file_path: &str) -> Result<(
         .map_err(|e| format!("cannot read '{}': {}", file_path, e))?;
 
     // Lex, parse, find derivation blocks
-    let tokens = lex_source(&source)?;
-    let program = parse_tokens(&tokens, &source)?;
+    let token_spans = lex_source_with_spans(&source)?;
+    let program = parse_tokens(&token_spans, &source)?;
 
     // Collect derivation blocks with their names
     let mut derivations: Vec<(String, DerivationBlock)> = Vec::new();
@@ -174,22 +174,30 @@ pub fn handle_derive_command(config: &DeriveConfig, file_path: &str) -> Result<(
     Ok(())
 }
 
-/// Lex a Brief source file into tokens.
-fn lex_source(source: &str) -> Result<Vec<crate::lexer::Token>, String> {
-    let lexer = { use logos::Logos; crate::lexer::Token::lexer(source) };
-    let tokens: Result<Vec<_>, _> = lexer.collect();
-    tokens.map_err(|_| "lex error".to_string())
+/// Lex a Brief source into (Token, byte_range) pairs using logos.
+/// 2026-07-28: Preserves byte spans so derivation block positions are correct.
+fn lex_source_with_spans(source: &str) -> Result<Vec<(crate::lexer::Token, std::ops::Range<usize>)>, String> {
+    use logos::Logos;
+    let mut lexer = crate::lexer::Token::lexer(source);
+    let mut result = Vec::new();
+    while let Some(token_result) = lexer.next() {
+        match token_result {
+            Ok(token) => {
+                let span = lexer.span();
+                result.push((token, span));
+            }
+            Err(_) => return Err("lex error".to_string()),
+        }
+    }
+    Ok(result)
 }
 
-/// Parse tokens into a program (using the new parser).
+/// Parse tokens with spans into a program.
 fn parse_tokens(
-    tokens: &[crate::lexer::Token],
+    token_spans: &[(crate::lexer::Token, std::ops::Range<usize>)],
     source: &str,
 ) -> Result<Vec<TopLevel>, String> {
-    let token_spans: Vec<_> = tokens.iter()
-        .map(|t| (t.clone(), 0..0))
-        .collect();
-    let mut parser = crate::parser::Parser::new(token_spans, source);
+    let mut parser = crate::parser::Parser::new(token_spans.to_vec(), source);
     parser.parse_program().map_err(|e| format!("parse error: {}", e))
 }
 
@@ -200,7 +208,7 @@ mod tests {
     #[test]
     fn test_lex_source_simple() {
         let source = "defn add(a: Int, b: Int) -> Int";
-        let result = lex_source(source);
+        let result = lex_source_with_spans(source);
         assert!(result.is_ok());
         let tokens = result.unwrap();
         assert!(!tokens.is_empty());
@@ -208,14 +216,14 @@ mod tests {
 
     #[test]
     fn test_lex_source_empty() {
-        let result = lex_source("");
+        let result = lex_source_with_spans("");
         assert!(result.is_ok());
         assert!(result.unwrap().is_empty());
     }
 
     #[test]
     fn test_lex_source_error() {
-        let result = lex_source("\"unterminated string");
+        let result = lex_source_with_spans("\"unterminated string");
         assert!(result.is_err());
     }
 

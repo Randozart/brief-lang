@@ -1,0 +1,25 @@
+// abs_derive — absolute value via derivation synthesis
+// The synthesis engine discovers branchless abs:
+//   (x ^ (x >> 63)) - (x >> 63)
+
+defn abs(x: Int) -> Int := {
+    5 -> 5;
+    -3 -> 3;
+    0 -> 0;
+    -128 -> 128;
+    1000000 -> 1000000;
+    -1 -> 1;
+};
+
+let N: Int = GetEnvInt#("BOUND");
+let i: Int = 0;
+let total: Int = 0;
+
+node run[i < N][i == N] {
+    total = total + abs(i - N/2);
+    i = i + 1;
+    [i == N] {
+        PrintLn!(total);
+    };
+    term;
+};
