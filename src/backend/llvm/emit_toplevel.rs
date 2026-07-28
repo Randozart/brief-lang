@@ -1506,7 +1506,16 @@ impl LlvmBackend {
         }
         fn is_ffi_call(expr: &Expr) -> bool {
             match expr {
-                Expr::Call(name, _, _) => !name.ends_with('#'),
+                Expr::Call(name, _, _) => {
+                    !name.ends_with('#')
+                    // 2026-07-28: Observable intrinsics (PrintInt#, Malloc#, etc.)
+                    // also need outlining — they create memory barriers in guard
+                    // bodies even though they're not FFI calls. Check the intrinsic
+                    // signature's observable flag to distinguish from inert intrinsics
+                    // like Add#, Sub#, etc.
+                    || crate::intrinsic_signatures::get_intrinsic_signature(name)
+                        .map_or(false, |sig| sig.observable)
+                }
                 Expr::Block(stmts) => stmts.iter().any(|s| has_ffi_call(s)),
                 _ => false,
             }
