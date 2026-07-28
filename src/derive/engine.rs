@@ -59,6 +59,14 @@ impl CostModel {
                 let else_cost = else_.as_ref().map(|e| self.cost_of_expr(e)).unwrap_or(0);
                 self.branch + self.cost_of_expr(cond) + self.cost_of_expr(then_) + else_cost
             }
+            // 2026-07-28: Phase 5 — Compound type expression costs
+            Expr::Call(_, args, _) => 3 + args.iter().map(|a| self.cost_of_expr(a)).sum::<u64>(),
+            Expr::Field(inner, _) => 2 + self.cost_of_expr(inner),
+            Expr::Match(scrut, arms) => {
+                5 + self.cost_of_expr(scrut)
+                    + arms.len() as u64
+                    + arms.iter().map(|a| self.cost_of_expr(&a.body)).sum::<u64>()
+            }
             _ => 10,
         }
     }
@@ -577,11 +585,16 @@ struct LevelCache {
     int_exprs: Vec<Expr>,
     float_exprs: Vec<Expr>,
     bool_exprs: Vec<Expr>,
+    /// 2026-07-28: Phase 5 — Compound type expressions, keyed by type name (e.g., "Expr").
+    compound_exprs: std::collections::HashMap<String, Vec<Expr>>,
 }
 
 impl LevelCache {
     fn empty() -> Self {
-        LevelCache { int_exprs: vec![], float_exprs: vec![], bool_exprs: vec![] }
+        LevelCache {
+            int_exprs: vec![], float_exprs: vec![], bool_exprs: vec![],
+            compound_exprs: std::collections::HashMap::new(),
+        }
     }
 
     /// Push an expression with its inferred type into the appropriate bucket.
@@ -590,6 +603,10 @@ impl LevelCache {
             "Int" => self.int_exprs.push(expr),
             "Float" => self.float_exprs.push(expr),
             "Bool" => self.bool_exprs.push(expr),
+            // 2026-07-28: Phase 5 — Compound types stored in HashMap
+            ty if is_compound_type(ty) => {
+                self.compound_exprs.entry(ty.to_string()).or_default().push(expr);
+            }
             _ => {}
         }
     }
@@ -623,6 +640,11 @@ fn is_all_ones(expr: &Expr) -> bool {
         Expr::Decimal(n) => *n == -1,
         _ => false,
     }
+}
+
+/// 2026-07-28: Phase 5 — Check if a type name is compound (not a primitive).
+pub fn is_compound_type(name: &str) -> bool {
+    matches!(name, "Expr")
 }
 
 /// 2026-07-28: Tier 1 — Check if a binary operation is semantically redundant.
@@ -734,6 +756,48 @@ fn generate_next_level(
         }
     }
 
+    // 2026-07-28: Phase 5 — Call and Match generation for compound types
+    if is_compound_type(ret_type) {
+        // Call generation: Const(Int), Add(Expr, Expr), Sub(Expr, Expr), Mul(Expr, Expr)
+        // Const takes Int arg
+        for int_expr in &prev.int_exprs {
+            result.push(Expr::Call("Const".into(), vec![int_expr.clone()], None));
+        }
+        // Add/Sub/Mul take two Expr args — use prev level's compound expressions
+        let compound_exprs = ret_type.to_string();
+        if let Some(exprs) = prev.compound_exprs.get(&compound_exprs) {
+            for lhs in exprs {
+                for rhs in exprs {
+                    result.push(Expr::Call("Add".into(), vec![lhs.clone(), rhs.clone()], None));
+                    result.push(Expr::Call("Sub".into(), vec![lhs.clone(), rhs.clone()], None));
+                    result.push(Expr::Call("Mul".into(), vec![lhs.clone(), rhs.clone()], None));
+                }
+            }
+        }
+    }
+
+    // Match generation: if we have compound type expressions in the prev level,
+    // produce Match expressions over them with simple arms.
+    for (type_name, exprs) in &prev.compound_exprs {
+        if type_name != ret_type {
+            // Only generate matches that return the same type
+            continue;
+        }
+        for scrutinee in exprs {
+            // Generate a match with default (wildcard) arm returning scrutinee itself
+            // This is the simplest valid Match: identity with fallback
+            let wildcard_arm = crate::ast::MatchArm {
+                pattern: crate::ast::Pattern::Wildcard,
+                guard: None,
+                body: Box::new(scrutinee.clone()),
+            };
+            result.push(Expr::Match(
+                Box::new(scrutinee.clone()),
+                vec![wildcard_arm],
+            ));
+        }
+    }
+
     result
 }
 
@@ -753,17 +817,22 @@ fn prune_level(
 
     for expr in &candidates {
         // Evaluate against all examples
-        let outputs: Vec<i64> = examples.iter().map(|ex| {
+        let outputs: Vec<(i64, i64)> = examples.iter().map(|ex| {
             let input_values = example_inputs_to_values(ex, param_names);
             let mut ctx = SynthesisEvalContext::new();
             for (name, val) in param_names.iter().zip(input_values.iter()) {
                 ctx.bind(name, val.clone());
             }
             match evaluate_synthesized(expr, &mut ctx) {
-                Ok(Value::Int(n)) => n,
-                Ok(Value::Float(f)) => f as i64,
-                Ok(Value::Bits(b)) => b.iter().fold(0i64, |acc, &x| (acc << 1) | x as i64),
-                _ => 0,
+                Ok(Value::Int(n)) => (n, 1),  // (value, kind discriminator)
+                Ok(Value::Float(f)) => (f as i64, 2),
+                Ok(Value::Bits(b)) => (b.iter().fold(0i64, |acc, &x| (acc << 1) | x as i64), 3),
+                // 2026-07-28: Phase 5 — Hash constructor values by (name_hash, field_count)
+                Ok(Value::Constructor(ref name, ref fields)) => {
+                    let name_hash = name.bytes().fold(0i64, |acc, b| acc.wrapping_mul(31).wrapping_add(b as i64));
+                    (name_hash, 10 + fields.len() as i64)
+                }
+                _ => (0, 0),
             }
         }).collect();
 
@@ -773,15 +842,18 @@ fn prune_level(
         // building blocks for shift amounts and bit masks (e.g., `1 + 1 = 2` for
         // `x0 >> 2`). Prune only large garbage constants (e.g., `x0 * 0 + 9999999`).
         if examples.len() >= 2 && outputs.iter().all(|&v| v == outputs[0]) {
-            let val = outputs[0];
+            let val = outputs[0].0; // first element's value
             if val < -128 || val > 255 {
-                continue; // prune large garbage constants
+                // Only prune if this is an Int-type expression (kind 1)
+                if outputs[0].1 == 1 {
+                    continue;
+                }
             }
-            // Fall through: small constants like 0, 1, 2, 3... are kept
         }
 
-        // Prune redundant output signatures (already seen from simpler expr)
-        if !seen.insert(outputs) {
+        // Prune redundant output signatures — use the raw tuple as hash key
+        let seen_key: Vec<i64> = outputs.iter().flat_map(|(v, k)| vec![*v, *k]).collect();
+        if !seen.insert(seen_key) {
             continue;
         }
 
@@ -816,6 +888,26 @@ fn expr_type_hint_with_params(expr: &Expr, param_names: &[String], param_types: 
         Expr::BinaryOp(op, lhs, _) => {
             let lhs_ty = expr_type_hint_with_params(lhs, param_names, param_types).unwrap_or("Int");
             op_result_type(op, lhs_ty, lhs_ty)
+        }
+        // 2026-07-28: Phase 5 — Compound type inference
+        Expr::Call(name, _, _) => {
+            // Constructor calls: Const → Expr, Add → Expr, etc.
+            if is_compound_type(name) {
+                Some("Expr") // All current compound types map to "Expr"
+            } else {
+                Some("Int") // Fallback for unknown constructors
+            }
+        }
+        Expr::Field(inner, _) => {
+            // Field access on a compound expression returns the field type.
+            // For Expr with Const-val → Int, Add-left/right → Expr.
+            // For now, assume field access on compound returns the compound's type.
+            expr_type_hint_with_params(inner, param_names, param_types)
+        }
+        Expr::Match(scrut, _) => {
+            // Match returns the type of its arms, which is the return type
+            // of the expression. Default to the scrutinee's type.
+            expr_type_hint_with_params(scrut, param_names, param_types)
         }
         _ => None,
     }
@@ -986,6 +1078,7 @@ fn expr_to_value(expr: &Expr) -> Value {
 pub fn enumerative_search(
     name: &str,
     params: &[(String, Type)],
+    ret_type: &Type,
     examples: &[DerivationExample],
     max_depth: usize,
 ) -> Result<Option<Expr>, SynthesizeError> {
@@ -994,7 +1087,11 @@ pub fn enumerative_search(
     }
     let param_names: Vec<String> = params.iter().map(|(n, _): &(String, Type)| n.clone()).collect();
     let param_types: Vec<String> = params.iter().map(|(_, t): &(String, Type)| t.to_string()).collect();
-    let ret_type_str = "Int".to_string(); // derivation blocks return Int by default
+    let ret_type_str = if ret_type == &Type::int() {
+        "Int".to_string()
+    } else {
+        ret_type.to_string()
+    };
     let max_depth_u8 = max_depth.min(8) as u8;
     let cost_model = CostModel::default();
 
@@ -1306,14 +1403,14 @@ mod tests {
             example(vec![Expr::Decimal(42)], Expr::Decimal(42), None),
         ];
         let params = vec![("x0".into(), Type::int())];
-        let result = enumerative_search("id", &params, &examples, 3).unwrap();
+        let result = enumerative_search("id", &params, &Type::int(), &examples, 3).unwrap();
         assert!(result.is_some());
     }
 
     #[test]
     fn test_empty_examples() {
         let params = vec![("x".into(), Type::int())];
-        let result = enumerative_search("f", &params, &[], 3);
+        let result = enumerative_search("f", &params, &Type::int(), &[], 3);
         assert!(result.is_err());
     }
 
@@ -1323,7 +1420,7 @@ mod tests {
             example(vec![Expr::Decimal(1)], Expr::Decimal(999), None),
         ];
         let params = vec![("x0".into(), Type::int())];
-        let result = enumerative_search("f", &params, &examples, 2).unwrap();
+        let result = enumerative_search("f", &params, &Type::int(), &examples, 2).unwrap();
         assert!(result.is_none());
     }
 }

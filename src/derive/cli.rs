@@ -131,7 +131,10 @@ pub fn handle_derive_command(config: &DeriveConfig, file_path: &str) -> Result<(
     let mut syntheses: Vec<(String, SynthesizedProgram)> = Vec::new();
     for (name, params, block) in &derivations {
         eprintln!("[derive] synthesizing '{}' (depth={})...", name, config.enumerative_depth);
-        match synthesize(name, block, params, config.enumerative_depth, config.verify_samples, block.postcondition.as_ref()) {
+        // Use Type::int() as default return type for derivation blocks
+        // TODO: extract actual return type from function signature
+        let ret_type = Type::int();
+        match synthesize(name, block, params, &ret_type, config.enumerative_depth, config.verify_samples, block.postcondition.as_ref()) {
             Ok(prog) => {
                 eprintln!("[derive] '{}': synthesized body with cost {}", name, prog.cost);
                 syntheses.push((name.clone(), prog));

@@ -51,6 +51,7 @@ pub fn synthesize(
     name: &str,
     block: &DerivationBlock,
     params: &[(String, Type)],
+    ret_type: &Type,
     max_depth: usize,
     verify_samples: usize,
     postcondition: Option<&Expr>,
@@ -64,7 +65,7 @@ pub fn synthesize(
 
     for iteration in 0..5 {
         // Step 1: Synthesize from current examples
-        let mut candidate_prog = synthesize_candidate(name, params, &examples, max_depth)?;
+        let mut candidate_prog = synthesize_candidate(name, params, ret_type, &examples, max_depth)?;
 
         // Step 2: Verify candidate
         let cand_expr = candidate_prog.body.get(0).cloned().unwrap_or(Expr::Decimal(0));
@@ -223,11 +224,12 @@ fn smt_get_correct_output(
 fn synthesize_candidate(
     name: &str,
     params: &[(String, Type)],
+    ret_type: &Type,
     examples: &[DerivationExample],
     max_depth: usize,
 ) -> Result<engine::SynthesizedProgram, SynthesizeError> {
     // Try enumerative search first
-    if let Ok(Some(expr)) = engine::enumerative_search(name, params, examples, max_depth) {
+    if let Ok(Some(expr)) = engine::enumerative_search(name, params, ret_type, examples, max_depth) {
         let cost = engine::CostModel::default().cost_of_expr(&expr);
         return Ok(engine::SynthesizedProgram { body: vec![expr], cost, depth: max_depth as u8 });
     }
