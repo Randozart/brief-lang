@@ -229,16 +229,16 @@ fn resolve_print(name: &str, args: &[Expr], known_types: &HashMap<String, Type>)
     let kind = kind_from_expr(value, known_types);
 
     let print_fn = match kind {
-        "String" => "__print_str",
-        "Float" => "__print_float",
-        _ => "__print_int",
+        "String" => "PrintStr#",
+        "Float" => "PrintFloat#",
+        _ => "PrintInt#",
     };
 
     let print_call = Expr::Call(print_fn.to_string(), vec![value.clone()], None);
 
     if name == "PrintLn" {
-        let newline = Expr::Call("__print_char".to_string(), vec![Expr::Decimal(10)], None);
-        eprintln!("print plugin: PrintLn -> {} + __print_char", print_fn);
+        let newline = Expr::Call("PrintChar#".to_string(), vec![Expr::Decimal(10)], None);
+        eprintln!("print plugin: PrintLn -> {} + PrintChar#", print_fn);
         Some(Expr::Block(vec![
             crate::ast::Statement::Expression(print_call),
             crate::ast::Statement::Expression(newline),

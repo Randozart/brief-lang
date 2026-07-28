@@ -481,6 +481,33 @@ pub fn execute_intrinsic(
             }
         }
 
+        // ── Print intrinsics (observable) ──────────────────────────────
+        "PrintInt#" => {
+            let val = arg_as_i64(args, 0)?;
+            print!("{}", val);
+            Ok(i64_to_bits(val))
+        }
+        "PrintFloat#" => {
+            let val = arg_as_f64(args, 0)?;
+            print!("{}", val);
+            // Return the float bits as the result
+            Ok(i64_to_bits(val.to_bits() as i64))
+        }
+        "PrintChar#" => {
+            let val = arg_as_i64(args, 0)?;
+            let ch = char::from_u32(val as u32).unwrap_or('?');
+            print!("{}", ch);
+            Ok(i64_to_bits(val))
+        }
+        "PrintStr#" => {
+            let val = args.get(0).cloned().unwrap_or(Value::Void);
+            if let Value::Int(n) = val {
+                // String handle (opaque pointer) — print as int for now
+                print!("{}", n);
+            }
+            // PrintStr# returns number of bytes printed
+            Ok(i64_to_bits(0))
+        }
         _ => Err(RuntimeError::UnsupportedIntrinsic(name.to_string())),
     }
 }

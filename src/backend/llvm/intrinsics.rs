@@ -60,6 +60,41 @@ pub fn emit_intrinsic_call(
         "DlClose#" => return emit_dl_close(backend, out, v, args, indent),
         // 2026-07-15: Debugging intrinsics
         "Backtrace#" => return emit_backtrace(backend, out, v, args, indent),
+        // 2026-07-28: Print intrinsics — emit correct LLVM call types directly
+        // (not through emit_external_call, which lacks type coercion for floats).
+        "PrintInt#" => {
+            let a = backend.emit_expr(out, &args[0], indent);
+            let llvm_ty = backend.llvm_type(&a.ty);
+            writeln!(out, "{}{} = call i64 @__print_int({} {})", indent, v, llvm_ty, a.name).ok();
+            return BTypedRegister { name: v.to_string(), ty: Type::int() };
+        }
+        "PrintFloat#" => {
+            let a = backend.emit_expr(out, &args[0], indent);
+            let (arg_llvm, fn_name) = if a.ty == Type::float64() {
+                ("double", "__print_float64")
+            } else {
+                ("float", "__print_float")
+            };
+            writeln!(out, "{}{} = call i64 @{}({} {})", indent, v, fn_name, arg_llvm, a.name).ok();
+            return BTypedRegister { name: v.to_string(), ty: Type::int() };
+        }
+        "PrintChar#" => {
+            let a = backend.emit_expr(out, &args[0], indent);
+            writeln!(out, "{}{} = call i64 @__print_char(i64 {})", indent, v, a.name).ok();
+            return BTypedRegister { name: v.to_string(), ty: Type::int() };
+        }
+        "PrintStr#" => {
+            let a = backend.emit_expr(out, &args[0], indent);
+            writeln!(out, "{}{} = call i64 @__print_str(ptr {})", indent, v, a.name).ok();
+            return BTypedRegister { name: v.to_string(), ty: Type::int() };
+        }
+        // 2026-07-28: Print intrinsics — emit the same @__print_* calls as
+        // before, but through the intrinsic path so they're recognized as
+        // non-FFI by is_ffi_call (guards become outline-able).
+        "PrintInt#"   => return emit_external_call(backend, out, v, "__print_int", args, indent),
+        "PrintFloat#" => return emit_external_call(backend, out, v, "__print_float", args, indent),
+        "PrintChar#"  => return emit_external_call(backend, out, v, "__print_char", args, indent),
+        "PrintStr#"   => return emit_external_call(backend, out, v, "__print_str", args, indent),
         // 2026-07-18: Pointer operations — special-case because they need
         // type-dependent codegen (Deref# needs pointee type, Index# needs
         // element type, Cast# needs target type). Ptr# is a simple inttoptr.

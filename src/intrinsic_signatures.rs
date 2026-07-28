@@ -83,7 +83,13 @@ pub fn get_intrinsic_signature(name: &str) -> Option<Signature> {
 
         // ── Runtime (observable) ────────────────────────────────────
         // 2026-07-19: GetEnv#/GetEnvInt# moved to stdlib env.bv via ! plugin.
-        // Print#/PutChar# moved to stdlib ffi/io.bv via ! plugin.
+        // 2026-07-28: PrintInt#/PrintFloat#/PrintChar#/PrintStr# are handled
+        // by the backend's emit_intrinsic_call (emits @__print_int etc.) and
+        // the interpreter (emits to stdout). observable: true prevents DCE.
+        "PrintInt#"   => Some(Signature { name: "PrintInt#",   parameters: vec![("val", Type::int())], return_kind: ReturnKind::Exact(Type::int()), observable: true, variadic: false }),
+        "PrintFloat#" => Some(Signature { name: "PrintFloat#", parameters: vec![("val", Type::float())], return_kind: ReturnKind::Exact(Type::int()), observable: true, variadic: false }),
+        "PrintChar#"  => Some(Signature { name: "PrintChar#",  parameters: vec![("val", Type::int())], return_kind: ReturnKind::Exact(Type::int()), observable: true, variadic: false }),
+        "PrintStr#"   => Some(Signature { name: "PrintStr#",   parameters: vec![("val", Type::string())], return_kind: ReturnKind::Exact(Type::int()), observable: true, variadic: false }),
 
         // ── Memory (observable) ─────────────────────────────────────
         "Malloc#"  => Some(Signature { name: "Malloc#",  parameters: vec![("size", Type::int())], return_kind: ReturnKind::Exact(Type::ptr(Type::bits(1))), observable: true, variadic: false }),
