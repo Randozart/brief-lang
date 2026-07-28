@@ -145,6 +145,7 @@ mod tests {
         let example = DerivationExample {
             inputs: vec![Expr::Decimal(5)],
             output: Box::new(Expr::Decimal(5)),
+            tolerance: None,
             span: dummy_span(),
         };
         let expr = Expr::Identifier("x0".into());
@@ -156,6 +157,7 @@ mod tests {
         let example = DerivationExample {
             inputs: vec![Expr::Decimal(2), Expr::Decimal(3)],
             output: Box::new(Expr::Decimal(5)),
+            tolerance: None,
             span: dummy_span(),
         };
         let expr = Expr::BinaryOp(
@@ -171,6 +173,7 @@ mod tests {
         let example = DerivationExample {
             inputs: vec![Expr::Decimal(10), Expr::Decimal(3)],
             output: Box::new(Expr::Decimal(7)),
+            tolerance: None,
             span: dummy_span(),
         };
         let expr = Expr::BinaryOp(
@@ -186,6 +189,7 @@ mod tests {
         let examples = vec![DerivationExample {
             inputs: vec![Expr::Decimal(42)],
             output: Box::new(Expr::Decimal(42)),
+            tolerance: None,
             span: dummy_span(),
         }];
         let result = enumerative_search("id", &examples, 3).unwrap();
@@ -203,6 +207,7 @@ mod tests {
         let examples = vec![DerivationExample {
             inputs: vec![Expr::Decimal(1)],
             output: Box::new(Expr::Decimal(999)),
+            tolerance: None,
             span: dummy_span(),
         }];
         let result = enumerative_search("f", &examples, 2).unwrap();

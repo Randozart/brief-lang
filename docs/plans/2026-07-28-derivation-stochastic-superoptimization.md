@@ -1126,6 +1126,115 @@ pub fn handle_derive_command(
 - `test_derive_command_already_synthesized`: Body already present → assertion mode only
 - `test_derive_command_nonexistent_file`: File not found → error
 
+### Step E.4 — `brief accept` subcommand (user-approved folding)
+
+**File**: `src/main.rs`, `src/derive/accept.rs` (new)
+
+**What**: An explicit user command that folds a doppelganger's synthesized bodies
+back into the source `.bv` file. The compiler NEVER mutates source — `brief accept`
+is an intentional user action after reviewing the generated `foo.derive.bv`.
+
+```
+brief accept <file>              # fold foo.derive.bv bodies into foo.bv
+brief accept <file> --opt        # fold from foo.opt.bv instead (MCMC result)
+brief accept <file> --all        # accept all derivation blocks in file
+```
+
+**Semantics**:
+1. Reads the shadow file (`foo.derive.bv` or `foo.opt.bv`), extracts each synthesized
+   expression body.
+2. For each `:= { ... };` derivation block in `foo.bv`, replaces it with the
+   synthesized body, demoting the derivation block to a trailing comment:
+   ```
+   Before: defn add(x: Int, y: Int) -> Int := { 2, 2 -> 4; };
+   After:  defn add(x: Int, y: Int) -> Int { term x + y; }  // := { 2, 2 -> 4; };
+   ```
+3. Writes the modified `foo.bv` in place.
+4. The trailing comment preserves the derivation block as specification for future
+   assertion builds or re-derivation.
+
+**Why separate from `brief derive`**: The derive step is automatic and lossless
+(original file untouched). The accept step is an explicit review gate — the
+developer inspects `foo.derive.bv`, decides "this looks correct," then folds it in.
+This separation prevents accidental source mutation from a failed synthesis or
+from synthesizing a correct-but-suboptimal body.
+
+**Relation to assertion mode**: After acceptance, `brief build foo.bv` runs in
+assertion mode by default (verifies `// := { 2, 2 -> 4; }` matches the body).
+Pass `--no-assert` to skip this verification.
+
+**CLI handler**:
+
+```rust
+/// 2026-07-28: Phase E.4 — `brief accept` command.
+/// Folds doppelganger bodies into the source file.
+/// Never mutates source without explicit user invocation.
+pub fn handle_accept_command(
+    file_path: &str,
+    opts: &AcceptOptions,
+) -> Result<(), String> {
+    let source_path = Path::new(file_path);
+    let source = std::fs::read_to_string(source_path)
+        .map_err(|e| format!("cannot read '{}': {}", file_path, e))?;
+
+    // Determine which doppelganger to read from
+    let shadow_path = if opts.use_opt {
+        Doppelganger::opt_path_for(source_path)
+    } else {
+        Doppelganger::derive_path_for(source_path)
+    };
+
+    if !shadow_path.exists() {
+        return Err(format!("no doppelganger found at '{}' — run 'brief derive' first", shadow_path.display()));
+    }
+
+    let shadow_source = std::fs::read_to_string(&shadow_path)
+        .map_err(|e| format!("cannot read '{}': {}", shadow_path.display(), e))?;
+
+    // Parse both files to find derivation blocks and their synthesized counterparts
+    let (program, byte_offsets) = parse_file_with_offsets(source_path)?;
+    let (shadow_program, _) = parse_file_with_offsets(&shadow_path)?;
+
+    // For each derivation block, replace := { ... } with the synthesized body
+    let new_source = fold_synthesized_bodies(&source, &program, &shadow_program, &byte_offsets)?;
+
+    // Write back to original source
+    std::fs::write(source_path, new_source)
+        .map_err(|e| format!("cannot write '{}': {}", file_path, e))?;
+
+    eprintln!("[accept] folded bodies into {}", source_path.display());
+    Ok(())
+}
+```
+
+**Key design invariants**:
+- The `// := { ... }` comment preserves the derivation spec for future assertion-mode
+  builds and re-derivation runs.
+- Insertions happen in reverse byte offset order (same as doppelganger writer) to
+  preserve span positions during replacement.
+- If no doppelganger exists, the error message tells the user to run `brief derive` first.
+
+**Nesting check**: The handler validates inputs, finds the shadow, calls the
+replacement helper, writes — one `?` chain, depth ≤ 2.
+
+**Tests**:
+- `test_accept_basic`: Run `brief accept foo.bv` after derive → `foo.bv` has bodies inlined
+- `test_accept_opt`: Accept from `foo.opt.bv` → `foo.bv` has MCMC-optimized bodies
+- `test_accept_no_shadow`: No `foo.derive.bv` → error message points to `brief derive`
+- `test_accept_preserves_derivation_block`: `// := { ... }` comment emitted after body
+- `test_accept_without_derivation`: Source has no `:=` blocks → no-op, file unchanged
+- `test_accept_idempotent`: Accept twice → second run sees no `:=` blocks → no-op
+
+### Step E.5 — Updated commit sequence
+
+The commit sequence for Phase E becomes:
+
+```
+5a. Doppelganger writer + resolver       (Step E.0–E.2)
+5b. `brief derive` CLI with flags        (Step E.3)
+5c. `brief accept` subcommand            (Step E.4)
+```
+
 ---
 
 ## Phase F — MCMC Stochastic Superoptimizer
@@ -2049,6 +2158,14 @@ fn test_end_to_end_derive_and_build() {
     //   → Or find commutativity swap y + x (equivalent cost)
     // 7. Verify foo.opt.bv exists (same as derive.bv for optimal case)
     // 8. Build foo.opt.bv → passes assertions
+    // 9. Run brief accept foo.bv
+    //   → Folds x + y body into test_functions.bv
+    //   → Derivation block demoted to // := { ... } comment
+    // 10. Read foo.bv → body present, // := comment preserved
+    // 11. Run brief build foo.bv
+    //   → Assertion mode verifies body matches the // := spec
+    // 12. Run brief accept foo.bv again (idempotent)
+    //   → No := blocks remain → no-op, file unchanged
 }
 ```
 
@@ -2093,7 +2210,7 @@ Every phase must update the following documentation in the same commit:
 | B | `docs/architecture/features/derivation-blocks.md` — assertion build gate |
 | C | `docs/architecture/features/derivation-blocks.md` — enumerative synthesis |
 | D | `docs/architecture/features/derivation-blocks.md` — SMT synthesis |
-| E | `docs/architecture/features/derivation-blocks.md` — doppelganger system |
+| E | `docs/architecture/features/derivation-blocks.md` — doppelganger system + `brief accept` |
 | F | `docs/architecture/features/mcmc-superoptimizer.md` — new doc |
 | G | `docs/architecture/optimization-hints.md` — new vocabulary reference |
 
@@ -2106,7 +2223,7 @@ Every phase must update the following documentation in the same commit:
  2. Phase B: Assertion build gate + interpreter call_function
  3. Phase C: Full enumerative synthesis (type-aware, interpreter-backed)
  4. Phase D: Full SMT synthesis (SyGuS, Z3 integration)
- 5. Phase E: Doppelganger write-back + build resolution
+  5. Phase E: Doppelganger write-back + build resolution + `brief accept`
  6. Phase F: MCMC superoptimizer (mutations, equivalence, sampler, Pareto)
  7. Phase G: Metadata vocabulary reference + backend mappings
  8. Integration tests: end-to-end pipeline

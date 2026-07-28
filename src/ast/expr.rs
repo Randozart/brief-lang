@@ -136,10 +136,16 @@ pub enum Pattern {
 
 /// A derivation block attached to a definition or transaction via `:=`.
 /// Contains input-output examples for inductive synthesis.
+/// 2026-07-28: Added tolerance field for FP relaxed equivalence — optional
+/// f64 relative tolerance. When Some(tol), the synthesized expression must
+/// produce output within tol * |expected| of each example's expected output.
 #[derive(Debug, Clone, PartialEq)]
 pub struct DerivationExample {
     pub inputs: Vec<Expr>,
     pub output: Box<Expr>,
+    /// 2026-07-28: Optional relative tolerance for FP relaxed equivalence.
+    /// Syntax: `input -> [tol] output;` in derivation blocks.
+    pub tolerance: Option<f64>,
     pub span: Span,
 }
 

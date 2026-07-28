@@ -95,6 +95,7 @@ mod tests {
         let examples = vec![DerivationExample {
             inputs: vec![Expr::Decimal(1)],
             output: Box::new(Expr::Decimal(2)),
+            tolerance: None,
             span: dummy_span(),
         }];
         let query = build_synthesis_query(&examples);
@@ -107,6 +108,7 @@ mod tests {
         let examples = vec![DerivationExample {
             inputs: vec![Expr::Decimal(5)],
             output: Box::new(Expr::Decimal(5)),
+            tolerance: None,
             span: dummy_span(),
         }];
         let result = parse_smt_model("", &examples).unwrap();
@@ -118,6 +120,7 @@ mod tests {
         let examples = vec![DerivationExample {
             inputs: vec![Expr::Decimal(1), Expr::Decimal(2)],
             output: Box::new(Expr::Decimal(3)),
+            tolerance: None,
             span: dummy_span(),
         }];
         let result = parse_smt_model("", &examples).unwrap();

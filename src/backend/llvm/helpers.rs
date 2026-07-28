@@ -182,6 +182,8 @@ impl LlvmBackend {
                         .map(|i| Self::rewrite_cell_identifiers(i, cell_name))
                         .collect(),
                     output: Box::new(Self::rewrite_cell_identifiers(&ex.output, cell_name)),
+                    // 2026-07-28: Preserve tolerance field through rewriting
+                    tolerance: ex.tolerance,
                     span: ex.span,
                 })
                 .collect(),

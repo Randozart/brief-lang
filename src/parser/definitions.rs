@@ -900,7 +900,9 @@ impl<'a> Parser<'a> {
         }))
     }
 
-    /// Parse a single derivation example: inputs -> output
+    /// Parse a single derivation example: inputs -> [tol] output
+    /// 2026-07-28: Optional [expr] tolerance bracket after -> for FP relaxed equivalence.
+    /// Syntax: `input -> [0.001] output;`
     fn parse_derivation_example(&mut self) -> Result<DerivationExample, SyntaxError> {
         let mut inputs = Vec::new();
         loop {
@@ -910,12 +912,45 @@ impl<'a> Parser<'a> {
             }
             self.expect(Token::Comma); // must be followed by comma or arrow
         }
+        // 2026-07-28: Optional tolerance bracket: -> [tol] output
+        let tolerance = if self.eat(&Token::LBracket) {
+            let tol_expr = self.parse_expression()?;
+            self.expect(Token::RBracket)?;
+            Some(self.expr_to_f64_constant(&tol_expr)?)
+        } else {
+            None
+        };
         let output = Box::new(self.parse_expression()?);
         Ok(DerivationExample {
             inputs,
             output,
+            tolerance,
             span: Span::dummy(),
         })
+    }
+
+    /// 2026-07-28: Evaluate a compile-time constant expression to f64.
+    /// Used for tolerance parsing and other early-parse constant folding.
+    /// Handles Expr::Float, Expr::Decimal, and Expr::UnaryOp(Neg, ...).
+    fn expr_to_f64_constant(&self, expr: &Expr) -> Result<f64, SyntaxError> {
+        match expr {
+            Expr::Float(f) => Ok(*f),
+            Expr::Decimal(n) => Ok(*n as f64),
+            Expr::UnaryOp(UnaryOpKind::Neg, inner) => {
+                let val = self.expr_to_f64_constant(inner)?;
+                Ok(-val)
+            }
+            _ => {
+                let msg = format!(
+                    "expected a numeric constant (float or integer) in tolerance bracket, got '{}'",
+                    expr
+                );
+                Err(SyntaxError::InvalidExpression {
+                    reason: msg,
+                    span: Span::dummy(),
+                })
+            }
+        }
     }
 
     /// Wrap top-level statements in an implicit [#] transaction if needed.
