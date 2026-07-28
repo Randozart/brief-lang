@@ -193,6 +193,9 @@ impl LlvmBackend {
         // the correct state argument instead of a garbage pointer.
         writeln!(out, "declare void @__set_async_state__(ptr)").ok();
         writeln!(out, "declare i64 @time(ptr) nounwind").ok();
+        // 2026-07-28: atol and getenv used by GetEnvInt# intrinsic.
+        writeln!(out, "declare i64 @atol(ptr) nounwind").ok();
+        writeln!(out, "declare ptr @getenv(ptr) nounwind").ok();
         writeln!(out, "declare noalias ptr @malloc(i64) nounwind").ok();
         writeln!(out, "declare void @free(ptr) nounwind").ok();
         // 2026-06-26: realloc used by the arena allocator grow path when

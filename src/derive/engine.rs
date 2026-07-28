@@ -662,10 +662,17 @@ fn prune_level(
             }
         }).collect();
 
-        // Prune constant outputs (same value for all inputs) — only if 2+ examples
+        // Prune constant outputs (same value for all inputs) — only if 2+ examples.
         // With a single example, every expression appears constant.
+        // 2026-07-28: Keep small integer constants [-128, 255] — they're essential
+        // building blocks for shift amounts and bit masks (e.g., `1 + 1 = 2` for
+        // `x0 >> 2`). Prune only large garbage constants (e.g., `x0 * 0 + 9999999`).
         if examples.len() >= 2 && outputs.iter().all(|&v| v == outputs[0]) {
-            continue;
+            let val = outputs[0];
+            if val < -128 || val > 255 {
+                continue; // prune large garbage constants
+            }
+            // Fall through: small constants like 0, 1, 2, 3... are kept
         }
 
         // Prune redundant output signatures (already seen from simpler expr)
