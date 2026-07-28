@@ -2,7 +2,7 @@
 // 2026-07-28: Phase F.0 — MCMC configuration, state, sampler loop.
 // Flat code: each function max 2 levels of nesting.
 
-use crate::ast::{DerivationExample, Expr};
+use crate::ast::{DerivationExample, Expr, PropertyValue};
 use crate::derive::engine::SynthesizedProgram;
 use crate::derive::SynthesizeError;
 use std::collections::HashMap;
@@ -56,6 +56,10 @@ pub struct McmcConfig {
     pub correctness_weight: f64,
     pub performance_weight: f64,
     pub seed: Option<u64>,
+    // ── Phase G.4: Config driven by !> metadata ──────────────────
+    pub tolerance: Option<f64>,
+    pub allowed_mutations: Vec<String>,
+    pub cost_fn: CostFn,
 }
 
 /// Mutation probability weights.
@@ -86,12 +90,50 @@ impl Default for MutationWeights {
     }
 }
 
+impl MutationWeights {
+    /// 2026-07-28: Phase G.4 — Only linear arithmetic mutations.
+    pub fn linear_only() -> Self {
+        MutationWeights {
+            replace_subtree: 0.0,
+            change_operator: 0.40,
+            swap_commutative: 0.20,
+            fold_constant: 0.40,
+            insert_identity: 0.0,
+            delete_dead_code: 0.0,
+            distribute: 0.0,
+            vector_fuse: 0.0,
+        }
+    }
+
+    /// 2026-07-28: Phase G.4 — Only bitwise logic mutations.
+    pub fn bitwise_only() -> Self {
+        MutationWeights {
+            replace_subtree: 0.30,
+            change_operator: 0.40,
+            swap_commutative: 0.10,
+            fold_constant: 0.20,
+            insert_identity: 0.0,
+            delete_dead_code: 0.0,
+            distribute: 0.0,
+            vector_fuse: 0.0,
+        }
+    }
+}
+
 /// How to verify equivalence after mutation.
 #[derive(Debug, Clone)]
 pub enum EquivalenceMode {
     ExamplesOnly,
     Z3Proof { z3_path: String },
     Hybrid { z3_path: String },
+}
+
+/// 2026-07-28: Phase G.4 — Which cost function to use for MCMC search.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum CostFn {
+    Latency,
+    Throughput,
+    Size,
 }
 
 /// State of the MCMC sampler.
@@ -119,6 +161,9 @@ impl Default for McmcConfig {
             correctness_weight: 1000.0,
             performance_weight: 1.0,
             seed: None,
+            tolerance: None,
+            allowed_mutations: Vec::new(),
+            cost_fn: CostFn::Latency,
         }
     }
 }
@@ -308,6 +353,44 @@ fn expr_to_value(expr: &Expr) -> crate::interpreter::Value {
     }
 }
 
+/// 2026-07-28: Phase G.4 — Build an McmcConfig from !> metadata.
+/// Reads search_space, cost_model, tolerance, and allowed_mutations keys.
+pub fn mcmc_config_from_metadata(metadata: &HashMap<String, PropertyValue>) -> McmcConfig {
+    let mut config = McmcConfig::default();
+
+    if let Some(PropertyValue::String(space)) = metadata.get("search_space") {
+        match space.as_str() {
+            "linear" => config.mutation_weights = MutationWeights::linear_only(),
+            "bitwise" => config.mutation_weights = MutationWeights::bitwise_only(),
+            _ => {}
+        }
+    }
+
+    if let Some(PropertyValue::String(model)) = metadata.get("cost_model") {
+        match model.as_str() {
+            "latency" => config.cost_fn = CostFn::Latency,
+            "throughput" => config.cost_fn = CostFn::Throughput,
+            "size" => config.cost_fn = CostFn::Size,
+            _ => {}
+        }
+    }
+
+    if let Some(PropertyValue::Float(tol)) = metadata.get("tolerance") {
+        config.tolerance = Some(*tol);
+    }
+
+    if let Some(PropertyValue::List(mutations)) = metadata.get("allowed_mutations") {
+        config.allowed_mutations = mutations.iter()
+            .filter_map(|v| match v {
+                PropertyValue::String(s) => Some(s.clone()),
+                _ => None,
+            })
+            .collect();
+    }
+
+    config
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -372,5 +455,66 @@ mod tests {
             cost: 0, depth: 0,
         };
         assert_eq!(performance_cost(&prog), 1);
+    }
+
+    // ── Phase G.4 Tests ─────────────────────────────────────────
+
+    #[test]
+    fn test_mut_weight_linear_only() {
+        let w = MutationWeights::linear_only();
+        assert_eq!(w.replace_subtree, 0.0);
+        assert!((w.change_operator + w.swap_commutative + w.fold_constant - 1.0).abs() < 1e-10);
+    }
+
+    #[test]
+    fn test_mut_weight_bitwise_only() {
+        let w = MutationWeights::bitwise_only();
+        assert_eq!(w.insert_identity, 0.0);
+        assert_eq!(w.delete_dead_code, 0.0);
+    }
+
+    #[test]
+    fn test_mcmc_config_from_metadata_search_space_linear() {
+        let mut meta = HashMap::new();
+        meta.insert("search_space".into(), PropertyValue::String("linear".into()));
+        let cfg = mcmc_config_from_metadata(&meta);
+        assert_eq!(cfg.mutation_weights.replace_subtree, 0.0);
+    }
+
+    #[test]
+    fn test_mcmc_config_from_metadata_cost_model() {
+        let mut meta = HashMap::new();
+        meta.insert("cost_model".into(), PropertyValue::String("throughput".into()));
+        let cfg = mcmc_config_from_metadata(&meta);
+        assert_eq!(cfg.cost_fn, CostFn::Throughput);
+    }
+
+    #[test]
+    fn test_mcmc_config_from_metadata_tolerance() {
+        let mut meta = HashMap::new();
+        meta.insert("tolerance".into(), PropertyValue::Float(0.001));
+        let cfg = mcmc_config_from_metadata(&meta);
+        assert!((cfg.tolerance.unwrap() - 0.001).abs() < 1e-10);
+    }
+
+    #[test]
+    fn test_mcmc_config_from_metadata_allowed_mutations() {
+        let mut meta = HashMap::new();
+        meta.insert("allowed_mutations".into(), PropertyValue::List(vec![
+            PropertyValue::String("replace_subtree".into()),
+            PropertyValue::String("fold_constant".into()),
+        ]));
+        let cfg = mcmc_config_from_metadata(&meta);
+        assert_eq!(cfg.allowed_mutations.len(), 2);
+        assert!(cfg.allowed_mutations.contains(&"replace_subtree".into()));
+    }
+
+    #[test]
+    fn test_mcmc_config_from_metadata_empty() {
+        let meta: HashMap<String, PropertyValue> = HashMap::new();
+        let cfg = mcmc_config_from_metadata(&meta);
+        assert!(cfg.tolerance.is_none());
+        assert!(cfg.allowed_mutations.is_empty());
+        assert_eq!(cfg.cost_fn, CostFn::Latency);
     }
 }

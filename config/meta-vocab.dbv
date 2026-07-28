@@ -1,0 +1,121 @@
+schema MetaField {
+    name: String;
+    type: String;
+    description: String;
+}
+
+schema BackendMapping {
+    backend: String;
+    metadata_key: String;
+    value_pattern: String;
+    ir_attribute: String;
+    applies_to: String;
+}
+
+as MetaField {
+    overflow: String; "Integer overflow behavior for arithmetic ops"
+}
+
+as MetaField {
+    associative: Bool; "May the optimizer reassociate FP operations"
+}
+
+as MetaField {
+    commutative: Bool; "May the optimizer swap operands"
+}
+
+as MetaField {
+    fp_contract: String; "May the optimizer form FMA (fast, strict)"
+}
+
+as MetaField {
+    fp_math: String; "Floating-point compliance model (ieee754, fast)"
+}
+
+as MetaField {
+    readonly: Bool; "Function has no observable side effects"
+}
+
+as MetaField {
+    inline_hint: String; "Inlining hint (always, never, hint)"
+}
+
+as MetaField {
+    alloc_scope: String; "Allocation scope (heap, stack)"
+}
+
+as MetaField {
+    convergence: String; "Hardware convergence mode (tight, loose)"
+}
+
+as MetaField {
+    unroll_hint: Int; "Loop unroll factor hint"
+}
+
+as MetaField {
+    search_space: String; "MCMC search space (linear, bitwise, all)"
+}
+
+as MetaField {
+    cost_model: String; "MCMC cost function (latency, throughput, size)"
+}
+
+as MetaField {
+    tolerance: Float; "FP equivalence tolerance for MCMC"
+}
+
+as MetaField {
+    allowed_mutations: String; "MCMC allowed mutation names"
+}
+
+as BackendMapping {
+    llvm: overflow; "wrapping"; "nuw nsw"; instruction
+}
+
+as BackendMapping {
+    llvm: fp_math; "fast"; "fast"; instruction
+}
+
+as BackendMapping {
+    llvm: fp_contract; "fast"; "contract"; instruction
+}
+
+as BackendMapping {
+    llvm: associative; "true"; "reassoc"; instruction
+}
+
+as BackendMapping {
+    llvm: readonly; "true"; "readonly"; function
+}
+
+as BackendMapping {
+    llvm: inline_hint; "always"; "alwaysinline"; function
+}
+
+as BackendMapping {
+    llvm: inline_hint; "never"; "noinline"; function
+}
+
+as BackendMapping {
+    llvm: alloc_scope; "stack"; "allockind(alloc)"; instruction
+}
+
+as BackendMapping {
+    llvm: unroll_hint; "*"; "unroll"; instruction
+}
+
+as BackendMapping {
+    webstack: alloc_scope; "stack"; "stack_allocation"; function
+}
+
+as BackendMapping {
+    webstack: fp_contract; "fast"; "fma_fusion"; function
+}
+
+as BackendMapping {
+    circt: convergence; "tight"; "single_cycle"; function
+}
+
+as BackendMapping {
+    circt: unroll_hint; "*"; "unroll_factor"; function
+}

@@ -2,6 +2,7 @@ pub mod bindgen;
 pub mod circt;
 pub mod circt_normalizer;
 pub mod llvm;
+pub mod metadata;
 pub mod normalizer;
 pub mod vm;
 pub mod webstack;

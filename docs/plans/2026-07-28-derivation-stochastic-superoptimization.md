@@ -1939,12 +1939,25 @@ mapping tables for each backend. The MCMC optimizer reads derivation-related key
 (`search_space`, `cost_model`, `tolerance`, `allowed_mutations`) to guide its search.
 Each backend reads the remaining keys and maps them to target-specific semantics.
 
+**Architecture decision (2026-07-28)**: Vocabulary definitions and backend mapping
+rules are stored in a single `config/meta-vocab.dbv` file (Data Brief `.dbv` format
+with inline schemas). This replaces hardcoded Rust match arms for metadata→attribute
+lookups. The DBV file is parsed at compile time via `include_str!` +
+`dbrief::v2::parse_document_quoted`. A `MetadataRegistry` in `src/backend/metadata.rs`
+provides typed lookup functions for each backend.
+
+Rationale: Adding a new backend or metadata key only requires editing
+`config/meta-vocab.dbv` — no Rust changes to the mapping logic. The `.dbv` file
+also serves as the machine-readable source of truth for the vocabulary (the
+`docs/architecture/optimization-hints.md` doc is a human-readable rendering).
+
 ### Step G.0 — Vocabulary reference document
 
 **File**: `docs/architecture/optimization-hints.md` (new)
 
 **What**: A complete reference document listing every `!>` metadata key, its values,
-its semantics, and which backends honor it. This is the single source of truth.
+its semantics, and which backends honor it. This is the human-readable source of truth.
+The machine-readable source is `config/meta-vocab.dbv`.
 
 ```markdown
 # !> Optimization Hints — Vocabulary Reference
@@ -1966,114 +1979,186 @@ its semantics, and which backends honor it. This is the single source of truth.
 
 **Nesting check**: Flat markdown document with tables — no nesting concern.
 
-### Step G.1 — LLVM metadata mapping
+### Step G.1 — Data Brief vocabulary file
 
-**File**: `src/backend/llvm/metadata.rs` (new)
+**File**: `config/meta-vocab.dbv` (new)
 
-**What**: Map `!>` metadata keys to LLVM IR attributes, metadata nodes, and
-fast-math flags.
+**What**: A single `.dbv` file with inline schemas and data entries. Defines:
+
+1. **`MetaField` schema** — what metadata keys exist, their types, descriptions
+2. **`BackendMapping` schema** — how a (key, value) pair maps to a backend IR attribute
+3. **Data entries** under `as MetaField { ... }` — one per metadata key
+4. **Data entries** under `as BackendMapping { ... }` — one per mapping rule
+
+```dbv
+// config/meta-vocab.dbv — Phase G metadata vocabulary
+// Inline schemas define the structure; > entries are positional data.
+
+schema MetaField {
+    name: String;
+    type: String;
+    description: String;
+};
+
+schema BackendMapping {
+    backend: String;
+    metadata_key: String;
+    value_pattern: String;
+    ir_attribute: String;
+    applies_to: String;  // "function", "instruction", "module"
+};
+
+as MetaField {
+    > overflow; String; "Integer overflow behavior for arithmetic ops";
+    > associative; Bool; "May the optimizer reassociate FP operations";
+    > commutative; Bool; "May the optimizer swap operands";
+    > fp_contract; String; "May the optimizer form FMA (fast, strict)";
+    > fp_math; String; "Floating-point compliance model (ieee754, fast)";
+    > readonly; Bool; "Function has no observable side effects";
+    > inline_hint; String; "Inlining hint (always, never, hint)";
+    > alloc_scope; String; "Allocation scope (heap, stack)";
+    > convergence; String; "Hardware convergence mode (tight, loose)";
+    > unroll_hint; Int; "Loop unroll factor hint";
+    > search_space; String; "MCMC search space (linear, bitwise, all)";
+    > cost_model; String; "MCMC cost function (latency, throughput, size)";
+    > tolerance; Float; "FP equivalence tolerance for MCMC";
+    > allowed_mutations; String[]; "MCMC allowed mutation names";
+};
+
+as BackendMapping {
+    // LLVM mappings
+    > llvm; overflow; "wrapping"; "nuw nsw"; instruction;
+    > llvm; fp_math; "fast"; "fast"; instruction;
+    > llvm; fp_contract; "fast"; "contract"; instruction;
+    > llvm; associative; "true"; "reassoc"; instruction;
+    > llvm; readonly; "true"; "readonly"; function;
+    > llvm; inline_hint; "always"; "alwaysinline"; function;
+    > llvm; inline_hint; "never"; "noinline"; function;
+    > llvm; alloc_scope; "stack"; "allockind(alloc)"; instruction;
+    > llvm; unroll_hint; "*"; "unroll"; instruction;
+
+    // Webstack mappings
+    > webstack; alloc_scope; "stack"; "stack_allocation"; function;
+    > webstack; fp_contract; "fast"; "fma_fusion"; function;
+
+    // CIRCT mappings
+    > circt; convergence; "tight"; "single_cycle"; function;
+    > circt; unroll_hint; "*"; "unroll_factor"; function;
+};
+```
+
+**Loading**: The `MetadataRegistry` uses `include_str!("../../config/meta-vocab.dbv")`
+and `dbrief::v2::parse_document_quoted()`. The `parse_document_quoted` variant is
+required because mapping values use `"...`" quotation (e.g., `"wrapping"`, `"fast"`).
+Parse failure at compile time is a hard error (invariant: the `.dbv` file is always
+valid in a working copy).
+
+### Step G.2 — MetadataRegistry
+
+**File**: `src/backend/metadata.rs` (new)
+
+**What**: Central registry that loads `config/meta-vocab.dbv` and provides
+typed lookup functions for each backend.
 
 ```rust
-/// 2026-07-28: Phase G.1 — LLVM backend metadata mapping.
-/// Maps !> optimization hints to LLVM IR attributes and metadata.
-
-/// Apply !> metadata to an LLVM function declaration.
-pub fn apply_function_metadata(
-    fn_decl: &mut String,
-    metadata: &HashMap<String, PropertyValue>,
-) {
-    // overflow: "wrapping" → nuw nsw
-    if let Some(PropertyValue::String(val)) = metadata.get("overflow") {
-        if val == "wrapping" {
-            // nuw/nsw are applied to individual add/sub instructions, not function-level
-            // Stored as a flag for emit_stmt.rs to use
-        }
-    }
-
-    // associative: true → reassoc flag on float ops
-    // fp_contract: "fast" → contract fast-math flag
-    // inline_hint: "always" → alwaysinline attribute
-    // readonly: true → readonly attribute
+/// 2026-07-28: Phase G — DBV-backed metadata registry.
+/// Loaded once at compiler init from config/meta-vocab.dbv.
+pub struct MetadataRegistry {
+    fields: HashMap<String, MetaFieldDef>,
+    mappings: Vec<BackendMapping>,
+    llvm_idx: Vec<usize>,
+    webstack_idx: Vec<usize>,
+    circt_idx: Vec<usize>,
 }
 
-/// Emit fast-math flags for a floating-point operation based on metadata.
-pub fn emit_fast_math_flags(metadata: &HashMap<String, PropertyValue>) -> String {
-    let mut flags = String::new();
-    if matches!(metadata.get("fp_math"), Some(PropertyValue::String(v)) if v == "fast") {
-        flags.push_str(" fast");
-    }
-    if matches!(metadata.get("fp_contract"), Some(PropertyValue::String(v)) if v == "fast") {
-        flags.push_str(" contract");
-    }
-    if matches!(metadata.get("associative"), Some(PropertyValue::Bool(true))) {
-        flags.push_str(" reassoc");
-    }
-    flags
+pub struct MetaFieldDef {
+    pub name: String,
+    pub field_type: MetaType,
+    pub description: String,
+}
+
+pub enum MetaType { Bool, Int, Float, String, List }
+
+struct BackendMapping {
+    backend: String,
+    metadata_key: String,
+    value_pattern: String,  // literal value or "*" wildcard
+    ir_attribute: String,
+    applies_to: String,
+}
+
+impl MetadataRegistry {
+    pub fn load() -> Self;
+    pub fn field_def(&self, name: &str) -> Option<&MetaFieldDef>;
+    pub fn llvm_attr(&self, key: &str, value: &str) -> Option<&str>;
+    pub fn webstack_option(&self, key: &str, value: &str) -> Option<&str>;
+    pub fn circt_option(&self, key: &str, value: &str) -> Option<&str>;
 }
 ```
 
-**Tests**:
-- `test_llvm_overflow_wrapping`: `!> overflow: "wrapping"` → `nuw nsw` on add
-- `test_llvm_fp_math_fast`: `!> fp_math: "fast"` → `fast` flag on fadd
-- `test_llvm_readonly`: `!> readonly: true` → `readonly` attribute
-- `test_llvm_inline_hint`: `!> inline_hint: "always"` → `alwaysinline` attribute
-- `test_llvm_unknown_key`: Unknown key → no attribute emitted
+**Loading logic**:
+1. `include_str!("../../config/meta-vocab.dbv")` gets the file content
+2. `parse_document_quoted(&content).expect("...")` parses into `DbriefDocument`
+3. Iterate `data_groups`, matching `schema_name == "MetaField"` → extract field defs
+4. Match `schema_name == "BackendMapping"` → collect all mappings
+5. Build per-backend index vectors (`llvm_idx` = indices where `backend == "llvm"`)
 
-### Step G.2 — Webstack metadata mapping
-
-**File**: `src/backend/webstack.rs` (add mapping function)
-
-**What**: Webstack/WASM backend has fewer optimization attributes but can use
-`!>` metadata for semantic decisions.
-
-```rust
-/// 2026-07-28: Phase G.2 — Webstack metadata mapping.
-pub fn apply_webstack_metadata(
-    metadata: &HashMap<String, PropertyValue>,
-) -> WebstackOptions {
-    let mut opts = WebstackOptions::default();
-    if matches!(metadata.get("alloc_scope"), Some(PropertyValue::String(v)) if v == "stack") {
-        opts.use_stack_allocation = true;
+**Lookup logic** (`llvm_attr` as example):
+```
+for idx in &self.llvm_idx {
+    let m = &self.mappings[*idx];
+    if m.metadata_key == key && (m.value_pattern == "*" || m.value_pattern == value) {
+        return Some(m.ir_attribute.as_str());
     }
-    if matches!(metadata.get("fp_contract"), Some(PropertyValue::String(v)) if v == "fast") {
-        opts.enable_fma_fusion = true;
-    }
-    opts
 }
+None
 ```
 
-**Tests**:
-- `test_webstack_stack_alloc`: `!> alloc_scope: "stack"` → stack allocation in WASM
-- `test_webstack_default`: No metadata → defaults used
+**Tests** (`test_registry_loads` etc. — ~6 tests):
+- Parse succeeds and returns expected number of fields and mappings
+- `llvm_attr("overflow", "wrapping")` returns `Some("nuw nsw")`
+- `llvm_attr("fp_math", "ieee754")` returns `None` (no mapping for that value)
+- `llvm_attr("unknown_key", "val")` returns `None`
+- `webstack_option("alloc_scope", "stack")` returns `Some("stack_allocation")`
+- `circt_option("unroll_hint", "4")` returns `Some("unroll_factor")`
 
-### Step G.3 — CIRCT metadata mapping
+### Step G.3 — Backend integration
 
-**File**: `src/backend/circt.rs` (add mapping function)
+**LLVM** (`src/backend/llvm/`): During function codegen, load the registry and
+consult it when emitting float operations (fast-math flags) and function
+attributes (`alwaysinline`, `noinline`, `readonly`).
 
-**What**: CIRCT/hardware backend maps `!>` metadata to MLIR attributes.
+- `apply_llvm_function_metadata(fn_decl, metadata, registry)` — emits function-level attrs
+- `emit_fast_math_flags(metadata, registry)` — returns `" fast contract reassoc"` string
+  based on registry lookups
+- The LLVM fast-math flag emission is extracted as a call to `registry.llvm_attr()`
+  rather than hardcoded matches
 
-```rust
-/// 2026-07-28: Phase G.3 — CIRCT metadata mapping.
-pub fn apply_circt_metadata(
-    metadata: &HashMap<String, PropertyValue>,
-) -> CirctOptions {
-    let mut opts = CirctOptions::default();
-    if matches!(metadata.get("convergence"), Some(PropertyValue::String(v)) if v == "tight") {
-        opts.pipeline_stage_count = 1; // Single-cycle operations
-    }
-    opts
-}
-```
+**Webstack** (`src/backend/webstack.rs`): Add `apply_webstack_metadata(metadata,
+registry) -> WebstackOptions` function that queries the registry for
+`alloc_scope` and `fp_contract`.
 
-**Tests**:
-- `test_circt_convergence_tight`: `!> convergence: "tight"` → single-cycle pipeline
-- `test_circt_unroll_hint`: `!> unroll_hint: 4` → loop unroll factor
+**CIRCT** (`src/backend/circt.rs`): Add `apply_circt_metadata(metadata,
+registry) -> CirctOptions` function that queries the registry for `convergence`
+and `unroll_hint`.
+
+**Tests** (same as original G.1-G.3 in this plan, but now driven by the registry):
+- `test_llvm_overflow_wrapping`
+- `test_llvm_fp_math_fast`
+- `test_llvm_readonly`
+- `test_llvm_inline_hint`
+- `test_llvm_unknown_key`
+- `test_webstack_stack_alloc`
+- `test_webstack_default`
+- `test_circt_convergence_tight`
+- `test_circt_unroll_hint`
 
 ### Step G.4 — MCMC metadata reading
 
 **File**: `src/derive/mcmc.rs`
 
-**What**: The MCMC optimizer reads `!>` metadata keys to guide its search:
+**What**: The MCMC optimizer reads `!>` metadata keys directly from the AST
+(no registry needed — these are configuration keys, not backend attributes).
 
 ```rust
 /// 2026-07-28: Phase G.4 — MCMC reads !> metadata for search guidance.
