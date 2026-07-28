@@ -1065,6 +1065,7 @@ impl fmt::Display for WebstackError {
 #[derive(Debug, Clone)]
 pub enum RuntimeError {
     UndefinedVariable { name: String },
+    UndefinedFunction(String),
     DivisionByZero,
     HeapError(String),
     UnsupportedIntrinsic(String),
@@ -1078,6 +1079,9 @@ impl fmt::Display for RuntimeError {
         match self {
             RuntimeError::UndefinedVariable { name } => {
                 write!(f, "undefined variable '{}'", name)
+            }
+            RuntimeError::UndefinedFunction(name) => {
+                write!(f, "undefined function '{}'", name)
             }
             RuntimeError::DivisionByZero => write!(f, "division by zero"),
             RuntimeError::HeapError(msg) => write!(f, "heap error: {}", msg),

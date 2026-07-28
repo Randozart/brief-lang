@@ -1,15 +1,18 @@
 // ── Derivation Module — Program Synthesis from Examples ───────────────
 // 2026-07-12: Phase 6 — Enumerative and SMT-guided program synthesis.
 // Generates function bodies from `:=` derivation blocks.
+// 2026-07-28: Phase B — Added assertion verification module.
 // Flat code: each function max 2 levels of nesting.
 
 mod engine;
 mod smt;
 mod cli;
+mod assert;
 
 pub use engine::*;
 pub use smt::*;
 pub use cli::*;
+pub use assert::*;
 
 use crate::ast::{DerivationBlock, DerivationExample, Expr};
 

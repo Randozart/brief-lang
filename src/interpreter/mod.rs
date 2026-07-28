@@ -7,6 +7,11 @@
 // 2026-07-14: Re-added List/Enum/Instance/HashMap variants for FFI bridge
 // code that marshals structured types between native libraries and the
 // interpreter. These are FFI-only — no interpreter eval path produces them.
+//
+// 2026-07-28: Phase B.1 — Added function registry, load_program(),
+// lookup_function(), and call_function() for derivation assertion
+// verification. Functions are stored by name and called with raw Value
+// arguments via a frame save/restore pattern.
 
 pub mod casts;
 mod cells;
@@ -19,23 +24,37 @@ pub use eval::*;
 pub use ffi::*;
 pub use intrinsics::*;
 
-use crate::ast::{Expr, Statement};
+use crate::ast::*;
 use std::collections::HashMap;
 use std::sync::Arc;
 
 /// FFI files import RuntimeError from crate::interpreter.
 pub use crate::errors::RuntimeError;
 
+/// 2026-07-28: Record for a parsed function definition stored in the
+/// interpreter's function registry.
+#[derive(Debug, Clone)]
+pub struct FunctionDef {
+    pub name: String,
+    pub parameters: Vec<String>,
+    pub body: Vec<Statement>,
+}
+
 /// Compatibility struct bridging old Interpreter-based code to the new
 /// function-based eval API. The old `Interpreter` had `state`, `prior_state`,
 /// `heap`, `eval_expr()`, and `exec_stmt()`. This shim preserves that API
 /// while delegating to the standalone `eval_expr`/`eval_statement` functions.
 /// 2026-07-14: Added for reactor.rs and feature code compatibility.
+///
+/// 2026-07-28: Phase B.1 — Added `functions` registry for call_function().
 #[derive(Debug, Clone)]
 pub struct Interpreter {
     pub state: HashMap<String, Value>,
     pub prior_state: HashMap<String, Value>,
     pub heap: VirtualHeap,
+    /// 2026-07-28: Phase B.1 — Function definitions loaded from the program.
+    /// Keyed by function name, used by call_function() for assertion verification.
+    pub functions: HashMap<String, FunctionDef>,
 }
 
 impl Interpreter {
@@ -44,7 +63,82 @@ impl Interpreter {
             state: HashMap::new(),
             prior_state: HashMap::new(),
             heap: VirtualHeap::new(),
+            functions: HashMap::new(),
         }
+    }
+
+    /// 2026-07-28: Phase B.1 — Load all definitions and transactions from
+    /// a parsed program into the function registry for call_function().
+    pub fn load_program(&mut self, program: &[TopLevel]) {
+        for item in program {
+            match item {
+                TopLevel::Definition(d) => {
+                    let param_names = d.parameters.iter().map(|(n, _)| n.clone()).collect();
+                    self.functions.insert(d.name.clone(), FunctionDef {
+                        name: d.name.clone(),
+                        parameters: param_names,
+                        body: d.body.clone(),
+                    });
+                }
+                TopLevel::Transaction(t) => {
+                    let param_names = t.parameters.iter().map(|(n, _)| n.clone()).collect();
+                    self.functions.insert(t.name.clone(), FunctionDef {
+                        name: t.name.clone(),
+                        parameters: param_names,
+                        body: t.body.clone(),
+                    });
+                }
+                _ => {}
+            }
+        }
+    }
+
+    /// 2026-07-28: Phase B.1 — Look up a function definition by name.
+    pub fn lookup_function(&self, name: &str) -> Option<&FunctionDef> {
+        self.functions.get(name)
+    }
+
+    /// 2026-07-28: Phase B.1 — Call a function by name with pre-evaluated
+    /// argument values. Binds parameters, executes body, returns result.
+    /// Saves and restores any state keys that overlap with parameter names.
+    pub fn call_function(&mut self, name: &str, args: &[Value]) -> Result<Value, RuntimeError> {
+        let defn = self.lookup_function(name)
+            .cloned()
+            .ok_or_else(|| RuntimeError::UndefinedFunction(name.to_string()))?;
+
+        if defn.parameters.len() != args.len() {
+            return Err(RuntimeError::TypeError {
+                expected: format!("{} arguments", defn.parameters.len()),
+                found: format!("{} arguments", args.len()),
+            });
+        }
+
+        // Save any existing state keys that overlap with parameter names
+        let mut saved: HashMap<String, Option<Value>> = HashMap::new();
+        for param in &defn.parameters {
+            saved.insert(param.clone(), self.state.get(param).cloned());
+        }
+
+        // Bind parameters
+        for (i, name) in defn.parameters.iter().enumerate() {
+            self.state.insert(name.clone(), args[i].clone());
+        }
+
+        // Execute body statements
+        let mut result = Value::Void;
+        for stmt in &defn.body {
+            result = eval_statement(stmt, &mut self.heap, &mut self.state)?;
+        }
+
+        // Restore saved state
+        for (name, saved_val) in saved {
+            match saved_val {
+                Some(val) => { self.state.insert(name, val); }
+                None => { self.state.remove(&name); }
+            }
+        }
+
+        Ok(result)
     }
 
     pub fn eval_expr(&mut self, expr: &Expr) -> Result<Value, RuntimeError> {
@@ -227,6 +321,21 @@ pub fn bool_to_bits(b: bool) -> Value {
 /// Create a zero-filled Bits value of the given byte size.
 pub fn zero_bits(size: usize) -> Value {
     Value::Bits(vec![0u8; size])
+}
+
+/// 2026-07-28: Phase B.0 — Compare two values within relative tolerance.
+/// Used by derivation assertion verification for FP relaxed equivalence.
+/// For Float values, checks relative error: |a - e| / max(|e|, 1e-10) <= tol.
+/// Non-float values must match exactly.
+pub fn values_within_tolerance(actual: &Value, expected: &Value, tol: f64) -> bool {
+    match (actual, expected) {
+        (Value::Float(a), Value::Float(e)) => {
+            let diff = (a - e).abs();
+            let mag = e.abs().max(1e-10);
+            diff / mag <= tol
+        }
+        _ => actual == expected,
+    }
 }
 
 /// Sandboxed compile-time heap for pointer arithmetic and allocation.
