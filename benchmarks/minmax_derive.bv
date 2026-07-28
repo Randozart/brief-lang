@@ -3,14 +3,14 @@
 //   min: y ^ ((x ^ y) & -(x < y))
 //   max: x ^ ((x ^ y) & -(x < y))
 
-defn min(x: Int, y: Int) -> Int := {
+defn min(x0: Int, x1: Int) -> Int := {
     0, 5 -> 0;
     10, 3 -> 3;
     -5, 2 -> -5;
     7, 7 -> 7;
 };
 
-defn max(x: Int, y: Int) -> Int := {
+defn max(x0: Int, x1: Int) -> Int := {
     0, 5 -> 5;
     10, 3 -> 10;
     -5, 2 -> 2;
@@ -24,7 +24,7 @@ let total: Int = 0;
 node run[i < N][i == N] {
     total = total + min(i, N - i) + max(i, N - i);
     i = i + 1;
-    [i == N] {
+    when i == N {
         PrintLn!(total);
     };
     term;

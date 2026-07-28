@@ -684,6 +684,9 @@ filter_derive_name() {
 #cargo build --release --bin briefc 2>&1
 #echo ""
 
+# ── MAIN LOOP ─────────────────────────────────────────────────────────
+
+if [ "$DERIVE_MODE" = false ]; then
 for name in "${BENCHMARKS[@]}"; do
     filter_name "$name" || continue
     if [ "$CORRECTNESS_ONLY" = true ]; then
@@ -700,16 +703,19 @@ for name in "${BENCHMARKS[@]}"; do
         build_c "$name" || true
     fi
 done
+fi  # end of DERIVE_MODE=false gate
 
 echo ""
 echo "================================================"
 echo "  RUNNING BENCHMARKS"
 echo "================================================"
 
+if [ "$DERIVE_MODE" = false ]; then
 for name in "${BENCHMARKS[@]}"; do
     filter_name "$name" || continue
     bench_self_term "$name"
 done
+fi  # end of DERIVE_MODE=false gate
 
 if [ -n "$FUZZ_N" ]; then
     echo ""
