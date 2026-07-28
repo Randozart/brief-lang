@@ -175,10 +175,10 @@ pub fn evaluate_synthesized(
         Expr::Match(expr, arms) => {
             let val = evaluate_synthesized(expr, ctx)?;
             match val {
-                Value::Constructor(ref name, ref fields) => {
+                Value::Constructor(name, fields) => {
                     for arm in arms {
                         if let Pattern::EnumVariant(ref arm_name, ref pat_fields) = arm.pattern {
-                            if arm_name == name {
+                             if *arm_name == name {
                                 for (i, pat) in pat_fields.iter().enumerate() {
                                     match pat {
                                         Pattern::Binding(binding_name) => {
@@ -611,6 +611,37 @@ impl LevelCache {
     }
 }
 
+/// 2026-07-28: Incremental evaluation cache — stores evaluation results for each
+/// expression from the pruning step, avoiding recursive re-evaluation at the next
+/// depth. The LevelCache holds the pruned expression sets; the results HashMap
+/// provides O(1) lookup for candidate_matches_all_examples sub-expression evaluation.
+struct EvalCache {
+    level: LevelCache,
+    /// 2026-07-28: Evaluation results stored as (expr, results_for_each_example) pairs.
+    /// Linear lookup is fine: n ≤ 500 at any depth.
+    results: Vec<(Expr, Vec<crate::interpreter::Value>)>,
+}
+
+impl EvalCache {
+    fn empty() -> Self {
+        EvalCache {
+            level: LevelCache::empty(),
+            results: Vec::new(),
+        }
+    }
+
+    fn len(&self) -> usize {
+        self.results.len()
+    }
+
+    /// Look up cached evaluation results for an expression.
+    fn get(&self, expr: &Expr) -> Option<&Vec<crate::interpreter::Value>> {
+        self.results.iter()
+            .find(|(e, _)| std::ptr::eq(e, expr))
+            .map(|(_, v)| v)
+    }
+}
+
 /// 2026-07-28: Check if an expression is constant zero (for div-by-zero pruning).
 fn is_constant_zero(expr: &Expr) -> bool {
     match expr {
@@ -646,6 +677,25 @@ pub fn is_compound_type(name: &str) -> bool {
     matches!(name, "Expr")
 }
 
+/// 2026-07-28: Symmetry breaking — check if an operator is commutative.
+/// For commutative ops, we only generate lhs ≤ rhs to avoid duplicates.
+fn is_commutative_op(op: BinaryOpKind) -> bool {
+    matches!(op, BinaryOpKind::Add | BinaryOpKind::Mul
+        | BinaryOpKind::BitAnd | BinaryOpKind::BitOr
+        | BinaryOpKind::BitXor | BinaryOpKind::Eq)
+}
+
+/// 2026-07-28: Symmetry breaking — check if lhs ≤ rhs in canonical ordering.
+/// Uses expression index in the Vec as position indicator.
+fn expr_pair_ordered(lhs: &Expr, rhs: &Expr, exprs: &[Expr]) -> bool {
+    let lhs_pos = exprs.iter().position(|e| std::ptr::eq(e, lhs));
+    let rhs_pos = exprs.iter().position(|e| std::ptr::eq(e, rhs));
+    match (lhs_pos, rhs_pos) {
+        (Some(l), Some(r)) => l <= r,
+        _ => true, // fallback: generate both
+    }
+}
+
 /// 2026-07-28: Tier 1 — Check if a binary operation is semantically redundant.
 /// Identity operations like 0+X, X*1, X>>0 produce the same result as the
 /// non-identity operand. Pruning them reduces search space and overfitting.
@@ -669,7 +719,7 @@ fn generate_next_level(
     param_names: &[String],
     param_types: &[String],
     ret_type: &str,
-    prev: &LevelCache,
+    prev: &EvalCache,
 ) -> Vec<Expr> {
     let mut result = Vec::new();
 
@@ -687,10 +737,10 @@ fn generate_next_level(
     // Merge int_exprs and float_exprs for arithmetic unary (Neg works on both)
     let mut unary_sources: Vec<Expr> = Vec::new();
     if ret_type == "Int" || ret_type == "Float" {
-        unary_sources.extend(prev.int_exprs.clone());
-        unary_sources.extend(prev.float_exprs.clone());
+        unary_sources.extend(prev.level.int_exprs.clone());
+        unary_sources.extend(prev.level.float_exprs.clone());
     } else if ret_type == "Bool" {
-        unary_sources.extend(prev.bool_exprs.clone());
+        unary_sources.extend(prev.level.bool_exprs.clone());
     }
     for e in &unary_sources {
         if ret_type == "Int" || ret_type == "Float" {
@@ -702,9 +752,9 @@ fn generate_next_level(
 
     // Binary ops: cross product of prev per type
     let cache_types: [(&str, &Vec<Expr>); 3] = [
-        ("Int", &prev.int_exprs),
-        ("Float", &prev.float_exprs),
-        ("Bool", &prev.bool_exprs),
+        ("Int", &prev.level.int_exprs),
+        ("Float", &prev.level.float_exprs),
+        ("Bool", &prev.level.bool_exprs),
     ];
     for (ty_str, exprs) in &cache_types {
         if exprs.is_empty() {
@@ -735,6 +785,12 @@ fn generate_next_level(
                         if is_identity_op(*op, lhs, rhs) {
                             continue;
                         }
+                        // 2026-07-28: Symmetry breaking — for commutative ops, only
+                        // generate when lhs <= rhs (by expression position) to avoid
+                        // generating both Add(A,B) and Add(B,A).
+                        if is_commutative_op(*op) && !expr_pair_ordered(lhs, rhs, exprs) {
+                            continue;
+                        }
                         result.push(Expr::BinaryOp(*op, Box::new(lhs.clone()), Box::new(rhs.clone())));
                     }
                 }
@@ -743,11 +799,11 @@ fn generate_next_level(
     }
 
     // Bool-specific logical ops
-    if ret_type == "Bool" && !prev.bool_exprs.is_empty() {
+    if ret_type == "Bool" && !prev.level.bool_exprs.is_empty() {
         for op in &[BinaryOpKind::And, BinaryOpKind::Or, BinaryOpKind::BitXor] {
             if op_result_type(op, "Bool", "Bool") == Some("Bool") {
-                for lhs in &prev.bool_exprs {
-                    for rhs in &prev.bool_exprs {
+                for lhs in &prev.level.bool_exprs {
+                    for rhs in &prev.level.bool_exprs {
                         result.push(Expr::BinaryOp(*op, Box::new(lhs.clone()), Box::new(rhs.clone())));
                     }
                 }
@@ -759,12 +815,12 @@ fn generate_next_level(
     if is_compound_type(ret_type) {
         // Call generation: Const(Int), Add(Expr, Expr), Sub(Expr, Expr), Mul(Expr, Expr)
         // Const takes Int arg
-        for int_expr in &prev.int_exprs {
+        for int_expr in &prev.level.int_exprs {
             result.push(Expr::Call("Const".into(), vec![int_expr.clone()], None));
         }
         // Add/Sub/Mul take two Expr args — use prev level's compound expressions
         let compound_exprs = ret_type.to_string();
-        if let Some(exprs) = prev.compound_exprs.get(&compound_exprs) {
+        if let Some(exprs) = prev.level.compound_exprs.get(&compound_exprs) {
             for lhs in exprs {
                 for rhs in exprs {
                     result.push(Expr::Call("Add".into(), vec![lhs.clone(), rhs.clone()], None));
@@ -780,7 +836,7 @@ fn generate_next_level(
     // For each compound type expression in prev level, generate a Match with
     // EnumVariant arms. Arm bodies use the bound field variables — for cross-type
     // extraction, the first field is assumed to be the value (correct for Const).
-    for (type_name, exprs) in &prev.compound_exprs {
+    for (type_name, exprs) in &prev.level.compound_exprs {
         if type_name == ret_type {
             // Same-type match: arms return the same type (reconstruct)
             for scrutinee in exprs {
@@ -859,29 +915,29 @@ fn prune_level(
     param_names: &[String],
     param_types: &[String],
     examples: &[DerivationExample],
-) -> LevelCache {
+) -> EvalCache {
     use std::collections::HashSet;
-    let mut cache = LevelCache::empty();
-    // Track seen output signatures to keep only unique ones
+    let mut level_cache = LevelCache::empty();
+    let mut eval_results: Vec<(Expr, Vec<crate::interpreter::Value>)> = Vec::new();
     let mut seen: HashSet<Vec<i64>> = HashSet::new();
 
     for expr in &candidates {
-        // Evaluate against all examples
-        let outputs: Vec<(i64, i64)> = examples.iter().map(|ex| {
+        // Evaluate against all examples — store raw results for caching
+        let eval_outputs: Vec<crate::interpreter::Value> = examples.iter().map(|ex| {
             let input_values = example_inputs_to_values(ex, param_names);
             let mut ctx = SynthesisEvalContext::new();
             for (name, val) in param_names.iter().zip(input_values.iter()) {
                 ctx.bind(name, val.clone());
             }
-            match evaluate_synthesized(expr, &mut ctx) {
-                Ok(Value::Int(n)) => (n, 1),  // (value, kind discriminator)
-                Ok(Value::Float(f)) => (f as i64, 2),
-                Ok(Value::Bits(b)) => (b.iter().fold(0i64, |acc, &x| (acc << 1) | x as i64), 3),
-                // 2026-07-28: Phase 5 — Hash constructor values recursively.
-                // Include name and all field values in the fingerprint so
-                // different constructor instances (e.g., Const(5) vs Const(42))
-                // are not incorrectly pruned as redundant.
-                Ok(Value::Constructor(ref name, ref fields)) => {
+            evaluate_synthesized(expr, &mut ctx).unwrap_or(crate::interpreter::Value::Int(0))
+        }).collect();
+        // Compute fingerprint from already-evaluated results
+        let outputs: Vec<(i64, i64)> = eval_outputs.iter().map(|v| {
+            match v {
+                Value::Int(n) => (*n, 1),
+                Value::Float(f) => (f.to_bits() as i64, 2),
+                Value::Bits(b) => (b.iter().fold(0i64, |acc, &x| (acc << 1) | x as i64), 3),
+                Value::Constructor(name, fields) => {
                     let name_hash = name.bytes().fold(0i64, |acc, b| acc.wrapping_mul(31).wrapping_add(b as i64));
                     let fields_hash = fields.iter().fold(0i64, |acc, f| match f {
                         Value::Int(n) => acc.wrapping_mul(31).wrapping_add(*n),
@@ -928,16 +984,19 @@ fn prune_level(
                 .map(|s| crate::derive::engine::is_compound_type(s.as_str()))
                 .unwrap_or(false)
         });
+        // Store eval results in the cache (Expr as Vec key, pointer-based lookup)
+        eval_results.push((expr.clone(), eval_outputs));
+
         if is_compound_param {
-            cache.compound_exprs.entry("Expr".to_string()).or_default().push(expr.clone());
+            level_cache.compound_exprs.entry("Expr".to_string()).or_default().push(expr.clone());
         } else if let Some(ty) = expr_type_hint_with_params(expr, param_names, param_types) {
-            cache.push(expr.clone(), ty);
+            level_cache.push(expr.clone(), ty);
         } else {
-            cache.compound_exprs.entry("Expr".to_string()).or_default().push(expr.clone());
+            level_cache.compound_exprs.entry("Expr".to_string()).or_default().push(expr.clone());
         }
     }
 
-    cache
+    EvalCache { level: level_cache, results: eval_results }
 }
 
 /// 2026-07-28: Infer the return type of an expression (best-effort for pruning).
@@ -1056,7 +1115,7 @@ pub fn synthesize_enumerative(
     let mut best: Option<SynthesizedProgram> = None;
     // 2026-07-28: Checkpointed depth search — start with empty level cache,
     // generate each depth from the pruned set of the previous depth.
-    let mut prev_cache = LevelCache::empty();
+    let mut prev_cache = EvalCache::empty();
 
     for depth in 1..=max_depth {
         // Generate candidates for this depth from the pruned previous level
@@ -1073,7 +1132,7 @@ pub fn synthesize_enumerative(
                 next_level.push(candidate.clone());
                 continue;
             }
-            if candidate_matches_all_examples(candidate, param_names, examples) {
+            if candidate_matches_all_examples(candidate, param_names, examples, &prev_cache) {
                 best = Some(SynthesizedProgram {
                     body: vec![candidate.clone()],
                     cost,
@@ -1100,7 +1159,25 @@ fn candidate_matches_all_examples(
     candidate: &Expr,
     param_names: &[String],
     examples: &[DerivationExample],
+    eval_cache: &EvalCache,
 ) -> bool {
+    // 2026-07-28: Check eval cache first — avoids re-evaluating expressions
+    // that were already evaluated during pruning.
+    if let Some(cached) = eval_cache.get(candidate) {
+        return cached.iter().enumerate().all(|(i, val): (usize, &crate::interpreter::Value)| {
+            let expected_input_ctx = || -> SynthesisEvalContext {
+                let mut c = SynthesisEvalContext::new();
+                c
+            };
+            let expected = evaluate_synthesized(&examples[i].output, &mut expected_input_ctx());
+            let tol = examples[i].tolerance.unwrap_or(0.0);
+            let ok_val: Result<crate::interpreter::Value, crate::derive::engine::SynthesisEvalError> = Ok(val.clone());
+            match (ok_val, expected) {
+                (Ok(ref actual), Ok(ref exp)) => values_within_tolerance(actual, exp, tol),
+                _ => false,
+            }
+        });
+    }
     examples.iter().all(|ex| {
         let input_values = example_inputs_to_values(ex, param_names);
         let mut ctx = SynthesisEvalContext::new();

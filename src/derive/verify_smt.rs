@@ -168,7 +168,7 @@ pub fn type_to_smt_sort(ty: &Type) -> String {
 }
 
 /// 2026-07-28: Check if a type name is a known compound (datatype) type.
-pub fn is_compound_type(name: &str) -> bool {
+fn is_compound_type(name: &str) -> bool {
     matches!(name, "Expr")
 }
 
