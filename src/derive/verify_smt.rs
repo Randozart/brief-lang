@@ -63,7 +63,24 @@ pub fn expr_to_smt_term(expr: &Expr, param_names: &[String]) -> String {
         }
         Expr::Field(inner, field_name) => {
             let inner_str = expr_to_smt_term(inner, param_names);
-            format!("({} {})", field_name, inner_str)
+            // 2026-07-28: Phase 4 — Use Z3 datatype selector names.
+            // The selector name depends on the constructor:
+            //   Const: "0" → "Const-val"
+            //   Add: "0" → "Add-left", "1" → "Add-right"
+            // If the inner expression is a Call, derive the selector from it.
+            let sel = field_name.clone();
+            if let Expr::Call(cname, _, _) = inner.as_ref() {
+                let prefix = &cname;
+                let suffix = match field_name.as_str() {
+                    "0" => "-val",
+                    "1" => "-right",
+                    _ => "",
+                };
+                let alt = format!("{}{}", prefix, suffix);
+                format!("({} {})", alt, inner_str)
+            } else {
+                format!("({} {})", sel, inner_str)
+            }
         }
         Expr::Match(expr, arms) => {
             let scrutinee = expr_to_smt_term(expr, param_names);
@@ -133,6 +150,8 @@ pub fn type_to_smt_sort(ty: &Type) -> String {
             "Int8" | "UInt8" => "(_ BitVec 8)".into(),
             "Bool" => "Bool".into(),
             "Float" => "(_ FloatingPoint 11 53)".into(),
+            // 2026-07-28: Phase 4 — Compound type names used as Z3 datatype names
+            name if is_compound_type(name) => name.into(),
             _ => "(_ BitVec 64)".into(),
         },
         Type::Bits(n) => {
@@ -145,6 +164,42 @@ pub fn type_to_smt_sort(ty: &Type) -> String {
             format!("(Vector {} {})", inner_sort, size)
         }
         _ => "(_ BitVec 64)".into(),
+    }
+}
+
+/// 2026-07-28: Check if a type name is a known compound (datatype) type.
+pub fn is_compound_type(name: &str) -> bool {
+    matches!(name, "Expr")
+}
+
+/// Get Z3 datatype declaration for a Brief type, if it's a compound type.
+fn datatype_decl_for_type(ty: &Type) -> Option<String> {
+    match ty {
+        Type::Custom(name) => get_datatype_declaration(name),
+        _ => None,
+    }
+}
+
+/// Get Z3 datatype declaration by type name string.
+fn datatype_decl_for_type_str(name: &str) -> Option<String> {
+    get_datatype_declaration(name)
+}
+
+/// 2026-07-28: Phase 4 — Generate Z3 declare-datatypes for compound types.
+/// Returns the datatype declaration for built-in synthesis types.
+/// Each type gets constructors with selectors matching expr_to_smt_term naming.
+pub fn get_datatype_declaration(type_name: &str) -> Option<String> {
+    match type_name {
+        "Expr" => Some(
+            "(declare-datatypes () ((Expr\n\
+             (Const (Const-val (_ BitVec 64)))\n\
+             (Add (Add-left Expr) (Add-right Expr))\n\
+             (Sub (Sub-left Expr) (Sub-right Expr))\n\
+             (Mul (Mul-left Expr) (Mul-right Expr))\n\
+             )))".into()
+        ),
+        "Bool" | "Int" | "Int64" | "Int32" | "Int16" | "Int8" => None,
+        _ => None,
     }
 }
 
@@ -175,6 +230,19 @@ pub fn build_verification_query(
     let mut q = String::new();
     q.push_str("(set-option :produce-models true)\n");
     q.push_str("(set-logic ALL)\n\n");
+
+    // 2026-07-28: Phase 4 — Datatype declarations for compound types
+    for (_, ty) in params {
+        if let Some(decl) = datatype_decl_for_type(ty) {
+            q.push_str(&decl);
+            q.push('\n');
+        }
+    }
+    if let Some(decl) = postcondition.and_then(|_| datatype_decl_for_type_str("Expr")) {
+        q.push_str(&decl);
+        q.push('\n');
+    }
+    q.push('\n');
 
     // declare-fun for the candidate function
     q.push_str(&format!("; Candidate: {}\n", name));
