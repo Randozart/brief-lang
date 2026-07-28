@@ -1756,6 +1756,10 @@ impl LlvmBackend {
             None
         };
 
+        // 2026-07-28: Persist transition graph for !prof computation in emit_toplevel.
+        // iter_bounds populated later (at txn processing loop) — txns not in scope yet.
+        self.ctx.transition_graph = Some(analysis.transition_graph.clone());
+
         let cg = &analysis.call_graph;
         self.ctx.has_cycles = cg.has_cycle();
         let sb = self.compute_state_size_bytes() as u64;
@@ -2360,6 +2364,13 @@ impl LlvmBackend {
         // 2026-07-21: Run SLP isomorphism analysis — detects structurally identical
         // operation sequences across different float fields (nbody's dx01=by0-by1,
         // dy01=by0-by1 pattern) for potential vectorization in a future phase.
+        // 2026-07-28: Populate iter_bounds for !prof computation (txns is now in scope).
+        self.ctx.iter_bounds.clear();
+        for (name, _) in &txns {
+            if let Some(bound) = analysis.region_analyzer.iteration_bound_of(name) {
+                self.ctx.iter_bounds.insert(name.clone(), bound);
+            }
+        }
         for (name, txn) in &txns {
             if txn.is_reactive {
                 let result = crate::analysis::slp_isomorphism::analyze_body(&txn.body);

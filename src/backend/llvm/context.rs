@@ -130,6 +130,13 @@ pub struct CompilerContext {
     /// 2026-07-27: Byte size of the %State struct. Computed after field index
     /// population in generate(), used as dereferenceable(N) on ptr %state params.
     pub state_size_bytes: u64,
+    /// 2026-07-28: Transition graph from analysis pipeline — carries bounded_pre
+    /// (induction variable, bound, direction) and increments per transaction name.
+    /// Used by emit_toplevel.rs for precise !prof branch weights on guard conditions.
+    pub transition_graph: Option<crate::analysis::transition_graph::ReactorTransitionGraph>,
+    /// 2026-07-28: Per-transaction iteration bounds from RegionAnalyzer.
+    /// Maps txn_name → iteration_count. Used with bounded_pre + increments for !prof.
+    pub iter_bounds: HashMap<String, u64>,
     /// 2026-07-27: Pre-computed parameter string for `ptr %state` with noundef
     /// and conditional dereferenceable(N). Set by set_state_ptr_param().
     pub state_ptr_param: String,
@@ -261,6 +268,8 @@ impl CompilerContext {
             emit_remarks: false,
             has_cycles: false,
             state_size_bytes: 0,
+            transition_graph: None,
+            iter_bounds: HashMap::new(),
             state_ptr_param: "ptr noundef noalias nocapture align 8 %state".to_string(),
             needs_arena: HashSet::new(),
             slp_hazard_fns: HashSet::new(),

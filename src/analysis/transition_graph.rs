@@ -37,6 +37,7 @@ pub struct ReactorNode {
     pub assume_shape_action: Option<String>,
 }
 
+#[derive(Debug, Clone)]
 pub struct ReactorTransitionGraph {
     pub nodes: Vec<ReactorNode>,
     pub has_triggers: bool,

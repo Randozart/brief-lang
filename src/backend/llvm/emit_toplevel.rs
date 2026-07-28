@@ -1471,6 +1471,17 @@ impl LlvmBackend {
         let txn_attr = self.slp_attr(name, "#0");
 
         // ── Helper: collect identifiers from a statement ────────────────
+        /// 2026-07-28: Check if an expression references the named induction variable.
+        fn get_induction_var_name(e: &Expr, var: &str) -> Option<String> {
+            match e {
+                Expr::Identifier(name) if name == var => Some(name.clone()),
+                Expr::BinaryOp(_, lhs, rhs) => {
+                    get_induction_var_name(lhs, var).or_else(|| get_induction_var_name(rhs, var))
+                }
+                Expr::UnaryOp(_, inner) => get_induction_var_name(inner, var),
+                _ => None,
+            }
+        }
         fn collect_let_names(stmt: &Statement, names: &mut Vec<String>) {
             match stmt {
                 Statement::Let { name, names: extra, .. } => {
@@ -1750,36 +1761,107 @@ impl LlvmBackend {
                         // like `count % N == C` with postcondition `[count == total]`,
                         // the guard fires `ceil(total / N)` times out of `total`.
                         let prof_meta = {
-                            // Extract postcondition bound: [x == N]
-                            let post_bound: Option<i64> = (|| {
-                                let (lhs, rhs) = match &txn.contract.post_condition {
-                                    Expr::BinaryOp(BinaryOpKind::Eq, l, r) => (l.as_ref(), r.as_ref()),
-                                    _ => return None,
+                            // 2026-07-28: Extended !prof computation — uses transition graph
+                            // data (bounded_pre, increments) and iter_bounds for more precise
+                            // weights. Falls back to postcondition + modulo analysis.
+                            let txn_name = name;
+                            let bounded_pre = self.ctx.transition_graph.as_ref()
+                                .and_then(|tg| tg.nodes.iter().find(|n| n.name == txn_name))
+                                .and_then(|n| n.bounded_pre.as_ref());
+                            let increment = self.ctx.transition_graph.as_ref()
+                                .and_then(|tg| tg.nodes.iter().find(|n| n.name == txn_name))
+                                .and_then(|n| n.increments.as_ref());
+                            let iter_bound = self.ctx.iter_bounds.get(txn_name).copied();
+
+                            // Helper: compute and scale !prof weights
+                            let scale_weights = |taken: u64, not_taken: u64| -> Option<(u32, u32)> {
+                                let max_w = 1000u64;
+                                let total = taken + not_taken;
+                                if taken == 0 || not_taken == 0 { return None; }
+                                let (wt, wn) = if total <= max_w {
+                                    (taken as u32, not_taken as u32)
+                                } else {
+                                    let ratio = total as f64 / max_w as f64;
+                                    ((taken as f64 / ratio).ceil() as u32,
+                                     (not_taken as f64 / ratio).ceil() as u32)
                                 };
-                                let n = match rhs {
-                                    Expr::Decimal(n) => Some(*n),
-                                    Expr::Identifier(id) => self.ctx.constants.get(id.as_str())
-                                        .and_then(|(_, e)| if let Expr::Decimal(v) = e { Some(*v) } else { None }),
+                                if wt > 0 && wn > 0 { Some((wt, wn)) } else { None }
+                            };
+                            let format_weights = |wt: u32, wn: u32| -> String {
+                                format!(", !prof !{{!\"branch_weights\", i32 {}, i32 {}}}", wt, wn)
+                            };
+
+                            // Strategy 1: Use transition graph bounded_pre + increments
+                            if let (Some(bp), Some(inc), Some(ib)) = (bounded_pre, increment, iter_bound) {
+                                let step = inc.delta.unsigned_abs() as u64;
+                                // Match guard condition referencing the induction variable
+                                let guard_var = match cond {
+                                    Expr::BinaryOp(BinaryOpKind::Eq, lhs, _) => {
+                                        get_induction_var_name(lhs, &bp.var)
+                                    }
                                     _ => None,
                                 };
-                                n.filter(|&n| n > 0)
-                            })();
-                            // Extract modulo divisor from guard condition: x % N == C
-                            let mod_div: Option<i64> = (|| {
-                                let lhs = match cond {
-                                    Expr::BinaryOp(BinaryOpKind::Eq, l, _) => l.as_ref(),
-                                    _ => return None,
-                                };
-                                match lhs {
-                                    Expr::BinaryOp(BinaryOpKind::Mod, _, d) => match d.as_ref() {
-                                        Expr::Decimal(n) if *n > 0 => Some(*n),
+                                if guard_var.is_some() && step > 0 && ib > 0 {
+                                    // Extract divisor from modulo: var % N == C
+                                    let mod_n = match cond {
+                                        Expr::BinaryOp(BinaryOpKind::Eq, lhs, _) => match lhs.as_ref() {
+                                            Expr::BinaryOp(BinaryOpKind::Mod, _, d) => match d.as_ref() {
+                                                Expr::Decimal(n) if *n > 0 => Some(*n as u64),
+                                                _ => None,
+                                            },
+                                            _ => None,
+                                        },
                                         _ => None,
-                                    },
-                                    _ => None,
-                                }
-                            })();
-                            match (post_bound, mod_div) {
-                                (Some(bound), Some(mod_n)) => {
+                                    };
+                                    if let Some(mn) = mod_n {
+                                        // Modulo pattern: count % N == C
+                                        let taken = ib / (step * mn);
+                                        let not_taken = ib.saturating_sub(taken);
+                                        if let Some((wt, wn)) = scale_weights(taken, not_taken) {
+                                            format_weights(wt, wn)
+                                        } else { String::new() }
+                                    } else {
+                                        // General induction variable constraint:
+                                        // Use iter_bound / step as total, guard fires 1 per step
+                                        let taken = ib / step;
+                                        let not_taken = ib.saturating_sub(taken);
+                                        if let Some((wt, wn)) = scale_weights(taken, not_taken) {
+                                            format_weights(wt, wn)
+                                        } else { String::new() }
+                                    }
+                                } else { String::new() }
+                            } else {
+                                // Strategy 2: Postcondition + modulo (original Phase 2)
+                                // Extract postcondition bound: [x == N]
+                                let post_bound: Option<i64> = (|| {
+                                    let (lhs, rhs) = match &txn.contract.post_condition {
+                                        Expr::BinaryOp(BinaryOpKind::Eq, l, r) => (l.as_ref(), r.as_ref()),
+                                        _ => return None,
+                                    };
+                                    let n = match rhs {
+                                        Expr::Decimal(n) => Some(*n),
+                                        Expr::Identifier(id) => self.ctx.constants.get(id.as_str())
+                                            .and_then(|(_, e)| if let Expr::Decimal(v) = e { Some(*v) } else { None }),
+                                        _ => None,
+                                    };
+                                    n.filter(|&n| n > 0)
+                                })();
+                                // Extract modulo divisor from guard condition: x % N == C
+                                let mod_div: Option<i64> = (|| {
+                                    let lhs = match cond {
+                                        Expr::BinaryOp(BinaryOpKind::Eq, l, _) => l.as_ref(),
+                                        _ => return None,
+                                    };
+                                    match lhs {
+                                        Expr::BinaryOp(BinaryOpKind::Mod, _, d) => match d.as_ref() {
+                                            Expr::Decimal(n) if *n > 0 => Some(*n),
+                                            _ => None,
+                                        },
+                                        _ => None,
+                                    }
+                                })();
+                                match (post_bound, mod_div) {
+                                    (Some(bound), Some(mod_n)) => {
                                     let taken = (bound as f64 / mod_n as f64).ceil() as u64;
                                     let not_taken = (bound as u64).saturating_sub(taken);
                                     let max_w = 1000u64;
@@ -1800,6 +1882,7 @@ impl LlvmBackend {
                                 }
                                 _ => String::new(),
                             }
+                        }
                         };
                         writeln!(out, "  br i1 {}, label %{}, label %{}{}",
                             cond_i1, then_lbl, end_lbl, prof_meta).ok();
