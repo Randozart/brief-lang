@@ -2511,17 +2511,18 @@ Every phase must update the following documentation in the same commit:
 ## Commit Sequence
 
 ```
- 1. Phase A: Parser/AST wiring + tolerance syntax
- 2. Phase B: Assertion build gate + interpreter call_function
- 3. Phase C: Full enumerative synthesis (type-aware, interpreter-backed)
- 4. Phase D: Full SMT synthesis (SyGuS, Z3 integration)
- 5. Phase E: Doppelganger write-back + build resolution (E.0–E.3)
- 6. Phase F: MCMC superoptimizer (mutations, equivalence, sampler, Pareto)
- 7. Phase G: Metadata vocabulary reference + backend mappings
- 8. Phase H: Metadata-driven codegen (LLVM, Webstack, CIRCT wiring)
- 9. Phase I: CLI completion (`brief derive` flags + `brief accept`)
-10. Integration tests: end-to-end pipeline
-11. Benchmark baseline + MCMC comparison
+ 1. Phase A: Parser/AST wiring + tolerance syntax                                     ✓ (0b244970)
+ 2. Phase B: Assertion build gate + interpreter call_function                         ✓ (ba45226e)
+ 3. Phase C: Full enumerative synthesis (type-aware, interpreter-backed)              ✓ (76c70901)
+ 4. Phase D: Full SMT synthesis (SyGuS, Z3 integration)                               ✓ (32ae4a47)
+ 5. Phase E: Doppelganger write-back + build resolution (E.0–E.3)                     ✓ (53f5604c)
+ 6. Phase F: MCMC superoptimizer (mutations, equivalence, sampler, Pareto)            ✓ (a272dc11)
+ 7. Phase G: Metadata vocabulary reference + backend mappings                         ✓ (09cfc234)
+ 8. Phase H: Metadata-driven codegen (LLVM, Webstack, CIRCT wiring)                   ✓ (9d54f263+)
+ 9. Phase I: CLI completion (`brief derive` flags + `brief accept`)                   ✓ (cb02b43b+)
+  -- Parse fix: `:= { ... }` without body (I.1 dependency)                           ✓ (755aa08c)
+ 10. Integration tests: end-to-end pipeline
+ 11. Benchmark baseline + MCMC comparison
 ```
 
 Each commit must pass `cargo test --lib` and `cargo build --release`.
