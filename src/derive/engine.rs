@@ -380,6 +380,142 @@ fn generate_typed_expressions(
     result
 }
 
+/// 2026-07-28: Lazy version — yields each candidate to `callback` as generated,
+/// stops early if callback returns true. Reduces memory from O(candidates) to O(depth).
+fn generate_typed_expressions_lazy(
+    param_names: &[String],
+    param_types: &[String],
+    ret_type: &str,
+    depth: u8,
+    callback: &mut dyn FnMut(&Expr) -> bool,
+) {
+    if depth == 0 || param_names.len() != param_types.len() {
+        return;
+    }
+
+    // Constants at any depth (but prefer shallow)
+    let mut temp = Vec::new();
+    push_typed_constants(ret_type, &mut temp);
+    for c in &temp {
+        if callback(c) { return; }
+    }
+
+    // Variables that match the return type
+    for (name, ty) in param_names.iter().zip(param_types.iter()) {
+        if ty == ret_type {
+            let expr = Expr::Identifier(name.clone());
+            if callback(&expr) { return; }
+        }
+    }
+
+    if depth <= 1 {
+        return;
+    }
+
+    // Unary ops
+    if ret_type == "Int" || ret_type == "Float" {
+        generate_typed_expressions_lazy(param_names, param_types, ret_type, depth - 1, &mut |e| {
+            if let Some(neg_ty) = unary_result_type(&UnaryOpKind::Neg, ret_type) {
+                if neg_ty == ret_type {
+                    if callback(&Expr::UnaryOp(UnaryOpKind::Neg, Box::new(e.clone()))) {
+                        return true;
+                    }
+                }
+            }
+            false
+        });
+    }
+    if ret_type == "Bool" {
+        generate_typed_expressions_lazy(param_names, param_types, ret_type, depth - 1, &mut |e| {
+            if callback(&Expr::UnaryOp(UnaryOpKind::Not, Box::new(e.clone()))) {
+                return true;
+            }
+            false
+        });
+    }
+
+    // Binary ops
+    for lhs_ty_str in &["Int", "Float", "Bool"] {
+        let mut lhs_collected = Vec::new();
+        generate_typed_expressions_lazy(param_names, param_types, lhs_ty_str, depth - 1, &mut |e| {
+            lhs_collected.push(e.clone());
+            false
+        });
+        if lhs_collected.is_empty() {
+            continue;
+        }
+        let mut rhs_collected = Vec::new();
+        generate_typed_expressions_lazy(param_names, param_types, lhs_ty_str, depth - 1, &mut |e| {
+            rhs_collected.push(e.clone());
+            false
+        });
+        if rhs_collected.is_empty() {
+            continue;
+        }
+        // 2026-07-28: Collect candidates with div-by-zero pruning.
+        // Skip Div/Mod/Shl where RHS is constant zero (always fails evaluation).
+        for op in &[
+            BinaryOpKind::Add, BinaryOpKind::Sub, BinaryOpKind::Mul,
+            BinaryOpKind::Div, BinaryOpKind::Mod, BinaryOpKind::Eq,
+            BinaryOpKind::Neq, BinaryOpKind::Lt, BinaryOpKind::Gt,
+            BinaryOpKind::Le, BinaryOpKind::Ge,
+            BinaryOpKind::BitAnd, BinaryOpKind::BitOr, BinaryOpKind::BitXor,
+            BinaryOpKind::Shl, BinaryOpKind::Shr,
+        ] {
+            if let Some(ty) = op_result_type(op, lhs_ty_str, lhs_ty_str) {
+                if ty != ret_type {
+                    continue;
+                }
+                for lhs_expr in &lhs_collected {
+                    for rhs_expr in &rhs_collected {
+                        // Div/Mod/Shl with constant-zero RHS always fail evaluation
+                        if matches!(op, BinaryOpKind::Div | BinaryOpKind::Mod | BinaryOpKind::Shl) {
+                            if is_constant_zero(rhs_expr) {
+                                continue;
+                            }
+                        }
+                        if callback(&Expr::BinaryOp(*op, Box::new(lhs_expr.clone()), Box::new(rhs_expr.clone()))) {
+                            return;
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // Bool-specific: logical ops only when ret_type == Bool
+    if ret_type == "Bool" {
+        let mut bool_candidates = Vec::new();
+        generate_typed_expressions_lazy(param_names, param_types, "Bool", depth - 1, &mut |e| {
+            bool_candidates.push(e.clone());
+            false
+        });
+        if !bool_candidates.is_empty() {
+            for op in &[BinaryOpKind::And, BinaryOpKind::Or, BinaryOpKind::BitXor] {
+                if op_result_type(op, "Bool", "Bool") == Some("Bool") {
+                    for lhs_expr in &bool_candidates {
+                        for rhs_expr in &bool_candidates {
+                            if callback(&Expr::BinaryOp(*op, Box::new(lhs_expr.clone()), Box::new(rhs_expr.clone()))) {
+                                return;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// 2026-07-28: Check if an expression is constant zero (for div-by-zero pruning).
+fn is_constant_zero(expr: &Expr) -> bool {
+    match expr {
+        Expr::Decimal(n) => *n == 0,
+        Expr::Float(f) => *f == 0.0,
+        Expr::UnaryOp(UnaryOpKind::Neg, inner) => is_constant_zero(inner),
+        _ => false,
+    }
+}
+
 fn unary_result_type(kind: &UnaryOpKind, ty: &str) -> Option<&'static str> {
     match kind {
         UnaryOpKind::Neg => {
@@ -431,6 +567,9 @@ pub struct SynthesizedProgram {
 
 /// 2026-07-28: Phase C.3 — Enumerate all programs up to max_depth,
 /// evaluate against all examples, return lowest-cost match.
+/// 2026-07-28: Phase C.3 — Enumerate all programs up to max_depth,
+/// evaluate against all examples, return lowest-cost match.
+/// 2026-07-28: Refactored — extract evaluation helper, use lazy callback generation.
 pub fn synthesize_enumerative(
     param_types: &[String],
     ret_type: &str,
@@ -446,49 +585,59 @@ pub fn synthesize_enumerative(
     let mut best: Option<SynthesizedProgram> = None;
 
     for depth in 1..=max_depth {
-        let candidates = generate_typed_expressions(param_names, param_types, ret_type, depth);
-        if candidates.is_empty() {
-            continue;
-        }
-
-        for candidate in &candidates {
+        let mut found = false;
+        generate_typed_expressions_lazy(param_names, param_types, ret_type, depth, &mut |candidate| {
+            // Cost pruning: skip if not better than current best
             let cost = cost_model.cost_of_expr(candidate);
             if best.as_ref().map_or(false, |b| cost >= b.cost) {
-                continue;
+                return false;
             }
-            let all_match = examples.iter().all(|ex| {
-                let input_values = example_inputs_to_values(ex, param_names);
-                let mut ctx = SynthesisEvalContext::new();
-                for (name, val) in param_names.iter().zip(input_values.iter()) {
-                    ctx.bind(name, val.clone());
-                }
-                let result = evaluate_synthesized(candidate, &mut ctx);
-                let expected_input_ctx = || -> SynthesisEvalContext {
-                    let mut c = SynthesisEvalContext::new();
-                    c
-                };
-                let expected = evaluate_synthesized(&ex.output, &mut expected_input_ctx());
-                match (result, expected) {
-                    (Ok(actual), Ok(exp)) => {
-                        let tol = ex.tolerance.unwrap_or(0.0);
-                        values_within_tolerance(&actual, &exp, tol)
-                    }
-                    _ => false,
-                }
-            });
-            if all_match {
-                if best.as_ref().map_or(true, |b| cost < b.cost) {
-                    best = Some(SynthesizedProgram {
-                        body: vec![candidate.clone()],
-                        cost,
-                        depth,
-                    });
-                }
+            // Check all examples — stop generation on first match
+            if candidate_matches_all_examples(candidate, param_names, examples) {
+                best = Some(SynthesizedProgram {
+                    body: vec![candidate.clone()],
+                    cost,
+                    depth,
+                });
+                found = true;
+                return true; // stop generation
             }
+            false // continue generation
+        });
+        if found {
+            break; // found at this depth, no need to go deeper
         }
     }
 
     best.ok_or_else(|| SynthesizeError::NoSolution("enumerative search failed".into()))
+}
+
+/// 2026-07-28: Evaluate a candidate expression against all derivation examples.
+fn candidate_matches_all_examples(
+    candidate: &Expr,
+    param_names: &[String],
+    examples: &[DerivationExample],
+) -> bool {
+    examples.iter().all(|ex| {
+        let input_values = example_inputs_to_values(ex, param_names);
+        let mut ctx = SynthesisEvalContext::new();
+        for (name, val) in param_names.iter().zip(input_values.iter()) {
+            ctx.bind(name, val.clone());
+        }
+        let result = evaluate_synthesized(candidate, &mut ctx);
+        let expected_input_ctx = || -> SynthesisEvalContext {
+            let mut c = SynthesisEvalContext::new();
+            c
+        };
+        let expected = evaluate_synthesized(&ex.output, &mut expected_input_ctx());
+        match (result, expected) {
+            (Ok(actual), Ok(exp)) => {
+                let tol = ex.tolerance.unwrap_or(0.0);
+                values_within_tolerance(&actual, &exp, tol)
+            }
+            _ => false,
+        }
+    })
 }
 
 /// Convert the input expressions in a DerivationExample to Values.
