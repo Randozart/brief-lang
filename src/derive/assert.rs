@@ -173,6 +173,7 @@ mod tests {
                 Expr::Decimal(5),
             )],
             synthesized: None,
+            postcondition: None,
             span: dummy_span(),
         };
         let program = vec![make_defn("add", body, derivation)];
@@ -196,6 +197,7 @@ mod tests {
                 Expr::Decimal(5),
             )],
             synthesized: None,
+            postcondition: None,
             span: dummy_span(),
         };
         let program = vec![make_defn("sub", body, derivation)];
@@ -216,6 +218,7 @@ mod tests {
                 0.1,
             )],
             synthesized: None,
+            postcondition: None,
             span: dummy_span(),
         };
         // Use float-aware definition
@@ -251,6 +254,7 @@ mod tests {
                 0.01,
             )],
             synthesized: None,
+            postcondition: None,
             span: dummy_span(),
         };
         let program = vec![TopLevel::Definition(crate::ast::Definition {
@@ -283,6 +287,7 @@ mod tests {
                 Expr::Decimal(5),
             )],
             synthesized: None,
+            postcondition: None,
             span: dummy_span(),
         };
         let program = vec![TopLevel::Definition(crate::ast::Definition {
@@ -357,6 +362,7 @@ mod tests {
                 make_example(vec![Expr::Decimal(10), Expr::Decimal(20)], Expr::Decimal(30)),
             ],
             synthesized: None,
+            postcondition: None,
             span: dummy_span(),
         };
         let program = vec![make_defn("add", body, derivation)];

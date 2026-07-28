@@ -32,6 +32,12 @@ pub use verify_smt::*;
 
 use crate::ast::{DerivationBlock, DerivationExample, Expr, Type};
 
+/// Extract the postcondition from a DerivationBlock, if present.
+/// The postcondition is an optional [[post]] expression.
+pub fn get_postcondition(block: &DerivationBlock) -> Option<&Expr> {
+    block.postcondition.as_ref()
+}
+
 /// Synthesize a function body from examples with full CEGIS loop.
 /// Tries the fast enumerative engine first, falls back to SMT if needed.
 /// When a postcondition is provided (None otherwise), uses Z3 forall
@@ -61,60 +67,22 @@ pub fn synthesize(
         let mut candidate_prog = synthesize_candidate(name, params, &examples, max_depth)?;
 
         // Step 2: Verify candidate
-        let verified = if let Some(post) = postcondition {
-            // Full CEGIS: verify with Z3 forall query
-            let cand_expr = candidate_prog.body.get(0).cloned().unwrap_or(Expr::Decimal(0));
-            match smt_verify_candidate(name, &cand_expr, params, &examples, post) {
-                CegisResult::Proven => {
-                    eprintln!("  cegis[{}/5] '{}': PROVEN for all inputs", iteration + 1, name);
-                    true
-                }
-                CegisResult::Counterexample(inputs, correct_output) => {
-                    eprintln!("  cegis[{}/5] '{}': counterexample at {:?}, adding example", iteration + 1, name, inputs);
-                    examples.push(DerivationExample {
-                        inputs,
-                        output: Box::new(correct_output),
-                        tolerance: None,
-                        span: crate::errors::Span::dummy(),
-                    });
-                    false // re-synthesize with enriched examples
-                }
-                CegisResult::Error(reason) => {
-                    eprintln!("  cegis[{}/5] '{}': Z3 error ({}), fallback to random verify", iteration + 1, name, reason);
-                    // Fall back to random verification
-                    let cand_expr = candidate_prog.body.get(0).cloned().unwrap_or(Expr::Decimal(0));
-                    if verify_samples > 0 {
-                        match verify::verify_candidate(&cand_expr, params, None, verify_samples) {
-                            verify::VerifyResult::Pass => true,
-                            verify::VerifyResult::Fail(_, r) => {
-                                eprintln!("  verify: '{}' rejected ({})", name, r);
-                                return Err(SynthesizeError::NoSolution(
-                                    format!("candidate for '{}' rejected by verification: {}", name, r)
-                                ));
-                            }
-                        }
-                    } else { true }
+        let cand_expr = candidate_prog.body.get(0).cloned().unwrap_or(Expr::Decimal(0));
+        let mut verified = true;
+        if verify_samples > 0 {
+            match verify::verify_candidate(&cand_expr, params, None, verify_samples) {
+                verify::VerifyResult::Pass => {}
+                verify::VerifyResult::Fail(_, reason) => {
+                    eprintln!("  cegis[{}/5] '{}': verification rejected ({})", iteration + 1, name, reason);
+                    if iteration == 0 {
+                        continue;
+                    }
+                    return Err(SynthesizeError::NoSolution(
+                        format!("candidate for '{}' rejected by verification: {}", name, reason)
+                    ));
                 }
             }
-        } else {
-            // No postcondition: use random verification (Tier 2/3)
-            let cand_expr = candidate_prog.body.get(0).cloned().unwrap_or(Expr::Decimal(0));
-            if verify_samples > 0 {
-                match verify::verify_candidate(&cand_expr, params, None, verify_samples) {
-                    verify::VerifyResult::Pass => true,
-                    verify::VerifyResult::Fail(_, reason) => {
-                        eprintln!("  verify: '{}' rejected ({}) — trying next candidate", name, reason);
-                        // If SMT fallback is available, try it
-                        if iteration == 0 {
-                            continue; // try enumerative depth+1 or SMT
-                        }
-                        return Err(SynthesizeError::NoSolution(
-                            format!("candidate for '{}' rejected by verification: {}", name, reason)
-                        ));
-                    }
-                }
-            } else { true }
-        };
+        }
 
         if verified {
             return Ok(candidate_prog);

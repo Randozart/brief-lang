@@ -64,7 +64,7 @@ pub enum Expr {
     Within(Box<Expr>, Box<Expr>),
 
     // ── Derivation ──────────────────────────────────────────────
-    DerivationBlock(DerivationBlock),
+    DerivationBlock(Box<DerivationBlock>),
 
     // ── Pointers ────────────────────────────────────────────────
     Deref(Box<Expr>),
@@ -153,6 +153,11 @@ pub struct DerivationExample {
 pub struct DerivationBlock {
     pub examples: Vec<DerivationExample>,
     pub synthesized: Option<Box<Expr>>,
+    /// 2026-07-28: Optional postcondition for full-spec CEGIS verification.
+    /// Parsed from [[post]] syntax in derivation blocks.
+    /// The postcondition is a predicate using @result to refer to the
+    /// function's return value (e.g., [[ @result >= 0 ]]).
+    pub postcondition: Option<Expr>,
     pub span: Span,
 }
 

@@ -210,7 +210,7 @@ pub fn build_verification_query(
         for (i, _) in params.iter().enumerate() {
             q.push_str(&format!(" x{}", i));
         }
-        q.push_str(&format!(") {}))))\n", candidate_body));
+        q.push_str(&format!(") {})))))\n", candidate_body));
     }
 
     q.push_str("\n(check-sat)\n");

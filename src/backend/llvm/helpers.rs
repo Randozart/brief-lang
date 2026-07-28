@@ -171,7 +171,7 @@ impl LlvmBackend {
 
     /// Rewrite identifiers inside a DerivationBlock.
     fn rewrite_derivation(db: &crate::ast::DerivationBlock, cell_name: &str) -> Expr {
-        Expr::DerivationBlock(crate::ast::DerivationBlock {
+        Expr::DerivationBlock(Box::new(crate::ast::DerivationBlock {
             examples: db
                 .examples
                 .iter()
@@ -191,8 +191,9 @@ impl LlvmBackend {
                 .synthesized
                 .as_ref()
                 .map(|s| Box::new(Self::rewrite_cell_identifiers(s, cell_name))),
+            postcondition: db.postcondition.clone(),
             span: db.span,
-        })
+        }))
     }
 
     /// Rewrite all identifiers in a statement with a cell prefix.

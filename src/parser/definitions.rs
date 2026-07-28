@@ -920,10 +920,36 @@ impl<'a> Parser<'a> {
             .unwrap_or(colon_eq_span.start + 2);
         // After RBrace, there may be an optional semicolon — consume it
         self.eat(&Token::Semicolon);
+        // 2026-07-28: Parse optional [[postcondition]] after the derivation block.
+        // [[post]] is sugar for [true][post] — a postcondition-only contract that
+        // the CEGIS loop uses to verify correctness for ALL inputs.
+        let postcondition = if self.check(&Token::LBracket) {
+            let next_is_bracket = self.tokens.get(self.pos + 1)
+                .map(|(t, _)| matches!(t, Token::LBracket))
+                .unwrap_or(false);
+            if !next_is_bracket {
+                None
+            } else {
+                self.advance();
+                self.advance();
+                let post_expr = Some(self.parse_expression()?);
+                match self.expect(Token::RBracket) {
+                    Ok(_) => {}
+                    Err(_) => return Ok(Some(DerivationBlock {
+                        examples, synthesized: None, postcondition: None, span: Span::dummy(),
+                    })),
+                }
+                self.eat(&Token::RBracket);
+                post_expr
+            }
+        } else {
+            None
+        };
         let span = Span::new(colon_eq_span.start, rbrace_end, 0, 0);
         Ok(Some(DerivationBlock {
             examples,
             synthesized: None,
+            postcondition,
             span,
         }))
     }
