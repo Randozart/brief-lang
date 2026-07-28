@@ -1482,6 +1482,30 @@ impl LlvmBackend {
                 _ => None,
             }
         }
+        /// Count cross-field operations in an expression.
+        /// Counts BinaryOps where LHS and RHS each contain at least one identifier.
+        /// This measures computation density — dense matrix multiply (kalman) has
+        /// many such ops; sparse force pairs (nbody) have fewer.
+        fn count_cross_float_ops_in_expr(expr: &Expr, _all_idents: &std::collections::HashSet<String>) -> u32 {
+            match expr {
+                Expr::BinaryOp(_, lhs, rhs) => {
+                    let has_lhs_id = has_any_ident(lhs);
+                    let has_rhs_id = has_any_ident(rhs);
+                    let count = if has_lhs_id && has_rhs_id { 1u32 } else { 0u32 };
+                    count + count_cross_float_ops_in_expr(lhs, _all_idents)
+                        + count_cross_float_ops_in_expr(rhs, _all_idents)
+                }
+                _ => 0,
+            }
+        }
+        fn has_any_ident(expr: &Expr) -> bool {
+            match expr {
+                Expr::Identifier(_) => true,
+                Expr::BinaryOp(_, lhs, rhs) => has_any_ident(lhs) || has_any_ident(rhs),
+                Expr::UnaryOp(_, e) => has_any_ident(e),
+                _ => false,
+            }
+        }
         fn collect_let_names(stmt: &Statement, names: &mut Vec<String>) {
             match stmt {
                 Statement::Let { name, names: extra, .. } => {
@@ -1732,7 +1756,37 @@ impl LlvmBackend {
                 }
             };
             let local_outlined = !outlined_info.is_empty();
-            let local_txn_attr = if local_outlined { "#11".to_string() } else { txn_attr.clone() };
+            let mut local_txn_attr = if local_outlined { "#11".to_string() } else { txn_attr.clone() };
+            // 2026-07-28: Dense matrix detection — if #11 would be selected but
+            // the txn has dense cross-field float computation (cross-per-field > 8),
+            // force #0 = memory(readwrite) instead. LLVM's auto-vectorizer creates
+            // expensive wide vectors (<12 x float>) for dense matrices that cause
+            // register spilling — the kalman 3.5x regression.
+            if local_txn_attr == "#11" {
+                // Count cross-field float ops across all let-expressions.
+                // Counts how many BinaryOps have 2+ distinct identifiers — this
+                // measures the density of cross-field computation. Kalman has
+                // ~84 ops across ~9 fields (9.3/field), nbody has ~50/30 (1.7).
+                let mut cross_ops = 0u32;
+                let mut float_body_idents: std::collections::HashSet<String> = std::collections::HashSet::new();
+                for s in &reordered {
+                    if let Statement::Let { name, .. } = s {
+                        float_body_idents.insert(name.clone());
+                    }
+                }
+                for s in &reordered {
+                    if let Statement::Let { expr: Some(e), .. } = s {
+                        cross_ops += count_cross_float_ops_in_expr(e, &float_body_idents);
+                    }
+                }
+                let n = float_body_idents.len();
+                if n > 4 {
+                    let cross_per_field = cross_ops as f64 / n as f64;
+                    if cross_per_field > 4.0 {
+                        local_txn_attr = "#0".to_string();
+                    }
+                }
+            }
 
             // Emit the txn function
             writeln!(out, "define void @txn_{}({}) local_unnamed_addr {}{} {{", name, self.ctx.state_ptr_param, local_txn_attr, alwaysinline).ok();
