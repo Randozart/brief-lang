@@ -208,7 +208,7 @@ fn kind_from_type(t: &Type) -> &'static str {
             if name == "Int" || name == "Int8" || name == "Int16" || name == "Int32"
                || name == "Int64" || name == "UInt" || name == "UInt8"
                || name == "UInt16" || name == "UInt32" || name == "UInt64"
-               || name == "Bits" || name == "Byte" || name == "Bool" {
+               || name == "Bit" || name == "Byte" || name == "Bool" {
                 "Int"
             } else if name == "String" || name == "StaticString" || name == "SmallString64" {
                 "String"

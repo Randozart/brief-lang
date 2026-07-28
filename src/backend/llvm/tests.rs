@@ -647,7 +647,7 @@ fn test_struct_auto_registered_in_type_universe() {
             "Struct 'Point' should be auto-registered in TypeUniverse");
         let rt = universe.types.get("Point").unwrap();
         assert_eq!(rt.bytes, 16);
-        assert_eq!(rt.base, "Bits");
+        assert_eq!(rt.base, "Bit");
     } else {
         panic!("TypeUniverse should exist after generate");
     }

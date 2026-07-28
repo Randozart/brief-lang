@@ -16,7 +16,7 @@ pub fn resolve_type(universe: &TypeUniverse, ty: &crate::ast::Type) -> Option<Re
         crate::ast::Type::Custom(name) => universe.get(name).cloned(),
         crate::ast::Type::Bits(n) => Some(ResolvedType {
             name: format!("Bits({})", n),
-            base: "Bits".into(),
+            base: "Bit".into(),
             bytes: *n,
             min_bits: *n * 8,
             max_bits: *n * 8,
@@ -36,7 +36,7 @@ pub fn resolve_type(universe: &TypeUniverse, ty: &crate::ast::Type) -> Option<Re
         }),
         crate::ast::Type::Void => Some(ResolvedType {
             name: "Void".into(),
-            base: "Bits".into(),
+            base: "Bit".into(),
             bytes: 0,
             min_bits: 0,
             max_bits: 0,

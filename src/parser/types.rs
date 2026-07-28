@@ -106,7 +106,7 @@ impl<'a> Parser<'a> {
     /// Parse a named type, possibly with generic parameters, pointer prefix, or extension.
     fn parse_named_type_body(&mut self, name: &str) -> Result<Type, SyntaxError> {
         // Bits<N> — numeric bit width, no annotation = flexible
-        if name == "Bits" || name == "bits" {
+        if name == "Bit" || name == "bits" {
             if self.eat(&Token::Lt) {
                 let bits = match self.peek() {
                     Some(&Token::Integer(n)) => {

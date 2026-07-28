@@ -1929,7 +1929,7 @@ impl LlvmBackend {
                             }).sum();
                             let rt = crate::type_universe::ResolvedType {
                                 name: s.name.clone(),
-                                base: "Bits".to_string(),
+                                base: "Bit".to_string(),
                                 bytes,
                                 min_bits: bytes * 8,
                                 max_bits: bytes * 8,
@@ -1955,7 +1955,7 @@ impl LlvmBackend {
                             }).sum();
                             let rt = crate::type_universe::ResolvedType {
                                 name: s.name.clone(),
-                                base: "Bits".to_string(),
+                                base: "Bit".to_string(),
                                 bytes,
                                 min_bits: bytes * 8,
                                 max_bits: bytes * 8,
@@ -1983,7 +1983,7 @@ impl LlvmBackend {
                             }).sum();
                             let rt = crate::type_universe::ResolvedType {
                                 name: td.name.clone(),
-                                base: "Bits".to_string(),
+                                base: "Bit".to_string(),
                                 bytes,
                                 min_bits: bytes * 8,
                                 max_bits: bytes * 8,

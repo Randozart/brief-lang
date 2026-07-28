@@ -309,7 +309,7 @@ mod tests {
     fn make_test_type(name: &str, bytes: u64) -> ResolvedType {
         ResolvedType {
             name: name.to_string(),
-            base: "Bits".to_string(),
+            base: "Bit".to_string(),
             bytes,
             min_bits: bytes * 8,
             max_bits: bytes * 8,

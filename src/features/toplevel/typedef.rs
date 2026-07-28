@@ -155,7 +155,7 @@ mod tests {
         let def = TypeDef {
             name: "U64".into(),
             type_params: vec![],
-            base: Box::new(Expr::TypeRef("Bits".into())),
+            base: Box::new(Expr::TypeRef("Bit".into())),
             bit_range: None,
             body: TypeDefBody {
                 slots: vec![],

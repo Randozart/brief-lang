@@ -21,7 +21,7 @@ pub fn normalize(items: &mut Vec<TopLevel>, universe: &mut TypeUniverse) -> Resu
             Some("float" | "double") => "number",
             Some("i1" | "i8") => "boolean",
             _ => match rt.base.as_str() {
-                "String" | "Bits" if rt.fields.len() >= 2 => "string",
+                "String" | "Bit" if rt.fields.len() >= 2 => "string",
                 _ => "object",
             },
         };

@@ -125,7 +125,7 @@ impl TypeUniverse {
             }
             self.types.insert(name.to_string(), ResolvedType {
                 name: name.to_string(),
-                base: "Bits".to_string(),
+                base: "Bit".to_string(),
                 bytes,
                 min_bits,
                 max_bits,
@@ -143,7 +143,7 @@ impl TypeUniverse {
             p.insert("alignment".into(), crate::ast::PropertyValue::Int(8));
             self.types.insert("String".to_string(), ResolvedType {
                 name: "String".to_string(),
-                base: "Bits".to_string(),
+                base: "Bit".to_string(),
                 bytes: 16,
                 min_bits: 128,
                 max_bits: 128,

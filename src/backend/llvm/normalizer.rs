@@ -229,7 +229,7 @@ fn register_typedefs(items: &[TopLevel], universe: &mut TypeUniverse) {
         let mut properties: std::collections::HashMap<String, PropertyValue> = td.body.metadata.clone();
         let base = td.parent.as_ref()
             .and_then(|e| match e.as_ref() { Expr::Identifier(n) => Some(n.clone()), _ => None })
-            .unwrap_or_else(|| "Bits".to_string());
+            .unwrap_or_else(|| "Bit".to_string());
         let fields: Vec<(String, Type)> = td.body.slots.iter()
             .map(|s| (s.name.clone(), s.ty.clone()))
             .collect();
