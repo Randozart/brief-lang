@@ -50,23 +50,14 @@ impl LlvmBackend {
                 self.emit_int(out, v, *n, indent)
             }
             Expr::Float(f) => {
-                // 2026-07-17: Emit as float (32-bit) matching the typechecker.
-                // Use a bitcast from the hex i32 pattern to avoid LLVM's
-                // verifier rejecting high-precision literals — the string
-                // "0.001660076642744037" has more significant digits than
-                // f32 can represent, causing "floating point constant
-                // invalid for type" even though the rounded value is valid.
+                // 2026-07-29: Direct bitcast from i32 hex bits to float.
+                // The `add i32 0, N` + `fadd float 0.0` wrappers were removed
+                // — LLVM IR accepts i32 bit patterns directly in bitcast, and
+                // the bitcast result is already float-typed without fadd.
+                // The hex bits avoid LLVM's verifier rejecting high-precision
+                // float literals like "0.001660076642744037" as f32.
                 let h = crate::backend::llvm::float_to_llvm_hex(*f);
-                let hex_reg = self.fun.gen_reg();
-                let flt_reg = self.fun.gen_reg();
-                writeln!(out, "{}{} = add i32 0, {}", indent, hex_reg, h).ok();
-                writeln!(
-                    out,
-                    "{}{} = bitcast i32 {} to float",
-                    indent, flt_reg, hex_reg
-                )
-                .ok();
-                writeln!(out, "{}{} = fadd float 0.0, {}", indent, v, flt_reg).ok();
+                writeln!(out, "{}{} = bitcast i32 {} to float", indent, v, h).ok();
                 TypedRegister {
                     name: v.to_string(),
                     ty: Type::float(),
