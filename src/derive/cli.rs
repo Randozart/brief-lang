@@ -146,25 +146,52 @@ pub fn handle_derive_command(config: &DeriveConfig, file_path: &str) -> Result<(
         // Use Type::int() as default return type for derivation blocks
         // TODO: extract actual return type from function signature
         let ret_type = Type::int();
-        // 2026-07-29: Look up reference function body for verifying clause
-        let ref_body_expr: Option<&Expr> = block.ref_name.as_ref().and_then(|ref_name| {
+        // 2026-07-29: Handle reference-only derivation — skip synthesis, use ref body.
+        if block.examples.is_empty() {
+            if let Some(ref ref_name) = block.ref_name {
+                if let Some(ref_body) = block.ref_name.as_ref().and_then(|rn| {
+                    ref_lookup.get(rn).and_then(|item| match item {
+                        TopLevel::Definition(d) => {
+                            d.body.iter().find_map(|s| {
+                                if let Statement::Term(Some(e)) = s {
+                                    let expr_ref: &Expr = e;
+                                    Some(expr_ref)
+                                } else { None }
+                            })
+                        }
+                        _ => None,
+                    })
+                }) {
+                    let cost = crate::derive::engine::CostModel::default().cost_of_expr(ref_body);
+                    let prog = crate::derive::engine::SynthesizedProgram {
+                        body: vec![ref_body.clone()],
+                        cost,
+                        depth: 0,
+                    };
+                    eprintln!("[derive] '{}': reference-only (using '{}' body, cost {})", name, ref_name, cost);
+                    syntheses.push((name.clone(), prog));
+                    continue;
+                } else {
+                    eprintln!("warn: reference function '{}' not found for '{}'", ref_name, name);
+                }
+            }
+        }
+
+        // Look up reference function body for verifying clause
+        let ref_fn_expr: Option<&Expr> = block.ref_name.as_ref().and_then(|ref_name| {
             ref_lookup.get(ref_name).and_then(|item| match item {
                 TopLevel::Definition(d) => {
-                    // Find the first Term(Some(expr)) in the body — that's the return value
                     d.body.iter().find_map(|s| {
                         if let Statement::Term(Some(e)) = s {
-                            // Box<Expr> derefs to Expr
                             let expr_ref: &Expr = e;
                             Some(expr_ref)
-                        } else {
-                            None
-                        }
+                        } else { None }
                     })
                 }
                 _ => None,
             })
         });
-        match synthesize(name, block, params, &ret_type, config.enumerative_depth, config.verify_samples, block.postcondition.as_ref(), block.precondition.as_ref(), ref_body_expr) {
+        match synthesize(name, block, params, &ret_type, config.enumerative_depth, config.verify_samples, block.postcondition.as_ref(), block.precondition.as_ref(), ref_fn_expr) {
             Ok(prog) => {
                 eprintln!("[derive] '{}': synthesized body with cost {}", name, prog.cost);
                 syntheses.push((name.clone(), prog));
