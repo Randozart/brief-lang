@@ -1201,6 +1201,9 @@ pub fn synthesize_enumerative(
     // helpers with use_count > 0 are attached to SynthesizedProgram.
     use crate::derive::HelperFunction;
     let mut helper_registry: Vec<HelperFunction> = Vec::new();
+    // 2026-07-29: Counter for unique helper names (_h0, _h1, ...).
+    // Persisted across depth levels to avoid name collisions.
+    let mut helper_name_counter: usize = 0;
     // 2026-07-28: Checkpointed depth search — start with empty level cache,
     // generate each depth from the pruned set of the previous depth.
     let mut prev_cache = EvalCache::empty();
@@ -1287,31 +1290,26 @@ pub fn synthesize_enumerative(
         // 2026-07-29: Abstraction discovery — extract reusable sub-expressions
         // from the pruned LevelCache and promote to helper functions.
         // Adapted from Koza ADFs [GP'92] and Feser et al. λ² [PLDI'15].
-        // Only activate at depth >= 2, because depth-1 expressions are just
-        // variables and constants with no useful abstraction to extract.
+        // 2026-07-29: Anti-unification abstraction discovery — find common
+        // sub-structure between pairs of LevelCache expressions and REPLACE
+        // originals with helper calls. Adapted from Feser et al. λ² (PLDI 2015) §4.
+        // Only activate at depth >= 2.
         if depth >= 2 {
-            let helpers = crate::derive::library::discover_helpers(
-                &prev_cache.level,
+            let helpers = crate::derive::library::discover_and_register_helpers(
+                &mut prev_cache.level,
                 param_names,
                 param_types,
                 &crate::derive::library::DISCOVER_CONFIG,
+                &mut helper_name_counter,
             );
             if !helpers.is_empty() {
-                // 2026-07-29: Register discovered helpers into the LevelCache.
-                // Helpers are emitted as standalone calls by generate_next_level
-                // at the next depth. They are NOT added to per-type buckets to
-                // avoid bloating the binary op cross product.
-                let mut tracked = helpers;
-                crate::derive::library::register_helpers(&mut prev_cache.level, &tracked);
-                // Store helpers in the function's helper registry for GC and
-                // doppelganger emission. Collected across all depths.
-                helper_registry.append(&mut tracked);
+                eprintln!("  anti-unify: discovered {} helper(s) at depth {}",
+                    helpers.len(), depth);
+                helper_registry.extend(helpers);
             }
         }
 
         // 2026-07-29: Garbage-collect unused helpers after registration.
-        // A helper with zero references at this point was registered but
-        // not used in candidate generation — remove it.
         if !helper_registry.is_empty() {
             crate::derive::library::gc_helpers(&mut prev_cache.level, &mut helper_registry);
         }
