@@ -1131,8 +1131,9 @@ impl LlvmBackend {
     }
 
     /// Set the LLVM target triple for generated IR.
-    /// Also updates the data layout to match.
+    /// Also updates the data layout to match and derives int_bits from it.
     /// 2026-07-11: Phase 6 — WASM target support.
+    /// 2026-07-29: Wire parse_pointer_width to auto-derive int_bits from data layout.
     pub fn with_target_triple(mut self, triple: &str) -> Self {
         self.ctx.target_triple = triple.to_string();
         self.ctx.data_layout = match triple {
@@ -1144,13 +1145,19 @@ impl LlvmBackend {
                 Some("e-m:e-p270:32:32-p271:32:32-p272:64:64-i64:64-i128:128-f80:128-n8:16:32:64-S128".to_string())
             }
         };
+        if let Some(ref dl) = self.ctx.data_layout {
+            self.ctx.int_bits = CompilerContext::parse_pointer_width(dl);
+        }
         self
     }
 
     /// Set the LLVM data layout string (overrides the auto-derived layout).
+    /// Also derives int_bits from the data layout's pointer width.
     /// 2026-07-15: Phase 7 — config-driven from targets.toml.
+    /// 2026-07-29: Wire parse_pointer_width to auto-derive int_bits from data layout.
     pub fn with_data_layout(mut self, dl: &str) -> Self {
         self.ctx.data_layout = Some(dl.to_string());
+        self.ctx.int_bits = CompilerContext::parse_pointer_width(dl);
         self
     }
 
