@@ -1786,10 +1786,11 @@ impl LlvmBackend {
     /// 2026-07-25: Return the integer type for binary operations based on
     /// the function's narrowed max width, or "i64" if no narrowing applies.
     /// 2026-07-25: Always return i64 for integer binary operations.
-    /// Narrowing affects the final `ret` (via trunc in emit_stmt.rs) but
-    /// intermediate SSA values remain i64 to match actual operand widths.
+    /// Intermediate SSA values match the target's native integer width.
+    /// 2026-07-29: Use self.ctx.int_bits instead of hardcoded i64 for
+    /// cross-target correctness (wasm32 uses i32 intermediate values).
     fn binop_int_type(&self) -> String {
-        "i64".to_string()
+        format!("i{}", self.ctx.int_bits)
     }
 
     /// 2026-07-18: Try to emit a binary operation from config/llvm-ops.toml.

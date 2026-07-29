@@ -296,24 +296,10 @@ impl LlvmBackend {
                 }
             }
         }
-        // 2026-07-26: #Int protocol width from --int-bits (default 64).
-        // Respects bits <~ N floor from primordial type (Int64 → 64).
-        if let Type::Custom(name) = ty {
-            if name == "Int" || name == "UInt" {
-                let type_floor = self.ctx.type_universe.as_ref()
-                    .and_then(|u| ty.universe_key().and_then(|k| u.get(k)))
-                    .and_then(|rt| rt.properties.get("bits"))
-                    .and_then(|pv| if let crate::ast::PropertyValue::Int(n) = pv { Some(*n as u64) } else { None })
-                    .unwrap_or(0);
-                let bits = self.ctx.int_bits.max(type_floor);
-                let llvm_bits: u64 = if bits <= 8 { 8 } else if bits <= 16 { 16 }
-                    else if bits <= 32 { 32 } else { 64 };
-                return format!("i{}", llvm_bits);
-            }
-        }
-
-        // 2026-07-14: Universe query with derive_llvm_type replaces
-        // the removed ResolvedType.llvm_type field.
+        // 2026-07-14: Universe query reads llvm_type property set by normalizer.
+        // After Phase 0d, the normalizer resolves Int/UInt from protocol + int_bits,
+        // so no name-based override is needed. Fixed-width types (Int32, Float) have
+        // their primordial llvm_type preserved.
         self.ctx.type_universe.as_ref()
             .and_then(|u| ty.universe_key().and_then(|k| u.get(k)))
             .map(rt_llvm_type)
