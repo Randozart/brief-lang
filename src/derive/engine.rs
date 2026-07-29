@@ -1174,12 +1174,13 @@ pub fn synthesize_enumerative(
         let mut sorted: Vec<(u64, &Expr)> = candidates.iter().map(|c| (cost_model.cost_of_expr(c), c)).collect();
         sorted.sort_by_key(|(cost, _)| *cost);
 
-        // 2026-07-28: Beam search — keep only beam_width cheapest candidates.
-        // For 2-param functions at depth 3, the candidate space is ~23K.
-        // Truncating to the top N cheapest reduces evaluation time dramatically
-        // while preserving the most promising candidates (lowest cost = most general).
-        if sorted.len() > beam_width {
-            sorted.truncate(beam_width);
+        // 2026-07-28: Adaptive beam — scales with depth.
+        // Effective beam = base_beam * depth. At depth 3 with base 5000,
+        // effective beam = 15000 (enough for 2-param IF expressions).
+        // At depth 4, effective beam = 20000 (up from 15000).
+        let effective_beam = beam_width * depth as usize;
+        if sorted.len() > effective_beam {
+            sorted.truncate(effective_beam);
         }
         // 2026-07-28: Ensure at least 200 IF expressions are in the beam.
         // IF expressions enable conditional logic (abs, min, max) but start at
@@ -1208,7 +1209,7 @@ pub fn synthesize_enumerative(
                     }
                 }
                 // Ensure beam + 5000 margin for IF safety
-                let expanded = pos.max(beam_width).min(candidates.len());
+                let expanded = pos.max(effective_beam).min(candidates.len());
                 sorted.truncate(expanded);
             }
         }
