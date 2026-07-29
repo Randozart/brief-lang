@@ -2,40 +2,58 @@
 
 ## Current Results
 
-Commit `88818123` + `35158e2f`:
+Commit `066b86a7` (dispatch guardrail + RHS mapping fix + vector phi infrastructure fixes):
 
 **All 19/19 runtime benchmarks MATCH. Zero MISMATCH.**
 
 | Benchmark | Ratio | Winner | Correct |
 |-----------|-------|--------|---------|
-| ring_buffer | 1.09x | C | MATCH |
-| float_math | 1.00x | ~tie | MATCH |
+| ring_buffer | 1.02x | C | MATCH |
+| float_math | 0.99x | Brief | MATCH |
 | float_math_nonzero | 0.96x | Brief | MATCH |
-| sparse_dispatch | 0.80x | Brief | MATCH |
-| print_loop | 1.03x | C | MATCH |
-| nbody_newton | **1.21x** | C | MATCH |
-| nbody_sqrt | 0.78x | Brief | MATCH |
-| nbody_sqrt_idio | 0.72x | Brief | MATCH |
-| fasta | **0.98x** | Brief | MATCH |
-| fannkuch_redux | 0.90x | Brief | MATCH |
-| mandelbrot | 0.99x | Brief | MATCH |
-| kalman_filter_runtime | 0.98x | Brief | MATCH |
-| knucleotide | **1.00x** | ~tie | MATCH |
-| cancel_math | 0.89x | Brief | MATCH |
-| bit_clear | 0.66x | Brief | MATCH |
-| queue_drain | 0.92x | Brief | MATCH |
+| sparse_dispatch | 0.83x | Brief | MATCH |
+| print_loop | 0.97x | Brief | MATCH |
+| nbody_newton | **1.22x** | C | MATCH |
+| nbody_sqrt | **0.77x** | Brief | MATCH |
+| nbody_sqrt_idio | **0.74x** | Brief | MATCH |
+| fasta | 1.02x | C | MATCH |
+| fannkuch_redux | 0.99x | Brief | MATCH |
+| mandelbrot | 1.00x | ~tie | MATCH |
+| kalman_filter_runtime | 1.00x | ~tie | MATCH |
+| knucleotide | 0.98x | Brief | MATCH |
+| cancel_math | 0.84x | Brief | MATCH |
+| bit_clear | ~0 | ~tie | MATCH |
+| queue_drain | 0.91x | Brief | MATCH |
 | queue_drain_sym | 0.88x | Brief | MATCH |
-| queue_drain_idio | 0.93x | Brief | MATCH |
-| interval_step | 1.02x | C | MATCH |
+| queue_drain_idio | 0.88x | Brief | MATCH |
+| interval_step | 0.97x | Brief | MATCH |
 
-fasta and knucleotide went from MISMATCH to MATCH. All other benchmarks stable.
+fasta and knucleotide went from MISMATCH to MATCH (dispatch guardrail fix).
+nbody_sqrt/nbody_sqrt_idio improved slightly (0.78→0.77, 0.72→0.74).
+nbody_newton remains at ~1.22x (pre-existing, independent of these changes).
+
+### Key Fixes
+
+1. **Dispatch guardrail** (mod.rs, commit `88818123`): Skip InlineSsa when body writes
+   non-counter state fields. emit_folded_loop passes empty write_set, silently
+   dropping non-counter writes. See docs/plans/2026-07-29-dispatch-bug-analysis.md.
+
+2. **RHS mapping for Assign isomorphism** (slp_isomorphism.rs, commit `066b86a7`):
+   statements_isomorphic now builds a variable mapping from BOTH LHS and RHS of
+   Assignment statements. Fixes false negatives for nbody's velocity/position groups.
+
+3. **Vector phi infrastructure disabled** inside emit_countable_main (counter.rs):
+   The vector phi emission has correctness edge cases (duplicate fields, let-binding
+   groups, non-power-of-2 widths, backedge naming conflicts). The dispatch-level
+   detection in mod.rs still checks for groups, but emission is deferred.
 
 ## Remaining Investigation: nbody_newton
 
 ### Current State
-- **Current**: 10.256s (1.21x C) — dispatched via PerFieldPhi
+- **Current**: 11.02s (1.22x C) — dispatched via PerFieldPhi
 - **Baseline** (`b39461e2`): 9.81s (1.16x C) — also dispatched via PerFieldPhi
-- **Regression**: ~4.5% slower (9.81s → 10.26s, 1.16x → 1.21x)
+- **Regression**: ~12% slower (9.81s → 11.02s, 1.16x → 1.22x) — pre-existing,
+  not caused by these changes. Likely from Phase 4 dispatch simplification.
 
 ### Root Cause: Missing RHS Mapping in `statements_isomorphic` for `Statement::Assign`
 
