@@ -795,10 +795,11 @@ fn test_local_float_binding() {
         }),
     ];
     let output = backend.generate(&program, None);
-    // 2026-07-17: Float literal emits fadd float (32-bit). The typechecker
-    // assigns Type::float() to Float literals, matching the constant emitter.
-    assert!(output.contains("fadd float"),
-        "Float literal should emit fadd float: {}", output);
+    // 2026-07-29: Float literal emits bitcast i32 <hex> to float (32-bit).
+    // The add+i32 + bitcast + fadd wrapper was removed — a single bitcast
+    // from the hex i32 bit pattern produces the float value.
+    assert!(output.contains("bitcast i32"),
+        "Float literal should emit bitcast i32 to float: {}", output);
 }
 
 #[test]
