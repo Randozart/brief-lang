@@ -110,10 +110,18 @@ Three tiers:
 
 ## Research: Abstraction Discovery
 
-A detailed research plan analyzing the depth-4 combinatorial wall and
-proposing an abstraction-discovery mechanism (adapted from Koza ADFs,
-Polozov/Gulwani version-spaces, Feser et al. λ², and Schmidt/Lipson
-Eureqa) is in `derivation-abstraction-discovery.md` (same directory).
+A research plan analyzing frequency-based abstraction discovery (adapted
+from Koza ADFs, Polozov/Gulwani version-spaces) is in
+`derivation-abstraction-discovery.md`. This approach was implemented but
+found ineffective: additive registration of helpers (alongside raw
+expressions) fails because helpers compete at equal cost and lose to
+cheaper ite-chain solutions.
+
+A revised plan using anti-unification with replacement (Feser et al. λ²,
+PLDI 2015) is in `anti-unification-abstraction.md`. This is the proven
+technique: find common sub-structure between pairs of expressions, extract
+as a helper, and REPLACE the originals with calls to it — shrinking the
+search space instead of growing it.
 
 ## Key Commands
 
