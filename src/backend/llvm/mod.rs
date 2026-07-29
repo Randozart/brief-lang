@@ -2692,13 +2692,14 @@ impl LlvmBackend {
                         if !dispatched {
                             // ── Structural 4-way dispatch ─────────────────────
                             // 1. VectorPhiGroup — isomorphic field groups with ≥4 members
-                            // 2. InlineSsa — dense writes, small state
+                            // 2. InlineSsa — dense writes, small state, counter-only writes
                             // 3. PerFieldPhi — everything else (default)
                             //
-                            // No has_body_ffi gate: the InlineSsa FFI bug
-                            // (globalopt eliminating prints) is avoided by PerFieldPhi
-                            // being the common case. statement_contains_ffi was buggy
-                            // (false-positive with sqrt# intrinsic) and never fired.
+                            // 2026-07-29: Guardrail: InlineSsa (emit_folded_loop) passes an
+                            // EMPTY write_set to emit_countable_body (counter.rs:110), so any
+                            // non-counter state writes are silently discarded. Skip InlineSsa
+                            // when the body writes fields other than the loop counter.
+                            // See docs/plans/2026-07-29-dispatch-bug-analysis.md.
                             let total_fields = self.ctx.field_index_map.len();
                             let write_count = node.write_set.len();
                             let write_density = if total_fields > 0 { write_count as f64 / total_fields as f64 } else { 1.0 };
@@ -2717,11 +2718,24 @@ impl LlvmBackend {
                                 self.emit_countable_main(&mut out, &node.name, counter_idx, total_idx, total_const_name, &body_stmts, &node.write_set, is_decreasing, Some(&bp.var));
                             } else if write_density >= 0.5 && total_fields < 8 {
                                 // InlineSsa: insertvalue chain for small, dense-write states.
-                                // Best for knucleotide (4 fields, all written) and mandelbrot
-                                // (5 fields, all written). The single %State phi enables SROA.
-                                self.fun.pending_post_hoist = post_hoist;
-                                self.warnings.push(format!("info: txn '{}' dispatched via inline SSA ({}/{} fields written)", &node.name, write_count, total_fields));
-                                self.emit_folded_main(&mut out, &node.name, counter_idx, total_idx, total_const_name, false, Some(&body_stmts));
+                                // Only safe when the counter is the ONLY written field —
+                                // emit_folded_loop passes empty write_set and silently drops
+                                // non-counter writes. Guardrail below enforces this.
+                                let writes_non_counter = node.write_set.iter().any(|f| {
+                                    *f != bp.var
+                                });
+                                if writes_non_counter {
+                                    // Non-counter state writes exist — emit_folded_loop would
+                                    // silently discard them. Route to PerFieldPhi instead.
+                                    self.fun.pending_post_hoist = post_hoist;
+                                    self.warnings.push(format!("info: txn '{}' dispatched via per-field phi ({}/{} fields written, non-counter writes)", &node.name, write_count, total_fields));
+                                    let is_decreasing = bp.direction == crate::analysis::transition_graph::ConvergeDirection::Decreasing;
+                                    self.emit_countable_main(&mut out, &node.name, counter_idx, total_idx, total_const_name, &body_stmts, &node.write_set, is_decreasing, Some(&bp.var));
+                                } else {
+                                    self.fun.pending_post_hoist = post_hoist;
+                                    self.warnings.push(format!("info: txn '{}' dispatched via inline SSA ({}/{} fields written)", &node.name, write_count, total_fields));
+                                    self.emit_folded_main(&mut out, &node.name, counter_idx, total_idx, total_const_name, false, Some(&body_stmts));
+                                }
                             } else {
                                 // PerFieldPhi: per-field phi loop with full write_set.
                                 // Default for all other programs. Most robust: handles guards,
