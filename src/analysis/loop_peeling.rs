@@ -38,7 +38,7 @@ pub fn reorder_body(body: &[Statement]) -> Vec<Statement> {
 
 /// Check if a statement is a guard that should be hoisted to the end.
 /// A guard is hoistable if it contains a function call.
-fn is_hoistable_guard(stmt: &Statement) -> bool {
+pub(crate) fn is_hoistable_guard(stmt: &Statement) -> bool {
     contains_function_call(stmt)
 }
 
@@ -76,6 +76,27 @@ fn is_zero(expr: &Expr) -> bool {
     matches!(expr, Expr::Decimal(0) | Expr::Float(0.0))
 }
 
+/// Split the body into pure compute statements and hoistable guards.
+/// Returns only the hoistable guards (containing function calls).
+pub fn split_hoistable(body: &[Statement]) -> Vec<Statement> {
+    body.iter().filter(|s| is_hoistable_guard(s)).cloned().collect()
+}
+
+/// Extract the batch size from a list of guard statements.
+pub fn extract_batch_size_from_guards(guards: &[Statement], count_var: &str) -> Option<usize> {
+    for guard in guards {
+        let (cond, _body) = match guard {
+            Statement::Guarded(c, b) => (c, b),
+            _ => continue,
+        };
+        match extract_batch_size(cond, count_var) {
+            Some(bs) => return Some(bs),
+            None => continue,
+        }
+    }
+    None
+}
+
 fn is_identifier(expr: &Expr, name: &str) -> bool {
     matches!(expr, Expr::Identifier(n) if n == name)
 }
@@ -108,6 +129,8 @@ fn has_call_expr(expr: &Expr) -> bool {
         Expr::Index(arr, idx) => has_call_expr(arr) || has_call_expr(idx),
         Expr::List(items) => items.iter().any(|i| has_call_expr(i)),
         Expr::Tuple(items) => items.iter().any(|i| has_call_expr(i)),
+        Expr::Block(stmts) => stmts.iter().any(|s| contains_function_call(s)),
+        Expr::PluginIntercept { .. } => true,
         _ => false,
     }
 }
