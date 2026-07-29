@@ -102,11 +102,41 @@ pub fn write_doppelganger(
         // branches to the convergence check. This is the correct way to return
         // a value from a synthesized body.
         // For ite chains (SMT results), use when-guard format instead.
-        let body_str = if let Some(ite_body) = Doppelganger::format_ite_body(prog) {
+        let mut body_str = if let Some(ite_body) = Doppelganger::format_ite_body(prog) {
             format!(" {{\n{}}} ", ite_body)
         } else {
             format!(" {{\n    term {};\n}} ", Doppelganger::format_body(prog))
         };
+        // 2026-07-29: Prepend helper defn blocks before the synthesized body.
+        // Only helpers with use_count > 0 are emitted. This is the ephemeral
+        // library concept: helpers created during search are only persisted
+        // in output if consumed by the final expression.
+        if !prog.helpers.is_empty() {
+            let mut helpers_str = String::from("\n");
+            for h in &prog.helpers {
+                if h.use_count == 0 { continue; }
+                let params: Vec<String> = h.params.iter()
+                    .zip(h.param_types.iter())
+                    .map(|(n, t)| format!("{}: {}", n, t))
+                    .collect();
+                helpers_str.push_str(&format!(
+                    "// 2026-07-29: Auto-discovered helper (abstraction discovery)\n\
+                     defn {}({}) -> {} {{ {} }};\n\n",
+                    h.name,
+                    params.join(", "),
+                    h.ret_type,
+                    Doppelganger::format_body(&SynthesizedProgram {
+                        body: vec![h.body.clone()],
+                        cost: h.body_cost,
+                        depth: 0,
+                        helpers: vec![],
+                    }),
+                ));
+            }
+            if !helpers_str.trim().is_empty() {
+                body_str = format!("{}{}", helpers_str, body_str);
+            }
+        }
         eprintln!("[derive] {}: inserting body at byte {}", name, insert_at);
         insertions.push((insert_at, body_str));
     }
