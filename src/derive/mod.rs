@@ -8,6 +8,7 @@ mod engine;
 mod smt;
 mod cli;
 mod assert;
+mod chain;
 mod doppelganger;
 mod library;
 mod mcmc;
