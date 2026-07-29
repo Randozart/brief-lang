@@ -227,6 +227,7 @@ pub fn build_verification_query(
     params: &[(String, Type)],
     postcondition: Option<&Expr>,
     precondition: Option<&Expr>,
+    ref_fn: Option<&Expr>,
 ) -> String {
     let mut q = String::new();
     q.push_str("(set-option :produce-models true)\n");
@@ -258,7 +259,17 @@ pub fn build_verification_query(
     }
     q.push_str(&format!(") (_ BitVec 64) {})\n\n", candidate_body));
 
-    // Build the forall verification body: (=> pre post) or just post
+    // 2026-07-29: Reference function as define-fun ref
+    if let Some(ref_expr) = ref_fn {
+        let ref_body = expr_to_smt_term(ref_expr, &param_names);
+        q.push_str("(define-fun ref (");
+        for (i, (_, ty)) in params.iter().enumerate() {
+            q.push_str(&format!(" (x{} {})", i, type_to_smt_sort(ty)));
+        }
+        q.push_str(&format!(") (_ BitVec 64) {})\n\n", ref_body));
+    }
+
+    // Build the forall verification body: (=> pre post) or just (f x) == (ref x)
     if let Some(post) = postcondition {
         let param_refs: Vec<String> = (0..params.len())
             .map(|i| format!("x{}", i))
@@ -276,6 +287,30 @@ pub fn build_verification_query(
         };
 
         q.push_str("; Verify: forall inputs, candidate satisfies postcondition\n");
+        q.push_str("(assert (not (forall (");
+        for (i, (_, ty)) in params.iter().enumerate() {
+            q.push_str(&format!(" (x{} {})", i, type_to_smt_sort(ty)));
+        }
+        q.push_str(&format!(")\n   {})))\n", forall_body));
+    }
+
+    // 2026-07-29: Reference-based verification: forall x: (f x) == (ref x)
+    if ref_fn.is_some() && postcondition.is_none() {
+        let param_refs: Vec<String> = (0..params.len())
+            .map(|i| format!("x{}", i))
+            .collect();
+        let f_call = format!("(f {})", param_refs.join(" "));
+        let ref_call = format!("(ref {})", param_refs.join(" "));
+        let equality = format!("(= {})", vec![f_call, ref_call].join(" "));
+
+        let forall_body = if let Some(pre) = precondition {
+            let pre_body = expr_to_smt_term(pre, &param_names[..params.len()]);
+            format!("(=> {} {})", pre_body, equality)
+        } else {
+            equality
+        };
+
+        q.push_str("; Verify: forall inputs, candidate matches reference function\n");
         q.push_str("(assert (not (forall (");
         for (i, (_, ty)) in params.iter().enumerate() {
             q.push_str(&format!(" (x{} {})", i, type_to_smt_sort(ty)));
@@ -460,7 +495,7 @@ mod tests {
     fn test_build_verification_query_simple() {
         let candidate = Expr::Identifier("x0".into());
         let params = vec![("x".into(), Type::int())];
-        let query = build_verification_query("test", &candidate, &params, None, None);
+        let query = build_verification_query("test", &candidate, &params, None, None, None);
         assert!(query.contains("define-fun"));
         assert!(query.contains("(set-logic ALL)"));
         assert!(query.contains("(check-sat)"));
@@ -480,7 +515,7 @@ mod tests {
             Box::new(Expr::Identifier("#Term".into())),
             Box::new(Expr::Decimal(0)),
         );
-        let query = build_verification_query("test", &candidate, &params, Some(&post), None);
+        let query = build_verification_query("test", &candidate, &params, Some(&post), None, None);
         assert!(query.contains("(forall"));
         assert!(query.contains("(f x0"));
     }

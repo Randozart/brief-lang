@@ -176,6 +176,8 @@ mod tests {
             synthesized: None,
             postcondition: None,
             precondition: None,
+            ref_name: None,
+            ref_tolerance: None,
             span: dummy_span(),
         };
 
@@ -222,6 +224,8 @@ mod tests {
             synthesized: None,
             postcondition: None,
             precondition: None,
+            ref_name: None,
+            ref_tolerance: None,
             span: dummy_span(),
         };
         let block2 = DerivationBlock {
@@ -229,6 +233,8 @@ mod tests {
             synthesized: None,
             postcondition: None,
             precondition: None,
+            ref_name: None,
+            ref_tolerance: None,
             span: dummy_span(),
         };
         let block2 = DerivationBlock {
@@ -236,6 +242,8 @@ mod tests {
             synthesized: None,
             postcondition: None,
             precondition: None,
+            ref_name: None,
+            ref_tolerance: None,
             span: dummy_span(),
         };
 

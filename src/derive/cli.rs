@@ -3,7 +3,7 @@
 // 2026-07-28: Phase I.0 — Added DeriveConfig, flag parsing, MCMC + doppelganger output.
 // Flat code: max 2 levels of nesting.
 
-use crate::ast::{DerivationBlock, Expr, TopLevel, Type};
+use crate::ast::{DerivationBlock, Expr, Statement, TopLevel, Type};
 use crate::derive::engine::{CostModel, SynthesizedProgram};
 use crate::derive::{synthesize, SynthesizeError};
 use std::fs;
@@ -127,6 +127,18 @@ pub fn handle_derive_command(config: &DeriveConfig, file_path: &str) -> Result<(
         return Ok(());
     }
 
+    // 2026-07-29: Build reference function lookup from the program.
+    // Reference functions are named defns in the same compilation unit.
+    let mut ref_lookup: std::collections::HashMap<String, &TopLevel> = std::collections::HashMap::new();
+    for item in &program {
+        if let TopLevel::Definition(d) = item {
+            ref_lookup.insert(d.name.clone(), item);
+        }
+        if let TopLevel::Transaction(t) = item {
+            ref_lookup.insert(t.name.clone(), item);
+        }
+    }
+
     // Synthesize each derivation block
     let mut syntheses: Vec<(String, SynthesizedProgram)> = Vec::new();
     for (name, params, block) in &derivations {
@@ -134,7 +146,25 @@ pub fn handle_derive_command(config: &DeriveConfig, file_path: &str) -> Result<(
         // Use Type::int() as default return type for derivation blocks
         // TODO: extract actual return type from function signature
         let ret_type = Type::int();
-        match synthesize(name, block, params, &ret_type, config.enumerative_depth, config.verify_samples, block.postcondition.as_ref(), block.precondition.as_ref()) {
+        // 2026-07-29: Look up reference function body for verifying clause
+        let ref_body_expr: Option<&Expr> = block.ref_name.as_ref().and_then(|ref_name| {
+            ref_lookup.get(ref_name).and_then(|item| match item {
+                TopLevel::Definition(d) => {
+                    // Find the first Term(Some(expr)) in the body — that's the return value
+                    d.body.iter().find_map(|s| {
+                        if let Statement::Term(Some(e)) = s {
+                            // Box<Expr> derefs to Expr
+                            let expr_ref: &Expr = e;
+                            Some(expr_ref)
+                        } else {
+                            None
+                        }
+                    })
+                }
+                _ => None,
+            })
+        });
+        match synthesize(name, block, params, &ret_type, config.enumerative_depth, config.verify_samples, block.postcondition.as_ref(), block.precondition.as_ref(), ref_body_expr) {
             Ok(prog) => {
                 eprintln!("[derive] '{}': synthesized body with cost {}", name, prog.cost);
                 syntheses.push((name.clone(), prog));

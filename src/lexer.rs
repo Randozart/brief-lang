@@ -76,6 +76,10 @@ pub enum Token {
     #[token("term!")]
     TermBang,
 
+    /// 2026-07-29: Reference function verification — `verifying ref_fn [tol: N]`
+    #[token("verifying")]
+    Verifying,
+
     #[token("escape")]
     Escape,
 
@@ -560,6 +564,7 @@ impl std::fmt::Display for Token {
             Token::Await => write!(f, "await"),
             Token::Term => write!(f, "term"),
             Token::TermBang => write!(f, "term!"),
+            Token::Verifying => write!(f, "verifying"),
             Token::Escape => write!(f, "escape"),
             Token::Uni => write!(f, "uni"),
             Token::Is => write!(f, "is"),

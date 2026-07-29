@@ -162,6 +162,13 @@ pub struct DerivationBlock {
     /// Parsed from [[ pre ]] syntax before the postcondition block.
     /// Example: [[ x0 >= 0 ]][ #Term >= 0 ] — only verify for non-negative inputs.
     pub precondition: Option<Expr>,
+    /// 2026-07-29: Optional reference function for correctness verification.
+    /// `verifying ref_fn` declares an existing function as the oracle for CEGIS.
+    /// The synthesized function must match ref_fn for ALL inputs (within tolerance).
+    /// ref_name: name of the reference function (must be a defn in the same unit).
+    /// ref_tolerance: allowed deviation (default 0.0 for exact match).
+    pub ref_name: Option<String>,
+    pub ref_tolerance: Option<f64>,
     pub span: Span,
 }
 
