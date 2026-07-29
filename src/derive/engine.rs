@@ -1149,6 +1149,7 @@ pub fn synthesize_enumerative(
     examples: &[DerivationExample],
     cost_model: &CostModel,
     max_depth: u8,
+    beam_width: usize,
 ) -> Result<SynthesizedProgram, SynthesizeError> {
     if examples.is_empty() {
         return Err(SynthesizeError::NoExamples("synthesize_enumerative".into()));
@@ -1170,9 +1171,16 @@ pub fn synthesize_enumerative(
         // 2026-07-28: Evaluate in cost order — cheapest first.
         // Sorting by cost ensures general formulas (e.g., If(x0<0, -x0, x0)
         // at cost ~14) are evaluated before table-lookup ite chains (cost ~56).
-        // This eliminates the generation-order bias where x0==5 appears before x0<0.
         let mut sorted: Vec<(u64, &Expr)> = candidates.iter().map(|c| (cost_model.cost_of_expr(c), c)).collect();
         sorted.sort_by_key(|(cost, _)| *cost);
+
+        // 2026-07-28: Beam search — keep only beam_width cheapest candidates.
+        // For 2-param functions at depth 3, the candidate space is ~23K.
+        // Truncating to the top N cheapest reduces evaluation time dramatically
+        // while preserving the most promising candidates (lowest cost = most general).
+        if sorted.len() > beam_width {
+            sorted.truncate(beam_width);
+        }
 
         let mut next_level: Vec<Expr> = Vec::new();
         for (cost, candidate) in &sorted {
@@ -1285,6 +1293,12 @@ fn expr_to_value(expr: &Expr) -> Value {
 
 /// Enumerative search using actual parameter names and types.
 /// 2026-07-12: Original entry point. 2026-07-28: Accepts params instead of hardcoding.
+/// 2026-07-28: Default beam width for candidate pruning at each depth.
+/// Higher values = more candidates evaluated (slower but more thorough).
+/// Lower values = faster but may miss solutions that require deeper search.
+/// 2000 works well for 1-param functions. For 2+ params, reduce to 500.
+const DEFAULT_BEAM_WIDTH: usize = 2000;
+
 pub fn enumerative_search(
     name: &str,
     params: &[(String, Type)],
@@ -1304,8 +1318,10 @@ pub fn enumerative_search(
     };
     let max_depth_u8 = max_depth.min(8) as u8;
     let cost_model = CostModel::default();
+    // 2026-07-28: Use smaller beam for multi-param functions (larger candidate space)
+    let beam = if params.len() >= 2 { 500 } else { DEFAULT_BEAM_WIDTH };
 
-    match synthesize_enumerative(&param_types, &ret_type_str, &param_names, examples, &cost_model, max_depth_u8) {
+    match synthesize_enumerative(&param_types, &ret_type_str, &param_names, examples, &cost_model, max_depth_u8, beam) {
         Ok(prog) => Ok(prog.body.into_iter().next()),
         Err(SynthesizeError::NoSolution(_)) => Ok(None),
         Err(e) => Err(e),
@@ -1509,7 +1525,7 @@ mod tests {
         let names: Vec<String> = vec!["x".into(), "y".into()];
         let types: Vec<String> = vec!["Int".into(), "Int".into()];
         let model = CostModel::default();
-        let result = synthesize_enumerative(&types, "Int", &names, &examples, &model, 3).unwrap();
+        let result = synthesize_enumerative(&types, "Int", &names, &examples, &model, 3, 2000).unwrap();
         assert_eq!(result.cost, model.cost_of_expr(&Expr::BinaryOp(
             BinaryOpKind::Add,
             Box::new(Expr::Identifier("x".into())),
@@ -1526,7 +1542,7 @@ mod tests {
         let names: Vec<String> = vec!["x".into()];
         let types: Vec<String> = vec!["Int".into()];
         let model = CostModel::default();
-        let result = synthesize_enumerative(&types, "Int", &names, &examples, &model, 2).unwrap();
+        let result = synthesize_enumerative(&types, "Int", &names, &examples, &model, 2, 2000).unwrap();
         assert_eq!(
             result.cost,
             model.cost_of_expr(&Expr::Identifier("x".into())),
@@ -1544,7 +1560,7 @@ mod tests {
         let types: Vec<String> = vec!["Int".into()];
         let model = CostModel::default();
         // The constant 1 (in the default pool) should be found
-        let result = synthesize_enumerative(&types, "Int", &names, &examples, &model, 2);
+        let result = synthesize_enumerative(&types, "Int", &names, &examples, &model, 2, 2000);
         assert!(result.is_ok(), "should find constant 1: {:?}", result.err());
     }
 
@@ -1556,7 +1572,7 @@ mod tests {
         let names: Vec<String> = vec!["x".into()];
         let types: Vec<String> = vec!["Int".into()];
         let model = CostModel::default();
-        let result = synthesize_enumerative(&types, "Int", &names, &examples, &model, 2);
+        let result = synthesize_enumerative(&types, "Int", &names, &examples, &model, 2, 2000);
         assert!(result.is_err(), "999 should not be found at depth 2");
     }
 
@@ -1572,7 +1588,7 @@ mod tests {
         let names: Vec<String> = vec!["x".into(), "y".into()];
         let types: Vec<String> = vec!["Float".into(), "Float".into()];
         let model = CostModel::default();
-        let result = synthesize_enumerative(&types, "Float", &names, &examples, &model, 3);
+        let result = synthesize_enumerative(&types, "Float", &names, &examples, &model, 3, 2000);
         assert!(result.is_ok(), "should find x + y with tolerance: {:?}", result.err());
     }
 
@@ -1581,7 +1597,7 @@ mod tests {
         let names: Vec<String> = vec!["x".into()];
         let types: Vec<String> = vec!["Int".into()];
         let model = CostModel::default();
-        let result = synthesize_enumerative(&types, "Int", &names, &[], &model, 2);
+        let result = synthesize_enumerative(&types, "Int", &names, &[], &model, 2, 2000);
         assert!(matches!(result, Err(SynthesizeError::NoExamples(_))));
     }
 
@@ -1597,7 +1613,7 @@ mod tests {
         let types: Vec<String> = vec!["Int".into()];
         let model = CostModel::default();
         // identity (x) should be found before x + 0
-        let result = synthesize_enumerative(&types, "Int", &names, &examples, &model, 3).unwrap();
+        let result = synthesize_enumerative(&types, "Int", &names, &examples, &model, 3, 2000).unwrap();
         assert!(
             result.body.iter().any(|e| matches!(e, Expr::Identifier(_))),
             "should prefer identity over x + 0: {:?}",
