@@ -1297,8 +1297,10 @@ pub fn synthesize_enumerative(
                 &crate::derive::library::DISCOVER_CONFIG,
             );
             if !helpers.is_empty() {
-                // 2026-07-29: Count uses before registration to establish baseline.
-                // Then register so generate_next_level can emit helper calls.
+                // 2026-07-29: Register discovered helpers into the LevelCache.
+                // Helpers are emitted as standalone calls by generate_next_level
+                // at the next depth. They are NOT added to per-type buckets to
+                // avoid bloating the binary op cross product.
                 let mut tracked = helpers;
                 crate::derive::library::register_helpers(&mut prev_cache.level, &tracked);
                 // Store helpers in the function's helper registry for GC and

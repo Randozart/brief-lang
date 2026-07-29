@@ -255,6 +255,9 @@ fn smt_get_correct_output(
 
 /// Try to synthesize a single candidate from examples using enumerative
 /// search, falling back to SMT if needed.
+/// 2026-07-29: Calls synthesize_enumerative directly to preserve the
+/// full SynthesizedProgram including discovered helper functions.
+/// The legacy enumerative_search wrapper discards helpers.
 fn synthesize_candidate(
     name: &str,
     params: &[(String, Type)],
@@ -262,11 +265,27 @@ fn synthesize_candidate(
     examples: &[DerivationExample],
     max_depth: usize,
 ) -> Result<engine::SynthesizedProgram, SynthesizeError> {
-    // Try enumerative search first
-    if let Ok(Some(expr)) = engine::enumerative_search(name, params, ret_type, examples, max_depth) {
-        let cost = engine::CostModel::default().cost_of_expr(&expr);
-        return Ok(engine::SynthesizedProgram { body: vec![expr], cost, depth: max_depth as u8, helpers: vec![] });
+    // Try enumerative search first — call directly to preserve helpers
+    let param_names: Vec<String> = params.iter().map(|(n, _)| n.clone()).collect();
+    let param_types: Vec<String> = params.iter().map(|(_, t)| t.to_string()).collect();
+    let ret_type_str = if ret_type == &Type::int() {
+        "Int".to_string()
+    } else {
+        ret_type.to_string()
+    };
+    let max_depth_u8 = max_depth.min(8) as u8;
+    let cost_model = engine::CostModel::default();
+    let beam = if params.len() >= 2 { 5000 } else { 4000 };
+
+    match engine::synthesize_enumerative(
+        &param_types, &ret_type_str, &param_names,
+        examples, &cost_model, max_depth_u8, beam,
+    ) {
+        Ok(prog) => return Ok(prog),
+        Err(SynthesizeError::NoSolution(_)) => {} // fall through to SMT
+        Err(e) => return Err(e),
     }
+
     // Fall back to SMT solver
     match smt::synthesize_via_smt(name, params, examples) {
         Ok(expr) => {

@@ -581,53 +581,34 @@ fn contains_subtree(expr: &Expr, target_fp: &str, param_names: &[String]) -> boo
 /// CostModel, which is naturally cheaper than the full helper body.
 /// No modification to CostModel is needed.
 ///
-/// Registering a helper makes it available as a single-token expression
-/// at the next depth level. This is the key scaling improvement: instead
-/// of regenerating the helper's entire subtree at depth N+1, the search
-/// references it by name.
+/// Registering a helper makes it available as a standalone candidate
+/// at the next depth level via `helper_names` / `helper_info`.
+///
+/// 2026-07-29: Helpers are NOT added to per-type buckets (int_exprs,
+/// float_exprs, etc.) because that would bloat the binary op cross
+/// product at depth N+1. Instead, helpers are emitted as standalone
+/// calls in generate_next_level() via the helper_names loop. This
+/// keeps the search space from growing combinatorially with each
+/// discovered helper.
+///
+/// The trade-off: helpers cannot be used as operands of binary ops at
+/// depth N+1 (e.g., `_h0(x) + _h1(y)` is not generated). But they ARE
+/// available as complete expressions that directly produce the return
+/// type. For depth-4 scaling, this is the correct choice: standalone
+/// helper calls break the exponential search space without adding to it.
 pub(crate) fn register_helpers(cache: &mut LevelCache, helpers: &[HelperFunction]) {
     for helper in helpers {
-        if helper.params.is_empty() {
-            // Constant helper — generate once and store
-            let call = helper.body.clone();
-            match helper.ret_type.as_str() {
-                "Int" => cache.int_exprs.push(call),
-                "Float" => cache.float_exprs.push(call),
-                "Bool" => cache.bool_exprs.push(call),
-                _ => {
-                    cache
-                        .compound_exprs
-                        .entry(helper.ret_type.clone())
-                        .or_default()
-                        .push(call);
-                }
-            }
-        } else {
-            let args: Vec<Expr> = helper
-                .params
-                .iter()
-                .map(|p| Expr::Identifier(p.clone()))
-                .collect();
-            let call = Expr::Call(helper.name.clone(), args, None);
-            match helper.ret_type.as_str() {
-                "Int" => cache.int_exprs.push(call),
-                "Float" => cache.float_exprs.push(call),
-                "Bool" => cache.bool_exprs.push(call),
-                _ => {
-                    cache
-                        .compound_exprs
-                        .entry(helper.ret_type.clone())
-                        .or_default()
-                        .push(call);
-                }
-            }
-        }
         // 2026-07-29: Track the helper name for iteration in
         // generate_next_level(). This also enables GC: after depth N+1,
         // we remove helpers with zero references.
+        // Helpers are NOT injected into per-type buckets — they are emitted
+        // as standalone calls via generate_next_level()'s helper_names loop.
         if !cache.helper_names.contains(&helper.name) {
             cache.helper_names.push(helper.name.clone());
         }
+        cache.helper_info.entry(helper.name.clone()).or_insert_with(|| {
+            (helper.params.clone(), helper.ret_type.clone())
+        });
     }
 }
 
@@ -658,27 +639,8 @@ pub(crate) fn gc_helpers(
         .helper_names
         .retain(|name| active.contains(name));
 
-    // 2026-07-29: Also remove helper call expressions from per-type buckets.
-    // A helper call is Expr::Call(name, args, None). We scan each bucket
-    // and remove calls whose name is no longer active.
-    for bucket in [&mut cache.int_exprs, &mut cache.float_exprs, &mut cache.bool_exprs] {
-        bucket.retain(|e| {
-            if let Expr::Call(name, _, _) = e {
-                active.contains(name)
-            } else {
-                true
-            }
-        });
-    }
-    for list in cache.compound_exprs.values_mut() {
-        list.retain(|e| {
-            if let Expr::Call(name, _, _) = e {
-                active.contains(name)
-            } else {
-                true
-            }
-        });
-    }
+    // 2026-07-29: Also clean up helper_info for removed helpers.
+    cache.helper_info.retain(|name, _| active.contains(name));
 }
 
 /// 2026-07-29: Increment use counts for helpers that are referenced
@@ -977,16 +939,11 @@ mod tests {
 
         register_helpers(&mut cache, &[helper]);
 
-        assert_eq!(cache.int_exprs.len(), 1);
         assert!(cache.helper_names.contains(&"_h0".to_string()));
-        match &cache.int_exprs[0] {
-            Expr::Call(name, args, None) => {
-                assert_eq!(name, "_h0");
-                assert_eq!(args.len(), 1);
-                assert!(matches!(&args[0], Expr::Identifier(n) if n == "x"));
-            }
-            _ => panic!("expected Expr::Call"),
-        }
+        assert!(cache.helper_info.contains_key("_h0"));
+        let (params, ret_type) = cache.helper_info.get("_h0").unwrap();
+        assert_eq!(params.len(), 1);
+        assert_eq!(ret_type, "Int");
     }
 
     #[test]
@@ -1005,11 +962,9 @@ mod tests {
 
         register_helpers(&mut cache, &[helper]);
 
-        assert_eq!(cache.int_exprs.len(), 1);
-        match &cache.int_exprs[0] {
-            Expr::Decimal(42) => {} // constant helper stored as raw value
-            _ => panic!("expected Expr::Decimal(42)"),
-        }
+        // Constant helpers are tracked by name/info only, not in int_exprs
+        assert!(cache.helper_names.contains(&"_h0".to_string()));
+        assert!(cache.helper_info.contains_key("_h0"));
     }
 
     #[test]
@@ -1033,8 +988,8 @@ mod tests {
 
         // All 25 helpers should have been registered (the cap is on
         // discovery, not registration — registration is additive)
-        assert_eq!(cache.int_exprs.len(), 25);
         assert_eq!(cache.helper_names.len(), 25);
+        assert_eq!(cache.helper_info.len(), 25);
     }
 
     // ── GC Tests ───────────────────────────────────────────────────
@@ -1058,7 +1013,7 @@ mod tests {
 
         assert!(helpers.is_empty(), "unused helper should be GC'd");
         assert!(!cache.helper_names.contains(&"_h0".to_string()));
-        assert!(cache.int_exprs.is_empty());
+        assert!(!cache.helper_info.contains_key("_h0"));
     }
 
     #[test]
@@ -1080,6 +1035,7 @@ mod tests {
 
         assert_eq!(helpers.len(), 1, "used helper should survive GC");
         assert!(cache.helper_names.contains(&"_h0".to_string()));
+        assert!(cache.helper_info.contains_key("_h0"));
     }
 
     // ── count_helper_uses Tests ───────────────────────────────────
