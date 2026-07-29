@@ -70,8 +70,40 @@ pub fn synthesize(
         // Step 2: Verify candidate
         let cand_expr = candidate_prog.body.get(0).cloned().unwrap_or(Expr::Decimal(0));
         let mut verified = true;
-        if verify_samples > 0 {
-            match verify::verify_candidate(&cand_expr, params, postcondition, verify_samples) {
+        // 2026-07-28: Use Z3 forall verification when postcondition provided.
+        // Falls back to random verification when Z3 is unavailable.
+        if let Some(post) = postcondition {
+            match smt_verify_candidate(name, &cand_expr, params, &examples, post) {
+                CegisResult::Proven => {
+                    eprintln!("  cegis[{}/5] '{}': PROVEN for all inputs", iteration + 1, name);
+                }
+                CegisResult::Counterexample(inputs, correct_output) => {
+                    eprintln!("  cegis[{}/5] '{}': counterexample at {:?}, adding example", iteration + 1, name, inputs);
+                    examples.push(DerivationExample {
+                        inputs,
+                        output: Box::new(correct_output),
+                        tolerance: None,
+                        span: crate::errors::Span::dummy(),
+                    });
+                    verified = false;
+                }
+                CegisResult::Error(reason) => {
+                    eprintln!("  cegis[{}/5] '{}': Z3 error ({}), fallback to random verify", iteration + 1, name, reason);
+                    if verify_samples > 0 {
+                        match verify::verify_candidate(&cand_expr, params, Some(post), verify_samples) {
+                            verify::VerifyResult::Pass => {}
+                            verify::VerifyResult::Fail(_, r) => {
+                                eprintln!("  verify: '{}' rejected ({})", name, r);
+                                return Err(SynthesizeError::NoSolution(
+                                    format!("candidate for '{}' rejected by verification: {}", name, r)
+                                ));
+                            }
+                        }
+                    }
+                }
+            }
+        } else if verify_samples > 0 {
+            match verify::verify_candidate(&cand_expr, params, None, verify_samples) {
                 verify::VerifyResult::Pass => {}
                 verify::VerifyResult::Fail(_, reason) => {
                     eprintln!("  cegis[{}/5] '{}': verification rejected ({})", iteration + 1, name, reason);
