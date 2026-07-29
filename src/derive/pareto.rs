@@ -108,7 +108,7 @@ mod tests {
     #[test]
     fn test_pareto_insert_dominated() {
         let mut frontier = ParetoFrontier::new();
-        let prog = SynthesizedProgram { body: vec![Expr::Decimal(0)], cost: 0, depth: 0 };
+        let prog = SynthesizedProgram { body: vec![Expr::Decimal(0)], cost: 0, depth: 0, helpers: vec![] };
         let p1 = make_point(prog.clone(), 5, 10);
         let p2 = make_point(prog.clone(), 5, 15); // more ops, same errors → dominated
         assert!(frontier.insert(p1));
@@ -118,7 +118,7 @@ mod tests {
     #[test]
     fn test_pareto_insert_non_dominated() {
         let mut frontier = ParetoFrontier::new();
-        let prog = SynthesizedProgram { body: vec![Expr::Decimal(0)], cost: 0, depth: 0 };
+        let prog = SynthesizedProgram { body: vec![Expr::Decimal(0)], cost: 0, depth: 0, helpers: vec![] };
         let p1 = make_point(prog.clone(), 5, 10);
         let p2 = make_point(prog.clone(), 3, 12); // fewer errors, more ops → not dominated
         assert!(frontier.insert(p1));
@@ -128,7 +128,7 @@ mod tests {
     #[test]
     fn test_pareto_knee_selection() {
         let mut frontier = ParetoFrontier::new();
-        let prog = SynthesizedProgram { body: vec![Expr::Decimal(0)], cost: 0, depth: 0 };
+        let prog = SynthesizedProgram { body: vec![Expr::Decimal(0)], cost: 0, depth: 0, helpers: vec![] };
         frontier.insert(make_point(prog.clone(), 0, 20)); // low error, high ops
         frontier.insert(make_point(prog.clone(), 10, 2)); // high error, low ops
         frontier.insert(make_point(prog.clone(), 3, 8));  // knee: middle trade-off
@@ -140,7 +140,7 @@ mod tests {
     #[test]
     fn test_pareto_knee_single_point() {
         let mut frontier = ParetoFrontier::new();
-        let prog = SynthesizedProgram { body: vec![Expr::Decimal(0)], cost: 0, depth: 0 };
+        let prog = SynthesizedProgram { body: vec![Expr::Decimal(0)], cost: 0, depth: 0, helpers: vec![] };
         frontier.insert(make_point(prog.clone(), 2, 5));
         let knee = frontier.select_knee().unwrap();
         assert_eq!(knee.error_count, 2);

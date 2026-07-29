@@ -300,6 +300,7 @@ fn parse_smt_response(
         body: vec![brief_expr],
         cost: 0,
         depth: 0,
+        helpers: vec![],
     })
 }
 

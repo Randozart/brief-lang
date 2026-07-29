@@ -167,6 +167,7 @@ pub fn handle_derive_command(config: &DeriveConfig, file_path: &str) -> Result<(
                         body: vec![ref_body.clone()],
                         cost,
                         depth: 0,
+                        helpers: vec![],
                     };
                     eprintln!("[derive] '{}': reference-only (using '{}' body, cost {})", name, ref_name, cost);
                     syntheses.push((name.clone(), prog));

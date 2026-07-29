@@ -9,6 +9,7 @@ mod smt;
 mod cli;
 mod assert;
 mod doppelganger;
+mod library;
 mod mcmc;
 mod mutate;
 mod equivalence;
@@ -22,6 +23,7 @@ pub use smt::*;
 pub use cli::*;
 pub use assert::*;
 pub use doppelganger::*;
+pub use library::*;
 pub use mcmc::*;
 pub use mutate::*;
 pub use equivalence::*;
@@ -263,13 +265,13 @@ fn synthesize_candidate(
     // Try enumerative search first
     if let Ok(Some(expr)) = engine::enumerative_search(name, params, ret_type, examples, max_depth) {
         let cost = engine::CostModel::default().cost_of_expr(&expr);
-        return Ok(engine::SynthesizedProgram { body: vec![expr], cost, depth: max_depth as u8 });
+        return Ok(engine::SynthesizedProgram { body: vec![expr], cost, depth: max_depth as u8, helpers: vec![] });
     }
     // Fall back to SMT solver
     match smt::synthesize_via_smt(name, params, examples) {
         Ok(expr) => {
             let cost = engine::CostModel::default().cost_of_expr(&expr);
-            Ok(engine::SynthesizedProgram { body: vec![expr], cost, depth: 0 })
+            Ok(engine::SynthesizedProgram { body: vec![expr], cost, depth: 0, helpers: vec![] })
         }
         Err(e) => Err(e),
     }

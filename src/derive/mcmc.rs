@@ -440,7 +440,7 @@ mod tests {
 
     #[test]
     fn test_performance_cost_constant() {
-        let prog = SynthesizedProgram { body: vec![Expr::Decimal(42)], cost: 0, depth: 0 };
+        let prog = SynthesizedProgram { body: vec![Expr::Decimal(42)], cost: 0, depth: 0, helpers: vec![] };
         assert_eq!(performance_cost(&prog), 0);
     }
 
@@ -453,6 +453,7 @@ mod tests {
                 Box::new(Expr::Decimal(1)),
             )],
             cost: 0, depth: 0,
+            helpers: vec![],
         };
         assert_eq!(performance_cost(&prog), 1);
     }

@@ -586,12 +586,23 @@ fn generate_typed_expressions_lazy(
 /// After each depth, expressions are evaluated against all examples and pruned
 /// to keep only unique, non-constant output vectors. The next depth generates
 /// candidates only from the pruned set, dramatically reducing the cross product.
-struct LevelCache {
-    int_exprs: Vec<Expr>,
-    float_exprs: Vec<Expr>,
-    bool_exprs: Vec<Expr>,
+/// 2026-07-29: Made pub(crate) for sibling module library.rs (abstraction discovery).
+/// Added helper_names for tracked helper functions. See abstraction-discovery plan.
+pub(crate) struct LevelCache {
+    pub(crate) int_exprs: Vec<Expr>,
+    pub(crate) float_exprs: Vec<Expr>,
+    pub(crate) bool_exprs: Vec<Expr>,
     /// 2026-07-28: Phase 5 — Compound type expressions, keyed by type name (e.g., "Expr").
-    compound_exprs: std::collections::HashMap<String, Vec<Expr>>,
+    pub(crate) compound_exprs: std::collections::HashMap<String, Vec<Expr>>,
+    /// 2026-07-29: Names of registered helper functions (abstraction discovery).
+    /// Stored separately from per-type exprs because helper calls are generated
+    /// from name-to-type mapping, not from raw exprs. Iterated in
+    /// generate_next_level() to find matching-return-type helpers.
+    pub(crate) helper_names: Vec<String>,
+    /// 2026-07-29: Helper metadata mapping name → (param_names, ret_type).
+    /// Used by generate_next_level() to emit standalone helper calls with
+    /// the correct arity and return type. Populated by register_helpers().
+    pub(crate) helper_info: std::collections::HashMap<String, (Vec<String>, String)>,
 }
 
 impl LevelCache {
@@ -599,6 +610,8 @@ impl LevelCache {
         LevelCache {
             int_exprs: vec![], float_exprs: vec![], bool_exprs: vec![],
             compound_exprs: std::collections::HashMap::new(),
+            helper_names: vec![],
+            helper_info: std::collections::HashMap::new(),
         }
     }
 
@@ -685,7 +698,8 @@ pub fn is_compound_type(name: &str) -> bool {
 
 /// 2026-07-28: Symmetry breaking — check if an operator is commutative.
 /// For commutative ops, we only generate lhs ≤ rhs to avoid duplicates.
-fn is_commutative_op(op: BinaryOpKind) -> bool {
+/// 2026-07-29: Made pub(crate) for sibling module library.rs (abstraction discovery).
+pub(crate) fn is_commutative_op(op: BinaryOpKind) -> bool {
     matches!(op, BinaryOpKind::Add | BinaryOpKind::Mul
         | BinaryOpKind::BitAnd | BinaryOpKind::BitOr
         | BinaryOpKind::BitXor | BinaryOpKind::Eq)
@@ -705,7 +719,8 @@ fn expr_pair_ordered(lhs: &Expr, rhs: &Expr, exprs: &[Expr]) -> bool {
 /// 2026-07-28: Tier 1 — Check if a binary operation is semantically redundant.
 /// Identity operations like 0+X, X*1, X>>0 produce the same result as the
 /// non-identity operand. Pruning them reduces search space and overfitting.
-fn is_identity_op(op: BinaryOpKind, lhs: &Expr, rhs: &Expr) -> bool {
+/// 2026-07-29: Made pub(crate) for sibling module library.rs (abstraction discovery).
+pub(crate) fn is_identity_op(op: BinaryOpKind, lhs: &Expr, rhs: &Expr) -> bool {
     match op {
         BinaryOpKind::Add => is_constant_zero(lhs) || is_constant_zero(rhs),
         BinaryOpKind::Sub => is_constant_zero(rhs),
@@ -737,6 +752,24 @@ fn generate_next_level(
     // via Match expressions (Expr → Int).
     for (name, _ty) in param_names.iter().zip(param_types.iter()) {
         result.push(Expr::Identifier(name.clone()));
+    }
+
+    // 2026-07-29: Helper call generation — emit Expr::Call for each
+    // registered helper whose return type matches the current target type.
+    // This is the key scaling improvement: instead of regenerating the
+    // helper's entire subtree at each use, the search references it by name.
+    // Helper calls are emitted as standalone candidates (like variables) and
+    // also participate in binary ops via their presence in the per-type buckets.
+    // Adapted from Koza's ADFs [GP'92] §6.3.
+    for helper_name in &prev.level.helper_names {
+        if let Some((params, h_ret_type)) = prev.level.helper_info.get(helper_name) {
+            if *h_ret_type == ret_type && !params.is_empty() {
+                let args: Vec<Expr> = params.iter()
+                    .map(|p| Expr::Identifier(p.clone()))
+                    .collect();
+                result.push(Expr::Call(helper_name.clone(), args, None));
+            }
+        }
     }
 
     // Unary ops on the previous level's expressions
@@ -1130,11 +1163,18 @@ fn push_typed_constants(ty: &str, result: &mut Vec<Expr>) {
 // ── C.3 — Depth-Bounded Search with Cost Pruning ──────────────────────
 
 /// 2026-07-28: Phase C.3 — A successfully synthesized program with its cost.
+/// 2026-07-29: Added helpers (abstraction discovery). Helper functions
+/// consumed by the synthesized body are emitted as defn blocks in the
+/// doppelganger output. See abstraction-discovery plan §5.
 #[derive(Debug, Clone)]
 pub struct SynthesizedProgram {
     pub body: Vec<Expr>,
     pub cost: u64,
     pub depth: u8,
+    /// 2026-07-29: Helper functions consumed by the synthesized body.
+    /// Only helpers with use_count > 0 are included. Emitted as defn
+    /// blocks before the main function in doppelganger output.
+    pub helpers: Vec<crate::derive::library::HelperFunction>,
 }
 
 /// 2026-07-28: Phase C.3 — Enumerate all programs up to max_depth,
@@ -1156,6 +1196,11 @@ pub fn synthesize_enumerative(
     }
 
     let mut best: Option<SynthesizedProgram> = None;
+    // 2026-07-29: Abstraction discovery helper registry. Collects all
+    // discovered helpers across depth levels. After solution found, only
+    // helpers with use_count > 0 are attached to SynthesizedProgram.
+    use crate::derive::HelperFunction;
+    let mut helper_registry: Vec<HelperFunction> = Vec::new();
     // 2026-07-28: Checkpointed depth search — start with empty level cache,
     // generate each depth from the pruned set of the previous depth.
     let mut prev_cache = EvalCache::empty();
@@ -1227,6 +1272,7 @@ pub fn synthesize_enumerative(
                     body: vec![(*candidate).clone()],
                     cost: *cost,
                     depth,
+                    helpers: vec![],
                 });
                 if depth >= 3 {
                     return Ok(best.unwrap());
@@ -1237,6 +1283,42 @@ pub fn synthesize_enumerative(
 
         // Checkpoint: prune the candidates to unique, non-constant outputs
         prev_cache = prune_level(next_level, param_names, param_types, examples);
+
+        // 2026-07-29: Abstraction discovery — extract reusable sub-expressions
+        // from the pruned LevelCache and promote to helper functions.
+        // Adapted from Koza ADFs [GP'92] and Feser et al. λ² [PLDI'15].
+        // Only activate at depth >= 2, because depth-1 expressions are just
+        // variables and constants with no useful abstraction to extract.
+        if depth >= 2 {
+            let helpers = crate::derive::library::discover_helpers(
+                &prev_cache.level,
+                param_names,
+                param_types,
+                &crate::derive::library::DISCOVER_CONFIG,
+            );
+            if !helpers.is_empty() {
+                // 2026-07-29: Count uses before registration to establish baseline.
+                // Then register so generate_next_level can emit helper calls.
+                let mut tracked = helpers;
+                crate::derive::library::register_helpers(&mut prev_cache.level, &tracked);
+                // Store helpers in the function's helper registry for GC and
+                // doppelganger emission. Collected across all depths.
+                helper_registry.append(&mut tracked);
+            }
+        }
+
+        // 2026-07-29: Garbage-collect unused helpers after registration.
+        // A helper with zero references at this point was registered but
+        // not used in candidate generation — remove it.
+        if !helper_registry.is_empty() {
+            crate::derive::library::gc_helpers(&mut prev_cache.level, &mut helper_registry);
+        }
+    }
+
+    // 2026-07-29: If a solution was found, attach the consumed helpers.
+    // Only helpers with use_count > 0 are included in the output.
+    if let Some(ref mut best) = best {
+        best.helpers = helper_registry;
     }
 
     best.ok_or_else(|| SynthesizeError::NoSolution("enumerative search failed".into()))

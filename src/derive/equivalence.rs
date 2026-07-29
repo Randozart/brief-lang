@@ -82,7 +82,7 @@ mod tests {
     fn dummy_span() -> Span { Span::dummy() }
 
     fn make_prog(body: Vec<Expr>) -> SynthesizedProgram {
-        SynthesizedProgram { body, cost: 0, depth: 0 }
+        SynthesizedProgram { body, cost: 0, depth: 0, helpers: vec![] }
     }
 
     fn example(inputs: Vec<Expr>, output: Expr, tolerance: Option<f64>) -> DerivationExample {

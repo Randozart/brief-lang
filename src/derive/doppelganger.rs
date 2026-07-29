@@ -136,7 +136,7 @@ mod tests {
     fn dummy_span() -> Span { Span::dummy() }
 
     fn make_prog(body: Vec<Expr>, cost: u64) -> SynthesizedProgram {
-        SynthesizedProgram { body, cost, depth: 0 }
+        SynthesizedProgram { body, cost, depth: 0, helpers: vec![] }
     }
 
     #[test]
