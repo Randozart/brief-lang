@@ -108,6 +108,10 @@ impl<'a> Parser<'a> {
                 if self.check_identifier("proto") {
                     return self.parse_protocol_def().map(TopLevel::ProtocolDef);
                 }
+                // 2026-07-29: asm<target> name(args) -> T { "instr"; };
+                if self.check_identifier("asm") {
+                    return self.parse_asm_fn().map(TopLevel::AsmFn);
+                }
                 let name = self.expect_identifier()?;
                 self.error_at_current(&format!("unexpected top-level item '{}'", name))
             }
@@ -930,6 +934,57 @@ impl<'a> Parser<'a> {
         } else {
             Ok(None)
         }
+    }
+
+    /// 2026-07-29: Parse asm<target> name(args) -> T { "instr"; "instr"; };
+    fn parse_asm_fn(&mut self) -> Result<AsmFn, SyntaxError> {
+        let start = self.pos;
+        self.advance(); // consume 'asm'
+        // expect '<'
+        self.expect(Token::Lt)?;
+        // expect target identifier
+        let target = self.expect_identifier()?;
+        // expect '>'
+        self.expect(Token::Gt)?;
+        // expect function name
+        let name = self.expect_identifier()?;
+        // expect '('
+        self.expect(Token::LParen)?;
+        // parse params
+        let params = self.parse_parameter_list()?;
+        // expect ')'
+        self.expect(Token::RParen)?;
+        // expect '->'
+        self.expect(Token::Arrow)?;
+        // parse return type
+        let ret_type = self.parse_type()?;
+        // expect '{'
+        self.expect(Token::LBrace)?;
+        // parse asm body (string literals separated by semicolons)
+        let body = self.parse_asm_body()?;
+        // expect '}'
+        self.expect(Token::RBrace)?;
+        // expect ';'
+        self.eat(&Token::Semicolon);
+        let span = self.tokens.get(start)
+            .and_then(|(_, s1)| self.tokens.get(self.pos - 1).map(|(_, s2)| (s1, s2)))
+            .map(|(s1, s2)| Span::new(s1.start, s2.end, 0, 0))
+            .unwrap_or(Span::new(0, 0, 0, 0));
+        Ok(AsmFn { target, name, params, ret_type, body, span })
+    }
+
+    /// 2026-07-29: Parse the body of an asm block: string literals separated by semicolons.
+    fn parse_asm_body(&mut self) -> Result<Vec<String>, SyntaxError> {
+        let mut strings = Vec::new();
+        loop {
+            if self.check(&Token::RBrace) {
+                break;
+            }
+            let s = self.expect_string()?;
+            strings.push(s);
+            self.eat(&Token::Semicolon);
+        }
+        Ok(strings)
     }
 
     fn parse_derivation_block(&mut self) -> Result<Option<DerivationBlock>, SyntaxError> {
