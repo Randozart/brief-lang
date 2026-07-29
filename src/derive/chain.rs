@@ -18,10 +18,13 @@ pub enum Body {
 }
 
 /// 2026-07-29: Evaluate a Brief expression against test inputs.
-fn evaluate_ref_expr(expr: &Expr, input: &[Value]) -> Result<Value, String> {
+/// `param_names` is the list of parameter names used in the expression.
+/// Inputs are bound to these names by position.
+fn evaluate_ref_expr(expr: &Expr, input: &[Value], param_names: &[String]) -> Result<Value, String> {
     let mut bindings: HashMap<String, Value> = HashMap::new();
     for (i, val) in input.iter().enumerate() {
-        bindings.insert(format!("x{}", i), val.clone());
+        let name = param_names.get(i).cloned().unwrap_or_else(|| format!("x{}", i));
+        bindings.insert(name, val.clone());
     }
     let mut heap = VirtualHeap::new();
     match eval_expr(expr, &mut heap, &mut bindings) {
@@ -31,23 +34,44 @@ fn evaluate_ref_expr(expr: &Expr, input: &[Value]) -> Result<Value, String> {
     }
 }
 
+/// 2026-07-29: Map target architecture to ABI register names.
+/// Returns (result_register, input_registers_by_position).
+fn abi_registers(arch: &str, n: usize) -> (&'static str, Vec<&'static str>) {
+    let regs: &[&str] = match arch {
+        "x86_64" => &["rdi", "rsi", "rdx", "rcx", "r8", "r9"],
+        "aarch64" => &["x0", "x1", "x2", "x3", "x4", "x5", "x6", "x7"],
+        _ => &["rdi", "rsi", "rdx", "rcx", "r8", "r9"],
+    };
+    let result = if arch == "aarch64" { "x0" } else { "rax" };
+    let inputs: Vec<&'static str> = (0..n).map(|i| *regs.get(i).unwrap_or(&regs[0])).collect();
+    (result, inputs)
+}
+
 /// 2026-07-29: Evaluate a body on a single set of inputs.
-/// For asm bodies, compiles the assembly to a shared library and calls it
-/// via FFI. For ref/synthesized, uses the interpreter.
-fn evaluate_body(body: &Body, input: &[Value], _asm: &dyn AsmAssembler) -> Result<Value, String> {
+/// `param_names` are the parameter names used in Ref/Synthesized bodies.
+fn evaluate_body(
+    body: &Body,
+    input: &[Value],
+    _asm: &dyn AsmAssembler,
+    param_names: &[String],
+) -> Result<Value, String> {
     match body {
         Body::Asm(asm_fn) => {
             if asm_fn.body.is_empty() {
                 return Ok(Value::Int(0));
             }
-            // Substitute {param} → numbered operands ({x} → $2 for result + first param)
+
+            // Substitute {param} and {result} with ABI register names for the target.
+            // Uses actual register names (e.g., rax, rdi for x86_64) because the
+            // assembly is compiled as raw GNU assembler, not GCC inline asm.
+            let arch = &asm_fn.target;
+            let (result_reg, input_regs) = abi_registers(arch, asm_fn.params.len());
             let mut asm_text = asm_fn.body.join("\n");
-            let mut offset = 1;
-            for (p_name, _) in &asm_fn.params {
-                asm_text = asm_text.replace(&format!("{{{}}}", p_name), &format!("${}", offset));
-                offset += 1;
+            asm_text = asm_text.replace("{result}", result_reg);
+            for (i, (p_name, _)) in asm_fn.params.iter().enumerate() {
+                let reg = *input_regs.get(i).unwrap_or(&result_reg);
+                asm_text = asm_text.replace(&format!("{{{}}}", p_name), reg);
             }
-            asm_text = asm_text.replace("{result}", "$0");
 
             let pid = std::process::id();
             let tmp = std::env::temp_dir().join(format!("brief_asm_{}", pid));
@@ -99,8 +123,8 @@ fn evaluate_body(body: &Body, input: &[Value], _asm: &dyn AsmAssembler) -> Resul
             let _ = std::fs::remove_dir_all(&tmp);
             Ok(Value::Int(result))
         }
-        Body::Ref(expr) => evaluate_ref_expr(expr, input),
-        Body::Synthesized(expr) => evaluate_ref_expr(expr, input),
+        Body::Ref(expr) => evaluate_ref_expr(expr, input, param_names),
+        Body::Synthesized(expr) => evaluate_ref_expr(expr, input, param_names),
     }
 }
 
@@ -137,12 +161,17 @@ fn verify_candidate(
     samples: usize,
     asm: &dyn AsmAssembler,
 ) -> bool {
+    let param_names: Vec<String> = params.iter().map(|(n, _)| n.clone()).collect();
     for _ in 0..samples {
         let input = generate_sample_input(params);
-        let Ok(output) = evaluate_body(&candidates[idx], &input, asm) else { return false; };
+        let Ok(output) = evaluate_body(&candidates[idx], &input, asm, &param_names) else {
+            return false;
+        };
         for j in 0..candidates.len() {
             if idx == j { continue; }
-            let Ok(other) = evaluate_body(&candidates[j], &input, asm) else { return false; };
+            let Ok(other) = evaluate_body(&candidates[j], &input, asm, &param_names) else {
+                return false;
+            };
             if !values_equal(&output, &other) {
                 return false;
             }
@@ -181,6 +210,7 @@ pub fn resolve_chain(
     samples: u32,
     registry: &HashMap<String, Body>,
 ) -> Option<Body> {
+    let param_names: Vec<String> = params.iter().map(|(n, _)| n.clone()).collect();
     let mut candidates: Vec<Body> = Vec::new();
     for segment in chain {
         if let Some(body) = resolve_segment(segment, target_arch, registry) {
@@ -282,7 +312,8 @@ mod tests {
             Box::new(Expr::Identifier("x0".into())),
             Box::new(Expr::Decimal(1)),
         );
-        let result = evaluate_ref_expr(&expr, &[Value::Int(5)]);
+        let params = vec!["x0".to_string()];
+        let result = evaluate_ref_expr(&expr, &[Value::Int(5)], &params);
         assert!(result.is_ok());
         assert_eq!(result.unwrap(), Value::Int(6));
     }

@@ -33,7 +33,7 @@ impl Default for DeriveConfig {
             enumerative_depth: 3,
             process_all: false,
             verify_samples: 50,
-            cross_verify_samples: 50,
+            cross_verify_samples: 0,
         }
     }
 }
@@ -133,6 +133,9 @@ pub fn handle_derive_command(config: &DeriveConfig, file_path: &str) -> Result<(
         if let TopLevel::Transaction(t) = item {
             ref_lookup.insert(t.name.clone(), item);
         }
+        if let TopLevel::AsmFn(a) = item {
+            ref_lookup.insert(a.name.clone(), item);
+        }
     }
 
     // Synthesize each derivation block
@@ -215,22 +218,27 @@ pub fn handle_derive_command(config: &DeriveConfig, file_path: &str) -> Result<(
                         chain_registry.insert(ref_name.clone(), crate::derive::chain::Body::Asm(af.clone()));
                     }
                     TopLevel::Definition(d) => {
-                        for stmt in &d.body {
-                            if let Statement::Term(Some(boxed)) = stmt {
-                                let expr: Expr = (*boxed).clone();
-                                chain_registry.insert(ref_name.clone(), crate::derive::chain::Body::Ref(expr));
-                                break;
-                            }
-                        }
+                        // Wrap the full body (including let bindings) in a Block.
+                        // Param names are matched by position in the chain resolver.
+                        let block = Expr::Block(d.body.clone());
+                        chain_registry.insert(ref_name.clone(), crate::derive::chain::Body::Ref(block));
                     }
                     _ => {}
                 }
             }
+            // 2026-07-29: Use verify_samples for cross-verification if
+            // cross_verify_samples is not explicitly set (default = 0 means
+            // use the value from --verify-samples / DeriveConfig.verify_samples).
+            let xv_samples = if config.cross_verify_samples > 0 {
+                config.cross_verify_samples
+            } else {
+                config.verify_samples
+            };
             let result = crate::derive::chain::resolve_chain(
                 &block.chain,
                 "native",
                 params,
-                config.cross_verify_samples as u32,
+                xv_samples as u32,
                 &chain_registry,
             );
             if result.is_some() {
