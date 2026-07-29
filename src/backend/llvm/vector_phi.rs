@@ -54,8 +54,15 @@ pub(crate) fn detect_vector_groups(
         return Vec::new();
     }
 
+    // 2026-07-29: Sort by width descending so the LARGEST group is processed
+    // first. When two candidates overlap (same field in two groups), the larger
+    // group takes priority and the smaller is skipped.
+    let mut candidates_sorted = candidates.clone();
+    candidates_sorted.sort_by_key(|c| std::cmp::Reverse(c.width));
+
+    let mut accepted_fields: HashSet<String> = HashSet::new();
     let mut groups: Vec<VectorPhiGroup> = Vec::new();
-    for c in &candidates {
+    for c in &candidates_sorted {
         // All fields must be unconditionally written (in write_set).
         let all_in_write_set = c.fields.iter().all(|f| write_set.contains(f));
         if !all_in_write_set {
@@ -80,6 +87,30 @@ pub(crate) fn detect_vector_groups(
         });
         if !all_same_type {
             continue;
+        }
+
+        // 2026-07-29: LLVM only supports power-of-2 vector widths (2, 4, 8, 16, ...).
+        // Non-power-of-2 widths produce `<N x float>` that fails codegen.
+        if c.width.count_ones() != 1 {
+            continue;
+        }
+
+        // 2026-07-29: Skip groups with duplicate field names. The merge step
+        // in analyze_body can create groups with the same field at multiple lanes.
+        let mut seen_fields: HashSet<&str> = HashSet::new();
+        let has_dupes = c.fields.iter().any(|f| !seen_fields.insert(f));
+        if has_dupes {
+            continue;
+        }
+
+        // 2026-07-29: Skip if ANY field is already in an accepted group.
+        // Prevents overlapping field-to-phi mappings.
+        let overlaps = c.fields.iter().any(|f| accepted_fields.contains(f));
+        if overlaps {
+            continue;
+        }
+        for f in &c.fields {
+            accepted_fields.insert(f.clone());
         }
 
         groups.push(VectorPhiGroup {
@@ -113,6 +144,7 @@ pub(crate) fn emit_vector_header(
     groups: &mut [VectorPhiGroup],
     init_regs: &HashMap<String, String>,
     indent: &str,
+    latch_label: &str,
 ) -> (HashMap<String, String>, HashMap<String, u32>) {
     let mut field_to_phi: HashMap<String, String> = HashMap::new();
     let mut field_to_lane: HashMap<String, u32> = HashMap::new();
@@ -139,11 +171,14 @@ pub(crate) fn emit_vector_header(
 
         let phi_reg = fun.next_reg_with_prefix(&format!("phi_{}", g.name));
         let phi_reg_name = phi_reg.clone();
-        let be_reg = format!("%be_{}", g.name);
-        writeln!(out, "{}{} = phi {} [ {}, %entry ], [ {}, %latch ]",
-            indent, phi_reg_name, vec_ty, prev_ins, be_reg).ok();
-
-        g.phi_reg = phi_reg_name.clone();
+        // 2026-07-29: Use unique backedge register name per group. infer_group_name
+        // can return the same name for different groups (e.g., "p"), causing type
+        // clashes when both backedges use %be_{name}. next_reg_with_prefix guarantees uniqueness.
+        let be_reg = fun.next_reg_with_prefix(&format!("be_{}", g.name));
+        writeln!(out, "{}{} = phi {} [ {}, %entry ], [ {}, {} ]",
+            indent, phi_reg_name, vec_ty, prev_ins, be_reg, latch_label).ok();
+ 
+         g.phi_reg = phi_reg_name.clone();
         g.backedge_reg = be_reg;
 
         for field_name in &g.fields {
@@ -175,8 +210,8 @@ pub(crate) fn emit_extractelement(
     let g = groups.iter().find(|g| g.fields.contains(&field_name.to_string()))?;
     let vec_ty = format!("<{} x {}>", g.width, g.element_ty);
     let lane_reg = fun.next_reg_with_prefix(&format!("ex_{}", field_name));
-    writeln!(out, "{}{} = extractelement {} {}, {} i32 {}",
-        indent, lane_reg, vec_ty, phi_reg, g.element_ty, lane_idx).ok();
+    writeln!(out, "{}{} = extractelement {} {}, i32 {}",
+        indent, lane_reg, vec_ty, phi_reg, lane_idx).ok();
     Some(lane_reg)
 }
 

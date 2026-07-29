@@ -127,6 +127,14 @@ pub fn statements_isomorphic(
             if !try_build_mapping_lhs(l1, l2, &mut mapping) {
                 return None;
             }
+            // 2026-07-29: Also build mapping from RHS expressions. The LHS-only
+            // mapping misses identifiers in the assignment RHS (e.g., nvx0 → nvx1
+            // in vx0 = nvx0 vs vx1 = nvx1), causing false negatives for nbody's
+            // velocity assignments and position updates. build_mapping handles
+            // recursive expression traversal — same function used for Let mapping.
+            if let Some(rhs_map) = build_mapping(e1, e2) {
+                mapping.extend(rhs_map);
+            }
             if exprs_isomorphic(e1, e2, &mapping) {
                 Some(mapping)
             } else {
@@ -444,7 +452,7 @@ pub fn analyze_body(body: &[Statement]) -> Vec<VectorPhiCandidate> {
     let mut i = 0;
     while i < body.len() {
         match &body[i] {
-            Statement::Let { .. } | Statement::Assign(Expr::Identifier(_), _) => {
+            Statement::Assign(Expr::Identifier(_), _) => {
                 let found = find_isomorphic_groups(body, i);
                 for g in found {
                     if g.width >= 2 {
@@ -565,10 +573,54 @@ mod tests {
                 expr: Some(add_expr(ident("ax"), ident("ay"))), modifiers: vec![] },
         ];
         let result4 = analyze_body(&body4);
-        assert!(!result4.is_empty(),
-            "4 identical float adds should form a vector phi group");
-        assert_eq!(result4[0].width, 4);
-        assert_eq!(result4[0].fields, vec!["bx0", "bx1", "bx2", "bx3"]);
+        // 2026-07-29: analyze_body no longer processes Statement::Let (temporary
+        // locals are not loop-carried state). Only Statement::Assign groups are
+        // returned. Let-based groups are skipped.
+        assert!(result4.is_empty(),
+            "analyze_body skips Statement::Let — no groups expected");
+    }
+
+    #[test]
+    fn test_assign_isomorphic_rhs_rename() {
+        // vx0 = nvx0 vs vx1 = nvx1 — RHS identifiers differ but should be
+        // isomorphic via the RHS mapping (build_mapping from RHS expressions).
+        // Before the fix, the LHS-only mapping missed nvx0→nvx1.
+        let a = Statement::Assign(
+            Expr::Identifier("vx0".to_string()),
+            Expr::Identifier("nvx0".to_string()),
+        );
+        let b = Statement::Assign(
+            Expr::Identifier("vx1".to_string()),
+            Expr::Identifier("nvx1".to_string()),
+        );
+        let mapping = statements_isomorphic(&a, &b);
+        assert!(mapping.is_some(),
+            "vx0=nvx0 vs vx1=nvx1 should be isomorphic");
+        assert_eq!(mapping.unwrap().get("vx0"), Some(&"vx1".to_string()));
+    }
+
+    #[test]
+    fn test_nbody_velocity_assign_pattern() {
+        // 5 consecutive scalar velocity assignments: vx0=nvx0..vx4=nvx4
+        // Should form a width-5 group via analyze_body.
+        let body = vec![
+            Statement::Assign(Expr::Identifier("vx0".to_string()),
+                Expr::Identifier("nvx0".to_string())),
+            Statement::Assign(Expr::Identifier("vx1".to_string()),
+                Expr::Identifier("nvx1".to_string())),
+            Statement::Assign(Expr::Identifier("vx2".to_string()),
+                Expr::Identifier("nvx2".to_string())),
+            Statement::Assign(Expr::Identifier("vx3".to_string()),
+                Expr::Identifier("nvx3".to_string())),
+            Statement::Assign(Expr::Identifier("vx4".to_string()),
+                Expr::Identifier("nvx4".to_string())),
+        ];
+        let result = analyze_body(&body);
+        assert!(!result.is_empty(),
+            "5 consecutive isomorphic scalar assigns should form groups");
+        assert_eq!(result[0].width, 5,
+            "first group should have width 5");
+        assert_eq!(result[0].fields, vec!["vx0", "vx1", "vx2", "vx3", "vx4"]);
     }
 
     #[test]

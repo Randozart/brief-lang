@@ -339,15 +339,15 @@ impl LlvmBackend {
             phi_field_init.insert((*fname).clone(), init_f);
         }
 
-        // 2026-07-29: Detect vector phi groups for this countable body.
-        // When groups of 4+ fields share isomorphic expressions, promote
-        // them to vector phis to reduce register pressure.
-        self.fun.active_vector_groups = crate::backend::llvm::vector_phi::detect_vector_groups(
-            write_set, body, &self.ctx.field_index_map, &self.ctx.field_types,
-        );
+        // 2026-07-29: Clear vector phi state — disabled inside emit_countable_main.
+        // The dispatch-level detection in mod.rs still checks for vector phi groups,
+        // but the actual emission is deferred until the vector phi infrastructure
+        // handles all edge cases (duplicate fields, let-binding groups, power-of-2
+        // widths, backedge register naming conflicts).
+        self.fun.active_vector_groups.clear();
         self.fun.field_to_phi.clear();
         self.fun.field_to_lane.clear();
-        let has_vector_groups = !self.fun.active_vector_groups.is_empty();
+        self.fun.vector_phi_current.clear();
 
         // 2026-07-17: Pre-generate backedge register names for per-field phis
         // (forward reference from header phi to latch definition).
@@ -383,37 +383,7 @@ impl LlvmBackend {
         self.fun.phi_field_regs.clear();
         self.fun.backedge_field_regs.clear();
 
-        // 2026-07-29: When vector groups are present, emit vector phis
-        // instead of scalar phis for grouped fields.
-        let mut active_groups: Vec<crate::backend::llvm::vector_phi::VectorPhiGroup> =         if has_vector_groups {
-            let mut groups = std::mem::take(&mut self.fun.active_vector_groups);
-            let (f2p, f2l) = crate::backend::llvm::vector_phi::emit_vector_header(
-                &mut self.fun, out, &mut groups, &phi_field_init, "  ",
-            );
-            self.fun.field_to_phi = f2p;
-            self.fun.field_to_lane = f2l;
-            groups
-        } else {
-            Vec::new()
-        };
-
-        // Emit per-field scalar phis for fields NOT in vector groups.
-        // Use owned strings to avoid borrow conflicts with the move below.
-        let vector_grouped_fields: std::collections::HashSet<String> = active_groups
-            .iter()
-            .flat_map(|g| g.fields.iter().cloned())
-            .collect();
-
-        // 2026-07-29: Restore groups to self.fun so body emission and latch
-        // can find them via self-reference (emit_expr, record_field_update,
-        // emit_vector_backedge all access self.fun.active_vector_groups).
-        self.fun.active_vector_groups = active_groups;
-
         for fname in &sorted_fields {
-            // Skip fields already covered by vector phis.
-            if vector_grouped_fields.contains(fname.as_str()) {
-                continue;
-            }
             // Check if this field duplicates the counter variable
             if let Some(cv) = counter_var {
                 if fname.as_str() == cv {
@@ -489,18 +459,6 @@ impl LlvmBackend {
             writeln!(out, "  {} = sub nuw nsw {} {}, 1", next, counter_ty, counter_name).ok();
         } else {
             writeln!(out, "  {} = add nuw nsw {} {}, 1", next, counter_ty, counter_name).ok();
-        }
-
-        // 2026-07-29: Emit vector phi backedges before per-field scalar backedges.
-        // Vector phis cover groups of fields; the backedge assembles all updated
-        // lanes via insertelement chain into a single <N x T> vector.
-        if has_vector_groups {
-            // Clone groups and lane map to avoid borrow conflicts with &mut self.fun.
-            let be_groups = self.fun.active_vector_groups.clone();
-            let be_lane_map = self.fun.field_to_lane.clone();
-            crate::backend::llvm::vector_phi::emit_vector_backedge(
-                &mut self.fun, out, &be_groups, &be_lane_map, "  ",
-            );
         }
 
         // 2026-07-17: Per-field scalar backedges. Modified fields use the written value;
