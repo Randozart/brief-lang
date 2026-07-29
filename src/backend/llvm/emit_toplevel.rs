@@ -2968,4 +2968,101 @@ impl LlvmBackend {
         }
         writeln!(out, "@chan_dirty_{} = global i8 0, align 1", cell_name).ok();
     }
+
+    // ── AsmFn Emission ──────────────────────────────────────────────
+
+    /// 2026-07-29: Emit an LLVM function from an AsmFn declaration.
+    /// Each instruction in the body becomes a `call asm sideeffect` call.
+    /// The function signature matches the declared params and return type.
+    /// Registers are allocated by LLVM's register allocator (use "=r"/"r" constraints).
+    pub(super) fn emit_asm_fn(&mut self, out: &mut String, af: &crate::ast::AsmFn) {
+        // Determine LLVM return type
+        let ll_ret = self.llvm_type(&af.ret_type);
+        let ll_name = &af.name;
+
+        // Emit the function header
+        writeln!(out, "define {} @{}(", ll_ret, ll_name).ok();
+        for (i, (_, t)) in af.params.iter().enumerate() {
+            if i > 0 { write!(out, ", ").ok(); }
+            write!(out, "{} %arg{}", self.llvm_type(t), i).ok();
+        }
+        writeln!(out, ") local_unnamed_addr #8 {{").ok();
+        writeln!(out, "  entry:").ok();
+
+        if af.body.is_empty() {
+            // No instructions — return 0
+            writeln!(out, "  ret {} 0", ll_ret).ok();
+            writeln!(out, "}}").ok();
+            return;
+        }
+
+        // Build constraint string and operand list for each instruction.
+        // Each instruction uses "=r" for result and "r" for each param.
+        let num_operands = af.params.len();
+        let result_operand = if af.ret_type != crate::ast::Type::Void { 1 } else { 0 };
+
+        for (ins_idx, instruction) in af.body.iter().enumerate() {
+            // Substitute {param} → $N and {result} → $0
+            let mut asm_text = instruction.clone();
+            // Replace {result} with $0 (output operand)
+            if result_operand > 0 {
+                asm_text = asm_text.replace("{result}", "$0");
+            }
+            // Replace {param_name} with $N+1 (input operand)
+            let mut offset = result_operand;
+            for (p_idx, (p_name, _)) in af.params.iter().enumerate() {
+                let placeholder = format!("{{{}}}", p_name);
+                asm_text = asm_text.replace(&placeholder, &format!("${}", offset));
+                offset += 1;
+            }
+
+            let is_last = ins_idx == af.body.len() - 1;
+
+            if result_operand > 0 {
+                // Build constraint: "=r" for output, "r" for each input, then clobbers
+                let mut constraint = "=r".to_string();
+                for _ in &af.params {
+                    constraint.push_str(",r");
+                }
+                if !af.params.is_empty() {
+                    constraint.push(',');
+                }
+                constraint.push_str("~{dirflag},~{fpsr},~{flags}");
+
+                let mut args = Vec::new();
+                for (_, t) in &af.params {
+                    args.push(format!("{} %arg{}", self.llvm_type(t), args.len()));
+                }
+
+                writeln!(out, "  %r{} = call {} asm \"{}\", \"{}\"({})",
+                    ins_idx, ll_ret, asm_text, constraint, args.join(", ")).ok();
+
+                if is_last {
+                    writeln!(out, "  ret {} %r{}", ll_ret, ins_idx).ok();
+                }
+            } else {
+                // No return value (void function or intermediate)
+                let mut constr = String::new();
+                for (i, (_, _)) in af.params.iter().enumerate() {
+                    if i > 0 { constr.push(','); }
+                    constr.push('r');
+                }
+                if !af.params.is_empty() {
+                    constr.push(',');
+                }
+                constr.push_str("~{dirflag},~{fpsr},~{flags}");
+                let args: Vec<String> = af.params.iter().enumerate()
+                    .map(|(i, (_, t))| format!("{} %arg{}", self.llvm_type(t), i))
+                    .collect();
+                writeln!(out, "  call void asm sideeffect \"{}\", \"{}\"({})",
+                    asm_text, constr, args.join(", ")).ok();
+            }
+        }
+
+        // Close function if no ret was emitted
+        if result_operand == 0 || af.body.len() > 1 {
+            writeln!(out, "  ret {} 0", ll_ret).ok();
+        }
+        writeln!(out, "}}").ok();
+    }
 }

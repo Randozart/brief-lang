@@ -1905,6 +1905,12 @@ impl LlvmBackend {
                     };
                     self.ctx.defn_return_types.insert(d.name.clone(), ret_tys);
                 }
+                TopLevel::AsmFn(asm_fn) => {
+                    let tys: Vec<Type> = asm_fn.params.iter().map(|(_, t)| t.clone()).collect();
+                    self.ctx.defn_params.insert(asm_fn.name.clone(), tys);
+                    let ret_tys = vec![asm_fn.ret_type.clone()];
+                    self.ctx.defn_return_types.insert(asm_fn.name.clone(), ret_tys);
+                }
                 TopLevel::ForeignBinding(fb) => {
                     let sig = crate::ast::ForeignSignature {
                         name: fb.foreign_name.clone(),
@@ -2381,12 +2387,17 @@ impl LlvmBackend {
                 }
                 TopLevel::Export(e) => {
                     if let TopLevel::Definition(d) = e.inner.as_ref() {
-                        // 2026-07-23: Pure exports skip the state parameter,
-                        // matching C ABI exactly for zero calling-convention overhead.
                         let needs_state = self.definition_needs_state(d);
                         self.emit_definition(&mut out, d, needs_state);
                         writeln!(out).ok();
                     }
+                }
+                // 2026-07-29: Emit asm function bodies.
+                // Each AsmFn is emitted as a define function with
+                // call asm sideeffect body.
+                TopLevel::AsmFn(asm_fn) => {
+                    self.emit_asm_fn(&mut out, asm_fn);
+                    writeln!(out).ok();
                 }
                 _ => {}
             }

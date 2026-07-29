@@ -20,6 +20,8 @@ pub struct DeriveConfig {
     pub process_all: bool,
     // 2026-07-28: Tier 2/3 — verification samples (0 = disable verification)
     pub verify_samples: usize,
+    /// 2026-07-29: Cross-verification samples for := chain validation.
+    pub cross_verify_samples: usize,
 }
 
 impl Default for DeriveConfig {
@@ -28,16 +30,10 @@ impl Default for DeriveConfig {
             stochastic: false,
             iterations: 10_000,
             temperature: 1.0,
-            // 2026-07-28: Default depth 3 (not 5) to keep synthesis fast.
-            // Depth 5 generates ~10k+ candidates for (Int, Int) -> Int,
-            // causing multi-minute CPU hangs. Users who need deeper search
-            // can pass --enumerative-depth 5 explicitly.
             enumerative_depth: 3,
             process_all: false,
-            // 2026-07-28: Default 50 verification samples. Disable with 0.
-            // Each sample evaluates the candidate against random inputs and
-            // checks for evaluation errors, constant-output, and postconditions.
             verify_samples: 50,
+            cross_verify_samples: 50,
         }
     }
 }
@@ -206,13 +202,83 @@ pub fn handle_derive_command(config: &DeriveConfig, file_path: &str) -> Result<(
                 _ => None,
             })
         });
-        match synthesize(name, block, params, &ret_type, config.enumerative_depth, config.verify_samples, block.postcondition.as_ref(), block.precondition.as_ref(), ref_fn_expr) {
-            Ok(prog) => {
-                eprintln!("[derive] '{}': synthesized body with cost {}", name, prog.cost);
-                syntheses.push((name.clone(), prog));
+        // 2026-07-29: Chain resolution — if the block has a multi-segment := chain,
+        // resolve it first. If a matching body is found, use it directly.
+        // The chain resolver cross-verifies each body against all others.
+        let chain_result: Option<crate::derive::chain::Body> = if !block.chain.is_empty() {
+            // Build registry from ref_lookup for chain resolution
+            let mut chain_registry: std::collections::HashMap<String, crate::derive::chain::Body> =
+                std::collections::HashMap::new();
+            for (ref_name, item) in &ref_lookup {
+                match item {
+                    TopLevel::AsmFn(af) => {
+                        chain_registry.insert(ref_name.clone(), crate::derive::chain::Body::Asm(af.clone()));
+                    }
+                    TopLevel::Definition(d) => {
+                        for stmt in &d.body {
+                            if let Statement::Term(Some(boxed)) = stmt {
+                                let expr: Expr = (*boxed).clone();
+                                chain_registry.insert(ref_name.clone(), crate::derive::chain::Body::Ref(expr));
+                                break;
+                            }
+                        }
+                    }
+                    _ => {}
+                }
             }
-            Err(e) => {
-                eprintln!("warn: synthesis failed for '{}': {}", name, e);
+            let result = crate::derive::chain::resolve_chain(
+                &block.chain,
+                "native",
+                params,
+                config.cross_verify_samples as u32,
+                &chain_registry,
+            );
+            if result.is_some() {
+                eprintln!("[derive] '{}': resolved via verification chain", name);
+            }
+            result
+        } else {
+            None
+        };
+
+        if let Some(selected) = chain_result {
+            match selected {
+                crate::derive::chain::Body::Ref(expr) => {
+                    let cost = crate::derive::engine::CostModel::default().cost_of_expr(&expr);
+                    syntheses.push((name.clone(), crate::derive::engine::SynthesizedProgram {
+                        body: vec![expr], cost, depth: 0, helpers: vec![],
+                    }));
+                }
+                crate::derive::chain::Body::Asm(_af) => {
+                    // Asm body — the LLVM backend's emit_asm_fn produces the
+                    // actual asm sideeffect. The SynthesizedProgram placeholder
+                    // records the selection for the doppelganger output.
+                    syntheses.push((name.clone(), crate::derive::engine::SynthesizedProgram {
+                        body: vec![Expr::Decimal(0)], cost: 0, depth: 0, helpers: vec![],
+                    }));
+                }
+                crate::derive::chain::Body::Synthesized(_) => {
+                    // Fall through to regular synthesis
+                    match synthesize(name, block, params, &ret_type, config.enumerative_depth, config.verify_samples, block.postcondition.as_ref(), block.precondition.as_ref(), ref_fn_expr) {
+                        Ok(prog) => {
+                            eprintln!("[derive] '{}': synthesized body with cost {}", name, prog.cost);
+                            syntheses.push((name.clone(), prog));
+                        }
+                        Err(e) => {
+                            eprintln!("warn: synthesis failed for '{}': {}", name, e);
+                        }
+                    }
+                }
+            }
+        } else {
+            match synthesize(name, block, params, &ret_type, config.enumerative_depth, config.verify_samples, block.postcondition.as_ref(), block.precondition.as_ref(), ref_fn_expr) {
+                Ok(prog) => {
+                    eprintln!("[derive] '{}': synthesized body with cost {}", name, prog.cost);
+                    syntheses.push((name.clone(), prog));
+                }
+                Err(e) => {
+                    eprintln!("warn: synthesis failed for '{}': {}", name, e);
+                }
             }
         }
     }
