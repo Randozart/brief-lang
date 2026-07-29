@@ -964,12 +964,44 @@ impl<'a> Parser<'a> {
         } else {
             (None, None)
         };
+        // 2026-07-29: Parse optional `verifying ref_fn [tol: N]` after contract.
+        let (ref_name, ref_tolerance) = if self.eat(&Token::Verifying) {
+            let name = match self.peek().cloned() {
+                Some(Token::Identifier(n)) => {
+                    self.advance();
+                    n
+                }
+                _ => {
+                    return self.error_at_current("expected reference function name after 'verifying'");
+                }
+            };
+            let tol = if self.eat(&Token::LBracket) {
+                self.expect(Token::Identifier("tol".into())).ok();
+                self.eat(&Token::Colon);
+                let val = self.parse_expression().ok().and_then(|e| {
+                    match e {
+                        Expr::Float(f) => Some(f),
+                        Expr::Decimal(n) => Some(n as f64),
+                        _ => None,
+                    }
+                });
+                self.eat(&Token::RBracket);
+                val
+            } else {
+                None
+            };
+            (Some(name), tol)
+        } else {
+            (None, None)
+        };
         let span = Span::new(colon_eq_span.start, rbrace_end, 0, 0);
         Ok(Some(DerivationBlock {
             examples,
             synthesized: None,
-            postcondition: None,
-            precondition: None,
+            postcondition,
+            precondition,
+            ref_name,
+            ref_tolerance,
             span,
         }))
     }

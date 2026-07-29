@@ -56,6 +56,7 @@ pub fn synthesize(
     verify_samples: usize,
     postcondition: Option<&Expr>,
     precondition: Option<&Expr>,
+    ref_fn: Option<&Expr>,
 ) -> Result<engine::SynthesizedProgram, SynthesizeError> {
     if block.examples.is_empty() {
         return Err(SynthesizeError::NoExamples(name.to_string()));
@@ -91,7 +92,7 @@ pub fn synthesize(
                 CegisResult::Error(reason) => {
                     eprintln!("  cegis[{}/5] '{}': Z3 error ({}), fallback to random verify", iteration + 1, name, reason);
                     if verify_samples > 0 {
-                        match verify::verify_candidate(&cand_expr, params, Some(post), verify_samples) {
+                        match verify::verify_candidate(&cand_expr, params, Some(post), verify_samples, ref_fn) {
                             verify::VerifyResult::Pass => {}
                             verify::VerifyResult::Fail(_, r) => {
                                 eprintln!("  verify: '{}' rejected ({})", name, r);
@@ -104,7 +105,7 @@ pub fn synthesize(
                 }
             }
         } else if verify_samples > 0 {
-            match verify::verify_candidate(&cand_expr, params, None, verify_samples) {
+            match verify::verify_candidate(&cand_expr, params, None, verify_samples, ref_fn) {
                 verify::VerifyResult::Pass => {}
                 verify::VerifyResult::Fail(_, reason) => {
                     eprintln!("  cegis[{}/5] '{}': verification rejected ({})", iteration + 1, name, reason);
@@ -150,7 +151,8 @@ fn smt_verify_candidate(
     precondition: Option<&Expr>,
 ) -> CegisResult {
     // Build forall verification query with precondition
-    let query = verify_smt::build_verification_query(name, candidate, params, Some(postcondition), precondition);
+    let ref_fn: Option<&Expr> = None; // TODO: pass through from synthesize
+    let query = verify_smt::build_verification_query(name, candidate, params, Some(postcondition), precondition, ref_fn);
 
     // Run Z3
     let result = match verify_smt::run_z3_verify(&query) {

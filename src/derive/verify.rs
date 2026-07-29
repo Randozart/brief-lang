@@ -89,6 +89,7 @@ pub fn verify_candidate(
     params: &[(String, Type)],
     postcondition: Option<&Expr>,
     sample_count: usize,
+    ref_fn: Option<&Expr>,
 ) -> VerifyResult {
     let inputs = generate_test_inputs(params, sample_count);
 
@@ -147,6 +148,35 @@ pub fn verify_candidate(
                     }
                 }
                 _ => {}
+            }
+        }
+
+        // 2026-07-29: Check reference function if provided.
+        // Evaluate ref_fn(input) and compare with candidate's result.
+        if let Some(ref_expr) = ref_fn {
+            let mut ref_ctx = SynthesisEvalContext::new();
+            for (i, (name, _)) in params.iter().enumerate() {
+                if let Some(val_expr) = input_row.get(i) {
+                    let val = expr_to_decimal(val_expr);
+                    ref_ctx.bind(name, val);
+                }
+            }
+            match evaluate_synthesized(ref_expr, &mut ref_ctx) {
+                Ok(ref_val) => {
+                    let tol = 0.0; // exact match for now
+                    if !crate::interpreter::values_within_tolerance(&result, &ref_val, tol) {
+                        return VerifyResult::Fail(
+                            vec![input_row.clone()],
+                            format!("reference mismatch: candidate={:?} ref={:?}", result, ref_val),
+                        );
+                    }
+                }
+                Err(e) => {
+                    return VerifyResult::Fail(
+                        vec![input_row.clone()],
+                        format!("reference evaluation error: {:?}", e),
+                    );
+                }
             }
         }
     }
@@ -212,7 +242,7 @@ mod tests {
         let params = int_params(1);
         // x0 always passes — it's the identity function
         let candidate = Expr::Identifier("x0".into());
-        let result = verify_candidate(&candidate, &params, None, 20);
+        let result = verify_candidate(&candidate, &params, None, 20, None);
         assert!(matches!(result, VerifyResult::Pass), "identity should pass");
     }
 
@@ -221,7 +251,7 @@ mod tests {
         let params = int_params(1);
         // Constant 42 — should be detected as constant-output
         let candidate = Expr::Decimal(42);
-        let result = verify_candidate(&candidate, &params, None, 20);
+        let result = verify_candidate(&candidate, &params, None, 20, None);
         match result {
             VerifyResult::Fail(_, ref msg) => {
                 assert!(msg.contains("constant output"),
@@ -239,7 +269,7 @@ mod tests {
         let candidate = Expr::Identifier("x0".into());
         // Postcondition: just `true` (always passes)
         let post = Expr::Bool(true);
-        let result = verify_candidate(&candidate, &params, Some(&post), 100);
+        let result = verify_candidate(&candidate, &params, Some(&post), 100, None);
         assert!(matches!(result, VerifyResult::Pass), "should pass postcondition: {:?}", result);
     }
 
@@ -252,7 +282,7 @@ mod tests {
             Box::new(Expr::Identifier("x0".into())),
             Box::new(Expr::Identifier("x1".into())),
         );
-        let result = verify_candidate(&candidate, &params, None, 20);
+        let result = verify_candidate(&candidate, &params, None, 20, None);
         assert!(matches!(result, VerifyResult::Pass), "addition should pass");
     }
 }
