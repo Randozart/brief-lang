@@ -108,6 +108,13 @@ Three tiers:
 2. **Random-input verification** — test 100+ random inputs after synthesis
 3. **Boundary testing** — edge cases (0, 1, -1, MAX, MIN) for each param
 
+## Research: Abstraction Discovery
+
+A detailed research plan analyzing the depth-4 combinatorial wall and
+proposing an abstraction-discovery mechanism (adapted from Koza ADFs,
+Polozov/Gulwani version-spaces, Feser et al. λ², and Schmidt/Lipson
+Eureqa) is in `derivation-abstraction-discovery.md` (same directory).
+
 ## Key Commands
 
 - `brief derive <file>` — synthesize bodies from derivation blocks
