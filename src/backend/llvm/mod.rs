@@ -1781,7 +1781,12 @@ impl LlvmBackend {
         self.ctx.exit_condition = exit_condition;
         // 2026-07-13: normalize_to_old_recursive removed in new AST.
         // BinaryOp/UnaryOp exit conditions are already the canonical form.
-        self.build_field_index(items);
+        // 2026-07-29: Reorder state field declarations to SoA layout before
+        // index assignment. This makes same-component fields (bx0..bx4) have
+        // consecutive indices, enabling the backend to form <N x float> vector
+        // phi groups. See analysis/soa_reorder.rs for safety verification.
+        let reordered_items = crate::analysis::soa_reorder::reorder_fields(items);
+        self.build_field_index(&reordered_items);
 
         // Scan for cell-to-cell wires from TrgBinding statements
         self.scan_cell_wires(items);
