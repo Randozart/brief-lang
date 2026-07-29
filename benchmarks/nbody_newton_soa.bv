@@ -1,0 +1,366 @@
+// nbody_newton_soa — 5-body gravity sim with Newton's method sqrt (SoA layout)
+// Same algorithm as nbody_newton.bv, but state fields declared in Struct-of-Arrays
+// order (all bx, then all by, etc.) so same-component indices are contiguous.
+// This enables the isomorphism analyzer to form <4 x float> vector phi groups.
+//
+// See docs/plans/2026-07-29-phi-register-pressure-capping.md
+
+let bound: Int = GetEnvInt!("BOUND");
+let count: Int = 0;
+
+const pi: Float32 = 3.141592653589793f32;
+const solar_mass: Float32 = 4.0f32 * pi * pi;
+const dpy: Float32 = 365.24f32;
+const dt: Float32 = 0.01f32;
+
+// ── Struct-of-Arrays layout ─────────────────────────────────────
+// All bx fields contiguous (state indices 2-6)
+let bx0: Float32 = 0.0f32;
+let bx1: Float32 = 4.84143144246472090f32;
+let bx2: Float32 = 8.34336671824457987f32;
+let bx3: Float32 = 12.8943695621309110f32;
+let bx4: Float32 = 15.3796971148509165f32;
+
+// All by fields contiguous (state indices 7-11)
+let by0: Float32 = 0.0f32;
+let by1: Float32 = -1.16032004402742839f32;
+let by2: Float32 = 4.12479856412430479f32;
+let by3: Float32 = -15.1111514016986312f32;
+let by4: Float32 = -25.9193146099879641f32;
+
+// All bz fields contiguous (state indices 12-16)
+let bz0: Float32 = 0.0f32;
+let bz1: Float32 = -0.103622044471123109f32;
+let bz2: Float32 = -0.403523417114321381f32;
+let bz3: Float32 = -0.223307578892655734f32;
+let bz4: Float32 = 0.179258772950371181f32;
+
+// All vx fields contiguous (state indices 17-21)
+let vx0: Float32 = 0.0f32;
+let vx1: Float32 = 0.00166007664274403694f32 * dpy;
+let vx2: Float32 = -0.00276742510726862411f32 * dpy;
+let vx3: Float32 = 0.00296460137564761618f32 * dpy;
+let vx4: Float32 = 0.00268067772490389322f32 * dpy;
+
+// All vy fields contiguous (state indices 22-26)
+let vy0: Float32 = 0.0f32;
+let vy1: Float32 = 0.00769901118419740425f32 * dpy;
+let vy2: Float32 = 0.00499852801234917238f32 * dpy;
+let vy3: Float32 = 0.00237847173959480950f32 * dpy;
+let vy4: Float32 = 0.00162824170038242295f32 * dpy;
+
+// All vz fields contiguous (state indices 27-31)
+let vz0: Float32 = 0.0f32;
+let vz1: Float32 = -0.0000690460016972063023f32 * dpy;
+let vz2: Float32 = 0.0000230417297573763929f32 * dpy;
+let vz3: Float32 = -0.0000296589568540237556f32 * dpy;
+let vz4: Float32 = -0.0000951592254519715870f32 * dpy;
+
+// Mass constants (not state fields, stay with source)
+const m0: Float32 = 1.0f32 * solar_mass;
+const m1: Float32 = 0.000954791938424326609f32 * solar_mass;
+const m2: Float32 = 0.000285885980666130812f32 * solar_mass;
+const m3: Float32 = 0.0000436624404335156298f32 * solar_mass;
+const m4: Float32 = 0.0000515138902046611451f32 * solar_mass;
+
+// State field for hoisted swan song print
+let last_energy: Float32 = 0.0f32;
+
+node simulate [
+    count < bound
+][count == bound] {
+    let dx01: Float32 = bx0 - bx1;
+    let dy01: Float32 = by0 - by1;
+    let dz01: Float32 = bz0 - bz1;
+    let dsq01: Float32 = dx01*dx01 + dy01*dy01 + dz01*dz01;
+    let dist01a: Float32 = dsq01 * 0.5f32;
+    let dist01b: Float32 = 0.5f32 * (dist01a + dsq01 / dist01a);
+    let dist01c: Float32 = 0.5f32 * (dist01b + dsq01 / dist01b);
+    let dist01d: Float32 = 0.5f32 * (dist01c + dsq01 / dist01c);
+    let dist01e: Float32 = 0.5f32 * (dist01d + dsq01 / dist01d);
+    let dist01: Float32 = 0.5f32 * (dist01e + dsq01 / dist01e);
+    let mag01: Float32 = dt / (dsq01 * dist01);
+    let dx02: Float32 = bx0 - bx2;
+    let dy02: Float32 = by0 - by2;
+    let dz02: Float32 = bz0 - bz2;
+    let dsq02: Float32 = dx02*dx02 + dy02*dy02 + dz02*dz02;
+    let dist02a: Float32 = dsq02 * 0.5f32;
+    let dist02b: Float32 = 0.5f32 * (dist02a + dsq02 / dist02a);
+    let dist02c: Float32 = 0.5f32 * (dist02b + dsq02 / dist02b);
+    let dist02d: Float32 = 0.5f32 * (dist02c + dsq02 / dist02c);
+    let dist02e: Float32 = 0.5f32 * (dist02d + dsq02 / dist02d);
+    let dist02: Float32 = 0.5f32 * (dist02e + dsq02 / dist02e);
+    let mag02: Float32 = dt / (dsq02 * dist02);
+    let dx03: Float32 = bx0 - bx3;
+    let dy03: Float32 = by0 - by3;
+    let dz03: Float32 = bz0 - bz3;
+    let dsq03: Float32 = dx03*dx03 + dy03*dy03 + dz03*dz03;
+    let dist03a: Float32 = dsq03 * 0.5f32;
+    let dist03b: Float32 = 0.5f32 * (dist03a + dsq03 / dist03a);
+    let dist03c: Float32 = 0.5f32 * (dist03b + dsq03 / dist03b);
+    let dist03d: Float32 = 0.5f32 * (dist03c + dsq03 / dist03c);
+    let dist03e: Float32 = 0.5f32 * (dist03d + dsq03 / dist03d);
+    let dist03: Float32 = 0.5f32 * (dist03e + dsq03 / dist03e);
+    let mag03: Float32 = dt / (dsq03 * dist03);
+    let dx04: Float32 = bx0 - bx4;
+    let dy04: Float32 = by0 - by4;
+    let dz04: Float32 = bz0 - bz4;
+    let dsq04: Float32 = dx04*dx04 + dy04*dy04 + dz04*dz04;
+    let dist04a: Float32 = dsq04 * 0.5f32;
+    let dist04b: Float32 = 0.5f32 * (dist04a + dsq04 / dist04a);
+    let dist04c: Float32 = 0.5f32 * (dist04b + dsq04 / dist04b);
+    let dist04d: Float32 = 0.5f32 * (dist04c + dsq04 / dist04c);
+    let dist04e: Float32 = 0.5f32 * (dist04d + dsq04 / dist04d);
+    let dist04: Float32 = 0.5f32 * (dist04e + dsq04 / dist04e);
+    let mag04: Float32 = dt / (dsq04 * dist04);
+    let dx12: Float32 = bx1 - bx2;
+    let dy12: Float32 = by1 - by2;
+    let dz12: Float32 = bz1 - bz2;
+    let dsq12: Float32 = dx12*dx12 + dy12*dy12 + dz12*dz12;
+    let dist12a: Float32 = dsq12 * 0.5f32;
+    let dist12b: Float32 = 0.5f32 * (dist12a + dsq12 / dist12a);
+    let dist12c: Float32 = 0.5f32 * (dist12b + dsq12 / dist12b);
+    let dist12d: Float32 = 0.5f32 * (dist12c + dsq12 / dist12c);
+    let dist12e: Float32 = 0.5f32 * (dist12d + dsq12 / dist12d);
+    let dist12: Float32 = 0.5f32 * (dist12e + dsq12 / dist12e);
+    let mag12: Float32 = dt / (dsq12 * dist12);
+    let dx13: Float32 = bx1 - bx3;
+    let dy13: Float32 = by1 - by3;
+    let dz13: Float32 = bz1 - bz3;
+    let dsq13: Float32 = dx13*dx13 + dy13*dy13 + dz13*dz13;
+    let dist13a: Float32 = dsq13 * 0.5f32;
+    let dist13b: Float32 = 0.5f32 * (dist13a + dsq13 / dist13a);
+    let dist13c: Float32 = 0.5f32 * (dist13b + dsq13 / dist13b);
+    let dist13d: Float32 = 0.5f32 * (dist13c + dsq13 / dist13c);
+    let dist13e: Float32 = 0.5f32 * (dist13d + dsq13 / dist13d);
+    let dist13: Float32 = 0.5f32 * (dist13e + dsq13 / dist13e);
+    let mag13: Float32 = dt / (dsq13 * dist13);
+    let dx14: Float32 = bx1 - bx4;
+    let dy14: Float32 = by1 - by4;
+    let dz14: Float32 = bz1 - bz4;
+    let dsq14: Float32 = dx14*dx14 + dy14*dy14 + dz14*dz14;
+    let dist14a: Float32 = dsq14 * 0.5f32;
+    let dist14b: Float32 = 0.5f32 * (dist14a + dsq14 / dist14a);
+    let dist14c: Float32 = 0.5f32 * (dist14b + dsq14 / dist14b);
+    let dist14d: Float32 = 0.5f32 * (dist14c + dsq14 / dist14c);
+    let dist14e: Float32 = 0.5f32 * (dist14d + dsq14 / dist14d);
+    let dist14: Float32 = 0.5f32 * (dist14e + dsq14 / dist14e);
+    let mag14: Float32 = dt / (dsq14 * dist14);
+    let dx23: Float32 = bx2 - bx3;
+    let dy23: Float32 = by2 - by3;
+    let dz23: Float32 = bz2 - bz3;
+    let dsq23: Float32 = dx23*dx23 + dy23*dy23 + dz23*dz23;
+    let dist23a: Float32 = dsq23 * 0.5f32;
+    let dist23b: Float32 = 0.5f32 * (dist23a + dsq23 / dist23a);
+    let dist23c: Float32 = 0.5f32 * (dist23b + dsq23 / dist23b);
+    let dist23d: Float32 = 0.5f32 * (dist23c + dsq23 / dist23c);
+    let dist23e: Float32 = 0.5f32 * (dist23d + dsq23 / dist23d);
+    let dist23: Float32 = 0.5f32 * (dist23e + dsq23 / dist23e);
+    let mag23: Float32 = dt / (dsq23 * dist23);
+    let dx24: Float32 = bx2 - bx4;
+    let dy24: Float32 = by2 - by4;
+    let dz24: Float32 = bz2 - bz4;
+    let dsq24: Float32 = dx24*dx24 + dy24*dy24 + dz24*dz24;
+    let dist24a: Float32 = dsq24 * 0.5f32;
+    let dist24b: Float32 = 0.5f32 * (dist24a + dsq24 / dist24a);
+    let dist24c: Float32 = 0.5f32 * (dist24b + dsq24 / dist24b);
+    let dist24d: Float32 = 0.5f32 * (dist24c + dsq24 / dist24c);
+    let dist24e: Float32 = 0.5f32 * (dist24d + dsq24 / dist24d);
+    let dist24: Float32 = 0.5f32 * (dist24e + dsq24 / dist24e);
+    let mag24: Float32 = dt / (dsq24 * dist24);
+    let dx34: Float32 = bx3 - bx4;
+    let dy34: Float32 = by3 - by4;
+    let dz34: Float32 = bz3 - bz4;
+    let dsq34: Float32 = dx34*dx34 + dy34*dy34 + dz34*dz34;
+    let dist34a: Float32 = dsq34 * 0.5f32;
+    let dist34b: Float32 = 0.5f32 * (dist34a + dsq34 / dist34a);
+    let dist34c: Float32 = 0.5f32 * (dist34b + dsq34 / dist34b);
+    let dist34d: Float32 = 0.5f32 * (dist34c + dsq34 / dist34c);
+    let dist34e: Float32 = 0.5f32 * (dist34d + dsq34 / dist34d);
+    let dist34: Float32 = 0.5f32 * (dist34e + dsq34 / dist34e);
+    let mag34: Float32 = dt / (dsq34 * dist34);
+    let nvx0: Float32 = vx0 - dx01*m1*mag01 - dx02*m2*mag02 - dx03*m3*mag03 - dx04*m4*mag04;
+    let nvy0: Float32 = vy0 - dy01*m1*mag01 - dy02*m2*mag02 - dy03*m3*mag03 - dy04*m4*mag04;
+    let nvz0: Float32 = vz0 - dz01*m1*mag01 - dz02*m2*mag02 - dz03*m3*mag03 - dz04*m4*mag04;
+    let nvx1: Float32 = vx1 + dx01*m0*mag01 - dx12*m2*mag12 - dx13*m3*mag13 - dx14*m4*mag14;
+    let nvy1: Float32 = vy1 + dy01*m0*mag01 - dy12*m2*mag12 - dy13*m3*mag13 - dy14*m4*mag14;
+    let nvz1: Float32 = vz1 + dz01*m0*mag01 - dz12*m2*mag12 - dz13*m3*mag13 - dz14*m4*mag14;
+    let nvx2: Float32 = vx2 + dx02*m0*mag02 + dx12*m1*mag12 - dx23*m3*mag23 - dx24*m4*mag24;
+    let nvy2: Float32 = vy2 + dy02*m0*mag02 + dy12*m1*mag12 - dy23*m3*mag23 - dy24*m4*mag24;
+    let nvz2: Float32 = vz2 + dz02*m0*mag02 + dz12*m1*mag12 - dz23*m3*mag23 - dz24*m4*mag24;
+    let nvx3: Float32 = vx3 + dx03*m0*mag03 + dx13*m1*mag13 + dx23*m2*mag23 - dx34*m4*mag34;
+    let nvy3: Float32 = vy3 + dy03*m0*mag03 + dy13*m1*mag13 + dy23*m2*mag23 - dy34*m4*mag34;
+    let nvz3: Float32 = vz3 + dz03*m0*mag03 + dz13*m1*mag13 + dz23*m2*mag23 - dz34*m4*mag34;
+    let nvx4: Float32 = vx4 + dx04*m0*mag04 + dx14*m1*mag14 + dx24*m2*mag24 + dx34*m3*mag34;
+    let nvy4: Float32 = vy4 + dy04*m0*mag04 + dy14*m1*mag14 + dy24*m2*mag24 + dy34*m3*mag34;
+    let nvz4: Float32 = vz4 + dz04*m0*mag04 + dz14*m1*mag14 + dz24*m2*mag24 + dz34*m3*mag34;
+    vx0 = nvx0;
+    vy0 = nvy0;
+    vz0 = nvz0;
+    vx1 = nvx1;
+    vy1 = nvy1;
+    vz1 = nvz1;
+    vx2 = nvx2;
+    vy2 = nvy2;
+    vz2 = nvz2;
+    vx3 = nvx3;
+    vy3 = nvy3;
+    vz3 = nvz3;
+    vx4 = nvx4;
+    vy4 = nvy4;
+    vz4 = nvz4;
+    bx0 = bx0 + dt * nvx0;
+    by0 = by0 + dt * nvy0;
+    bz0 = bz0 + dt * nvz0;
+    bx1 = bx1 + dt * nvx1;
+    by1 = by1 + dt * nvy1;
+    bz1 = bz1 + dt * nvz1;
+    bx2 = bx2 + dt * nvx2;
+    by2 = by2 + dt * nvy2;
+    bz2 = bz2 + dt * nvz2;
+    bx3 = bx3 + dt * nvx3;
+    by3 = by3 + dt * nvy3;
+    bz3 = bz3 + dt * nvz3;
+    bx4 = bx4 + dt * nvx4;
+    by4 = by4 + dt * nvy4;
+    bz4 = bz4 + dt * nvz4;
+    count = count + 1;
+
+    let dxe01: Float32 = bx0 - bx1;
+    let dye01: Float32 = by0 - by1;
+    let dze01: Float32 = bz0 - bz1;
+    let dsqe01: Float32 = dxe01 * dxe01 + dye01 * dye01 + dze01 * dze01;
+    let gea01: Float32 = dsqe01 * 0.5f32;
+    let geb01: Float32 = 0.5f32 * (gea01 + dsqe01 / gea01);
+    let gec01: Float32 = 0.5f32 * (geb01 + dsqe01 / geb01);
+    let ged01: Float32 = 0.5f32 * (gec01 + dsqe01 / gec01);
+    let gee01: Float32 = 0.5f32 * (ged01 + dsqe01 / ged01);
+    let edist01: Float32 = 0.5f32 * (gee01 + dsqe01 / gee01);
+
+    let dxe02: Float32 = bx0 - bx2;
+    let dye02: Float32 = by0 - by2;
+    let dze02: Float32 = bz0 - bz2;
+    let dsqe02: Float32 = dxe02 * dxe02 + dye02 * dye02 + dze02 * dze02;
+    let gea02: Float32 = dsqe02 * 0.5f32;
+    let geb02: Float32 = 0.5f32 * (gea02 + dsqe02 / gea02);
+    let gec02: Float32 = 0.5f32 * (geb02 + dsqe02 / geb02);
+    let ged02: Float32 = 0.5f32 * (gec02 + dsqe02 / gec02);
+    let gee02: Float32 = 0.5f32 * (ged02 + dsqe02 / ged02);
+    let edist02: Float32 = 0.5f32 * (gee02 + dsqe02 / gee02);
+
+    let dxe03: Float32 = bx0 - bx3;
+    let dye03: Float32 = by0 - by3;
+    let dze03: Float32 = bz0 - bz3;
+    let dsqe03: Float32 = dxe03 * dxe03 + dye03 * dye03 + dze03 * dze03;
+    let gea03: Float32 = dsqe03 * 0.5f32;
+    let geb03: Float32 = 0.5f32 * (gea03 + dsqe03 / gea03);
+    let gec03: Float32 = 0.5f32 * (geb03 + dsqe03 / geb03);
+    let ged03: Float32 = 0.5f32 * (gec03 + dsqe03 / gec03);
+    let gee03: Float32 = 0.5f32 * (ged03 + dsqe03 / ged03);
+    let edist03: Float32 = 0.5f32 * (gee03 + dsqe03 / gee03);
+
+    let dxe04: Float32 = bx0 - bx4;
+    let dye04: Float32 = by0 - by4;
+    let dze04: Float32 = bz0 - bz4;
+    let dsqe04: Float32 = dxe04 * dxe04 + dye04 * dye04 + dze04 * dze04;
+    let gea04: Float32 = dsqe04 * 0.5f32;
+    let geb04: Float32 = 0.5f32 * (gea04 + dsqe04 / gea04);
+    let gec04: Float32 = 0.5f32 * (geb04 + dsqe04 / geb04);
+    let ged04: Float32 = 0.5f32 * (gec04 + dsqe04 / gec04);
+    let gee04: Float32 = 0.5f32 * (ged04 + dsqe04 / ged04);
+    let edist04: Float32 = 0.5f32 * (gee04 + dsqe04 / gee04);
+
+    let dxe12: Float32 = bx1 - bx2;
+    let dye12: Float32 = by1 - by2;
+    let dze12: Float32 = bz1 - bz2;
+    let dsqe12: Float32 = dxe12 * dxe12 + dye12 * dye12 + dze12 * dze12;
+    let gea12: Float32 = dsqe12 * 0.5f32;
+    let geb12: Float32 = 0.5f32 * (gea12 + dsqe12 / gea12);
+    let gec12: Float32 = 0.5f32 * (geb12 + dsqe12 / geb12);
+    let ged12: Float32 = 0.5f32 * (gec12 + dsqe12 / gec12);
+    let gee12: Float32 = 0.5f32 * (ged12 + dsqe12 / ged12);
+    let edist12: Float32 = 0.5f32 * (gee12 + dsqe12 / gee12);
+
+    let dxe13: Float32 = bx1 - bx3;
+    let dye13: Float32 = by1 - by3;
+    let dze13: Float32 = bz1 - bz3;
+    let dsqe13: Float32 = dxe13 * dxe13 + dye13 * dye13 + dze13 * dze13;
+    let gea13: Float32 = dsqe13 * 0.5f32;
+    let geb13: Float32 = 0.5f32 * (gea13 + dsqe13 / gea13);
+    let gec13: Float32 = 0.5f32 * (geb13 + dsqe13 / geb13);
+    let ged13: Float32 = 0.5f32 * (gec13 + dsqe13 / gec13);
+    let gee13: Float32 = 0.5f32 * (ged13 + dsqe13 / ged13);
+    let edist13: Float32 = 0.5f32 * (gee13 + dsqe13 / gee13);
+
+    let dxe14: Float32 = bx1 - bx4;
+    let dye14: Float32 = by1 - by4;
+    let dze14: Float32 = bz1 - bz4;
+    let dsqe14: Float32 = dxe14 * dxe14 + dye14 * dye14 + dze14 * dze14;
+    let gea14: Float32 = dsqe14 * 0.5f32;
+    let geb14: Float32 = 0.5f32 * (gea14 + dsqe14 / gea14);
+    let gec14: Float32 = 0.5f32 * (geb14 + dsqe14 / geb14);
+    let ged14: Float32 = 0.5f32 * (gec14 + dsqe14 / gec14);
+    let gee14: Float32 = 0.5f32 * (ged14 + dsqe14 / ged14);
+    let edist14: Float32 = 0.5f32 * (gee14 + dsqe14 / gee14);
+
+    let dxe23: Float32 = bx2 - bx3;
+    let dye23: Float32 = by2 - by3;
+    let dze23: Float32 = bz2 - bz3;
+    let dsqe23: Float32 = dxe23 * dxe23 + dye23 * dye23 + dze23 * dze23;
+    let gea23: Float32 = dsqe23 * 0.5f32;
+    let geb23: Float32 = 0.5f32 * (gea23 + dsqe23 / gea23);
+    let gec23: Float32 = 0.5f32 * (geb23 + dsqe23 / geb23);
+    let ged23: Float32 = 0.5f32 * (gec23 + dsqe23 / gec23);
+    let gee23: Float32 = 0.5f32 * (ged23 + dsqe23 / ged23);
+    let edist23: Float32 = 0.5f32 * (gee23 + dsqe23 / gee23);
+
+    let dxe24: Float32 = bx2 - bx4;
+    let dye24: Float32 = by2 - by4;
+    let dze24: Float32 = bz2 - bz4;
+    let dsqe24: Float32 = dxe24 * dxe24 + dye24 * dye24 + dze24 * dze24;
+    let gea24: Float32 = dsqe24 * 0.5f32;
+    let geb24: Float32 = 0.5f32 * (gea24 + dsqe24 / gea24);
+    let gec24: Float32 = 0.5f32 * (geb24 + dsqe24 / geb24);
+    let ged24: Float32 = 0.5f32 * (gec24 + dsqe24 / gec24);
+    let gee24: Float32 = 0.5f32 * (ged24 + dsqe24 / ged24);
+    let edist24: Float32 = 0.5f32 * (gee24 + dsqe24 / gee24);
+
+    let dxe34: Float32 = bx3 - bx4;
+    let dye34: Float32 = by3 - by4;
+    let dze34: Float32 = bz3 - bz4;
+    let dsqe34: Float32 = dxe34 * dxe34 + dye34 * dye34 + dze34 * dze34;
+    let gea34: Float32 = dsqe34 * 0.5f32;
+    let geb34: Float32 = 0.5f32 * (gea34 + dsqe34 / gea34);
+    let gec34: Float32 = 0.5f32 * (geb34 + dsqe34 / geb34);
+    let ged34: Float32 = 0.5f32 * (gec34 + dsqe34 / gec34);
+    let gee34: Float32 = 0.5f32 * (ged34 + dsqe34 / ged34);
+    let edist34: Float32 = 0.5f32 * (gee34 + dsqe34 / gee34);
+
+    let epex01: Float32 = m0 * m1 / edist01;
+    let epex02: Float32 = m0 * m2 / edist02;
+    let epex03: Float32 = m0 * m3 / edist03;
+    let epex04: Float32 = m0 * m4 / edist04;
+    let epex12: Float32 = m1 * m2 / edist12;
+    let epex13: Float32 = m1 * m3 / edist13;
+    let epex14: Float32 = m1 * m4 / edist14;
+    let epex23: Float32 = m2 * m3 / edist23;
+    let epex24: Float32 = m2 * m4 / edist24;
+    let epex34: Float32 = m3 * m4 / edist34;
+    let epp: Float32 = -(epex01 + epex02 + epex03 + epex04 + epex12 + epex13 + epex14 + epex23 + epex24 + epex34);
+    let ek0c: Float32 = 0.5f32 * m0 * (vx0 * vx0 + vy0 * vy0 + vz0 * vz0);
+    let ek1c: Float32 = 0.5f32 * m1 * (vx1 * vx1 + vy1 * vy1 + vz1 * vz1);
+    let ek2c: Float32 = 0.5f32 * m2 * (vx2 * vx2 + vy2 * vy2 + vz2 * vz2);
+    let ek3c: Float32 = 0.5f32 * m3 * (vx3 * vx3 + vy3 * vy3 + vz3 * vz3);
+    let ek4c: Float32 = 0.5f32 * m4 * (vx4 * vx4 + vy4 * vy4 + vz4 * vz4);
+    let ekc: Float32 = ek0c + ek1c + ek2c + ek3c + ek4c;
+    let energy: Float32 = epp + ekc;
+    last_energy = energy;
+
+    when count % 5000000 == 0 {
+        let __periodic: Bool = PrintLn!(energy);
+    };
+    when count == bound {
+        term! -> PrintLn!(last_energy);
+    };
+    term;
+};

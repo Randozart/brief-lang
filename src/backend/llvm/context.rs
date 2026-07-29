@@ -189,6 +189,25 @@ pub struct CompilerContext {
 }
 
 impl CompilerContext {
+    /// 2026-07-29: Derive target float register count from LLVM target triple.
+    /// Returns `usize::MAX` for virtual-register targets (WASM).
+    /// See docs/plans/2026-07-29-phi-register-pressure-capping.md.
+    pub fn float_register_count(&self) -> usize {
+        if self.target_triple.starts_with("aarch64")
+            || self.target_triple.starts_with("arm64")
+        {
+            32
+        } else if self.target_triple.starts_with("wasm32")
+            || self.target_triple.starts_with("wasm64")
+        {
+            usize::MAX
+        } else if self.target_triple.starts_with("spirv64") {
+            32
+        } else {
+            16
+        }
+    }
+
     /// 2026-07-27: Parse the default pointer width (in bits) from a target data
     /// layout string. Looks for `-p:<abi>:<pref>-` (unqualified) or the largest
     /// `-p<num>:<abi>:<pref>-` (qualified address space). Falls back to 64.

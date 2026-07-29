@@ -20,6 +20,22 @@ use std::collections::HashMap;
 use std::collections::HashSet;
 use std::fmt::Write;
 
+/// Configuration for batch-loop mode.
+/// When set, the loop is split into an outer structural loop and an inner
+/// pure-compute loop. The inner loop runs for `batch_size` iterations without
+/// any branch guards, enabling LLVM's if-conversion. The outer loop handles
+/// the guard checks (prints, termination) between batches.
+///
+/// See docs/plans/2026-07-29-loop-peeling-automatic.md
+pub(crate) struct BatchInfo {
+    /// Number of iterations per inner batch (from `when count % N == 0`)
+    pub batch_size: usize,
+    /// Guard statements to emit in the outer loop body
+    pub outer_guards: Vec<Statement>,
+    /// Name of the loop counter variable
+    pub counter_var: String,
+}
+
 impl LlvmBackend {
     // ═══════════════════════════════════════════════════════════════
     // Strategy 1: Pure Counter Fold
@@ -159,6 +175,11 @@ impl LlvmBackend {
     // Strategy 3: Hybrid Countable Loop (EmitHybridCounterPhi)
     // ═══════════════════════════════════════════════════════════════
 
+/// Configuration for batch-loop mode.
+/// When set, the loop is split into an outer structural loop and an inner
+/// pure-compute loop. The inner loop runs for `batch_size` iterations without
+/// any branch guards, enabling LLVM's if-conversion. The outer loop handles
+/// the guard checks (prints, termination) between batches.
     /// Emit a countable main() with per-field phi nodes (EmitPerFieldPhi/EmitHybridCounterPhi).
     ///
     /// 2026-07-17: Each state field in write_set gets its own phi node in
@@ -173,6 +194,12 @@ impl LlvmBackend {
     /// Path B (post-loop hoists exist): GEP+store emitted for fields the
     /// done: block reads. Ensures hoisted post-loop prints see final values.
     ///
+    /// 2026-07-29: Batch mode (batch_info is Some) emits a nested loop
+    /// structure with two levels of phi nodes. The outer phis track values
+    /// across batches; the inner phis track values within a single batch.
+    /// The inner loop has no branches or function calls, enabling LLVM's
+    /// if-conversion.
+    ///
     /// 2026-07-13: Extracted into a single function with max 2-level
     /// nesting. Loop setup, body, and latch are delegated to helpers.
     pub(crate) fn emit_countable_main(
@@ -186,7 +213,18 @@ impl LlvmBackend {
         write_set: &HashSet<String>,
         is_decreasing: bool,
         counter_var: Option<&str>,
+        batch_info: Option<&BatchInfo>,
     ) {
+        // 2026-07-29: Batch-loop mode — emit outer/inner loop structure.
+        // When batch_info is set, the loop body is split into a pure-compute
+        // inner loop (no branches) and an outer loop (guard checks, prints).
+        // This enables LLVM's if-conversion on the inner loop.
+        if let Some(bi) = batch_info {
+            return self.emit_countable_batched_main(
+                out, txn_name, counter_idx, total_idx, total_const_name,
+                body, write_set, is_decreasing, counter_var, bi,
+            );
+        }
         writeln!(out, "define i32 @main() local_unnamed_addr {} {{", "#0").ok();
         writeln!(out, "entry:").ok();
         writeln!(out, "  %state = alloca %State, align 8").ok();
@@ -391,6 +429,275 @@ impl LlvmBackend {
 
     // 2026-07-29: emit_countable_memory_main removed — dead code after Phase 4.
     // PerFieldPhi (emit_countable_main) handles all cases.
+
+    // ── Batch Loop Emission ─────────────────────────────────────────
+    //
+    // 2026-07-29: Emit outer/inner loop structure for batch-mode loops.
+    // The outer loop handles guard checks (print terminals, periodic prints).
+    // The inner loop is pure compute (no branches) — runs for `batch_size`
+    // iterations or until the bound is reached.
+    //
+    // Structure:
+    //   entry → .oh (outer header, phis) → .inner (inner header, phis)
+    //       → body (pure compute) → .inner_latch → .inner
+    //       → .inner_exit → .oexit (guard checks) → .ol or .exit
+    //       → .ol (outer latch) → .oh
+    //
+    fn emit_countable_batched_main(
+        &mut self,
+        out: &mut String,
+        txn_name: &str,
+        counter_idx: usize,
+        total_idx: Option<usize>,
+        total_const_name: Option<&str>,
+        body: &[Statement],
+        write_set: &HashSet<String>,
+        is_decreasing: bool,
+        counter_var: Option<&str>,
+        batch_info: &BatchInfo,
+    ) {
+        let batch_size = batch_info.batch_size;
+        writeln!(out, "define i32 @main() local_unnamed_addr {} {{", "#0").ok();
+        writeln!(out, "entry:").ok();
+        writeln!(out, "  %state = alloca %State, align 8").ok();
+        self.emit_inline_init_stores(out, "%state");
+        let c0 = self.fun.txn_counter;
+        let bound_reg = self.fun.next_reg_with_prefix("obb");
+        self.emit_countable_load_bound(out, &bound_reg, total_idx, total_const_name, c0);
+
+        // Pre-load initial values from state for outer phis
+        let mut sorted_fields: Vec<&String> = write_set.iter().collect();
+        sorted_fields.sort();
+        let mut phi_field_init: HashMap<String, String> = HashMap::new();
+        for fname in &sorted_fields {
+            if let Some(&idx) = self.ctx.field_index_map.get(fname.as_str()) {
+                let (init_f, _) = self.emit_state_load_i64_by_idx(out, "  ", idx);
+                phi_field_init.insert((*fname).clone(), init_f);
+            }
+        }
+        let init_name = phi_field_init.get(&batch_info.counter_var)
+            .cloned().unwrap_or_else(|| "0".to_string());
+
+        let exit_label = format!(".oexit_{}", c0);
+        let inner_exit_label = format!(".inner_exit_{}", c0);
+        writeln!(out, "  br label %.oh_{}", c0).ok();
+
+        // ── Outer Header ──────────────────────────────────────────
+        // Phis track values across batches. Updated from entry (first batch)
+        // or from outer latch (subsequent batches).
+        writeln!(out, ".oh_{}:", c0).ok();
+        let oh_counter = self.fun.next_reg_with_prefix("ohc");
+        let oh_bound = self.fun.next_reg_with_prefix("ohb");
+        let next_oh = self.fun.next_reg_with_prefix("ohn");
+        let counter_ty = self.ctx.field_types.get(counter_idx)
+            .cloned().unwrap_or_else(|| "i64".to_string());
+        writeln!(out, "  {} = phi {} [ {}, %entry ], [ {}, %.ol_{} ]",
+            oh_counter, counter_ty, init_name, next_oh, c0).ok();
+        writeln!(out, "  {} = phi i64 [ {}, %entry ], [ {}, %.ol_{} ]",
+            oh_bound, bound_reg, bound_reg, c0).ok();
+
+        let mut oh_field_regs: HashMap<String, String> = HashMap::new();
+        let mut oh_latch_regs: HashMap<String, String> = HashMap::new();
+        for fname in &sorted_fields {
+            if fname.as_str() == batch_info.counter_var { continue; }
+            if let Some(cv) = counter_var {
+                if fname.as_str() == cv { continue; }
+            }
+            let oh_f = self.fun.next_reg_with_prefix("ohs");
+            let ol_f = self.fun.next_reg_with_prefix("olf");
+            let init_f = phi_field_init.get(fname.as_str())
+                .cloned().unwrap_or_else(|| "0".to_string());
+            let phi_ty = self.ctx.field_index_map.get(fname.as_str())
+                .and_then(|idx| self.ctx.field_types.get(*idx))
+                .cloned().unwrap_or_else(|| "i64".to_string());
+            writeln!(out, "  {} = phi {} [ {}, %entry ], [ {}, %.ol_{} ]",
+                oh_f, phi_ty, init_f, ol_f, c0).ok();
+            oh_field_regs.insert((*fname).clone(), oh_f);
+            oh_latch_regs.insert((*fname).clone(), ol_f);
+        }
+
+        // Compute inner_end = min(bound, next_print_boundary)
+        // next_print_boundary = ((counter / batch_size) + 1) * batch_size
+        let bsize_reg = self.fun.next_reg_with_prefix("bsz");
+        writeln!(out, "  {} = add i64 0, {}", bsize_reg, batch_size).ok();
+        let div_reg = self.fun.next_reg_with_prefix("bdi");
+        writeln!(out, "  {} = udiv i64 {}, {}", div_reg, oh_counter, bsize_reg).ok();
+        let add_reg = self.fun.next_reg_with_prefix("bad");
+        writeln!(out, "  {} = add i64 {}, 1", add_reg, div_reg).ok();
+        let mul_reg = self.fun.next_reg_with_prefix("bmu");
+        writeln!(out, "  {} = mul i64 {}, {}", mul_reg, add_reg, bsize_reg).ok();
+        let inner_end = self.fun.next_reg_with_prefix("bie");
+        writeln!(out, "  {} = call i64 @llvm.umin.i64(i64 {}, i64 {})",
+            inner_end, oh_bound, mul_reg).ok();
+
+        writeln!(out, "  br label %.inner_{}", c0).ok();
+
+        // ── Inner Header ──────────────────────────────────────────
+        // Phis are fed by outer phis initially, then backedge from inner latch.
+        writeln!(out, ".inner_{}:", c0).ok();
+        let i_counter = self.fun.next_reg_with_prefix("icc");
+        let next_i = self.fun.next_reg_with_prefix("icn");
+        writeln!(out, "  {} = phi {} [ {}, %.oh_{} ], [ {}, %.il_{} ]",
+            i_counter, counter_ty, oh_counter, c0, next_i, c0).ok();
+
+        self.fun.phi_field_regs.clear();
+        self.fun.backedge_field_regs.clear();
+        self.fun.phi_field_regs.insert(batch_info.counter_var.clone(), i_counter.clone());
+
+        let mut be_field_regs: HashMap<String, String> = HashMap::new();
+        for fname in &sorted_fields {
+            let be_f = self.fun.next_reg_with_prefix("ibf");
+            be_field_regs.insert((*fname).clone(), be_f);
+            if fname.as_str() == batch_info.counter_var {
+                self.fun.backedge_field_regs.insert((*fname).clone(), next_i.clone());
+            }
+        }
+
+        for fname in &sorted_fields {
+            if fname.as_str() == batch_info.counter_var { continue; }
+            if let Some(cv) = counter_var {
+                if fname.as_str() == cv { continue; }
+            }
+            let i_f = self.fun.next_reg_with_prefix("ifs");
+            let be_f = be_field_regs.get(fname.as_str())
+                .cloned().unwrap_or_else(|| format!("%be_{}", fname));
+            let init_f = oh_field_regs.get(fname.as_str())
+                .cloned().unwrap_or_else(|| "0".to_string());
+            let phi_ty = self.ctx.field_index_map.get(fname.as_str())
+                .and_then(|idx| self.ctx.field_types.get(*idx))
+                .cloned().unwrap_or_else(|| "i64".to_string());
+            writeln!(out, "  {} = phi {} [ {}, %.oh_{} ], [ {}, %.il_{} ]",
+                i_f, phi_ty, init_f, c0, be_f, c0).ok();
+            self.fun.phi_field_regs.insert((*fname).clone(), i_f);
+            self.fun.backedge_field_regs.insert((*fname).clone(), be_f);
+        }
+
+        // Inner exit check
+        let exit_reg = self.fun.next_reg_with_prefix("iex");
+        if is_decreasing {
+            writeln!(out, "  {} = icmp sgt i64 {}, {}", exit_reg, i_counter, inner_end).ok();
+        } else {
+            writeln!(out, "  {} = icmp slt i64 {}, {}", exit_reg, i_counter, inner_end).ok();
+        }
+        writeln!(out, "  br i1 {}, label %.il_{}, label %{}", exit_reg, c0, inner_exit_label).ok();
+
+        // ── Inner Body ────────────────────────────────────────────
+        writeln!(out, ".il_{}:", c0).ok();
+        self.fun.pending_phi_backedge.clear();
+        for fname in &sorted_fields {
+            let init_val = self.fun.phi_field_regs.get(fname.as_str())
+                .cloned().unwrap_or_else(|| "0".to_string());
+            self.fun.pending_phi_backedge.insert((*fname).clone(), init_val.clone());
+        }
+        self.emit_countable_body(out, body, write_set, &mut vec![]);
+
+        // ── Inner Latch ───────────────────────────────────────────
+        let i_next = self.fun.next_reg_with_prefix("icn");
+        let one_reg = self.fun.next_reg_with_prefix("ico");
+        writeln!(out, "  {} = add i64 0, 1", one_reg).ok();
+        writeln!(out, "  {} = add {} {}, {}", i_next, counter_ty, i_counter, one_reg).ok();
+        self.fun.pending_phi_backedge.insert(batch_info.counter_var.clone(), i_next.clone());
+
+        // Emit inner latch backedges
+        for fname in &sorted_fields {
+            if let Some(be_f) = self.fun.backedge_field_regs.get(fname.as_str()) {
+                let val = self.fun.pending_phi_backedge.get(fname.as_str())
+                    .cloned().unwrap_or_else(|| {
+                        self.fun.phi_field_regs.get(fname.as_str())
+                            .cloned().unwrap_or_else(|| "0".to_string())
+                    });
+                let field_ty = self.ctx.field_index_map.get(fname.as_str())
+                    .and_then(|idx| self.ctx.field_types.get(*idx))
+                    .cloned().unwrap_or_else(|| "i64".to_string());
+                if field_ty == "float" || field_ty == "double" {
+                    writeln!(out, "  {} = fadd {} 0.0, {}", be_f, field_ty, val).ok();
+                } else {
+                    writeln!(out, "  {} = add {} 0, {}", be_f, field_ty, val).ok();
+                }
+            }
+        }
+        writeln!(out, "  br label %.inner_{}", c0).ok();
+
+        // ── Inner Exit / Outer Body ──────────────────────────────
+        // The inner loop completed one batch. Store final values to %state
+        // so the outer body and subsequent batches can read them.
+        writeln!(out, "{}:", inner_exit_label).ok();
+        // At this point, i_counter is the value that FAILED the exit check,
+        // meaning i_counter >= inner_end. The inner loop is done.
+        // Store the final counter and field values to %state.
+        let final_counter = i_counter.clone();
+        for fname in &sorted_fields {
+            if fname.as_str() == batch_info.counter_var { continue; }
+            if let Some(cv) = counter_var {
+                if fname.as_str() == cv { continue; }
+            }
+            let phi_reg = self.fun.phi_field_regs.get(fname.as_str())
+                .cloned().unwrap_or_else(|| "0".to_string());
+            if let Some(&idx) = self.ctx.field_index_map.get(fname.as_str()) {
+                self.emit_state_store_i64_by_idx(out, "  ", idx, &phi_reg);
+            }
+        }
+        self.emit_state_store_i64_by_idx(out, "  ", counter_idx, &final_counter);
+        writeln!(out, "  br label %.ox_{}", c0).ok();
+
+        // ── Outer Body (Guard Checks + Termination) ───────────────
+        writeln!(out, ".ox_{}:", c0).ok();
+        // Load the final count from %state (stored by inner exit)
+        let (final_count_load, _) = self.emit_state_load_i64_by_idx(out, "  ", counter_idx);
+        // Check termination: is count >= bound?
+        let done_reg = self.fun.next_reg_with_prefix("odn");
+        if is_decreasing {
+            writeln!(out, "  {} = icmp sle i64 {}, {}", done_reg, final_count_load, oh_bound).ok();
+        } else {
+            writeln!(out, "  {} = icmp sge i64 {}, {}", done_reg, final_count_load, oh_bound).ok();
+        }
+        writeln!(out, "  br i1 {}, label %.done_{}, label %.ol_{}", done_reg, c0, c0).ok();
+
+        // ── Done / Exit ──────────────────────────────────────────
+        writeln!(out, ".done_{}:", c0).ok();
+        // Emit the termination print(s) from the hoisted guards
+        // Reload the final last_energy from %state for the print
+        let energy_idx = self.ctx.field_index_map.get("last_energy").copied();
+        if let Some(ei) = energy_idx {
+            let (energy_reg, _) = self.emit_state_load_i64_by_idx(out, "  ", ei);
+            // Emit a call to __print_float for the energy value
+            writeln!(out, "  call i64 @__print_float(float {})", energy_reg).ok();
+            writeln!(out, "  call i64 @__print_char(i64 10) ; newline").ok();
+        }
+        writeln!(out, "  ret i32 0").ok();
+
+        // ── Outer Latch ───────────────────────────────────────────
+        writeln!(out, ".ol_{}:", c0).ok();
+        // Load field values from %state (stored by inner exit) and forward
+        // to outer phis for the next batch.
+        writeln!(out, "  {} = add {} 0, {}", next_oh, counter_ty, final_counter).ok();
+        for fname in &sorted_fields {
+            if fname.as_str() == batch_info.counter_var { continue; }
+            if let Some(cv) = counter_var {
+                if fname.as_str() == cv { continue; }
+            }
+            let ol_f = oh_latch_regs.get(fname.as_str())
+                .cloned().unwrap_or_else(|| self.fun.next_reg_with_prefix("olf"));
+            if let Some(&idx) = self.ctx.field_index_map.get(fname.as_str()) {
+                let (val, _) = self.emit_state_load_i64_by_idx(out, "  ", idx);
+                let field_ty = self.ctx.field_index_map.get(fname.as_str())
+                    .and_then(|idx| self.ctx.field_types.get(*idx))
+                    .cloned().unwrap_or_else(|| "i64".to_string());
+                if field_ty == "float" || field_ty == "double" {
+                    writeln!(out, "  {} = fadd {} 0.0, {}", ol_f, field_ty, val).ok();
+                } else {
+                    writeln!(out, "  {} = add {} 0, {}", ol_f, field_ty, val).ok();
+                }
+            }
+        }
+        writeln!(out, "  br label %.oh_{}", c0).ok();
+
+        // ── Function epilogue ────────────────────────────────────
+        // Declare llvm.umin intrinsic
+        writeln!(out, "}}").ok();
+        writeln!(out, "declare i64 @llvm.umin.i64(i64, i64) #0").ok();
+        writeln!(out).ok();
+    }
 
     // ═══════════════════════════════════════════════════════════════
     // Countable Loop Helpers

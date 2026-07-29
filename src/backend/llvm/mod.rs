@@ -1781,7 +1781,12 @@ impl LlvmBackend {
         self.ctx.exit_condition = exit_condition;
         // 2026-07-13: normalize_to_old_recursive removed in new AST.
         // BinaryOp/UnaryOp exit conditions are already the canonical form.
-        self.build_field_index(items);
+        // 2026-07-29: Reorder state field declarations to SoA layout before
+        // index assignment. This makes same-component fields (bx0..bx4) have
+        // consecutive indices, enabling the backend to form <N x float> vector
+        // phi groups. See analysis/soa_reorder.rs for safety verification.
+        let reordered_items = crate::analysis::soa_reorder::reorder_fields(items);
+        self.build_field_index(&reordered_items);
 
         // Scan for cell-to-cell wires from TrgBinding statements
         self.scan_cell_wires(items);
@@ -2634,6 +2639,16 @@ impl LlvmBackend {
                         });
                         let raw_body = &txns[0].1.body;
                         let (body_stmts, post_hoist) = hoist_terminating_guard(raw_body, &self.ctx.field_index_map);
+                        // 2026-07-29: Brief-level LICM — hoist loop-invariant let-bindings.
+                        // The hoisted bindings are prepended to the body so LLVM's LICM
+                        // can hoist them to the preheader. See analysis/licm.rs.
+                        let state_fields: std::collections::HashSet<String> = self.ctx.field_index_map.keys().cloned().collect();
+                        let (hoisted_reordered, body_stmts) = crate::analysis::licm::hoist_loop_invariants(
+                            &body_stmts, &node.write_set, &state_fields,
+                        );
+                        // Prepend hoisted bindings to body (they appear at loop entry)
+                        let body_stmts: Vec<Statement> = hoisted_reordered.into_iter()
+                            .chain(body_stmts).collect();
                         // ── Dispatch: pure counter vs per-field phi loop ───────
                         //
                         // For bodies proven pure (or effectively pure), the compiler
@@ -2718,6 +2733,24 @@ impl LlvmBackend {
                                 &node.write_set, &body_stmts,
                                 &self.ctx.field_index_map, &self.ctx.field_types,
                             );
+                            // 2026-07-29: Compute batch info BEFORE dispatch so all
+                            // paths can use it. Filter guards from the inner body.
+                            let (inner_body, batch_info) = {
+                                let guards = crate::analysis::loop_peeling::split_hoistable(&body_stmts);
+                                if !guards.is_empty() {
+                                    let bsize = crate::analysis::loop_peeling::extract_batch_size_from_guards(
+                                        &guards, &bp.var,
+                                    );
+                                    let inner: Vec<Statement> = body_stmts.iter()
+                                        .filter(|s| !crate::analysis::loop_peeling::is_hoistable_guard(s))
+                                        .cloned().collect();
+                                    let bi = bsize.map(|s| crate::backend::llvm::loop_engine::counter::BatchInfo {
+                                        batch_size: s, outer_guards: guards, counter_var: bp.var.clone(),
+                                    });
+                                    (inner, bi)
+                                } else { (body_stmts.clone(), None) }
+                            };
+
                             if !vg.is_empty() && total_fields > 14 {
                                 // Vector phi group path — per-field phi loop with vector
                                 // phi promotion. Checks before InlineSsa so nbody_newton
@@ -2726,7 +2759,7 @@ impl LlvmBackend {
                                 let field_count: usize = vg.iter().map(|g| g.width).sum();
                                 self.warnings.push(format!("info: txn '{}' dispatched via vector phi ({}/{} fields in {} groups)", &node.name, field_count, total_fields, vg.len()));
                                 let is_decreasing = bp.direction == crate::analysis::transition_graph::ConvergeDirection::Decreasing;
-                                self.emit_countable_main(&mut out, &node.name, counter_idx, total_idx, total_const_name, &body_stmts, &node.write_set, is_decreasing, Some(&bp.var));
+                                self.emit_countable_main(&mut out, &node.name, counter_idx, total_idx, total_const_name, &inner_body, &node.write_set, is_decreasing, Some(&bp.var), batch_info.as_ref());
                             } else if write_density >= 0.5 && total_fields < 8 {
                                 // InlineSsa: insertvalue chain for small, dense-write states.
                                 // Only safe when the counter is the ONLY written field —
@@ -2741,22 +2774,17 @@ impl LlvmBackend {
                                     self.fun.pending_post_hoist = post_hoist;
                                     self.warnings.push(format!("info: txn '{}' dispatched via per-field phi ({}/{} fields written, non-counter writes)", &node.name, write_count, total_fields));
                                     let is_decreasing = bp.direction == crate::analysis::transition_graph::ConvergeDirection::Decreasing;
-                                    self.emit_countable_main(&mut out, &node.name, counter_idx, total_idx, total_const_name, &body_stmts, &node.write_set, is_decreasing, Some(&bp.var));
+                                    self.emit_countable_main(&mut out, &node.name, counter_idx, total_idx, total_const_name, &inner_body, &node.write_set, is_decreasing, Some(&bp.var), batch_info.as_ref());
                                 } else {
                                     self.fun.pending_post_hoist = post_hoist;
                                     self.warnings.push(format!("info: txn '{}' dispatched via inline SSA ({}/{} fields written)", &node.name, write_count, total_fields));
                                     self.emit_folded_main(&mut out, &node.name, counter_idx, total_idx, total_const_name, false, Some(&body_stmts));
                                 }
                             } else {
-                                // PerFieldPhi: per-field phi loop with full write_set.
-                                // Default for all other programs. Most robust: handles guards,
-                                // FFI calls, any field count, any write density. phi_cap removed —
-                                // full write_set means every written field gets a phi, eliminating
-                                // needs_state_stores_in_body for phi-capped edge cases.
                                 self.fun.pending_post_hoist = post_hoist;
                                 self.warnings.push(format!("info: txn '{}' dispatched via per-field phi ({}/{} fields written)", &node.name, write_count, total_fields));
                                 let is_decreasing = bp.direction == crate::analysis::transition_graph::ConvergeDirection::Decreasing;
-                                self.emit_countable_main(&mut out, &node.name, counter_idx, total_idx, total_const_name, &body_stmts, &node.write_set, is_decreasing, Some(&bp.var));
+                                self.emit_countable_main(&mut out, &node.name, counter_idx, total_idx, total_const_name, &inner_body, &node.write_set, is_decreasing, Some(&bp.var), batch_info.as_ref());
                             }
                         }
                         true

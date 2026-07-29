@@ -2846,6 +2846,19 @@ impl LlvmBackend {
                 write!(out, ", !range !{}", mi).ok();
             }
         }
+        // 2026-07-29: Append !invariant.load for Ptr<T> state fields.
+        // Pointers (allocated by Malloc#) are assigned once during init and
+        // never reassigned. The stored i64 value is invariant for the entire
+        // program lifetime. This allows LICM to hoist the load of the pointer
+        // from inside the loop body to the preheader, eliminating one
+        // GEP+load per iteration per pointer field.
+        // See docs/plans/2026-07-29-frontend-ir-quality-improvements.md §B.
+        if matches!(brief_ty, Type::Ptr(_) | Type::PtrConst(_)) {
+            let md_idx = self.fun.metadata_counter;
+            self.fun.metadata_counter += 1;
+            writeln!(self.fun.pending_metadata, "!{} = !{{}}", md_idx).ok();
+            write!(out, ", !invariant.load !{}", md_idx).ok();
+        }
         writeln!(out).ok();
         Some((val, brief_ty))
     }
