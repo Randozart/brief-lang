@@ -11,6 +11,120 @@ use std::io::Write;
 
 /// Convert a Brief expression to an SMT-LIB2 term string.
 /// `param_names` are the names of bound variables (function parameters).
+/// 2026-07-29: Convert a block of statements to a single SMT expression.
+/// Inlines let bindings via β-reduction (substitution) and returns the
+/// SMT term of the final expression (from Term, Return, or the last value).
+/// If the block is a single expression, returns it directly.
+/// Handles the reference function body: let bindings + final term expr.
+fn block_to_smt_term(block: &[Statement], param_names: &[String]) -> String {
+    // Start from the end and work backwards, inlining let bindings
+    let mut stmts = block.to_vec();
+    // Process statements in reverse, inlining let bindings
+    let mut current_body: Option<String> = None;
+    let mut current_expr: Option<Expr> = None;
+
+    for stmt in stmts.into_iter().rev() {
+        match stmt {
+            Statement::Term(Some(expr)) => {
+                // Final expression — this is what we need to convert
+                current_expr = Some(expr);
+            }
+            Statement::Let { names, expr, .. } => {
+                // Inline the let binding: substitute the name into current_expr
+                if let (Some(let_expr), Some(ce)) = (expr, current_expr.take()) {
+                    let mut result = ce;
+                    for name in &names {
+                        result = substitute_var_local(&result, name, &let_expr);
+                    }
+                    current_expr = Some(result);
+                }
+            }
+            Statement::Expression(expr) => {
+                if current_expr.is_none() {
+                    current_expr = Some(expr);
+                }
+            }
+            _ => {}
+        }
+    }
+
+    if let Some(ce) = current_expr {
+        expr_to_smt_term(&ce, param_names)
+    } else {
+        "#x0000000000000000".into()
+    }
+}
+
+/// 2026-07-29: Local substitute_var for verify_smt.rs (mirrors smt.rs).
+fn substitute_var_local(expr: &Expr, var_name: &str, replacement: &Expr) -> Expr {
+    match expr {
+        Expr::Identifier(name) => {
+            if name == var_name { replacement.clone() } else { expr.clone() }
+        }
+        Expr::UnaryOp(kind, inner) => {
+            Expr::UnaryOp(*kind, Box::new(substitute_var_local(inner, var_name, replacement)))
+        }
+        Expr::BinaryOp(kind, lhs, rhs) => {
+            Expr::BinaryOp(
+                *kind,
+                Box::new(substitute_var_local(lhs, var_name, replacement)),
+                Box::new(substitute_var_local(rhs, var_name, replacement)),
+            )
+        }
+        Expr::If(cond, then_, else_) => {
+            Expr::If(
+                Box::new(substitute_var_local(cond, var_name, replacement)),
+                Box::new(substitute_var_local(then_, var_name, replacement)),
+                else_.as_ref().map(|e| Box::new(substitute_var_local(e, var_name, replacement))),
+            )
+        }
+        Expr::Call(name, args, aid) => {
+            Expr::Call(
+                name.clone(),
+                args.iter().map(|a| substitute_var_local(a, var_name, replacement)).collect(),
+                *aid,
+            )
+        }
+        Expr::Field(inner, fname) => {
+            Expr::Field(Box::new(substitute_var_local(inner, var_name, replacement)), fname.clone())
+        }
+        Expr::Match(scrut, arms) => {
+            Expr::Match(
+                Box::new(substitute_var_local(scrut, var_name, replacement)),
+                arms.iter().map(|a| crate::ast::MatchArm {
+                    pattern: a.pattern.clone(),
+                    guard: a.guard.clone(),
+                    body: Box::new(substitute_var_local(&a.body, var_name, replacement)),
+                }).collect(),
+            )
+        }
+        Expr::Block(stmts) => {
+            Expr::Block(stmts.iter().map(|s| match s {
+                Statement::Let { name, names, ty, expr, modifiers } => {
+                    Statement::Let {
+                        name: name.clone(),
+                        names: names.clone(),
+                        ty: ty.clone(),
+                        expr: expr.as_ref().map(|e| substitute_var_local(e, var_name, replacement)),
+                        modifiers: modifiers.clone(),
+                    }
+                }
+                Statement::Term(val) => {
+                    Statement::Term(val.as_ref().map(|e| substitute_var_local(e, var_name, replacement)))
+                }
+                Statement::Assign(lhs, rhs) => {
+                    Statement::Assign(
+                        substitute_var_local(lhs, var_name, replacement),
+                        substitute_var_local(rhs, var_name, replacement),
+                    )
+                }
+                other => other.clone(),
+            }).collect())
+        }
+        _ => expr.clone(),
+    }
+}
+
 pub fn expr_to_smt_term(expr: &Expr, param_names: &[String]) -> String {
     match expr {
         Expr::Decimal(n) => format_smt_int(*n),
@@ -265,7 +379,13 @@ pub fn build_verification_query(
     // postcondition in the SMT query.
     if let Some((ref_expr, ref_param_names)) = ref_fn {
         let ref_body_renamed = rename_variables(ref_expr, ref_param_names, &param_names);
-        let ref_body = expr_to_smt_term(&ref_body_renamed, &param_names);
+        // 2026-07-29: Handle Block bodies (let bindings + term) by inlining
+        // let bindings via β-reduction. Fall back to expr_to_smt_term for
+        // simple expressions.
+        let ref_body = match &ref_body_renamed {
+            Expr::Block(stmts) => block_to_smt_term(stmts, &param_names),
+            _ => expr_to_smt_term(&ref_body_renamed, &param_names),
+        };
         q.push_str("(define-fun ref (");
         for (i, (_, ty)) in params.iter().enumerate() {
             q.push_str(&format!(" (x{} {})", i, type_to_smt_sort(ty)));

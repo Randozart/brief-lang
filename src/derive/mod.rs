@@ -75,9 +75,16 @@ pub fn synthesize(
         let mut candidate_prog = synthesize_candidate(name, params, ret_type, &examples, adaptive_depth)?;
         let cand_expr = candidate_prog.body.get(0).cloned().unwrap_or(Expr::Decimal(0));
         let mut verified = true;
-        // 2026-07-28: Use Z3 forall verification when postcondition provided.
-        // Falls back to random verification when Z3 is unavailable.
-        if let Some(post) = postcondition {
+        // 2026-07-28: Use Z3 forall verification when postcondition or
+        // reference function is provided. When only ref_fn is present
+        // (no postcondition), pass a trivial `true` postcondition so the
+        // combined verification asserts (= (f x) (ref x)) for all inputs.
+        // 2026-07-29: Changed gate from `if let Some(post)` to also
+        // trigger on ref_fn — the SMT path can verify against the reference
+        // without needing a user-written postcondition.
+        let trivial_post = Expr::Bool(true);
+        if postcondition.is_some() || ref_fn.is_some() {
+            let post = postcondition.unwrap_or(&trivial_post);
             match smt_verify_candidate(name, &cand_expr, params, &examples, post, precondition, ref_fn) {
                 CegisResult::Proven => {
                     eprintln!("  cegis[{}/5] '{}': PROVEN for all inputs", iteration + 1, name);
