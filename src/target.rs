@@ -29,7 +29,20 @@ pub struct TargetEntry {
     /// Override LLVM data layout string.
     /// 2026-07-15: Phase 7 — optional, auto-derived from target_triple if not set.
     pub data_layout: Option<String>,
+    /// 2026-07-29: Assembler backend for inline assembly validation.
+    /// "keystone" — Keystone Engine (default, requires libkeystone).
+    /// "platform" — system assembler (as / ml64).
+    /// "none" — no validation, warn at compile time.
+    #[serde(default = "default_assembler")]
+    pub assembler: String,
+    /// 2026-07-29: Number of random samples for cross-verification
+    /// in the := verification chain. Default 50.
+    #[serde(default = "default_cross_verify_samples")]
+    pub cross_verify_samples: u32,
 }
+
+fn default_assembler() -> String { "none".to_string() }
+fn default_cross_verify_samples() -> u32 { 50 }
 
 /// Loaded config/targets.toml.
 #[derive(Debug, Clone, serde::Deserialize)]

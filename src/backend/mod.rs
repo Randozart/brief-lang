@@ -1,3 +1,4 @@
+pub mod assembler;
 pub mod bindgen;
 pub mod circt;
 pub mod circt_normalizer;

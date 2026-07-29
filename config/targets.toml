@@ -8,6 +8,8 @@
 backend = "llvm"
 defaults = ["--budget", "256"]
 plugins = ["prelude", "env", "print"]
+assembler = "none"
+cross_verify_samples = 50
 
 [".ebv"]
 backend = "llvm"
