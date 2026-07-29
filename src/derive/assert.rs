@@ -241,6 +241,7 @@ mod tests {
             precondition: None,
             ref_name: None,
             ref_tolerance: None,
+            chain: vec![],
             span: dummy_span(),
         };
         let program = vec![make_defn("add", body, derivation)];
@@ -268,9 +269,10 @@ mod tests {
             precondition: None,
             ref_name: None,
             ref_tolerance: None,
+            chain: vec![],
             span: dummy_span(),
         };
-        let program = vec![make_defn("sub", body, derivation)];
+        let program = vec![make_defn("add", body, derivation)];
         let mut interp = Interpreter::new();
         interp.load_program(&program);
         let result = verify_derivation_assertions(&program, &mut interp);
@@ -292,6 +294,7 @@ mod tests {
             precondition: None,
             ref_name: None,
             ref_tolerance: None,
+            chain: vec![],
             span: dummy_span(),
         };
         // Use float-aware definition
@@ -331,6 +334,7 @@ mod tests {
             precondition: None,
             ref_name: None,
             ref_tolerance: None,
+            chain: vec![],
             span: dummy_span(),
         };
         let program = vec![TopLevel::Definition(crate::ast::Definition {
@@ -367,6 +371,7 @@ mod tests {
             precondition: None,
             ref_name: None,
             ref_tolerance: None,
+            chain: vec![],
             span: dummy_span(),
         };
         let program = vec![TopLevel::Definition(crate::ast::Definition {
@@ -445,6 +450,7 @@ mod tests {
             precondition: None,
             ref_name: None,
             ref_tolerance: None,
+            chain: vec![],
             span: dummy_span(),
         };
         let program = vec![make_defn("add", body, derivation)];

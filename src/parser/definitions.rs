@@ -900,6 +900,38 @@ impl<'a> Parser<'a> {
     ///   := popcount_ref          — reference only (synthesis skipped, use ref body)
     ///   := { 0 -> 0; } := ref_fn — both (verify against reference)
     ///   := ref_fn := { 0 -> 0; } — both (reversed order)
+    /// 2026-07-29: Parse a single segment after :=: either { examples } or identifier.
+    /// Returns (examples, ref_name, ref_tolerance) for a derivation segment,
+    /// or Ok(None) for the last segment when the next token isn't := or {.
+    fn parse_derivation_segment(&mut self) -> Result<Option<(Vec<DerivationExample>, Option<String>, Option<f64>)>, SyntaxError> {
+        if self.check(&Token::LBrace) {
+            self.expect(Token::LBrace)?;
+            let mut examples = Vec::new();
+            while !self.check(&Token::RBrace) && !self.is_at_end() {
+                let example = self.parse_derivation_example()?;
+                examples.push(example);
+                self.eat(&Token::Semicolon);
+            }
+            self.expect(Token::RBrace)?;
+            self.eat(&Token::Semicolon);
+            Ok(Some((examples, None, None)))
+        } else if let Some(Token::Identifier(n)) = self.peek().cloned() {
+            self.advance();
+            let mut ref_tolerance: Option<f64> = None;
+            if self.eat(&Token::LBracket) {
+                self.expect(Token::Identifier("tol".into())).ok();
+                self.eat(&Token::Colon);
+                ref_tolerance = self.parse_expression().ok().and_then(|e| {
+                    match e { Expr::Float(f) => Some(f), Expr::Decimal(n) => Some(n as f64), _ => None }
+                });
+                self.eat(&Token::RBracket);
+            }
+            Ok(Some((vec![], Some(n), ref_tolerance)))
+        } else {
+            Ok(None)
+        }
+    }
+
     fn parse_derivation_block(&mut self) -> Result<Option<DerivationBlock>, SyntaxError> {
         let colon_eq_span = self.tokens.get(self.pos)
             .map(|(_, s)| s.clone())
@@ -907,72 +939,45 @@ impl<'a> Parser<'a> {
         if !self.eat(&Token::ColonEq) {
             return Ok(None);
         }
-        let mut examples = Vec::new();
+
+        // 2026-07-29: Multi-segment chain: := a := b := c
+        // Parse segments in a loop, each segment is either { examples }
+        // or an identifier (asm/defn ref).
+        let mut chain: Vec<ChainSegment> = Vec::new();
+        let mut examples: Vec<DerivationExample> = Vec::new();
         let mut ref_name: Option<String> = None;
         let mut ref_tolerance: Option<f64> = None;
-        let mut rbrace_end = colon_eq_span.start + 2;
 
-        // First := block: either { examples } or identifier (ref)
-        if self.check(&Token::LBrace) {
-            // := { examples }
-            self.expect(Token::LBrace)?;
-            while !self.check(&Token::RBrace) && !self.is_at_end() {
-                let example = self.parse_derivation_example()?;
-                examples.push(example);
-                self.eat(&Token::Semicolon);
+        // Parse the first segment
+        if let Some((ex, rn, rt)) = self.parse_derivation_segment()? {
+            if !ex.is_empty() {
+                // First segment has examples (backward compat)
+                examples = ex;
+                ref_name = rn;
+                ref_tolerance = rt;
+            } else if let Some(name) = rn {
+                chain.push(ChainSegment::Ref(name));
             }
-            self.expect(Token::RBrace)?;
-            rbrace_end = self.tokens.get(self.pos - 1)
-                .map(|(_, s)| s.end)
-                .unwrap_or(colon_eq_span.start + 2);
-            self.eat(&Token::Semicolon);
         } else {
-            // := identifier (reference function name)
-            if let Some(Token::Identifier(n)) = self.peek().cloned() {
-                self.advance();
-                ref_name = Some(n);
-                // Parse optional [tol: N]
-                if self.eat(&Token::LBracket) {
-                    self.expect(Token::Identifier("tol".into())).ok();
-                    self.eat(&Token::Colon);
-                    ref_tolerance = self.parse_expression().ok().and_then(|e| {
-                        match e { Expr::Float(f) => Some(f), Expr::Decimal(n) => Some(n as f64), _ => None }
-                    });
-                    self.eat(&Token::RBracket);
-                }
-            } else {
-                return self.error_at_current("expected '{' for examples or identifier for reference function after ':='");
-            }
+            return self.error_at_current("expected '{' for examples or identifier for reference function after ':='");
         }
 
-        // Second := block (optional, order-free)
-        if self.eat(&Token::ColonEq) {
-            if self.check(&Token::LBrace) {
-                // := { examples }
-                self.expect(Token::LBrace)?;
-                while !self.check(&Token::RBrace) && !self.is_at_end() {
-                    let example = self.parse_derivation_example()?;
-                    examples.push(example);
-                    self.eat(&Token::Semicolon);
-                }
-                self.expect(Token::RBrace)?;
-                rbrace_end = self.tokens.get(self.pos - 1)
-                    .map(|(_, s)| s.end)
-                    .unwrap_or(colon_eq_span.start + 2);
-                self.eat(&Token::Semicolon);
-            } else if let Some(Token::Identifier(n)) = self.peek().cloned() {
-                self.advance();
-                ref_name = Some(n);
-                if self.eat(&Token::LBracket) {
-                    self.expect(Token::Identifier("tol".into())).ok();
-                    self.eat(&Token::Colon);
-                    ref_tolerance = self.parse_expression().ok().and_then(|e| {
-                        match e { Expr::Float(f) => Some(f), Expr::Decimal(n) => Some(n as f64), _ => None }
-                    });
-                    self.eat(&Token::RBracket);
+        // Parse additional segments
+        while self.eat(&Token::ColonEq) {
+            if let Some((ex, rn, rt)) = self.parse_derivation_segment()? {
+                if !ex.is_empty() {
+                    // Standalone examples block (no ref): := { ex }
+                    chain.push(ChainSegment::Derivation(Box::new(DerivationBlock {
+                        examples: ex, synthesized: None,
+                        postcondition: None, precondition: None,
+                        ref_name: None, ref_tolerance: None,
+                        chain: vec![], span: crate::errors::Span::dummy(),
+                    })));
+                } else if let Some(name) = rn {
+                    chain.push(ChainSegment::Ref(name));
                 }
             } else {
-                return self.error_at_current("expected '{' for examples or identifier for reference function after second ':='");
+                break;
             }
         }
 
@@ -1012,7 +1017,8 @@ impl<'a> Parser<'a> {
             (None, None)
         };
 
-        let span = Span::new(colon_eq_span.start, rbrace_end, 0, 0);
+        let end = self.tokens.get(self.pos).map(|(_, s)| s.start).unwrap_or(colon_eq_span.start + 2);
+        let span = Span::new(colon_eq_span.start, end, 0, 0);
         Ok(Some(DerivationBlock {
             examples,
             synthesized: None,
@@ -1020,6 +1026,7 @@ impl<'a> Parser<'a> {
             precondition,
             ref_name,
             ref_tolerance,
+            chain,
             span,
         }))
     }

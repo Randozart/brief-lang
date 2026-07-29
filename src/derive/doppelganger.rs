@@ -208,6 +208,7 @@ mod tests {
             precondition: None,
             ref_name: None,
             ref_tolerance: None,
+            chain: vec![],
             span: dummy_span(),
         };
 
@@ -256,6 +257,7 @@ mod tests {
             precondition: None,
             ref_name: None,
             ref_tolerance: None,
+            chain: vec![],
             span: dummy_span(),
         };
         let block2 = DerivationBlock {
@@ -265,6 +267,7 @@ mod tests {
             precondition: None,
             ref_name: None,
             ref_tolerance: None,
+            chain: vec![],
             span: dummy_span(),
         };
         let block2 = DerivationBlock {
@@ -274,6 +277,7 @@ mod tests {
             precondition: None,
             ref_name: None,
             ref_tolerance: None,
+            chain: vec![],
             span: dummy_span(),
         };
 

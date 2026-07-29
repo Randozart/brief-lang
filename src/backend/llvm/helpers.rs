@@ -195,6 +195,7 @@ impl LlvmBackend {
             precondition: db.precondition.clone(),
             ref_name: db.ref_name.clone(),
             ref_tolerance: db.ref_tolerance,
+            chain: db.chain.clone(),
             span: db.span,
         }))
     }

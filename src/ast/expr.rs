@@ -149,6 +149,17 @@ pub struct DerivationExample {
     pub span: Span,
 }
 
+/// 2026-07-29: A segment in the := verification chain.
+/// Each segment is one body: an asm function name, a derivation block,
+/// or a reference function name.
+#[derive(Debug, Clone, PartialEq)]
+pub enum ChainSegment {
+    /// Reference to an asm function or defn: := name
+    Ref(String),
+    /// Derivation block with examples and optional reference
+    Derivation(Box<DerivationBlock>),
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct DerivationBlock {
     pub examples: Vec<DerivationExample>,
@@ -169,6 +180,9 @@ pub struct DerivationBlock {
     /// ref_tolerance: allowed deviation (default 0.0 for exact match).
     pub ref_name: Option<String>,
     pub ref_tolerance: Option<f64>,
+    /// 2026-07-29: Multi-segment verification chain.
+    /// If non-empty, body is selected by cross-verification at compile time.
+    pub chain: Vec<ChainSegment>,
     pub span: Span,
 }
 

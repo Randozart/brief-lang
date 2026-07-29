@@ -63,6 +63,9 @@ pub enum TopLevel {
     /// $txn name(params) [pre][post] -> Type { body } — compile-time-only tx.
     /// 2026-07-23: Convergent loop with pre/post, top-level before codegen.
     CompileTimeTxn(Transaction),
+    /// 2026-07-29: Inline assembly function declaration.
+    /// asm<x86_64> name(params) -> ReturnType { "instruction"; };
+    AsmFn(AsmFn),
     RenderBlock(RenderBlock),
     Stylesheet(String),
     SvgComponent {
@@ -1042,6 +1045,22 @@ pub enum CfgCondition {
     Or(Box<CfgCondition>, Box<CfgCondition>),
     Not(Box<CfgCondition>),
     Bool(bool),
+}
+
+// ── AsmFn ─────────────────────────────────────────────────────────────
+
+/// 2026-07-29: Assembly function declaration.
+/// asm<x86_64> name(params) -> ReturnType { "instruction"; };
+/// Target-annotated inline assembly body. Cross-verified against other
+/// bodies in the := chain at compile time (see verification-chain plan).
+#[derive(Debug, Clone, PartialEq)]
+pub struct AsmFn {
+    pub target: String,
+    pub name: String,
+    pub params: Vec<(String, Type)>,
+    pub ret_type: Type,
+    pub body: Vec<String>,
+    pub span: Span,
 }
 
 impl CfgCondition {

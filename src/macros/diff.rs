@@ -46,6 +46,7 @@ fn item_key(tl: &TopLevel) -> String {
         Statement(_) | Stylesheet(_) | SvgComponent { .. } | SyncGroup { .. } | StageBlock(_) | RenderBlock(_) | Cfg(_) => {
             format!("{:?}", tl)
         }
+        AsmFn(a) => format!("asm:<{}> {}", a.target, a.name),
         CompileTimeDefn(d) => format!("$defn:{}", d.name),
         CompileTimeTxn(t) => format!("$txn:{}", t.name),
         CompileTimeLet(name, _) => format!("$let:{}", name),
@@ -91,6 +92,7 @@ pub fn item_summary(tl: &TopLevel) -> String {
         CompileTimeTxn(t) => format!("$txn {}", t.name),
         CompileTimeLet(name, _) => format!("$let {}", name),
         CompileTimeConst(name, _) => format!("$const {}", name),
+        AsmFn(a) => format!("asm:<{}> {}", a.target, a.name),
         ProtocolDef(p) => format!("proto {}: #{}", p.name, p.category),
     }
 }
