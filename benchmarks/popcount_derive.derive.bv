@@ -4,16 +4,22 @@
 // superoptimizer further optimizes it via --stochastic.
 
 defn popcount(x0: Int) -> Int  {
-    x0;
+    when (x0 == 0) {
+            term 0;
+    };
+    when (x0 == 3) {
+            term 2;
+    };
+    when (x0 == 1) {
+            term 1;
+    };
+    term 3;
 } := {
     0 -> 0;
     1 -> 1;
     3 -> 2;
     7 -> 3;
-    255 -> 8;
-    1024 -> 1;
-    4294967295 -> 32;
-};
+} [[ #Term >= 0 && #Term < 64 ];
 
 let N: Int = GetEnvInt#("BOUND");
 let i: Int = 0;

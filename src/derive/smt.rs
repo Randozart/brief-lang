@@ -91,7 +91,7 @@ fn build_sygus_query(
         q.push(' ');
         q.push_str(ps);
     }
-    q.push_str(&format!(")) {})\n\n", ret_sort));
+    q.push_str(&format!(") {})\n\n", ret_sort));
 
     // Constraints from examples
     for example in examples {
@@ -269,10 +269,28 @@ fn parse_smt_response(
         return Err(SynthesizeError::SolverError("empty SMT response".into()));
     }
 
-    // Find the first define-fun form
+    // Find the first define-fun form (handles Z3's nested model wrapper)
     let define_fun = sexprs.into_iter().find(|s| is_define_fun(s));
     let body = match define_fun {
-        Some(ref s) => extract_define_fun_body(s)?,
+        Some(ref s) => {
+            // Unwrap Z3's model wrapper: ((define-fun ...)) → (define-fun ...)
+            let inner: SExpr = match s {
+                SExpr::List(items) => {
+                    if let Some(SExpr::List(sub)) = items.first() {
+                        let sub_sexpr = SExpr::List(sub.clone());
+                        if is_define_fun(&sub_sexpr) {
+                            sub_sexpr
+                        } else {
+                            s.clone()
+                        }
+                    } else {
+                        s.clone()
+                    }
+                }
+                _ => s.clone(),
+            };
+            extract_define_fun_body(&inner)?
+        }
         None => return Err(SynthesizeError::SolverError("no define-fun in response".into())),
     };
 
@@ -286,10 +304,20 @@ fn parse_smt_response(
 }
 
 /// Check if an S-expr is a define-fun form.
+/// Z3 wraps (define-fun ...) inside a top-level model list:
+///   ( (define-fun f ((x Sort)) Ret body) ... )
+/// This function checks both the top level and one level down.
 fn is_define_fun(sexpr: &SExpr) -> bool {
     match sexpr {
         SExpr::List(items) => {
-            items.first().map_or(false, |f| matches!(f, SExpr::Atom(a) if a == "define-fun"))
+            // Check direct: (define-fun ...)
+            if items.first().map_or(false, |f| matches!(f, SExpr::Atom(a) if a == "define-fun")) {
+                return true;
+            }
+            // Check nested: ((define-fun ...) ...) — Z3 model wrapper
+            items.iter().any(|sub| matches!(sub, SExpr::List(sub_items) if
+                sub_items.first().map_or(false, |f| matches!(f, SExpr::Atom(a) if a == "define-fun"))
+            ))
         }
         _ => false,
     }
@@ -470,8 +498,14 @@ fn smt_atom_to_expr(
     params: &[(String, Type)],
     _ret_type: &Type,
 ) -> Result<Expr, SynthesizeError> {
-    // Check if it's a variable reference (x0, x1, ...)
+    // Check if it's a variable reference (x0, x1, ... or x!0, x!1 from Z3)
     if let Some(idx) = s.strip_prefix('x') {
+        // Z3 uses x!0, x!1, etc.
+        let idx = if let Some(digit_start) = idx.strip_prefix('!') {
+            digit_start
+        } else {
+            idx
+        };
         if let Ok(i) = idx.parse::<usize>() {
             if i < params.len() {
                 return Ok(Expr::Identifier(params[i].0.clone()));
@@ -556,7 +590,7 @@ pub fn synthesize_via_smt(
     }
     let ret_type = Type::int();
 
-    match synthesize_via_smt_typed(params, &ret_type, examples, "z3") {
+    match synthesize_via_smt_typed(params, &ret_type, examples, "z3-4.12") {
         Ok(prog) => {
             let expr = prog.body.into_iter().next().unwrap_or(Expr::Decimal(0));
             Ok(expr)
