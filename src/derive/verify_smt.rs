@@ -244,18 +244,21 @@ pub fn build_verification_query(
     }
     q.push('\n');
 
-    // declare-fun for the candidate function
+    // define-fun for the candidate function — fixes f as the candidate body
+    // so Z3 doesn't assign arbitrary values.
     q.push_str(&format!("; Candidate: {}\n", name));
-    q.push_str("(declare-fun f (");
-    for (_, ty) in params {
-        q.push(' ');
-        q.push_str(&type_to_smt_sort(ty));
+    let mut param_names: Vec<String> = (0..params.len())
+        .map(|i| format!("x{}", i))
+        .collect();
+    let candidate_body = expr_to_smt_term(candidate, &param_names);
+    q.push_str("(define-fun f (");
+    for (i, (_, ty)) in params.iter().enumerate() {
+        q.push_str(&format!(" (x{} {})", i, type_to_smt_sort(ty)));
     }
-    q.push_str(") (_ BitVec 64))\n\n");
+    q.push_str(&format!(") (_ BitVec 64) {})\n\n", candidate_body));
 
     // If postcondition provided: verify candidate against it
     if let Some(post) = postcondition {
-        // Build the forall verification query
         q.push_str("; Verify: forall inputs, candidate satisfies postcondition\n");
         q.push_str("(assert (not (forall (");
         for (i, (name, ty)) in params.iter().enumerate() {
@@ -263,22 +266,19 @@ pub fn build_verification_query(
         }
         q.push_str(")\n");
 
-        // The candidate body in SMT
-        let mut param_names: Vec<String> = (0..params.len())
+        // The postcondition in SMT — #Term is replaced by (f x0 x1 ...)
+        // which is the function's output for the quantified inputs.
+        let param_refs: Vec<String> = (0..params.len())
             .map(|i| format!("x{}", i))
             .collect();
-        let candidate_body = expr_to_smt_term(candidate, &param_names);
+        let f_call = format!("(f {})", param_refs.join(" "));
+        // Parse the postcondition, replacing #Term with (f x0 x1 ...)
+        param_names.push("#Term".to_string());
+        let post_raw = expr_to_smt_term(post, &param_names);
+        // Substitute: the raw "#Term" becomes the function call
+        let post_body = post_raw.replace("#Term", &f_call);
 
-        // The postcondition in SMT
-        // Bind @result to the candidate's output for this input
-        param_names.push("@result".to_string());
-        let post_body = expr_to_smt_term(post, &param_names);
-
-        q.push_str(&format!("   (=> {} (= (f", post_body));
-        for (i, _) in params.iter().enumerate() {
-            q.push_str(&format!(" x{}", i));
-        }
-        q.push_str(&format!(") {})))))\n", candidate_body));
+        q.push_str(&format!("   {})))\n", post_body));
     }
 
     q.push_str("\n(check-sat)\n");
@@ -299,7 +299,7 @@ pub enum VerificationResult {
 
 /// Run Z3 with a verification query and parse the result.
 pub fn run_z3_verify(query: &str) -> Result<VerificationResult, SynthesizeError> {
-    let mut child = Command::new("z3")
+    let mut child = Command::new("z3-4.12")
         .arg("-in")
         .stdin(std::process::Stdio::piped())
         .stdout(std::process::Stdio::piped())
@@ -459,7 +459,7 @@ mod tests {
         let candidate = Expr::Identifier("x0".into());
         let params = vec![("x".into(), Type::int())];
         let query = build_verification_query("test", &candidate, &params, None);
-        assert!(query.contains("declare-fun"));
+        assert!(query.contains("define-fun"));
         assert!(query.contains("(set-logic ALL)"));
         assert!(query.contains("(check-sat)"));
     }
@@ -472,15 +472,15 @@ mod tests {
             Box::new(Expr::Decimal(1)),
         );
         let params = vec![("x".into(), Type::int())];
-        // Postcondition: @result > 0
+        // Postcondition: #Term > 0
         let post = Expr::BinaryOp(
             BinaryOpKind::Gt,
-            Box::new(Expr::Identifier("@result".into())),
+            Box::new(Expr::Identifier("#Term".into())),
             Box::new(Expr::Decimal(0)),
         );
         let query = build_verification_query("test", &candidate, &params, Some(&post));
         assert!(query.contains("(forall"));
-        assert!(query.contains("(= (f"));
+        assert!(query.contains("(f x0"));
     }
 
     #[test]
