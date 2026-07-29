@@ -154,10 +154,14 @@ pub struct DerivationBlock {
     pub examples: Vec<DerivationExample>,
     pub synthesized: Option<Box<Expr>>,
     /// 2026-07-28: Optional postcondition for full-spec CEGIS verification.
-    /// Parsed from [[post]] syntax in derivation blocks.
-    /// The postcondition is a predicate using @result to refer to the
-    /// function's return value (e.g., [[ @result >= 0 ]]).
+    /// Parsed from [[post]] syntax: [[ post ] or [[ pre ]][ post ].
+    /// The postcondition is a predicate using #Term to refer to the
+    /// function's return value (e.g., [[ #Term >= 0 ]).
     pub postcondition: Option<Expr>,
+    /// 2026-07-29: Optional precondition stating valid input states.
+    /// Parsed from [[ pre ]] syntax before the postcondition block.
+    /// Example: [[ x0 >= 0 ]][ #Term >= 0 ] — only verify for non-negative inputs.
+    pub precondition: Option<Expr>,
     pub span: Span,
 }
 

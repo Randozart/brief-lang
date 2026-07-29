@@ -920,30 +920,56 @@ impl<'a> Parser<'a> {
             .unwrap_or(colon_eq_span.start + 2);
         // After RBrace, there may be an optional semicolon — consume it
         self.eat(&Token::Semicolon);
-        // 2026-07-28: Parse optional [[postcondition]] after the derivation block.
-        // [[post]] is sugar for [true][post] — a postcondition-only contract that
-        // the CEGIS loop uses to verify correctness for ALL inputs.
-        let postcondition = if self.check(&Token::LBracket) {
+        // 2026-07-28: Parse optional contract [[post], [pre][post], [pre]].
+        // [[post] = [true][post] — postcondition only.
+        // [pre][post] — both pre and post.
+        // [pre]] = [pre][true] — precondition only.
+        let (precondition, postcondition) = if self.check(&Token::LBracket) {
             let next_is_bracket = self.tokens.get(self.pos + 1)
                 .map(|(t, _)| matches!(t, Token::LBracket))
                 .unwrap_or(false);
-            if !next_is_bracket {
-                None
-            } else {
+            if next_is_bracket {
+                // [[ — postcondition only
                 self.advance();
                 self.advance();
-                let post_expr = Some(self.parse_expression()?);
+                let post = Some(self.parse_expression()?);
                 self.expect(Token::RBracket)?;
-                post_expr
+                (None, post)
+            } else {
+                // [ — could be precondition, or postcondition without sugar
+                self.advance();
+                let expr = Some(self.parse_expression()?);
+                let closed = self.eat(&Token::RBracket); // ]
+                // Check for second [ for postcondition
+                if self.check(&Token::LBracket) {
+                    self.advance();
+                    let post = Some(self.parse_expression()?);
+                    self.expect(Token::RBracket)?;
+                    (expr, post) // [pre][post]
+                } else if !closed {
+                    // Wasn't closed — this shouldn't happen
+                    (None, None)
+                } else {
+                    // Single ] — check if ]] (precondition only)
+                    // Closed with single ], this might be [post] without sugar
+                    // or [pre]] — both are valid
+                    if self.check(&Token::RBracket) {
+                        self.advance(); // consume second ]
+                        (expr, None) // [pre]]
+                    } else {
+                        (None, expr) // [post]
+                    }
+                }
             }
         } else {
-            None
+            (None, None)
         };
         let span = Span::new(colon_eq_span.start, rbrace_end, 0, 0);
         Ok(Some(DerivationBlock {
             examples,
             synthesized: None,
-            postcondition,
+            postcondition: None,
+            precondition: None,
             span,
         }))
     }
