@@ -2628,6 +2628,16 @@ impl LlvmBackend {
                         });
                         let raw_body = &txns[0].1.body;
                         let (body_stmts, post_hoist) = hoist_terminating_guard(raw_body, &self.ctx.field_index_map);
+                        // 2026-07-29: Brief-level LICM — hoist loop-invariant let-bindings.
+                        // The hoisted bindings are prepended to the body so LLVM's LICM
+                        // can hoist them to the preheader. See analysis/licm.rs.
+                        let state_fields: std::collections::HashSet<String> = self.ctx.field_index_map.keys().cloned().collect();
+                        let (hoisted_reordered, body_stmts) = crate::analysis::licm::hoist_loop_invariants(
+                            &body_stmts, &node.write_set, &state_fields,
+                        );
+                        // Prepend hoisted bindings to body (they appear at loop entry)
+                        let body_stmts: Vec<Statement> = hoisted_reordered.into_iter()
+                            .chain(body_stmts).collect();
                         // ── Dispatch: pure counter vs per-field phi loop ───────
                         //
                         // For bodies proven pure (or effectively pure), the compiler
