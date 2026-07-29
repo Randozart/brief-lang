@@ -63,13 +63,14 @@ pub fn synthesize(
     }
 
     // CEGIS loop: synthesize → verify → re-synthesize on counterexample
+    // 2026-07-29: Increase depth when references reject candidates — forces
+    // the search to find a more general formula instead of the ite chain.
     let mut examples = block.examples.clone();
+    let mut adaptive_depth = max_depth;
 
     for iteration in 0..5 {
         // Step 1: Synthesize from current examples
-        let mut candidate_prog = synthesize_candidate(name, params, ret_type, &examples, max_depth)?;
-
-        // Step 2: Verify candidate
+        let mut candidate_prog = synthesize_candidate(name, params, ret_type, &examples, adaptive_depth)?;
         let cand_expr = candidate_prog.body.get(0).cloned().unwrap_or(Expr::Decimal(0));
         let mut verified = true;
         // 2026-07-28: Use Z3 forall verification when postcondition provided.
@@ -95,10 +96,9 @@ pub fn synthesize(
                         match verify::verify_candidate(&cand_expr, params, Some(post), verify_samples, ref_fn) {
                             verify::VerifyResult::Pass => {}
                             verify::VerifyResult::Fail(_, r) => {
-                                eprintln!("  verify: '{}' rejected ({})", name, r);
-                                return Err(SynthesizeError::NoSolution(
-                                    format!("candidate for '{}' rejected by verification: {}", name, r)
-                                ));
+                                adaptive_depth += 1;
+                                eprintln!("  verify: '{}' rejected ({}) — trying depth {}", name, r, adaptive_depth);
+                                verified = false;
                             }
                         }
                     }
@@ -108,13 +108,9 @@ pub fn synthesize(
             match verify::verify_candidate(&cand_expr, params, None, verify_samples, ref_fn) {
                 verify::VerifyResult::Pass => {}
                 verify::VerifyResult::Fail(_, reason) => {
-                    eprintln!("  cegis[{}/5] '{}': verification rejected ({})", iteration + 1, name, reason);
-                    if iteration == 0 {
-                        continue;
-                    }
-                    return Err(SynthesizeError::NoSolution(
-                        format!("candidate for '{}' rejected by verification: {}", name, reason)
-                    ));
+                    adaptive_depth += 1;
+                    eprintln!("  cegis[{}/5] '{}': verification rejected ({}) — trying depth {}", iteration + 1, name, reason, adaptive_depth);
+                    continue;
                 }
             }
         }
