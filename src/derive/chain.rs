@@ -32,9 +32,73 @@ fn evaluate_ref_expr(expr: &Expr, input: &[Value]) -> Result<Value, String> {
 }
 
 /// 2026-07-29: Evaluate a body on a single set of inputs.
+/// For asm bodies, compiles the assembly to a shared library and calls it
+/// via FFI. For ref/synthesized, uses the interpreter.
 fn evaluate_body(body: &Body, input: &[Value], _asm: &dyn AsmAssembler) -> Result<Value, String> {
     match body {
-        Body::Asm(_) => Err("asm evaluation requires LLVM JIT — Phase D".into()),
+        Body::Asm(asm_fn) => {
+            if asm_fn.body.is_empty() {
+                return Ok(Value::Int(0));
+            }
+            // Substitute {param} → numbered operands ({x} → $2 for result + first param)
+            let mut asm_text = asm_fn.body.join("\n");
+            let mut offset = 1;
+            for (p_name, _) in &asm_fn.params {
+                asm_text = asm_text.replace(&format!("{{{}}}", p_name), &format!("${}", offset));
+                offset += 1;
+            }
+            asm_text = asm_text.replace("{result}", "$0");
+
+            let pid = std::process::id();
+            let tmp = std::env::temp_dir().join(format!("brief_asm_{}", pid));
+            std::fs::create_dir_all(&tmp).map_err(|e| format!("tmp: {}", e))?;
+            let asm_file = tmp.join("f.s");
+            let c_file = tmp.join("f.c");
+            let so_file = tmp.join("f.so");
+
+            // Write GNU assembler file with proper directives
+            let preamble = format!(".intel_syntax noprefix\n.text\n.globl asm_func\n.type asm_func, @function\nasm_func:\n");
+            std::fs::write(&asm_file, format!("{}{}\nret\n", preamble, asm_text))
+                .map_err(|e| format!("write asm: {}", e))?;
+
+            // Write C wrapper: passes first 6 i64 args, returns i64
+            let c_code = "long long asm_func(long long, long long, long long, long long, long long, long long);\n\
+                         long long wrapper(long long a0, long long a1, long long a2, long long a3, long long a4, long long a5) {\n\
+                         return asm_func(a0, a1, a2, a3, a4, a5);\n}\n";
+            std::fs::write(&c_file, c_code).map_err(|e| format!("write c: {}", e))?;
+
+            // Compile with gcc
+            let cc = std::env::var("CC").unwrap_or_else(|_| "gcc".to_string());
+            let out = std::process::Command::new(&cc)
+                .args(&["-shared", "-fPIC", "-o"])
+                .arg(&so_file)
+                .args(&[&asm_file, &c_file])
+                .output()
+                .map_err(|e| format!("gcc: {}", e))?;
+            if !out.status.success() {
+                let err = String::from_utf8_lossy(&out.stderr);
+                let _ = std::fs::remove_dir_all(&tmp);
+                return Err(format!("compile: {}", err.trim()));
+            }
+
+            // Load and call via FFI
+            let result = unsafe {
+                let lib = libloading::Library::new(&so_file)
+                    .map_err(|e| format!("load: {}", e))?;
+                let f: libloading::Symbol<unsafe extern "C" fn(i64, i64, i64, i64, i64, i64) -> i64>
+                    = lib.get(b"wrapper").map_err(|e| format!("sym: {}", e))?;
+                let mut args = [0i64; 6];
+                for (i, v) in input.iter().enumerate().take(6) {
+                    args[i] = match v { Value::Int(n) => *n, _ => 0 };
+                }
+                let val = f(args[0], args[1], args[2], args[3], args[4], args[5]);
+                lib.close().ok();
+                val
+            };
+
+            let _ = std::fs::remove_dir_all(&tmp);
+            Ok(Value::Int(result))
+        }
         Body::Ref(expr) => evaluate_ref_expr(expr, input),
         Body::Synthesized(expr) => evaluate_ref_expr(expr, input),
     }

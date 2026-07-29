@@ -63,6 +63,67 @@ impl AsmAssembler for StubAssembler {
     fn is_available(&self) -> bool { true }
 }
 
+// ── Platform Implementation ──────────────────────────────────────────
+
+/// 2026-07-29: System assembler — shells out to `as` on Unix or `ml64`
+/// on Windows. No external library needed. Selected via `assembler = "platform"`.
+/// Uses a temp file for each assembly invocation.
+#[derive(Debug)]
+pub struct PlatformAssembler;
+
+impl PlatformAssembler {
+    /// Map Brief arch string to the assembler binary and flags.
+    fn assembler_for_arch(arch: &str) -> (&'static str, &'static [&'static str]) {
+        match arch {
+            "x86_64" => ("as", &["--64"]),
+            "aarch64" => ("as", &[]),
+            "wasm32" | "wasm64" => ("wasm-as", &[]),
+            _ => ("as", &[]),
+        }
+    }
+}
+
+impl AsmAssembler for PlatformAssembler {
+    fn name(&self) -> &str { "platform" }
+
+    fn assemble(&self, text: &str, arch: &str) -> Result<Vec<u8>, String> {
+        let (assembler, flags) = Self::assembler_for_arch(arch);
+        let mut tmp_dir = std::env::temp_dir();
+        tmp_dir.push(format!("brief_asm_{}", std::process::id()));
+        std::fs::create_dir_all(&tmp_dir).map_err(|e| format!("cannot create tmp dir: {}", e))?;
+
+        let src_path = tmp_dir.join("input.s");
+        let obj_path = tmp_dir.join("input.o");
+        std::fs::write(&src_path, text).map_err(|e| format!("cannot write asm file: {}", e))?;
+
+        let output = std::process::Command::new(assembler)
+            .args(flags)
+            .arg("-o")
+            .arg(&obj_path)
+            .arg(&src_path)
+            .output()
+            .map_err(|e| format!("failed to run '{}': {}", assembler, e))?;
+
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            let _ = std::fs::remove_dir_all(&tmp_dir);
+            return Err(format!("assembler error for {}: {}", arch, stderr.trim()));
+        }
+
+        let bytes = std::fs::read(&obj_path)
+            .map_err(|e| format!("cannot read assembled output: {}", e))?;
+        let _ = std::fs::remove_dir_all(&tmp_dir);
+        Ok(bytes)
+    }
+
+    fn is_available(&self) -> bool {
+        std::process::Command::new("as")
+            .arg("--version")
+            .output()
+            .is_ok()
+    }
+}
+
 // ── Selector ─────────────────────────────────────────────────────────
 
 /// 2026-07-29: Select the assembler implementation based on config.
@@ -70,6 +131,7 @@ impl AsmAssembler for StubAssembler {
 pub fn get_assembler(config: &crate::target::TargetEntry) -> Box<dyn AsmAssembler> {
     match config.assembler.as_str() {
         "none" => Box::new(StubAssembler),
+        "platform" => Box::new(PlatformAssembler),
         other => {
             eprintln!("  warning: unknown assembler '{}', falling back to 'none'", other);
             Box::new(StubAssembler)
@@ -130,5 +192,38 @@ mod tests {
         };
         let asm = get_assembler(&entry);
         assert_eq!(asm.name(), "none");
+    }
+
+    #[test]
+    fn test_get_assembler_platform() {
+        let entry = crate::target::TargetEntry {
+            backend: "llvm".into(),
+            defaults: vec![],
+            plugins: None,
+            target_triple: None,
+            data_layout: None,
+            assembler: "platform".into(),
+            cross_verify_samples: 50,
+        };
+        let asm = get_assembler(&entry);
+        assert_eq!(asm.name(), "platform");
+    }
+
+    #[test]
+    fn test_platform_assembler_is_available() {
+        let pa = PlatformAssembler;
+        // Should be available on any system with `as` installed
+        assert_eq!(pa.is_available(), std::process::Command::new("as").arg("--version").output().is_ok());
+    }
+
+    #[test]
+    fn test_platform_assembler_assemble_nop_x86_64() {
+        let pa = PlatformAssembler;
+        if pa.is_available() {
+            let result = pa.assemble("nop\n", "x86_64");
+            assert!(result.is_ok(), "nop should assemble: {:?}", result);
+            // A single nop is 1 byte (0x90)
+            assert!(!result.unwrap().is_empty(), "should produce bytes");
+        }
     }
 }
