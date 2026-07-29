@@ -1404,28 +1404,24 @@ impl LlvmBackend {
         }
         let result = self.fun.gen_reg();
         match (src_llvm.as_str(), param_llvm_ty) {
-            // float → i64: bitcast to i32, zext to i64
+            // float → i64: fptosi — semantic float-to-int, not bitcast
             ("float", "i64") => {
-                let b32 = self.fun.gen_reg();
-                writeln!(out, "{}  {} = bitcast float {} to i32", indent, b32, arg_reg.name).ok();
-                writeln!(out, "{}  {} = zext i32 {} to i64", indent, result, b32).ok();
+                writeln!(out, "{}  {} = fptosi float {} to i64", indent, result, arg_reg.name).ok();
                 TypedRegister { name: result, ty: Type::int() }
             }
-            // double → i64: bitcast
+            // double → i64: fptosi — semantic float-to-int, not bitcast
             ("double", "i64") => {
-                writeln!(out, "{}  {} = bitcast double {} to i64", indent, result, arg_reg.name).ok();
+                writeln!(out, "{}  {} = fptosi double {} to i64", indent, result, arg_reg.name).ok();
                 TypedRegister { name: result, ty: Type::int() }
             }
-            // i64 → float: trunc to i32, bitcast to float
+            // i64 → float: sitofp — semantic int-to-float, not bitcast
             ("i64", "float") => {
-                let tr = self.fun.gen_reg();
-                writeln!(out, "{}  {} = trunc i64 {} to i32", indent, tr, arg_reg.name).ok();
-                writeln!(out, "{}  {} = bitcast i32 {} to float", indent, result, tr).ok();
+                writeln!(out, "{}  {} = sitofp i64 {} to float", indent, result, arg_reg.name).ok();
                 TypedRegister { name: result, ty: Type::float() }
             }
-            // i64 → double: bitcast
+            // i64 → double: sitofp — semantic int-to-float, not bitcast
             ("i64", "double") => {
-                writeln!(out, "{}  {} = bitcast i64 {} to double", indent, result, arg_reg.name).ok();
+                writeln!(out, "{}  {} = sitofp i64 {} to double", indent, result, arg_reg.name).ok();
                 TypedRegister { name: result, ty: Type::float64() }
             }
             // float ↔ double: fpext/fptrunc
