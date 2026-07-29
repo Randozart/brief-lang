@@ -165,7 +165,7 @@ fn compute_correct_output(
     // For now, handle the common case: `@result = expr` where we evaluate expr.
     if let Expr::BinaryOp(crate::ast::BinaryOpKind::Eq, lhs, rhs) = postcondition {
         // Check if LHS is @result — if so, the RHS is the spec
-        if matches!(lhs.as_ref(), Expr::Identifier(n) if n == "@result") {
+        if matches!(lhs.as_ref(), Expr::Identifier(n) if n == "#Term") {
             let mut ctx = SynthesisEvalContext::new();
             for (i, (name, _)) in params.iter().enumerate() {
                 if let Some(input_expr) = input_exprs.get(i) {

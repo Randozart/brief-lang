@@ -933,13 +933,7 @@ impl<'a> Parser<'a> {
                 self.advance();
                 self.advance();
                 let post_expr = Some(self.parse_expression()?);
-                match self.expect(Token::RBracket) {
-                    Ok(_) => {}
-                    Err(_) => return Ok(Some(DerivationBlock {
-                        examples, synthesized: None, postcondition: None, span: Span::dummy(),
-                    })),
-                }
-                self.eat(&Token::RBracket);
+                self.expect(Token::RBracket)?;
                 post_expr
             }
         } else {

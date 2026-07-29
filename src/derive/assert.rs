@@ -51,6 +51,15 @@ fn verify_item(item: &TopLevel, interp: &mut Interpreter) -> Result<(), Vec<Stri
         }
     }
 
+    // 2026-07-28: Check [[postcondition]] for each example.
+    if let Some(ref post) = derivation.postcondition {
+        for (i, example) in derivation.examples.iter().enumerate() {
+            if let Err(msg) = verify_postcondition(name, i, post, example, interp) {
+                errors.push(msg);
+            }
+        }
+    }
+
     if errors.is_empty() { Ok(()) } else { Err(errors) }
 }
 
@@ -107,6 +116,60 @@ fn verify_example(
     Ok(())
 }
 
+/// Verify a [[postcondition]] for a given example.
+/// Evaluates the postcondition expression with #Term bound to the function's
+/// actual output for this example's inputs.
+fn verify_postcondition(
+    name: &str,
+    index: usize,
+    post: &crate::ast::Expr,
+    example: &DerivationExample,
+    interp: &mut Interpreter,
+) -> Result<(), String> {
+    let args: Result<Vec<Value>, _> = example.inputs
+        .iter()
+        .map(|input| interp.eval_expr(input))
+        .collect();
+    let args = match args {
+        Ok(a) => a,
+        Err(e) => return Err(format!(
+            "{} example {}: input evaluation failed: {}",
+            name, index + 1, e
+        )),
+    };
+    let result = match interp.call_function(name, &args) {
+        Ok(r) => r,
+        Err(e) => return Err(format!(
+            "{} example {}: body execution failed: {}",
+            name, index + 1, e
+        )),
+    };
+    interp.state.insert("#Term".into(), result.clone());
+    let post_result = match interp.eval_expr(post) {
+        Ok(v) => v,
+        Err(e) => {
+            interp.state.remove("#Term");
+            return Err(format!(
+                "{} example {}: postcondition evaluation failed: {}",
+                name, index + 1, e
+            ));
+        }
+    };
+    interp.state.remove("#Term");
+    let pass = match &post_result {
+        Value::Int(n) => *n != 0,
+        Value::Bits(b) => b.iter().any(|x| *x != 0),
+        _ => false,
+    };
+    if pass {
+        Ok(())
+    } else {
+        Err(format!(
+            "{} example {}: postcondition violated (result={:?})",
+            name, index + 1, result
+        ))
+    }
+}
 
 #[cfg(test)]
 mod tests {
