@@ -87,33 +87,36 @@ impl TypeUniverse {
         // bytes is the exact width for fixed types; min_bits/max_bits is
         // the range for flexible types (Int has max_bits=64, min_bits=0).
         const PRIMORDIALS: &[(&str, u64, u64, u64, u64, &str, &[(&str, &str)])] = &[
-            // Flexible integer types (min=0, max=ceiling, narrowing shrinks SSA values)
-            ("Int",    8, 0, 64, 8, "i64", &[]),
-            ("UInt",   8, 0, 64, 8, "i64", &[]),
-            // Exact integer types
-            ("Int8",   1, 8, 8,  1, "i8", &[]),
-            ("UInt8",  1, 8, 8,  1, "i8", &[]),
-            ("Int16",  2, 16, 16, 2, "i16", &[]),
-            ("UInt16", 2, 16, 16, 2, "i16", &[]),
-            ("Int32",  4, 32, 32, 4, "i32", &[]),
-            ("UInt32", 4, 32, 32, 4, "i32", &[]),
-            ("Int64",  8, 64, 64, 8, "i64", &[]),
-            ("UInt64", 8, 64, 64, 8, "i64", &[]),
-            ("Int128", 16, 128, 128, 16, "i128", &[]),
-            ("UInt128",16, 128, 128, 16, "i128", &[]),
-            // Floating-point types (exact)
-            ("Half",   2, 16, 16, 2, "half", &[]),
-            ("BFloat", 2, 16, 16, 2, "bfloat", &[("disamb", "bfloat")]),
-            ("Float",  4, 32, 32, 4, "float", &[]),
-            ("Float32",4, 32, 32, 4, "float", &[]),
-            ("Float64",8, 64, 64, 8, "double", &[]),
-            ("Double", 8, 64, 64, 8, "double", &[]),
-            ("X86_FP80",10, 80, 80, 4, "x86_fp80", &[]),
-            ("FP128",  16, 128, 128, 16, "fp128", &[]),
+            // 2026-07-29: Flexible protocol types — all fields resolved by normalizer from int_bits.
+            // No baked-in width, alignment, or bytes. Every value is 0 = "not yet resolved."
+            ("Int",    0, 0, 0,  0, "", &[("Cast.#Int", "true"), ("Cast.#Bit", "true")]),
+            ("UInt",   0, 0, 0,  0, "", &[("Cast.#UInt", "true"), ("Cast.#Bit", "true")]),
+            ("Bit",    0, 0, 0,  0, "", &[("Cast.#Bit", "true")]),
+            // Fixed-width integer types — exact bit width is absolute
+            ("Int8",   1, 8, 8,  1, "i8", &[("Cast.#Int", "true"), ("Cast.#Bit", "true")]),
+            ("UInt8",  1, 8, 8,  1, "i8", &[("Cast.#UInt", "true"), ("Cast.#Bit", "true")]),
+            ("Int16",  2, 16, 16, 2, "i16", &[("Cast.#Int", "true"), ("Cast.#Bit", "true")]),
+            ("UInt16", 2, 16, 16, 2, "i16", &[("Cast.#UInt", "true"), ("Cast.#Bit", "true")]),
+            ("Int32",  4, 32, 32, 4, "i32", &[("Cast.#Int", "true"), ("Cast.#Bit", "true")]),
+            ("UInt32", 4, 32, 32, 4, "i32", &[("Cast.#UInt", "true"), ("Cast.#Bit", "true")]),
+            ("Int64",  8, 64, 64, 8, "i64", &[("Cast.#Int", "true"), ("Cast.#Bit", "true")]),
+            ("UInt64", 8, 64, 64, 8, "i64", &[("Cast.#UInt", "true"), ("Cast.#Bit", "true")]),
+            ("Int128", 16, 128, 128, 16, "i128", &[("Cast.#Int", "true"), ("Cast.#Bit", "true")]),
+            ("UInt128",16, 128, 128, 16, "i128", &[("Cast.#UInt", "true"), ("Cast.#Bit", "true")]),
+            // Floating-point types — bit-width is accuracy, not maximum storage.
+            // Each float type carries an explicit bits property for the normalizer.
+            ("Half",   2, 16, 16, 2, "half", &[("Cast.#Float", "true"), ("Cast.#Bit", "true"), ("bits", "16")]),
+            ("BFloat", 2, 16, 16, 2, "bfloat", &[("disamb", "bfloat"), ("Cast.#Float", "true"), ("Cast.#Bit", "true"), ("bits", "16")]),
+            ("Float",  4, 32, 32, 4, "float", &[("Cast.#Float", "true"), ("Cast.#Bit", "true"), ("bits", "32")]),
+            ("Float32",4, 32, 32, 4, "float", &[("Cast.#Float", "true"), ("Cast.#Bit", "true"), ("bits", "32")]),
+            ("Float64",8, 64, 64, 8, "double", &[("Cast.#Float", "true"), ("Cast.#Bit", "true"), ("bits", "64")]),
+            ("Double", 8, 64, 64, 8, "double", &[("Cast.#Float", "true"), ("Cast.#Bit", "true"), ("bits", "64")]),
+            ("X86_FP80",10, 80, 80, 4, "x86_fp80", &[("Cast.#Float", "true"), ("Cast.#Bit", "true"), ("bits", "80")]),
+            ("FP128",  16, 128, 128, 16, "fp128", &[("Cast.#Float", "true"), ("Cast.#Bit", "true"), ("bits", "128")]),
             // Other
-            ("Bool",   1, 8, 8,  1, "i8", &[]),
-            ("Char",   4, 32, 32, 4, "i32", &[]),
-            ("Data",   8, 64, 64, 8, "i8*", &[]),
+            ("Bool",   1, 8, 8,  1, "i8", &[("Cast.#Bool", "true"), ("Cast.#Bit", "true")]),
+            ("Char",   4, 32, 32, 4, "i32", &[("Cast.#Bit", "true")]),
+            ("Data",   8, 64, 64, 8, "ptr", &[("Cast.#Data", "true"), ("Cast.#Bit", "true")]),
             ("Void",   0, 0,  0,  0, "void", &[]),
         ];
         for &(name, bytes, min_bits, max_bits, alignment, llvm_ty, extras) in PRIMORDIALS {
@@ -121,7 +124,13 @@ impl TypeUniverse {
             properties.insert("llvm_type".into(), crate::ast::PropertyValue::String(llvm_ty.to_string()));
             properties.insert("alignment".into(), crate::ast::PropertyValue::Int(alignment as i64));
             for &(k, v) in extras {
-                properties.insert(k.to_string(), crate::ast::PropertyValue::String(v.to_string()));
+                // 2026-07-29: Numeric extras (bits, maxbits) are stored as Int so
+                // the normalizer's get_exact_bits/get_maxbits can read them directly.
+                if let Ok(n) = v.parse::<i64>() {
+                    properties.insert(k.to_string(), crate::ast::PropertyValue::Int(n));
+                } else {
+                    properties.insert(k.to_string(), crate::ast::PropertyValue::String(v.to_string()));
+                }
             }
             self.types.insert(name.to_string(), ResolvedType {
                 name: name.to_string(),
