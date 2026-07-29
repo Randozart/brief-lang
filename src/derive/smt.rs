@@ -485,6 +485,31 @@ fn smt_to_brief_expr(
                     // These appear in Bool grammars — simplified handling
                     smt_boolean_op(items, &op, params, ret_type)
                 }
+                "let" => {
+                    // 2026-07-29: SMT let: (let ((v1 e1) (v2 e2) ...) body)
+                    // Expand by substituting variables into the body.
+                    // Process bindings innermost-first.
+                    if items.len() < 2 {
+                        return Err(SynthesizeError::SolverError("malformed let".into()));
+                    }
+                    let body_expr_idx = items.len() - 1;
+                    let mut result = smt_to_brief_expr(&items[body_expr_idx], params, ret_type)?;
+                    // Process bindings in reverse (innermost first)
+                    for i in (1..items.len()-1).rev() {
+                        let SExpr::List(binding) = &items[i] else {
+                            return Err(SynthesizeError::SolverError("malformed let binding".into()));
+                        };
+                        if binding.len() < 2 {
+                            return Err(SynthesizeError::SolverError("malformed let binding pair".into()));
+                        }
+                        let SExpr::Atom(var_name) = &binding[0] else {
+                            return Err(SynthesizeError::SolverError("expected variable name in let".into()));
+                        };
+                        let val_expr = smt_to_brief_expr(&binding[1], params, ret_type)?;
+                        result = substitute_var(&result, var_name, &val_expr);
+                    }
+                    Ok(result)
+                }
                 _ => Err(SynthesizeError::SolverError(format!(
                     "unknown SMT operator: {}", op
                 ))),
@@ -599,6 +624,60 @@ pub fn synthesize_via_smt(
         Err(e @ SynthesizeError::SolverUnavailable(_)) => Err(e),
         Err(e) => Err(e), // 2026-07-28: Propagate error — removed identity fallback
                            // (Phase D placeholder returned x0 regardless of examples)
+    }
+}
+
+/// 2026-07-29: Substitute a variable name with an expression throughout
+/// an expression tree. Used to expand SMT let bindings into the body.
+/// For example: substitute_var(Expr::Identifier("x"), "x", Expr::Decimal(42))
+/// → Expr::Decimal(42). Handles all Expr variants that contain identifiers.
+fn substitute_var(expr: &Expr, var_name: &str, replacement: &Expr) -> Expr {
+    match expr {
+        Expr::Identifier(name) => {
+            if name == var_name {
+                replacement.clone()
+            } else {
+                expr.clone()
+            }
+        }
+        Expr::UnaryOp(kind, inner) => {
+            Expr::UnaryOp(*kind, Box::new(substitute_var(inner, var_name, replacement)))
+        }
+        Expr::BinaryOp(kind, lhs, rhs) => {
+            Expr::BinaryOp(
+                *kind,
+                Box::new(substitute_var(lhs, var_name, replacement)),
+                Box::new(substitute_var(rhs, var_name, replacement)),
+            )
+        }
+        Expr::If(cond, then_, else_) => {
+            Expr::If(
+                Box::new(substitute_var(cond, var_name, replacement)),
+                Box::new(substitute_var(then_, var_name, replacement)),
+                else_.as_ref().map(|e| Box::new(substitute_var(e, var_name, replacement))),
+            )
+        }
+        Expr::Call(name, args, aid) => {
+            Expr::Call(
+                name.clone(),
+                args.iter().map(|a| substitute_var(a, var_name, replacement)).collect(),
+                *aid,
+            )
+        }
+        Expr::Field(inner, fname) => {
+            Expr::Field(Box::new(substitute_var(inner, var_name, replacement)), fname.clone())
+        }
+        Expr::Match(scrut, arms) => {
+            Expr::Match(
+                Box::new(substitute_var(scrut, var_name, replacement)),
+                arms.iter().map(|a| crate::ast::MatchArm {
+                    pattern: a.pattern.clone(),
+                    guard: a.guard.clone(),
+                    body: Box::new(substitute_var(&a.body, var_name, replacement)),
+                }).collect(),
+            )
+        }
+        _ => expr.clone(),
     }
 }
 

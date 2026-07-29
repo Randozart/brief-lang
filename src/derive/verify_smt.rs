@@ -3,7 +3,7 @@
 // verification queries, invokes Z3, and extracts counterexamples.
 // This is the core of the CEGIS verification loop.
 
-use crate::ast::{BinaryOpKind, Expr, Type, UnaryOpKind};
+use crate::ast::{BinaryOpKind, Expr, Statement, Type, UnaryOpKind};
 use crate::ast::Pattern;
 use crate::derive::SynthesizeError;
 use std::process::Command;
@@ -227,7 +227,7 @@ pub fn build_verification_query(
     params: &[(String, Type)],
     postcondition: Option<&Expr>,
     precondition: Option<&Expr>,
-    ref_fn: Option<&Expr>,
+    ref_fn: Option<(&Expr, &[String])>,
 ) -> String {
     let mut q = String::new();
     q.push_str("(set-option :produce-models true)\n");
@@ -259,9 +259,13 @@ pub fn build_verification_query(
     }
     q.push_str(&format!(") (_ BitVec 64) {})\n\n", candidate_body));
 
-    // 2026-07-29: Reference function as define-fun ref
-    if let Some(ref_expr) = ref_fn {
-        let ref_body = expr_to_smt_term(ref_expr, &param_names);
+    // 2026-07-29: Reference function as define-fun ref.
+    // Substitute reference's own param names with standardized x0, x1, ...
+    // so the ref body uses the same variable names as the candidate and
+    // postcondition in the SMT query.
+    if let Some((ref_expr, ref_param_names)) = ref_fn {
+        let ref_body_renamed = rename_variables(ref_expr, ref_param_names, &param_names);
+        let ref_body = expr_to_smt_term(&ref_body_renamed, &param_names);
         q.push_str("(define-fun ref (");
         for (i, (_, ty)) in params.iter().enumerate() {
             q.push_str(&format!(" (x{} {})", i, type_to_smt_sort(ty)));
@@ -269,48 +273,52 @@ pub fn build_verification_query(
         q.push_str(&format!(") (_ BitVec 64) {})\n\n", ref_body));
     }
 
-    // Build the forall verification body: (=> pre post) or just (f x) == (ref x)
+    // 2026-07-29: Build combined verification condition.
+    // When both postcondition and reference are present, assert BOTH:
+    //   (=> pre post) AND (= (f x) (ref x))
+    // When only one is present, assert just that one.
+    let param_refs: Vec<String> = (0..params.len())
+        .map(|i| format!("x{}", i))
+        .collect();
+    let mut conditions: Vec<String> = Vec::new();
+
     if let Some(post) = postcondition {
-        let param_refs: Vec<String> = (0..params.len())
-            .map(|i| format!("x{}", i))
-            .collect();
         let f_call = format!("(f {})", param_refs.join(" "));
-        param_names.push("#Term".to_string());
-        let post_raw = expr_to_smt_term(post, &param_names);
+        let mut post_params = param_names.clone();
+        post_params.push("#Term".to_string());
+        let post_raw = expr_to_smt_term(post, &post_params);
         let post_body = post_raw.replace("#Term", &f_call);
 
-        let forall_body = if let Some(pre) = precondition {
-            let pre_body = expr_to_smt_term(pre, &param_names[..params.len()]);
+        let cond = if let Some(pre) = precondition {
+            let pre_body = expr_to_smt_term(pre, &param_names);
             format!("(=> {} {})", pre_body, post_body)
         } else {
             post_body
         };
-
-        q.push_str("; Verify: forall inputs, candidate satisfies postcondition\n");
-        q.push_str("(assert (not (forall (");
-        for (i, (_, ty)) in params.iter().enumerate() {
-            q.push_str(&format!(" (x{} {})", i, type_to_smt_sort(ty)));
-        }
-        q.push_str(&format!(")\n   {})))\n", forall_body));
+        conditions.push(cond);
     }
 
-    // 2026-07-29: Reference-based verification: forall x: (f x) == (ref x)
-    if ref_fn.is_some() && postcondition.is_none() {
-        let param_refs: Vec<String> = (0..params.len())
-            .map(|i| format!("x{}", i))
-            .collect();
+    if ref_fn.is_some() {
         let f_call = format!("(f {})", param_refs.join(" "));
         let ref_call = format!("(ref {})", param_refs.join(" "));
         let equality = format!("(= {})", vec![f_call, ref_call].join(" "));
-
-        let forall_body = if let Some(pre) = precondition {
-            let pre_body = expr_to_smt_term(pre, &param_names[..params.len()]);
+        let cond = if let Some(pre) = precondition {
+            let pre_body = expr_to_smt_term(pre, &param_names);
             format!("(=> {} {})", pre_body, equality)
         } else {
             equality
         };
+        conditions.push(cond);
+    }
 
-        q.push_str("; Verify: forall inputs, candidate matches reference function\n");
+    if !conditions.is_empty() {
+        let forall_body = if conditions.len() == 1 {
+            conditions[0].clone()
+        } else {
+            format!("(and {})", conditions.join(" "))
+        };
+
+        q.push_str("; Verify: forall inputs, candidate satisfies specification\n");
         q.push_str("(assert (not (forall (");
         for (i, (_, ty)) in params.iter().enumerate() {
             q.push_str(&format!(" (x{} {})", i, type_to_smt_sort(ty)));
@@ -437,6 +445,124 @@ fn extract_counterexamples(output: &str) -> Vec<Vec<Expr>> {
         results.push(vec![Expr::Decimal(0)]);
     }
     results
+}
+
+// ── Variable Renaming ────────────────────────────────────────────────
+
+/// 2026-07-29: Rename variables in an expression according to a positional mapping.
+/// Each identifier in the expression that matches a name in `from_names` is replaced
+/// with the corresponding name in `to_names`. Used to standardize reference function
+/// parameter names before SMT conversion.
+fn rename_variables(expr: &Expr, from_names: &[String], to_names: &[String]) -> Expr {
+    match expr {
+        Expr::Identifier(name) => {
+            if let Some(idx) = from_names.iter().position(|p| p == name) {
+                to_names.get(idx).cloned().map_or_else(
+                    || expr.clone(),
+                    |new_name| Expr::Identifier(new_name),
+                )
+            } else {
+                expr.clone()
+            }
+        }
+        Expr::UnaryOp(kind, inner) => {
+            Expr::UnaryOp(*kind, Box::new(rename_variables(inner, from_names, to_names)))
+        }
+        Expr::BinaryOp(kind, lhs, rhs) => {
+            Expr::BinaryOp(
+                *kind,
+                Box::new(rename_variables(lhs, from_names, to_names)),
+                Box::new(rename_variables(rhs, from_names, to_names)),
+            )
+        }
+        Expr::If(cond, then, else_) => {
+            Expr::If(
+                Box::new(rename_variables(cond, from_names, to_names)),
+                Box::new(rename_variables(then, from_names, to_names)),
+                else_.as_ref().map(|e| Box::new(rename_variables(e, from_names, to_names))),
+            )
+        }
+        Expr::Call(name, args, aid) => {
+            Expr::Call(
+                name.clone(),
+                args.iter().map(|a| rename_variables(a, from_names, to_names)).collect(),
+                *aid,
+            )
+        }
+        Expr::Field(inner, fname) => {
+            Expr::Field(Box::new(rename_variables(inner, from_names, to_names)), fname.clone())
+        }
+        Expr::Match(scrut, arms) => {
+            Expr::Match(
+                Box::new(rename_variables(scrut, from_names, to_names)),
+                arms.iter().map(|a| crate::ast::MatchArm {
+                    pattern: a.pattern.clone(),
+                    guard: a.guard.clone(),
+                    body: Box::new(rename_variables(&a.body, from_names, to_names)),
+                }).collect(),
+            )
+        }
+        Expr::Block(stmts) => {
+            Expr::Block(stmts.iter().map(|s| rename_stmt(s, from_names, to_names)).collect())
+        }
+        _ => expr.clone(),
+    }
+}
+
+/// 2026-07-29: Rename variables in a statement (used by rename_variables for blocks).
+fn rename_stmt(stmt: &Statement, from_names: &[String], to_names: &[String]) -> Statement {
+    match stmt {
+        Statement::Let { name, names, ty, expr, modifiers } => {
+            Statement::Let {
+                name: name.clone(),
+                names: names.clone(),
+                ty: ty.clone(),
+                expr: expr.as_ref().map(|e| rename_variables(e, from_names, to_names)),
+                modifiers: modifiers.clone(),
+            }
+        }
+        Statement::Assign(lhs, rhs) => {
+            Statement::Assign(
+                rename_variables(lhs, from_names, to_names),
+                rename_variables(rhs, from_names, to_names),
+            )
+        }
+        Statement::Expression(expr) => {
+            Statement::Expression(rename_variables(expr, from_names, to_names))
+        }
+        Statement::Term(val) => {
+            Statement::Term(val.as_ref().map(|e| rename_variables(e, from_names, to_names)))
+        }
+        Statement::TermBang(val) => {
+            Statement::TermBang(val.as_ref().map(|e| rename_variables(e, from_names, to_names)))
+        }
+        Statement::Guarded(cond, body) => {
+            Statement::Guarded(
+                rename_variables(cond, from_names, to_names),
+                body.iter().map(|s| rename_stmt(s, from_names, to_names)).collect(),
+            )
+        }
+        Statement::Gate(cond) => {
+            Statement::Gate(rename_variables(cond, from_names, to_names))
+        }
+        Statement::If(cond, then, else_) => {
+            Statement::If(
+                rename_variables(cond, from_names, to_names),
+                then.iter().map(|s| rename_stmt(s, from_names, to_names)).collect(),
+                else_.iter().map(|s| rename_stmt(s, from_names, to_names)).collect(),
+            )
+        }
+        Statement::Block(body) => {
+            Statement::Block(body.iter().map(|s| rename_stmt(s, from_names, to_names)).collect())
+        }
+        Statement::SyncBlock(body) => {
+            Statement::SyncBlock(body.iter().map(|s| rename_stmt(s, from_names, to_names)).collect())
+        }
+        Statement::Return(val) => {
+            Statement::Return(val.as_ref().map(|e| rename_variables(e, from_names, to_names)))
+        }
+        _ => stmt.clone(),
+    }
 }
 
 #[cfg(test)]

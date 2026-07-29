@@ -17,9 +17,14 @@ use crate::derive::SynthesizeError;
 pub enum VerifyResult {
     /// Candidate passed all verification checks.
     Pass,
-    /// Candidate failed verification. The Vec contains failing input expressions
-    /// (one per parameter, in order).
-    Fail(Vec<Vec<Expr>>, String),
+    /// Candidate failed verification.
+    /// Fields: failing inputs (one Vec<Expr> per param row), optional correct output
+    /// (for re-synthesis counterexample injection), human-readable reason.
+    /// 2026-07-29: Added Option<Expr> for correct output. The random verifier knows
+    /// the correct output for reference mismatches (it's the reference's result) and
+    /// for @result = expr postconditions (evaluated from the RHS). For evaluation
+    /// errors and general postconditions, the correct output is None.
+    Fail(Vec<Vec<Expr>>, Option<Expr>, String),
 }
 
 /// Generate test inputs for a function with given parameters.
@@ -116,6 +121,7 @@ pub fn verify_candidate(
             Err(e) => {
                 return VerifyResult::Fail(
                     vec![input_row.clone()],
+                    None,
                     format!("evaluation error: {:?}", e),
                 );
             }
@@ -139,6 +145,7 @@ pub fn verify_candidate(
                     if b.is_empty() || b.iter().all(|&x| x == 0) {
                         return VerifyResult::Fail(
                             vec![input_row.clone()],
+                            None,
                             format!("postcondition failed for output {:?}", result),
                         );
                     }
@@ -147,6 +154,7 @@ pub fn verify_candidate(
                     if n == 0 {
                         return VerifyResult::Fail(
                             vec![input_row.clone()],
+                            None,
                             format!("postcondition failed for output {:?}", result),
                         );
                     }
@@ -183,14 +191,17 @@ pub fn verify_candidate(
                 Err(e) => {
                     return VerifyResult::Fail(
                         vec![input_row.clone()],
+                        None,
                         format!("reference evaluation error: {:?}", e),
                     );
                 }
             };
             let tol = 0.0; // exact match for now
             if !crate::interpreter::values_within_tolerance(&result, &ref_val, tol) {
+                let correct_output = val_to_expr_output(&ref_val);
                 return VerifyResult::Fail(
                     vec![input_row.clone()],
+                    Some(correct_output),
                     format!("reference mismatch: candidate={:?} ref={:?}", result, ref_val),
                 );
             }
@@ -205,12 +216,30 @@ pub fn verify_candidate(
         if seen_outputs.iter().all(|&v| v == first) {
             return VerifyResult::Fail(
                 vec![],
+                None,
                 format!("constant output {} for all {} test inputs", first, seen_outputs.len()),
             );
         }
     }
 
     VerifyResult::Pass
+}
+
+/// 2026-07-29: Convert an interpreter Value to an Expr for use as a
+/// counterexample's correct output in DerivationExample.
+fn val_to_expr_output(val: &crate::interpreter::Value) -> Expr {
+    match val {
+        crate::interpreter::Value::Int(n) => Expr::Decimal(*n),
+        crate::interpreter::Value::Float(f) => Expr::Float(*f),
+        crate::interpreter::Value::Bits(b) => {
+            if b.len() == 1 && (b[0] == 0 || b[0] == 1) {
+                Expr::Bool(b[0] == 1)
+            } else {
+                Expr::Decimal(b.iter().fold(0i64, |acc, &x| acc.wrapping_shl(8) | x as i64))
+            }
+        }
+        _ => Expr::Decimal(0),
+    }
 }
 
 /// Extract an i64 value from a constant expression (for test input generation).
@@ -269,7 +298,7 @@ mod tests {
         let candidate = Expr::Decimal(42);
         let result = verify_candidate(&candidate, &params, None, 20, None);
         match result {
-            VerifyResult::Fail(_, ref msg) => {
+            VerifyResult::Fail(_, _, ref msg) => {
                 assert!(msg.contains("constant output"),
                     "expected constant output message, got: {}", msg);
             }

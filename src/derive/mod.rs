@@ -78,7 +78,7 @@ pub fn synthesize(
         // 2026-07-28: Use Z3 forall verification when postcondition provided.
         // Falls back to random verification when Z3 is unavailable.
         if let Some(post) = postcondition {
-            match smt_verify_candidate(name, &cand_expr, params, &examples, post, precondition) {
+            match smt_verify_candidate(name, &cand_expr, params, &examples, post, precondition, ref_fn) {
                 CegisResult::Proven => {
                     eprintln!("  cegis[{}/5] '{}': PROVEN for all inputs", iteration + 1, name);
                 }
@@ -97,9 +97,27 @@ pub fn synthesize(
                     if verify_samples > 0 {
                         match verify::verify_candidate(&cand_expr, params, Some(post), verify_samples, ref_fn) {
                             verify::VerifyResult::Pass => {}
-                            verify::VerifyResult::Fail(_, r) => {
-                                adaptive_depth += 1;
-                                eprintln!("  verify: '{}' rejected ({}) — trying depth {}", name, r, adaptive_depth);
+                            // 2026-07-29: Inject counterexample from random verification.
+                            // When the correct output is known (reference mismatch or
+                            // @result = expr postcondition), push it as a DerivationExample
+                            // for re-synthesis — same as the Z3 CEGIS path does at line 85.
+                            verify::VerifyResult::Fail(inputs, correct_output, r) => {
+                                if let (Some(input_row), Some(output)) = (inputs.first(), correct_output) {
+                                    eprintln!("  cegis[{}/5] '{}': counterexample at {:?}, adding example", iteration + 1, name, input_row);
+                                    examples.push(DerivationExample {
+                                        inputs: input_row.clone(),
+                                        output: Box::new(output),
+                                        tolerance: None,
+                                        span: crate::errors::Span::dummy(),
+                                    });
+                                    // 2026-07-29: Also increase depth — more examples
+                                    // require a more complex formula.
+                                    adaptive_depth += 1;
+                                    eprintln!("  cegis[{}/5] '{}': increased depth to {}", iteration + 1, name, adaptive_depth);
+                                } else {
+                                    adaptive_depth += 1;
+                                    eprintln!("  verify: '{}' rejected ({}) — trying depth {}", name, r, adaptive_depth);
+                                }
                                 verified = false;
                             }
                         }
@@ -109,10 +127,24 @@ pub fn synthesize(
         } else if verify_samples > 0 {
             match verify::verify_candidate(&cand_expr, params, None, verify_samples, ref_fn) {
                 verify::VerifyResult::Pass => {}
-                verify::VerifyResult::Fail(_, reason) => {
-                    adaptive_depth += 1;
-                    eprintln!("  cegis[{}/5] '{}': verification rejected ({}) — trying depth {}", iteration + 1, name, reason, adaptive_depth);
-                    continue;
+                // 2026-07-29: Inject counterexample from random verification.
+                // Same pattern as above — push to examples when correct output is known.
+                verify::VerifyResult::Fail(inputs, correct_output, reason) => {
+                    if let (Some(input_row), Some(output)) = (inputs.first(), correct_output) {
+                        eprintln!("  cegis[{}/5] '{}': counterexample at {:?}, adding example", iteration + 1, name, input_row);
+                        examples.push(DerivationExample {
+                            inputs: input_row.clone(),
+                            output: Box::new(output),
+                            tolerance: None,
+                            span: crate::errors::Span::dummy(),
+                        });
+                        adaptive_depth += 1;
+                        eprintln!("  cegis[{}/5] '{}': increased depth to {}", iteration + 1, name, adaptive_depth);
+                    } else {
+                        adaptive_depth += 1;
+                        eprintln!("  cegis[{}/5] '{}': verification rejected ({}) — trying depth {}", iteration + 1, name, reason, adaptive_depth);
+                    }
+                    verified = false;
                 }
             }
         }
@@ -147,9 +179,9 @@ fn smt_verify_candidate(
     examples: &[DerivationExample],
     postcondition: &Expr,
     precondition: Option<&Expr>,
+    ref_fn: Option<(&Expr, &[String])>,
 ) -> CegisResult {
-    // Build forall verification query with precondition
-    let ref_fn: Option<&Expr> = None; // TODO: pass through from synthesize
+    // Build forall verification query with precondition and optional reference
     let query = verify_smt::build_verification_query(name, candidate, params, Some(postcondition), precondition, ref_fn);
 
     // Run Z3
