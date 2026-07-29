@@ -75,16 +75,11 @@ pub fn synthesize(
         let mut candidate_prog = synthesize_candidate(name, params, ret_type, &examples, adaptive_depth)?;
         let cand_expr = candidate_prog.body.get(0).cloned().unwrap_or(Expr::Decimal(0));
         let mut verified = true;
-        // 2026-07-28: Use Z3 forall verification when postcondition or
-        // reference function is provided. When only ref_fn is present
-        // (no postcondition), pass a trivial `true` postcondition so the
-        // combined verification asserts (= (f x) (ref x)) for all inputs.
-        // 2026-07-29: Changed gate from `if let Some(post)` to also
-        // trigger on ref_fn — the SMT path can verify against the reference
-        // without needing a user-written postcondition.
-        let trivial_post = Expr::Bool(true);
-        if postcondition.is_some() || ref_fn.is_some() {
-            let post = postcondition.unwrap_or(&trivial_post);
+        // 2026-07-28: Use Z3 forall verification when postcondition provided.
+        // 2026-07-29: Z3 reference-only verification returns sat with empty
+        // model for bitvector equality queries. Use Z3 only for user-written
+        // postconditions; reference-only falls through to random verification.
+        if let Some(post) = postcondition {
             match smt_verify_candidate(name, &cand_expr, params, &examples, post, precondition, ref_fn) {
                 CegisResult::Proven => {
                     eprintln!("  cegis[{}/5] '{}': PROVEN for all inputs", iteration + 1, name);
@@ -104,20 +99,16 @@ pub fn synthesize(
                     if verify_samples > 0 {
                         match verify::verify_candidate(&cand_expr, params, Some(post), verify_samples, ref_fn) {
                             verify::VerifyResult::Pass => {}
-                            // 2026-07-29: Inject counterexample from random verification.
-                            // When the correct output is known (reference mismatch or
-                            // @result = expr postcondition), push it as a DerivationExample
-                            // for re-synthesis — same as the Z3 CEGIS path does at line 85.
                             verify::VerifyResult::Fail(inputs, correct_output, r) => {
-                if let (Some(input_row), Some(output)) = (inputs.first(), correct_output) {
-                eprintln!("  cegis[{}/5] '{}': counterexample at {:?}, adding example", iteration + 1, name, input_row);
-                examples.push(DerivationExample {
-                    inputs: input_row.clone(),
-                    output: Box::new(output),
-                    tolerance: None,
-                    span: crate::errors::Span::dummy(),
-                });
-            } else {
+                                if let (Some(input_row), Some(output)) = (inputs.first(), correct_output) {
+                                    eprintln!("  cegis[{}/5] '{}': counterexample at {:?}, adding example", iteration + 1, name, input_row);
+                                    examples.push(DerivationExample {
+                                        inputs: input_row.clone(),
+                                        output: Box::new(output),
+                                        tolerance: None,
+                                        span: crate::errors::Span::dummy(),
+                                    });
+                                } else {
                                     adaptive_depth += 1;
                                     eprintln!("  verify: '{}' rejected ({}) — trying depth {}", name, r, adaptive_depth);
                                 }
@@ -131,7 +122,7 @@ pub fn synthesize(
             match verify::verify_candidate(&cand_expr, params, None, verify_samples, ref_fn) {
                 verify::VerifyResult::Pass => {}
                 // 2026-07-29: Inject counterexample from random verification.
-                // Same pattern as above — push to examples when correct output is known.
+                // Pushes to examples when correct output is known (reference mismatch).
                 verify::VerifyResult::Fail(inputs, correct_output, reason) => {
                     if let (Some(input_row), Some(output)) = (inputs.first(), correct_output) {
                         eprintln!("  cegis[{}/5] '{}': counterexample at {:?}, adding example", iteration + 1, name, input_row);

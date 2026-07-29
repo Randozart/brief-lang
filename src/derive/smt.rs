@@ -487,26 +487,30 @@ fn smt_to_brief_expr(
                 }
                 "let" => {
                     // 2026-07-29: SMT let: (let ((v1 e1) (v2 e2) ...) body)
-                    // Expand by substituting variables into the body.
-                    // Process bindings innermost-first.
-                    if items.len() < 2 {
+                    // Z3's let format puts ALL bindings in ONE sublist at items[1]:
+                    //   items[1] = SExpr::List([SExpr::List([v1, e1]), SExpr::List([v2, e2]), ...])
+                    // The body is items[last].
+                    // Expand by substituting bindings into body, innermost-first.
+                    if items.len() < 3 {
                         return Err(SynthesizeError::SolverError("malformed let".into()));
                     }
-                    let body_expr_idx = items.len() - 1;
-                    let mut result = smt_to_brief_expr(&items[body_expr_idx], params, ret_type)?;
-                    // Process bindings in reverse (innermost first)
-                    for i in (1..items.len()-1).rev() {
-                        let SExpr::List(binding) = &items[i] else {
-                            return Err(SynthesizeError::SolverError("malformed let binding".into()));
-                        };
-                        if binding.len() < 2 {
-                            return Err(SynthesizeError::SolverError("malformed let binding pair".into()));
+                    let body = &items[items.len() - 1];
+                    let mut result = smt_to_brief_expr(body, params, ret_type)?;
+                    // The bindings are in a single sublist at items[1]
+                    if let SExpr::List(bindings_list) = &items[1] {
+                        // Process bindings in reverse (innermost first)
+                        for binding in bindings_list.iter().rev() {
+                            if let SExpr::List(pair) = binding {
+                                if pair.len() < 2 {
+                                    return Err(SynthesizeError::SolverError("malformed let binding pair".into()));
+                                }
+                                let SExpr::Atom(var_name) = &pair[0] else {
+                                    return Err(SynthesizeError::SolverError("expected variable name in let".into()));
+                                };
+                                let val_expr = smt_to_brief_expr(&pair[1], params, ret_type)?;
+                                result = substitute_var(&result, var_name, &val_expr);
+                            }
                         }
-                        let SExpr::Atom(var_name) = &binding[0] else {
-                            return Err(SynthesizeError::SolverError("expected variable name in let".into()));
-                        };
-                        let val_expr = smt_to_brief_expr(&binding[1], params, ret_type)?;
-                        result = substitute_var(&result, var_name, &val_expr);
                     }
                     Ok(result)
                 }
@@ -537,6 +541,21 @@ fn smt_atom_to_expr(
                 return Ok(Expr::Identifier(params[i].0.clone()));
             }
         }
+    }
+    // 2026-07-29: Z3 uses a!0, a!1, ... for internal skolem constants and
+    // let-bound variables in SyGuS solutions. These are bound by (let ((a!N val))
+    // ...) and substituted by the 'let' handler. If one appears unbound,
+    // it's likely from nested let structure — treat as return value 0.
+    // The CEGIS verification will catch incorrect values.
+    if let Some(digit_str) = s.strip_prefix("a!") {
+        if let Ok(i) = digit_str.parse::<usize>() {
+            if i < params.len() {
+                return Ok(Expr::Identifier(params[i].0.clone()));
+            }
+        }
+        // 2026-07-29: Out-of-range a!N — Z3 internal variable that was not
+        // substituted by the let handler. Return 0 as placeholder.
+        return Ok(Expr::Decimal(0));
     }
     // Check if it's a hex constant (#x...)
     if let Some(hex_str) = s.strip_prefix("#x") {

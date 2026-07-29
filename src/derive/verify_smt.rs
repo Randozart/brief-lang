@@ -440,18 +440,25 @@ pub fn build_verification_query(
     }
 
     if !conditions.is_empty() {
-        let forall_body = if conditions.len() == 1 {
+        let conditions_body = if conditions.len() == 1 {
             conditions[0].clone()
         } else {
             format!("(and {})", conditions.join(" "))
         };
 
-        q.push_str("; Verify: forall inputs, candidate satisfies specification\n");
-        q.push_str("(assert (not (forall (");
+        // 2026-07-29: Skolemized counterexample extraction — replace forall
+        // with declare-const + direct assertion. Z3 cannot reliably produce
+        // models for quantified variables in forall queries (returns sat with
+        // empty model). With declare-const, Z3 always provides a concrete
+        // counterexample model when sat is returned.
+        // This is correct for CEGIS: UNSAT means condition holds for ALL
+        // assignments (same as forall), SAT provides a specific witness.
+        q.push_str("; Skolemized parameters for reliable model extraction\n");
         for (i, (_, ty)) in params.iter().enumerate() {
-            q.push_str(&format!(" (x{} {})", i, type_to_smt_sort(ty)));
+            q.push_str(&format!("(declare-const x{} {})\n", i, type_to_smt_sort(ty)));
         }
-        q.push_str(&format!(")\n   {})))\n", forall_body));
+        q.push_str(&format!("\n; Verify: candidate satisfies specification\n"));
+        q.push_str(&format!("(assert (not {}))\n", conditions_body));
     }
 
     q.push_str("\n(check-sat)\n");
@@ -815,7 +822,8 @@ mod tests {
             Box::new(Expr::Decimal(0)),
         );
         let query = build_verification_query("test", &candidate, &params, Some(&post), None, None);
-        assert!(query.contains("(forall"));
+        // 2026-07-29: Skolemized — uses declare-const instead of forall
+        assert!(query.contains("declare-const"), "query should use declare-const, got: {}", &query[..query.len().min(200)]);
         assert!(query.contains("(f x0"));
     }
 
