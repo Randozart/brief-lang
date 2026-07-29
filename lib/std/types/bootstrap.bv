@@ -13,7 +13,6 @@
 // hardcoded codegen based on protocol membership.
 
 type Int: #Int {
-    op Parse: parse(#L);
     op Add: add(#L, #R);
     op Sub: sub(#L, #R);
     op Mul: mul(#L, #R);
@@ -43,7 +42,6 @@ type Int64: Int { !> bits: 64; };
 type UInt64: Int { !> bits: 64; };
 
 type Float: #Float {
-    op Parse: parse(#L);
     op Add: add(#L, #R);
     op Sub: sub(#L, #R);
     op Mul: mul(#L, #R);
@@ -61,7 +59,6 @@ type Double: #Float { !> bits: 64; };
 
 type Bool: #Bool {
     !> bits: 8;
-    op Parse: parse_bool(#L);
     op Eq: eq(#L, #R);
     op Ne: ne(#L, #R);
     op And: band(#L, #R);
@@ -70,7 +67,6 @@ type Bool: #Bool {
 };
 
 type Char: #Char { !> bits: 32;
-    op Parse: parse_char(#L);
 };
 
 type String: #String {
@@ -78,7 +74,6 @@ type String: #String {
     len: Int;
     !> alignment: 8;
     !> encoding: "UTF-8";
-    op Parse(Quoted): parse_string(#L);
     prop Size: chars(#L);
     prop Bytes: byte_len(#L);
 };

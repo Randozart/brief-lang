@@ -549,23 +549,31 @@ impl LlvmBackend {
     }
 
     pub(super) fn align_of(&self, ty: &str) -> u32 {
-        // 2026-07-04: Universe-driven alignment lookup.
-        // The type universe provides per-type alignment from type declarations.
-        // Falls back to hardcoded byte-size-based alignment when not found.
-        // This enables custom types (e.g., packed structs) to specify their
-        // own alignment without modifying the backend.
+        // 2026-07-29: Alignment is the bit-width of the resolved LLVM type.
+        // Flexible types (Int, UInt, Bit) have alignment 0 in the primordial
+        // table — their width is resolved by the normalizer from int_bits +
+        // protocol membership. The universe stores explicit alignment for
+        // fixed-width types (Int64→8, Float→4). Zero-alignment entries
+        // are skipped so the fallback computes alignment from llvm_type.
         if let Some(u) = &self.ctx.type_universe {
             for rt in u.types.values() {
-                if rt_llvm_type(rt) == ty {
+                if rt_llvm_type(rt) == ty && rt.alignment > 0 {
                     return rt.alignment as u32;
                 }
             }
         }
+        // 2026-07-29: Derive alignment from LLVM bit width for integer types.
+        // Covers i8/i16/i32/i64/i128 and any future integer width — bits / 8.
+        if let Some(bits) = ty.strip_prefix('i').and_then(|s| s.parse::<u32>().ok()) {
+            let a = bits / 8;
+            if a > 0 { return a; }
+        }
+        // Named floating-point, pointer, and other types.
         match ty {
-            "i64" | "double" => 8,
-            "float" | "i32" => 4,
-            "i16" => 2,
-            "i8" => 1,
+            "double" | "fp128" => 8,
+            "float" => 4,
+            "half" | "bfloat" => 2,
+            "ptr" => 8,
             _ => 8,
         }
     }
