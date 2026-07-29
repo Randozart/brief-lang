@@ -365,71 +365,167 @@ mod tests {
 }
 ```
 
-### File: `src/backend/llvm/mod.rs` — dispatch integration
+## Implementation: Batch-Loop Approach
 
-In the `emit_transaction` function (around line 2620), after extracting `body_stmts`:
+The correct fix is to emit TWO nested loops instead of one:
 
-```rust
-// 2026-07-29: Loop peeling — detect hoistable guards and split the loop.
-let peeling = crate::analysis::loop_peeling::analyze_loop(&body_stmts);
-let inner_body = if peeling.hoistable_guards.is_empty() {
-    body_stmts  // no peeling needed — use original body
-} else {
-    // The inner body is the pure compute part (guards removed).
-    // The outer body re-inserts guards after the inner compute call.
-    //
-    // For Phase 1, we only peel when it's trivially safe:
-    // - exactly 1 or 2 hoistable guards (periodic print + termination)
-    // - no complex control flow in the inner body
-    //
-    // Phase 1 emits: inner_body as-is in the loop, but the guards
-    // are placed AFTER the inner body in the same loop structure.
-    // This still benefits because the inner body is a single basic
-    // block that LLVM's if-conversion can handle independently.
-    //
-    // Future Phase 2 will emit inner_body as a separate @inner function.
-    body_stmts  // Phase 1: same body, structural improvement only
-};
+```
+Outer loop: tracks batch boundaries, handles print guards
+  Inner batch loop: pure compute, bounded by next print point
 ```
 
-**Phase 1 simplification**: Since the inner body is already a single basic block (all assignments, no branches), simply reordering the body so that ALL pure compute statements come FIRST, followed by the guards, is sufficient for LLVM's if-conversion. The current body structure interleaves compute with guards:
+### LLVM IR Structure
 
 ```llvm
-; Current structure (body order):
-  ; compute physics
-  ; compute energy
-  ; when guard check → branch to print block
-  ; termination check → branch to exit
-  ; latch → back to header
+define i32 @main() {
+entry:
+  %state = alloca %State
+  call void @init_state(ptr %state)
+  br label %.outer_header
+
+; ── Outer Loop ──────────────────────────────────────────────────
+; Tracks batch boundaries. Each batch runs up to the next periodic
+; print point, then checks guards.
+
+.outer_header:
+  %oh_count = phi i64 [ 0, %entry ], [ %inner_count, %.outer_latch ]
+  ; 33 outer phis for state fields (3 i64 + 30 float)
+  %oh_bx0 = phi float [ %bx0_init, %entry ], [ %il_bx0, %.outer_latch ]
+  ; ... 30 more float phis ...
+  
+  ; Compute inner bound for this batch
+  ; inner_end = min(bound, ((count / batch_size) + 1) * batch_size)
+  %batch_size = add i64 0, 5000000  ; from the `when count % N == 0` condition
+  %next_boundary = ... ; ((count / batch_size) + 1) * batch_size
+  %inner_end = ... ; min(bound, next_boundary)
+  
+  br label %.inner_header
+
+; ── Inner Loop (Pure Compute) ───────────────────────────────────
+; NO branches, NO function calls. Single basic block compute.
+; Runs count from oh_count to inner_end.
+
+.inner_header:
+  %ic = phi i64 [ %oh_count, %.outer_header ], [ %ic_next, %.inner_latch ]
+  %il_bx0 = phi float [ %oh_bx0, %.outer_header ], [ %il_bx0_next, %.inner_latch ]
+  ; ... 30 more inner phis
+  
+  ; Pure compute body (same as current, but without when guards)
+  %dx01 = fsub float %il_bx0, %il_bx1
+  ; ... full compute body ...
+  %il_bx0_next = fadd fast float %il_bx0, %step
+  
+  %ic_next = add i64 %ic, 1
+  %inner_done = icmp slt i64 %ic_next, %inner_end
+  br i1 %inner_done, label %.inner_latch, label %.inner_exit
+
+.inner_latch:
+  br label %.inner_header
+
+.inner_exit:
+  ; Final values flow to outer latch via memory or forwarding phis
+  br label %.outer_body
+
+; ── Outer Body (Guard Checks) ──────────────────────────────────
+; Runs after each batch. Checks periodic + termination conditions.
+
+.outer_body:
+  ; Check: did we cross a print boundary?
+  %mod_check = urem i64 %ic_next, %batch_size
+  %should_print = icmp eq i64 %mod_check, 0
+  br i1 %should_print, label %.print_block, label %.outer_end_check
+
+.print_block:
+  call void @txn_simulate_cold_0(float %il_energy)
+  br label %.outer_end_check
+
+.outer_end_check:
+  %is_done = icmp slt i64 %ic_next, %bound
+  br i1 %is_done, label %.outer_latch, label %.exit
+
+.outer_latch:
+  br label %.outer_header
+
+.exit:
+  ret i32 0
+}
 ```
 
-The fix is to emit the compute code BEFORE the guard checks in the basic block order. This way, LLVM sees the compute code as a contiguous block without branches, and can if-convert through the guard branches at the end.
+### Key Design: Two-Level Phi Nodes
 
-### Phase 2 — Separate @inner Function (Future)
+The outer loop has its OWN set of phis (one per written field). The inner loop has ANOTHER set of phis (one per written field). The inner phis get their initial values from the outer phis. After the inner loop exits, the FINAL inner phi values flow back to the outer phis for the next batch.
 
-Emit a separate `@inner_<txn>(ptr %state)` function that contains only the pure compute code. `@main` calls `@inner` as a loop body. This gives LLVM maximum optimization freedom:
+This avoids memory round-trips — ALL state passes through SSA registers. No stores to `%State` needed.
 
-- The `@inner` function has no branches → loop vectorizer can handle it
-- The `@main` function handles the structural logic (printing, termination)
-- Inline the `@inner` call into `@main` during LTO if profitable
+The cost: 2 × N phi nodes instead of N. But the inner loop phis are the same as the current single-loop phis — we're only adding the outer phis as an extra level. With 31 field phis + 1 counter phi, we go from 32 to 64 phis total. But the OUTER phis don't have backedges (they only feed inner phis), so they don't contribute to register pressure across the inner loop iterations.
+
+### Implementation in `counter.rs`
+
+Modify `emit_countable_main` to accept an optional `batch_info` parameter:
+
+```rust
+pub struct BatchInfo {
+    pub batch_size: usize,
+    pub outer_guards: Vec<Statement>,
+    pub counter_var: String,
+}
+```
+
+When `batch_info` is `Some`:
+1. Emit `entry:` with alloca, init, load bound → br `.outer_header`
+2. Emit `.outer_header:` with outer phis (one per written field)
+3. Compute `inner_end` from `count`, `bound`, `batch_size`
+4. Emit `.inner_header:` with inner phis (same as current per-field phis)
+5. Emit pure compute body (no guards) — same as current body emission
+6. Emit inner exit check (count < inner_end) instead of (count < bound)
+7. Emit inner latch (backedge)
+8. Emit `.inner_exit:` (forward values to outer latch)
+9. Emit `.outer_body:` with guard checks (from `outer_guards`)
+10. Emit `.outer_latch:` (forward to outer header or exit)
+
+When `batch_info` is `None`: emit the current single-loop code.
+
+### Integration in Dispatch (`mod.rs`)
+
+```rust
+// After hoist_terminating_guard and LICM:
+let guards = crate::analysis::loop_peeling::split_guards(&body_stmts);
+let batch_size = crate::analysis::loop_peeling::detect_batch_size(
+    &guards, &bp.var
+);
+
+if !guards.is_empty() && batch_size.is_some() && total_fields > 8 {
+    // Batch loop mode: emit outer + inner loop
+    // Pass batch_info to emit_countable_main
+} else {
+    // Standard single-loop mode
+}
+```
+
+### `src/analysis/loop_peeling.rs` additions
+
+Add functions:
+- `split_guards(body) -> (Vec<Statement>, Vec<Statement>)` — separates hoistable guards from pure compute
+- `detect_batch_size(guards, counter_var) -> Option<usize>` — extracts N from `when count % N == 0` or uses default
 
 ## Verification
 
-1. `cargo test --lib` — all tests pass (including new loop_peeling tests)
+1. `cargo test --lib` — all tests pass (including new batch detection tests)
 2. `bash benchmarks/build_and_bench.sh --correctness` — all benchmarks MATCH
-3. `BOUND=5000000 ./target/release/briefc build benchmarks/nbody_newton.bv` — check the `.ll` output:
-   - If Phase 1 (reorder): `@main` has one loop, compute statements before guards
-   - If Phase 2 (separate function): `define void @inner_simulate(ptr %state)` exists
-4. `bash benchmarks/build_and_bench.sh --runtime` — nbody ratio should improve from 1.22× to ≤ 1.05×
-5. Compare objdump: instructions in hot loop should decrease
+3. Check `.ll` output for nbody: should show `outer_header` / `inner_header` blocks
+4. `bash benchmarks/build_and_bench.sh --runtime` — nbody ratio should drop from 1.22× toward 0.83×
+5. All other benchmarks: unchanged (single-loop code path when no guards detected)
 
 ## Timeline
 
-| Phase | Description | Effort | Expected ratio |
-|-------|-------------|--------|:--------------:|
-| 1 | Reorder body: compute before guards (no separate function) | 1-2h | ≤ 1.10× |
-| 2 | Separate `@inner` function with full peeling | 3-4h | ≤ 0.85× |
-| + | Flat allocas (Phase 5) | 4-6h | ≤ 0.75× |
+| Step | Description | Effort |
+|------|-------------|--------|
+| 1 | Add batch detection + guard splitting to `loop_peeling.rs` | 30min |
+| 2 | Modify `emit_countable_main` to accept batch_info | 1h |
+| 3 | Implement outer header + outer phi emission | 1h |
+| 4 | Implement inner bound computation | 30min |
+| 5 | Wire dispatch to use batch mode | 30min |
+| 6 | Test + benchmark | 1h |
 
 ## Diagnosting Experiment Details
 
