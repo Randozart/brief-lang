@@ -154,7 +154,74 @@ defn first<T, U>(pair: (T, U)) [[true] -> T {
 // The `[[post]` and `[pre]]` sugar fill the omitted side as `[true]`.
 ```
 
-## 8. Complete Example
+## 8. Derivation Blocks — Synthesis by Example
+
+Functions can be defined by examples rather than by hand-writing a body.
+The compiler searches for an expression that matches all examples.
+
+```brief
+defn add(x: Int, y: Int) -> Int := {
+    2, 3 -> 5;
+    0, 0 -> 0;
+    10, -3 -> 7;
+};
+```
+
+Run `brief derive` to synthesize the body, which produces a `.derive.bv`
+shadow file. Review it, then run `brief accept` to fold it back.
+
+### Reference Function
+
+Use an existing function as the specification:
+
+```brief
+defn popcount_ref(x: Int) -> Int {
+    term ((x & 1) + ((x >> 1) & 1));
+};
+defn popcount(x: Int) -> Int := popcount_ref;
+```
+
+The `:= ref_fn` form copies the reference's body directly.
+Combined with examples for verification:
+
+```brief
+defn popcount(x: Int) -> Int := { 0 -> 0; 1 -> 1; } := popcount_ref;
+```
+
+### Postcondition Contracts
+
+The `[[post]` syntax defines postconditions verified during synthesis:
+
+```brief
+defn popcount(x: Int) -> Int := {
+    0 -> 0; 1 -> 1;
+} [[ #Term >= 0 && #Term < 64 ];
+```
+
+`#Term` is a hashword that refers to the function's return value.
+
+### Tolerance for Floating-Point
+
+Each example can specify a tolerance for fuzzy comparison:
+
+```brief
+defn sqrt(x: Float) -> Float := {
+    1.0 -> [0.01] 1.0;
+    4.0 -> [0.01] 2.0;
+} [[ #Term >= 0 ];
+```
+
+### CLI
+
+```bash
+brief derive file.bv                 # Synthesize all derivation blocks
+brief derive --stochastic file.bv    # Also run MCMC superoptimizer
+brief derive --enumerative-depth 4   # Search deeper for better formulas
+brief accept file.bv                 # Fold bodies back into source
+brief build file.derive.bv          # Build with assertion verification
+```
+
+## 9. Complete Example
 
 ```brief
 // math_utils.bv

@@ -1357,12 +1357,11 @@ fn expr_to_value(expr: &Expr) -> Value {
 /// Enumerative search using actual parameter names and types.
 /// 2026-07-12: Original entry point. 2026-07-28: Accepts params instead of hardcoding.
 /// 2026-07-28: Default beam width for candidate pruning at each depth.
-/// Depth 1-2 produce few candidates (< 500). Depth 3 produces ~20K+ candidates
-/// with IF expressions starting at cost 14. The cheapest 8000 are usually binary
-/// ops with cost <= 13. A beam of 8000 ensures at least some IF candidates are
-/// evaluated while keeping depth-3 search time under 10 seconds for 1-param.
-/// For 2+ params at depth 3, 8000 is still manageable (dominated by Bool × Int × Int).
-const DEFAULT_BEAM_WIDTH: usize = 15000;
+/// 2026-07-29: Capped at 4000 — depth scaling (beam * depth) would exceed
+/// 15000 at depth 4, letting too many candidates through.
+/// Depth 3: beam = 4000 * 3 = 12000 (enough for IF expressions + binary ops)
+/// Depth 4: beam = 4000 * 4 = 16000 (capped at 16000 — manageable <60s)
+const DEFAULT_BEAM_WIDTH: usize = 4000;
 
 pub fn enumerative_search(
     name: &str,
