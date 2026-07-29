@@ -3,12 +3,24 @@
 // implementation from the examples. A body is synthesized, the MCMC
 // superoptimizer further optimizes it via --stochastic.
 
+// Reference implementation: parallel prefix popcount
+// Used as a validator by the CEGIS loop to reject ite chains
+defn popcount_ref(x: Int) -> Int {
+    let a: Int = x - ((x >> 1) & 0x5555555555555555);
+    let b: Int = (a & 0x3333333333333333) + ((a >> 2) & 0x3333333333333333);
+    let c: Int = (b + (b >> 4)) & 0x0F0F0F0F0F0F0F0F;
+    let d: Int = c + (c >> 8);
+    let e: Int = d + (d >> 16);
+    let f: Int = e + (e >> 32);
+    term f & 0x7F;
+};
+
 defn popcount(x0: Int) -> Int := {
     0 -> 0;
     1 -> 1;
     3 -> 2;
     7 -> 3;
-} [[ #Term >= 0 && #Term < 64 ];
+} := popcount_ref;
 
 let N: Int = GetEnvInt#("BOUND");
 let i: Int = 0;

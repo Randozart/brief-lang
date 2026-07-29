@@ -178,16 +178,30 @@ pub fn handle_derive_command(config: &DeriveConfig, file_path: &str) -> Result<(
             }
         }
 
-        // Look up reference function body for verifying clause
-        let ref_fn_expr: Option<&Expr> = block.ref_name.as_ref().and_then(|ref_name| {
+        // 2026-07-29: Look up reference function body for CEGIS verification.
+        // Store Block-wrapped bodies in a Vec so references live long enough.
+        // The full body (including let bindings) is wrapped in a Block expression
+        // so the interpreter can evaluate all statements in sequence.
+        // Previously, only the Term expression was extracted, discarding let
+        // bindings and causing UndefinedVariable errors.
+        // 2026-07-29: Look up reference function body for CEGIS verification.
+        // Store the body (as Expr::Block) and its own parameter names so the
+        // verifier can bind reference params by position, not by name.
+        // Uses RefFnBundle to keep body+params co-owned.
+        struct RefFnBundle {
+            body: Expr,
+            params: Vec<String>,
+        }
+        let mut ref_fn_bundles: Vec<RefFnBundle> = Vec::new();
+        let ref_fn_expr: Option<(&Expr, &[String])> = block.ref_name.as_ref().and_then(|ref_name| {
             ref_lookup.get(ref_name).and_then(|item| match item {
                 TopLevel::Definition(d) => {
-                    d.body.iter().find_map(|s| {
-                        if let Statement::Term(Some(e)) = s {
-                            let expr_ref: &Expr = e;
-                            Some(expr_ref)
-                        } else { None }
-                    })
+                    if d.body.is_empty() { return None; }
+                    let body_expr = Expr::Block(d.body.clone());
+                    let ref_params: Vec<String> = d.parameters.iter().map(|(n, _)| n.clone()).collect();
+                    ref_fn_bundles.push(RefFnBundle { body: body_expr, params: ref_params });
+                    let bundle = ref_fn_bundles.last()?;
+                    Some((&bundle.body, bundle.params.as_slice()))
                 }
                 _ => None,
             })

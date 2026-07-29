@@ -58,7 +58,7 @@ pub fn synthesize(
     verify_samples: usize,
     postcondition: Option<&Expr>,
     precondition: Option<&Expr>,
-    ref_fn: Option<&Expr>,
+    ref_fn: Option<(&Expr, &[String])>,
 ) -> Result<engine::SynthesizedProgram, SynthesizeError> {
     if block.examples.is_empty() {
         return Err(SynthesizeError::NoExamples(name.to_string()));

@@ -84,12 +84,16 @@ pub fn generate_test_inputs(
 /// 2. If postcondition provided: evaluate post(result) and check it's true
 /// 3. Constant-output detection: if candidate returns same value for ALL tested
 ///    inputs (while examples have varying outputs), reject.
+/// 2026-07-29: ref_fn changed from Option<&Expr> to Option<(&Expr, &[String])>
+/// to carry the reference function's own parameter names. The verifier binds
+/// reference params by position (first ref param gets first candidate input),
+/// so ref and candidate can use different parameter names.
 pub fn verify_candidate(
     candidate: &Expr,
     params: &[(String, Type)],
     postcondition: Option<&Expr>,
     sample_count: usize,
-    ref_fn: Option<&Expr>,
+    ref_fn: Option<(&Expr, &[String])>,
 ) -> VerifyResult {
     let inputs = generate_test_inputs(params, sample_count);
 
@@ -152,31 +156,43 @@ pub fn verify_candidate(
         }
 
         // 2026-07-29: Check reference function if provided.
-        // Evaluate ref_fn(input) and compare with candidate's result.
-        if let Some(ref_expr) = ref_fn {
+        // Use the interpreter's eval_expr (not evaluate_synthesized) because
+        // the reference body is an Expr::Block containing let statements and
+        // a term statement. evaluate_synthesized does not handle blocks or
+        // statements — only the interpreter does.
+        // The interpreter signals normal return via RuntimeError::TermReturn(val).
+        // Reference params are bound by position (first ref param gets first input),
+        // so ref and candidate can use different parameter names.
+        if let Some((ref_expr, ref_param_names)) = ref_fn {
             let mut ref_ctx = SynthesisEvalContext::new();
-            for (i, (name, _)) in params.iter().enumerate() {
+            for (i, ref_pname) in ref_param_names.iter().enumerate() {
                 if let Some(val_expr) = input_row.get(i) {
                     let val = expr_to_decimal(val_expr);
-                    ref_ctx.bind(name, val);
+                    ref_ctx.bind(ref_pname, val);
                 }
             }
-            match evaluate_synthesized(ref_expr, &mut ref_ctx) {
-                Ok(ref_val) => {
-                    let tol = 0.0; // exact match for now
-                    if !crate::interpreter::values_within_tolerance(&result, &ref_val, tol) {
-                        return VerifyResult::Fail(
-                            vec![input_row.clone()],
-                            format!("reference mismatch: candidate={:?} ref={:?}", result, ref_val),
-                        );
-                    }
-                }
+            let mut heap = crate::interpreter::VirtualHeap::new();
+            let ref_result = crate::interpreter::eval_expr(
+                ref_expr, &mut heap, &mut ref_ctx.bindings,
+            );
+            let ref_val = match ref_result {
+                Ok(v) => v,
+                // 2026-07-29: Term with value signals early return — this is
+                // the normal termination path for a defn body.
+                Err(crate::interpreter::RuntimeError::TermReturn(v)) => v,
                 Err(e) => {
                     return VerifyResult::Fail(
                         vec![input_row.clone()],
                         format!("reference evaluation error: {:?}", e),
                     );
                 }
+            };
+            let tol = 0.0; // exact match for now
+            if !crate::interpreter::values_within_tolerance(&result, &ref_val, tol) {
+                return VerifyResult::Fail(
+                    vec![input_row.clone()],
+                    format!("reference mismatch: candidate={:?} ref={:?}", result, ref_val),
+                );
             }
         }
     }
