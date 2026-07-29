@@ -71,7 +71,7 @@ pub fn synthesize(
         let cand_expr = candidate_prog.body.get(0).cloned().unwrap_or(Expr::Decimal(0));
         let mut verified = true;
         if verify_samples > 0 {
-            match verify::verify_candidate(&cand_expr, params, None, verify_samples) {
+            match verify::verify_candidate(&cand_expr, params, postcondition, verify_samples) {
                 verify::VerifyResult::Pass => {}
                 verify::VerifyResult::Fail(_, reason) => {
                     eprintln!("  cegis[{}/5] '{}': verification rejected ({})", iteration + 1, name, reason);
