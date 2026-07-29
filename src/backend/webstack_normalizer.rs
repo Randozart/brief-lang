@@ -9,7 +9,7 @@ use crate::type_universe::TypeUniverse;
 
 /// 2026-07-14: Normalize the AST for Webstack (WASM + JS) backend.
 /// Attaches js_type annotation based on primitive metadata.
-pub fn normalize(items: &mut Vec<TopLevel>, universe: &mut TypeUniverse) -> Result<(), String> {
+pub fn normalize(items: &mut Vec<TopLevel>, universe: &mut TypeUniverse, _int_bits: u64) -> Result<(), String> {
     // 2026-07-20: Derive js_type from llvm_type (hashword protocol replaces CTD)
     for rt in universe.types.values_mut() {
         let llvm_ty = rt.properties.get("llvm_type").and_then(|pv| match pv {

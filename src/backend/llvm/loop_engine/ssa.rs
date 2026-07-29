@@ -126,7 +126,7 @@ impl LlvmBackend {
         divisor: i64,
         cases: &[(i64, &str)],
     ) {
-        writeln!(out, "define i32 @main() local_unnamed_addr {} {{", self.slp_attr("main", "#0")).ok();
+        writeln!(out, "define i32 @main() local_unnamed_addr {} {{", "#0").ok();
         writeln!(out, "entry:").ok();
         writeln!(out, "  %state = alloca %State, align 8").ok();
         self.emit_inline_init_stores(out, "%state");
@@ -165,7 +165,7 @@ impl LlvmBackend {
         divisor: i64,
         cases: &[(i64, &str)],
     ) {
-        writeln!(out, "define i32 @main() local_unnamed_addr {} {{", self.slp_attr("main", "#0")).ok();
+        writeln!(out, "define i32 @main() local_unnamed_addr {} {{", "#0").ok();
         writeln!(out, "entry:").ok();
         writeln!(out, "  %state = alloca %State, align 8").ok();
         self.emit_inline_init_stores(out, "%state");
@@ -329,7 +329,7 @@ impl LlvmBackend {
             return;
         }
 
-        writeln!(out, "define i32 @main() local_unnamed_addr {} {{", self.slp_attr("main", "#0")).ok();
+        writeln!(out, "define i32 @main() local_unnamed_addr {} {{", "#0").ok();
         writeln!(out, "entry:").ok();
         writeln!(out, "  %state = alloca %State, align 8").ok();
         self.emit_inline_init_stores(out, "%state");
@@ -419,7 +419,7 @@ impl LlvmBackend {
         _all_internal_map: Option<&HashMap<String, (usize, i64)>>,
         _has_wake: bool,
     ) {
-        writeln!(out, "define i32 @main() local_unnamed_addr {} {{", self.slp_attr("main", "#0")).ok();
+        writeln!(out, "define i32 @main() local_unnamed_addr {} {{", "#0").ok();
         writeln!(out, "entry:").ok();
         writeln!(out, "  %state = alloca %State, align 8").ok();
         self.emit_inline_init_stores(out, "%state");

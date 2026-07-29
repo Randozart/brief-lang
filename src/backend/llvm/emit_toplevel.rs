@@ -296,24 +296,10 @@ impl LlvmBackend {
                 }
             }
         }
-        // 2026-07-26: #Int protocol width from --int-bits (default 64).
-        // Respects bits <~ N floor from primordial type (Int64 → 64).
-        if let Type::Custom(name) = ty {
-            if name == "Int" || name == "UInt" {
-                let type_floor = self.ctx.type_universe.as_ref()
-                    .and_then(|u| ty.universe_key().and_then(|k| u.get(k)))
-                    .and_then(|rt| rt.properties.get("bits"))
-                    .and_then(|pv| if let crate::ast::PropertyValue::Int(n) = pv { Some(*n as u64) } else { None })
-                    .unwrap_or(0);
-                let bits = self.ctx.int_bits.max(type_floor);
-                let llvm_bits: u64 = if bits <= 8 { 8 } else if bits <= 16 { 16 }
-                    else if bits <= 32 { 32 } else { 64 };
-                return format!("i{}", llvm_bits);
-            }
-        }
-
-        // 2026-07-14: Universe query with derive_llvm_type replaces
-        // the removed ResolvedType.llvm_type field.
+        // 2026-07-14: Universe query reads llvm_type property set by normalizer.
+        // After Phase 0d, the normalizer resolves Int/UInt from protocol + int_bits,
+        // so no name-based override is needed. Fixed-width types (Int32, Float) have
+        // their primordial llvm_type preserved.
         self.ctx.type_universe.as_ref()
             .and_then(|u| ty.universe_key().and_then(|k| u.get(k)))
             .map(rt_llvm_type)
@@ -563,23 +549,31 @@ impl LlvmBackend {
     }
 
     pub(super) fn align_of(&self, ty: &str) -> u32 {
-        // 2026-07-04: Universe-driven alignment lookup.
-        // The type universe provides per-type alignment from type declarations.
-        // Falls back to hardcoded byte-size-based alignment when not found.
-        // This enables custom types (e.g., packed structs) to specify their
-        // own alignment without modifying the backend.
+        // 2026-07-29: Alignment is the bit-width of the resolved LLVM type.
+        // Flexible types (Int, UInt, Bit) have alignment 0 in the primordial
+        // table — their width is resolved by the normalizer from int_bits +
+        // protocol membership. The universe stores explicit alignment for
+        // fixed-width types (Int64→8, Float→4). Zero-alignment entries
+        // are skipped so the fallback computes alignment from llvm_type.
         if let Some(u) = &self.ctx.type_universe {
             for rt in u.types.values() {
-                if rt_llvm_type(rt) == ty {
+                if rt_llvm_type(rt) == ty && rt.alignment > 0 {
                     return rt.alignment as u32;
                 }
             }
         }
+        // 2026-07-29: Derive alignment from LLVM bit width for integer types.
+        // Covers i8/i16/i32/i64/i128 and any future integer width — bits / 8.
+        if let Some(bits) = ty.strip_prefix('i').and_then(|s| s.parse::<u32>().ok()) {
+            let a = bits / 8;
+            if a > 0 { return a; }
+        }
+        // Named floating-point, pointer, and other types.
         match ty {
-            "i64" | "double" => 8,
-            "float" | "i32" => 4,
-            "i16" => 2,
-            "i8" => 1,
+            "double" | "fp128" => 8,
+            "float" => 4,
+            "half" | "bfloat" => 2,
+            "ptr" => 8,
             _ => 8,
         }
     }
@@ -1497,7 +1491,7 @@ impl LlvmBackend {
         };
         // 2026-07-27: txn_attr for assume_action path (no outlining — rare path).
         // The non-assume_action path below computes its own attr from reordered body.
-        let txn_attr = self.slp_attr(name, "#0");
+        let txn_attr = "#0";
 
         // ── Helper: collect identifiers from a statement ────────────────
         /// 2026-07-28: Check if an expression references the named induction variable.
@@ -1509,6 +1503,30 @@ impl LlvmBackend {
                 }
                 Expr::UnaryOp(_, inner) => get_induction_var_name(inner, var),
                 _ => None,
+            }
+        }
+        /// Count cross-field operations in an expression.
+        /// Counts BinaryOps where LHS and RHS each contain at least one identifier.
+        /// This measures computation density — dense matrix multiply (kalman) has
+        /// many such ops; sparse force pairs (nbody) have fewer.
+        fn count_cross_float_ops_in_expr(expr: &Expr, _all_idents: &std::collections::HashSet<String>) -> u32 {
+            match expr {
+                Expr::BinaryOp(_, lhs, rhs) => {
+                    let has_lhs_id = has_any_ident(lhs);
+                    let has_rhs_id = has_any_ident(rhs);
+                    let count = if has_lhs_id && has_rhs_id { 1u32 } else { 0u32 };
+                    count + count_cross_float_ops_in_expr(lhs, _all_idents)
+                        + count_cross_float_ops_in_expr(rhs, _all_idents)
+                }
+                _ => 0,
+            }
+        }
+        fn has_any_ident(expr: &Expr) -> bool {
+            match expr {
+                Expr::Identifier(_) => true,
+                Expr::BinaryOp(_, lhs, rhs) => has_any_ident(lhs) || has_any_ident(rhs),
+                Expr::UnaryOp(_, e) => has_any_ident(e),
+                _ => false,
             }
         }
         fn collect_let_names(stmt: &Statement, names: &mut Vec<String>) {
@@ -1627,14 +1645,9 @@ impl LlvmBackend {
             if !matches!(txn.contract.pre_condition, Expr::Bool(true)) {
                 self.emit_precondition_check(out, &txn.contract.pre_condition, "  ");
             }
-            let (reordered, has_cycle) = super::reorder::reorder_body_statements(&txn.body);
-            if has_cycle {
-                self.warnings.push(format!(
-                    "Warning: dependency cycle detected in transaction '{}' — ILP reordering is suboptimal",
-                    name
-                ));
-            }
-            for s in &reordered {
+            // 2026-07-29: Statement reordering removed — proven counterproductive.
+            // LLVM's scheduler does this better within each basic block.
+            for s in &txn.body {
                 if self.fun.terminated { break; }
                 emit_statement(self, out, s, "  ");
             }
@@ -1658,14 +1671,11 @@ impl LlvmBackend {
             }
             writeln!(out, "}}").ok();
         } else {
-            // 2026-07-27: Reorder + compute outlining info in one pass.
-            let (reordered, has_cycle) = super::reorder::reorder_body_statements(&txn.body);
-            if has_cycle {
-                self.warnings.push(format!(
-                    "Warning: dependency cycle detected in transaction '{}' — ILP reordering is suboptimal",
-                    name
-                ));
-            }
+            // 2026-07-29: Statement reordering removed — proven counterproductive.
+            // Use body directly (reordering removed 2026-07-29).
+            // The `reordered` alias preserves existing code patterns below.
+            let body = &txn.body;
+            let reordered = body;
             // 2026-07-27: Three-category outlining — identifiers can be state
             // fields (GEP+load), let bindings (lookup at emission time), or
             // compile-time constants (ctx.constants). Only `Unknown` blocks
@@ -1677,7 +1687,7 @@ impl LlvmBackend {
                 LetBinding(String), // LLVM type string ("float" or "i64")
                 Constant(Expr, Type), // value expression + Brief type
             }
-            // Scan reordered body for FFI guards that can be outlined.
+            // Scan body for FFI guards that can be outlined.
             let outlined_info: Vec<(usize, String, Vec<(String, String, ParamSrc)>)> = {
                 let mut ffi_guard_indices: Vec<usize> = Vec::new();
                 let mut guard_bodies: Vec<&[Statement]> = Vec::new();
@@ -1695,7 +1705,7 @@ impl LlvmBackend {
                 // (pre-scan: which identifiers are let bindings?)
                 let mut txn_let_names: Vec<String> = Vec::new();
                 let mut txn_let_types: std::collections::HashMap<String, String> = std::collections::HashMap::new();
-                for s in &reordered {
+                for s in reordered.iter() {
                     collect_let_names(s, &mut txn_let_names);
                     if let Statement::Let { name, ty: Some(t), .. } = s {
                         let llvm_ty = match t {
@@ -1761,7 +1771,37 @@ impl LlvmBackend {
                 }
             };
             let local_outlined = !outlined_info.is_empty();
-            let local_txn_attr = if local_outlined { "#11".to_string() } else { txn_attr.clone() };
+            let mut local_txn_attr = if local_outlined { "#11".to_string() } else { txn_attr.to_string() };
+            // 2026-07-28: Dense matrix detection — if #11 would be selected but
+            // the txn has dense cross-field float computation (cross-per-field > 8),
+            // force #0 = memory(readwrite) instead. LLVM's auto-vectorizer creates
+            // expensive wide vectors (<12 x float>) for dense matrices that cause
+            // register spilling — the kalman 3.5x regression.
+            if local_txn_attr == "#11" {
+                // Count cross-field float ops across all let-expressions.
+                // Counts how many BinaryOps have 2+ distinct identifiers — this
+                // measures the density of cross-field computation. Kalman has
+                // ~84 ops across ~9 fields (9.3/field), nbody has ~50/30 (1.7).
+                let mut cross_ops = 0u32;
+                let mut float_body_idents: std::collections::HashSet<String> = std::collections::HashSet::new();
+                for s in reordered.iter() {
+                    if let Statement::Let { name, .. } = s {
+                        float_body_idents.insert(name.clone());
+                    }
+                }
+                for s in reordered.iter() {
+                    if let Statement::Let { expr: Some(e), .. } = s {
+                        cross_ops += count_cross_float_ops_in_expr(e, &float_body_idents);
+                    }
+                }
+                let n = float_body_idents.len();
+                if n > 4 {
+                    let cross_per_field = cross_ops as f64 / n as f64;
+                    if cross_per_field > 4.0 {
+                        local_txn_attr = "#0".to_string();
+                    }
+                }
+            }
 
             // Emit the txn function
             writeln!(out, "define void @txn_{}({}) local_unnamed_addr {}{}{} {{", name, self.ctx.state_ptr_param, local_txn_attr, alwaysinline, meta_attrs).ok();
@@ -2419,7 +2459,7 @@ impl LlvmBackend {
     //   enables the async runtime to call each body independently.
     pub(super) fn emit_async_body(&mut self, out: &mut String, txn: &crate::ast::Transaction, name: &str) {
         let async_name = format!("async_body_{}", name);
-        let async_attr = self.slp_attr(&async_name, "#0");
+        let async_attr = "#0".to_string();
         writeln!(out, "define void @{}({}) local_unnamed_addr {} {{", async_name, self.ctx.state_ptr_param, async_attr).ok();
         writeln!(out, "  entry:").ok();
         self.fun.txn_counter = 0;
@@ -2486,7 +2526,7 @@ impl LlvmBackend {
             .filter(|s| !matches!(s, Statement::Term(..) | Statement::TermBang(..) | Statement::Escape(_)))
             .cloned().collect();
         let combined: Vec<Statement> = body_a.into_iter().chain(b.body.iter().cloned()).collect();
-        let fused_attr = self.slp_attr(name, "#0");
+        let fused_attr = "#0";
         writeln!(out, "define void @{}(ptr noalias nocapture align 8 %state) local_unnamed_addr {} {{", name, fused_attr).ok();
         writeln!(out, "  entry:").ok();
         self.fun.txn_counter = 0; self.fun.let_bindings.clear(); self.fun.let_binding_types.clear(); self.fun.let_original_types.clear(); self.fun.reg_float_cache.clear(); self.fun.reg_type_cache.clear(); self.fun.terminated = false; self.fun.returns_i64 = false;
@@ -2500,7 +2540,7 @@ impl LlvmBackend {
     }
 
     pub(super) fn emit_shape_guarded_body(&mut self, out: &mut String, body: &[Statement], name: &str, action: &str) {
-        let fused_attr = self.slp_attr(name, "#0");
+        let fused_attr = "#0";
         writeln!(out, "define void @{}({}) local_unnamed_addr {} {{", name, self.ctx.state_ptr_param, fused_attr).ok();
         writeln!(out, "  entry:").ok();
         writeln!(out, "  br i1 true, label %body, label %rollback").ok();
@@ -2538,7 +2578,7 @@ impl LlvmBackend {
     //   body) instead of stitching two txns at emit time. Both produce the same
     //   straight-line IR and both share the ptr rationale above.
     pub(super) fn emit_fused_composed(&mut self, out: &mut String, body: &[Statement], name: &str) {
-        let fused_attr = self.slp_attr(name, "#0");
+        let fused_attr = "#0";
         writeln!(out, "define void @{}({}) local_unnamed_addr {} {{", name, self.ctx.state_ptr_param, fused_attr).ok();
         writeln!(out, "  entry:").ok();
         self.fun.txn_counter = 0; self.fun.let_bindings.clear(); self.fun.let_binding_types.clear(); self.fun.let_original_types.clear(); self.fun.reg_float_cache.clear(); self.fun.reg_type_cache.clear(); self.fun.terminated = false; self.fun.returns_i64 = false;

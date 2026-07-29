@@ -228,7 +228,7 @@ impl LlvmBackend {
     /// The memcpy round-trip saves/restores all state fields so each
     /// reactor tick sees a consistent snapshot.
 pub(crate) fn emit_main(&mut self, out: &mut String, has_wake_triggers: bool) {
-    writeln!(out, "define i32 @main() local_unnamed_addr {} {{", self.slp_attr("main", "#0")).ok();
+    writeln!(out, "define i32 @main() local_unnamed_addr {} {{", "#0").ok();
     writeln!(out, "entry:").ok();
     writeln!(out, "  %state = alloca %State, align 8").ok();
     self.emit_inline_init_stores(out, "%state");

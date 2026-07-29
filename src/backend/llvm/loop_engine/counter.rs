@@ -140,7 +140,7 @@ impl LlvmBackend {
         use_phi: bool,
         body: Option<&[Statement]>,
     ) {
-        writeln!(out, "define i32 @main() local_unnamed_addr {} {{", self.slp_attr("main", "#0")).ok();
+        writeln!(out, "define i32 @main() local_unnamed_addr {} {{", "#0").ok();
         writeln!(out, "entry:").ok();
         writeln!(out, "  %state = alloca %State, align 8").ok();
         self.emit_inline_init_stores(out, "%state");
@@ -151,138 +151,9 @@ impl LlvmBackend {
         writeln!(out).ok();
     }
 
-    /// Emit a foldable loop using memory-based counter (EmitMemoryCounter path).
-    /// 2026-07-19: Reactivated for dense-write single-txn programs where per-field
-    /// phi nodes add overhead without SROA benefit (e.g. nbody_newton: 33 fields,
-    /// all written every iteration). Counter is tracked via GEP+load+store without
-    /// phi nodes — all state fields stored to %State each iteration.
-    pub(crate) fn emit_folded_memory_main(
-        &mut self,
-        out: &mut String,
-        txn_name: &str,
-        counter_idx: usize,
-        total_idx: Option<usize>,
-        total_const_name: Option<&str>,
-        body: &[Statement],
-    ) {
-        writeln!(out, "define i32 @main() local_unnamed_addr {} {{", self.slp_attr("main", "#0")).ok();
-        writeln!(out, "entry:").ok();
-        writeln!(out, "  %state = alloca %State, align 8").ok();
-        self.emit_inline_init_stores(out, "%state");
-        let c0 = self.fun.txn_counter;
-        let bound_reg = self.fun.next_reg_with_prefix("fmb");
-        self.emit_countable_load_bound(out, &bound_reg, total_idx, total_const_name, c0);
-        {
-            let mut push_targets: Vec<String> = Vec::new();
-            crate::backend::llvm::collect_push_targets(body, &mut push_targets);
-            push_targets.sort();
-            push_targets.dedup();
-            if !push_targets.is_empty() {
-                self.emit_prealloc_for_targets(out, "  ", &push_targets, &bound_reg);
-            }
-        }
-        writeln!(out, "  br label %.fm_loop").ok();
-        writeln!(out, ".fm_loop:").ok();
-        let (counter_val, _) = self.emit_state_load_i64_by_idx(out, "  ", counter_idx);
-        let done = self.fun.next_reg_with_prefix("fmd");
-        writeln!(out, "  {} = icmp slt i64 {}, {}", done, counter_val, bound_reg).ok();
-        writeln!(out, "  br i1 {}, label %.fm_body, label %.fm_end", done).ok();
-        writeln!(out, ".fm_body:").ok();
-        // 2026-07-19: Memory-based loop — all state fields must be stored to
-        // %State each iteration so the next iteration reads correct values.
-        // When hoisted post-loop prints exist, needs_state_stores_in_body is
-        // already true (set by caller in dispatch).
-        let prev = self.fun.needs_state_stores_in_body;
-        self.fun.needs_state_stores_in_body = true;
-        let write_set: HashSet<String> = HashSet::new();
-        let mut hoisted = Vec::new();
-        self.emit_countable_body(out, body, &write_set, &mut hoisted);
-        self.fun.needs_state_stores_in_body = prev;
-        let next = self.fun.next_reg_with_prefix("fmn");
-        writeln!(out, "  {} = add nuw nsw i64 {}, 1", next, counter_val).ok();
-        self.emit_state_store_i64_by_idx(out, "  ", counter_idx, &next);
-        emit_loop_metadata(out, "  ", ".fm_loop",
-            &mut self.fun.metadata_counter, &mut self.fun.pending_metadata);
-        writeln!(out, ".fm_end:").ok();
-        // 2026-07-19: Clear reg_float_cache before hoisted prints — prevents
-        // reuse of non-dominating float registers from inside the loop body.
-        // Same pattern as emit_countable_main line 383 (nbody_newton bug).
-        self.fun.reg_float_cache.clear();
-        // 2026-07-19: Clear last-val temps before hoisted prints — prevents
-        // SSA dominance violations from non-state let bindings (vx01,
-        // energy_step) that were defined in .fm_body but don't dominate
-        // .fm_end. load_last_val_temps repopulates state fields from %State.
-        self.fun.last_val_temps.clear();
-        self.fun.last_val_types.clear();
-        let hoisted = self.fun.pending_post_hoist.clone();
-        if !hoisted.is_empty() {
-            self.load_last_val_temps(out);
-            self.emit_hoisted_post_loop_prints(out, &hoisted);
-        }
-        writeln!(out, "  ret i32 0").ok();
-        writeln!(out, "}}").ok();
-        writeln!(out).ok();
-    }
-
-    // ═══════════════════════════════════════════════════════════════
-    // Strategy 2.5: Direct While Loop (no phi nodes)
-    // ═══════════════════════════════════════════════════════════════
-
-    /// Emit a simple while-loop for single-node programs. No phi nodes —
-    /// every state field goes through GEP+load+store each iteration.
-    /// Uses emit_countable_body for body emission with needs_state_stores
-    /// forced on. Best for programs with FFI calls in the body where
-    /// phi overhead doesn't pay off (no SROA benefit with opaque calls).
-    pub(crate) fn emit_while_main(
-        &mut self,
-        out: &mut String,
-        txn_name: &str,
-        counter_idx: usize,
-        total_idx: Option<usize>,
-        total_const_name: Option<&str>,
-        body: &[Statement],
-    ) {
-        writeln!(out, "define i32 @main() local_unnamed_addr {} {{", self.slp_attr("main", "#0")).ok();
-        writeln!(out, "entry:").ok();
-        writeln!(out, "  %state = alloca %State, align 8").ok();
-        self.emit_inline_init_stores(out, "%state");
-        let c0 = self.fun.txn_counter;
-        let bound_reg = self.fun.next_reg_with_prefix("whb");
-        self.emit_countable_load_bound(out, &bound_reg, total_idx, total_const_name, c0);
-        writeln!(out, "  br label %.wloop").ok();
-        writeln!(out, ".wloop:").ok();
-        let (counter_val, _) = self.emit_state_load_i64_by_idx(out, "  ", counter_idx);
-        let done = self.fun.next_reg_with_prefix("whd");
-        writeln!(out, "  {} = icmp slt i64 {}, {}", done, counter_val, bound_reg).ok();
-        writeln!(out, "  br i1 {}, label %.wbody, label %.wend", done).ok();
-        writeln!(out, ".wbody:").ok();
-        // Force all field writes to %State (no phi nodes to hold values)
-        let prev = self.fun.needs_state_stores_in_body;
-        self.fun.needs_state_stores_in_body = true;
-        let write_set: HashSet<String> = HashSet::new();
-        let mut hoisted = Vec::new();
-        self.emit_countable_body(out, body, &write_set, &mut hoisted);
-        self.fun.needs_state_stores_in_body = prev;
-        let next = self.fun.next_reg_with_prefix("whn");
-        writeln!(out, "  {} = add nuw nsw i64 {}, 1", next, counter_val).ok();
-        self.emit_state_store_i64_by_idx(out, "  ", counter_idx, &next);
-        emit_loop_metadata(out, "  ", ".wloop",
-            &mut self.fun.metadata_counter, &mut self.fun.pending_metadata);
-        writeln!(out, "  br label %.wloop").ok();
-        writeln!(out, ".wend:").ok();
-        // Hoisted post-loop prints (swan song)
-        self.fun.reg_float_cache.clear();
-        self.fun.last_val_temps.clear();
-        self.fun.last_val_types.clear();
-        let hoist = self.fun.pending_post_hoist.clone();
-        if !hoist.is_empty() {
-            self.load_last_val_temps(out);
-            self.emit_hoisted_post_loop_prints(out, &hoist);
-        }
-        writeln!(out, "  ret i32 0").ok();
-        writeln!(out, "}}").ok();
-        writeln!(out).ok();
-    }
+    // 2026-07-29: emit_folded_memory_main and emit_while_main removed — dead code
+    // after Phase 4 dispatch simplification. PerFieldPhi (emit_countable_main)
+    // handles all cases with better SROA characteristics.
 
     // ═══════════════════════════════════════════════════════════════
     // Strategy 3: Hybrid Countable Loop (EmitHybridCounterPhi)
@@ -316,7 +187,7 @@ impl LlvmBackend {
         is_decreasing: bool,
         counter_var: Option<&str>,
     ) {
-        writeln!(out, "define i32 @main() local_unnamed_addr {} {{", self.slp_attr("main", "#0")).ok();
+        writeln!(out, "define i32 @main() local_unnamed_addr {} {{", "#0").ok();
         writeln!(out, "entry:").ok();
         writeln!(out, "  %state = alloca %State, align 8").ok();
         self.emit_inline_init_stores(out, "%state");
@@ -338,6 +209,16 @@ impl LlvmBackend {
             let (init_f, _) = self.emit_state_load_i64_by_idx(out, "  ", idx);
             phi_field_init.insert((*fname).clone(), init_f);
         }
+
+        // 2026-07-29: Clear vector phi state — disabled inside emit_countable_main.
+        // The dispatch-level detection in mod.rs still checks for vector phi groups,
+        // but the actual emission is deferred until the vector phi infrastructure
+        // handles all edge cases (duplicate fields, let-binding groups, power-of-2
+        // widths, backedge register naming conflicts).
+        self.fun.active_vector_groups.clear();
+        self.fun.field_to_phi.clear();
+        self.fun.field_to_lane.clear();
+        self.fun.vector_phi_current.clear();
 
         // 2026-07-17: Pre-generate backedge register names for per-field phis
         // (forward reference from header phi to latch definition).
@@ -372,6 +253,7 @@ impl LlvmBackend {
         // iN for exact ints, i64 for flexible Int and everything else).
         self.fun.phi_field_regs.clear();
         self.fun.backedge_field_regs.clear();
+
         for fname in &sorted_fields {
             // Check if this field duplicates the counter variable
             if let Some(cv) = counter_var {
@@ -386,8 +268,6 @@ impl LlvmBackend {
                 .cloned().unwrap_or_else(|| format!("%be_{}", fname));
             let init_f = phi_field_init.get(fname.as_str())
                 .cloned().unwrap_or_else(|| "0".to_string());
-            // 2026-07-26: Read phi type from field_types — matches whatever
-            // push_field_type stored for this field (float, double, i8..i128).
             let phi_ty = self.ctx.field_index_map.get(fname.as_str())
                 .and_then(|idx| self.ctx.field_types.get(*idx))
                 .cloned().unwrap_or_else(|| "i64".to_string());
@@ -452,7 +332,7 @@ impl LlvmBackend {
             writeln!(out, "  {} = add nuw nsw {} {}, 1", next, counter_ty, counter_name).ok();
         }
 
-        // 2026-07-17: Per-field backedges. Modified fields use the written value;
+        // 2026-07-17: Per-field scalar backedges. Modified fields use the written value;
         // unwritten fields use identity (phi self-ref). LLVM peephole eliminates
         // the `add i64 0, %val` copy in both cases.
         // 2026-07-21: Skip the counter variable — its backedge is already the
@@ -509,49 +389,8 @@ impl LlvmBackend {
         writeln!(out).ok();
     }
 
-    /// Simpler variant of countable_main that uses memory-based fields.
-    /// No counter phi — counter is tracked via GEP+load+store.
-    pub(super) fn emit_countable_memory_main(
-        &mut self,
-        out: &mut String,
-        txn_name: &str,
-        counter_idx: usize,
-        total_idx: Option<usize>,
-        total_const_name: Option<&str>,
-        body: &[Statement],
-        write_set: &HashSet<String>,
-    ) {
-        writeln!(out, "define i32 @main() local_unnamed_addr {} {{", self.slp_attr("main", "#0")).ok();
-        writeln!(out, "entry:").ok();
-        writeln!(out, "  %state = alloca %State, align 8").ok();
-        self.emit_inline_init_stores(out, "%state");
-        let c0 = self.fun.txn_counter;
-        let bound_reg = self.fun.next_reg_with_prefix("cmmb");
-        self.emit_countable_load_bound(out, &bound_reg, total_idx, total_const_name, c0);
-        writeln!(out, "  br label %.cmm_loop").ok();
-        writeln!(out, ".cmm_loop:").ok();
-        // 2026-07-20: Intentionally hand-rolled — single GEP serves both load (next line) and store (cmm_body latch).
-        let counter_gep = self.fun.next_reg_with_prefix("cmmg");
-        writeln!(out, "  {} = getelementptr inbounds %State, ptr %state, i32 0, i32 {}",
-            counter_gep, counter_idx).ok();
-        let counter_val = self.fun.next_reg_with_prefix("cmmv");
-        writeln!(out, "  {} = load i64, ptr {}, align 8", counter_val, counter_gep).ok();
-        let done = self.fun.next_reg_with_prefix("cmmd");
-        writeln!(out, "  {} = icmp slt i64 {}, {}", done, counter_val, bound_reg).ok();
-        writeln!(out, "  br i1 {}, label %.cmm_body, label %.cmm_end", done).ok();
-        writeln!(out, ".cmm_body:").ok();
-        let mut hoisted = Vec::new();
-        self.emit_countable_body(out, body, write_set, &mut hoisted);
-        self.emit_hoisted_post_loop_prints(out, &hoisted);
-        let next = self.fun.next_reg_with_prefix("cmmn");
-        writeln!(out, "  {} = add nuw nsw i64 {}, 1", next, counter_val).ok();
-        writeln!(out, "  store i64 {}, ptr {}, align 8", next, counter_gep).ok();
-        writeln!(out, "  br label %.cmm_loop").ok();
-        writeln!(out, ".cmm_end:").ok();
-        writeln!(out, "  ret i32 0").ok();
-        writeln!(out, "}}").ok();
-        writeln!(out).ok();
-    }
+    // 2026-07-29: emit_countable_memory_main removed — dead code after Phase 4.
+    // PerFieldPhi (emit_countable_main) handles all cases.
 
     // ═══════════════════════════════════════════════════════════════
     // Countable Loop Helpers
@@ -591,35 +430,10 @@ impl LlvmBackend {
         }
     }
 
-    // 2026-07-21: SLP vector codegen (Phase 2) is not yet implemented.
-    // The analysis pass (Phase 1) detects 143 isomorphic groups in nbody,
-    // but emitting actual <4 x float> vector arithmetic requires building a
-    // vector operation tree from the lane RHS expressions — a larger effort
-    // that will be added in a future commit.
-
     /// Emit the body of a countable loop. Converts each Statement to the
     /// appropriate SSA load + op + store sequence.
-    /// 2026-07-27: Collect state field indices referenced by an expression.
-    fn collect_field_indices(expr: &Expr, field_map: &HashMap<String, usize>, out: &mut Vec<usize>) {
-        match expr {
-            Expr::Identifier(name) => {
-                if let Some(&idx) = field_map.get(name) {
-                    out.push(idx);
-                }
-            }
-            Expr::Call(_, args, _) => {
-                for a in args { Self::collect_field_indices(a, field_map, out); }
-            }
-            Expr::BinaryOp(_, lhs, rhs) => {
-                Self::collect_field_indices(lhs, field_map, out);
-                Self::collect_field_indices(rhs, field_map, out);
-            }
-            Expr::UnaryOp(_, e) => Self::collect_field_indices(e, field_map, out),
-            Expr::Cast(inner, _) => Self::collect_field_indices(inner, field_map, out),
-            _ => {}
-        }
-    }
-
+    /// 2026-07-29: SLP gating removed — proven counterproductive. LLVM's SLP
+    /// vectorizer has its own cost model. See docs/plans/2026-07-29-full-recovery-plan.md §7.
     fn emit_countable_body(
         &mut self,
         out: &mut String,
@@ -629,67 +443,6 @@ impl LlvmBackend {
     ) {
         let mut i = 0;
         while i < body.len() {
-            // 2026-07-27: Hazard-gated SLP — skip vectorization for txns that
-            // would suffer from artificial insertelement/extractelement chains.
-            // The hazard_spec analysis in hazard.rs populates slp_hazard_fns
-            // when register pressure (peak) exceeds available registers (r).
-            // The #4/#5 attributes (disable-slp-vectorize) are NOT emitted, so
-            // LLVM's auto-vectorizer runs freely for all benchmarks.
-            // 2026-07-27: Hazard gate — skip SLP for txns flagged by hazard_spec.
-            // The cross_per_field > 3 check (added 2026-07-27) applies to ALL txns;
-            // register-pressure checks (peak >= r) apply only to non-alwaysinline.
-            let is_hazardous = !self.fun.txn_name.is_empty()
-                && self.ctx.slp_hazard_fns.contains(&self.fun.txn_name);
-            if !is_hazardous {
-                let match_group = self.fun.slp_groups.iter()
-                    .find(|g| g.base_index == i).cloned();
-                if let Some(ref group) = match_group {
-                    // 2026-07-27: SLP profitability — three gates:
-                    //   1. Max field stride: continuous field accesses (stride <= 1) let
-                    //      LLVM merge scalar loads into vector loads. Strided access
-                    //      (e.g. p00, p10, p20 at indices 0, 3, 6) forces scalar loads
-                    //      + inserts, dominating the shuffle cost.
-                    //   2. Depth * width >= 10: total compute work must exceed the
-                    //      ~8-10 insertelement/extractelement overhead.
-                    //   3. Width <= 8: wider groups force LLVM to split vectors,
-                    //      adding split/join overhead.
-                    let template_expr = body.get(i).and_then(|s| match s {
-                        Statement::Let { expr: Some(e), .. } => Some(&*e),
-                        Statement::Assign(_, e) => Some(&*e),
-                        _ => None,
-                    });
-                    let mut stride_ok = true;
-                    if let Some(expr) = template_expr {
-                        let mut field_indices: Vec<usize> = Vec::new();
-                        Self::collect_field_indices(expr, &self.ctx.field_index_map, &mut field_indices);
-                        field_indices.sort();
-                        if field_indices.len() >= 2 {
-                            let max_stride = field_indices.windows(2)
-                                .map(|w| w[1] - w[0]).max().unwrap_or(0);
-                            if max_stride > 1 {
-                                // Strided access — inserts can't be merged
-                                stride_ok = false;
-                            }
-                        }
-                    }
-                    let should_vec = stride_ok
-                        && (group.width >= 4 && group.width <= 8
-                            || (group.width >= 3 && group.width <= 8
-                                && template_expr.map_or(false, |expr| {
-                                    crate::backend::llvm::vector_codegen::tree_depth(expr)
-                                        * group.width >= 10
-                                })));
-                    if should_vec {
-                        let result = crate::backend::llvm::vector_codegen::emit_slp_group(
-                            self, out, body, group, write_set);
-                        if result.is_ok() {
-                            i = group.lane_positions.iter().max()
-                                .copied().unwrap_or(i + group.width) + 1;
-                            continue;
-                        }
-                    }
-                }
-            }
             let stmt = &body[i];
             match stmt {
                 Statement::Let { name, expr: Some(e), .. } => {
@@ -700,21 +453,36 @@ impl LlvmBackend {
                 Statement::Assign(lhs, expr) => {
                     let lhs_name = Self::assign_target_name(lhs);
                      let val = self.emit_expr(out, expr, "  ");
-                     if let Some(ref n) = lhs_name {
+                      if let Some(ref n) = lhs_name {
                          if write_set.contains(n) {
-                             // 2026-07-21: Float fields use native type in backend —
-                             // skip adapt_to_i64 and store the float value directly.
-                             // Non-float fields still box to i64 for phi compatibility.
-                             let field_ty = self.ctx.field_index_map.get(n)
-                                 .and_then(|idx| self.ctx.field_types.get(*idx))
-                                 .cloned().unwrap_or_else(|| "i64".to_string());
-                             if field_ty == "float" || field_ty == "double" {
-                                 self.fun.pending_phi_backedge.insert(n.clone(), val.name.clone());
-                             } else {
-                                 let boxed = self.adapt_to_i64(out, "  ", &val);
-                                 self.fun.pending_phi_backedge.insert(n.clone(), boxed);
-                             }
-                         }
+                              // 2026-07-29: Vector phi routing — if field belongs to
+                              // a vector group, record_field_update instead of scalar backedge.
+                              // Clone lookup data to avoid borrow conflicts with &mut self.fun.
+                              let is_vector_grouped = self.fun.field_to_phi.contains_key(n.as_str());
+                              let (groups_clone, lane_map_clone) = if is_vector_grouped {
+                                  (Some(self.fun.active_vector_groups.clone()),
+                                   Some(self.fun.field_to_lane.clone()))
+                              } else {
+                                  (None, None)
+                              };
+                              if let (Some(ref g), Some(ref l)) = (groups_clone, lane_map_clone) {
+                                  crate::backend::llvm::vector_phi::record_field_update(
+                                      &mut self.fun, n, &val.name, g, l,
+                                  );
+                              } else {
+                                  // 2026-07-21: Float fields use native type in backend —
+                                  // skip adapt_to_i64 and store the float value directly.
+                                  let field_ty = self.ctx.field_index_map.get(n)
+                                      .and_then(|idx| self.ctx.field_types.get(*idx))
+                                      .cloned().unwrap_or_else(|| "i64".to_string());
+                                  if field_ty == "float" || field_ty == "double" {
+                                      self.fun.pending_phi_backedge.insert(n.clone(), val.name.clone());
+                                  } else {
+                                      let boxed = self.adapt_to_i64(out, "  ", &val);
+                                      self.fun.pending_phi_backedge.insert(n.clone(), boxed);
+                                  }
+                              }
+                          }
                         // 2026-07-17: When post-loop hoisted prints need final values,
                         // emit state stores for ALL fields, not just phi-tracked ones.
                         // Without this, fields outside the capped write_set (max 6)

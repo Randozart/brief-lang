@@ -7,16 +7,13 @@ pub mod emit_expr;
 pub mod emit_stmt;
 pub mod emit_toplevel;
 pub mod gpu;
-pub mod hazard;
 pub mod helpers;
 pub mod intrinsics;
 pub mod loop_engine;
-pub mod vector_codegen;
 pub mod normalizer;
-pub mod optimizer;
-pub mod reorder;
 pub mod types;
-pub mod validate;
+pub mod strategy;
+pub mod vector_phi;
 
 #[cfg(test)]
 mod tests;
@@ -1131,8 +1128,9 @@ impl LlvmBackend {
     }
 
     /// Set the LLVM target triple for generated IR.
-    /// Also updates the data layout to match.
+    /// Also updates the data layout to match and derives int_bits from it.
     /// 2026-07-11: Phase 6 — WASM target support.
+    /// 2026-07-29: Wire parse_pointer_width to auto-derive int_bits from data layout.
     pub fn with_target_triple(mut self, triple: &str) -> Self {
         self.ctx.target_triple = triple.to_string();
         self.ctx.data_layout = match triple {
@@ -1144,13 +1142,19 @@ impl LlvmBackend {
                 Some("e-m:e-p270:32:32-p271:32:32-p272:64:64-i64:64-i128:128-f80:128-n8:16:32:64-S128".to_string())
             }
         };
+        if let Some(ref dl) = self.ctx.data_layout {
+            self.ctx.int_bits = CompilerContext::parse_pointer_width(dl);
+        }
         self
     }
 
     /// Set the LLVM data layout string (overrides the auto-derived layout).
+    /// Also derives int_bits from the data layout's pointer width.
     /// 2026-07-15: Phase 7 — config-driven from targets.toml.
+    /// 2026-07-29: Wire parse_pointer_width to auto-derive int_bits from data layout.
     pub fn with_data_layout(mut self, dl: &str) -> Self {
         self.ctx.data_layout = Some(dl.to_string());
+        self.ctx.int_bits = CompilerContext::parse_pointer_width(dl);
         self
     }
 
@@ -2356,32 +2360,13 @@ impl LlvmBackend {
         writeln!(out, "@ll_empty_list = private unnamed_addr constant {{ i64, i64 }} {{ i64 0, i64 0 }}").ok();
         writeln!(out).ok();
 
-        // Run SLP hazard analysis before emitting function definitions and attributes.
-        // This populates slp_hazard_fns so that slp_attr() returns the correct attribute
-        // group (#4/#5) for hazardous functions, and the attributes section emits #4/#5.
-        self.estimate_slp_hazard(&txns);
-
-        // 2026-07-21: Run SLP isomorphism analysis — detects structurally identical
-        // operation sequences across different float fields (nbody's dx01=by0-by1,
-        // dy01=by0-by1 pattern) for potential vectorization in a future phase.
         // 2026-07-28: Populate iter_bounds for !prof computation (txns is now in scope).
+        // 2026-07-29: SLP hazard and isomorphism analysis removed — proven counterproductive.
+        // LLVM's SLP vectorizer has its own cost model. See §7 of recovery plan.
         self.ctx.iter_bounds.clear();
         for (name, _) in &txns {
             if let Some(bound) = analysis.region_analyzer.iteration_bound_of(name) {
                 self.ctx.iter_bounds.insert(name.clone(), bound);
-            }
-        }
-        for (name, txn) in &txns {
-            if txn.is_reactive {
-                let result = crate::analysis::slp_isomorphism::analyze_body(&txn.body);
-                if result.has_slp_opportunities {
-                    let total_lanes: usize = result.groups.iter().map(|g| g.width).sum();
-                    self.warnings.push(format!(
-                        "info: txn '{}' has {} SLP isomorphism group(s) ({} total lanes)",
-                        name, result.groups.len(), total_lanes));
-                    // Store groups on FunctionContext for codegen
-                    self.fun.slp_groups = result.groups;
-                }
             }
         }
 
@@ -2668,6 +2653,12 @@ impl LlvmBackend {
                         // (needs_state_stores_in_body=false), EmitPerFieldPhi emits zero memory
                         // traffic regardless of field count — strictly better than
                         // Removed memory-loop variant's GEP+load+store per iteration.
+                        // 2026-07-29: Three-way structural dispatch (pure counter fold
+                        // handled separately). Removed heuristics: has_body_ffi,
+                        // write_density >= 0.8, phi_cap, emit_while_main,
+                        // emit_folded_memory_main — all proven counterproductive.
+                        // See docs/plans/2026-07-29-full-recovery-plan.md §10.
+                        let mut dispatched = false;
                         if !has_swan_song && (node.is_pure_body || node.is_effectively_pure) {
                             let total_val = self.ctx.field_initializers
                                 .get(&bp.bound_var)
@@ -2695,158 +2686,69 @@ impl LlvmBackend {
                                 }
                                 writeln!(out, "  ret i32 0").ok();
                                 writeln!(out, "}}").ok();
-                                 true
-                         } else {
-                             // Adaptive dispatch: EmitInlineSsa (inline SSA) vs EmitPerFieldPhi (per-field phi).
-                            // 2026-07-05: EmitInlineSsa is selected for dense-write, small-field
-                            // bodies — the single %State phi + insertvalue chain lets
-                            // LLVM optimize the entire state as one SSA unit.  Guards are
-                            // handled via phi merge (emit_stmt.rs:983-992).  EmitPerFieldPhi is
-                            // selected for sparse-write, large-field bodies — per-field
-                            // phis avoid the long insertvalue chain.
-                            // 2026-07-05: When the body has FFI calls (print_int#, etc.),
-                            // use EmitPerFieldPhi instead of EmitInlineSsa.  EmitInlineSsa's insertvalue chain makes
-                            // it easier for LLVM's ipsccp/globalopt to prove the loop is
-                            // pure (by analyzing @stdout as null/undef), which causes
-                            // LLVM to eliminate the entire loop including all fprintf
-                            // calls — producing empty output (knucleotide, fasta bug).
+                                dispatched = true;
+                            }
+                        }
+                        if !dispatched {
+                            // ── Structural 4-way dispatch ─────────────────────
+                            // 1. VectorPhiGroup — isomorphic field groups with ≥4 members
+                            // 2. InlineSsa — dense writes, small state, counter-only writes
+                            // 3. PerFieldPhi — everything else (default)
+                            //
+                            // 2026-07-29: Guardrail: InlineSsa (emit_folded_loop) passes an
+                            // EMPTY write_set to emit_countable_body (counter.rs:110), so any
+                            // non-counter state writes are silently discarded. Skip InlineSsa
+                            // when the body writes fields other than the loop counter.
+                            // See docs/plans/2026-07-29-dispatch-bug-analysis.md.
                             let total_fields = self.ctx.field_index_map.len();
                             let write_count = node.write_set.len();
                             let write_density = if total_fields > 0 { write_count as f64 / total_fields as f64 } else { 1.0 };
-                            let has_body_ffi = raw_body.iter().any(|s| {
-                                crate::analysis::transition_graph::statement_contains_ffi(s)
-                            });
-                            if has_body_ffi && total_fields < 16 {
-                                // 2026-07-21: Direct while-loop for bodies with FFI calls.
-                                // No phi nodes — every field via GEP+load+store. Avoids both
-                                // the EmitInlineSsa FFI bug (globalopt eliminates prints) and
-                                // the per-field phi overhead (3-4 extra insns per iteration).
+                            let vg = crate::backend::llvm::vector_phi::detect_vector_groups(
+                                &node.write_set, &body_stmts,
+                                &self.ctx.field_index_map, &self.ctx.field_types,
+                            );
+                            if !vg.is_empty() && total_fields > 14 {
+                                // Vector phi group path — per-field phi loop with vector
+                                // phi promotion. Checks before InlineSsa so nbody_newton
+                                // (large state) gets vector phis, not InlineSsa.
                                 self.fun.pending_post_hoist = post_hoist;
-                                self.warnings.push(format!("info: txn '{}' dispatched via direct while-loop", &node.name));
-                                self.emit_while_main(&mut out, &node.name, counter_idx,
-                                    total_idx, total_const_name, &body_stmts);
-                                true
-                            } else if write_density >= 0.5 && total_fields < 8 && !has_body_ffi {
-                                // EmitInlineSsa: inline SSA with insertvalue chain.
-                                // Best for dense writes (knucleotide: 4 fields all written,
-                                // mandelbrot: 5 fields all written).
-                                self.fun.pending_post_hoist = post_hoist;
-                                self.warnings.push(format!("info: txn '{}' dispatched via inline SSA (EmitInlineSsa, {}/{} fields written)", &node.name, write_count, total_fields));
-                                self.emit_folded_main(&mut out, &node.name, counter_idx, total_idx, total_const_name, false, Some(&body_stmts));
-                                true
-                            // 2026-07-19: Memory counter loop for dense-write programs with
-                            // many fields. Uses GEP+load+store (Phase 3 style) — avoids
-                            // per-field phi overhead. load_last_val_temps unboxes float
-                            // fields for correct hoisted print types.
+                                let field_count: usize = vg.iter().map(|g| g.width).sum();
+                                self.warnings.push(format!("info: txn '{}' dispatched via vector phi ({}/{} fields in {} groups)", &node.name, field_count, total_fields, vg.len()));
+                                let is_decreasing = bp.direction == crate::analysis::transition_graph::ConvergeDirection::Decreasing;
+                                self.emit_countable_main(&mut out, &node.name, counter_idx, total_idx, total_const_name, &body_stmts, &node.write_set, is_decreasing, Some(&bp.var));
+                            } else if write_density >= 0.5 && total_fields < 8 {
+                                // InlineSsa: insertvalue chain for small, dense-write states.
+                                // Only safe when the counter is the ONLY written field —
+                                // emit_folded_loop passes empty write_set and silently drops
+                                // non-counter writes. Guardrail below enforces this.
+                                let writes_non_counter = node.write_set.iter().any(|f| {
+                                    *f != bp.var
+                                });
+                                if writes_non_counter {
+                                    // Non-counter state writes exist — emit_folded_loop would
+                                    // silently discard them. Route to PerFieldPhi instead.
+                                    self.fun.pending_post_hoist = post_hoist;
+                                    self.warnings.push(format!("info: txn '{}' dispatched via per-field phi ({}/{} fields written, non-counter writes)", &node.name, write_count, total_fields));
+                                    let is_decreasing = bp.direction == crate::analysis::transition_graph::ConvergeDirection::Decreasing;
+                                    self.emit_countable_main(&mut out, &node.name, counter_idx, total_idx, total_const_name, &body_stmts, &node.write_set, is_decreasing, Some(&bp.var));
+                                } else {
+                                    self.fun.pending_post_hoist = post_hoist;
+                                    self.warnings.push(format!("info: txn '{}' dispatched via inline SSA ({}/{} fields written)", &node.name, write_count, total_fields));
+                                    self.emit_folded_main(&mut out, &node.name, counter_idx, total_idx, total_const_name, false, Some(&body_stmts));
+                                }
                             } else {
-                                // EmitPerFieldPhi: per-field phi loop with Path A + dead-field
-                                // elimination + commit block.
-                                 // 2026-07-10: Cap write_set to avoid register spilling.
-                                 // Too many phi registers (>=8) causes LLVM to spill to
-                                 // stack, which is slower than GEP+load+store for the
-                                 // non-tracked fields. Priority: counter, bound, vec groups.
-                                 // 2026-07-21: Adaptive cap — scale with write_set to reduce
-                                 // GEP+load+store for medium fields (fannkuch_redux 1.31x).
-                                 let phi_cap = if node.write_set.len() > 10 {
-                                    10
-                                 } else {
-                                    node.write_set.len().max(6)
-                                 };
-                                 let mut capped_set: HashSet<String> = HashSet::new();
-                                capped_set.insert(bp.var.clone());
-                                if let Some(ref tv) = total_idx {
-                                    if let Some(name) = self.ctx.field_index_map.iter()
-                                        .find(|&(_, v)| *v == *tv).map(|(k, _)| k.clone())
-                                    {
-                                        capped_set.insert(name);
-                                    }
-                                }
-                                 for f in &node.write_set {
-                                     if capped_set.len() >= phi_cap { break; }
-                                     capped_set.insert(f.clone());
-                                 }
-                                 // 2026-07-21: Force state stores when capped_set excludes write
-                                 // fields. Without this, non-phi fields' values are computed in the
-                                 // body but never stored back to %State — they are lost at the end
-                                 // of each iteration (float_math_nonzero p22 bug).
-                                 if node.write_set.iter().any(|f| !capped_set.contains(f)) {
-                                     self.fun.needs_state_stores_in_body = true;
-                                 }
-                                 self.fun.pending_post_hoist = post_hoist;
-                                 let num_fields = capped_set.len().max(2);
-                                 self.warnings.push(format!("info: txn '{}' dispatched via per-field phi loop (EmitPerFieldPhi, {} fields)", &node.name, num_fields));
-                                  let is_decreasing = bp.direction == crate::analysis::transition_graph::ConvergeDirection::Decreasing;
-                                  self.emit_countable_main(&mut out, &node.name, counter_idx, total_idx, total_const_name, &body_stmts, &capped_set, is_decreasing, Some(&bp.var));
-                                  true
-                              }
-                              }
-                          } else {
-                              // Adaptive dispatch for non-pure bodies: EmitInlineSsa vs EmitPerFieldPhi.
-                            // 2026-07-05: Same criteria as pure path — dense writes,
-                            // small fields favors EmitInlineSsa insertvalue chain.  The SSA mode
-                            // guard handler (emit_stmt.rs:983-992) handles guards with
-                            // phi merge, so guards don't disqualify EmitInlineSsa.
-                            // 2026-07-05: has_body_ffi check — when the body has FFI
-                            // calls, use EmitPerFieldPhi to prevent LLVM from eliminating the
-                            // loop+fprintf chain via globalopt (knucleotide bug).
-                            let total_fields = self.ctx.field_index_map.len();
-                            let write_count = node.write_set.len();
-                            let write_density = if total_fields > 0 { write_count as f64 / total_fields as f64 } else { 1.0 };
-                            let has_body_ffi = raw_body.iter().any(|s| {
-                                crate::analysis::transition_graph::statement_contains_ffi(s)
-                            });
-                            if has_body_ffi && total_fields < 16 {
-                                // 2026-07-21: Direct while-loop for bodies with FFI calls.
+                                // PerFieldPhi: per-field phi loop with full write_set.
+                                // Default for all other programs. Most robust: handles guards,
+                                // FFI calls, any field count, any write density. phi_cap removed —
+                                // full write_set means every written field gets a phi, eliminating
+                                // needs_state_stores_in_body for phi-capped edge cases.
                                 self.fun.pending_post_hoist = post_hoist;
-                                self.warnings.push(format!("info: txn '{}' dispatched via direct while-loop", &node.name));
-                                self.emit_while_main(&mut out, &node.name, counter_idx,
-                                    total_idx, total_const_name, &body_stmts);
-                                true
-                            } else if write_density >= 0.5 && total_fields < 8 && !has_body_ffi {
-                                self.fun.pending_post_hoist = post_hoist;
-                                self.warnings.push(format!("info: txn '{}' dispatched via inline SSA (EmitInlineSsa, {}/{} fields written)", &node.name, write_count, total_fields));
-                                self.emit_folded_main(&mut out, &node.name, counter_idx, total_idx, total_const_name, false, Some(&body_stmts));
-                                true
-                            } else if write_density >= 0.8 && total_fields >= 8 {
-                                // 2026-07-19: Memory counter loop for dense-write programs.
-                                // Uses GEP+load+store (Phase 3 style) — avoids per-field phi
-                                // overhead. last_val_temps cleared before hoisted prints.
-                                self.fun.pending_post_hoist = post_hoist;
-                                self.warnings.push(format!("info: txn '{}' dispatched via memory counter loop (EmitMemoryCounter, {}/{} fields written)", &node.name, write_count, total_fields));
-                                self.emit_folded_memory_main(&mut out, &node.name, counter_idx, total_idx, total_const_name, &body_stmts);
-                                true
-                             } else {
-                                 let phi_cap = if node.write_set.len() > 10 {
-                                    10
-                                 } else {
-                                    node.write_set.len().max(6)
-                                 };
-                                 let mut capped_set: HashSet<String> = HashSet::new();
-                                 capped_set.insert(bp.var.clone());
-                                 if let Some(ref tv) = total_idx {
-                                    if let Some(name) = self.ctx.field_index_map.iter()
-                                        .find(|&(_, v)| *v == *tv).map(|(k, _)| k.clone())
-                                    {
-                                        capped_set.insert(name);
-                                    }
-                                }
-                                 for f in &node.write_set {
-                                     if capped_set.len() >= phi_cap { break; }
-                                     capped_set.insert(f.clone());
-                                 }
-                                 // 2026-07-21: Force state stores when capped_set excludes write
-                                 // fields (same as pure-path above).
-                                 if node.write_set.iter().any(|f| !capped_set.contains(f)) {
-                                     self.fun.needs_state_stores_in_body = true;
-                                 }
-                                 self.fun.pending_post_hoist = post_hoist;
-                                 let num_fields = capped_set.len().max(2);
-                                 self.warnings.push(format!("info: txn '{}' dispatched via per-field phi loop (EmitPerFieldPhi, {} fields)", &node.name, num_fields));
-                                 let is_decreasing = bp.direction == crate::analysis::transition_graph::ConvergeDirection::Decreasing;
-                                  self.emit_countable_main(&mut out, &node.name, counter_idx, total_idx, total_const_name, &body_stmts, &capped_set, is_decreasing, Some(&bp.var));
-                                  true
-                              }
-                          }
+                                self.warnings.push(format!("info: txn '{}' dispatched via per-field phi ({}/{} fields written)", &node.name, write_count, total_fields));
+                                let is_decreasing = bp.direction == crate::analysis::transition_graph::ConvergeDirection::Decreasing;
+                                self.emit_countable_main(&mut out, &node.name, counter_idx, total_idx, total_const_name, &body_stmts, &node.write_set, is_decreasing, Some(&bp.var));
+                            }
+                        }
+                        true
                       } else { false }
                   } else { false }
              } else { false }
@@ -3548,15 +3450,10 @@ impl LlvmBackend {
 
     /// Return any extra flags needed for `opt`. Currently emits
     /// `-slp-vectorize-hor=false` when SLP hazards exist, since LLVM 18's
-    /// per-function `"disable-slp-vectorize"` attribute is not always respected
-    /// by the new pass manager. This is a safeguard: the per-function attribute
-    /// works on LLVM 15-17 and 22+; the global flag covers LLVM 18-21.
+    /// 2026-07-29: SLP hazard gating removed — proven counterproductive.
+    /// No global SLP-disable flags needed. LLVM's auto-vectorizer runs freely.
     pub fn llvm_extra_flags(&self) -> Vec<String> {
-        let mut flags = Vec::new();
-        if !self.ctx.slp_hazard_fns.is_empty() {
-            flags.push("-slp-vectorize-hor=false".to_string());
-        }
-        flags
+        Vec::new()
     }
 
     /// Select the LLVM attribute group for a function, adjusting for SLP hazard.

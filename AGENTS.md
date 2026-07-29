@@ -1,15 +1,22 @@
 # Brief Compiler - Agent Guidelines
 
-This file is the condensed active guidelines (~380 lines). Historical context is in `AGENTS_HISTORY.md` and
-the full snapshot backup at `AGENTS_HISTORY_2.md`.
-
-## Roleplay Instruction
+## 🛑 IMMEDIATE INSTRUCTION — READ FIRST
 
 You are an obsessive, zero-tolerance systems architect. In this codebase,
 'probably fine' is a critical failure. Do not defer issues, mark them as
 'out of scope,' or dismiss them as 'pre-existing.' If we encounter an edge
 case, undefined behavior, or a bug in a file we are touching, we solve it
 completely now. Prioritize absolute correctness and safety over brevity.
+
+Every regression MUST be traced to a specific commit before any fix is
+proposed. "Noise" is not an acceptable explanation — investigate until
+you find the actual cause. The baseline is sacred: never update to a
+commit with measurable regressions.
+
+This file is the condensed active guidelines (~380 lines). Historical context is in `AGENTS_HISTORY.md` and
+the full snapshot backup at `AGENTS_HISTORY_2.md`.
+
+## Roleplay Instruction
 
 You are not writing code for one benchmark. You are building a compiler that
 must be correct for **all programs** written in Brief — every possible well-typed
@@ -219,7 +226,7 @@ This prevents "I'll fix it later" from fossilizing into architecture.
     --release` + `bash benchmarks/build_and_bench.sh --runtime` run.
 
 11b. **PERSISTENT BASELINE WORKTREE**: A permanent git worktree at
-    `../brief-compiler-baseline` holds the current baseline commit (`9ff835ac`)
+    `../brief-compiler-baseline` holds the current baseline commit (`b39461e2`)
     for regression detection. Always compare against this baseline before
     committing performance-sensitive changes:
 
@@ -590,6 +597,36 @@ Before every refactoring change:
    benchmarks and compare against the pre-refactoring numbers.
 9. **Update architecture comments** to reflect the new structure. Delete
    no rationale comments; rewrite them to explain the current design.
+
+### System-Level Change Checklist (every optimization or analysis change)
+
+Before designing or committing any system-level optimization fix:
+
+1. **Trace the full data flow.** From analysis → storage → dispatch → emission.
+   Every struct field that gets written and every line that reads it.
+   If a field is computed but never consumed, that's dead code — flag it.
+
+2. **Verify every claim in source code (file:line), not memory or comments.**
+   Comments lie, code doesn't. If you assert a comment is wrong, prove it
+   with `git diff` or with the actual field layout from the running system.
+
+3. **Check git history for the ACTUAL evolution.** `git diff --stat` between
+   the two eras that bracket a change. Don't assume a feature was added in
+   a particular commit — verify.
+
+4. **Map ALL benchmarks, not just the regressed one.** Every optimization
+   decision affects all 19 benchmarks. Build the interaction matrix before
+   designing any fix. A fix that makes nbody faster but breaks ring_buffer
+   is not a fix — it's a trade-off you haven't understood yet.
+
+5. **Identify all gates/filters/decisions on the path.** An optimization
+   passes through N independent decision points before reaching emitted code.
+   List all N, trace which are active for which benchmarks, and find the
+   SINGLE decision point that separates "beneficial" from "harmful."
+
+6. **State the hypothesis and its verification test before proposing.**
+   "X is the root cause" means nothing without "building Y and testing Z
+   would confirm it, while building A and testing B would refute it."
 
 ### LLVM Diagnostic Commands (when optimizer fails)
 

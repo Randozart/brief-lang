@@ -12,7 +12,7 @@ use std::collections::HashSet;
 
 /// 2026-07-15: Normalize AST for SPIR-V backend emission.
 /// 2026-07-20: No TOML config — hashword protocol replaces op dispatch.
-pub fn normalize(items: &mut Vec<TopLevel>, universe: &mut TypeUniverse) -> Result<(), String> {
+pub fn normalize(items: &mut Vec<TopLevel>, universe: &mut TypeUniverse, _int_bits: u64) -> Result<(), String> {
     // 2026-07-15: Flag kernel transactions ([idx < N] pattern)
     for item in items.iter_mut() {
         if let TopLevel::Transaction(txn) = item {

@@ -386,18 +386,21 @@ pub fn compile_source(file_path: &str, source: &str, opts: &BuildOptions) -> Res
     emit_beast_snapshot(file_path, BeastStage::TypeCheck, BeastPosition::After, &items, &universe, opts)?;
 
     // ── Normalizer pass ───────────────────────────────────────────────
+    // 2026-07-29: Pass int_bits for protocol-driven llvm_type resolution.
+    let int_bits = opts.int_bits;
     match opts.backend {
         BackendKind::Llvm | BackendKind::Gpu => {
-            brief_compiler::backend::llvm::normalizer::normalize(&mut items, &mut universe)?;
+            brief_compiler::backend::llvm::normalizer::normalize(&mut items, &mut universe, int_bits)?;
         }
         BackendKind::Circt => {
-            brief_compiler::backend::circt_normalizer::normalize(&mut items, &mut universe)?;
+            brief_compiler::backend::circt_normalizer::normalize(&mut items, &mut universe, int_bits)?;
         }
         BackendKind::Webstack => {
-            brief_compiler::backend::webstack_normalizer::normalize(&mut items, &mut universe)?;
+            // Webstack is always wasm32 (32-bit pointers)
+            brief_compiler::backend::webstack_normalizer::normalize(&mut items, &mut universe, 32)?;
         }
         BackendKind::Spirv => {
-            brief_compiler::backend::spirv::normalizer::normalize(&mut items, &mut universe)?;
+            brief_compiler::backend::spirv::normalizer::normalize(&mut items, &mut universe, int_bits)?;
         }
         BackendKind::Vm => {
             // VM backend is target-agnostic — no normalization needed.

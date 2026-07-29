@@ -84,16 +84,10 @@ impl LlvmBackend {
 
             // ── Identifier ───────────────────────────────────────────
             Expr::Identifier(name) => {
-                // 2026-07-17: Five paths: last_val_temps, local binding,
-                // phi register, state field, global constant.
-                //
-                // Check last_val_temps FIRST — this catches values written
-                // earlier in the same body iteration (e.g. count = count + 1
-                // followed by guard [count % 5000000 == 0]). Without this,
-                // the guard reads the phi register (start-of-iteration value)
-                // instead of the updated value, producing wrong guard results.
-                // The type is looked up from last_val_types (parallel map) or
-                // falls back to field_index_map or Int.
+                // 2026-07-29: Accumulation chaining — check last_val_temps FIRST.
+                // When a field is written multiple times in one iteration, the second
+                // read must return the just-computed value, not the loop-header phi,
+                // so the first write forms a live dependency chain (not dead code).
                 if let Some(reg) = self.fun.last_val_temps.get(name) {
                     let brief_ty = self
                         .fun
@@ -107,11 +101,34 @@ impl LlvmBackend {
                                 .and_then(|idx| self.ctx.field_brief_types.get(*idx).cloned())
                         })
                         .unwrap_or(Type::int());
-                    TypedRegister {
+                    return TypedRegister {
                         name: reg.clone(),
                         ty: brief_ty,
+                    };
+                }
+                // 2026-07-29: Path 2 — Vector phi group extractelement.
+                // Checked after last_val_temps so that intra-iteration writes
+                // to vector-grouped fields (if any) resolve correctly.
+                if !self.fun.active_vector_groups.is_empty() {
+                    let groups_clone = self.fun.active_vector_groups.clone();
+                    let f2p_clone = self.fun.field_to_phi.clone();
+                    let f2l_clone = self.fun.field_to_lane.clone();
+                    if let Some(lane_reg) = crate::backend::llvm::vector_phi::emit_extractelement(
+                        &mut self.fun, out, name, &groups_clone,
+                        &f2p_clone, &f2l_clone, indent,
+                    ) {
+                        let brief_ty = self
+                            .ctx
+                            .field_index_map
+                            .get(name)
+                            .and_then(|idx| self.ctx.field_brief_types.get(*idx).cloned())
+                            .unwrap_or(Type::int());
+                        return TypedRegister { name: lane_reg, ty: brief_ty };
                     }
-                } else if let Some(reg) = self.get_local(name) {
+                }
+                // 2026-07-17: Remaining paths: local binding,
+                // phi register, state field, global constant.
+                if let Some(reg) = self.get_local(name) {
                     // 2026-07-18: If the binding is an alloca (param slot,
                     // uninitialized let, or txn param slot), emit a load.
                     if self.fun.param_slots.values().any(|s| s == &reg)
@@ -1404,28 +1421,24 @@ impl LlvmBackend {
         }
         let result = self.fun.gen_reg();
         match (src_llvm.as_str(), param_llvm_ty) {
-            // float → i64: bitcast to i32, zext to i64
+            // float → i64: fptosi — semantic float-to-int, not bitcast
             ("float", "i64") => {
-                let b32 = self.fun.gen_reg();
-                writeln!(out, "{}  {} = bitcast float {} to i32", indent, b32, arg_reg.name).ok();
-                writeln!(out, "{}  {} = zext i32 {} to i64", indent, result, b32).ok();
+                writeln!(out, "{}  {} = fptosi float {} to i64", indent, result, arg_reg.name).ok();
                 TypedRegister { name: result, ty: Type::int() }
             }
-            // double → i64: bitcast
+            // double → i64: fptosi — semantic float-to-int, not bitcast
             ("double", "i64") => {
-                writeln!(out, "{}  {} = bitcast double {} to i64", indent, result, arg_reg.name).ok();
+                writeln!(out, "{}  {} = fptosi double {} to i64", indent, result, arg_reg.name).ok();
                 TypedRegister { name: result, ty: Type::int() }
             }
-            // i64 → float: trunc to i32, bitcast to float
+            // i64 → float: sitofp — semantic int-to-float, not bitcast
             ("i64", "float") => {
-                let tr = self.fun.gen_reg();
-                writeln!(out, "{}  {} = trunc i64 {} to i32", indent, tr, arg_reg.name).ok();
-                writeln!(out, "{}  {} = bitcast i32 {} to float", indent, result, tr).ok();
+                writeln!(out, "{}  {} = sitofp i64 {} to float", indent, result, arg_reg.name).ok();
                 TypedRegister { name: result, ty: Type::float() }
             }
-            // i64 → double: bitcast
+            // i64 → double: sitofp — semantic int-to-float, not bitcast
             ("i64", "double") => {
-                writeln!(out, "{}  {} = bitcast i64 {} to double", indent, result, arg_reg.name).ok();
+                writeln!(out, "{}  {} = sitofp i64 {} to double", indent, result, arg_reg.name).ok();
                 TypedRegister { name: result, ty: Type::float64() }
             }
             // float ↔ double: fpext/fptrunc
@@ -1790,10 +1803,11 @@ impl LlvmBackend {
     /// 2026-07-25: Return the integer type for binary operations based on
     /// the function's narrowed max width, or "i64" if no narrowing applies.
     /// 2026-07-25: Always return i64 for integer binary operations.
-    /// Narrowing affects the final `ret` (via trunc in emit_stmt.rs) but
-    /// intermediate SSA values remain i64 to match actual operand widths.
+    /// Intermediate SSA values match the target's native integer width.
+    /// 2026-07-29: Use self.ctx.int_bits instead of hardcoded i64 for
+    /// cross-target correctness (wasm32 uses i32 intermediate values).
     fn binop_int_type(&self) -> String {
-        "i64".to_string()
+        format!("i{}", self.ctx.int_bits)
     }
 
     /// 2026-07-18: Try to emit a binary operation from config/llvm-ops.toml.

@@ -40,7 +40,25 @@ pub fn type_size(ty: &Type, universe: Option<&crate::type_universe::TypeUniverse
     // When universe is available, read bytes from ResolvedType.
     if let Some(ref u) = universe {
         if let Some(rt) = ty.universe_key().and_then(|k| u.get(k)) {
-            return rt.bytes;
+            if rt.bytes > 0 {
+                return rt.bytes;
+            }
+            // 2026-07-29: Flexible protocol type with no baked-in bytes.
+            // Compute from protocol membership with conservative defaults.
+            // After normalizer runs, rt.bytes is set from int_bits + protocol.
+            if rt.properties.contains_key("Cast.#Int") || rt.properties.contains_key("Cast.#UInt") {
+                return 8; // conservative default for Int/UInt
+            }
+            if rt.properties.contains_key("Cast.#Float") {
+                if let Some(crate::ast::PropertyValue::Int(bits)) = rt.properties.get("bits") {
+                    return (*bits as u64) / 8;
+                }
+                return 4; // default float size
+            }
+            if rt.properties.contains_key("Cast.#Bool") || rt.properties.contains_key("Cast.#Bit") {
+                return 1;
+            }
+            return 0;
         }
     }
     match ty {

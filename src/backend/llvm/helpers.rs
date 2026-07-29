@@ -325,7 +325,7 @@ impl LlvmBackend {
         writeln!(
             out,
             "define i32 @main() local_unnamed_addr {} {{",
-            self.slp_attr("main", "#0")
+            "#0"
         )
         .ok();
         writeln!(out, "  entry:").ok();
