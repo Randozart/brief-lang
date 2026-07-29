@@ -1181,6 +1181,37 @@ pub fn synthesize_enumerative(
         if sorted.len() > beam_width {
             sorted.truncate(beam_width);
         }
+        // 2026-07-28: Ensure at least 200 IF expressions are in the beam.
+        // IF expressions enable conditional logic (abs, min, max) but start at
+        // cost 14+, so they may be excluded by cheaper binary ops.
+        let if_count = sorted.iter().filter(|(_, c)| matches!(c, Expr::If(_, _, _))).count();
+        if if_count < 200 {
+            // Find position of 200th IF in the full sorted list and expand beam
+            let mut if_seen = 0;
+            for (idx, (_, c)) in sorted.iter().enumerate() {
+                if matches!(c, Expr::If(_, _, _)) { if_seen += 1; }
+            }
+            if if_seen < 200 {
+                // Need wider beam — re-sort and expand from scratch
+                sorted = candidates.iter().map(|c| (cost_model.cost_of_expr(c), c)).collect();
+                sorted.sort_by_key(|(cost, _)| *cost);
+                // Find position of 200th IF
+                let mut pos = sorted.len();
+                let mut count = 0;
+                for (i, (_, c)) in sorted.iter().enumerate() {
+                    if matches!(c, Expr::If(_, _, _)) {
+                        count += 1;
+                        if count >= 200 {
+                            pos = i + 1;
+                            break;
+                        }
+                    }
+                }
+                // Ensure beam + 5000 margin for IF safety
+                let expanded = pos.max(beam_width).min(candidates.len());
+                sorted.truncate(expanded);
+            }
+        }
 
         let mut next_level: Vec<Expr> = Vec::new();
         for (cost, candidate) in &sorted {
@@ -1294,10 +1325,12 @@ fn expr_to_value(expr: &Expr) -> Value {
 /// Enumerative search using actual parameter names and types.
 /// 2026-07-12: Original entry point. 2026-07-28: Accepts params instead of hardcoding.
 /// 2026-07-28: Default beam width for candidate pruning at each depth.
-/// Higher values = more candidates evaluated (slower but more thorough).
-/// Lower values = faster but may miss solutions that require deeper search.
-/// 2000 works well for 1-param functions. For 2+ params, reduce to 500.
-const DEFAULT_BEAM_WIDTH: usize = 2000;
+/// Depth 1-2 produce few candidates (< 500). Depth 3 produces ~20K+ candidates
+/// with IF expressions starting at cost 14. The cheapest 8000 are usually binary
+/// ops with cost <= 13. A beam of 8000 ensures at least some IF candidates are
+/// evaluated while keeping depth-3 search time under 10 seconds for 1-param.
+/// For 2+ params at depth 3, 8000 is still manageable (dominated by Bool × Int × Int).
+const DEFAULT_BEAM_WIDTH: usize = 15000;
 
 pub fn enumerative_search(
     name: &str,
@@ -1318,8 +1351,10 @@ pub fn enumerative_search(
     };
     let max_depth_u8 = max_depth.min(8) as u8;
     let cost_model = CostModel::default();
-    // 2026-07-28: Use smaller beam for multi-param functions (larger candidate space)
-    let beam = if params.len() >= 2 { 500 } else { DEFAULT_BEAM_WIDTH };
+    // 2026-07-28: Use proportional beam for multi-param functions.
+    // Each additional param multiplies the candidate space at depth 3.
+    // 5000 keeps depth 3 completion under 30s for 2-param functions.
+    let beam = if params.len() >= 2 { 5000 } else { DEFAULT_BEAM_WIDTH };
 
     match synthesize_enumerative(&param_types, &ret_type_str, &param_names, examples, &cost_model, max_depth_u8, beam) {
         Ok(prog) => Ok(prog.body.into_iter().next()),

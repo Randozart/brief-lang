@@ -8,6 +8,8 @@ defn min(x0: Int, x1: Int) -> Int := {
     10, 3 -> 3;
     -5, 2 -> -5;
     7, 7 -> 7;
+    5, 10 -> 5;
+    -3, -7 -> -7;
 };
 
 defn max(x0: Int, x1: Int) -> Int := {
@@ -15,6 +17,8 @@ defn max(x0: Int, x1: Int) -> Int := {
     10, 3 -> 10;
     -5, 2 -> 2;
     7, 7 -> 7;
+    5, 10 -> 10;
+    -3, -7 -> -3;
 };
 
 let N: Int = GetEnvInt#("BOUND");
