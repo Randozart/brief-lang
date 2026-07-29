@@ -894,36 +894,89 @@ impl<'a> Parser<'a> {
         Ok(expr)
     }
 
-    /// Parse optional derivation block: := { ... }
+    /// Parse optional derivation block: := { ... } := ref_fn
+    /// 2026-07-29: Uses two `:=` — one for examples, one for reference (order-free).
+    ///   := { 0 -> 0; }           — examples only (existing)
+    ///   := popcount_ref          — reference only (synthesis skipped, use ref body)
+    ///   := { 0 -> 0; } := ref_fn — both (verify against reference)
+    ///   := ref_fn := { 0 -> 0; } — both (reversed order)
     fn parse_derivation_block(&mut self) -> Result<Option<DerivationBlock>, SyntaxError> {
-        // 2026-07-28: Save current position — if ColonEq is not next, return None.
         let colon_eq_span = self.tokens.get(self.pos)
             .map(|(_, s)| s.clone())
             .unwrap_or(0..0);
         if !self.eat(&Token::ColonEq) {
             return Ok(None);
         }
-        self.expect(Token::LBrace)?;
         let mut examples = Vec::new();
-        while !self.check(&Token::RBrace) && !self.is_at_end() {
-            let example = self.parse_derivation_example()?;
-            examples.push(example);
+        let mut ref_name: Option<String> = None;
+        let mut ref_tolerance: Option<f64> = None;
+        let mut rbrace_end = colon_eq_span.start + 2;
+
+        // First := block: either { examples } or identifier (ref)
+        if self.check(&Token::LBrace) {
+            // := { examples }
+            self.expect(Token::LBrace)?;
+            while !self.check(&Token::RBrace) && !self.is_at_end() {
+                let example = self.parse_derivation_example()?;
+                examples.push(example);
+                self.eat(&Token::Semicolon);
+            }
+            self.expect(Token::RBrace)?;
+            rbrace_end = self.tokens.get(self.pos - 1)
+                .map(|(_, s)| s.end)
+                .unwrap_or(colon_eq_span.start + 2);
             self.eat(&Token::Semicolon);
+        } else {
+            // := identifier (reference function name)
+            if let Some(Token::Identifier(n)) = self.peek().cloned() {
+                self.advance();
+                ref_name = Some(n);
+                // Parse optional [tol: N]
+                if self.eat(&Token::LBracket) {
+                    self.expect(Token::Identifier("tol".into())).ok();
+                    self.eat(&Token::Colon);
+                    ref_tolerance = self.parse_expression().ok().and_then(|e| {
+                        match e { Expr::Float(f) => Some(f), Expr::Decimal(n) => Some(n as f64), _ => None }
+                    });
+                    self.eat(&Token::RBracket);
+                }
+            } else {
+                return self.error_at_current("expected '{' for examples or identifier for reference function after ':='");
+            }
         }
-        // 2026-07-28: Use the actual byte span so doppelganger writer inserts
-        // at the correct position (not position 0 from Span::dummy()).
-        // expect(RBrace) advances past it; look up the consumed token's span via
-        // tokens[self.pos - 1] (since expect incremented pos).
-        self.expect(Token::RBrace)?;
-        let rbrace_end = self.tokens.get(self.pos - 1)
-            .map(|(_, s)| s.end)
-            .unwrap_or(colon_eq_span.start + 2);
-        // After RBrace, there may be an optional semicolon — consume it
-        self.eat(&Token::Semicolon);
-        // 2026-07-28: Parse optional contract [[post], [pre][post], [pre]].
-        // [[post] = [true][post] — postcondition only.
-        // [pre][post] — both pre and post.
-        // [pre]] = [pre][true] — precondition only.
+
+        // Second := block (optional, order-free)
+        if self.eat(&Token::ColonEq) {
+            if self.check(&Token::LBrace) {
+                // := { examples }
+                self.expect(Token::LBrace)?;
+                while !self.check(&Token::RBrace) && !self.is_at_end() {
+                    let example = self.parse_derivation_example()?;
+                    examples.push(example);
+                    self.eat(&Token::Semicolon);
+                }
+                self.expect(Token::RBrace)?;
+                rbrace_end = self.tokens.get(self.pos - 1)
+                    .map(|(_, s)| s.end)
+                    .unwrap_or(colon_eq_span.start + 2);
+                self.eat(&Token::Semicolon);
+            } else if let Some(Token::Identifier(n)) = self.peek().cloned() {
+                self.advance();
+                ref_name = Some(n);
+                if self.eat(&Token::LBracket) {
+                    self.expect(Token::Identifier("tol".into())).ok();
+                    self.eat(&Token::Colon);
+                    ref_tolerance = self.parse_expression().ok().and_then(|e| {
+                        match e { Expr::Float(f) => Some(f), Expr::Decimal(n) => Some(n as f64), _ => None }
+                    });
+                    self.eat(&Token::RBracket);
+                }
+            } else {
+                return self.error_at_current("expected '{' for examples or identifier for reference function after second ':='");
+            }
+        }
+
+        // Contract parsing: [[post], [pre][post], [pre]]
         let (precondition, postcondition) = if self.check(&Token::LBracket) {
             let next_is_bracket = self.tokens.get(self.pos + 1)
                 .map(|(t, _)| matches!(t, Token::LBracket))
@@ -936,64 +989,29 @@ impl<'a> Parser<'a> {
                 self.expect(Token::RBracket)?;
                 (None, post)
             } else {
-                // [ — could be precondition, or postcondition without sugar
                 self.advance();
                 let expr = Some(self.parse_expression()?);
-                let closed = self.eat(&Token::RBracket); // ]
-                // Check for second [ for postcondition
+                let closed = self.eat(&Token::RBracket);
                 if self.check(&Token::LBracket) {
                     self.advance();
                     let post = Some(self.parse_expression()?);
                     self.expect(Token::RBracket)?;
-                    (expr, post) // [pre][post]
+                    (expr, post)
                 } else if !closed {
-                    // Wasn't closed — this shouldn't happen
                     (None, None)
                 } else {
-                    // Single ] — check if ]] (precondition only)
-                    // Closed with single ], this might be [post] without sugar
-                    // or [pre]] — both are valid
                     if self.check(&Token::RBracket) {
-                        self.advance(); // consume second ]
-                        (expr, None) // [pre]]
+                        self.advance();
+                        (expr, None)
                     } else {
-                        (None, expr) // [post]
+                        (None, expr)
                     }
                 }
             }
         } else {
             (None, None)
         };
-        // 2026-07-29: Parse optional `verifying ref_fn [tol: N]` after contract.
-        let (ref_name, ref_tolerance) = if self.eat(&Token::Verifying) {
-            let name = match self.peek().cloned() {
-                Some(Token::Identifier(n)) => {
-                    self.advance();
-                    n
-                }
-                _ => {
-                    return self.error_at_current("expected reference function name after 'verifying'");
-                }
-            };
-            let tol = if self.eat(&Token::LBracket) {
-                self.expect(Token::Identifier("tol".into())).ok();
-                self.eat(&Token::Colon);
-                let val = self.parse_expression().ok().and_then(|e| {
-                    match e {
-                        Expr::Float(f) => Some(f),
-                        Expr::Decimal(n) => Some(n as f64),
-                        _ => None,
-                    }
-                });
-                self.eat(&Token::RBracket);
-                val
-            } else {
-                None
-            };
-            (Some(name), tol)
-        } else {
-            (None, None)
-        };
+
         let span = Span::new(colon_eq_span.start, rbrace_end, 0, 0);
         Ok(Some(DerivationBlock {
             examples,
