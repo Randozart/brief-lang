@@ -8,7 +8,7 @@ defn popcount(x0: Int) -> Int := {
     1 -> 1;
     3 -> 2;
     7 -> 3;
-} [[ @result >= 0 && @result < 64 ]];
+} [[ #Term >= 0 && #Term < 64 ];
 
 let N: Int = GetEnvInt#("BOUND");
 let i: Int = 0;

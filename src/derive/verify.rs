@@ -126,7 +126,7 @@ pub fn verify_candidate(
         if let Some(post) = postcondition {
             let post_ctx = &mut SynthesisEvalContext::new();
             if let crate::interpreter::Value::Int(n) = &result {
-                post_ctx.bind("@result", crate::interpreter::Value::Int(*n));
+                post_ctx.bind("#Term", crate::interpreter::Value::Int(*n));
             }
             let post_result = evaluate_synthesized(post, post_ctx);
             match post_result {
