@@ -894,6 +894,16 @@ fn check_top_level(
             }
             Ok(())
         }
+        // 2026-07-29: Validate AsmFn declaration
+        TopLevel::AsmFn(asm_fn) => {
+            if asm_fn.target.is_empty() {
+                return Err(crate::errors::TypeError::InvalidOperation {
+                    operation: "asm declaration".into(),
+                    type_name: "empty target".into(),
+                });
+            }
+            Ok(())
+        }
         _ => Ok(()),
     }
 }
