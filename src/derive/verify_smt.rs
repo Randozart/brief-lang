@@ -226,6 +226,7 @@ pub fn build_verification_query(
     candidate: &Expr,
     params: &[(String, Type)],
     postcondition: Option<&Expr>,
+    precondition: Option<&Expr>,
 ) -> String {
     let mut q = String::new();
     q.push_str("(set-option :produce-models true)\n");
@@ -257,28 +258,29 @@ pub fn build_verification_query(
     }
     q.push_str(&format!(") (_ BitVec 64) {})\n\n", candidate_body));
 
-    // If postcondition provided: verify candidate against it
+    // Build the forall verification body: (=> pre post) or just post
     if let Some(post) = postcondition {
-        q.push_str("; Verify: forall inputs, candidate satisfies postcondition\n");
-        q.push_str("(assert (not (forall (");
-        for (i, (name, ty)) in params.iter().enumerate() {
-            q.push_str(&format!(" (x{} {})", i, type_to_smt_sort(ty)));
-        }
-        q.push_str(")\n");
-
-        // The postcondition in SMT — #Term is replaced by (f x0 x1 ...)
-        // which is the function's output for the quantified inputs.
         let param_refs: Vec<String> = (0..params.len())
             .map(|i| format!("x{}", i))
             .collect();
         let f_call = format!("(f {})", param_refs.join(" "));
-        // Parse the postcondition, replacing #Term with (f x0 x1 ...)
         param_names.push("#Term".to_string());
         let post_raw = expr_to_smt_term(post, &param_names);
-        // Substitute: the raw "#Term" becomes the function call
         let post_body = post_raw.replace("#Term", &f_call);
 
-        q.push_str(&format!("   {})))\n", post_body));
+        let forall_body = if let Some(pre) = precondition {
+            let pre_body = expr_to_smt_term(pre, &param_names[..params.len()]);
+            format!("(=> {} {})", pre_body, post_body)
+        } else {
+            post_body
+        };
+
+        q.push_str("; Verify: forall inputs, candidate satisfies postcondition\n");
+        q.push_str("(assert (not (forall (");
+        for (i, (_, ty)) in params.iter().enumerate() {
+            q.push_str(&format!(" (x{} {})", i, type_to_smt_sort(ty)));
+        }
+        q.push_str(&format!(")\n   {})))\n", forall_body));
     }
 
     q.push_str("\n(check-sat)\n");
@@ -458,7 +460,7 @@ mod tests {
     fn test_build_verification_query_simple() {
         let candidate = Expr::Identifier("x0".into());
         let params = vec![("x".into(), Type::int())];
-        let query = build_verification_query("test", &candidate, &params, None);
+        let query = build_verification_query("test", &candidate, &params, None, None);
         assert!(query.contains("define-fun"));
         assert!(query.contains("(set-logic ALL)"));
         assert!(query.contains("(check-sat)"));
@@ -478,7 +480,7 @@ mod tests {
             Box::new(Expr::Identifier("#Term".into())),
             Box::new(Expr::Decimal(0)),
         );
-        let query = build_verification_query("test", &candidate, &params, Some(&post));
+        let query = build_verification_query("test", &candidate, &params, Some(&post), None);
         assert!(query.contains("(forall"));
         assert!(query.contains("(f x0"));
     }

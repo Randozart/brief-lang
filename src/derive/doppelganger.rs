@@ -175,6 +175,7 @@ mod tests {
             examples: vec![],
             synthesized: None,
             postcondition: None,
+            precondition: None,
             span: dummy_span(),
         };
 
@@ -220,18 +221,21 @@ mod tests {
             examples: vec![],
             synthesized: None,
             postcondition: None,
+            precondition: None,
             span: dummy_span(),
         };
         let block2 = DerivationBlock {
             examples: vec![],
             synthesized: None,
             postcondition: None,
+            precondition: None,
             span: dummy_span(),
         };
         let block2 = DerivationBlock {
             examples: vec![],
             synthesized: None,
             postcondition: None,
+            precondition: None,
             span: dummy_span(),
         };
 

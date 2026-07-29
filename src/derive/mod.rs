@@ -55,6 +55,7 @@ pub fn synthesize(
     max_depth: usize,
     verify_samples: usize,
     postcondition: Option<&Expr>,
+    precondition: Option<&Expr>,
 ) -> Result<engine::SynthesizedProgram, SynthesizeError> {
     if block.examples.is_empty() {
         return Err(SynthesizeError::NoExamples(name.to_string()));
@@ -73,7 +74,7 @@ pub fn synthesize(
         // 2026-07-28: Use Z3 forall verification when postcondition provided.
         // Falls back to random verification when Z3 is unavailable.
         if let Some(post) = postcondition {
-            match smt_verify_candidate(name, &cand_expr, params, &examples, post) {
+            match smt_verify_candidate(name, &cand_expr, params, &examples, post, precondition) {
                 CegisResult::Proven => {
                     eprintln!("  cegis[{}/5] '{}': PROVEN for all inputs", iteration + 1, name);
                 }
@@ -146,9 +147,10 @@ fn smt_verify_candidate(
     params: &[(String, Type)],
     examples: &[DerivationExample],
     postcondition: &Expr,
+    precondition: Option<&Expr>,
 ) -> CegisResult {
-    // Build forall verification query
-    let query = verify_smt::build_verification_query(name, candidate, params, Some(postcondition));
+    // Build forall verification query with precondition
+    let query = verify_smt::build_verification_query(name, candidate, params, Some(postcondition), precondition);
 
     // Run Z3
     let result = match verify_smt::run_z3_verify(&query) {

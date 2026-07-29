@@ -192,6 +192,7 @@ impl LlvmBackend {
                 .as_ref()
                 .map(|s| Box::new(Self::rewrite_cell_identifiers(s, cell_name))),
             postcondition: db.postcondition.clone(),
+            precondition: db.precondition.clone(),
             span: db.span,
         }))
     }
