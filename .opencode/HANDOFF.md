@@ -1,5 +1,5 @@
 # Agent Handoff — Brief Compiler Baseline Recovery
-## Handoff timestamp: 2026-07-28 ~12:00
+## Handoff timestamp: 2026-07-28 ~12:00 (updated ~14:30)
 ## Current baseline: `b39461e2` — "SLP stride gate — all 19 benchmarks at parity or better"
 
 ## Critical Ground Rules
@@ -68,15 +68,52 @@ What it does NOT have:
 All of these were added in later commits and need to be cherry-picked one at a
 time with verification.
 
-## Baseline Worktree
+## Worktree Layout
 
 ```
-$HOME/Desktop/Projects/brief-compiler-baseline
+/home/randozart/Desktop/Projects/
+├── brief-compiler/                  # Main repo (main branch)
+│   ├── target/release/briefc
+│   ├── .opencode/
+│   │   ├── HANDOFF.md
+│   │   └── plans/2026-07-28-baseline-recovery.md
+│   └── benchmarks/
+│
+├── brief-compiler-baseline/         # Read-only A/B comparison at b39461e2
+│   └── target/release/briefc        # (release build ready)
+│
+├── brief-compiler-recovery/         # Recovery worktree (recovery-branch)
+│   └── target/release/briefc        # (release build ready — baseline + our commits)
+│
+└── brief-compiler-derive/           # Feature worktree (derivation + stochastic opt)
+    └── commits Phases A–I           # (12 code commits on c3155e99 base)
 ```
-A permanent git worktree at `../brief-compiler-baseline` (relative to the main
-repo) holds a detached HEAD at `b39461e2` with a release build ready at
-`target/release/briefc`. Use `bash benchmarks/compare_baseline.sh <name>` to
-compare a benchmark against the baseline.
+
+**All operations happen in `../brief-compiler-recovery`.** Use the baseline
+worktree only for comparison via `bash benchmarks/compare_baseline.sh <name>`.
+
+**VERY IMPORTANT:** All `compare_baseline.sh` and `build_and_bench.sh` commands
+must be run from the **main worktree** (`../brief-compiler`) because the scripts
+use relative paths to find the baseline worktree at `../brief-compiler-baseline`.
+The recovery worktree has its own `target/release/briefc` for compilation, but
+benchmark scripts reference paths relative to the main repo.
+
+**Recommended workflow for single-benchmark testing from the recovery worktree:**
+
+```bash
+# Compile with recovery compiler
+cd /home/randozart/Desktop/Projects/brief-compiler-recovery
+rm -f benchmarks/ring_buffer.ll benchmarks/ring_buffer
+./target/release/briefc build benchmarks/ring_buffer.bv --llvm --out benchmarks
+clang -O3 -flto -march=native -ffast-math \
+    benchmarks/ring_buffer.ll lib/runtime/brief_rt.c \
+    -o benchmarks/ring_buffer
+BOUND=50000000 /usr/bin/time -f "%e" ./benchmarks/ring_buffer 2>&1
+
+# Compare against baseline (must run from main worktree)
+cd /home/randozart/Desktop/Projects/brief-compiler
+bash benchmarks/compare_baseline.sh ring_buffer
+```
 
 ## Recovery Plan — Each step is ONE commit with its own benchmark run
 
@@ -236,3 +273,84 @@ cargo build --release     # ~45 seconds for release binary
 For questions about the baseline rebuild, the original session log is in
 `AGENTS_HISTORY.md` and `docs/plans/2026-07-27-cold-path-refinement.md`
 (which has all 6 benchmark runs documented chronologically).
+
+---
+
+## Worktree Topology
+
+Three worktrees exist in parallel:
+
+| Worktree | Path | Branch/HEAD | Purpose |
+|----------|------|-------------|---------|
+| **Main** | `../brief-compiler` | `main` at `70ead990` | Integration target — feature merges here first |
+| **Baseline** | `../brief-compiler-baseline` | Detached HEAD at `b39461e2` | Read-only A/B comparison — never commit here |
+| **Recovery** | `../brief-compiler-recovery` | `recovery-branch` at `b39461e2` | Builds the 8-step recovery plan |
+| **Derive (feature)** | `../brief-compiler-derive` | Detached HEAD at `7c24d9e5` | `:=` derivation block + stochastic optimization feature |
+
+**Critical rule:** Only work in your assigned worktree. Never modify files in another
+worktree's directory. Git worktrees share the object database but have independent
+working trees and indexes.
+
+## Integration Strategy
+
+The recovery work is sequentialized with the derivation feature worktree:
+
+### Step A — Feature merges to main (derivation agent's responsibility)
+
+The derivation worktree (`../brief-compiler-derive`, 12 code commits on
+Phases A–I of the `:=` derivation + stochastic optimization feature, forked
+from `c3155e99`) merges into `main` first. The feature agent resolves any
+conflicts between their 12 commits and the 17 post-baseline commits on `main`.
+
+```bash
+# In ../brief-compiler-derive:
+git branch derive-feature
+git push .. HEAD:refs/heads/derive-feature
+cd ../brief-compiler
+git merge derive-feature    # resolve conflicts, commit
+```
+
+### Step B — Recovery merges into main (this agent's responsibility)
+
+After the feature is on `main`, the 8-step recovery branch merges in.
+Conflict resolution is guided by this rule:
+
+**For every conflicted file, apply this decision matrix:**
+
+| File(s) | Take | Rationale |
+|---------|------|-----------|
+| `emit_toplevel.rs`, `context.rs`, `mod.rs`, `dispatch.rs` | recovery branch | Our correct attribute selection, stride gate, metadata, state params, DataLayout |
+| `helpers.rs` | recovery branch | Our `!range`/`!prof` metadata wiring |
+| `*slp_isomorphism*`, `*counter*` | recovery branch | Our working stride gate + gates |
+| `lexer.rs`, parser files | **merge both** | Feature adds `:=`, our Step 6 adds `!>` — both tokens must coexist |
+| Feature-new files (synthesis, MCMC, config) | main | Keep derivation feature intact |
+| MetadataRegistry hooks | main | Keep feature's registry wiring, weave into our clean backend code |
+
+```bash
+cd ../brief-compiler-recovery
+# Build 8 steps on recovery-branch (see plan document)
+# ... each step verified independently ...
+
+cd ../brief-compiler
+git fetch ../brief-compiler-recovery recovery-branch
+git merge recovery-branch
+# Resolve conflicts per the matrix above
+bash benchmarks/build_and_bench.sh --runtime && bash benchmarks/build_and_bench.sh --correctness
+```
+
+### Known conflict surface
+
+1. **Lexer/parser**: Feature adds `:=` token (derivation syntax), Step 6 of recovery
+   changes `Token::TildeArrow` to `Token::ExclaimArrow` and adds `:` after key in
+   metadata. Both modify `lexer.rs`, `statements.rs`, `metadata.rs`, `definitions.rs`.
+   Resolution: keep both sets of changes (different tokens, different contexts).
+
+2. **LLVM backend overlap**: Feature's Phase H.0 (`9d54f263`) wires MetadataRegistry
+   into the LLVM backend. Our Steps 1–5, 7 all modify `emit_toplevel.rs`, `context.rs`,
+   `dispatch.rs`, `mod.rs`. Resolution: take our clean recovery versions, re-apply
+   MetadataRegistry hooks manually if needed.
+
+3. **`.bv` files**: Feature may add new stdlib types; our Step 6 changes metadata
+   syntax across ~25 `.bv` files. Resolution: apply Step 6's `!>` syntax change
+   across ALL `.bv` files including feature-added ones — or skip feature files if
+   they don't use `<~` metadata.

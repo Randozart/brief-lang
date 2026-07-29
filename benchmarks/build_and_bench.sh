@@ -176,7 +176,15 @@ build_bench() {
     # 2026-07-26: Clear FFI cache + temp objects to avoid duplicate symbols.
     # The one-step `clang .ll lib/runtime/brief_rt.c` avoids cached .o conflicts.
     rm -f ~/.cache/brief-compiler/ffi/*.o /tmp/brief_rt*.o 2>/dev/null || true
-    BOUND=50000000 ./target/release/briefc build "benchmarks/${name}.bv" \
+    local bound="${BOUND:-50000000}"
+    if [ "${QUICK:-0}" = "1" ]; then
+        case "$name" in
+            nbody_newton|nbody_sqrt|nbody_sqrt_idio)
+                bound=5000000
+                ;;
+        esac
+    fi
+    BOUND="$bound" ./target/release/briefc build "benchmarks/${name}.bv" \
         --out benchmarks --optimize-budget "$budget" $gpu_flag 2>&1
 
     if [ ! -f "$bin" ]; then
@@ -526,9 +534,18 @@ bench_self_term() {
     local brief_sum=0; local brief_min=999999; local brief_max=0
     local c_sum=0
 
+    local bound="${BOUND:-50000000}"
+    if [ "${QUICK:-0}" = "1" ]; then
+        case "$name" in
+            nbody_newton|nbody_sqrt|nbody_sqrt_idio)
+                bound=5000000
+                ;;
+        esac
+    fi
+
     for i in 1 2 3 4 5; do
-        local bt=$(env BOUND=50000000 "$TIMER_BIN" "$brief_bin")
-        local ct=$(env BOUND=50000000 "$TIMER_BIN" "$ref_c_bin")
+        local bt=$(env BOUND="$bound" "$TIMER_BIN" "$brief_bin")
+        local ct=$(env BOUND="$bound" "$TIMER_BIN" "$ref_c_bin")
         brief_sum=$(echo "$brief_sum + $bt" | bc)
         c_sum=$(echo "$c_sum + $ct" | bc)
         if (( $(echo "$bt < $brief_min" | bc -l) )); then brief_min=$bt; fi
@@ -756,7 +773,7 @@ echo "================================================"
 echo "  SUMMARY"
 echo "================================================"
 echo "  5 iterations per benchmark, avg wall clock via CLOCK_MONOTONIC."
-echo "  BOUND=50000000. Nanosecond-precision fork+exec timing harness."
+echo "  BOUND=${bound:-50000000}. Nanosecond-precision fork+exec timing harness."
 echo "  Tags: runtime=FFI in hot loop, optimizer=precompute_ok."
 echo "================================================"
 

@@ -11,7 +11,7 @@ use crate::type_universe::TypeUniverse;
 /// 2026-07-14: Normalize the AST for CIRCT hardware backend emission.
 /// CIRCT doesn't use primitive — it uses bytes to determine bit width.
 /// Rejects intrinsics that require runtime OS support (Print#, Malloc#, etc.).
-pub fn normalize(items: &mut Vec<TopLevel>, universe: &mut TypeUniverse) -> Result<(), String> {
+pub fn normalize(items: &mut Vec<TopLevel>, universe: &mut TypeUniverse, _int_bits: u64) -> Result<(), String> {
     // Attach bit_width to every type
     for rt in universe.types.values_mut() {
         let bits = rt.bytes * 8;
