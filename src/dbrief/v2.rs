@@ -410,6 +410,13 @@ impl Parser {
         }
 
         doc.schemas.push(SchemaDef { name, key_field, fields });
+        // 2026-07-28: Consume optional trailing ; after schema } to prevent
+        // the ; from falling through to the main loop's _ => arm, where it
+        // gets misparsed as an empty positional value.
+        self.skip_ws();
+        if self.peek_char() == Some(';') {
+            self.advance();
+        }
         Ok(())
     }
 
@@ -575,6 +582,13 @@ impl Parser {
             entries.push(self.parse_data_entry_in_group()?);
         }
 
+        // 2026-07-28: Consume optional trailing ; after as-block } for
+        // the same reason as parse_schema — prevents ; from derailing
+        // the positional value parser.
+        self.skip_ws();
+        if self.peek_char() == Some(';') {
+            self.advance();
+        }
         Ok(DataGroup {
             schema_name,
             entries,
@@ -636,7 +650,11 @@ impl Parser {
             }
 
             // Regular keyed entry: `key: field; field;`
-            let fields = self.parse_field_list()?;
+            // Uses `parse_keyed_entry_fields` to stop at the next `ident:`
+            // boundary, allowing multiple keyed entries like
+            // `overflow: String; "desc"; associative: Bool; "desc2";`
+            // to be correctly split into separate entries.
+            let fields = self.parse_keyed_entry_fields()?;
             return Ok(DataEntry {
                 key: Some(key),
                 schema_name: None,
@@ -758,7 +776,9 @@ impl Parser {
             }
 
             // Regular keyed: `key: field; field;`
-            let fields = self.parse_field_list()?;
+            // Uses `parse_keyed_entry_fields` so that `key2: f1; f2;` following
+            // this entry is detected as a boundary, not consumed as more fields.
+            let fields = self.parse_keyed_entry_fields()?;
             return Ok(Some(DataEntry {
                 key: Some(key),
                 schema_name: self.current_schema.clone(),
@@ -776,8 +796,8 @@ impl Parser {
     // ========================================================================
 
     /// Parse a list of fields: `field; field; { nested; }; field;`
-    /// Stops at `}`, EOF, or when next token starts a new keyed entry
-    /// (ident followed by `:` — only at top level of as block).
+    /// Stops at `}`, `>`, or EOF. No keyed-entry boundary detection —
+    /// that responsibility lives in `parse_keyed_entry_fields`.
     fn parse_field_list(&mut self) -> Result<Vec<DataField>, String> {
         let mut fields = Vec::new();
         loop {
@@ -794,25 +814,75 @@ impl Parser {
             if self.peek_char() == Some(';') {
                 self.advance();
                 self.skip_ws_and_comments();
-                // After ;, could be more fields, }, next key:, or > for next entry
                 if self.peek_char() == Some('}')
                     || self.peek_char() == Some('>')
                     || self.is_eof()
                 {
                     break;
                 }
-                // Check if next token looks like a new key (`ident:`)
-                // This is handled by the caller — field_list just reads until break
             } else if self.peek_char() == Some('}') || self.is_eof() {
                 break;
             } else {
-                // No ; and no } — check if we should continue or stop
-                // peek ahead: if next is ident: or > or EOF or }, stop
                 if self.peek_char() == Some('>') {
                     break;
                 }
-                // Continue reading next value (bare tokens adjacent without ;)
-                // This shouldn't normally happen in valid syntax
+            }
+        }
+        Ok(fields)
+    }
+
+    /// Parse fields for a keyed entry: `field; field; { nested; }; field;`
+    /// Like `parse_field_list` but also stops at `ident:` boundaries,
+    /// enabling multiple keyed entries in a single `as { }` block:
+    ///   overflow: String; "desc"; associative: Bool; "desc2";
+    /// After the first entry's fields `String; "desc"`, the `associative:`
+    /// pattern triggers a break so the caller can parse a new entry.
+    ///
+    /// 2026-07-28: Separate function from `parse_field_list` to keep boundary
+    /// detection at the entry level, not in the generic field parser.
+    fn parse_keyed_entry_fields(&mut self) -> Result<Vec<DataField>, String> {
+        let mut fields = Vec::new();
+        loop {
+            self.skip_ws_and_comments();
+            if self.peek_char() == Some('}') || self.is_eof() {
+                break;
+            }
+
+            // Before reading a new value, check if the next token is a keyed
+            // entry boundary (`ident:`). If so, stop — the caller handles it.
+            let save = self.pos;
+            if let Some(_key) = self.try_parse_identifier() {
+                if self.peek_char() == Some(':') {
+                    self.pos = save;
+                    break;
+                }
+                self.pos = save;
+            }
+            // Also stop at `>` for mixed keyed/positional entries
+            if self.peek_char() == Some('>') {
+                break;
+            }
+
+            let val = self.parse_value()?;
+            fields.push(val);
+
+            self.skip_ws_and_comments();
+            if self.peek_char() == Some(';') {
+                self.advance();
+                self.skip_ws_and_comments();
+                if self.peek_char() == Some('}')
+                    || self.peek_char() == Some('>')
+                    || self.is_eof()
+                {
+                    break;
+                }
+                // After ;, re-check for ident: boundary (loop top handles it)
+            } else if self.peek_char() == Some('}') || self.is_eof() {
+                break;
+            } else {
+                if self.peek_char() == Some('>') {
+                    break;
+                }
             }
         }
         Ok(fields)
@@ -1351,6 +1421,62 @@ schema Person (name) {
         assert_eq!(schema.name, "Person");
         assert_eq!(schema.key_field, Some("name".to_string()));
         assert_eq!(schema.fields.len(), 2);
+    }
+
+    #[test]
+    // 2026-07-28: Verify schema with trailing ; after } parses correctly.
+    // This was a parser bug: the ; fell through to the main loop's _ => arm
+    // and was misparsed as an empty positional value.
+    fn test_schema_trailing_semicolon() {
+        let input = r#"
+schema Foo { a: Int; b: Bool; };
+schema Bar { c: String; };
+"#;
+        let doc = parse_document(input).unwrap();
+        assert_eq!(doc.schemas.len(), 2);
+        assert_eq!(doc.schemas[0].name, "Foo");
+        assert_eq!(doc.schemas[0].fields.len(), 2);
+        assert_eq!(doc.schemas[1].name, "Bar");
+        assert_eq!(doc.schemas[1].fields.len(), 1);
+    }
+
+    #[test]
+    // 2026-07-28: Verify as-block with trailing ; after } parses correctly.
+    fn test_as_block_trailing_semicolon() {
+        let input = r#"
+as Foo { > a; > b; };
+as Bar { > c; };
+"#;
+        let doc = parse_document(input).unwrap();
+        assert_eq!(doc.data_groups.len(), 2);
+        assert_eq!(doc.data_groups[0].schema_name.as_deref(), Some("Foo"));
+        assert_eq!(doc.data_groups[0].entries.len(), 2);
+        assert_eq!(doc.data_groups[1].schema_name.as_deref(), Some("Bar"));
+        assert_eq!(doc.data_groups[1].entries.len(), 1);
+    }
+
+    #[test]
+    // 2026-07-28: Verify schema followed by as-block with trailing ; works.
+    fn test_schema_then_as_block_with_semicolons() {
+        let input = r#"
+schema MetaField (name) {
+    name: String;
+    ty: String;
+    description: String;
+};
+
+as MetaField {
+    overflow: String; "test field";
+};
+"#;
+        let doc = parse_document(input).unwrap();
+        assert_eq!(doc.schemas.len(), 1);
+        assert_eq!(doc.schemas[0].name, "MetaField");
+        assert_eq!(doc.schemas[0].key_field, Some("name".to_string()));
+        assert_eq!(doc.data_groups.len(), 1);
+        assert_eq!(doc.data_groups[0].schema_name.as_deref(), Some("MetaField"));
+        assert_eq!(doc.data_groups[0].entries.len(), 1);
+        assert_eq!(doc.data_groups[0].entries[0].key.as_deref(), Some("overflow"));
     }
 
     #[test]

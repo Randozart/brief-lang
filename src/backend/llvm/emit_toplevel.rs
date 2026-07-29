@@ -193,6 +193,9 @@ impl LlvmBackend {
         // the correct state argument instead of a garbage pointer.
         writeln!(out, "declare void @__set_async_state__(ptr)").ok();
         writeln!(out, "declare i64 @time(ptr) nounwind").ok();
+        // 2026-07-28: atol and getenv used by GetEnvInt# intrinsic.
+        writeln!(out, "declare i64 @atol(ptr) nounwind").ok();
+        writeln!(out, "declare ptr @getenv(ptr) nounwind").ok();
         writeln!(out, "declare noalias ptr @malloc(i64) nounwind").ok();
         writeln!(out, "declare void @free(ptr) nounwind").ok();
         // 2026-06-26: realloc used by the arena allocator grow path when
@@ -1466,6 +1469,32 @@ impl LlvmBackend {
                 }
             }
         };
+        // 2026-07-28: Phase H.0 — Emit function-level attributes from !> metadata.
+        // Iterates over txn.metadata (sorted for deterministic IR), converts each
+        // PropertyValue to a string, and looks up the LLVM IR attribute via the
+        // MetadataRegistry. The registry's wildcard pattern "*" matches any value.
+        let meta_attrs: String = {
+            let registry = &self.ctx.metadata_registry;
+            let mut attrs = String::new();
+            let mut keys: Vec<&String> = txn.metadata.keys().collect();
+            keys.sort();
+            for key in keys {
+                let v = &txn.metadata[key];
+                let value_str = match v {
+                    crate::ast::PropertyValue::Bool(b) => { if *b { "true".to_string() } else { "false".to_string() } }
+                    crate::ast::PropertyValue::Int(n) => n.to_string(),
+                    crate::ast::PropertyValue::Float(f) => f.to_string(),
+                    crate::ast::PropertyValue::String(s) => s.clone(),
+                    crate::ast::PropertyValue::Identifier(s) => s.clone(),
+                    _ => continue,
+                };
+                if let Some(llvm_attr) = registry.llvm_attr(key, &value_str) {
+                    attrs.push(' ');
+                    attrs.push_str(llvm_attr);
+                }
+            }
+            attrs
+        };
         // 2026-07-27: txn_attr for assume_action path (no outlining — rare path).
         // The non-assume_action path below computes its own attr from reordered body.
         let txn_attr = self.slp_attr(name, "#0");
@@ -1595,7 +1624,7 @@ impl LlvmBackend {
             // and emit_folded_multi_main can reference the function (they call
             // @txn_{name}). Without this, the definition is @<name> but the
             // call is @txn_<name> — undefined reference error at link time.
-            writeln!(out, "define void @txn_{}({}) local_unnamed_addr {}{} {{", name, self.ctx.state_ptr_param, txn_attr, alwaysinline).ok();
+            writeln!(out, "define void @txn_{}({}) local_unnamed_addr {}{}{} {{", name, self.ctx.state_ptr_param, txn_attr, alwaysinline, meta_attrs).ok();
             writeln!(out, "  entry:").ok();
             // Arena for body emission — same rationale as the standard path:
             // the reactor dispatch calls @txn_name as a separate function,
@@ -1789,7 +1818,7 @@ impl LlvmBackend {
             }
 
             // Emit the txn function
-            writeln!(out, "define void @txn_{}({}) local_unnamed_addr {}{} {{", name, self.ctx.state_ptr_param, local_txn_attr, alwaysinline).ok();
+            writeln!(out, "define void @txn_{}({}) local_unnamed_addr {}{}{} {{", name, self.ctx.state_ptr_param, local_txn_attr, alwaysinline, meta_attrs).ok();
             writeln!(out, "  entry:").ok();
             self.fun.ssa_old_int_regs.clear();
             self.fun.ssa_old_float_regs.clear();

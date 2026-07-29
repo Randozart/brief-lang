@@ -15,7 +15,7 @@ vocabulary reference.
 
 ## Overview
 
-This plan adds a **four-phase derivation pipeline** to Brief, with non-destructive doppelganger
+This plan adds a **nine-phase implementation** (A–I) implementing a four-stage derivation pipeline, with non-destructive doppelganger
 output files and an optional stochastic superoptimization pass. The `brief derive` command
 synthesizes function bodies from `:= { ... }` examples, then optionally optimizes them via
 STOKE-style MCMC random search at the normalized IR layer.
@@ -30,6 +30,8 @@ STOKE-style MCMC random search at the normalized IR layer.
 | **Stochastic Superoptimization** | MCMC Metropolis-Hastings on normalized IR | `--stochastic` |
 | **Doppelganger Output** | Full-source shadow files, never mutates originals | Always-on |
 | **!> Metadata Vocabulary** | Cross-backend optimization hints | First-class language |
+| **Metadata-Driven Codegen** | Backends consume `!>` via `MetadataRegistry` | Automatic (Phase H) |
+| **`brief accept`** | Fold synthesized bodies into source | User-initiated (Phase I) |
 
 ### Pipeline
 
@@ -213,6 +215,25 @@ pub tolerance: Option<f64>,
 - `test_existing_derivation_block_parses`: Source with `:= { 2, 3 -> 6; }` parses correctly
 - `test_existing_derivation_ast_fields`: All fields on DerivationBlock accessible
 - `test_existing_colon_eq_token`: `:=` lexes to `Token::ColonEq`
+
+### Derivation Syntax — Three Forms
+
+A function or transaction with a derivation block takes one of three forms:
+
+| Form | Example | Meaning |
+|------|---------|---------|
+| **Body only** | `defn f(x) -> T { body }` | Regular function definition |
+| **Derivation only** | `defn f(x) -> T := { examples }` | **Synthesis target** — no body provided, compiler synthesizes one |
+| **Body + Derivation** | `defn f(x) -> T { body } := { examples }` | Existing body checked against examples at compile time |
+
+In the **derivation only** form, `:= { examples }` appears directly where a
+`{ body }` would normally go. The parser must not error on `:=` — it checks
+for `{` first, and if absent, leaves `body` empty and delegates to the
+derivation block. This is the primary `brief derive` target.
+
+In the **body + derivation** form, the body is written by the developer and
+the derivation examples serve as assertions. This is the "build gate" mode
+(Phase B) — the compiler verifies the body against the examples at every build.
 
 ### Step A.1 — Add tolerance syntax to parser
 
@@ -1126,6 +1147,115 @@ pub fn handle_derive_command(
 - `test_derive_command_already_synthesized`: Body already present → assertion mode only
 - `test_derive_command_nonexistent_file`: File not found → error
 
+### Step E.4 — `brief accept` subcommand (user-approved folding)
+
+**File**: `src/main.rs`, `src/derive/accept.rs` (new)
+
+**What**: An explicit user command that folds a doppelganger's synthesized bodies
+back into the source `.bv` file. The compiler NEVER mutates source — `brief accept`
+is an intentional user action after reviewing the generated `foo.derive.bv`.
+
+```
+brief accept <file>              # fold foo.derive.bv bodies into foo.bv
+brief accept <file> --opt        # fold from foo.opt.bv instead (MCMC result)
+brief accept <file> --all        # accept all derivation blocks in file
+```
+
+**Semantics**:
+1. Reads the shadow file (`foo.derive.bv` or `foo.opt.bv`), extracts each synthesized
+   expression body.
+2. For each `:= { ... };` derivation block in `foo.bv`, replaces it with the
+   synthesized body, demoting the derivation block to a trailing comment:
+   ```
+   Before: defn add(x: Int, y: Int) -> Int := { 2, 2 -> 4; };
+   After:  defn add(x: Int, y: Int) -> Int { term x + y; }  // := { 2, 2 -> 4; };
+   ```
+3. Writes the modified `foo.bv` in place.
+4. The trailing comment preserves the derivation block as specification for future
+   assertion builds or re-derivation.
+
+**Why separate from `brief derive`**: The derive step is automatic and lossless
+(original file untouched). The accept step is an explicit review gate — the
+developer inspects `foo.derive.bv`, decides "this looks correct," then folds it in.
+This separation prevents accidental source mutation from a failed synthesis or
+from synthesizing a correct-but-suboptimal body.
+
+**Relation to assertion mode**: After acceptance, `brief build foo.bv` runs in
+assertion mode by default (verifies `// := { 2, 2 -> 4; }` matches the body).
+Pass `--no-assert` to skip this verification.
+
+**CLI handler**:
+
+```rust
+/// 2026-07-28: Phase E.4 — `brief accept` command.
+/// Folds doppelganger bodies into the source file.
+/// Never mutates source without explicit user invocation.
+pub fn handle_accept_command(
+    file_path: &str,
+    opts: &AcceptOptions,
+) -> Result<(), String> {
+    let source_path = Path::new(file_path);
+    let source = std::fs::read_to_string(source_path)
+        .map_err(|e| format!("cannot read '{}': {}", file_path, e))?;
+
+    // Determine which doppelganger to read from
+    let shadow_path = if opts.use_opt {
+        Doppelganger::opt_path_for(source_path)
+    } else {
+        Doppelganger::derive_path_for(source_path)
+    };
+
+    if !shadow_path.exists() {
+        return Err(format!("no doppelganger found at '{}' — run 'brief derive' first", shadow_path.display()));
+    }
+
+    let shadow_source = std::fs::read_to_string(&shadow_path)
+        .map_err(|e| format!("cannot read '{}': {}", shadow_path.display(), e))?;
+
+    // Parse both files to find derivation blocks and their synthesized counterparts
+    let (program, byte_offsets) = parse_file_with_offsets(source_path)?;
+    let (shadow_program, _) = parse_file_with_offsets(&shadow_path)?;
+
+    // For each derivation block, replace := { ... } with the synthesized body
+    let new_source = fold_synthesized_bodies(&source, &program, &shadow_program, &byte_offsets)?;
+
+    // Write back to original source
+    std::fs::write(source_path, new_source)
+        .map_err(|e| format!("cannot write '{}': {}", file_path, e))?;
+
+    eprintln!("[accept] folded bodies into {}", source_path.display());
+    Ok(())
+}
+```
+
+**Key design invariants**:
+- The `// := { ... }` comment preserves the derivation spec for future assertion-mode
+  builds and re-derivation runs.
+- Insertions happen in reverse byte offset order (same as doppelganger writer) to
+  preserve span positions during replacement.
+- If no doppelganger exists, the error message tells the user to run `brief derive` first.
+
+**Nesting check**: The handler validates inputs, finds the shadow, calls the
+replacement helper, writes — one `?` chain, depth ≤ 2.
+
+**Tests**:
+- `test_accept_basic`: Run `brief accept foo.bv` after derive → `foo.bv` has bodies inlined
+- `test_accept_opt`: Accept from `foo.opt.bv` → `foo.bv` has MCMC-optimized bodies
+- `test_accept_no_shadow`: No `foo.derive.bv` → error message points to `brief derive`
+- `test_accept_preserves_derivation_block`: `// := { ... }` comment emitted after body
+- `test_accept_without_derivation`: Source has no `:=` blocks → no-op, file unchanged
+- `test_accept_idempotent`: Accept twice → second run sees no `:=` blocks → no-op
+
+### Step E.5 — Updated commit sequence
+
+The commit sequence for Phase E becomes:
+
+```
+5a. Doppelganger writer + resolver       (Step E.0–E.2)
+5b. `brief derive` CLI with flags        (Step E.3)
+5c. `brief accept` subcommand            (Step E.4)
+```
+
 ---
 
 ## Phase F — MCMC Stochastic Superoptimizer
@@ -1830,12 +1960,25 @@ mapping tables for each backend. The MCMC optimizer reads derivation-related key
 (`search_space`, `cost_model`, `tolerance`, `allowed_mutations`) to guide its search.
 Each backend reads the remaining keys and maps them to target-specific semantics.
 
+**Architecture decision (2026-07-28)**: Vocabulary definitions and backend mapping
+rules are stored in a single `config/meta-vocab.dbv` file (Data Brief `.dbv` format
+with inline schemas). This replaces hardcoded Rust match arms for metadata→attribute
+lookups. The DBV file is parsed at compile time via `include_str!` +
+`dbrief::v2::parse_document_quoted`. A `MetadataRegistry` in `src/backend/metadata.rs`
+provides typed lookup functions for each backend.
+
+Rationale: Adding a new backend or metadata key only requires editing
+`config/meta-vocab.dbv` — no Rust changes to the mapping logic. The `.dbv` file
+also serves as the machine-readable source of truth for the vocabulary (the
+`docs/architecture/optimization-hints.md` doc is a human-readable rendering).
+
 ### Step G.0 — Vocabulary reference document
 
 **File**: `docs/architecture/optimization-hints.md` (new)
 
 **What**: A complete reference document listing every `!>` metadata key, its values,
-its semantics, and which backends honor it. This is the single source of truth.
+its semantics, and which backends honor it. This is the human-readable source of truth.
+The machine-readable source is `config/meta-vocab.dbv`.
 
 ```markdown
 # !> Optimization Hints — Vocabulary Reference
@@ -1857,114 +2000,208 @@ its semantics, and which backends honor it. This is the single source of truth.
 
 **Nesting check**: Flat markdown document with tables — no nesting concern.
 
-### Step G.1 — LLVM metadata mapping
+### Step G.1 — Data Brief vocabulary file
 
-**File**: `src/backend/llvm/metadata.rs` (new)
+**File**: `config/meta-vocab.dbv` (new)
 
-**What**: Map `!>` metadata keys to LLVM IR attributes, metadata nodes, and
-fast-math flags.
+**What**: A single `.dbv` file with inline schemas and data entries. Defines:
+
+1. **`MetaField` schema** — what metadata keys exist, their types, descriptions
+2. **`BackendMapping` schema** — how a (key, value) pair maps to a backend IR attribute
+3. **Data entries** under `as MetaField { ... }` — keyed entries using `(name)` key field
+4. **Data entries** under `as BackendMapping { ... }` — positional `>` entries
+
+**Grammar note**: `MetaField` uses `(name)` as its key field annotation. This marks
+the `name` field as the logical lookup key but does NOT change the entry syntax —
+entries in `as MetaField { ... }` use the keyed entry form `key: ty; "description";`
+where `key` is the name, and the remaining fields are positional by schema order.
+
+**DBV parser fix (2026-07-28)**: `parse_schema()` and `parse_grouped_data()` now
+consume the optional trailing `;` after `}`. Previously the `;` fell through to the
+main loop's `_ =>` arm and was misparsed as an empty positional value. Both
+`schema Name { ... };` and `as SchemaName { ... };` work with or without `;`.
+
+```dbv
+// config/meta-vocab.dbv — Phase G metadata vocabulary
+// MetaField uses keyed entries with (name) key field.
+// BackendMapping uses positional > entries with (meta_key) key field.
+
+schema MetaField (name) {
+    name: String;
+    ty: String;
+    description: String;
+};
+
+schema BackendMapping (meta_key) {
+    backend: String;
+    meta_key: String;
+    value_pattern: String;
+    attr: String;
+    scope: String;  // "function", "instruction", "module", "loop", "option"
+};
+
+as MetaField {
+    overflow: String; "Integer overflow behavior for arithmetic ops";
+    associative: Bool; "May the optimizer reassociate FP operations";
+    commutative: Bool; "May the optimizer swap commutative operands";
+    fp_contract: String; "May the optimizer form FP contractions (FMA)";
+    fp_math: String; "Floating-point compliance: ieee754 | fast";
+    readonly: Bool; "Function has no observable side effects";
+    alloc_scope: String; "Allocation scope: heap | stack";
+    inline_hint: String; "Inlining hint: always | never | hint";
+    convergence: String; "Hardware convergence mode: tight | loose";
+    unroll_hint: Int; "Loop unroll factor hint";
+    search_space: String; "MCMC search space: linear | bitwise | all";
+    cost_model: String; "MCMC cost function: latency | throughput | size";
+    tolerance: Float; "FP equivalence tolerance for MCMC";
+    allowed_mutations: Vec[String]; "Restrict MCMC to named mutations only";
+};
+
+as BackendMapping {
+    // LLVM mappings
+    > llvm; overflow; "wrapping"; "nuw nsw"; instruction;
+    > llvm; overflow; "checked"; "nsw"; instruction;
+    > llvm; overflow; "saturating"; "nuw"; instruction;
+    > llvm; associative; "*"; "reassoc"; function;
+    > llvm; fp_contract; "*"; "contract"; function;
+    > llvm; fp_math; "fast"; "fast"; function;
+    > llvm; fp_math; "ieee754"; ""; function;
+    > llvm; readonly; "*"; "readonly"; function;
+    > llvm; inline_hint; "always"; "alwaysinline"; function;
+    > llvm; inline_hint; "never"; "noinline"; function;
+    > llvm; unroll_hint; "*"; "unroll"; loop;
+
+    // Webstack mappings
+    > webstack; convergence; "tight"; "no_subnormals"; option;
+    > webstack; alloc_scope; "stack"; "stack_allocation"; option;
+    > webstack; fp_contract; "*"; "fma_fuse"; option;
+
+    // CIRCT mappings
+    > circt; overflow; "wrapping"; "comb.add"; option;
+    > circt; convergence; "tight"; "single_cycle"; option;
+    > circt; unroll_hint; "*"; "unroll_factor"; option;
+};
+```
+
+**Loading**: The `MetadataRegistry` uses `include_str!("../../config/meta-vocab.dbv")`
+and `dbrief::v2::parse_document_quoted()`. The `parse_document_quoted` variant is
+required because mapping values use `"..."` quotation (e.g., `"wrapping"`, `"fast"`).
+Parse failure at compile time is a hard error (invariant: the `.dbv` file is always
+valid in a working copy).
+
+**MetaField parsing**: `MetadataRegistry::parse_meta_field` reads `entry.key` as
+the field name, `fields[0]` as the type string, `fields[1]` as the description.
+
+**BackendMapping parsing**: `MetadataRegistry::parse_backend_mapping` reads
+`fields[0..4]` as positional `(backend, meta_key, value_pattern, attr, scope)`.
+The `entry.key` is `None` for `>` positional entries.
+
+### Step G.2 — MetadataRegistry
+
+**File**: `src/backend/metadata.rs` (new)
+
+**What**: Central registry that loads `config/meta-vocab.dbv` and provides
+typed lookup functions for each backend.
 
 ```rust
-/// 2026-07-28: Phase G.1 — LLVM backend metadata mapping.
-/// Maps !> optimization hints to LLVM IR attributes and metadata.
-
-/// Apply !> metadata to an LLVM function declaration.
-pub fn apply_function_metadata(
-    fn_decl: &mut String,
-    metadata: &HashMap<String, PropertyValue>,
-) {
-    // overflow: "wrapping" → nuw nsw
-    if let Some(PropertyValue::String(val)) = metadata.get("overflow") {
-        if val == "wrapping" {
-            // nuw/nsw are applied to individual add/sub instructions, not function-level
-            // Stored as a flag for emit_stmt.rs to use
-        }
-    }
-
-    // associative: true → reassoc flag on float ops
-    // fp_contract: "fast" → contract fast-math flag
-    // inline_hint: "always" → alwaysinline attribute
-    // readonly: true → readonly attribute
+/// 2026-07-28: Phase G — DBV-backed metadata registry.
+/// Loaded once at compiler init from config/meta-vocab.dbv.
+pub struct MetadataRegistry {
+    fields: HashMap<String, MetaFieldDef>,
+    mappings: Vec<BackendMapping>,
+    llvm_idx: Vec<usize>,
+    webstack_idx: Vec<usize>,
+    circt_idx: Vec<usize>,
 }
 
-/// Emit fast-math flags for a floating-point operation based on metadata.
-pub fn emit_fast_math_flags(metadata: &HashMap<String, PropertyValue>) -> String {
-    let mut flags = String::new();
-    if matches!(metadata.get("fp_math"), Some(PropertyValue::String(v)) if v == "fast") {
-        flags.push_str(" fast");
-    }
-    if matches!(metadata.get("fp_contract"), Some(PropertyValue::String(v)) if v == "fast") {
-        flags.push_str(" contract");
-    }
-    if matches!(metadata.get("associative"), Some(PropertyValue::Bool(true))) {
-        flags.push_str(" reassoc");
-    }
-    flags
+pub struct MetaFieldDef {
+    pub name: String,
+    pub field_type: MetaType,
+    pub description: String,
+}
+
+pub enum MetaType { Bool, Int, Float, String, List }
+
+struct BackendMapping {
+    backend: String,
+    metadata_key: String,
+    value_pattern: String,  // literal value or "*" wildcard
+    ir_attribute: String,
+    applies_to: String,
+}
+
+impl MetadataRegistry {
+    pub fn load() -> Self;
+    pub fn field_def(&self, name: &str) -> Option<&MetaFieldDef>;
+    pub fn llvm_attr(&self, key: &str, value: &str) -> Option<&str>;
+    pub fn webstack_option(&self, key: &str, value: &str) -> Option<&str>;
+    pub fn circt_option(&self, key: &str, value: &str) -> Option<&str>;
 }
 ```
 
-**Tests**:
-- `test_llvm_overflow_wrapping`: `!> overflow: "wrapping"` → `nuw nsw` on add
-- `test_llvm_fp_math_fast`: `!> fp_math: "fast"` → `fast` flag on fadd
-- `test_llvm_readonly`: `!> readonly: true` → `readonly` attribute
-- `test_llvm_inline_hint`: `!> inline_hint: "always"` → `alwaysinline` attribute
-- `test_llvm_unknown_key`: Unknown key → no attribute emitted
+**Loading logic**:
+1. `include_str!("../../config/meta-vocab.dbv")` gets the file content
+2. `parse_document_quoted(&content).expect("...")` parses into `DbriefDocument`
+3. Iterate `data_groups`, matching `schema_name == "MetaField"` → extract field defs
+4. Match `schema_name == "BackendMapping"` → collect all mappings
+5. Build per-backend index vectors (`llvm_idx` = indices where `backend == "llvm"`)
 
-### Step G.2 — Webstack metadata mapping
-
-**File**: `src/backend/webstack.rs` (add mapping function)
-
-**What**: Webstack/WASM backend has fewer optimization attributes but can use
-`!>` metadata for semantic decisions.
-
-```rust
-/// 2026-07-28: Phase G.2 — Webstack metadata mapping.
-pub fn apply_webstack_metadata(
-    metadata: &HashMap<String, PropertyValue>,
-) -> WebstackOptions {
-    let mut opts = WebstackOptions::default();
-    if matches!(metadata.get("alloc_scope"), Some(PropertyValue::String(v)) if v == "stack") {
-        opts.use_stack_allocation = true;
+**Lookup logic** (`llvm_attr` as example):
+```
+for idx in &self.llvm_idx {
+    let m = &self.mappings[*idx];
+    if m.metadata_key == key && (m.value_pattern == "*" || m.value_pattern == value) {
+        return Some(m.ir_attribute.as_str());
     }
-    if matches!(metadata.get("fp_contract"), Some(PropertyValue::String(v)) if v == "fast") {
-        opts.enable_fma_fusion = true;
-    }
-    opts
 }
+None
 ```
 
-**Tests**:
-- `test_webstack_stack_alloc`: `!> alloc_scope: "stack"` → stack allocation in WASM
-- `test_webstack_default`: No metadata → defaults used
+**Tests** (`test_registry_loads` etc. — ~6 tests):
+- Parse succeeds and returns expected number of fields and mappings
+- `llvm_attr("overflow", "wrapping")` returns `Some("nuw nsw")`
+- `llvm_attr("fp_math", "ieee754")` returns `None` (no mapping for that value)
+- `llvm_attr("unknown_key", "val")` returns `None`
+- `webstack_option("alloc_scope", "stack")` returns `Some("stack_allocation")`
+- `circt_option("unroll_hint", "4")` returns `Some("unroll_factor")`
 
-### Step G.3 — CIRCT metadata mapping
+### Step G.3 — Backend integration
 
-**File**: `src/backend/circt.rs` (add mapping function)
+**LLVM** (`src/backend/llvm/`): During function codegen, load the registry and
+consult it when emitting float operations (fast-math flags) and function
+attributes (`alwaysinline`, `noinline`, `readonly`).
 
-**What**: CIRCT/hardware backend maps `!>` metadata to MLIR attributes.
+- `apply_llvm_function_metadata(fn_decl, metadata, registry)` — emits function-level attrs
+- `emit_fast_math_flags(metadata, registry)` — returns `" fast contract reassoc"` string
+  based on registry lookups
+- The LLVM fast-math flag emission is extracted as a call to `registry.llvm_attr()`
+  rather than hardcoded matches
 
-```rust
-/// 2026-07-28: Phase G.3 — CIRCT metadata mapping.
-pub fn apply_circt_metadata(
-    metadata: &HashMap<String, PropertyValue>,
-) -> CirctOptions {
-    let mut opts = CirctOptions::default();
-    if matches!(metadata.get("convergence"), Some(PropertyValue::String(v)) if v == "tight") {
-        opts.pipeline_stage_count = 1; // Single-cycle operations
-    }
-    opts
-}
-```
+**Webstack** (`src/backend/webstack.rs`): Add `apply_webstack_metadata(metadata,
+registry) -> WebstackOptions` function that queries the registry for
+`alloc_scope` and `fp_contract`.
 
-**Tests**:
-- `test_circt_convergence_tight`: `!> convergence: "tight"` → single-cycle pipeline
-- `test_circt_unroll_hint`: `!> unroll_hint: 4` → loop unroll factor
+**CIRCT** (`src/backend/circt.rs`): Add `apply_circt_metadata(metadata,
+registry) -> CirctOptions` function that queries the registry for `convergence`
+and `unroll_hint`.
+
+**Tests** (same as original G.1-G.3 in this plan, but now driven by the registry):
+- `test_llvm_overflow_wrapping`
+- `test_llvm_fp_math_fast`
+- `test_llvm_readonly`
+- `test_llvm_inline_hint`
+- `test_llvm_unknown_key`
+- `test_webstack_stack_alloc`
+- `test_webstack_default`
+- `test_circt_convergence_tight`
+- `test_circt_unroll_hint`
 
 ### Step G.4 — MCMC metadata reading
 
 **File**: `src/derive/mcmc.rs`
 
-**What**: The MCMC optimizer reads `!>` metadata keys to guide its search:
+**What**: The MCMC optimizer reads `!>` metadata keys directly from the AST
+(no registry needed — these are configuration keys, not backend attributes).
 
 ```rust
 /// 2026-07-28: Phase G.4 — MCMC reads !> metadata for search guidance.
@@ -2049,6 +2286,14 @@ fn test_end_to_end_derive_and_build() {
     //   → Or find commutativity swap y + x (equivalent cost)
     // 7. Verify foo.opt.bv exists (same as derive.bv for optimal case)
     // 8. Build foo.opt.bv → passes assertions
+    // 9. Run brief accept foo.bv
+    //   → Folds x + y body into test_functions.bv
+    //   → Derivation block demoted to // := { ... } comment
+    // 10. Read foo.bv → body present, // := comment preserved
+    // 11. Run brief build foo.bv
+    //   → Assertion mode verifies body matches the // := spec
+    // 12. Run brief accept foo.bv again (idempotent)
+    //   → No := blocks remain → no-op, file unchanged
 }
 ```
 
@@ -2080,6 +2325,168 @@ Enumerative: `c * 1.8 + 32.0` (cost: ~10)
 MCMC might try: `c * 9.0/5.0 + 32.0` (same cost) or `(c*9 + 160)/5` (more ops,
 rejected).
 
+## Phase H — Metadata-Driven Optimization Hints (3 sub-steps)
+
+**Goal**: Wire the `MetadataRegistry` (created in Phase G) into each active backend so
+`!>` metadata annotations on functions, loops, and instructions produce real
+LLVM IR attributes, Webstack flags, and CIRCT options. Currently, Phase G only
+created the vocabulary and lookup functions — no backend consumes them.
+
+### Step H.0 — LLVM Fast-Math Flag Emission
+
+**File**: `src/backend/llvm/mod.rs`
+
+**What**: During function emission, read the function's `!>` metadata entries
+(`fp_math`, `fp_contract`, `associative`, `commutative`, `overflow`) and emit
+the corresponding LLVM attributes via `MetadataRegistry::llvm_attr()`.
+
+| `!>` metadata | LLVM attribute | Emitted on |
+|---|---|---|
+| `fp_math: "fast"` | `"fast"` | `fadd`/`fmul`/etc. |
+| `fp_contract: "*"` | `"contract"` | `fadd`/`fmul` |
+| `associative: "*"` | `"reassoc"` | function |
+| `overflow: "wrapping"` | `"nuw nsw"` | `add`/`sub`/`mul` |
+| `overflow: "checked"` | `"nsw"` | `add`/`sub`/`mul` |
+| `readonly: "*"` | `"readonly"` | function |
+| `inline_hint: "always"` | `"alwaysinline"` | function |
+| `inline_hint: "never"` | `"noinline"` | function |
+| `unroll_hint: N` | `"unroll"` | loop |
+
+**Tests**: `test_llvm_fast_math_fp_math`, `test_llvm_overflow_flag`,
+`test_llvm_unroll_hint_loop` — verify emitted `.ll` contains the expected
+string attributes.
+
+### Step H.1 — Webstack Options
+
+**File**: `src/backend/webstack.rs`
+
+**What**: During Webstack code generation, read `!>` metadata and emit
+WebAssembly-level options via `MetadataRegistry::webstack_option()`.
+
+| `!>` metadata | Webstack option |
+|---|---|
+| `convergence: "tight"` | `no_subnormals` |
+| `alloc_scope: "stack"` | `stack_allocation` |
+| `fp_contract: "*"` | `fma_fuse` |
+
+**Tests**: `test_webstack_convergence_option`,
+`test_webstack_alloc_scope_stack` — verify option string appears in generated
+JS glue.
+
+### Step H.2 — CIRCT Options
+
+**File**: `src/backend/circt.rs`
+
+**What**: During CIRCT code generation, read `!>` metadata and emit
+CIRCT-level options via `MetadataRegistry::circt_option()`.
+
+| `!>` metadata | CIRCT option |
+|---|---|
+| `overflow: "wrapping"` | `comb.add` |
+| `convergence: "tight"` | `single_cycle` |
+| `unroll_hint: N` | `unroll_factor` |
+
+**Tests**: `test_circt_overflow_wrapping`, `test_circt_convergence_tight`
+— verify option emitted in `.mlir` output.
+
+---
+
+## Phase I — CLI Completion (`brief derive` flags + `brief accept`)
+
+**Goal**: Complete the phase E sub-steps that were deferred. Phase E committed
+the doppelganger infrastructure and a bare `brief derive` command, but omitted
+flag parsing (`--stochastic`, `--iterations`, etc.) and the `brief accept`
+subcommand. Phase I finishes both.
+
+### Step I.0 — `brief derive` CLI Flags
+
+**File**: `src/derive/cli.rs`, `src/main.rs`
+
+**What**: Add flag parsing to the `brief derive` command:
+
+```
+brief derive <file>                # enumerative + SMT → foo.derive.bv
+brief derive --stochastic <file>   # also run MCMC → foo.opt.bv
+brief derive --iterations N        # MCMC iterations (default: 10000)
+brief derive --temperature T       # initial temperature (default: 1.0)
+brief derive --enumerative-depth N # max depth (default: 5)
+brief derive --all                 # process all transitive imports
+```
+
+Flags are parsed with a simple hand-written loop (no clap dependency in
+`src/main.rs`). The handler passes them to `handle_derive_command` which
+currently ignores them — extend the function signature to accept a config
+struct.
+
+**`DeriveConfig` struct** (new, in `src/derive/cli.rs`):
+
+```rust
+pub struct DeriveConfig {
+    pub stochastic: bool,
+    pub iterations: usize,
+    pub temperature: f64,
+    pub enumerative_depth: usize,
+    pub process_all: bool,
+}
+```
+
+Default: `DeriveConfig { stochastic: false, iterations: 10_000,
+temperature: 1.0, enumerative_depth: 5, process_all: false }`.
+
+**Flow**:
+1. CLI parses flags, builds `DeriveConfig`
+2. `synthesize()` receives config — uses `enumerative_depth` for depth cap
+3. If `stochastic: true`, calls `mcmc_superoptimize()` (Phase F) after synthesis
+4. Writes to `foo.opt.bv` instead of `foo.derive.bv` when `stochastic`
+
+**Tests**:
+- `test_derive_with_stochastic_flag`: `--stochastic` → MCMC runs
+- `test_derive_with_custom_depth`: `--enumerative-depth 3` → limited search
+- `test_derive_with_iterations`: Non-default iteration count passed to MCMC
+- `test_derive_all_flag`: Imported derivation blocks also processed
+
+### Step I.1 — `brief accept` Subcommand
+
+**File**: `src/derive/accept.rs` (new), `src/main.rs`, `src/derive/mod.rs`
+
+**What**: Add `brief accept <file>` that folds doppelganger bodies back into
+the source `.bv` file. The compiler NEVER mutates source — `brief accept` is
+an intentional user action after reviewing the generated `foo.derive.bv`.
+
+```
+brief accept <file>              # fold foo.derive.bv bodies into foo.bv
+brief accept <file> --opt        # fold from foo.opt.bv instead (MCMC result)
+brief accept <file> --all        # accept all derivation blocks in file
+```
+
+**Algorithm**:
+1. Read the shadow file (`foo.derive.bv` or `foo.opt.bv`)
+2. Parse it to find synthesized bodies
+3. Read the original `foo.bv`, find each `:= { ... }` block
+4. Replace the derivation comment with the actual body
+5. Write `foo.bv` (with `.bak` backup of original)
+
+**Why separate from `brief derive`**: The derive step is automatic and lossless
+(original file untouched). The accept step is an explicit review gate — the
+developer inspects `foo.derive.bv`, decides "this looks correct," then folds it in.
+
+**Why no `--all` default**: A large file may have multiple derivation blocks.
+The developer should review each synthesized body before accepting. `--all`
+is available for CI/scripted workflows.
+
+**Relation to assertion mode**: After acceptance, `brief build foo.bv` runs in
+assertion mode (`verify_derivation_assertions` in compile pipeline) — if the
+body and examples disagree, the build fails. This ensures accepted results
+stay correct after source changes.
+
+**Tests**:
+- `test_accept_basic`: derive → accept → `foo.bv` has inlined bodies
+- `test_accept_opt`: accept from `foo.opt.bv` → MCMC-optimized bodies
+- `test_accept_no_shadow`: no `.derive.bv` → error points to `brief derive`
+- `test_accept_preserves_derivation_block`: `// := { ... }` comment retained
+- `test_accept_without_derivation`: source has no `:=` blocks → no-op
+- `test_accept_idempotent`: accept twice → second run sees no `:=` → no-op
+
 ---
 
 ## Documentation Requirements
@@ -2088,30 +2495,35 @@ Every phase must update the following documentation in the same commit:
 
 | Phase | Document to update |
 |-------|-------------------|
-| All | `docs/architecture/overview.md` — mention the four-phase pipeline |
+| All | `docs/architecture/overview.md` — mention the nine-phase (A–I) pipeline |
 | A | `docs/architecture/features/derivation-blocks.md` — tolerance syntax |
 | B | `docs/architecture/features/derivation-blocks.md` — assertion build gate |
 | C | `docs/architecture/features/derivation-blocks.md` — enumerative synthesis |
 | D | `docs/architecture/features/derivation-blocks.md` — SMT synthesis |
-| E | `docs/architecture/features/derivation-blocks.md` — doppelganger system |
+| E | `docs/architecture/features/derivation-blocks.md` — doppelganger system + `brief accept` |
 | F | `docs/architecture/features/mcmc-superoptimizer.md` — new doc |
 | G | `docs/architecture/optimization-hints.md` — new vocabulary reference |
+| H | `docs/architecture/optimization-hints.md` — backend wiring section |
+| I | `docs/architecture/features/derivation-blocks.md` — `brief accept` docs |
 
 ---
 
 ## Commit Sequence
 
 ```
- 1. Phase A: Parser/AST wiring + tolerance syntax
- 2. Phase B: Assertion build gate + interpreter call_function
- 3. Phase C: Full enumerative synthesis (type-aware, interpreter-backed)
- 4. Phase D: Full SMT synthesis (SyGuS, Z3 integration)
- 5. Phase E: Doppelganger write-back + build resolution
- 6. Phase F: MCMC superoptimizer (mutations, equivalence, sampler, Pareto)
- 7. Phase G: Metadata vocabulary reference + backend mappings
- 8. Integration tests: end-to-end pipeline
- 9. Benchmark baseline + MCMC comparison
+ 1. Phase A: Parser/AST wiring + tolerance syntax                                     ✓ (0b244970)
+ 2. Phase B: Assertion build gate + interpreter call_function                         ✓ (ba45226e)
+ 3. Phase C: Full enumerative synthesis (type-aware, interpreter-backed)              ✓ (76c70901)
+ 4. Phase D: Full SMT synthesis (SyGuS, Z3 integration)                               ✓ (32ae4a47)
+ 5. Phase E: Doppelganger write-back + build resolution (E.0–E.3)                     ✓ (53f5604c)
+ 6. Phase F: MCMC superoptimizer (mutations, equivalence, sampler, Pareto)            ✓ (a272dc11)
+ 7. Phase G: Metadata vocabulary reference + backend mappings                         ✓ (09cfc234)
+ 8. Phase H: Metadata-driven codegen (LLVM, Webstack, CIRCT wiring)                   ✓ (9d54f263+)
+ 9. Phase I: CLI completion (`brief derive` flags + `brief accept`)                   ✓ (cb02b43b+)
+  -- Parse fix: `:= { ... }` without body (I.1 dependency)                           ✓ (755aa08c)
+ 10. Integration tests: end-to-end pipeline
+ 11. Benchmark baseline + MCMC comparison
 ```
 
 Each commit must pass `cargo test --lib` and `cargo build --release`.
-After commit 9, run the full benchmark suite and compare to baseline.
+After commit 11, run the full benchmark suite and compare to baseline.

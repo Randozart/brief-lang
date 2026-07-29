@@ -374,7 +374,12 @@ impl<'a> Parser<'a> {
         };
         let output_type = self.parse_output_type()?;
         let contract = self.parse_contract()?;
-        let body = self.parse_block()?;
+        // 2026-07-28: Body is optional — `defn f(x) -> T := { ... }` has no { body }.
+        let body = if self.check(&Token::LBrace) {
+            self.parse_block()?
+        } else {
+            Vec::new()
+        };
         let derivation = self.parse_derivation_block()?;
         let metadata = self.parse_body_metadata()?;
         Ok(Definition {
@@ -432,7 +437,12 @@ impl<'a> Parser<'a> {
         } else {
             None
         };
-        let body = self.parse_block()?;
+        // 2026-07-28: Body is optional — `txn f -> T := { ... }` has no { body }.
+        let body = if self.check(&Token::LBrace) {
+            self.parse_block()?
+        } else {
+            Vec::new()
+        };
         let derivation = self.parse_derivation_block()?;
         let doc = self.take_doc();
         Ok(Transaction {
@@ -465,7 +475,12 @@ impl<'a> Parser<'a> {
         let name = self.expect_identifier()?;
         // node has no parameters and no return value (purely reactive)
         let contract = self.parse_contract()?;
-        let body = self.parse_block()?;
+        // 2026-07-28: Body is optional for consistency with defn/txn.
+        let body = if self.check(&Token::LBrace) {
+            self.parse_block()?
+        } else {
+            Vec::new()
+        };
         let derivation = self.parse_derivation_block()?;
         Ok(Transaction {
             name,
@@ -881,6 +896,10 @@ impl<'a> Parser<'a> {
 
     /// Parse optional derivation block: := { ... }
     fn parse_derivation_block(&mut self) -> Result<Option<DerivationBlock>, SyntaxError> {
+        // 2026-07-28: Save current position — if ColonEq is not next, return None.
+        let colon_eq_span = self.tokens.get(self.pos)
+            .map(|(_, s)| s.clone())
+            .unwrap_or(0..0);
         if !self.eat(&Token::ColonEq) {
             return Ok(None);
         }
@@ -891,16 +910,53 @@ impl<'a> Parser<'a> {
             examples.push(example);
             self.eat(&Token::Semicolon);
         }
+        // 2026-07-28: Use the actual byte span so doppelganger writer inserts
+        // at the correct position (not position 0 from Span::dummy()).
+        // expect(RBrace) advances past it; look up the consumed token's span via
+        // tokens[self.pos - 1] (since expect incremented pos).
         self.expect(Token::RBrace)?;
-        let span = Span::dummy();
+        let rbrace_end = self.tokens.get(self.pos - 1)
+            .map(|(_, s)| s.end)
+            .unwrap_or(colon_eq_span.start + 2);
+        // After RBrace, there may be an optional semicolon — consume it
+        self.eat(&Token::Semicolon);
+        // 2026-07-28: Parse optional [[postcondition]] after the derivation block.
+        // [[post]] is sugar for [true][post] — a postcondition-only contract that
+        // the CEGIS loop uses to verify correctness for ALL inputs.
+        let postcondition = if self.check(&Token::LBracket) {
+            let next_is_bracket = self.tokens.get(self.pos + 1)
+                .map(|(t, _)| matches!(t, Token::LBracket))
+                .unwrap_or(false);
+            if !next_is_bracket {
+                None
+            } else {
+                self.advance();
+                self.advance();
+                let post_expr = Some(self.parse_expression()?);
+                match self.expect(Token::RBracket) {
+                    Ok(_) => {}
+                    Err(_) => return Ok(Some(DerivationBlock {
+                        examples, synthesized: None, postcondition: None, span: Span::dummy(),
+                    })),
+                }
+                self.eat(&Token::RBracket);
+                post_expr
+            }
+        } else {
+            None
+        };
+        let span = Span::new(colon_eq_span.start, rbrace_end, 0, 0);
         Ok(Some(DerivationBlock {
             examples,
             synthesized: None,
+            postcondition,
             span,
         }))
     }
 
-    /// Parse a single derivation example: inputs -> output
+    /// Parse a single derivation example: inputs -> [tol] output
+    /// 2026-07-28: Optional [expr] tolerance bracket after -> for FP relaxed equivalence.
+    /// Syntax: `input -> [0.001] output;`
     fn parse_derivation_example(&mut self) -> Result<DerivationExample, SyntaxError> {
         let mut inputs = Vec::new();
         loop {
@@ -910,12 +966,45 @@ impl<'a> Parser<'a> {
             }
             self.expect(Token::Comma); // must be followed by comma or arrow
         }
+        // 2026-07-28: Optional tolerance bracket: -> [tol] output
+        let tolerance = if self.eat(&Token::LBracket) {
+            let tol_expr = self.parse_expression()?;
+            self.expect(Token::RBracket)?;
+            Some(self.expr_to_f64_constant(&tol_expr)?)
+        } else {
+            None
+        };
         let output = Box::new(self.parse_expression()?);
         Ok(DerivationExample {
             inputs,
             output,
+            tolerance,
             span: Span::dummy(),
         })
+    }
+
+    /// 2026-07-28: Evaluate a compile-time constant expression to f64.
+    /// Used for tolerance parsing and other early-parse constant folding.
+    /// Handles Expr::Float, Expr::Decimal, and Expr::UnaryOp(Neg, ...).
+    fn expr_to_f64_constant(&self, expr: &Expr) -> Result<f64, SyntaxError> {
+        match expr {
+            Expr::Float(f) => Ok(*f),
+            Expr::Decimal(n) => Ok(*n as f64),
+            Expr::UnaryOp(UnaryOpKind::Neg, inner) => {
+                let val = self.expr_to_f64_constant(inner)?;
+                Ok(-val)
+            }
+            _ => {
+                let msg = format!(
+                    "expected a numeric constant (float or integer) in tolerance bracket, got '{}'",
+                    expr
+                );
+                Err(SyntaxError::InvalidExpression {
+                    reason: msg,
+                    span: Span::dummy(),
+                })
+            }
+        }
     }
 
     /// Wrap top-level statements in an implicit [#] transaction if needed.
@@ -1479,7 +1568,12 @@ impl<'a> Parser<'a> {
         };
         let output_type = self.parse_output_type()?;
         let contract = self.parse_contract()?;
-        let body = self.parse_block()?;
+        // 2026-07-28: Body is optional for consistency with defn/txn.
+        let body = if self.check(&Token::LBrace) {
+            self.parse_block()?
+        } else {
+            Vec::new()
+        };
         let derivation = self.parse_derivation_block()?;
         let metadata = self.parse_body_metadata()?;
         Ok(TopLevel::CompileTimeDefn(Definition {
@@ -1506,7 +1600,12 @@ impl<'a> Parser<'a> {
         };
         let output_type = self.parse_output_type()?;
         let contract = self.parse_contract()?;
-        let body = self.parse_block()?;
+        // 2026-07-28: Body is optional for consistency with defn/txn.
+        let body = if self.check(&Token::LBrace) {
+            self.parse_block()?
+        } else {
+            Vec::new()
+        };
         let derivation = self.parse_derivation_block()?;
         let metadata = self.parse_body_metadata()?;
         Ok(TopLevel::CompileTimeTxn(Transaction {

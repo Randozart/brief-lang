@@ -206,6 +206,40 @@ fn eval_binary_op(
                 _ => Ok(bool_to_bits(false)),
             }
         }
+        BinaryOpKind::Le => {
+            let la = lv.as_i64();
+            let ra = rv.as_i64();
+            match (la, ra) {
+                (Some(a), Some(b)) => Ok(bool_to_bits(a <= b)),
+                _ => Ok(bool_to_bits(false)),
+            }
+        }
+        BinaryOpKind::Ge => {
+            let la = lv.as_i64();
+            let ra = rv.as_i64();
+            match (la, ra) {
+                (Some(a), Some(b)) => Ok(bool_to_bits(a >= b)),
+                _ => Ok(bool_to_bits(false)),
+            }
+        }
+        BinaryOpKind::Neq => {
+            let la = lv.as_i64();
+            let ra = rv.as_i64();
+            match (la, ra) {
+                (Some(a), Some(b)) => Ok(bool_to_bits(a != b)),
+                _ => Ok(bool_to_bits(false)),
+            }
+        }
+        BinaryOpKind::And => {
+            let lb = matches!(lv, Value::Bits(ref b) if b.iter().any(|x| *x > 0));
+            let rb = matches!(rv, Value::Bits(ref b) if b.iter().any(|x| *x > 0));
+            Ok(bool_to_bits(lb && rb))
+        }
+        BinaryOpKind::Or => {
+            let lb = matches!(lv, Value::Bits(ref b) if b.iter().any(|x| *x > 0));
+            let rb = matches!(rv, Value::Bits(ref b) if b.iter().any(|x| *x > 0));
+            Ok(bool_to_bits(lb || rb))
+        }
         _ => {
             // Pass through unknown operators as intrinsic calls
             let op_name = format!("{:?}#", kind);
@@ -292,10 +326,16 @@ pub fn eval_statement(
         }
         Statement::Expression(expr) => eval_expr(expr, heap, bindings),
         Statement::Term(val) => {
-            if let Some(val) = val {
-                eval_expr(val, heap, bindings)
-            } else {
-                Ok(Value::Void)
+            match val {
+                Some(val) => {
+                    // 2026-07-28: Term with value signals early return.
+                    let result = eval_expr(val, heap, bindings)?;
+                    Err(RuntimeError::TermReturn(result))
+                }
+                None => {
+                    // Term without value is a convergence checkpoint — continue.
+                    Ok(Value::Void)
+                }
             }
         }
         Statement::Guarded(cond, body) => {
@@ -341,10 +381,14 @@ pub fn eval_statement(
             Ok(result)
         }
         Statement::TermBang(val) => {
-            if let Some(val) = val {
-                eval_expr(val, heap, bindings)
-            } else {
-                Ok(Value::Void)
+            match val {
+                Some(val) => {
+                    let result = eval_expr(val, heap, bindings)?;
+                    Err(RuntimeError::TermReturn(result))
+                }
+                None => {
+                    Ok(Value::Void)
+                }
             }
         }
         Statement::Return(val) => {

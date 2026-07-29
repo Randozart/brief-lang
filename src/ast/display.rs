@@ -525,7 +525,12 @@ impl fmt::Display for DerivationExample {
             }
             write!(f, "{}", input)?;
         }
-        write!(f, " -> {}", self.output)
+        // 2026-07-28: Show tolerance when present: `input -> [tol] output`
+        if let Some(tol) = self.tolerance {
+            write!(f, " -> [{}] {}", tol, self.output)
+        } else {
+            write!(f, " -> {}", self.output)
+        }
     }
 }
 

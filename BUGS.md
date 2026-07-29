@@ -1,5 +1,28 @@
 # Bugs
 
+## DBV Parser: Trailing `;` After `}` Misparsed as Empty Positional Value — FIXED
+
+**Date:** 2026-07-28
+**Status:** Fixed
+**Root cause:** `parse_schema()` and `parse_grouped_data()` did not consume the
+optional trailing `;` after the closing `}`. The `;` fell through to the main
+loop's `_ =>` arm, which tried to parse it as a standalone entry via
+`try_parse_standalone_entry()`. Since `;` is not an identifier, it fell through
+to `parse_positional_values()`, which treated `;` as a value separator and
+produced empty-string positional values. This derailed the parser state before
+the next `as` block or `schema` definition.
+**Fix:** Added `self.skip_ws(); if self.peek_char() == Some(';') { self.advance(); }`
+at the end of both `parse_schema()` and `parse_grouped_data()`, after the `}`
+is consumed.
+**Impact:** `as MetaField { ... }; as BackendMapping { ... };` (with trailing
+semicolons) now parses correctly. The clean keyed-entry format for MetaField
+(`overflow: String; "desc"`) works without workarounds.
+**Lesson:** Any parser function that consumes a braced block `{ ... }` should
+consume the optional trailing `;` before returning to the main loop. Both
+`schema Name { }` and `as SchemaName { }` can be optionally followed by `;`.
+
+---
+
 ## `expect_str_arg` Returns Literal Identifier, Not Variable Value — FIXED
 
 **Date:** 2026-07-23  

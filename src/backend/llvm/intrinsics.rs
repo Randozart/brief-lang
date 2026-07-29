@@ -637,8 +637,15 @@ fn emit_get_env_int(
     let name_reg = emit_arg(backend, out, &args[0], indent);
     let ptr_reg = backend.fun.gen_reg();
     writeln!(out, "{}{} = inttoptr i64 {} to ptr", indent, ptr_reg, name_reg).ok();
+    // 2026-07-28: Brief strings are stored as [i64 length][data\0] with the
+    // handle pointing to the struct start. getenv expects just the data portion.
+    // Without this GEP, getenv reads the length field as the string (e.g.,
+    // length=5 → binary 0x05 → empty string) → returns NULL → atol(NULL)
+    // segfaults. This was the root cause of the popcount binary crash.
+    let data_ptr = backend.fun.gen_reg();
+    writeln!(out, "{}{} = getelementptr i8, ptr {}, i64 8", indent, data_ptr, ptr_reg).ok();
     let env_ptr = backend.fun.gen_reg();
-    writeln!(out, "{}{} = call ptr @getenv(ptr {})", indent, env_ptr, ptr_reg).ok();
+    writeln!(out, "{}{} = call ptr @getenv(ptr {})", indent, env_ptr, data_ptr).ok();
     writeln!(out, "{}{} = call i64 @atol(ptr {})", indent, v, env_ptr).ok();
     BTypedRegister { name: v.to_string(), ty: Type::int() }
 }

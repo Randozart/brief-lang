@@ -181,6 +181,12 @@ pub struct CompilerContext {
     // state_layout() for the JS shim. Only active for .rbv compilation
     // with BackendKind::Webstack.
     pub webstack_enabled: bool,
+
+    // 2026-07-28: Phase H.0 — !> metadata registry for optimization hints.
+    // Maps (key, value) metadata pairs to backend-specific LLVM IR attributes.
+    // Loaded once from config/meta-vocab.dbv at CompilerContext construction.
+    // Each backend has its own registry instance (Webstack/CIRCT load separately).
+    pub metadata_registry: crate::backend::metadata::MetadataRegistry,
 }
 
 impl CompilerContext {
@@ -293,6 +299,11 @@ impl CompilerContext {
                 is_trg: HashSet::new(),
                 all_vars: HashSet::new(),
             },
+            // 2026-07-28: Phase H.0 — !> metadata registry for optimization hints.
+            // Each backend loads its own MetadataRegistry instance from the embedded
+            // config/meta-vocab.dbv file. The registry maps (key, value) metadata pairs
+            // to backend-specific IR attributes (e.g., ("readonly", "*") → "readonly").
+            metadata_registry: crate::backend::metadata::MetadataRegistry::load(),
         }
     }
 }

@@ -1065,12 +1065,16 @@ impl fmt::Display for WebstackError {
 #[derive(Debug, Clone)]
 pub enum RuntimeError {
     UndefinedVariable { name: String },
+    UndefinedFunction(String),
     DivisionByZero,
     HeapError(String),
     UnsupportedIntrinsic(String),
     TypeError { expected: String, found: String },
     UndefinedForeignFunction { name: String, source: String },
     ContractViolation(String),
+    /// 2026-07-28: Term statement evaluated — early return with value.
+    /// Used by the interpreter's call_function to detect termination.
+    TermReturn(crate::interpreter::Value),
 }
 
 impl fmt::Display for RuntimeError {
@@ -1078,6 +1082,9 @@ impl fmt::Display for RuntimeError {
         match self {
             RuntimeError::UndefinedVariable { name } => {
                 write!(f, "undefined variable '{}'", name)
+            }
+            RuntimeError::UndefinedFunction(name) => {
+                write!(f, "undefined function '{}'", name)
             }
             RuntimeError::DivisionByZero => write!(f, "division by zero"),
             RuntimeError::HeapError(msg) => write!(f, "heap error: {}", msg),
@@ -1091,6 +1098,7 @@ impl fmt::Display for RuntimeError {
                 write!(f, "undefined foreign function '{}' from {}", name, source)
             }
             RuntimeError::ContractViolation(msg) => write!(f, "contract violation: {}", msg),
+            RuntimeError::TermReturn(_) => write!(f, "term return"),
         }
     }
 }

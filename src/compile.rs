@@ -560,6 +560,21 @@ pub fn compile_source(file_path: &str, source: &str, opts: &BuildOptions) -> Res
         return Ok(());
     }
 
+    // ── Derivation assertion verification (Phase B.0) ──────────────────
+    // 2026-07-28: For every definition/txn that has BOTH a body and a
+    // derivation block, evaluate each example through the interpreter and
+    // compare to expected output. A mismatch is a fatal build error.
+    {
+        let mut interp = brief_compiler::interpreter::Interpreter::new();
+        interp.load_program(&items);
+        if let Err(errors) = brief_compiler::derive::verify_derivation_assertions(&items, &mut interp) {
+            for e in &errors {
+                eprintln!("error: derivation assertion: {}", e);
+            }
+            return Err("derivation assertion failed".to_string());
+        }
+    }
+
     // ── Code generation ───────────────────────────────────────────────
     // 2026-07-23: Check if any glue target requests native module init.
     let enable_module_init = glue_targets.values().any(|t| t.module_init);
