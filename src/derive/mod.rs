@@ -109,19 +109,15 @@ pub fn synthesize(
                             // @result = expr postcondition), push it as a DerivationExample
                             // for re-synthesis — same as the Z3 CEGIS path does at line 85.
                             verify::VerifyResult::Fail(inputs, correct_output, r) => {
-                                if let (Some(input_row), Some(output)) = (inputs.first(), correct_output) {
-                                    eprintln!("  cegis[{}/5] '{}': counterexample at {:?}, adding example", iteration + 1, name, input_row);
-                                    examples.push(DerivationExample {
-                                        inputs: input_row.clone(),
-                                        output: Box::new(output),
-                                        tolerance: None,
-                                        span: crate::errors::Span::dummy(),
-                                    });
-                                    // 2026-07-29: Also increase depth — more examples
-                                    // require a more complex formula.
-                                    adaptive_depth += 1;
-                                    eprintln!("  cegis[{}/5] '{}': increased depth to {}", iteration + 1, name, adaptive_depth);
-                                } else {
+                if let (Some(input_row), Some(output)) = (inputs.first(), correct_output) {
+                eprintln!("  cegis[{}/5] '{}': counterexample at {:?}, adding example", iteration + 1, name, input_row);
+                examples.push(DerivationExample {
+                    inputs: input_row.clone(),
+                    output: Box::new(output),
+                    tolerance: None,
+                    span: crate::errors::Span::dummy(),
+                });
+            } else {
                                     adaptive_depth += 1;
                                     eprintln!("  verify: '{}' rejected ({}) — trying depth {}", name, r, adaptive_depth);
                                 }
@@ -145,8 +141,6 @@ pub fn synthesize(
                             tolerance: None,
                             span: crate::errors::Span::dummy(),
                         });
-                        adaptive_depth += 1;
-                        eprintln!("  cegis[{}/5] '{}': increased depth to {}", iteration + 1, name, adaptive_depth);
                     } else {
                         adaptive_depth += 1;
                         eprintln!("  cegis[{}/5] '{}': verification rejected ({}) — trying depth {}", iteration + 1, name, reason, adaptive_depth);
