@@ -84,16 +84,10 @@ impl LlvmBackend {
 
             // ── Identifier ───────────────────────────────────────────
             Expr::Identifier(name) => {
-                // 2026-07-17: Five paths: last_val_temps, local binding,
-                // phi register, state field, global constant.
-                //
-                // Check last_val_temps FIRST — this catches values written
-                // earlier in the same body iteration (e.g. count = count + 1
-                // followed by guard [count % 5000000 == 0]). Without this,
-                // the guard reads the phi register (start-of-iteration value)
-                // instead of the updated value, producing wrong guard results.
-                // The type is looked up from last_val_types (parallel map) or
-                // falls back to field_index_map or Int.
+                // 2026-07-29: Accumulation chaining — check last_val_temps FIRST.
+                // When a field is written multiple times in one iteration, the second
+                // read must return the just-computed value, not the loop-header phi,
+                // so the first write forms a live dependency chain (not dead code).
                 if let Some(reg) = self.fun.last_val_temps.get(name) {
                     let brief_ty = self
                         .fun
@@ -107,11 +101,34 @@ impl LlvmBackend {
                                 .and_then(|idx| self.ctx.field_brief_types.get(*idx).cloned())
                         })
                         .unwrap_or(Type::int());
-                    TypedRegister {
+                    return TypedRegister {
                         name: reg.clone(),
                         ty: brief_ty,
+                    };
+                }
+                // 2026-07-29: Path 2 — Vector phi group extractelement.
+                // Checked after last_val_temps so that intra-iteration writes
+                // to vector-grouped fields (if any) resolve correctly.
+                if !self.fun.active_vector_groups.is_empty() {
+                    let groups_clone = self.fun.active_vector_groups.clone();
+                    let f2p_clone = self.fun.field_to_phi.clone();
+                    let f2l_clone = self.fun.field_to_lane.clone();
+                    if let Some(lane_reg) = crate::backend::llvm::vector_phi::emit_extractelement(
+                        &mut self.fun, out, name, &groups_clone,
+                        &f2p_clone, &f2l_clone, indent,
+                    ) {
+                        let brief_ty = self
+                            .ctx
+                            .field_index_map
+                            .get(name)
+                            .and_then(|idx| self.ctx.field_brief_types.get(*idx).cloned())
+                            .unwrap_or(Type::int());
+                        return TypedRegister { name: lane_reg, ty: brief_ty };
                     }
-                } else if let Some(reg) = self.get_local(name) {
+                }
+                // 2026-07-17: Remaining paths: local binding,
+                // phi register, state field, global constant.
+                if let Some(reg) = self.get_local(name) {
                     // 2026-07-18: If the binding is an alloca (param slot,
                     // uninitialized let, or txn param slot), emit a load.
                     if self.fun.param_slots.values().any(|s| s == &reg)

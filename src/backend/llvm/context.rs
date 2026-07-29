@@ -144,7 +144,6 @@ pub struct CompilerContext {
     /// Populated pre-codegen by analyze_arena_need. When empty for a given
     /// function, arena fields in %State and emit_arena_init/fini are skipped.
     pub needs_arena: HashSet<String>,
-    pub slp_hazard_fns: HashSet<String>,
 
     // 2026-07-26: Native integer width for #Int protocol (default 64).
     // Controls i32 vs i64 emission for Int/UInt types.
@@ -278,7 +277,6 @@ impl CompilerContext {
             iter_bounds: HashMap::new(),
             state_ptr_param: "ptr noundef noalias nocapture align 8 %state".to_string(),
             needs_arena: HashSet::new(),
-            slp_hazard_fns: HashSet::new(),
             int_bits: 64,
             target_triple: "x86_64-unknown-linux-gnu".to_string(),
             data_layout: Some(
@@ -508,25 +506,20 @@ pub struct FunctionContext {
     // via GEP, breaking circular phi chains for SCEV analysis.
     pub rotation_fields: HashSet<String>,
 
-    // 2026-07-05: Vector phi groups for register pressure reduction.
-    // When multiple scalar fields form a contiguous group (e.g., vx0..vx3),
-    // they are promoted to a single <4 x float> phi node.  This reduces
-    // register pressure in the hot loop from 32 scalar phis to ~8 vector
-    // phis, eliminating register spills (nbody_sqrt: 16 spills → 0).
-    // Maps vector phi register name → Vec of field names it covers.
-    pub vector_phi_groups: HashMap<String, Vec<String>>,
+    // 2026-07-29: Active vector phi groups for the current countable body.
+    // Populated by detect_vector_groups before emit_countable_main runs.
+    pub(crate) active_vector_groups: Vec<crate::backend::llvm::vector_phi::VectorPhiGroup>,
+
+    // 2026-07-29: Maps field_name → vector phi register name for extractelement.
+    pub(crate) field_to_phi: HashMap<String, String>,
+
+    // 2026-07-29: Maps field_name → lane index within its vector group.
+    pub(crate) field_to_lane: HashMap<String, u32>,
 
     // 2026-07-05: Tracks the current accumulated vector value during body
-    // emission for insertelement chaining.  Maps vector phi register name
-    // → the most recent insertelement result register.
+    // emission for insertelement chaining.  Maps group-lane key
+    // (format: "{name}-{lane_idx}") → the most recent lane value register.
     pub vector_phi_current: HashMap<String, String>,
-    /// 2026-07-21: SLP isomorphism groups detected in the current txn body.
-    pub slp_groups: Vec<crate::analysis::slp_isomorphism::SlpIsomorphicGroup>,
-    /// 2026-07-28: Per-group consumer chain pass/fail from two-pass analysis.
-    /// `slp_chain_pass_ok[i]` is true if group i passes the cost-gain check.
-    pub slp_chain_pass_ok: Vec<bool>,
-
-    // Chimera tracking
 
     // Chimera tracking
     pub chimera_map: HashMap<String, ChimeraInfo>,
@@ -614,10 +607,11 @@ impl FunctionContext {
             last_val_temps: HashMap::new(),
             last_val_types: HashMap::new(),
             rotation_fields: HashSet::new(),
-            vector_phi_groups: HashMap::new(),
+            active_vector_groups: Vec::new(),
+            field_to_phi: HashMap::new(),
+            field_to_lane: HashMap::new(),
             vector_phi_current: HashMap::new(),
-            slp_groups: Vec::new(),
-            slp_chain_pass_ok: Vec::new(),
+
             chimera_map: HashMap::new(),
             expr_dedup_cache: HashMap::new(),
             alloc_strategies: HashMap::new(),

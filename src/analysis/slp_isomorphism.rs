@@ -1,177 +1,20 @@
 use crate::ast::{BinaryOpKind, Expr, Statement, Type, UnaryOpKind};
 use std::collections::{HashMap, HashSet};
 
-/// A group of isomorphic statements that can be vectorized.
+/// A group of expressions that can be promoted to a vector phi node.
+/// Fields within a group share the same LLVM type and have structurally
+/// isomorphic assignment expressions (same operator tree, same literal
+/// values, but different variable names per lane).
 #[derive(Debug, Clone)]
-pub struct SlpIsomorphicGroup {
-    /// Index of the first statement in the group within the txn body.
-    pub base_index: usize,
-    /// Number of repetitions (vector width).
+pub struct VectorPhiCandidate {
+    /// Group name derived from common field prefix (descriptive only).
+    pub group_name: String,
+    /// The Brief type of each field in this group.
+    pub element_ty: Type,
+    /// Number of lanes in the group.
     pub width: usize,
-    /// Variable mapping for each lane beyond the template.
-    /// lane_mappings[0] = {bx0→bx0, ...} (template identity)
-    /// lane_mappings[1] = {bx0→bx1, ...} (lane 1 substitutions)
-    pub lane_mappings: Vec<HashMap<String, String>>,
-    /// The LHS variable names for each lane.
-    pub lhs_names: Vec<String>,
-    /// The body index for each lane. For contiguous groups this is
-    /// base_index..base_index+width. For merged groups it's concatenated
-    /// from source groups — lanes may come from non-contiguous positions.
-    pub lane_positions: Vec<usize>,
-    /// The vector element type.
-    pub element_type: Type,
-    /// 2026-07-28: Indices of SLP groups that consume this group's outputs.
-    /// Populated by `build_consumer_graph` after all groups are formed.
-    /// Non-empty means the extract→insert chain creates overhead that may
-    /// exceed compute gain. Used by `chain_pass_ok` in the second pass.
-    pub consumer_group_indices: Vec<usize>,
-}
-
-impl SlpIsomorphicGroup {
-    pub fn is_viable(&self) -> bool {
-        self.width >= 2
-    }
-
-    /// Number of unique variable references in the template expression.
-    /// Used by chain cost calculation — each unique variable needs one insert per lane.
-    pub fn template_var_count(&self) -> usize {
-        // lane_mappings[0] is the template identity mapping.
-        // The number of entries is the number of unique variables in the template.
-        self.lane_mappings.first().map_or(0, |m| m.len())
-    }
-}
-
-/// 2026-07-28: Build the consumer graph after all SLP groups are formed.
-/// For each group, walk later body statements and find which groups consume
-/// its outputs (identified by lhs_names). Populates consumer_group_indices.
-pub fn build_consumer_graph(body: &[Statement], groups: &mut [SlpIsomorphicGroup]) {
-    // Build a map: lhs_name → group_index for quick lookup
-    let mut lhs_to_group: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
-    for (gi, g) in groups.iter().enumerate() {
-        for name in &g.lhs_names {
-            lhs_to_group.insert(name.clone(), gi);
-        }
-    }
-    
-    // For each group, walk body statements after its last position
-    for gi in 0..groups.len() {
-        let last_pos = groups[gi].lane_positions.iter().max().copied().unwrap_or(0);
-        let lhs_names = &groups[gi].lhs_names;
-        // Scan body from last_pos + 1
-        for pos in (last_pos + 1)..body.len() {
-            if let Some(stmt) = body.get(pos) {
-                let mut refs: Vec<String> = Vec::new();
-                collect_idents_from_stmt(stmt, &mut refs);
-                // Check if any reference matches this group's lhs_names
-                let is_match = refs.iter().any(|r| lhs_names.contains(r));
-                if is_match {
-                    // Find which group this consumer belongs to
-                    // by checking if the statement at pos is the base_index of some group
-                    if let Some(&ci) = lhs_to_group.get(&refs[0]) {
-                        if ci != gi {  // Don't consume from yourself
-                            if !groups[gi].consumer_group_indices.contains(&ci) {
-                                groups[gi].consumer_group_indices.push(ci);
-                            }
-                        }
-                    }
-                    // Also check all references
-                    for r in &refs {
-                        if let Some(&ci) = lhs_to_group.get(r) {
-                            if ci != gi && !groups[gi].consumer_group_indices.contains(&ci) {
-                                groups[gi].consumer_group_indices.push(ci);
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    }
-}
-
-/// 2026-07-28: Compute whether a group's consumer chain passes the cost-gain check.
-/// Returns false when the extract→insert overhead of the consumer chain exceeds
-/// the compute gain of the group. This is the principled kalman-vs-nbody gate.
-pub fn chain_pass_ok(groups: &[SlpIsomorphicGroup], gi: usize) -> bool {
-    let group = &groups[gi];
-    if group.consumer_group_indices.is_empty() {
-        return true;  // No consumers — no chain overhead
-    }
-    
-    let mut visited = std::collections::HashSet::new();
-    let total_cost = compute_chain_cost(groups, gi, &mut visited);
-    
-    let vars_per_lane = group.template_var_count().max(1) as u32;
-    let compute_gain = (group.width * estimate_template_depth(groups, gi).max(1)) as u32;
-    let insert_cost = (group.width as u32) * vars_per_lane;
-    let extract_cost = group.width as u32;
-    
-    // Allow vectorization if total chain cost doesn't exceed double the compute gain
-    (total_cost as u64) < (compute_gain as u64 * 2)
-}
-
-fn compute_chain_cost(groups: &[SlpIsomorphicGroup], gi: usize, visited: &mut std::collections::HashSet<usize>) -> u32 {
-    if !visited.insert(gi) { return 0; }
-    let group = &groups[gi];
-    let vars_per_lane = group.template_var_count().max(1);
-    let insert_cost = group.width as u32 * vars_per_lane as u32;
-    let extract_cost = group.width as u32;
-    
-    let mut total = insert_cost + extract_cost;
-    for &ci in &group.consumer_group_indices {
-        if let Some(consumer) = groups.get(ci) {
-            let consumer_vars = consumer.template_var_count().max(1);
-            total += consumer.width as u32 * consumer_vars as u32;  // consumer inserts
-            total += consumer.width as u32;  // consumer extracts
-            total += compute_chain_cost(groups, ci, visited);
-        }
-    }
-    total
-}
-
-fn estimate_template_depth(groups: &[SlpIsomorphicGroup], gi: usize) -> usize {
-    // We don't have the actual expression tree depth here (it's in counter.rs),
-    // so estimate from group characteristics. Width > 3 indicates merged groups
-    // which have depth >= 2. Width <= 3 pre-merge groups have depth >= 1.
-    // The actual depth is computed by tree_depth() at dispatch time.
-    groups.get(gi).map_or(1, |g| if g.width > 3 { 2 } else { 1 })
-}
-
-fn collect_idents_from_stmt(stmt: &Statement, names: &mut Vec<String>) {
-    match stmt {
-        Statement::Let { expr: Some(e), .. } => collect_idents_from_expr(e, names),
-        Statement::Expression(e) => collect_idents_from_expr(e, names),
-        Statement::Assign(lhs, rhs) => {
-            collect_idents_from_expr(lhs, names);
-            collect_idents_from_expr(rhs, names);
-        }
-        _ => {}
-    }
-}
-
-fn collect_idents_from_expr(expr: &Expr, names: &mut Vec<String>) {
-    match expr {
-        Expr::Identifier(name) => { names.push(name.clone()); }
-        Expr::Call(_, args, _) => { for a in args { collect_idents_from_expr(a, names); } }
-        Expr::BinaryOp(_, lhs, rhs) => {
-            collect_idents_from_expr(lhs, names);
-            collect_idents_from_expr(rhs, names);
-        }
-        Expr::UnaryOp(_, e) => collect_idents_from_expr(e, names),
-        _ => {}
-    }
-}
-
-/// Result of analyzing a single transaction body for SLP opportunities.
-#[derive(Debug, Clone, Default)]
-pub struct SlpAnalysisResult {
-    /// Groups of isomorphic statements found.
-    pub groups: Vec<SlpIsomorphicGroup>,
-    /// Whether any viable groups were found.
-    pub has_slp_opportunities: bool,
-    /// 2026-07-28: Per-group consumer chain analysis results.
-    /// `chain_pass_ok[i]` is true if group i's consumer chain passes the
-    /// cost-gain check. False means the group should use scalar fallback.
-    pub chain_pass_ok: Vec<bool>,
+    /// The field names in this group, in index order.
+    pub fields: Vec<String>,
 }
 
 /// Check if two expressions are structurally isomorphic under a variable mapping.
@@ -198,7 +41,7 @@ pub fn exprs_isomorphic(
         (Expr::Identifier(n1), Expr::Identifier(n2)) => {
             match mapping.get(n1) {
                 Some(mapped) => mapped == n2,
-                None => n1 == n2, // not in mapping, must be identical
+                None => n1 == n2,
             }
         }
         (Expr::Cast(e1, t1), Expr::Cast(e2, t2)) => {
@@ -244,12 +87,11 @@ fn try_build_mapping(
         (Expr::Bool(b1), Expr::Bool(b2)) => b1 == b2,
         (Expr::Identifier(n1), Expr::Identifier(n2)) => {
             if n1 == n2 {
-                return true; // same identifier — no mapping needed
+                return true;
             }
             match mapping.get(n1) {
-                Some(mapped) => mapped == n2, // already mapped, must match
+                Some(mapped) => mapped == n2,
                 None => {
-                    // Check n2 isn't already mapped to something else
                     if mapping.values().any(|v| v == n2) {
                         return false;
                     }
@@ -281,12 +123,10 @@ pub fn statements_isomorphic(
             Some(mapping)
         }
         (Statement::Assign(l1, e1), Statement::Assign(l2, e2)) => {
-            // Build mapping from LHS identifiers
             let mut mapping = HashMap::new();
             if !try_build_mapping_lhs(l1, l2, &mut mapping) {
                 return None;
             }
-            // Verify RHS expressions are isomorphic under this mapping
             if exprs_isomorphic(e1, e2, &mapping) {
                 Some(mapping)
             } else {
@@ -297,7 +137,6 @@ pub fn statements_isomorphic(
     }
 }
 
-/// Build mapping from LHS of two assignments.
 fn try_build_mapping_lhs(
     a: &Expr,
     b: &Expr,
@@ -320,23 +159,19 @@ fn try_build_mapping_lhs(
     }
 }
 
-/// Find groups of isomorphic statements in a sequence.
-/// Segments consecutive Let/Assign statements and groups those with
-/// structural similarity.
+/// Find groups of isomorphic statements starting at start_idx.
 fn find_isomorphic_groups(
     body: &[Statement],
     start_idx: usize,
-) -> Vec<SlpIsomorphicGroup> {
+) -> Vec<VectorPhiCandidate> {
     let mut groups = Vec::new();
     if start_idx >= body.len() {
         return groups;
     }
 
     let template = &body[start_idx];
-    let mut mappings: Vec<HashMap<String, String>> = Vec::new();
     let mut lhs_names: Vec<String> = Vec::new();
 
-    // Extract LHS name for the template
     let template_lhs = match template {
         Statement::Let { name, .. } => Some(name.clone()),
         Statement::Assign(Expr::Identifier(n), _) => Some(n.clone()),
@@ -347,47 +182,62 @@ fn find_isomorphic_groups(
         None => return groups,
     };
     lhs_names.push(template_lhs.clone());
-    mappings.push(HashMap::new()); // template identity mapping
 
-    // Compare subsequent statements to the template
     for (offset, stmt) in body.iter().enumerate().skip(start_idx + 1) {
-        if let Some(mapping) = statements_isomorphic(template, stmt) {
+        if statements_isomorphic(template, stmt).is_some() {
             let lhs = match stmt {
                 Statement::Let { name, .. } => name.clone(),
                 Statement::Assign(Expr::Identifier(n), _) => n.clone(),
                 _ => break,
             };
-            mappings.push(mapping);
             lhs_names.push(lhs);
         } else {
-            break; // non-isomorphic statement ends the group
+            break;
         }
     }
 
-    if mappings.len() >= 2 {
-        let width = mappings.len();
+    if lhs_names.len() >= 2 {
+        let width = lhs_names.len();
         let element_type = match template {
             Statement::Let { ty: Some(t), .. } => t.clone(),
             _ => Type::float(),
         };
-        let elem_ty = element_type.clone();
-        groups.push(SlpIsomorphicGroup {
-            base_index: start_idx,
-            width: mappings.len(),
-            lane_mappings: mappings.clone(),
-            lhs_names,
-            lane_positions: (start_idx..start_idx + mappings.len()).collect(),
-            element_type: elem_ty,
-            consumer_group_indices: Vec::new(),
+        let group_name = infer_group_name(&lhs_names);
+        groups.push(VectorPhiCandidate {
+            group_name,
+            element_ty: element_type,
+            width,
+            fields: lhs_names,
         });
     }
 
     groups
 }
 
-/// Compute a template signature for an expression. The signature captures the
-/// structure (BinaryOp kinds, tree depth, literal values) but ignores variable
-/// names — two expressions with the same signature are isomorphic.
+/// Guess a descriptive group name from a set of field names.
+/// e.g., ["bx0", "bx1", "bx2", "bx3"] → "bx"
+fn infer_group_name(fields: &[String]) -> String {
+    if fields.is_empty() {
+        return "g".to_string();
+    }
+    // Find the longest common prefix
+    let first = &fields[0];
+    for len in (1..=first.len()).rev() {
+        let prefix = &first[..len];
+        if fields.iter().all(|f| f.starts_with(prefix)) {
+            // Require that all fields have digits (or nothing) after the prefix
+            let rest_valid = fields.iter().all(|f| {
+                let rest = &f[len..];
+                rest.is_empty() || rest.chars().all(|c| c.is_ascii_digit())
+            });
+            if rest_valid {
+                return prefix.to_string();
+            }
+        }
+    }
+    "g".to_string()
+}
+
 fn expr_signature(expr: &Expr) -> Vec<u8> {
     let mut sig = Vec::new();
     expr_signature_inner(expr, &mut sig);
@@ -397,7 +247,7 @@ fn expr_signature(expr: &Expr) -> Vec<u8> {
 fn expr_signature_inner(expr: &Expr, sig: &mut Vec<u8>) {
     match expr {
         Expr::BinaryOp(kind, l, r) => {
-            sig.push(1); // tag: BinaryOp
+            sig.push(1);
             sig.push(match kind {
                 BinaryOpKind::Add => 1, BinaryOpKind::Sub => 2,
                 BinaryOpKind::Mul => 3, BinaryOpKind::Div => 4,
@@ -410,38 +260,40 @@ fn expr_signature_inner(expr: &Expr, sig: &mut Vec<u8>) {
             expr_signature_inner(r, sig);
         }
         Expr::UnaryOp(kind, e) => {
-            sig.push(2); // tag: UnaryOp
+            sig.push(2);
             sig.push(match kind {
                 UnaryOpKind::Neg => 1, UnaryOpKind::Not => 2,
                 _ => 0,
             });
             expr_signature_inner(e, sig);
         }
-        Expr::Identifier(_) => {
-            sig.push(3); // tag: any identifier (variable name ignored)
-        }
+        Expr::Identifier(_) => { sig.push(3); }
         Expr::Decimal(n) => {
-            sig.push(4); // tag: decimal literal
+            sig.push(4);
             for &b in &n.to_le_bytes() { sig.push(b); }
         }
         Expr::Float(f) => {
-            sig.push(5); // tag: float literal
+            sig.push(5);
             let bits = f.to_bits();
             for &b in &bits.to_le_bytes() { sig.push(b); }
         }
         Expr::Bool(b) => {
-            sig.push(6); // tag: bool literal
+            sig.push(6);
             sig.push(if *b { 1 } else { 0 });
         }
-        _ => {
-            sig.push(0); // tag: other/non-vectorizable
-        }
+        _ => { sig.push(0); }
     }
 }
 
-/// Get the template signature for a group's first statement.
-fn group_template_signature(body: &[Statement], group: &SlpIsomorphicGroup) -> Option<Vec<u8>> {
-    let stmt = body.get(group.base_index)?;
+fn group_template_signature(body: &[Statement], group: &VectorPhiCandidate) -> Option<Vec<u8>> {
+    // Find the first field in the body to get its expression
+    let field_name = &group.fields[0];
+    let pos = body.iter().position(|s| match s {
+        Statement::Let { name, .. } => name == field_name,
+        Statement::Assign(Expr::Identifier(n), _) => n == field_name,
+        _ => false,
+    })?;
+    let stmt = body.get(pos)?;
     let expr = match stmt {
         Statement::Let { expr: Some(e), .. } => &*e,
         Statement::Assign(_, e) => &*e,
@@ -450,7 +302,6 @@ fn group_template_signature(body: &[Statement], group: &SlpIsomorphicGroup) -> O
     Some(expr_signature(expr))
 }
 
-/// Build a map from let-binding variable name to its definition position in the body.
 fn build_def_sites(body: &[Statement]) -> HashMap<String, usize> {
     let mut defs = HashMap::new();
     for (i, stmt) in body.iter().enumerate() {
@@ -465,7 +316,6 @@ fn build_def_sites(body: &[Statement]) -> HashMap<String, usize> {
     defs
 }
 
-/// Collect all identifier names referenced by an expression.
 fn collect_expr_vars(expr: &Expr, out: &mut Vec<String>) {
     match expr {
         Expr::Identifier(n) => out.push(n.clone()),
@@ -477,53 +327,38 @@ fn collect_expr_vars(expr: &Expr, out: &mut Vec<String>) {
     }
 }
 
-/// Check that all variables referenced by a group's lanes are available
-/// at the template's body position. A variable is available if:
-///   a) It is NOT a let-binding (state field or constant) — always available
-///   b) It IS a let-binding defined at body index < template_base_index
-/// Returns false if any lane references a let-binding defined at or after
-/// the template position (the emitter won't have its value yet).
 fn all_deps_available(
     body: &[Statement],
-    group: &SlpIsomorphicGroup,
+    field_name: &str,
     template_base_index: usize,
 ) -> bool {
     let def_sites = build_def_sites(body);
-
-    for lane_idx in 0..group.width {
-        let stmt = match body.get(group.base_index + lane_idx) {
-            Some(s) => s,
-            None => return false,
-        };
-        let rhs = match stmt {
-            Statement::Let { expr: Some(e), .. } => &*e,
-            Statement::Assign(_, e) => &*e,
-            _ => continue,
-        };
-
-        let mut vars = Vec::new();
-        collect_expr_vars(rhs, &mut vars);
-        for var in &vars {
-            match def_sites.get(var) {
-                Some(&pos) if pos < template_base_index => continue,
-                Some(_) => return false, // defined at or after template — not available
-                None => continue, // state field or constant — always available
-            }
+    let stmt = body.get(template_base_index);
+    let Some(stmt) = stmt else { return false; };
+    let rhs = match stmt {
+        Statement::Let { expr: Some(e), .. } => &*e,
+        Statement::Assign(_, e) => &*e,
+        _ => return true,
+    };
+    let mut vars = Vec::new();
+    collect_expr_vars(rhs, &mut vars);
+    for var in &vars {
+        match def_sites.get(var) {
+            Some(&pos) if pos < template_base_index => continue,
+            Some(_) => return false,
+            None => continue,
         }
     }
     true
 }
 
 /// Merge groups with the same template signature into wider cross-pair groups.
-/// Groups must have the same width to be merged. The resulting group contains
-/// lanes from all merged groups, with composed lane mappings.
-fn merge_groups(body: &[Statement], groups: Vec<SlpIsomorphicGroup>) -> Vec<SlpIsomorphicGroup> {
+fn merge_groups(body: &[Statement], groups: Vec<VectorPhiCandidate>) -> Vec<VectorPhiCandidate> {
     if groups.len() < 2 {
         return groups;
     }
 
-    // Compute signatures for each group
-    let mut sig_buckets: HashMap<Vec<u8>, Vec<SlpIsomorphicGroup>> = HashMap::new();
+    let mut sig_buckets: HashMap<Vec<u8>, Vec<VectorPhiCandidate>> = HashMap::new();
     for g in &groups {
         if let Some(sig) = group_template_signature(body, g) {
             sig_buckets.entry(sig).or_default().push(g.clone());
@@ -538,8 +373,7 @@ fn merge_groups(body: &[Statement], groups: Vec<SlpIsomorphicGroup>) -> Vec<SlpI
             continue;
         }
 
-        // Group by width within this signature bucket
-        let mut by_width: HashMap<usize, Vec<SlpIsomorphicGroup>> = HashMap::new();
+        let mut by_width: HashMap<usize, Vec<VectorPhiCandidate>> = HashMap::new();
         for g in bucket {
             by_width.entry(g.width).or_default().push(g);
         }
@@ -551,56 +385,44 @@ fn merge_groups(body: &[Statement], groups: Vec<SlpIsomorphicGroup>) -> Vec<SlpI
             }
 
             let mut sorted = same_width_groups;
-            sorted.sort_by_key(|g| g.base_index);
-            // 2026-07-21: Only merge groups where all lane dependencies are
-            // available at the template position. Checks that every variable
-            // referenced by a lane's RHS is either a state field (always available)
-            // or a let-binding defined before the template.
-            let template_base = sorted[0].base_index;
-            sorted.retain(|g| g.base_index == template_base || all_deps_available(body, g, template_base));
+            sorted.sort_by_key(|g| {
+                // Find position of first field in body
+                g.fields.first().cloned().unwrap_or_default()
+            });
+            // Keep only groups where dependencies are available at template position
+            let template_base = sorted[0].fields.first().cloned().unwrap_or_default();
+            let template_base_idx = body.iter().position(|s| match s {
+                Statement::Let { name, .. } => *name == template_base,
+                Statement::Assign(Expr::Identifier(n), _) => *n == template_base,
+                _ => false,
+            }).unwrap_or(0);
+            sorted.retain(|g| {
+                let first = g.fields.first().cloned().unwrap_or_default();
+                let pos = body.iter().position(|s| match s {
+                    Statement::Let { name, .. } => *name == first,
+                    Statement::Assign(Expr::Identifier(n), _) => *n == first,
+                    _ => false,
+                }).unwrap_or(0);
+                pos == template_base_idx || all_deps_available(body, &first, pos)
+            });
             if sorted.len() < 2 {
                 merged.extend(sorted);
                 continue;
             }
             let template_group = sorted[0].clone();
 
-            let mut merged_lane_mappings = template_group.lane_mappings.clone();
-            let mut merged_lhs_names = template_group.lhs_names.clone();
-
+            let mut merged_fields = template_group.fields.clone();
             for src in sorted.iter().skip(1) {
-                for lane_idx in 0..src.width {
-                    let src_lhs = &src.lhs_names[lane_idx];
-                    let src_mapping = &src.lane_mappings[lane_idx];
-                    let mut composed = HashMap::new();
-                    for (k, v) in src_mapping {
-                        composed.insert(k.clone(), v.clone());
-                    }
-                    if lane_idx < template_group.lhs_names.len() {
-                        let t_lhs = &template_group.lhs_names[lane_idx];
-                        if t_lhs != src_lhs {
-                            composed.insert(t_lhs.clone(), src_lhs.clone());
-                        }
-                    }
-                    merged_lane_mappings.push(composed);
-                    merged_lhs_names.push(src_lhs.clone());
-                }
+                merged_fields.extend(src.fields.clone());
             }
 
             let merged_width = template_group.width * sorted.len();
-            let mut merged_lane_positions = template_group.lane_positions.clone();
-            for src in sorted.iter().skip(1) {
-                for lane_idx in 0..src.width {
-                    merged_lane_positions.push(src.lane_positions[lane_idx]);
-                }
-            }
-            merged.push(SlpIsomorphicGroup {
-                base_index: template_group.base_index,
+            let group_name = infer_group_name(&merged_fields);
+            merged.push(VectorPhiCandidate {
+                group_name,
+                element_ty: template_group.element_ty.clone(),
                 width: merged_width,
-                lane_mappings: merged_lane_mappings,
-                lhs_names: merged_lhs_names,
-                lane_positions: merged_lane_positions,
-                element_type: template_group.element_type.clone(),
-                consumer_group_indices: Vec::new(),
+                fields: merged_fields,
             });
         }
     }
@@ -608,77 +430,55 @@ fn merge_groups(body: &[Statement], groups: Vec<SlpIsomorphicGroup>) -> Vec<SlpI
     merged
 }
 
-/// Analyze a transaction body for SLP vectorization opportunities.
-pub fn analyze_body(body: &[Statement]) -> SlpAnalysisResult {
-    let mut result = SlpAnalysisResult::default();
+/// Analyze a transaction body for vector phi opportunities.
+/// Returns groups of fields that can share a single vector phi node.
+/// A group is valid only when:
+/// 1. All fields have the same LLVM type
+/// 2. All fields are unconditionally written (not inside `when` guards)
+/// 3. All fields have structurally isomorphic assignment expressions
+///
+/// Groups of width >= 4 are returned. Smaller groups are filtered out,
+/// since <4-wide vectors don't justify the insertelement/extractelement overhead.
+pub fn analyze_body(body: &[Statement]) -> Vec<VectorPhiCandidate> {
+    let mut groups = Vec::new();
     let mut i = 0;
     while i < body.len() {
         match &body[i] {
             Statement::Let { .. } | Statement::Assign(Expr::Identifier(_), _) => {
-                let groups = find_isomorphic_groups(body, i);
-                for group in groups {
-                    if group.is_viable() {
-                        result.groups.push(group);
+                let found = find_isomorphic_groups(body, i);
+                for g in found {
+                    if g.width >= 2 {
+                        groups.push(g);
                     }
                 }
                 i += 1;
             }
-            _ => {
-                i += 1;
-            }
+            _ => { i += 1; }
         }
     }
 
-    // 2026-07-21: Cross-pair merge — groups with the same template signature
-    // across non-consecutive positions (e.g., all Newton-step-2 from pairs
-    // 01-10) are merged into wider groups with independent lanes.
-    if result.groups.len() >= 10 {
-        let pre = result.groups.len();
-        let old_groups = std::mem::take(&mut result.groups);
+    // Cross-pair merge: when many narrow groups share a signature,
+    // combine them into wider groups (e.g., Newton-step-2 from pairs 01-10).
+    if groups.len() >= 10 {
+        let old_groups = std::mem::take(&mut groups);
         let merged = merge_groups(body, old_groups);
-        result.groups = merged;
+        groups = merged;
     }
 
-    result.has_slp_opportunities = !result.groups.is_empty();
-    
-    // 2026-07-28: Two-pass consumer analysis — build consumer graph and run
-    // cost-gain check. This is the principled kalman-vs-nbody gate.
-    if result.has_slp_opportunities {
-        build_consumer_graph(body, &mut result.groups);
-        for gi in 0..result.groups.len() {
-            result.chain_pass_ok.push(chain_pass_ok(&result.groups, gi));
-        }
-    }
-    
-    result
+    // Only return groups that are wide enough to justify vector phi overhead.
+    groups.into_iter().filter(|g| g.width >= 4).collect()
 }
-
-
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::ast::{BinaryOpKind, Expr, Statement};
 
-    fn float_expr(val: f64) -> Expr {
-        Expr::Float(val)
-    }
-
-    fn ident(n: &str) -> Expr {
-        Expr::Identifier(n.to_string())
-    }
-
-    fn add_expr(a: Expr, b: Expr) -> Expr {
-        Expr::BinaryOp(BinaryOpKind::Add, Box::new(a), Box::new(b))
-    }
-
-    fn sub_expr(a: Expr, b: Expr) -> Expr {
-        Expr::BinaryOp(BinaryOpKind::Sub, Box::new(a), Box::new(b))
-    }
-
-    fn mul_expr(a: Expr, b: Expr) -> Expr {
-        Expr::BinaryOp(BinaryOpKind::Mul, Box::new(a), Box::new(b))
-    }
+    fn float_expr(val: f64) -> Expr { Expr::Float(val) }
+    fn ident(n: &str) -> Expr { Expr::Identifier(n.to_string()) }
+    fn add_expr(a: Expr, b: Expr) -> Expr { Expr::BinaryOp(BinaryOpKind::Add, Box::new(a), Box::new(b)) }
+    fn sub_expr(a: Expr, b: Expr) -> Expr { Expr::BinaryOp(BinaryOpKind::Sub, Box::new(a), Box::new(b)) }
+    fn mul_expr(a: Expr, b: Expr) -> Expr { Expr::BinaryOp(BinaryOpKind::Mul, Box::new(a), Box::new(b)) }
 
     #[test]
     fn test_isomorphic_simple_add() {
@@ -706,13 +506,15 @@ mod tests {
 
     #[test]
     fn test_statement_isomorphic_let() {
-        let a = Statement::Let { names: vec![], 
+        let a = Statement::Let {
+            names: vec![],
             name: "dx01".to_string(),
             ty: Some(Type::float()),
             expr: Some(sub_expr(ident("bx0"), ident("bx1"))),
             modifiers: vec![],
         };
-        let b = Statement::Let { names: vec![], 
+        let b = Statement::Let {
+            names: vec![],
             name: "dx02".to_string(),
             ty: Some(Type::float()),
             expr: Some(sub_expr(ident("bx0"), ident("bx2"))),
@@ -724,21 +526,23 @@ mod tests {
 
     #[test]
     fn test_nbody_distance_pattern() {
-        // Simulate nbody's dx01/dy01 pattern
         let body = vec![
-            Statement::Let { names: vec![], 
+            Statement::Let {
+                names: vec![],
                 name: "dx01".to_string(),
                 ty: Some(Type::float()),
                 expr: Some(sub_expr(ident("bx0"), ident("bx1"))),
                 modifiers: vec![],
             },
-            Statement::Let { names: vec![], 
+            Statement::Let {
+                names: vec![],
                 name: "dy01".to_string(),
                 ty: Some(Type::float()),
                 expr: Some(sub_expr(ident("by0"), ident("by1"))),
                 modifiers: vec![],
             },
-            Statement::Let { names: vec![], 
+            Statement::Let {
+                names: vec![],
                 name: "dz01".to_string(),
                 ty: Some(Type::float()),
                 expr: Some(sub_expr(ident("bz0"), ident("bz1"))),
@@ -746,9 +550,31 @@ mod tests {
             },
         ];
         let result = analyze_body(&body);
-        assert!(result.has_slp_opportunities,
-            "dx01/dy01/dz01 should form an SLP group");
-        assert_eq!(result.groups[0].width, 3,
-            "Should have 3 lanes (dx, dy, dz)");
+        assert!(result.is_empty(),
+            "dx01/dy01/dz01 width=3 should be filtered (width < 4)");
+
+        // Now test with 4 lanes (bx0..bx3)
+        let body4 = vec![
+            Statement::Let { names: vec![], name: "bx0".to_string(), ty: Some(Type::float()),
+                expr: Some(add_expr(ident("ax"), ident("ay"))), modifiers: vec![] },
+            Statement::Let { names: vec![], name: "bx1".to_string(), ty: Some(Type::float()),
+                expr: Some(add_expr(ident("ax"), ident("ay"))), modifiers: vec![] },
+            Statement::Let { names: vec![], name: "bx2".to_string(), ty: Some(Type::float()),
+                expr: Some(add_expr(ident("ax"), ident("ay"))), modifiers: vec![] },
+            Statement::Let { names: vec![], name: "bx3".to_string(), ty: Some(Type::float()),
+                expr: Some(add_expr(ident("ax"), ident("ay"))), modifiers: vec![] },
+        ];
+        let result4 = analyze_body(&body4);
+        assert!(!result4.is_empty(),
+            "4 identical float adds should form a vector phi group");
+        assert_eq!(result4[0].width, 4);
+        assert_eq!(result4[0].fields, vec!["bx0", "bx1", "bx2", "bx3"]);
+    }
+
+    #[test]
+    fn test_infer_group_name() {
+        assert_eq!(infer_group_name(&["bx0".into(), "bx1".into(), "bx2".into()]), "bx");
+        assert_eq!(infer_group_name(&["vx".into(), "vy".into(), "vz".into()]), "g");
+        assert_eq!(infer_group_name(&["a".into(), "b".into()]), "g");
     }
 }

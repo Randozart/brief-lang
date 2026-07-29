@@ -140,7 +140,7 @@ impl LlvmBackend {
         use_phi: bool,
         body: Option<&[Statement]>,
     ) {
-        writeln!(out, "define i32 @main() local_unnamed_addr {} {{", self.slp_attr("main", "#0")).ok();
+        writeln!(out, "define i32 @main() local_unnamed_addr {} {{", "#0").ok();
         writeln!(out, "entry:").ok();
         writeln!(out, "  %state = alloca %State, align 8").ok();
         self.emit_inline_init_stores(out, "%state");
@@ -165,7 +165,7 @@ impl LlvmBackend {
         total_const_name: Option<&str>,
         body: &[Statement],
     ) {
-        writeln!(out, "define i32 @main() local_unnamed_addr {} {{", self.slp_attr("main", "#0")).ok();
+        writeln!(out, "define i32 @main() local_unnamed_addr {} {{", "#0").ok();
         writeln!(out, "entry:").ok();
         writeln!(out, "  %state = alloca %State, align 8").ok();
         self.emit_inline_init_stores(out, "%state");
@@ -242,7 +242,7 @@ impl LlvmBackend {
         total_const_name: Option<&str>,
         body: &[Statement],
     ) {
-        writeln!(out, "define i32 @main() local_unnamed_addr {} {{", self.slp_attr("main", "#0")).ok();
+        writeln!(out, "define i32 @main() local_unnamed_addr {} {{", "#0").ok();
         writeln!(out, "entry:").ok();
         writeln!(out, "  %state = alloca %State, align 8").ok();
         self.emit_inline_init_stores(out, "%state");
@@ -316,7 +316,7 @@ impl LlvmBackend {
         is_decreasing: bool,
         counter_var: Option<&str>,
     ) {
-        writeln!(out, "define i32 @main() local_unnamed_addr {} {{", self.slp_attr("main", "#0")).ok();
+        writeln!(out, "define i32 @main() local_unnamed_addr {} {{", "#0").ok();
         writeln!(out, "entry:").ok();
         writeln!(out, "  %state = alloca %State, align 8").ok();
         self.emit_inline_init_stores(out, "%state");
@@ -338,6 +338,16 @@ impl LlvmBackend {
             let (init_f, _) = self.emit_state_load_i64_by_idx(out, "  ", idx);
             phi_field_init.insert((*fname).clone(), init_f);
         }
+
+        // 2026-07-29: Detect vector phi groups for this countable body.
+        // When groups of 4+ fields share isomorphic expressions, promote
+        // them to vector phis to reduce register pressure.
+        self.fun.active_vector_groups = crate::backend::llvm::vector_phi::detect_vector_groups(
+            write_set, body, &self.ctx.field_index_map, &self.ctx.field_types,
+        );
+        self.fun.field_to_phi.clear();
+        self.fun.field_to_lane.clear();
+        let has_vector_groups = !self.fun.active_vector_groups.is_empty();
 
         // 2026-07-17: Pre-generate backedge register names for per-field phis
         // (forward reference from header phi to latch definition).
@@ -372,7 +382,38 @@ impl LlvmBackend {
         // iN for exact ints, i64 for flexible Int and everything else).
         self.fun.phi_field_regs.clear();
         self.fun.backedge_field_regs.clear();
+
+        // 2026-07-29: When vector groups are present, emit vector phis
+        // instead of scalar phis for grouped fields.
+        let mut active_groups: Vec<crate::backend::llvm::vector_phi::VectorPhiGroup> =         if has_vector_groups {
+            let mut groups = std::mem::take(&mut self.fun.active_vector_groups);
+            let (f2p, f2l) = crate::backend::llvm::vector_phi::emit_vector_header(
+                &mut self.fun, out, &mut groups, &phi_field_init, "  ",
+            );
+            self.fun.field_to_phi = f2p;
+            self.fun.field_to_lane = f2l;
+            groups
+        } else {
+            Vec::new()
+        };
+
+        // Emit per-field scalar phis for fields NOT in vector groups.
+        // Use owned strings to avoid borrow conflicts with the move below.
+        let vector_grouped_fields: std::collections::HashSet<String> = active_groups
+            .iter()
+            .flat_map(|g| g.fields.iter().cloned())
+            .collect();
+
+        // 2026-07-29: Restore groups to self.fun so body emission and latch
+        // can find them via self-reference (emit_expr, record_field_update,
+        // emit_vector_backedge all access self.fun.active_vector_groups).
+        self.fun.active_vector_groups = active_groups;
+
         for fname in &sorted_fields {
+            // Skip fields already covered by vector phis.
+            if vector_grouped_fields.contains(fname.as_str()) {
+                continue;
+            }
             // Check if this field duplicates the counter variable
             if let Some(cv) = counter_var {
                 if fname.as_str() == cv {
@@ -386,8 +427,6 @@ impl LlvmBackend {
                 .cloned().unwrap_or_else(|| format!("%be_{}", fname));
             let init_f = phi_field_init.get(fname.as_str())
                 .cloned().unwrap_or_else(|| "0".to_string());
-            // 2026-07-26: Read phi type from field_types — matches whatever
-            // push_field_type stored for this field (float, double, i8..i128).
             let phi_ty = self.ctx.field_index_map.get(fname.as_str())
                 .and_then(|idx| self.ctx.field_types.get(*idx))
                 .cloned().unwrap_or_else(|| "i64".to_string());
@@ -452,7 +491,19 @@ impl LlvmBackend {
             writeln!(out, "  {} = add nuw nsw {} {}, 1", next, counter_ty, counter_name).ok();
         }
 
-        // 2026-07-17: Per-field backedges. Modified fields use the written value;
+        // 2026-07-29: Emit vector phi backedges before per-field scalar backedges.
+        // Vector phis cover groups of fields; the backedge assembles all updated
+        // lanes via insertelement chain into a single <N x T> vector.
+        if has_vector_groups {
+            // Clone groups and lane map to avoid borrow conflicts with &mut self.fun.
+            let be_groups = self.fun.active_vector_groups.clone();
+            let be_lane_map = self.fun.field_to_lane.clone();
+            crate::backend::llvm::vector_phi::emit_vector_backedge(
+                &mut self.fun, out, &be_groups, &be_lane_map, "  ",
+            );
+        }
+
+        // 2026-07-17: Per-field scalar backedges. Modified fields use the written value;
         // unwritten fields use identity (phi self-ref). LLVM peephole eliminates
         // the `add i64 0, %val` copy in both cases.
         // 2026-07-21: Skip the counter variable — its backedge is already the
@@ -521,7 +572,7 @@ impl LlvmBackend {
         body: &[Statement],
         write_set: &HashSet<String>,
     ) {
-        writeln!(out, "define i32 @main() local_unnamed_addr {} {{", self.slp_attr("main", "#0")).ok();
+        writeln!(out, "define i32 @main() local_unnamed_addr {} {{", "#0").ok();
         writeln!(out, "entry:").ok();
         writeln!(out, "  %state = alloca %State, align 8").ok();
         self.emit_inline_init_stores(out, "%state");
@@ -591,30 +642,10 @@ impl LlvmBackend {
         }
     }
 
-    // 2026-07-21: SLP vector codegen (Phase 2) is not yet implemented.
-    // The analysis pass (Phase 1) detects 143 isomorphic groups in nbody,
-    // but emitting actual <4 x float> vector arithmetic requires building a
-    // vector operation tree from the lane RHS expressions — a larger effort
-    // that will be added in a future commit.
-
-    /// Collect state field indices from an expression. Free function used by
-    /// the stride gate — walks the expression tree and collects all field indices.
-    pub fn collect_field_indices_front(expr: &Expr, field_map: &HashMap<String, usize>, out: &mut Vec<usize>) {
-        match expr {
-            Expr::Identifier(name) => { if let Some(&idx) = field_map.get(name) { out.push(idx); } }
-            Expr::Call(_, args, _) => { for a in args { Self::collect_field_indices_front(a, field_map, out); } }
-            Expr::BinaryOp(_, lhs, rhs) => {
-                Self::collect_field_indices_front(lhs, field_map, out);
-                Self::collect_field_indices_front(rhs, field_map, out);
-            }
-            Expr::UnaryOp(_, e) => Self::collect_field_indices_front(e, field_map, out),
-            Expr::Cast(inner, _) => Self::collect_field_indices_front(inner, field_map, out),
-            _ => {}
-        }
-    }
-
     /// Emit the body of a countable loop. Converts each Statement to the
     /// appropriate SSA load + op + store sequence.
+    /// 2026-07-29: SLP gating removed — proven counterproductive. LLVM's SLP
+    /// vectorizer has its own cost model. See docs/plans/2026-07-29-full-recovery-plan.md §7.
     fn emit_countable_body(
         &mut self,
         out: &mut String,
@@ -624,64 +655,6 @@ impl LlvmBackend {
     ) {
         let mut i = 0;
         while i < body.len() {
-            // 2026-07-27: Hazard-gated SLP — skip vectorization for txns that
-            // would suffer from artificial insertelement/extractelement chains.
-            // The hazard_spec analysis in hazard.rs populates slp_hazard_fns
-            // when register pressure (peak) exceeds available registers (r).
-            // The #4/#5 attributes (disable-slp-vectorize) are NOT emitted, so
-            // LLVM's auto-vectorizer runs freely for all benchmarks.
-            // 2026-07-27: Hazard gate — skip SLP for txns flagged by hazard_spec.
-            // The cross_per_field > 3 check (added 2026-07-27) applies to ALL txns;
-            // register-pressure checks (peak >= r) apply only to non-alwaysinline.
-            let is_hazardous = !self.fun.txn_name.is_empty()
-                && self.ctx.slp_hazard_fns.contains(&self.fun.txn_name);
-            if !is_hazardous {
-                let match_group = self.fun.slp_groups.iter()
-                    .find(|g| g.base_index == i).cloned();
-                if let Some(ref group) = match_group {
-                    // 2026-07-28: SLP profitability — stride gate + depth check.
-                    // Stride gate: field indices must be contiguous (max_stride <= 1).
-                    // Kalman's matrix multiply has stride=3 (p00,p10,p20 at indices
-                    // 0,3,6) — stride gate blocks merge, preventing width=12 groups.
-                    // Nbody's subtracts have stride=1 (bx0,bx1 at consecutive indices).
-                    // Depth check: depth * width >= 10 ensures compute gain exceeds
-                    // the ~8-10 insertelement/extractelement overhead.
-                    let template_expr = body.get(i).and_then(|s| match s {
-                        Statement::Let { expr: Some(e), .. } => Some(&*e),
-                        Statement::Assign(_, e) => Some(&*e),
-                        _ => None,
-                    });
-                    // Stride gate: collect field indices, reject if max stride > 1
-                    let mut stride_ok = true;
-                    if let Some(expr) = template_expr {
-                        let mut field_indices: Vec<usize> = Vec::new();
-                        Self::collect_field_indices_front(expr, &self.ctx.field_index_map, &mut field_indices);
-                        field_indices.sort();
-                        if field_indices.len() >= 2 {
-                            let max_stride = field_indices.windows(2)
-                                .map(|w| w[1] - w[0]).max().unwrap_or(0);
-                            if max_stride > 1 {
-                                stride_ok = false;
-                            }
-                        }
-                    }
-                    let should_vec = stride_ok
-                        && group.width >= 3
-                        && template_expr.map_or(false, |expr| {
-                            crate::backend::llvm::vector_codegen::tree_depth(expr)
-                                * group.width >= 10
-                        });
-                    if should_vec {
-                        let result = crate::backend::llvm::vector_codegen::emit_slp_group(
-                            self, out, body, group, write_set);
-                        if result.is_ok() {
-                            i = group.lane_positions.iter().max()
-                                .copied().unwrap_or(i + group.width) + 1;
-                            continue;
-                        }
-                    }
-                }
-            }
             let stmt = &body[i];
             match stmt {
                 Statement::Let { name, expr: Some(e), .. } => {
@@ -692,21 +665,36 @@ impl LlvmBackend {
                 Statement::Assign(lhs, expr) => {
                     let lhs_name = Self::assign_target_name(lhs);
                      let val = self.emit_expr(out, expr, "  ");
-                     if let Some(ref n) = lhs_name {
+                      if let Some(ref n) = lhs_name {
                          if write_set.contains(n) {
-                             // 2026-07-21: Float fields use native type in backend —
-                             // skip adapt_to_i64 and store the float value directly.
-                             // Non-float fields still box to i64 for phi compatibility.
-                             let field_ty = self.ctx.field_index_map.get(n)
-                                 .and_then(|idx| self.ctx.field_types.get(*idx))
-                                 .cloned().unwrap_or_else(|| "i64".to_string());
-                             if field_ty == "float" || field_ty == "double" {
-                                 self.fun.pending_phi_backedge.insert(n.clone(), val.name.clone());
-                             } else {
-                                 let boxed = self.adapt_to_i64(out, "  ", &val);
-                                 self.fun.pending_phi_backedge.insert(n.clone(), boxed);
-                             }
-                         }
+                              // 2026-07-29: Vector phi routing — if field belongs to
+                              // a vector group, record_field_update instead of scalar backedge.
+                              // Clone lookup data to avoid borrow conflicts with &mut self.fun.
+                              let is_vector_grouped = self.fun.field_to_phi.contains_key(n.as_str());
+                              let (groups_clone, lane_map_clone) = if is_vector_grouped {
+                                  (Some(self.fun.active_vector_groups.clone()),
+                                   Some(self.fun.field_to_lane.clone()))
+                              } else {
+                                  (None, None)
+                              };
+                              if let (Some(ref g), Some(ref l)) = (groups_clone, lane_map_clone) {
+                                  crate::backend::llvm::vector_phi::record_field_update(
+                                      &mut self.fun, n, &val.name, g, l,
+                                  );
+                              } else {
+                                  // 2026-07-21: Float fields use native type in backend —
+                                  // skip adapt_to_i64 and store the float value directly.
+                                  let field_ty = self.ctx.field_index_map.get(n)
+                                      .and_then(|idx| self.ctx.field_types.get(*idx))
+                                      .cloned().unwrap_or_else(|| "i64".to_string());
+                                  if field_ty == "float" || field_ty == "double" {
+                                      self.fun.pending_phi_backedge.insert(n.clone(), val.name.clone());
+                                  } else {
+                                      let boxed = self.adapt_to_i64(out, "  ", &val);
+                                      self.fun.pending_phi_backedge.insert(n.clone(), boxed);
+                                  }
+                              }
+                          }
                         // 2026-07-17: When post-loop hoisted prints need final values,
                         // emit state stores for ALL fields, not just phi-tracked ones.
                         // Without this, fields outside the capped write_set (max 6)

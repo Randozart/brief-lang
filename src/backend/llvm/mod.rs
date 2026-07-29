@@ -7,16 +7,13 @@ pub mod emit_expr;
 pub mod emit_stmt;
 pub mod emit_toplevel;
 pub mod gpu;
-pub mod hazard;
 pub mod helpers;
 pub mod intrinsics;
 pub mod loop_engine;
-pub mod vector_codegen;
 pub mod normalizer;
-pub mod optimizer;
-pub mod reorder;
 pub mod types;
-pub mod validate;
+pub mod strategy;
+pub mod vector_phi;
 
 #[cfg(test)]
 mod tests;
@@ -2363,33 +2360,13 @@ impl LlvmBackend {
         writeln!(out, "@ll_empty_list = private unnamed_addr constant {{ i64, i64 }} {{ i64 0, i64 0 }}").ok();
         writeln!(out).ok();
 
-        // Run SLP hazard analysis before emitting function definitions and attributes.
-        // This populates slp_hazard_fns so that slp_attr() returns the correct attribute
-        // group (#4/#5) for hazardous functions, and the attributes section emits #4/#5.
-        self.estimate_slp_hazard(&txns);
-
-        // 2026-07-21: Run SLP isomorphism analysis — detects structurally identical
-        // operation sequences across different float fields (nbody's dx01=by0-by1,
-        // dy01=by0-by1 pattern) for potential vectorization in a future phase.
         // 2026-07-28: Populate iter_bounds for !prof computation (txns is now in scope).
+        // 2026-07-29: SLP hazard and isomorphism analysis removed — proven counterproductive.
+        // LLVM's SLP vectorizer has its own cost model. See §7 of recovery plan.
         self.ctx.iter_bounds.clear();
         for (name, _) in &txns {
             if let Some(bound) = analysis.region_analyzer.iteration_bound_of(name) {
                 self.ctx.iter_bounds.insert(name.clone(), bound);
-            }
-        }
-        for (name, txn) in &txns {
-            if txn.is_reactive {
-                let result = crate::analysis::slp_isomorphism::analyze_body(&txn.body);
-                if result.has_slp_opportunities {
-                    let total_lanes: usize = result.groups.iter().map(|g| g.width).sum();
-                    self.warnings.push(format!(
-                        "info: txn '{}' has {} SLP isomorphism group(s) ({} total lanes)",
-                        name, result.groups.len(), total_lanes));
-                    // Store groups on FunctionContext for codegen
-                    self.fun.slp_groups = result.groups;
-                    self.fun.slp_chain_pass_ok = result.chain_pass_ok;
-                }
             }
         }
 
@@ -2734,6 +2711,24 @@ impl LlvmBackend {
                                 self.emit_while_main(&mut out, &node.name, counter_idx,
                                     total_idx, total_const_name, &body_stmts);
                                 true
+                            } else if {
+                                // 2026-07-29: Vector phi group path when isomorphic field groups
+                                // of size >= 4 are detected, use per-field phi loop (with vector
+                                // phi promotion) instead of memory counter.
+                                let vg = crate::backend::llvm::vector_phi::detect_vector_groups(
+                                    &node.write_set, &body_stmts,
+                                    &self.ctx.field_index_map, &self.ctx.field_types,
+                                );
+                                let has_vg = !vg.is_empty() && total_fields > 14;
+                                if has_vg {
+                                    self.fun.pending_post_hoist = post_hoist.clone();
+                                    self.warnings.push(format!("info: txn '{}' dispatched via vector phi ({}/{} fields in {} groups)", &node.name, vg.iter().map(|g| g.width).sum::<usize>(), total_fields, vg.len()));
+                                    let is_decreasing = bp.direction == crate::analysis::transition_graph::ConvergeDirection::Decreasing;
+                                    self.emit_countable_main(&mut out, &node.name, counter_idx, total_idx, total_const_name, &body_stmts, &node.write_set, is_decreasing, Some(&bp.var));
+                                }
+                                has_vg
+                            } {
+                                true
                             } else if write_density >= 0.5 && total_fields < 8 && !has_body_ffi {
                                 // EmitInlineSsa: inline SSA with insertvalue chain.
                                 // Best for dense writes (knucleotide: 4 fields all written,
@@ -2814,6 +2809,22 @@ impl LlvmBackend {
                                 self.fun.pending_post_hoist = post_hoist;
                                 self.warnings.push(format!("info: txn '{}' dispatched via inline SSA (EmitInlineSsa, {}/{} fields written)", &node.name, write_count, total_fields));
                                 self.emit_folded_main(&mut out, &node.name, counter_idx, total_idx, total_const_name, false, Some(&body_stmts));
+                                true
+                            } else if {
+                                // 2026-07-29: Vector phi group path for non-pure bodies.
+                                let vg = crate::backend::llvm::vector_phi::detect_vector_groups(
+                                    &node.write_set, &body_stmts,
+                                    &self.ctx.field_index_map, &self.ctx.field_types,
+                                );
+                                let has_vg = !vg.is_empty() && total_fields > 14;
+                                if has_vg {
+                                    self.fun.pending_post_hoist = post_hoist.clone();
+                                    self.warnings.push(format!("info: txn '{}' dispatched via vector phi ({}/{} fields in {} groups)", &node.name, vg.iter().map(|g| g.width).sum::<usize>(), total_fields, vg.len()));
+                                    let is_decreasing = bp.direction == crate::analysis::transition_graph::ConvergeDirection::Decreasing;
+                                    self.emit_countable_main(&mut out, &node.name, counter_idx, total_idx, total_const_name, &body_stmts, &node.write_set, is_decreasing, Some(&bp.var));
+                                }
+                                has_vg
+                            } {
                                 true
                             } else if write_density >= 0.8 && total_fields >= 8 {
                                 // 2026-07-19: Memory counter loop for dense-write programs.
@@ -3556,15 +3567,10 @@ impl LlvmBackend {
 
     /// Return any extra flags needed for `opt`. Currently emits
     /// `-slp-vectorize-hor=false` when SLP hazards exist, since LLVM 18's
-    /// per-function `"disable-slp-vectorize"` attribute is not always respected
-    /// by the new pass manager. This is a safeguard: the per-function attribute
-    /// works on LLVM 15-17 and 22+; the global flag covers LLVM 18-21.
+    /// 2026-07-29: SLP hazard gating removed — proven counterproductive.
+    /// No global SLP-disable flags needed. LLVM's auto-vectorizer runs freely.
     pub fn llvm_extra_flags(&self) -> Vec<String> {
-        let mut flags = Vec::new();
-        if !self.ctx.slp_hazard_fns.is_empty() {
-            flags.push("-slp-vectorize-hor=false".to_string());
-        }
-        flags
+        Vec::new()
     }
 
     /// Select the LLVM attribute group for a function, adjusting for SLP hazard.

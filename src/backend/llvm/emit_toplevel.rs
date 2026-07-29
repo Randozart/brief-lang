@@ -1483,7 +1483,7 @@ impl LlvmBackend {
         };
         // 2026-07-27: txn_attr for assume_action path (no outlining — rare path).
         // The non-assume_action path below computes its own attr from reordered body.
-        let txn_attr = self.slp_attr(name, "#0");
+        let txn_attr = "#0";
 
         // ── Helper: collect identifiers from a statement ────────────────
         /// 2026-07-28: Check if an expression references the named induction variable.
@@ -1637,14 +1637,9 @@ impl LlvmBackend {
             if !matches!(txn.contract.pre_condition, Expr::Bool(true)) {
                 self.emit_precondition_check(out, &txn.contract.pre_condition, "  ");
             }
-            let (reordered, has_cycle) = super::reorder::reorder_body_statements(&txn.body);
-            if has_cycle {
-                self.warnings.push(format!(
-                    "Warning: dependency cycle detected in transaction '{}' — ILP reordering is suboptimal",
-                    name
-                ));
-            }
-            for s in &reordered {
+            // 2026-07-29: Statement reordering removed — proven counterproductive.
+            // LLVM's scheduler does this better within each basic block.
+            for s in &txn.body {
                 if self.fun.terminated { break; }
                 emit_statement(self, out, s, "  ");
             }
@@ -1668,14 +1663,11 @@ impl LlvmBackend {
             }
             writeln!(out, "}}").ok();
         } else {
-            // 2026-07-27: Reorder + compute outlining info in one pass.
-            let (reordered, has_cycle) = super::reorder::reorder_body_statements(&txn.body);
-            if has_cycle {
-                self.warnings.push(format!(
-                    "Warning: dependency cycle detected in transaction '{}' — ILP reordering is suboptimal",
-                    name
-                ));
-            }
+            // 2026-07-29: Statement reordering removed — proven counterproductive.
+            // Use body directly (reordering removed 2026-07-29).
+            // The `reordered` alias preserves existing code patterns below.
+            let body = &txn.body;
+            let reordered = body;
             // 2026-07-27: Three-category outlining — identifiers can be state
             // fields (GEP+load), let bindings (lookup at emission time), or
             // compile-time constants (ctx.constants). Only `Unknown` blocks
@@ -1687,7 +1679,7 @@ impl LlvmBackend {
                 LetBinding(String), // LLVM type string ("float" or "i64")
                 Constant(Expr, Type), // value expression + Brief type
             }
-            // Scan reordered body for FFI guards that can be outlined.
+            // Scan body for FFI guards that can be outlined.
             let outlined_info: Vec<(usize, String, Vec<(String, String, ParamSrc)>)> = {
                 let mut ffi_guard_indices: Vec<usize> = Vec::new();
                 let mut guard_bodies: Vec<&[Statement]> = Vec::new();
@@ -1705,7 +1697,7 @@ impl LlvmBackend {
                 // (pre-scan: which identifiers are let bindings?)
                 let mut txn_let_names: Vec<String> = Vec::new();
                 let mut txn_let_types: std::collections::HashMap<String, String> = std::collections::HashMap::new();
-                for s in &reordered {
+                for s in reordered.iter() {
                     collect_let_names(s, &mut txn_let_names);
                     if let Statement::Let { name, ty: Some(t), .. } = s {
                         let llvm_ty = match t {
@@ -1771,7 +1763,7 @@ impl LlvmBackend {
                 }
             };
             let local_outlined = !outlined_info.is_empty();
-            let mut local_txn_attr = if local_outlined { "#11".to_string() } else { txn_attr.clone() };
+            let mut local_txn_attr = if local_outlined { "#11".to_string() } else { txn_attr.to_string() };
             // 2026-07-28: Dense matrix detection — if #11 would be selected but
             // the txn has dense cross-field float computation (cross-per-field > 8),
             // force #0 = memory(readwrite) instead. LLVM's auto-vectorizer creates
@@ -1784,12 +1776,12 @@ impl LlvmBackend {
                 // ~84 ops across ~9 fields (9.3/field), nbody has ~50/30 (1.7).
                 let mut cross_ops = 0u32;
                 let mut float_body_idents: std::collections::HashSet<String> = std::collections::HashSet::new();
-                for s in &reordered {
+                for s in reordered.iter() {
                     if let Statement::Let { name, .. } = s {
                         float_body_idents.insert(name.clone());
                     }
                 }
-                for s in &reordered {
+                for s in reordered.iter() {
                     if let Statement::Let { expr: Some(e), .. } = s {
                         cross_ops += count_cross_float_ops_in_expr(e, &float_body_idents);
                     }
@@ -2459,7 +2451,7 @@ impl LlvmBackend {
     //   enables the async runtime to call each body independently.
     pub(super) fn emit_async_body(&mut self, out: &mut String, txn: &crate::ast::Transaction, name: &str) {
         let async_name = format!("async_body_{}", name);
-        let async_attr = self.slp_attr(&async_name, "#0");
+        let async_attr = "#0".to_string();
         writeln!(out, "define void @{}({}) local_unnamed_addr {} {{", async_name, self.ctx.state_ptr_param, async_attr).ok();
         writeln!(out, "  entry:").ok();
         self.fun.txn_counter = 0;
@@ -2526,7 +2518,7 @@ impl LlvmBackend {
             .filter(|s| !matches!(s, Statement::Term(..) | Statement::TermBang(..) | Statement::Escape(_)))
             .cloned().collect();
         let combined: Vec<Statement> = body_a.into_iter().chain(b.body.iter().cloned()).collect();
-        let fused_attr = self.slp_attr(name, "#0");
+        let fused_attr = "#0";
         writeln!(out, "define void @{}(ptr noalias nocapture align 8 %state) local_unnamed_addr {} {{", name, fused_attr).ok();
         writeln!(out, "  entry:").ok();
         self.fun.txn_counter = 0; self.fun.let_bindings.clear(); self.fun.let_binding_types.clear(); self.fun.let_original_types.clear(); self.fun.reg_float_cache.clear(); self.fun.reg_type_cache.clear(); self.fun.terminated = false; self.fun.returns_i64 = false;
@@ -2540,7 +2532,7 @@ impl LlvmBackend {
     }
 
     pub(super) fn emit_shape_guarded_body(&mut self, out: &mut String, body: &[Statement], name: &str, action: &str) {
-        let fused_attr = self.slp_attr(name, "#0");
+        let fused_attr = "#0";
         writeln!(out, "define void @{}({}) local_unnamed_addr {} {{", name, self.ctx.state_ptr_param, fused_attr).ok();
         writeln!(out, "  entry:").ok();
         writeln!(out, "  br i1 true, label %body, label %rollback").ok();
@@ -2578,7 +2570,7 @@ impl LlvmBackend {
     //   body) instead of stitching two txns at emit time. Both produce the same
     //   straight-line IR and both share the ptr rationale above.
     pub(super) fn emit_fused_composed(&mut self, out: &mut String, body: &[Statement], name: &str) {
-        let fused_attr = self.slp_attr(name, "#0");
+        let fused_attr = "#0";
         writeln!(out, "define void @{}({}) local_unnamed_addr {} {{", name, self.ctx.state_ptr_param, fused_attr).ok();
         writeln!(out, "  entry:").ok();
         self.fun.txn_counter = 0; self.fun.let_bindings.clear(); self.fun.let_binding_types.clear(); self.fun.let_original_types.clear(); self.fun.reg_float_cache.clear(); self.fun.reg_type_cache.clear(); self.fun.terminated = false; self.fun.returns_i64 = false;
