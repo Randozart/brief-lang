@@ -1,0 +1,30 @@
+// popcount_chain — verification chain with asm + reference
+// This benchmark shows the := verification chain selecting the
+// best available implementation at compile time.
+
+// Reference implementation: parallel prefix popcount
+defn popcount_ref(x: Int) -> Int {
+    let a: Int = x - ((x >> 1) & 0x5555555555555555);
+    let b: Int = (a & 0x3333333333333333) + ((a >> 2) & 0x3333333333333333);
+    let c: Int = (b + (b >> 4)) & 0x0F0F0F0F0F0F0F0F;
+    let d: Int = c + (c >> 8);
+    let e: Int = d + (d >> 16);
+    let f: Int = e + (e >> 32);
+    term f & 0x7F;
+};
+
+// x86-64 assembly popcount using popcnt instruction
+asm<x86_64> popcount_asm(x: Int) -> Int {
+    "popcnt {result}, {x}"
+};
+
+// aarch64 assembly popcount using cnt instruction
+asm<aarch64> popcount_arm(x: Int) -> Int {
+    "cnt {result}.8b, {x}.8b"
+    "addv {result}, {result}.8b"
+};
+
+// Verification chain: try asm first, fall back to reference
+defn popcount(x: Int) -> Int  {
+    term { let a: Int = (x - ((x >> 1) & 6148914691236517205)); let b: Int = ((a & 3689348814741910323) + ((a >> 2) & 3689348814741910323)); let c: Int = ((b + (b >> 4)) & 1085102592571150095); let d: Int = (c + (c >> 8)); let e: Int = (d + (d >> 16)); let f: Int = (e + (e >> 32)); term (f & 127); };
+} := popcount_asm := popcount_arm := popcount_ref;

@@ -1,0 +1,45 @@
+// minmax_derive — min and max via derivation synthesis
+// The synthesis engine discovers branchless min/max:
+//   min: y ^ ((x ^ y) & -(x < y))
+//   max: x ^ ((x ^ y) & -(x < y))
+
+defn min(x0: Int, x1: Int) -> Int  {
+    when (x0 < x1) {
+            term x0;
+    };
+    term x1;
+} := {
+    0, 5 -> 0;
+    10, 3 -> 3;
+    -5, 2 -> -5;
+    7, 7 -> 7;
+    5, 10 -> 5;
+    -3, -7 -> -7;
+};
+
+defn max(x0: Int, x1: Int) -> Int  {
+    when (x0 < x1) {
+            term x1;
+    };
+    term x0;
+} := {
+    0, 5 -> 5;
+    10, 3 -> 10;
+    -5, 2 -> 2;
+    7, 7 -> 7;
+    5, 10 -> 10;
+    -3, -7 -> -3;
+};
+
+let N: Int = GetEnvInt#("BOUND");
+let i: Int = 0;
+let total: Int = 0;
+
+node run[i < N][i == N] {
+    total = total + min(i, N - i) + max(i, N - i);
+    i = i + 1;
+    when i == N {
+        PrintLn!(total);
+    };
+    term;
+};
