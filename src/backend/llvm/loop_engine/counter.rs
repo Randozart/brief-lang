@@ -843,7 +843,16 @@ impl LlvmBackend {
                         }
                         Expr::Deref(inner) => {
                             let ptr_reg = self.emit_expr(out, inner, "  ");
-                            writeln!(out, "  store i64 {}, ptr {}", val.name, ptr_reg.name).ok();
+                            // 2026-07-30: Ptr values are stored as i64 internally;
+                            // convert back to LLVM ptr before storing through.
+                            let store_ptr = if matches!(ptr_reg.ty, Type::Ptr(_)) {
+                                let p = self.fun.gen_reg();
+                                writeln!(out, "  {} = inttoptr i64 {} to ptr", p, ptr_reg.name).ok();
+                                p.to_string()
+                            } else {
+                                ptr_reg.name.clone()
+                            };
+                            writeln!(out, "  store i64 {}, ptr {}", val.name, store_ptr).ok();
                         }
                         _ => {}
                     }

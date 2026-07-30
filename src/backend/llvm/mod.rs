@@ -2034,10 +2034,48 @@ impl LlvmBackend {
                 TopLevel::Enum(e) => {
                     self.ctx.enum_types.insert(e.name.clone(), e.clone());
                 }
+                // 2026-07-30: Unwrap Export to register defn/txn/asm_fn params
+                // from exported definitions. Without this, emit_user_call can't
+                // find the parameter types and falls through to the non-defn path
+                // which doesn't insert inttoptr for Ptr args.
+                TopLevel::Export(e) => {
+                    match e.inner.as_ref() {
+                        TopLevel::Definition(d) => {
+                            let tys: Vec<Type> = d.parameters.iter().map(|(_, t)| t.clone()).collect();
+                            self.ctx.defn_params.insert(d.name.clone(), tys);
+                            let ret_tys = if !d.outputs.is_empty() {
+                                d.outputs.clone()
+                            } else if let Some(ref ot) = d.output_type {
+                                ot.all_types()
+                            } else {
+                                vec![]
+                            };
+                            self.ctx.defn_return_types.insert(d.name.clone(), ret_tys);
+                        }
+                        TopLevel::Transaction(t) => {
+                            let tys: Vec<Type> = t.parameters.iter().map(|(_, ty)| ty.clone()).collect();
+                            self.ctx.defn_params.insert(t.name.clone(), tys);
+                            let ret_tys = if !t.outputs.is_empty() {
+                                t.outputs.clone()
+                            } else if let Some(ref ot) = t.output_type {
+                                ot.all_types()
+                            } else {
+                                vec![]
+                            };
+                            self.ctx.defn_return_types.insert(t.name.clone(), ret_tys);
+                        }
+                        TopLevel::AsmFn(af) => {
+                            let tys: Vec<Type> = af.params.iter().map(|(_, t)| t.clone()).collect();
+                            self.ctx.defn_params.insert(af.name.clone(), tys);
+                            self.ctx.defn_return_types.insert(af.name.clone(), vec![af.ret_type.clone()]);
+                        }
+                        _ => {}
+                    }
+                }
                 _ => {}
             }
         }
-
+ 
         // 2026-07-13: struct_layout removed from ResolvedType in new AST.
         // TypeUniverse-based struct population is a no-op until slot syntax is reintroduced.
 

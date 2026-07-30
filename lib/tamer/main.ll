@@ -35,12 +35,12 @@ declare ptr @dlopen(ptr, i32) nounwind
 declare ptr @dlsym(ptr, ptr) nounwind
 declare i32 @dlclose(ptr) nounwind
 declare i64 @brief_backtrace()
-declare i64 @__getenv_int(i128) #6
 declare void @__print_str(i128) #6
-declare i64 @__print_float(float) #6
-declare i64 @__print_int(i64) #6
-declare i128 @__getenv_brief(i128) #6
 declare i64 @__print_char(i64) #6
+declare i64 @__getenv_int(i128) #6
+declare i128 @__getenv_brief(i128) #6
+declare i64 @__print_int(i64) #6
+declare i64 @__print_float(float) #6
 declare i8* @__chr_to_str(i32) #1
 declare i64 @__int_to_str__(i64) #1
 declare i64 @__str_bytes__(i64) #1
@@ -156,124 +156,133 @@ define i64 @tame(ptr noundef noalias nocapture align 8 %state, ptr %arg0, i64 %a
   %ac2 = ptrtoint ptr %arg2 to i64
   %t3 = add i64 0, 0
   %t1 = add nsw i64 %ac0, %t3
-  %t0 = load i64, ptr %t1, align 8
-  %t6 = add i64 0, 4294967295
-  %t4 = and i64 %t0, %t6
-  %t9 = add i64 0, 1380532556
-  %t10 = icmp ne i64 %t4, %t9
-  %t7 = zext i1 %t10 to i8
-  %t12 = trunc i8 %t7 to i1
-  br i1 %t12, label %guard.then11, label %guard.end11
-  guard.then11:
-  %t13 = add i64 0, 101
-  ret i64 %t13
-  br label %guard.end11
-  guard.end11:
-  %t19 = add i64 0, 4
-  %t17 = add nsw i64 %ac0, %t19
-  %t16 = load i64, ptr %t17, align 8
-  %t24 = add i64 0, 5
-  %t22 = add nsw i64 %ac0, %t24
-  %t21 = load i64, ptr %t22, align 8
-  %t29 = add i64 0, 6
-  %t27 = add nsw i64 %ac0, %t29
-  %t26 = load i64, ptr %t27, align 8
-  %t34 = add i64 0, 7
-  %t32 = add nsw i64 %ac0, %t34
-  %t31 = load i64, ptr %t32, align 8
-  %t38 = add i64 0, 20
-  %t36 = sdiv i64 %t21, %t38
-  %t39 = add nsw i64 %ac0, %t26
-  %t42 = add nsw i64 %ac0, %t16
-  %t46 = add nsw i64 %t26, %t31
-  %t50 = icmp sgt i64 %t46, %arg1
-  %t45 = zext i1 %t50 to i8
-  %t52 = trunc i8 %t45 to i1
-  br i1 %t52, label %guard.then51, label %guard.end51
-  guard.then51:
-  %t53 = add i64 0, 103
-  ret i64 %t53
-  br label %guard.end51
-  guard.end51:
-  %t57 = add nsw i64 %t16, %t21
-  %t61 = icmp sgt i64 %t57, %arg1
-  %t56 = zext i1 %t61 to i8
-  %t63 = trunc i8 %t56 to i1
-  br i1 %t63, label %guard.then62, label %guard.end62
-  guard.then62:
-  %t64 = add i64 0, 104
-  ret i64 %t64
-  br label %guard.end62
-  guard.end62:
-  %t69 = add i64 0, 0
-  %t70 = icmp eq i64 %t36, %t69
-  %t67 = zext i1 %t70 to i8
-  %t72 = trunc i8 %t67 to i1
-  br i1 %t72, label %guard.then71, label %guard.end71
-  guard.then71:
-  %t73 = add i64 0, 105
-  ret i64 %t73
-  br label %guard.end71
-  guard.end71:
-  %t76 = call i64 @compute_buffer_sizes(i64 %t42, i64 %t36, i64 %t39, i64 %t31)
-  %t83 = add i64 0, 1024
-  %t84 = icmp sle i64 %t76, %t83
-  %t81 = zext i1 %t84 to i8
-  %t86 = trunc i8 %t81 to i1
-  br i1 %t86, label %guard.then85, label %guard.end85
-  guard.then85:
-  %t89 = add i64 0, 0
-  %t90 = icmp sge i64 %t76, %t89
-  %t87 = zext i1 %t90 to i8
-  %t92 = trunc i8 %t87 to i1
-  br i1 %t92, label %gate.pass91, label %loop
-  gate.pass91:
-  br label %guard.end85
-  guard.end85:
-  %t96 = load i64, ptr @locals_slots
-  %t97 = add i64 0, 4096
-  %t98 = icmp sle i64 %t96, %t97
-  %t95 = zext i1 %t98 to i8
-  %t100 = trunc i8 %t95 to i1
-  br i1 %t100, label %guard.then99, label %guard.end99
-  guard.then99:
-  %t102 = load i64, ptr @locals_slots
-  %t103 = add i64 0, 0
-  %t104 = icmp sge i64 %t102, %t103
-  %t101 = zext i1 %t104 to i8
-  %t106 = trunc i8 %t101 to i1
-  br i1 %t106, label %gate.pass105, label %loop
-  gate.pass105:
-  br label %guard.end99
-  guard.end99:
-  %t110 = load i64, ptr @frames_max
-  %t111 = add i64 0, 256
-  %t112 = icmp sle i64 %t110, %t111
-  %t109 = zext i1 %t112 to i8
-  %t114 = trunc i8 %t109 to i1
-  br i1 %t114, label %guard.then113, label %guard.end113
-  guard.then113:
-  %t116 = load i64, ptr @frames_max
-  %t117 = add i64 0, 0
-  %t118 = icmp sgt i64 %t116, %t117
-  %t115 = zext i1 %t118 to i8
-  %t120 = trunc i8 %t115 to i1
-  br i1 %t120, label %gate.pass119, label %loop
-  gate.pass119:
-  br label %guard.end113
-  guard.end113:
-  %t123 = alloca i64
-  %t124 = alloca i64
-  %t125 = alloca i64
-  %t128 = ptrtoint ptr %t123 to i64
-  %t130 = ptrtoint ptr %t124 to i64
-  %t132 = ptrtoint ptr %t125 to i64
-  %t137 = add i64 0, 0
-  %t138 = add i64 0, 0
-  %t139 = add i64 0, 1
-  %t126 = call i64 @vm_loop(i64 %t128, i64 %t130, i64 %t132, i64 %t39, i64 %t31, i64 %t42, i64 %t36, i64 %t137, i64 %t138, i64 %t139)
-  %t140 = add i64 0, 0
-  ret i64 %t140
+  %t4 = inttoptr i64 %t1 to ptr
+  %t0 = load i64, ptr %t4, align 8
+  %t7 = add i64 0, 4294967295
+  %t5 = and i64 %t0, %t7
+  %t10 = add i64 0, 1380532556
+  %t11 = icmp ne i64 %t5, %t10
+  %t8 = zext i1 %t11 to i8
+  %t13 = trunc i8 %t8 to i1
+  br i1 %t13, label %guard.then12, label %guard.end12
+  guard.then12:
+  %t14 = add i64 0, 101
+  ret i64 %t14
+  br label %guard.end12
+  guard.end12:
+  %t20 = add i64 0, 4
+  %t18 = add nsw i64 %ac0, %t20
+  %t21 = inttoptr i64 %t18 to ptr
+  %t17 = load i64, ptr %t21, align 8
+  %t26 = add i64 0, 5
+  %t24 = add nsw i64 %ac0, %t26
+  %t27 = inttoptr i64 %t24 to ptr
+  %t23 = load i64, ptr %t27, align 8
+  %t32 = add i64 0, 6
+  %t30 = add nsw i64 %ac0, %t32
+  %t33 = inttoptr i64 %t30 to ptr
+  %t29 = load i64, ptr %t33, align 8
+  %t38 = add i64 0, 7
+  %t36 = add nsw i64 %ac0, %t38
+  %t39 = inttoptr i64 %t36 to ptr
+  %t35 = load i64, ptr %t39, align 8
+  %t43 = add i64 0, 20
+  %t41 = sdiv i64 %t23, %t43
+  %t44 = add nsw i64 %ac0, %t29
+  %t47 = add nsw i64 %ac0, %t17
+  %t51 = add nsw i64 %t29, %t35
+  %t55 = icmp sgt i64 %t51, %arg1
+  %t50 = zext i1 %t55 to i8
+  %t57 = trunc i8 %t50 to i1
+  br i1 %t57, label %guard.then56, label %guard.end56
+  guard.then56:
+  %t58 = add i64 0, 103
+  ret i64 %t58
+  br label %guard.end56
+  guard.end56:
+  %t62 = add nsw i64 %t17, %t23
+  %t66 = icmp sgt i64 %t62, %arg1
+  %t61 = zext i1 %t66 to i8
+  %t68 = trunc i8 %t61 to i1
+  br i1 %t68, label %guard.then67, label %guard.end67
+  guard.then67:
+  %t69 = add i64 0, 104
+  ret i64 %t69
+  br label %guard.end67
+  guard.end67:
+  %t74 = add i64 0, 0
+  %t75 = icmp eq i64 %t41, %t74
+  %t72 = zext i1 %t75 to i8
+  %t77 = trunc i8 %t72 to i1
+  br i1 %t77, label %guard.then76, label %guard.end76
+  guard.then76:
+  %t78 = add i64 0, 105
+  ret i64 %t78
+  br label %guard.end76
+  guard.end76:
+  %t86 = inttoptr i64 %t47 to ptr
+  %t87 = inttoptr i64 %t44 to ptr
+  %t81 = call i64 @compute_buffer_sizes(ptr %t86, i64 %t41, ptr %t87, i64 %t35)
+  %t90 = add i64 0, 1024
+  %t91 = icmp sle i64 %t81, %t90
+  %t88 = zext i1 %t91 to i8
+  %t93 = trunc i8 %t88 to i1
+  br i1 %t93, label %guard.then92, label %guard.end92
+  guard.then92:
+  %t96 = add i64 0, 0
+  %t97 = icmp sge i64 %t81, %t96
+  %t94 = zext i1 %t97 to i8
+  %t99 = trunc i8 %t94 to i1
+  br i1 %t99, label %gate.pass98, label %loop
+  gate.pass98:
+  br label %guard.end92
+  guard.end92:
+  %t103 = load i64, ptr @locals_slots
+  %t104 = add i64 0, 4096
+  %t105 = icmp sle i64 %t103, %t104
+  %t102 = zext i1 %t105 to i8
+  %t107 = trunc i8 %t102 to i1
+  br i1 %t107, label %guard.then106, label %guard.end106
+  guard.then106:
+  %t109 = load i64, ptr @locals_slots
+  %t110 = add i64 0, 0
+  %t111 = icmp sge i64 %t109, %t110
+  %t108 = zext i1 %t111 to i8
+  %t113 = trunc i8 %t108 to i1
+  br i1 %t113, label %gate.pass112, label %loop
+  gate.pass112:
+  br label %guard.end106
+  guard.end106:
+  %t117 = load i64, ptr @frames_max
+  %t118 = add i64 0, 256
+  %t119 = icmp sle i64 %t117, %t118
+  %t116 = zext i1 %t119 to i8
+  %t121 = trunc i8 %t116 to i1
+  br i1 %t121, label %guard.then120, label %guard.end120
+  guard.then120:
+  %t123 = load i64, ptr @frames_max
+  %t124 = add i64 0, 0
+  %t125 = icmp sgt i64 %t123, %t124
+  %t122 = zext i1 %t125 to i8
+  %t127 = trunc i8 %t122 to i1
+  br i1 %t127, label %gate.pass126, label %loop
+  gate.pass126:
+  br label %guard.end120
+  guard.end120:
+  %t130 = alloca i64
+  %t131 = alloca i64
+  %t132 = alloca i64
+  %t135 = ptrtoint ptr %t130 to i64
+  %t137 = ptrtoint ptr %t131 to i64
+  %t139 = ptrtoint ptr %t132 to i64
+  %t144 = add i64 0, 0
+  %t145 = add i64 0, 0
+  %t146 = add i64 0, 1
+  %t147 = inttoptr i64 %t44 to ptr
+  %t148 = inttoptr i64 %t47 to ptr
+  %t133 = call i64 @vm_loop(i64 %t135, i64 %t137, i64 %t139, ptr %t147, i64 %t35, ptr %t148, i64 %t41, i64 %t144, i64 %t145, i64 %t146)
+  %t149 = add i64 0, 0
+  ret i64 %t149
 }
 
 define void @init_state(ptr noundef noalias nocapture align 8 %state) local_unnamed_addr #0 {

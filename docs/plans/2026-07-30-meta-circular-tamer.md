@@ -141,16 +141,40 @@ For the MVP, we start with the simplest possible subset and expand.
 
 ### 0a. Fix Ptr arithmetic codegen in LLVM backend (1 day)
 
-`src/backend/llvm/emit_expr.rs` has a bug: `*(ptr + offset)` emits `ptrtoint` +
-`add i64` + `load i64, ptr %i64_value` — the pointer type is lost, producing
-invalid IR.
+`*(ptr + offset)` produces invalid LLVM IR: `add nsw i64 %ac0, %offset` then
+`load i64, ptr %i64_result` — the second operand to `load` must be `ptr`, not `i64`.
 
-**Root cause**: `emit_expr` handles `Expr::BinaryOp(Add, lhs, rhs)` where `lhs`
-is a `Ptr<T>` by doing integer addition instead of GEP. The `Ptr<T>` type is
-converted to `i64` via `ptrtoint` and the add produces an `i64`, then the
-`Deref` tries to use it as `ptr`.
+**This is not a GEP bug.** The LLVM backend uses an i64-centric internal
+representation for all values, including pointers. Ptr parameters are converted
+from `ptr` to `i64` at function entry via `ptrtoint` (emit_toplevel.rs:1188,
+rationale comment at line 1184). This is intentional — it keeps all SSA values
+as `i64` and lets LLVM's optimizer eliminate the round-trip. The GEP path at
+emit_expr.rs:1946 is dead code by design (config dispatch intercepts first).
+
+**Root cause**: `Expr::Deref` (and the store path in `Statement::Assignment`)
+use the i64 register directly as `ptr` in `load`/`store` without an intervening
+`inttoptr`. The `Expr::Index` handler (emit_expr.rs:491-520) and the loop
+engine's Index store (counter.rs:828-841) show the correct pattern:
+`inttoptr` → `GEP`/`load`/`store`.
+
+**Three sites need the fix** (all the same: emit `inttoptr` before using the
+register as ptr):
+
+| Site | File:Line | Pattern |
+|------|-----------|---------|
+| Deref load | `src/backend/llvm/emit_expr.rs:718` | `load ..., ptr %i64_reg` → insert `inttoptr` then `load ..., ptr %new_ptr` |
+| Deref store (main) | `src/backend/llvm/emit_stmt.rs:122` | `store ..., ptr %i64_reg` → insert `inttoptr` |
+| Deref store (loop) | `src/backend/llvm/loop_engine/counter.rs:846` | `store ..., ptr %i64_reg` → insert `inttoptr` |
+
+The canonical helper `emit_inttoptr` at `mod.rs:1178` generates the correct
+pointer-width instruction using `int_bits` from the target data layout.
 
 This blocks native compilation of the tamer via `briefc build lib/tamer/main.bv`.
+
+**Test update**: `test_struct_param_ptrtoint_at_entry` in `tests.rs:1992`
+asserts the ptrtoint behavior (which is correct and stays). No test exists for
+the Deref load path — add one that verifies `*(ptr + 0)` produces valid IR with
+the `inttoptr` + `load` pattern.
 
 ### 0b. Pre-compile the tamer to .lair (1 day)
 

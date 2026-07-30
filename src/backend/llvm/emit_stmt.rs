@@ -119,7 +119,16 @@ pub fn emit_statement(backend: &mut LlvmBackend, out: &mut String, stmt: &Statem
                 Expr::Deref(inner) => {
                     let ptr_reg = backend.emit_expr(out, inner, indent);
                     let store_ty = backend.llvm_type(&val.ty);
-                    writeln!(out, "{}store {} {}, ptr {}", indent, store_ty, val.name, ptr_reg.name).ok();
+                    // 2026-07-30: Ptr values are stored as i64 internally;
+                    // convert back to LLVM ptr before storing through.
+                    let store_ptr = if matches!(ptr_reg.ty, Type::Ptr(_)) {
+                        let p = backend.fun.gen_reg();
+                        backend.emit_inttoptr(out, indent, &p, &ptr_reg.name);
+                        p.to_string()
+                    } else {
+                        ptr_reg.name.clone()
+                    };
+                    writeln!(out, "{}store {} {}, ptr {}", indent, store_ty, val.name, store_ptr).ok();
                 }
                 // 2026-07-17: Pointer-indexed store — data[idx] = val.
                 // Emits inttoptr + GEP + store for Ptr-typed objects.

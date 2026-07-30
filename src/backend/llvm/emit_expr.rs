@@ -707,7 +707,16 @@ impl LlvmBackend {
             // ── Dereference ───────────────────────────────────────────
             Expr::Deref(inner) => {
                 let ptr_reg = self.emit_expr(out, inner, indent);
-                // Check if the pointer type carries a LLVM pointer representation.
+                // 2026-07-30: Ptr values are stored as i64 internally (see
+                // ptrtoint at emit_toplevel.rs:1188). Convert back to actual
+                // LLVM ptr before loading.
+                let load_ptr = if matches!(ptr_reg.ty, Type::Ptr(_)) {
+                    let p = self.fun.gen_reg();
+                    self.emit_inttoptr(out, indent, &p, &ptr_reg.name);
+                    p.to_string()
+                } else {
+                    ptr_reg.name.clone()
+                };
                 let pointee_ty = match &ptr_reg.ty {
                     Type::Ptr(inner_ty) => inner_ty.as_ref().clone(),
                     _ => Type::int(), // fallback
@@ -716,7 +725,7 @@ impl LlvmBackend {
                 writeln!(
                     out,
                     "{}{} = load {}, ptr {}, align 8",
-                    indent, v, llvm_ty, ptr_reg.name
+                    indent, v, llvm_ty, load_ptr
                 )
                 .ok();
                 TypedRegister {
@@ -1747,7 +1756,10 @@ impl LlvmBackend {
                     .get(i)
                     .map(|pt| self.llvm_type(pt))
                     .unwrap_or_else(|| reg_llvm_ty.to_string());
-                if param_llvm_ty == "ptr" && reg_llvm_ty == "i64" {
+                // 2026-07-30: Ptr values are stored as i64 internally (ptrtoint at
+                // function entry). Convert back to LLVM ptr when the function expects
+                // ptr but the register's Brief type is Ptr (meaning it's an i64 handle).
+                if param_llvm_ty == "ptr" && (reg_llvm_ty == "i64" || matches!(reg.ty, Type::Ptr(_))) {
                     let conv = self.fun.gen_reg();
                     writeln!(out, "{}{} = inttoptr i64 {} to ptr", indent, conv, reg.name).ok();
                     call_args.push(format!("ptr {}", conv));
@@ -1761,7 +1773,16 @@ impl LlvmBackend {
             }
         } else {
             for reg in &arg_regs {
-                call_args.push(format!("{} {}", self.llvm_type(&reg.ty), reg.name));
+                // 2026-07-30: Non-defn calls (or calls where defn not found in
+                // defn_params) also need inttoptr for Ptr-typed arguments, since
+                // the register holds the i64 internal representation.
+                if matches!(reg.ty, Type::Ptr(_)) {
+                    let conv = self.fun.gen_reg();
+                    self.emit_inttoptr(out, indent, &conv, &reg.name);
+                    call_args.push(format!("ptr {}", conv));
+                } else {
+                    call_args.push(format!("{} {}", self.llvm_type(&reg.ty), reg.name));
+                }
             }
         }
         // 2026-07-14: user call return type from defn_return_types — fall back to i64
@@ -1868,14 +1889,29 @@ impl LlvmBackend {
                 ty: Type::bool_(),
             })
         } else {
+            // 2026-07-30: Preserve Ptr type for pointer arithmetic so downstream
+            // Deref can detect it needs inttoptr before load/store. Ptr values are
+            // stored as i64 internally (ptrtoint at function entry), but the type
+            // must remain Ptr so consumption sites know to convert back.
+            let effective_ret_ty = if matches!(kind, BinaryOpKind::Add | BinaryOpKind::Sub) {
+                if matches!(l.ty, Type::Ptr(_)) {
+                    l.ty.clone()
+                } else if matches!(r.ty, Type::Ptr(_)) {
+                    r.ty.clone()
+                } else {
+                    ret_ty.clone()
+                }
+            } else {
+                ret_ty.clone()
+            };
             writeln!(out, "{}{} = {}", indent, v, line).ok();
             Some(TypedRegister {
                 name: v.to_string(),
-                ty: ret_ty.clone(),
+                ty: effective_ret_ty,
             })
         }
     }
-
+ 
     /// Emit a binary operation.
     fn emit_binary_op(
         &mut self,
