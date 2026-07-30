@@ -13,8 +13,7 @@ use crate::ast::*;
 use crate::ast::{Expr, Statement, Type};
 use crate::backend::llvm::emit_stmt;
 use crate::backend::llvm::intrinsics::{
-    emit_intrinsic_call, emit_meld_shuffle, emit_simple_call, find_cast_impl,
-    template_for_op, try_cast_protocol_path, type_name_str,
+    emit_intrinsic_call, template_for_op,
 };
 use crate::backend::llvm::types;
 use crate::backend::llvm::{LlvmBackend, TypedRegister};
@@ -538,24 +537,13 @@ impl LlvmBackend {
             }
 
             // ── Cast ─────────────────────────────────────────────────
-            // 2026-07-14: Added string conversion paths. i64→ptr calls
-            // __int_to_str__, ptr→i64 calls __str_to_int after inttoptr.
-            // 2026-07-30: Protocol-based cast resolution (physical vs semantic)
-            // checked before LLVM coercion. If the source or target participates
-            // in a known protocol (Cast.#<Cat>), delegate to resolve_cast.
+            // 2026-07-30: Casting graph resolves protocol→protocol paths.
+            // Falls through to LLVM coercion when no graph path exists.
             Expr::Cast(expr, target) => {
                 let src = self.emit_expr(out, expr, indent);
-                // 2026-07-30: Check protocol-based cast path first.
-                // Physical (target is Bits(N) or type Bit) → literal memory bytes.
-                // Semantic (target is any other protocol) → operator pipeline.
-                if self.resolve_cast_should_try(&src.ty, target)
-                    || type_name_str(&src.ty).and_then(|n| find_cast_impl(self, &n, "Cast")).is_some()
-                    || type_name_str(&src.ty).and_then(|n| find_cast_impl(self, &n, "CastTo")).is_some()
-                    || type_name_str(target).and_then(|n| find_cast_impl(self, &n, "CastFrom")).is_some()
-                {
-                    if let Some(result) = self.resolve_cast(out, v, &src, target, indent) {
-                        return result;
-                    }
+                // Try casting graph path first
+                if let Some(result) = self.emit_cast_path(out, v, &src, target, indent) {
+                    return result;
                 }
                 let target_ll = self.llvm_type(target);
                 let src_ll = self.llvm_type(&src.ty);
@@ -2453,292 +2441,145 @@ impl LlvmBackend {
         }
     }
 
-    /// 2026-07-30: Check whether protocol-based cast resolution should be attempted.
-    /// Returns true if the source or target type warrants protocol dispatch.
-    /// Guards against calling resolve_cast for trivial cases where LLVM coercion suffices.
-    fn resolve_cast_should_try(&self, src_ty: &Type, target: &Type) -> bool {
-        // Physical target: Bits(N) or type Bit → protocol may provide custom CastTo(#Bit)
-        if matches!(target, Type::Bits(_))
-            || type_name_str(target).map(|n| n == "Bit").unwrap_or(false)
-        {
-            return true;
-        }
-        // Source has operator bindings for Cast or CastTo
-        if let Some(ref name) = type_name_str(src_ty) {
-            if let Some(defs) = self.ctx.operator_defs.get(name) {
-                if defs.iter().any(|d| d.op == "Cast" || d.op == "CastTo") {
-                    return true;
-                }
-            }
-        }
-        // Target has operator bindings for CastFrom
-        if let Some(ref name) = type_name_str(target) {
-            if let Some(defs) = self.ctx.operator_defs.get(name) {
-                if defs.iter().any(|d| d.op == "CastFrom") {
-                    return true;
-                }
-            }
-        }
-        false
-    }
+    // ── Casting Graph Path Emission ──────────────────────────────────
 
-    // 2026-07-30: Unified cast resolution — physical vs semantic paths.
-    // Physical: target is explicit Bits(N) or type Bit → literal memory bytes.
-    // Semantic: target is any other protocol → operator pipeline.
-    // Returns None when no protocol path exists (caller falls back to LLVM coercion).
-    pub(super) fn resolve_cast(
+    /// Try to resolve a cast through the casting graph protocol path.
+    /// Returns None if no path exists (caller falls back to LLVM coercion).
+    fn emit_cast_path(
         &mut self, out: &mut String, v: &str,
         src: &TypedRegister, target: &Type, indent: &str,
     ) -> Option<TypedRegister> {
-        // Physical path: target is explicit Bits(N) or type Bit → literal memory bytes.
-        // Do NOT match by #Bit protocol membership — all types are members of #Bit.
-        let is_physical_target = matches!(target, Type::Bits(_))
-            || type_name_str(target).map(|n| n == "Bit").unwrap_or(false);
-        if is_physical_target {
-            return self.resolve_physical_cast(out, v, src, indent);
-        }
-        // Semantic path: check operator_defs and protocol pipeline
-        let src_name = type_name_str(&src.ty);
-        let target_name = type_name_str(target);
-        // Step 1: Direct op Cast(Target) on source type
-        let target_ll = self.llvm_type(target);
-        if let Some(ref name) = src_name {
-            if let Some(impl_args) = find_cast_impl(self, name, "Cast") {
-                let result = emit_simple_call(self, out, v, src, &impl_args, &target_ll, indent);
-                return Some(TypedRegister { name: result, ty: target.clone() });
-            }
-        }
-        // Step 2: CastTo(#Category) → CastFrom(#Category) protocol path
-        if let (Some(s_name), Some(t_name)) = (src_name.as_ref(), target_name.as_ref()) {
-            if let Some(impl_args) = try_cast_protocol_path(self, s_name, t_name) {
-                let result = emit_simple_call(self, out, v, src, &impl_args, &target_ll, indent);
-                return Some(TypedRegister { name: result, ty: target.clone() });
-            }
-        }
-        // Step 3: Direct CastFrom on target type (e.g., String's CastFrom(#Int))
-        // Check if the target type has a CastFrom operator whose category matches
-        // the source type's protocol membership.
-        if let Some(ref t_name) = target_name {
-            if let Some(impl_args) = find_matching_cast_from(self, &src.ty, t_name) {
-                let result = emit_simple_call(self, out, v, src, &impl_args, &target_ll, indent);
-                return Some(TypedRegister { name: result, ty: target.clone() });
-            }
-        }
-        // Step 4: Direct CastTo on source type (for target categories)
-        if let Some(ref s_name) = src_name {
-            if let Some(impl_args) = find_matching_cast_to(self, s_name, target) {
-                let result = emit_simple_call(self, out, v, src, &impl_args, &target_ll, indent);
-                return Some(TypedRegister { name: result, ty: target.clone() });
-            }
-        }
-        // Step 5: Meld shuffle (structural bit remapping via @/ fields)
-        let shuffle = self.resolve_shuffle_data(&src.ty);
-        if let Some(ref data) = shuffle {
-            if !data.is_empty() {
-                return Some(emit_meld_shuffle(self, out, v, src, data, indent));
-            }
-        }
-        // No protocol path found — caller falls back to LLVM coercion
-        None
+        let graph = self.ctx.casting_graph.as_ref()?;
+        let universe = self.ctx.type_universe.as_ref()?;
+        let (src_cat, src_var) = graph.type_to_protocol(universe, &src.ty);
+        let (dst_cat, dst_var) = graph.type_to_protocol(universe, target);
+        let path = graph.find_path(&src_cat, &src_var, &dst_cat, &dst_var)?;
+
+        self.emit_cast_steps(out, v, src, target, indent, &path)
     }
 
-    /// 2026-07-30: Physical cast — emit literal memory bytes of a value.
-    /// For types with a custom CastTo(#Bit) operator, calls through the
-    /// operator pipeline. For struct types, extracts the first scalar field
-    /// (typically `.data`) as the raw content pointer/bytes. Otherwise,
-    /// bitcasts the register to a matching-size integer type.
-    fn resolve_physical_cast(
+    /// Emit LLVM IR for a sequence of cast steps returned by the graph.
+    fn emit_cast_steps(
         &mut self, out: &mut String, v: &str,
-        src: &TypedRegister, indent: &str,
+        src: &TypedRegister, target: &Type, indent: &str,
+        path: &[crate::casting::graph::CastStep],
     ) -> Option<TypedRegister> {
-        // Step 1: Check for custom CastTo(#Bit) or Cast(#Bit) operator
-        // Physical cast always returns i64 (raw bytes).
-        const PHYSICAL_OUT: &str = "i64";
-        if let Some(name) = type_name_str(&src.ty) {
-            if let Some(impl_args) = find_cast_impl(self, &name, "CastTo") {
-                let result = emit_simple_call(self, out, v, src, &impl_args, PHYSICAL_OUT, indent);
-                return Some(TypedRegister { name: result, ty: src.ty.clone() });
-            }
-            if let Some(impl_args) = find_cast_impl(self, &name, "Cast") {
-                let result = emit_simple_call(self, out, v, src, &impl_args, PHYSICAL_OUT, indent);
-                return Some(TypedRegister { name: result, ty: src.ty.clone() });
-            }
-        }
-        // Step 2: For struct types, extract the .data field as the raw
-        // content bytes. The first scalar field is typically the data
-        // pointer or inline storage. Returns it as i64.
-        let src_ll = self.llvm_type(&src.ty);
-        if src_ll.starts_with('{') && src_ll.ends_with('}') {
-            // Try to extract the first field (index 0) as i64.
-            // This is the physical bytes representation for struct types
-            // like String { i64, i64 } → extractvalue .data (index 0).
-            writeln!(out, "{}{} = extractvalue {} {}, 0",
-                indent, v, src_ll, src.name).ok();
-            return Some(TypedRegister { name: v.to_string(), ty: Type::int() });
-        }
-        // Step 3: Fallback — bitcast to matching-size iN type.
-        // Compute total bits from the LLVM type string.
-        let total_bits = self.physical_cast_bits(&src_ll);
-        if total_bits > 0 && total_bits <= 128 {
-            let int_ty = format!("i{}", total_bits);
-            writeln!(out, "{}{} = bitcast {} {} to {}",
-                indent, v, src_ll, src.name, int_ty).ok();
-            // Wrap in i64 for ABI compatibility (truncate if larger)
-            if total_bits > 64 {
-                writeln!(out, "{}{}_trunc = trunc {} {} to i64",
-                    indent, v, int_ty, v).ok();
-                return Some(TypedRegister { name: format!("{}_trunc", v), ty: Type::int() });
-            }
-            if total_bits < 64 {
-                writeln!(out, "{}{}_ext = zext {} {} to i64",
-                    indent, v, int_ty, v).ok();
-                return Some(TypedRegister { name: format!("{}_ext", v), ty: Type::int() });
-            }
-            return Some(TypedRegister { name: v.to_string(), ty: Type::int() });
-        }
-        // Step 4: Desperate measure — memcpy to stack and ptrtoint
-        writeln!(out, "{}%phys_stack = alloca {}, align 8", indent, src_ll).ok();
-        writeln!(out, "{}store {} {}, ptr %phys_stack, align 8", indent, src_ll, src.name).ok();
-        writeln!(out, "{}{} = ptrtoint ptr %phys_stack to i64", indent, v).ok();
-        Some(TypedRegister { name: v.to_string(), ty: Type::int() })
-    }
+        let target_ll = self.llvm_type(target);
 
-    /// 2026-07-30: Estimate total bit width from an LLVM type string.
-    /// Handles scalars (i8-i128), floats (float=32, double=64), structs (estimated),
-    /// and pointers (ptr=64). Returns 0 for unknown types.
-    fn physical_cast_bits(&self, ll_ty: &str) -> u64 {
-        // iN → N
-        if let Some(rest) = ll_ty.strip_prefix('i') {
-            if let Ok(n) = rest.parse::<u64>() { return n; }
+        // Identity (same protocol) — return source with target type
+        if path.is_empty() {
+            return Some(TypedRegister { name: src.name.clone(), ty: target.clone() });
         }
-        // float → 32, double → 64
-        match ll_ty {
-            "float" => return 32,
-            "double" => return 64,
-            "half" => return 16,
-            "bfloat" => return 16,
-            "fp128" => return 128,
-            "x86_fp80" => return 80,
-            _ => {}
-        }
-        // ptr → 64
-        if ll_ty == "ptr" || ll_ty.starts_with("ptr ") { return 64; }
-        // Struct: estimate from field types (simplified — count { and } depth)
-        // For { i64, i64 } → estimate 128 bits
-        if ll_ty.starts_with('{') && ll_ty.ends_with('}') {
-            // Parse struct body to estimate total bits
-            let body = &ll_ty[1..ll_ty.len()-1].trim();
-            let mut total = 0u64;
-            let mut depth = 0u64;
-            let mut current = String::new();
-            for ch in body.chars() {
-                match ch {
-                    '{' => { depth += 1; current.push(ch); }
-                    '}' => { depth -= 1; current.push(ch); if depth == 0 { total += self.physical_cast_bits(&current); current.clear(); } }
-                    ',' => { if depth == 0 { if !current.trim().is_empty() { total += self.physical_cast_bits(current.trim()); } current.clear(); } else { current.push(ch); } }
-                    _ => current.push(ch),
+
+        let mut cur = src.name.clone();
+        let mut cur_ll = self.llvm_type(&src.ty);
+        let total = path.len();
+
+        for (i, step) in path.iter().enumerate() {
+            let is_last = i == total - 1;
+            let dst = if is_last { v.to_string() } else { self.fun.gen_reg() };
+            let dst_ll = if is_last { target_ll.clone() } else { self.llvm_type(&src.ty) };
+
+            match &step.lane {
+                crate::casting::graph::LaneKind::Bitcast => {
+                    writeln!(out, "{}{} = bitcast {} {} to {}",
+                        indent, dst, cur_ll, cur, dst_ll).ok();
+                }
+                crate::casting::graph::LaneKind::IntToFloat => {
+                    writeln!(out, "{}{} = sitofp {} {} to double",
+                        indent, dst, cur_ll, cur).ok();
+                }
+                crate::casting::graph::LaneKind::FloatToInt => {
+                    writeln!(out, "{}{} = fptosi {} {} to i64",
+                        indent, dst, cur_ll, cur).ok();
+                }
+                crate::casting::graph::LaneKind::ExtCall(fn_name) => {
+                    writeln!(out, "{}{} = call i64 @{}({} {})",
+                        indent, dst, fn_name, cur_ll, cur).ok();
+                }
+                crate::casting::graph::LaneKind::ExtractData => {
+                    writeln!(out, "{}{} = extractvalue {} {}, 0",
+                        indent, dst, cur_ll, cur).ok();
+                }
+                crate::casting::graph::LaneKind::PtrToInt => {
+                    writeln!(out, "{}{} = ptrtoint {} {} to i64",
+                        indent, dst, cur_ll, cur).ok();
+                }
+                crate::casting::graph::LaneKind::IntToPtr => {
+                    writeln!(out, "{}{} = inttoptr {} {} to ptr",
+                        indent, dst, cur_ll, cur).ok();
+                }
+                crate::casting::graph::LaneKind::ZExt => {
+                    writeln!(out, "{}{} = zext {} {} to {}",
+                        indent, dst, cur_ll, cur, dst_ll).ok();
+                }
+                crate::casting::graph::LaneKind::Trunc => {
+                    writeln!(out, "{}{} = trunc {} {} to {}",
+                        indent, dst, cur_ll, cur, dst_ll).ok();
+                }
+                crate::casting::graph::LaneKind::Chain(a, b) => {
+                    // Emit first step into temp, then second step into dst
+                    let temp = self.fun.gen_reg();
+                    self.emit_single_cast_lane(out, &temp, a, &cur, &cur_ll, indent);
+                    let temp_ll = self.llvm_type(&src.ty); // conservative estimate
+                    self.emit_single_cast_lane(out, &dst, b, &temp, &temp_ll, indent);
+                }
+                crate::casting::graph::LaneKind::CastFromBitCallback => {
+                    // CastFrom(#Bit) overrides — requires lookup; fall through for now
+                    return None;
                 }
             }
-            if !current.trim().is_empty() {
-                total += self.physical_cast_bits(current.trim());
+            cur = dst;
+            cur_ll = dst_ll;
+        }
+
+        Some(TypedRegister { name: v.to_string(), ty: target.clone() })
+    }
+
+    /// Emit a single cast lane instruction (helper for Chain).
+    fn emit_single_cast_lane(
+        &self, out: &mut String, dst: &str,
+        lane: &crate::casting::graph::LaneKind,
+        src_name: &str, src_ll: &str, indent: &str,
+    ) {
+        match lane {
+            crate::casting::graph::LaneKind::Bitcast => {
+                writeln!(out, "{}{} = bitcast {} {} to i64",
+                    indent, dst, src_ll, src_name).ok();
             }
-            return total;
-        }
-        0
-    }
-
-    /// 2026-07-30: Extract meld shuffle data from type universe properties.
-    fn resolve_shuffle_data(&self, ty: &Type) -> Option<Vec<(u64, u64, u64)>> {
-        let tu = self.ctx.type_universe.as_ref()?;
-        let key = ty.universe_key()?;
-        let rt = tu.get(key)?;
-        let fields: Vec<String> = rt.properties.keys()
-            .filter(|k| k.starts_with("shuffle.") && k.ends_with(".src_offset"))
-            .map(|k| k.strip_prefix("shuffle.").unwrap()
-                 .strip_suffix(".src_offset").unwrap().to_string())
-            .collect();
-        if fields.is_empty() { return None; }
-        let data: Vec<(u64, u64, u64)> = fields.iter().map(|f| {
-            let src_off = get_shuffle_int(&rt.properties, &format!("shuffle.{}.src_offset", f));
-            let src_wid = get_shuffle_int(&rt.properties, &format!("shuffle.{}.src_width", f));
-            let dst_off = get_shuffle_int(&rt.properties, &format!("shuffle.{}.dst_offset", f));
-            (src_off, src_wid, dst_off)
-        }).collect();
-        Some(data)
-    }
-}
-
-/// 2026-07-30: Extract integer from type properties for meld shuffle.
-fn get_shuffle_int(properties: &std::collections::HashMap<String, crate::ast::PropertyValue>, key: &str) -> u64 {
-    properties.get(key)
-        .and_then(|pv| if let crate::ast::PropertyValue::Int(n) = pv { Some(*n as u64) } else { None })
-        .unwrap_or(0)
-}
-
-/// 2026-07-30: Find a CastFrom operator on target_type whose category matches
-/// the source type's protocol membership. For example, String::CastFrom(#Int)
-/// matches when source type is Int (which is a member of #Int).
-/// CastFrom(#Bit) matches when source is an integer-like type that can
-/// meaningfully be interpreted as raw bytes for construction.
-fn find_matching_cast_from(backend: &LlvmBackend, src_ty: &Type, target_name: &str) -> Option<crate::ast::PropertyValue> {
-    let defs = backend.ctx.operator_defs.get(target_name)?;
-    for d in defs {
-        if d.op != "CastFrom" { continue; }
-        let cat = category_from_first_param(&d.params)?;
-        let normalized_cat = cat.strip_prefix('#').unwrap_or(&cat);
-        if normalized_cat == "Bit" {
-            // 2026-07-30: CastFrom(#Bit) matches when source is an integer type.
-            if backend.is_protocol_member(src_ty, "#Int") {
-                return d.impl_args.clone();
+            crate::casting::graph::LaneKind::IntToFloat => {
+                writeln!(out, "{}{} = sitofp {} {} to double",
+                    indent, dst, src_ll, src_name).ok();
             }
-            continue;
-        }
-        let hashword = format!("#{}", normalized_cat);
-        if backend.is_protocol_member(src_ty, &hashword) {
-            return d.impl_args.clone();
-        }
-    }
-    None
-}
-
-/// 2026-07-30: Find a CastTo operator on source_name whose category matches
-/// the target type's protocol membership. For example, Int::CastTo(#String)
-/// matches when target type is String (which is a member of #String).
-/// CastTo(#Bit) matches when target IS Bit/Bits(N) OR when target is an
-/// integer-like type that can meaningfully hold raw bytes (.data pointer).
-fn find_matching_cast_to(backend: &LlvmBackend, src_name: &str, target: &Type) -> Option<crate::ast::PropertyValue> {
-    let defs = backend.ctx.operator_defs.get(src_name)?;
-    for d in defs {
-        if d.op != "CastTo" { continue; }
-        let cat = category_from_first_param(&d.params)?;
-        let normalized_cat = cat.strip_prefix('#').unwrap_or(&cat);
-        if normalized_cat == "Bit" {
-            // 2026-07-30: CastTo(#Bit) matches when target IS Bit/Bits(N),
-            // OR when target is an integer type (Int, Int8..Int64, etc.)
-            // that can meaningfully hold the .data pointer as raw bytes.
-            if type_name_str(target).map(|n| n == "Bit").unwrap_or(false)
-                || matches!(target, Type::Bits(_))
-                || backend.is_protocol_member(target, "#Int")
-            {
-                return d.impl_args.clone();
+            crate::casting::graph::LaneKind::FloatToInt => {
+                writeln!(out, "{}{} = fptosi {} {} to i64",
+                    indent, dst, src_ll, src_name).ok();
             }
-            continue;
+            crate::casting::graph::LaneKind::ZExt => {
+                writeln!(out, "{}{} = zext {} {} to i64",
+                    indent, dst, src_ll, src_name).ok();
+            }
+            crate::casting::graph::LaneKind::Trunc => {
+                writeln!(out, "{}{} = trunc {} {} to i8",
+                    indent, dst, src_ll, src_name).ok();
+            }
+            crate::casting::graph::LaneKind::ExtractData => {
+                writeln!(out, "{}{} = extractvalue {} {}, 0",
+                    indent, dst, src_ll, src_name).ok();
+            }
+            crate::casting::graph::LaneKind::PtrToInt => {
+                writeln!(out, "{}{} = ptrtoint {} {} to i64",
+                    indent, dst, src_ll, src_name).ok();
+            }
+            // For Chain-internal ExtCall — emit the call with conservative i64 return
+            crate::casting::graph::LaneKind::ExtCall(fn_name) => {
+                writeln!(out, "{}{} = call i64 @{}({} {})",
+                    indent, dst, fn_name, src_ll, src_name).ok();
+            }
+            _ => {
+                writeln!(out, "{}{} = bitcast {} {} to i64",
+                    indent, dst, src_ll, src_name).ok();
+            }
         }
-        let hashword = format!("#{}", normalized_cat);
-        if backend.is_protocol_member(target, &hashword) {
-            return d.impl_args.clone();
-        }
-    }
-    None
-}
-
-/// 2026-07-30: Extract the category string from the first parameter of an operator.
-fn category_from_first_param(params: &[crate::ast::Type]) -> Option<String> {
-    let p = params.first()?;
-    match p {
-        crate::ast::Type::Custom(name) => Some(name.clone()),
-        crate::ast::Type::HashWord(name) => Some(name.clone()),
-        crate::ast::Type::HashWordVariant(name, _) => Some(name.clone()),
-        _ => None,
     }
 }
