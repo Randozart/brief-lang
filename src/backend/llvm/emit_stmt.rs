@@ -375,7 +375,6 @@ pub fn emit_statement(backend: &mut LlvmBackend, out: &mut String, stmt: &Statem
                 writeln!(out, "{}{}:", indent, fail_target).ok();
                 writeln!(out, "{}  unreachable", indent).ok();
             }
-            writeln!(out, "{}br i1 {}, label %{}, label %{}", indent, cond_i1, pass_lbl, target).ok();
             writeln!(out, "{}{}:", indent, pass_lbl).ok();
             backend.fun.terminated = false;
             TypedRegister { name: backend.fun.gen_reg(), ty: Type::void() }

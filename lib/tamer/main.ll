@@ -35,12 +35,12 @@ declare ptr @dlopen(ptr, i32) nounwind
 declare ptr @dlsym(ptr, ptr) nounwind
 declare i32 @dlclose(ptr) nounwind
 declare i64 @brief_backtrace()
-declare void @__print_str(i128) #6
+declare i64 @__print_float(float) #6
+declare i128 @__getenv_brief(i128) #6
 declare i64 @__print_char(i64) #6
 declare i64 @__getenv_int(i128) #6
-declare i128 @__getenv_brief(i128) #6
+declare void @__print_str(i128) #6
 declare i64 @__print_int(i64) #6
-declare i64 @__print_float(float) #6
 declare i8* @__chr_to_str(i32) #1
 declare i64 @__int_to_str__(i64) #1
 declare i64 @__str_bytes__(i64) #1
@@ -233,7 +233,9 @@ define i64 @tame(ptr noundef noalias nocapture align 8 %state, ptr %arg0, i64 %a
   %t97 = icmp sge i64 %t81, %t96
   %t94 = zext i1 %t97 to i8
   %t99 = trunc i8 %t94 to i1
-  br i1 %t99, label %gate.pass98, label %loop
+  br i1 %t99, label %gate.pass98, label %gate.fail98
+  gate.fail98:
+    unreachable
   gate.pass98:
   br label %guard.end92
   guard.end92:
@@ -249,7 +251,9 @@ define i64 @tame(ptr noundef noalias nocapture align 8 %state, ptr %arg0, i64 %a
   %t111 = icmp sge i64 %t109, %t110
   %t108 = zext i1 %t111 to i8
   %t113 = trunc i8 %t108 to i1
-  br i1 %t113, label %gate.pass112, label %loop
+  br i1 %t113, label %gate.pass112, label %gate.fail112
+  gate.fail112:
+    unreachable
   gate.pass112:
   br label %guard.end106
   guard.end106:
@@ -265,7 +269,9 @@ define i64 @tame(ptr noundef noalias nocapture align 8 %state, ptr %arg0, i64 %a
   %t125 = icmp sgt i64 %t123, %t124
   %t122 = zext i1 %t125 to i8
   %t127 = trunc i8 %t122 to i1
-  br i1 %t127, label %gate.pass126, label %loop
+  br i1 %t127, label %gate.pass126, label %gate.fail126
+  gate.fail126:
+    unreachable
   gate.pass126:
   br label %guard.end120
   guard.end120:
@@ -288,7 +294,7 @@ define i64 @tame(ptr noundef noalias nocapture align 8 %state, ptr %arg0, i64 %a
 define void @init_state(ptr noundef noalias nocapture align 8 %state) local_unnamed_addr #0 {
   entry:
   %ip_0 = getelementptr inbounds %State, ptr %state, i32 0, i32 0
-  store i64 0, ptr %ip_0, align 4
+  store i64 0, ptr %ip_0, align 1
   ret void
 }
 
@@ -302,7 +308,7 @@ define i32 @main() local_unnamed_addr #0 {
 entry:
   %state = alloca %State, align 8
   %t0 = getelementptr inbounds %State, ptr %state, i32 0, i32 0
-  store i64 0, ptr %t0, align 4
+  store i64 0, ptr %t0, align 1
   %state_save = alloca %State, align 8
   br label %.loop
 .loop:
