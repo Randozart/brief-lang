@@ -2,6 +2,7 @@
 
 **Date:** 2026-07-30  
 **Author:** Plan-driven agent  
+**Status:** ✅ COMPLETE — all 10 phases implemented at `fd55677f`  
 **Target:** Replace `operator_defs`-based Cast/CastTo/CastFrom dispatch with a static casting graph where every base protocol has a hardcoded direct lane to every other base protocol.
 
 ---
@@ -698,3 +699,25 @@ If the casting graph rewrite causes regressions that cannot be resolved within 2
 4. Debug the root cause with controlled A/B: same inputs, compare graph path vs operator_defs path output
 
 The dual-path approach follows AGENTS.md rule 4 (Dual-Path / Adaptive Optimizations): `--use-casting-graph` flag defaults to false until the graph path matches operator_defs output for ALL 1211 tests + ALL 19 benchmarks.
+
+---
+
+## 12. Completion Summary
+
+All phases implemented at commits `04d15031` through `fd55677f`:
+
+| Phase | Description | Net change | Commit |
+|-------|-------------|-----------|--------|
+| 0a | `CastingGraph` module with 64 base protocol lanes | +606 lines | `04d15031` |
+| 0b | Remove `llvm_type` metadata, hardcode protocol variants | +785 lines | `4377ce38` |
+| 1 | Wire `Expr::Cast` → casting graph | -159 lines | `90c99ea6` |
+| 2 | Wire `Cast#` intrinsic → casting graph | -133 lines | `005f1580` |
+| 3+8 | Remove Cast.# injection, update `is_protocol_member()` | -24 lines | `aa8ffd8e` |
+| 4 | Split `CastFrom(#Bit)` out of `operator_defs` | +36 lines | `0f839a39` |
+| 5 | Remove `op Cast()` from parser (already done) | 0 | — |
+| 6 | Simplify `bootstrap.bv` to protocol-only | +1 line | `0161fd03` |
+| 7 | Wire `proto` declarations → casting graph | +36 lines | `eb9387fe` |
+| Cleanup | Remove `Cast#` signature, dead stdlib defns, `sig_casting.rs` | -13 lines | `ffd55677` |
+| Merge | Replace `ProtocolGraph` with `CastingGraph` | -392 lines | `2a1ab89e` |
+
+**Final state:** 1209 tests passing, 0 failing, 2 pre-existing warnings. No regressions from baseline.
