@@ -2505,28 +2505,105 @@ impl LlvmBackend {
 
     /// 2026-07-30: Physical cast — emit literal memory bytes of a value.
     /// For types with a custom CastTo(#Bit) operator, calls through the
-    /// operator pipeline. Otherwise, bitcasts the register.
+    /// operator pipeline. For struct types, extracts the first scalar field
+    /// (typically `.data`) as the raw content pointer/bytes. Otherwise,
+    /// bitcasts the register to a matching-size integer type.
     fn resolve_physical_cast(
         &mut self, out: &mut String, v: &str,
         src: &TypedRegister, indent: &str,
     ) -> Option<TypedRegister> {
-        // Check for custom CastTo(#Bit) operator on source type
+        // Step 1: Check for custom CastTo(#Bit) or Cast(#Bit) operator
         if let Some(name) = type_name_str(&src.ty) {
-            // First try CastTo(#Bit) directly
             if let Some(impl_args) = find_cast_impl(self, &name, "CastTo") {
                 let result = emit_simple_call(self, out, v, src, &impl_args, indent);
                 return Some(TypedRegister { name: result, ty: src.ty.clone() });
             }
-            // Fall back to op Cast(#Bit) (generic Cast)
             if let Some(impl_args) = find_cast_impl(self, &name, "Cast") {
                 let result = emit_simple_call(self, out, v, src, &impl_args, indent);
                 return Some(TypedRegister { name: result, ty: src.ty.clone() });
             }
         }
-        // Fallback: bitcast the register to i64 (literal bytes)
+        // Step 2: For struct types, extract the .data field as the raw
+        // content bytes. The first scalar field is typically the data
+        // pointer or inline storage. Returns it as i64.
         let src_ll = self.llvm_type(&src.ty);
-        writeln!(out, "{}{} = bitcast {} {} to i64", indent, v, src_ll, src.name).ok();
+        if src_ll.starts_with('{') && src_ll.ends_with('}') {
+            // Try to extract the first field (index 0) as i64.
+            // This is the physical bytes representation for struct types
+            // like String { i64, i64 } → extractvalue .data (index 0).
+            writeln!(out, "{}{} = extractvalue {} {}, 0",
+                indent, v, src_ll, src.name).ok();
+            return Some(TypedRegister { name: v.to_string(), ty: Type::int() });
+        }
+        // Step 3: Fallback — bitcast to matching-size iN type.
+        // Compute total bits from the LLVM type string.
+        let total_bits = self.physical_cast_bits(&src_ll);
+        if total_bits > 0 && total_bits <= 128 {
+            let int_ty = format!("i{}", total_bits);
+            writeln!(out, "{}{} = bitcast {} {} to {}",
+                indent, v, src_ll, src.name, int_ty).ok();
+            // Wrap in i64 for ABI compatibility (truncate if larger)
+            if total_bits > 64 {
+                writeln!(out, "{}{}_trunc = trunc {} {} to i64",
+                    indent, v, int_ty, v).ok();
+                return Some(TypedRegister { name: format!("{}_trunc", v), ty: Type::int() });
+            }
+            if total_bits < 64 {
+                writeln!(out, "{}{}_ext = zext {} {} to i64",
+                    indent, v, int_ty, v).ok();
+                return Some(TypedRegister { name: format!("{}_ext", v), ty: Type::int() });
+            }
+            return Some(TypedRegister { name: v.to_string(), ty: Type::int() });
+        }
+        // Step 4: Desperate measure — memcpy to stack and ptrtoint
+        writeln!(out, "{}%phys_stack = alloca {}, align 8", indent, src_ll).ok();
+        writeln!(out, "{}store {} {}, ptr %phys_stack, align 8", indent, src_ll, src.name).ok();
+        writeln!(out, "{}{} = ptrtoint ptr %phys_stack to i64", indent, v).ok();
         Some(TypedRegister { name: v.to_string(), ty: Type::int() })
+    }
+
+    /// 2026-07-30: Estimate total bit width from an LLVM type string.
+    /// Handles scalars (i8-i128), floats (float=32, double=64), structs (estimated),
+    /// and pointers (ptr=64). Returns 0 for unknown types.
+    fn physical_cast_bits(&self, ll_ty: &str) -> u64 {
+        // iN → N
+        if let Some(rest) = ll_ty.strip_prefix('i') {
+            if let Ok(n) = rest.parse::<u64>() { return n; }
+        }
+        // float → 32, double → 64
+        match ll_ty {
+            "float" => return 32,
+            "double" => return 64,
+            "half" => return 16,
+            "bfloat" => return 16,
+            "fp128" => return 128,
+            "x86_fp80" => return 80,
+            _ => {}
+        }
+        // ptr → 64
+        if ll_ty == "ptr" || ll_ty.starts_with("ptr ") { return 64; }
+        // Struct: estimate from field types (simplified — count { and } depth)
+        // For { i64, i64 } → estimate 128 bits
+        if ll_ty.starts_with('{') && ll_ty.ends_with('}') {
+            // Parse struct body to estimate total bits
+            let body = &ll_ty[1..ll_ty.len()-1].trim();
+            let mut total = 0u64;
+            let mut depth = 0u64;
+            let mut current = String::new();
+            for ch in body.chars() {
+                match ch {
+                    '{' => { depth += 1; current.push(ch); }
+                    '}' => { depth -= 1; current.push(ch); if depth == 0 { total += self.physical_cast_bits(&current); current.clear(); } }
+                    ',' => { if depth == 0 { if !current.trim().is_empty() { total += self.physical_cast_bits(current.trim()); } current.clear(); } else { current.push(ch); } }
+                    _ => current.push(ch),
+                }
+            }
+            if !current.trim().is_empty() {
+                total += self.physical_cast_bits(current.trim());
+            }
+            return total;
+        }
+        0
     }
 
     /// 2026-07-30: Extract meld shuffle data from type universe properties.
