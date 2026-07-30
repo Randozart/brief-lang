@@ -989,6 +989,14 @@ fn codegen(
                     b = b.with_data_layout(dl);
                 }
             }
+            // Register proto declarations on the casting graph
+            if let Some(ref mut graph) = b.ctx.casting_graph {
+                for item in items.iter() {
+                    if let brief_compiler::ast::TopLevel::ProtocolDef(pd) = item {
+                        graph.register_protocol_def(pd);
+                    }
+                }
+            }
             output = b.generate(items, None);
             ".ll"
         }
@@ -1008,6 +1016,10 @@ fn codegen(
                 .with_optimize_budget(opts.optimize_budget)
                 .with_type_universe(universe.clone())
                 .with_operator_defs(operator_defs)
+                .with_cast_from_bit_overrides(cast_from_bit_overrides)
+                .with_resolved_frgns(resolved_frgns.clone())
+                .with_trg_unresolved_action(opts.trg_unresolved_action)
+                .with_module_init(enable_module_init);
                 .with_cast_from_bit_overrides(cast_from_bit_overrides)
                 .with_resolved_frgns(resolved_frgns.clone())
                 .with_trg_unresolved_action(opts.trg_unresolved_action)
@@ -1060,6 +1072,14 @@ fn codegen(
                     b = b.with_data_layout(dl);
                 }
             }
+            // Register proto declarations on the casting graph
+            if let Some(ref mut graph) = b.ctx.casting_graph {
+                for item in items.iter() {
+                    if let brief_compiler::ast::TopLevel::ProtocolDef(pd) = item {
+                        graph.register_protocol_def(pd);
+                    }
+                }
+            }
             output = b.generate(items, None);
             ".ll"
         }
@@ -1085,6 +1105,14 @@ fn codegen(
                 .with_optimize_report(true);
             if opts.gpu_offload {
                 b = b.with_gpu_offload(true);
+            }
+            // Register proto declarations on the casting graph
+            if let Some(ref mut graph) = b.ctx.casting_graph {
+                for item in items.iter() {
+                    if let brief_compiler::ast::TopLevel::ProtocolDef(pd) = item {
+                        graph.register_protocol_def(pd);
+                    }
+                }
             }
             output = b.generate(items, None);
             ".ll"
@@ -1113,6 +1141,14 @@ fn codegen(
                 }
                 if let Some(ref dl) = entry.data_layout {
                     b = b.with_data_layout(dl);
+                }
+            }
+            // Register proto declarations on the casting graph
+            if let Some(ref mut graph) = b.ctx.casting_graph {
+                for item in items.iter() {
+                    if let brief_compiler::ast::TopLevel::ProtocolDef(pd) = item {
+                        graph.register_protocol_def(pd);
+                    }
                 }
             }
             output = b.generate(items, None);
