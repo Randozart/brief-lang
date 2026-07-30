@@ -1,7 +1,7 @@
 # The Bits Thesis
 
 **Date:** 2026-07-11  
-**Updated:** 2026-07-20 (hashword protocol architecture)  
+**Updated:** 2026-07-30 (casting graph, `!>` syntax, `→#Bit` ban)  
 **Status:** Foundational  
 **Applies to:** Brief compiler core architecture, interpreter, type system, backends
 
@@ -20,14 +20,19 @@ Hashwords can be parameterized by **protocol variant** using angle brackets:
 `.ebv` → ASCII). Cross-variant calls require explicit protocol.
 
 | Old mechanism | Replaced by |
-|---|---|
+|---|---|---|
 | `primitive <~ "Int"` + `llvm <~ "i64"` | Structure + `op Add(#Int)` |
 | `ctd <~ "Float"` + `alu <~ "Float"` | Structure + `op Add(#Float)` |
 | `op Add ~> "int.add"` (string binding) | `op Add(#Int, #Int)` (hashword directive) |
 | TOML config (`llvm-ops.toml`, `ctd-llvm-mappings.toml`) | Removed — hashword backend intrinsics |
 | `category` inference (2026-07-19 attempt) | Removed — types don't belong to categories |
+| `<~` property syntax | `!> key: value;` — e.g., `!> bits: 8;` |
 
-**The Bits thesis is unaffected.** `Bits` remains the sole primitive. What
+**The Bits thesis is unaffected.** `#Bit` is the protocol; `Bit` is the sole
+primitive type (hardcoded anchor in the compiler, not a primordial — primordials
+are overrideable by stdlib, Bit is not). They are tightly coupled:
+the protocol guarantees the semantics, the type provides the concrete
+representation. What
 changes is how types express their semantics: through ops with hashword
 signatures, not through metadata tags. See `docs/architecture/casting-protocol.md`
 and `docs/plans/2026-07-20-extensible-number-types-final.md` for the full
@@ -35,16 +40,16 @@ architecture.
 
 ## 2026-07-24 Update: Protocol-First Types
 
-Type declarations now use `: [Parent] [Protocol]` instead of `: Bits`:
+Type declarations now use `: Protocol` instead of `: Bits`:
 
 ```brief
 // Before:
 type Int : Bits { maxbits <~ 64; ... op Add(#Int, #Int); };
 
 // After:
-type Int: #Int;              // protocol-only (width inferred)
-type i64: Int { bits <~ 64; };  // derives from Int, explicit width
-type UInt: Int;               // derives from Int, inherits #Int protocol
+type Int: #Int;                       // protocol-only (width inferred)
+type i64: Int { !> bits: 64; };       // derives from Int, explicit width
+type UInt: Int;                        // derives from Int, inherits #Int protocol
 ```
 
 Key changes:
@@ -52,12 +57,13 @@ Key changes:
 - **Protocols drive dispatch** — `#Int` tells backends how to add, subtract, etc.
   The backend knows the default ops for every protocol. User only writes `op`
   overrides when deviating from the default.
-- **Width is inferred** unless `bits <~ N` is explicit.
+- **Width is inferred** unless `!> bits: N;` is explicit.
 - **`x.#Property` replaces `x :> Property`** for accessing type properties
   (Size, Capacity, Ptr, etc.). The `:>` operator is deprecated.
 - **`match` in `$defn`** — `match expr { pattern => body; _ => body; };`
   supports integer, string, and wildcard patterns.
 - **`=>` token** added for match arm syntax.
+- **`<~` removed** in favour of `!> key: value;` for all metadata properties.
 
 ```brief
 // Protocol default — nothing to override:
@@ -65,11 +71,11 @@ type Int: #Int;
 type String: #String;
 
 // Derives from parent, inherits protocol:
-type i64: Int { bits <~ 64; };
+type i64: Int { !> bits: 64; };
 
 // Override only what's different from the protocol default:
 type MyString: String {
-    op Add(#String) = weird_interaction(#L, #R);
+    op Add(#String): weird_interaction(#L, #R);
 };
 ```
 
@@ -81,6 +87,130 @@ contract (`#String`) tells the backend what operations are valid; the backend
 picks the representation — inline SSO, heap-allocated, rope tree — based on
 the program's operation profile. This is what makes the type system
 **width-agnostic and layout-agnostic**.
+
+## 2026-07-30 Update: Casting Graph — Protocols Are Guarantees, Types Are Overlays
+
+The `op Cast()` mechanism is removed. Cast dispatch is now a **casting graph**
+where every base protocol has a hardcoded direct lane to every other base
+protocol. `operator_defs` no longer carries Cast/CastTo/CastFrom — only
+non-cast operators (`InsertAt`, `ExtractFrom`).
+
+### Four-Layer Protocol Hierarchy
+
+```
+Layer 1: #Bit (root protocol); Bit (sole primitive type, hardcoded anchor — not a primordial)
+  Cast TO   #Bit = LLVM bitcast of raw memory (hardcoded, never overridable)
+  Cast FROM #Bit = interpret N raw bits as target protocol semantics
+
+Layer 2: Base protocols (hardcoded in compiler)
+  #Int, #UInt, #Float, #String, #Bool, #Char, #Data
+  Each has a hardcoded direct lane to every other base protocol.
+  Each knows its LLVM type representation.
+  Each knows its operations (Add, Sub, Mul, etc.).
+
+Layer 3: Sub-protocols / variants (stdlib proto declarations)
+  proto ASCII: #String { CastTo(#String): ascii_to_utf8(#L); };
+  proto UTF16: #String { CastFrom(#String): utf16_from_utf8(#L); };
+  Normalizer reads these, feeds edges into the casting graph.
+
+Layer 4: User types (stdlib type declarations)
+  type String: #String;
+  type Int32: #Int { !> bits: 32; };
+  All behavior inherited from protocol. No body needed.
+```
+
+### Core Principle: Protocols are Guarantees, Types are Overlays
+
+Every base protocol has a hardcoded direct lane to every other base protocol.
+These lanes are **compiler guarantees** — they always exist, they always work
+the same way, and they cannot be broken, removed, or overloaded.
+
+Types can extend, override, and customize on top of the protocol guarantees.
+A type-level override of `CastTo(#Int)` changes what happens when *that
+specific type* reaches `#Int`, but the `#String → #Int` lane itself is
+unchanged — available for any other `#String` type that doesn't override it.
+
+### Primitives vs Primordials: What's Overrideable
+
+| | Primitive | Primordial |
+|---|---|---|
+| **Examples** | `Bit` | `Int`, `Float`, `Bool`, `Char`, `Data`, `Void` |
+| **Where defined** | Hardcoded in compiler (`seed_primordial_types`, before the PRIMORDIALS loop) | Seeded by compiler in PRIMORDIALS loop |
+| **Overrideable?** | No — error if any stdlib or user code declares `type Bit` | Yes — bootstrap.bv or user `.bv` files replace the seeded entry silently |
+| **Why** | Axiomatic anchor — the whole system rests on it | Useful defaults — stdlib can specialize them |
+
+`Bit` is the one true primitive: the compiler's axiom, non-negotiable,
+unoverridable. Any attempt to declare `type Bit` in stdlib or user code
+produces a compiler error. Everything else — `Int`, `Float`, `String` — is
+a primordial: a useful default that stdlib or user code can refine or
+replace. If bootstrap.bv declares `type Int: #Int { !> bits: 32; }`, that
+replaces the primordial `Int` entry.
+
+The `#Bit` **protocol** is similarly hardcoded in the casting graph — its lanes
+to every other protocol are compiler guarantees. But protocols are not types:
+a type participates in a protocol (`type Int: #Int`), and that protocol
+membership can be set freely by the standard library.
+
+**Using `#Bit` as a protocol is fully legitimate.** You can create new types
+that participate in it:
+
+```brief
+type ReorganisedBit: #Bit {
+    !> bits: 42;
+    op CastTo(#String): my_custom_encode(#L);
+    op CastFrom(#String): my_custom_decode(#L);
+};
+```
+
+This declares a 42-bit type that uses `#Bit` protocol semantics (raw bits,
+bitwise operations) but with custom encoding/decoding to strings. What you
+cannot do is touch `type Bit: #Bit` itself — that concrete type is the
+compiler's axiom. But using `#Bit` protocol membership for your own types
+is exactly what the system is designed for.
+
+### The `→ #Bit` Ban and the `← #Bit` Door
+
+`#Bit` is where all protocols meet as equals:
+
+- **`op CastTo(#Bit)` is banned at declaration time.** `"CastTo(#Bit) is
+  hardcoded — use x as Bit or Cast#(x, target) for bitcasts."` Casting TO
+  `#Bit` is a **representation guarantee**: the compiler always does the
+  mechanical job (bitcast, extractvalue, ptrtoint) with zero semantic
+  transformation. No type overrides this.
+
+- **`op CastFrom(#Bit)` is the sole user-extensible cast edge.** It is the
+  **interpretation door** — a type declares how to construct itself from raw
+  memory bits. This is the one place where user code gives meaning to `#Bit`.
+
+- **`op CastTo/CastFrom(#Category)` for non-`#Bit` categories** remains
+  allowed. `type AutoString: #String { op CastTo(#Int): my_parse(#L); };`
+  registers a type-level lane override. The graph always prefers a type-level
+  override over the protocol default.
+
+Three-way priority in the casting graph's `emit_cast()`:
+1. **Type-level override** — if the specific src→dst pair has one
+2. **Protocol default** — the hardcoded lane between the two base protocols
+3. **`CastFrom(#Bit)` constructor** — if the target type declares it and the
+   path passes through `#Bit`
+
+Step 3 never applies when the target IS `#Bit`.
+
+### How the Casting Graph Resolves `x as Target`
+
+1. Determine `(src_protocol, src_variant)` and `(dst_protocol, dst_variant)`
+   from the types involved.
+2. Check for a type-level override on the specific src→dst pair. If found,
+   emit it.
+3. If src and dst are both base protocols (no variants), use the hardcoded
+   direct lane — O(1), no BFS.
+4. If variants are involved, BFS through variant edges + base lanes to find
+   a path. If found, emit each step.
+5. If no path exists through the graph, fall through to LLVM coercion
+   (inttoptr, sitofp, bitcast, etc.) for trivial cases.
+
+All `→ #Bit` lanes bypass steps 2–5: they always emit the hardcoded
+mechanical transformation. `CastFrom(#Bit)` overrides are checked only when
+the target is a concrete type that declared one.
 
 ---
 
@@ -107,33 +237,35 @@ The entire Brief language is built from exactly three hardcoded assumptions.
 Everything else — every type, every operation, every data structure — follows
 from these axioms and is defined in the standard library prelude.
 
-### Axiom 1: `Bits` Is the Sole Primitive
+### Axiom 1: `#Bit` Is the Sole Primitive
 
-`Bits` is a built-in type representing a contiguous sequence of N uninterpreted
-bytes. It is the only type the compiler knows about axiomatically.
-
-```
-type Bits {
-    maxbits <~ N;      // width in bits
-};
-```
-
-`Bits` is special-cased in the type resolver: it has no base type because it
-*is* the base. Every other type in the language inherits from `Bits`, directly
-or transitively:
+`#Bit` is a built-in protocol representing a contiguous sequence of N
+uninterpreted bytes. It is the only protocol the compiler knows about
+axiomatically. Every other protocol and type derives its physical
+representation from `#Bit` through the casting graph.
 
 ```
-type Int      : Bits { maxbits <~ 64;  ... }
-type Float    : Bits { maxbits <~ 64;  ... }
-type Bool     : Bits { maxbits <~ 8;  ... }
-type Char     : Bits { maxbits <~ 32;  ... }
-type String   : Bits { maxbits <~ 192; ... }
-type Void     : Bits { maxbits <~ 0;  ... }   // zero-width => void
+#Bit — root protocol, hardcoded in compiler
+  Cast TO   #Bit = bitcast/extractvalue/ptrtoint (never overridable)
+  Cast FROM #Bit = interpret raw bits as target semantics (overridable via op CastFrom(#Bit))
 ```
 
-The only property the frontend hardcodes at the type level is `maxbits`. It must
-know the width of every type to compute struct field offsets, allocate
-interpreter storage, and emit LLVM struct layouts.
+`#Bit` is special-cased in the casting graph: it has no base protocol because
+it *is* the base. Every other protocol has a direct lane to `#Bit` and a
+direct lane from `#Bit`:
+
+```
+type Int:     #Int;       // Int participates in #Int protocol → i64 LLVM type
+type Float:   #Float;     // Float participates in #Float protocol → double
+type Bool:    #Bool;      // Bool participates in #Bool protocol → i8
+type Char:    #Char;      // Char participates in #Char protocol → i32
+type String:  #String;    // String participates in #String protocol → {i64, i64}
+type Void:    (no protocol) → void  // zero-width, no bits
+```
+
+The only property the frontend hardcodes at the protocol level is the LLVM
+type representation for each base protocol. Width is derived from the `!> bits`
+metadata when explicit, or from the protocol default otherwise.
 
 ### Axiom 2: Bitwise Operations Are the Laws of Physics
 
@@ -178,16 +310,14 @@ compiler intrinsic (identified by a trailing `#`) or a standard Brief function
 (no trailing `#`):
 
 ```brief
-type Int: Bits {
-    maxbits <~ 64;
-    llvm  <~ "i64";
-    op Add(Int, Int) -> Int  = __add_i64#;     // compiler intrinsic
+type Int: #Int {
+    op Add(#Int): add(#L, #R);       // compiler intrinsic — backend emits i64 add
 };
 
-type Complex: Bits {
+type Complex: #Int {
     real: Float;
     imag: Float;
-    op Add(Complex, Complex) -> Complex = complex_add;  // user function
+    op Add(#Int): complex_add(#L, #R);  // user function — no intrinsic needed
 };
 ```
 
@@ -282,16 +412,16 @@ The `Void` type is not a base type. It is a zero‑width specialization of
 `Bits`:
 
 ```brief
-type Void: Bits {
-    maxbits <~ 0;
-    alignment <~ 1;
-    llvm  <~ "void";
+type Void {
+    !> maxbits: 0;
+    !> alignment: 1;
 };
 ```
 
-Because `maxbits <~ 0`, the type resolver allocates zero bytes for any slot of
-type `Void`. The LLVM backend reads the `llvm` property and emits `void`. The
-compiler's frontend has zero hardcoded knowledge of "Void" as a concept.
+Because `maxbits <~ 0` (zero-width), the type resolver allocates zero bytes for
+any slot of type `Void`. The compiler's frontend has zero hardcoded knowledge
+of "Void" as a concept. Void has no protocol membership — it is pure zero-width
+`#Bit`.
 
 ### 3. `Box<T>` Is a Struct with `op Drop`
 
@@ -331,34 +461,36 @@ Indexing a list (`list[i]`) routes through `op ExtractFrom`, which computes
 `ptr + i * sizeof<T>()` and dereferences. The interpreter evaluates this as a
 regular function call. No special-casing for "list operations."
 
-### 5. Backend‑Intrinsic Metadata Is Opaque
+### 5. Protocol-Level Metadata Resolution
 
-The frontend recognizes a fixed set of metadata properties for its own use:
+The frontend recognizes a fixed set of metadata properties:
 
 | Property | Purpose | Hardcoded? |
 |----------|---------|------------|
-| `maxbits` | Bit width of the type | Yes (Axiom 1) |
+| `bits` | Bit width of the type | Yes (Axiom 1 — width is fundamental) |
 | `alignment` | Memory alignment | Yes (layout engine) |
 | `op X` | Operator binding | Yes (Axiom 3 — rune→op, not op→intrinsic) |
-| `alu` | ALU routing tag (PascalCase, exhaustive set) | **No** — backend-specific |
-| `llvm` | LLVM type representation | **No** — opaque to frontend |
-| `hw_storage` | Hardware storage type | **No** — opaque to frontend |
+| `llvm_type` | LLVM type override | **No** — derived from protocol+metadata by normalizer |
 
-The `alu` metadata replaces the earlier `primitive` concept. It tells the
-backend which arithmetic unit to route `Bits(N)` through:
+LLVM types are resolved from `(protocol, metadata)` by the normalizer:
 
-| `alu` | LLVM behavior | CIRCT behavior |
-|-------|---------------|----------------|
-| `Int` | Native `i64` — general ALU | Raw `Bits(N)` — ignored |
-| `Float` | Native `double` — float ALU | Raw `Bits(N)` — ignored |
-| `Bool` | Native `i1` — condition unit | Raw `Bits(N)` — ignored |
-| `Ptr` | Native pointer type — AGU | Raw `Bits(N)` — ignored |
-| *(custom)* | Inline ASM or target attribute | Raw `Bits(N)` — ignored |
+| Protocol | Metadata | LLVM type |
+|----------|----------|-----------|
+| `#Int` | (none) | `i64` (default 64-bit) |
+| `#Int` | `!> bits: 8` | `i8` |
+| `#Int` | `!> bits: 32` | `i32` |
+| `#Float` | (none) | `float` (default 32-bit) |
+| `#Float` | `!> bits: 64` | `double` |
+| `#String` | (none) | `{ i64, i64 }` |
+| `#Bool` | (none) | `i8` |
+| `#Char` | (none) | `i32` |
+| `#Bit` | (none) | `i64` (default) |
+| `#Data` | (none) | `ptr` |
 
-Unrecognized `alu` values trigger a fallback path in the backend: emit
-inline assembly or a target-specific attribute. The frontend never needs
-to enumerate ALUs — it just attaches the routing tag. CIRCT and the SMT
-solver ignore `alu` entirely; they only see `Bits(N)`.
+The old `primitive <~ "Int"` / `alu <~ "Int"` / `llvm <~ "i64"` metadata
+properties are **removed**. Hashword protocol membership (`#Int`, `#Float`,
+etc.) replaces all three. The frontend matches on protocol membership via
+`is_protocol_member()`, not on string values of metadata tags.
 
 Any property the frontend does not recognize is stored, serialized to the
 `.bvsa` archive, and ignored. Only backend-specific tooling (e.g.,
@@ -395,13 +527,13 @@ No name-based magic. `String` accepts `"..."` because `String` declares
 are already valid UTF-8. (Legacy: `DefaultQuoted.formatting <~ Quoted`
 still works but is deprecated in favour of `op Parse`.)
 
-### 6.1 Parse Protocol — Replacement for `formatting <~`
+### 6.1 Parse Protocol — Replacement for `formatting` metadata
 
-**2026-07-20:** The `formatting <~` metadata property and the `codec`
+**2026-07-20:** The `formatting` metadata property and the `codec`
 declaration form are superseded by the `op Parse` protocol:
 
 ```brief
-// Old (codec + formatting <~):
+// Old (codec + formatting):
 codec HexColor {
     formatting <~ Bare;
     parse      <~ parse_hex;
@@ -410,26 +542,27 @@ codec HexColor {
 // New (op Parse):
 type HexColor {
     data: Bits<24>;
-    op Parse(Bare) = parse_hex(#L);   // Bare literal "FF00FF" → HexColor
+    op Parse(Bare): parse_hex(#L);   // Bare literal "FF00FF" → HexColor
 };
 ```
 
 | Old mechanism | Replaced by |
 |---|---|
-| `formatting <~ Bare` + `parse <~ parse_hex` | `op Parse(Bare) = parse_hex(#L)` |
-| `formatting <~ Decimal` + `parse <~ parse_fn` | `op Parse(Decimal) = fn(#L)` (or `op Parse(#Int)` for identity) |
-| `formatting <~ Quoted` + `parse <~ identity` | `op Parse(#String)` or `op Parse(Quoted) = fn(#L)` |
+| `formatting <~ Bare` + `parse <~ parse_hex` | `op Parse(Bare): parse_hex(#L)` |
+| `formatting <~ Decimal` + `parse <~ parse_fn` | `op Parse(Decimal): fn(#L)` (or `op Parse(#Int)` for identity) |
+| `formatting <~ Quoted` + `parse <~ identity` | `op Parse(#String)` or `op Parse(Quoted): fn(#L)` |
 | `DefaultQuoted` codec class | Inline `op Parse` on each type definition |
+| `<~` property assignment syntax | `!> key: value;` throughout |
 
 **Why the change:** The `op` system already provides dispatch, `alwaysinline`,
-positional markers (`#L`, `#R`), and inheritance through `<:`. `op Parse`
+positional markers (`#L`, `#R`), and inheritance through `:`. `op Parse`
 integrates literal construction into the same system rather than maintaining
 a parallel `codec` mechanism. Additionally, `op Parse(#Category)` provides a
 zero-cost identity path: when the target type IS the protocol shape,
 parsing is a no-op.
 
 **The three token forms (QuotedValue, DecimalValue, Bareword) remain compiler
-axioms** — only the dispatch mechanism changes from `formatting <~` metadata
+axioms** — only the dispatch mechanism changes from `formatting` metadata
 to `op Parse` signatures.
 
 ### 6.2 Round-Trip Verification of Parse Ops
@@ -451,32 +584,52 @@ If the round-trip fails (e.g., a hash function that loses information),
 the compiler emits a warning but continues. Non-invertible types must
 document this with an explicit annotation.
 
-### 7. The Complete Type Hierarchy from First Principles
+### 7. The Complete Protocol Graph from First Principles
 
-Every type is `Bits(N)` + metadata. Nothing is special-cased:
+Every type participates in a protocol. Nothing is special-cased:
 
 ```
-Bits(axiom)          — 3 axioms, the only hardcoded type
+#Bit (root protocol, compiler axiom)
   │
-  ├─ Void            — Bits(0), llvm <~ "void"
-  ├─ Int             — Bits(8), op Add = __add_i64#
-  ├─ Float           — Bits(8), op Add = __fadd_f64#
-  ├─ Bool            — Bits(1), op Eq = __eq_i1#
-  ├─ Char            — Bits(4), op Eq = __eq_i32#
-  ├─ String          — Bits(24), op Drop = __free_string_allocation#
-  ├─ Box<T>          — Bits(8), op Drop = __free_heap_allocation#
-  ├─ List<T>         — Bits(24), op InsertAt/ExtractFrom
-  ├─ HashMap<K,V>    — Bits(24), op ExtractFrom
-  └─ MyCustomType    — same mechanism, user-defined
+  ├── #Int       → i64 LLVM, Add = native i64 add
+  │     ├── type Int: #Int             (default 64-bit signed)
+  │     ├── type UInt: #Int            (same bits, unsigned interpretation)
+  │     ├── type Int8:  #Int { !> bits: 8; }
+  │     ├── type Int16: #Int { !> bits: 16; }
+  │     ├── type Int32: #Int { !> bits: 32; }
+  │     ├── type Int64: #Int { !> bits: 64; }
+  │     └── type Data:  Int  { !> bits: 64; }  (pointer-width alias)
+  │
+  ├── #Float     → double (default 64-bit), Add = native fadd
+  │     ├── type Float:  #Float
+  │     ├── type Float32: #Float { !> bits: 32; }
+  │     ├── type Double:  #Float { !> bits: 64; }
+  │     └── type Half:    #Float { !> bits: 16; }
+  │
+  ├── #String    → {i64, i64}, Add = concat
+  │     ├── type String: #String
+  │     ├── proto ASCII: #String { CastTo(#String): ascii_to_utf8(#L); };
+  │     └── type ASCIIStr: #String<ASCII>
+  │
+  ├── #Bool      → i8, Eq = icmp ne
+  │     └── type Bool: #Bool { !> bits: 8; }
+  │
+  ├── #Char      → i32, Eq = icmp eq
+  │     └── type Char: #Char { !> bits: 32; }
+  │
+  └── #Data      → ptr, CastTo(#Int) = ptrtoint
+        └── (implicit on every pointer type)
 ```
 
 Everything on the right side of `│` is defined in the standard library
-prelude (`bootstrap.bv`), not in the compiler's Rust code. A user could
-omit the prelude entirely, define their own `Int` with saturating
-arithmetic, their own `List` with arena allocation, their own `String`
-with a different encoding — and the compiler would handle them identically
-because it only sees `Bits` + properties. There is no "stdlib" path and
-"user" path in the compiler. There is only one path.
+prelude (`bootstrap.bv`), not in the compiler's Rust code — except the
+base protocols themselves, which are hardcoded in the casting graph.
+
+A user could omit the prelude entirely, define their own `Int` with
+saturating arithmetic, their own `List` with arena allocation, their own
+`String` with a different encoding — and the compiler would handle them
+identically because it only sees protocol membership + metadata. There is
+no "stdlib" path and "user" path in the compiler. There is only one path.
 
 ### 7. SMT Solver Alignment
 
@@ -572,20 +725,6 @@ the Bits thesis: if everything is bits at the compiler level, everything is
 bits at the solver level, because the solver is just another consumer of the
 same representation.
 
-The frontend recognizes a fixed set of metadata properties for its own use:
-
-| Property | Purpose | Hardcoded? |
-|----------|---------|------------|
-| `maxbits` | Bit width of the type | Yes (Axiom 1) |
-| `alignment` | Memory alignment | Yes (layout engine) |
-| `op X` | Operator binding | Yes (Axiom 3 — rune→op, not op→intrinsic) |
-| `llvm` | LLVM type representation | **No** — opaque to frontend |
-| `hw_storage` | Hardware storage type | **No** — opaque to frontend |
-
-Any property the frontend does not recognize is stored, serialized to the
-`.bvsa` archive, and ignored. Only backend-specific tooling (e.g.,
-`brief-llvm`, `brief-circt`) interprets it.
-
 ---
 
 ## How This Enables Decoupled Backends
@@ -598,13 +737,14 @@ the typed program. It contains:
 - Operator bindings as property references
 
 A decoupled LLVM backend reads the `.bvsa` archive. For each type, it queries
-the `llvm` property to determine the LLVM type representation. If `llvm` is
-not present, it derives a default from `bytes` (e.g., `bytes=8` → `i64`).
-It never asks the frontend "is this an Int?" — it only reads properties.
+the casting graph to determine the LLVM type representation from the type's
+protocol membership and metadata. It never asks the frontend "is this an Int?"
+— it only checks protocol membership via `is_protocol_member()`.
 
-A decoupled CIRCT backend reads the same `.bvsa` archive. It queries
-`hw_storage` or ignores `llvm` entirely. The frontend does not need to know
-which properties a backend will use.
+A decoupled CIRCT backend reads the same `.bvsa` archive. It ignores LLVM
+types and computes its own hardware representation from `!> bits` and
+protocol membership. The frontend does not need to know which properties a
+backend will use.
 
 ---
 
@@ -622,10 +762,12 @@ behavior because:
    The intrinsics table maps named operations (`"__add_i64"`) to concrete
    byte-array logic. Backends map the same names to native instructions.
 
-3. **All semantics are metadata.** The meaning of a value — whether it is an
-   integer, a float, a pointer, or a color — is not in its bits. It is in
-   the properties attached to its type in the universe. Changing the
-   properties changes the semantics without changing the bits.
+3. **All semantics are protocol membership.** The meaning of a value — whether
+   it is an integer, a float, a pointer, or a color — is not in its bits. It
+   is in the protocol the type participates in. Changing protocol membership
+   changes the semantics without changing the bits. The casting graph
+   guarantees every protocol can reach every other protocol — no type is
+   ever stranded.
 
 4. **All extension is user-defined.** A new type, new operator, new backend
     target — none require compiler changes. Types are declared, operators
@@ -635,23 +777,26 @@ behavior because:
 
 ## FAQ
 
-### Q1: If everything is Bits, why does the compiler still have `Int`, `Float`, `Bool` as separate concepts?
+### Q1: If everything is Bit (the Bits thesis), why does the compiler still have `#Int`, `#Float`, `#Bool` as separate protocols?
 
-**It doesn't — not in the type system itself.** The compiler's type checker
-sees only `Bits(N)` with optional metadata. The named types (`Int`, `Float`,
-`Bool`) are **stdlib aliases** defined in `lib/std/types.bv`:
+**They are not separate primitives — they are protocol contracts defined in
+the casting graph.** The compiler's casting graph has hardcoded lanes between
+base protocols, but the type checker never matches on protocol names. It
+checks protocol membership via `is_protocol_member()`:
 
 ```brief
-type Int   <~ Bits(64)  // sets primitive<~Int, bytes<~8
-type Float <~ Bits(64)  // sets primitive<~Float, bytes<~8
-type Bool  <~ Bits(1)   // sets primitive<~Bool, bytes<~1
+type Int: #Int;     // Int participates in #Int protocol → backend knows to use i64 ALU
+type Float: #Float; // Float participates in #Float protocol → backend uses float ALU
+type Bool: #Bool;   // Bool participates in #Bool protocol → backend uses i1 compare
 ```
 
-The compiler frontend never matches on the name `"Int"`. It matches on
-`Bits(64)` and reads the `primitive` metadata if it needs to.
+The compiler frontend never matches on the name `"Int"`. It checks
+`is_protocol_member(ty, "#Int")` which queries the casting graph — a
+reachability check, not a name match.
 
-The only place "Int" appears as a hardcoded concept is the `ReturnKind` enum,
-which is a **compiler-to-backend contract**, not a type system feature:
+The only place protocol names appear as hardcoded concepts is the
+`ReturnKind` enum, which is a **compiler-to-backend contract**, not a type
+system feature:
 
 ```rust
 ReturnKind::Native("Int")   // backend: "emit 64-bit integer ops"
@@ -666,25 +811,25 @@ These tell the backend what LLVM IR to emit. They are not type judgments.
 | Consumer | Sees | Action |
 |----------|------|--------|
 | Parser | raw bytes + token forms | No type knowledge |
-| Type checker | `Bits(N)` + metadata | Structural comparison on `N` |
+| Type checker | protocol membership + metadata | Structural comparison on width |
+| Casting graph | (protocol, variant) pairs | BFS for cast path between protocols |
 | SMT solver | `(_ BitVec N)` | Ignores all metadata |
-| CIRCT backend | `Bits(N)` + `hw_storage` | Uses metadata if present, else raw bits |
-| LLVM backend | `Bits(N)` + `primitive` | Reads `primitive` for instruction selection |
-| Meld/FFI | `Bits(N)` + shape/mapping | Enforces C layout compatibility |
+| CIRCT backend | protocol + `!> bits` | Uses bits for hardware width |
+| LLVM backend | protocol + metadata | Resolves LLVM type from `(protocol, metadata)` |
+| Meld/FFI | protocol + shape/mapping | Enforces C layout compatibility |
 
 The SMT solver and CIRCT backend **never need to know about `Int` or `Float`**.
-They operate on pure bit-vectors. The `primitive` metadata is only consumed by
-LLVM and similar CPU-targeting backends that must decide between integer ALUs,
-float ALUs, and address-generation units.
+They operate on pure bit-vectors. The casting graph is only consumed by the
+LLVM backend to resolve cast paths between types.
 
 ### Q3: Does the type checker force me to coerce types at every boundary?
 
-**No.** The type checker compares types structurally by `Bits(N)` width.
-Metadata (`primitive`, `llvm`, etc.) is **not part of the comparison key**.
-An `Int` and a `Float` both have `Bits(64)` width, so the type checker sees
+**No.** The type checker compares types structurally by width. Protocol
+membership (`#Int`, `#Float`, etc.) is **not part of the comparison key**.
+An `Int` and a `Float` both have 64-bit width, so the type checker sees
 them as compatible at the structural level. Coercion only matters at the
-LLVM codegen level, where `primitive<~Int` vs `primitive<~Float` determines
-which ALU instruction to emit.
+LLVM codegen level, where `is_protocol_member(ty, "#Int")` vs
+`is_protocol_member(ty, "#Float")` determines which ALU instruction to emit.
 
 The exception is explicit `meld` (FFI) declarations, where C's type system
 requires specific layout guarantees. That's an opt-in mechanism, not the
@@ -698,42 +843,43 @@ patterns trigger specific hardware units:
 - `double` → float ALU (fadd, fmul, etc.)
 - `i1` → branch condition (je, jne, etc.)
 
-These are genuine physical realities of the hardware. `primitive<~Int`
-metadata routes `Bits(64)` to the integer ALU. `primitive<~Float` routes
-it to the float ALU. The same `Bits(64)` go into different silicon, but
+These are genuine physical realities of the hardware. `#Int` protocol
+membership routes a 64-bit value to the integer ALU. `#Float` routes
+it to the float ALU. The same 64 bits go into different silicon, but
 they're still bits.
 
 The Bits thesis does not deny this. It says: **the bits are the true
-representation. The `primitive` tag is a routing hint for backends that
+representation. The protocol tag is a routing hint for backends that
 have multiple ALUs.**
 
 ### Q5: Does this mean `ReturnKind::Native("Int")` could map to `i32` on an embedded target?
 
 **Yes, exactly.** On x86_64, `#Int` → `i64`. On a 32-bit ARM target, the
 same intrinsic could map to `i32`. The `.bv` source doesn't change — only
-the backend's interpretation of `#Int` changes. The `bytes` metadata on
+the backend's interpretation of `#Int` changes. The `!> bits` metadata on
 `Int` would be set per-target:
 
 ```brief
-// x86_64 backend: maxbits <~ 64 → i64
-// ARM32 backend:  maxbits <~ 32 → i32
-type Int <~ Bits { maxbits <~ TARGET_PTR_SIZE; ... };
+// x86_64 backend: !> bits: 64 → i64
+// ARM32 backend:  !> bits: 32 → i32
+type Int: #Int { !> bits: TARGET_PTR_SIZE; };
 ```
 
 All algebraic operations on `Int` automatically use the right width because
-they operate on `Bits(N)` where `N` is the target pointer size.
+they operate on the protocol's native integer width for the target.
 
-### Q6: If metadata is ignored by the type checker, how does the `primitive` tag affect anything?
+### Q6: If protocol membership is ignored by the type checker, how does `is_protocol_member()` affect anything?
 
 **It doesn't affect the type checker.** It only affects the LLVM backend.
 The pipeline is:
 
-1. Type checker: verifies `Bits(N)` structural compatibility → **metadata ignored**
-2. LLVM backend: reads `primitive` → emits `add i64` or `fadd double`
+1. Type checker: verifies structural width compatibility → **protocol membership ignored**
+2. Casting graph: resolves `(protocol, variant)` to cast path → emits LLVM IR
+3. LLVM backend: checks `is_protocol_member()` → emits `add i64` or `fadd double`
 
-The metadata travels through the pipeline **opaque to the type checker**.
-It's like a sticky note attached to the type that says "when you get to LLVM,
-use float instructions." The type checker never reads the sticky note.
+Protocol membership travels through the pipeline **opaque to the type
+checker**. It is only consumed by the casting graph and the LLVM backend,
+never by structural type comparison.
 
 ### Q7: Is the Bits thesis hogwash? Should we reintroduce primitives as first-class compiler concepts?
 
@@ -741,16 +887,17 @@ use float instructions." The type checker never reads the sticky note.
 as first-class compiler concepts.**
 
 The Bits thesis is the deepest correct description of computation: everything
-is `Bits(N)`. The `primitive` metadata is a thin routing layer on top that
-only CPU-targeting backends consume. Reintroducing primitives as first-class
-AST types would:
-- Duplicate the `Bits(N)` width information
+is `#Bit`. The protocol layer (`#Int`, `#Float`, etc.) is a thin routing
+surface that only the LLVM backend consumes. Reintroducing primitives as
+first-class AST types would:
+- Duplicate the width information already present in protocol metadata
 - Require special-casing in the type checker, SMT solver, and CIRCT backend
-- Break the axiom that every type is `Bits(N)` + metadata
+- Break the axiom that every type participates in a protocol
 - Force users to learn about primitives when defining custom types
 
-The current architecture — `Bits(N)` at the core, `primitive` as metadata,
-`ReturnKind` as compiler-to-backend contract — is the right balance.
+The current architecture — `#Bit` at the core, protocol membership for
+dispatch, `ReturnKind` as compiler-to-backend contract, casting graph for
+cross-protocol conversion — is the right balance.
 
 ### Q8: How does FFI fit into this? C expects specific types.
 
@@ -758,9 +905,9 @@ The `meld` keyword bridges Brief's type system to foreign (C) ABIs. It
 explicitly maps Brief types to C types with layout guarantees:
 
 ```brief
-meld type FileHandle <~ C "int" {
-    maxbits <~ 32;
-    signed <~ true;
+meld type FileHandle: C "int" {
+    !> bits: 32;
+    !> signed: true;
 };
 ```
 
@@ -787,9 +934,9 @@ declared independently." This is only used for polymorphic intrinsics like
 
 ### Q10: If CIRCT and SMT ignore metadata, how does CIRCT know the width of a type?
 
-CIRCT reads `Bytes(N)` from the type — specifically the `bytes` metadata,
-which is Axiom 1. `Bytes(8)` → hardware `uint64_t` or equivalent. The
-`primitive` tag (`Int` vs `Float`) is irrelevant for hardware synthesis —
-CIRCT only needs bit widths and dataflow connections. This is by design:
-**hardware doesn't have separate integer and float ALUs at the RTL level,
-it has wires and gates.**
+CIRCT reads the bit width from `!> bits` metadata, which is Axiom 1.
+`!> bits: 64` → hardware `uint64_t` or equivalent. Protocol membership
+(`#Int` vs `#Float`) is irrelevant for hardware synthesis — CIRCT only
+needs bit widths and dataflow connections. This is by design: **hardware
+doesn't have separate integer and float ALUs at the RTL level, it has
+wires and gates.**

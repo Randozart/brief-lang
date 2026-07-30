@@ -1013,10 +1013,6 @@ fn codegen(
                 .with_resolved_frgns(resolved_frgns.clone())
                 .with_trg_unresolved_action(opts.trg_unresolved_action)
                 .with_module_init(enable_module_init);
-                .with_cast_from_bit_overrides(cast_from_bit_overrides)
-                .with_resolved_frgns(resolved_frgns.clone())
-                .with_trg_unresolved_action(opts.trg_unresolved_action)
-                .with_module_init(enable_module_init);
             if opts.gpu_offload {
                 b = b.with_gpu_offload(true);
                 b = b.with_svo(opts.feature_svo);

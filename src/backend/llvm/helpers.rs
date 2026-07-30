@@ -2450,6 +2450,12 @@ impl LlvmBackend {
         indent: &str,
         reg: &TypedRegister,
     ) -> String {
+        // 2026-07-30: If already i64 (from state load), return as-is.
+        // State fields are always stored as i64 regardless of Brief type,
+        // so loads from %State produce i64 values that need no conversion.
+        if self.llvm_type(&reg.ty) == "i64" {
+            return reg.name.clone();
+        }
         // 2026-07-26: Protocol-driven dispatch. No name matching.
         let ty = &reg.ty;
         // #Float protocol: convert float/double to i64
