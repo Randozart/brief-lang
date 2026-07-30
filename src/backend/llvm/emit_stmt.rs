@@ -342,8 +342,14 @@ pub fn emit_statement(backend: &mut LlvmBackend, out: &mut String, stmt: &Statem
             let label_n = backend.fun.txn_counter;
             backend.fun.txn_counter += 1;
             let pass_lbl = format!("gate.pass{}", label_n);
-            let target = backend.fun.convergence_target.clone()
-                .unwrap_or_else(|| "loop".to_string());
+            // 2026-07-30: In a defn (no convergence target), assertions that fail
+            // trap via unreachable. In a txn, they branch back to the loop header.
+            let has_convergence = backend.fun.convergence_target.is_some();
+            let fail_target = if has_convergence {
+                backend.fun.convergence_target.as_ref().unwrap().clone()
+            } else {
+                format!("gate.fail{}", label_n)
+            };
             let cond_i1 = if cond_reg.ty == Type::bool_() {
                 let b = backend.fun.gen_reg();
                 writeln!(out, "{}{} = trunc i8 {} to i1", indent, b, cond_reg.name).ok();
@@ -353,6 +359,13 @@ pub fn emit_statement(backend: &mut LlvmBackend, out: &mut String, stmt: &Statem
                 writeln!(out, "{}{} = icmp ne i64 {}, 0", indent, i1_name, cond_reg.name).ok();
                 i1_name
             };
+            writeln!(out, "{0}br i1 {1}, label %{2}, label %{3}",
+                indent, cond_i1, pass_lbl, fail_target).ok();
+            if !has_convergence {
+                // Defn body: assertion failure traps via unreachable
+                writeln!(out, "{}{}:", indent, fail_target).ok();
+                writeln!(out, "{}  unreachable", indent).ok();
+            }
             writeln!(out, "{}br i1 {}, label %{}, label %{}", indent, cond_i1, pass_lbl, target).ok();
             writeln!(out, "{}{}:", indent, pass_lbl).ok();
             backend.fun.terminated = false;
