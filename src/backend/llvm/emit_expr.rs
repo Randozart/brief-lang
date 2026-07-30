@@ -2486,13 +2486,29 @@ impl LlvmBackend {
             }
         }
         // Step 2: CastTo(#Category) → CastFrom(#Category) protocol path
-        if let (Some(ref s_name), Some(ref t_name)) = (src_name, target_name) {
+        if let (Some(s_name), Some(t_name)) = (src_name.as_ref(), target_name.as_ref()) {
             if let Some(impl_args) = try_cast_protocol_path(self, s_name, t_name) {
                 let result = emit_simple_call(self, out, v, src, &impl_args, indent);
                 return Some(TypedRegister { name: result, ty: target.clone() });
             }
         }
-        // Step 3: Meld shuffle (structural bit remapping via @/ fields)
+        // Step 3: Direct CastFrom on target type (e.g., String's CastFrom(#Int))
+        // Check if the target type has a CastFrom operator whose category matches
+        // the source type's protocol membership.
+        if let Some(ref t_name) = target_name {
+            if let Some(impl_args) = find_matching_cast_from(self, &src.ty, t_name) {
+                let result = emit_simple_call(self, out, v, src, &impl_args, indent);
+                return Some(TypedRegister { name: result, ty: target.clone() });
+            }
+        }
+        // Step 4: Direct CastTo on source type (for target categories)
+        if let Some(ref s_name) = src_name {
+            if let Some(impl_args) = find_matching_cast_to(self, s_name, target) {
+                let result = emit_simple_call(self, out, v, src, &impl_args, indent);
+                return Some(TypedRegister { name: result, ty: target.clone() });
+            }
+        }
+        // Step 5: Meld shuffle (structural bit remapping via @/ fields)
         let shuffle = self.resolve_shuffle_data(&src.ty);
         if let Some(ref data) = shuffle {
             if !data.is_empty() {
@@ -2632,4 +2648,47 @@ fn get_shuffle_int(properties: &std::collections::HashMap<String, crate::ast::Pr
     properties.get(key)
         .and_then(|pv| if let crate::ast::PropertyValue::Int(n) = pv { Some(*n as u64) } else { None })
         .unwrap_or(0)
+}
+
+/// 2026-07-30: Find a CastFrom operator on target_type whose category matches
+/// the source type's protocol membership. For example, String::CastFrom(#Int)
+/// matches when source type is Int (which is a member of #Int).
+fn find_matching_cast_from(backend: &LlvmBackend, src_ty: &Type, target_name: &str) -> Option<crate::ast::PropertyValue> {
+    let defs = backend.ctx.operator_defs.get(target_name)?;
+    for d in defs {
+        if d.op != "CastFrom" { continue; }
+        let cat = category_from_first_param(&d.params)?;
+        let hashword = if cat.starts_with('#') { cat.to_string() } else { format!("#{}", cat) };
+        if backend.is_protocol_member(src_ty, &hashword) {
+            return d.impl_args.clone();
+        }
+    }
+    None
+}
+
+/// 2026-07-30: Find a CastTo operator on source_name whose category matches
+/// the target type's protocol membership. For example, Int::CastTo(#String)
+/// matches when target type is String (which is a member of #String).
+fn find_matching_cast_to(backend: &LlvmBackend, src_name: &str, target: &Type) -> Option<crate::ast::PropertyValue> {
+    let defs = backend.ctx.operator_defs.get(src_name)?;
+    for d in defs {
+        if d.op != "CastTo" { continue; }
+        let cat = category_from_first_param(&d.params)?;
+        let hashword = if cat.starts_with('#') { cat.to_string() } else { format!("#{}", cat) };
+        if backend.is_protocol_member(target, &hashword) {
+            return d.impl_args.clone();
+        }
+    }
+    None
+}
+
+/// 2026-07-30: Extract the category string from the first parameter of an operator.
+fn category_from_first_param(params: &[crate::ast::Type]) -> Option<String> {
+    let p = params.first()?;
+    match p {
+        crate::ast::Type::Custom(name) => Some(name.clone()),
+        crate::ast::Type::HashWord(name) => Some(name.clone()),
+        crate::ast::Type::HashWordVariant(name, _) => Some(name.clone()),
+        _ => None,
+    }
 }
