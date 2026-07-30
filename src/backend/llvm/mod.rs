@@ -482,6 +482,10 @@ fn collect_strings_expr(expr: &Expr, seen: &mut std::collections::HashSet<String
 /// type's ResolvedType in the universe. No name matching — the primordial
 /// llvm_type property is the single source of truth. Returns "i64" if the
 /// universe is unavailable or the type is unknown (safe default).
+/// Derive LLVM type string from a Type, using bytes-based fallback.
+/// 2026-07-30: No longer reads llvm_type from universe properties.
+/// Protocol-based resolution is handled by CastingGraph::resolve_llvm_type()
+/// (accessible via LlvmBackend::llvm_type() in codegen contexts).
 /// Ptr<T> and Vector<T,N> are compiler constructs, not universe types.
 pub fn protocol_llvm_type(ty: &Type, universe: Option<&crate::type_universe::TypeUniverse>) -> String {
     if matches!(ty, Type::Ptr(_) | Type::Vector(_, _)) {
@@ -489,8 +493,10 @@ pub fn protocol_llvm_type(ty: &Type, universe: Option<&crate::type_universe::Typ
     }
     if let Some(ref u) = universe {
         if let Some(rt) = ty.universe_key().and_then(|k| u.get(k)) {
-            if let Some(crate::ast::PropertyValue::String(s)) = rt.properties.get("llvm_type") {
-                return s.clone();
+            // Use bytes as fallback — types with protocol membership get
+            // their LLVM type from the casting graph instead.
+            if rt.bytes > 0 {
+                return format!("i{}", rt.bytes * 8);
             }
         }
     }
@@ -968,13 +974,7 @@ impl LlvmBackend {
         // stores as i64 — adapt_to_i64/ensure_typed_value handle conversion.
         let llvm_ty = if let Some(ref universe) = self.ctx.type_universe {
             if let Some(rt) = ty.universe_key().and_then(|k| universe.get(k)) {
-                let is_float = rt.properties.contains_key("Cast.#Float")
-                    || rt.properties.get("llvm_type")
-                        .and_then(|pv| match pv {
-                            crate::ast::PropertyValue::String(s) => Some(s.as_str()),
-                            _ => None,
-                        })
-                        .map_or(false, |s| matches!(s, "half" | "float" | "double" | "bfloat" | "fp128" | "x86_fp80"));
+                let is_float = rt.properties.contains_key("Cast.#Float");
                 if is_float {
                     if rt.max_bits <= 32 { "float".to_string() }
                     else if rt.max_bits <= 64 { "double".to_string() }

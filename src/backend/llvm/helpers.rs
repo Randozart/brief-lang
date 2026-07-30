@@ -21,18 +21,6 @@ use std::collections::HashMap;
 use std::fmt::Write;
 use std::sync::LazyLock;
 
-/// Derive LLVM type string from a ResolvedType.
-/// 2026-07-20: Reads from normalizer-set llvm_type property exclusively.
-/// Every properly normalized type has llvm_type stamped by the normalizer.
-/// This function should only be reached as a safety net — fallback is bysytes.
-fn rt_llvm_type(rt: &ResolvedType) -> String {
-    if let Some(crate::ast::PropertyValue::String(s)) = rt.properties.get("llvm_type") {
-        return s.clone();
-    }
-    // Safety net: bysytes-based fallback
-    format!("i{}", rt.bytes * 8)
-}
-
 impl LlvmBackend {
     // ═══════════════════════════════════════════════════════════════
     // Section 1: Cell Rewriting

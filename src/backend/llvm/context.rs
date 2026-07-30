@@ -313,7 +313,7 @@ impl CompilerContext {
             is_embedded: false,
             type_universe: None,
             operator_defs: HashMap::new(),
-            casting_graph: None,
+            casting_graph: Some(crate::casting::graph::CastingGraph::new()),
             webstack_enabled: false,
             dep_graph: DependencyGraph {
                 topo_order: Vec::new(),

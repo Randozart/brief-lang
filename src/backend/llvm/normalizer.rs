@@ -13,80 +13,24 @@ use crate::backend::normalizer;
 use crate::type_universe::{ResolvedType, TypeUniverse};
 use crate::ast::PropertyValue;
 
-/// 2026-07-14: Normalize the AST for LLVM backend emission.
-/// Attaches llvm_type to every ResolvedType in the universe.
+// 2026-07-30: Walks the AST and registers types in the TypeUniverse with
+// their protocol membership and metadata. The casting graph resolves LLVM
+// types from (protocol, metadata) at codegen time — no llvm_type needed.
+
+/// Register type definitions in the universe and process meld declarations.
 ///
-/// 2026-07-29: Protocol-driven llvm_type resolution.
-/// - Flexible types (Int, UInt, Bit) have no baked-in llvm_type —
-///   resolved from protocol membership + int_bits + explicit !> bits metadata.
-/// - Fixed-width types (Int32, Float) keep primordial llvm_type.
+/// 2026-07-30: Protocol-driven type registration only. LLVM type resolution
+/// is deferred to the casting graph's `resolve_llvm_type()`.
+/// - Flexible types (Int, UInt, Bit) have no baked-in width — resolved per-target.
+/// - Fixed-width types (Int32, Float) carry explicit !> bits metadata.
+/// - Struct types derive LLVM type from field shapes at codegen time.
+/// - Protocol (Cast.#) properties are retained for graph-based membership checks.
 /// - Explicit user `llvm <~` is validated against known LLVM type strings.
 pub fn normalize(items: &mut Vec<TopLevel>, universe: &mut TypeUniverse, int_bits: u64) -> Result<(), String> {
     // ── Register all TopLevel::TypeDef items into the TypeUniverse ─────────
-    // Must run before llvm_type derivation so struct types from bootstrap.bv
-    // (like String with fields=[data:Int, len:Int]) are available for
-    // field-based llvm_type computation.
-    register_typedefs(items, universe);
-
-    // ── Derive llvm_type for ALL types ─────────────────────────────────────
-    // 2026-07-29: Protocol-driven resolution. Three phases:
-    //   1. Strip primordial llvm_type for protocol-resolved types
-    //   2. Skip types that still have llvm_type (fixed-width, explicit user llvm)
-    //   3. Resolve llvm_type from protocol membership + int_bits + !> bits metadata
-    for rt in universe.types.values_mut() {
-        // ── Phase 1: Strip primordial llvm_type for target-dependent types ──
-        // Cast.#Int, Cast.#UInt, and Cast.#Float types need target-aware width
-        // resolution (int_bits for Int/UInt, explicit bits for Float). Strip the
-        // primordial llvm_type so Phase 3 recomputes it from protocol + int_bits.
-        // Cast.#Bool, Cast.#Bit, and types without these protocols keep theirs
-        // (Bool→i8, Data→ptr, Char→i32, fixed-width types, structs).
-        let needs_target_resolution = rt.properties.contains_key("Cast.#Int")
-            || rt.properties.contains_key("Cast.#UInt")
-            || rt.properties.contains_key("Cast.#Float");
-
-        if needs_target_resolution {
-            rt.properties.remove("llvm_type");
-        }
-
-        // ── Phase 2: Skip if llvm_type is already set ──
-        // This catches fixed-width types (Int32, Float) that have primordial
-        // llvm_type and don't need protocol resolution.
-        if rt.properties.contains_key("llvm_type") {
-            continue;
-        }
-
-        // ── Phase 3: Resolve llvm_type ──
-        // 2026-07-19: User-provided llvm override (only in user code, not stdlib).
-        let explicit_llvm = rt.properties.get("llvm").and_then(|pv| match pv {
-            PropertyValue::String(s) => Some(s.as_str()),
-            _ => None,
-        });
-
-        let llvm_ty = if let Some(llvm_val) = explicit_llvm {
-            validate_explicit_llvm(llvm_val)?;
-            llvm_val.to_string()
-        } else if needs_target_resolution {
-            // Protocol-driven resolution: #Int/#UInt → i{int_bits or explicit bits},
-            // #Float → float/double/half/bfloat, #Bool → i8, #Bit → i8
-            resolve_protocol_llvm_type(rt, int_bits)?
-        } else if rt.bytes == 2 {
-            // 2026-07-20: 2-byte types are ambiguous between half (IEEE 754),
-            // bfloat (Google Brain), and i16 (integer). The disamb hint
-            // resolves the ambiguity: disamb <~ "bfloat" → "bfloat",
-            // disamb absent or any other value → "half" (IEEE 754 default).
-            // If the type is an integer, the user should set llvm <~ "i16".
-            match rt.properties.get("disamb") {
-                Some(PropertyValue::String(s)) if s == "bfloat" => "bfloat".to_string(),
-                Some(PropertyValue::Identifier(s)) if s == "bfloat" => "bfloat".to_string(),
-                _ => "half".to_string(),
-            }
-        } else {
-            // No fields, no explicit llvm, no protocol: derive from bytes
-            format!("i{}", rt.bytes * 8)
-        };
-
-        rt.properties.insert("llvm_type".into(), PropertyValue::String(llvm_ty));
-    }
+    // After registration, the casting graph resolves LLVM types from
+    // (protocol, metadata) at codegen time — no llvm_type derivation needed.
+    register_typedefs(items, universe)?;
 
     // 2026-07-16: P0+P6 — Process meld layout declarations in a single pass.
     for item in items.iter() {
@@ -144,16 +88,9 @@ pub fn normalize(items: &mut Vec<TopLevel>, universe: &mut TypeUniverse, int_bit
     }
 
     // Strip metadata LLVM doesn't use
-        // 2026-07-20: Keep llvm_type, tbaa, and the <- operator bindings.
-        // op.InsertAt and op.ExtractFrom are used by the <- (push/pop) operator
-        // dispatch (e.g., stdlib's InsertAt <~ ring_push). Old-style op Add ~>
-        // "string" metadata is no longer retained — hashword OperatorDef from
-        // the AST replaces it.
-        let keep: HashSet<String> = [
-            "llvm_type", "disamb",
-        ].iter().map(|s| s.to_string()).collect();
+        // 2026-07-30: Only Cast.# properties are retained for protocol membership.
         for rt in universe.types.values_mut() {
-            rt.properties.retain(|k, _| keep.contains(k) || k.starts_with("Cast."));
+            rt.properties.retain(|k, _| k.starts_with("Cast."));
         }
 
     Ok(())
@@ -192,12 +129,17 @@ fn validate_explicit_llvm(llvm_val: &str) -> Result<(), String> {
 /// 2026-07-16: Register all TopLevel::TypeDef items into the TypeUniverse.
 /// Extracts byte size from layout metadata or slots, attaches field annotations,
 /// and registers each type so meld validation can look it up.
-fn register_typedefs(items: &[TopLevel], universe: &mut TypeUniverse) {
+fn register_typedefs(items: &[TopLevel], universe: &mut TypeUniverse) -> Result<(), String> {
     for item in items {
         let td = match item {
             TopLevel::TypeDef(td) => td,
             _ => continue,
         };
+        // 2026-07-30: Bit is the axiomatic anchor — never overrideable.
+        // A type declaration for Bit in user code or stdlib is an error.
+        if td.name == "Bit" {
+            return Err("'Bit' is a compiler primitive and cannot be redeclared".to_string());
+        }
         // 2026-07-26: Read bits/maxbits/minbits metadata independently.
         // bits <~ N → exact (min=max=N), maxbits <~ N → ceiling (min=0, max=N),
         // minbits <~ N → floor (min=N, max=primordial). Fallback: primordial values.
@@ -282,17 +224,6 @@ fn register_typedefs(items: &[TopLevel], universe: &mut TypeUniverse) {
             properties,
             fields,
         };
-        // 2026-07-26: Preserve primordial llvm_type when the declaration
-        // doesn't explicitly set it. The normalizer would otherwise derive
-        // a raw "i{N}" from bytes, losing Float's "float" LLVM type.
-        if let Some(prim) = primordial {
-            if !rt.properties.contains_key("llvm_type")
-                && prim.properties.contains_key("llvm_type")
-            {
-                rt.properties.insert("llvm_type".to_string(),
-                    prim.properties.get("llvm_type").unwrap().clone());
-            }
-        }
         if let Some(PropertyValue::String(layout_str)) = rt.properties.get("layout") {
             let cleaned = layout_str.strip_prefix('<').unwrap_or(layout_str);
             if let Ok(pat) = crate::beast::layout::parse_layout_pattern(cleaned) {
@@ -388,6 +319,7 @@ fn register_typedefs(items: &[TopLevel], universe: &mut TypeUniverse) {
             rt.properties.insert("Cast.#Bit".to_string(), PropertyValue::Bool(true));
         }
     }
+    Ok(())
 }
 
 use std::collections::HashSet;
@@ -534,64 +466,6 @@ const STANDARD_OPS: &[&str] = &[
     "Print",
     "Malloc", "Free",
 ];
-
-// 2026-07-29: Protocol-driven LLVM type resolution for types whose width
-// depends on target int_bits or explicit !> bits metadata. Called from
-// Phase 3 of the normalizer main loop for Cast.#Int/.#UInt/.#Float types.
-fn resolve_protocol_llvm_type(rt: &ResolvedType, int_bits: u64) -> Result<String, String> {
-    let has_cast_int = rt.properties.contains_key("Cast.#Int");
-    let has_cast_uint = rt.properties.contains_key("Cast.#UInt");
-    let has_cast_float = rt.properties.contains_key("Cast.#Float");
-
-    if has_cast_int || has_cast_uint {
-        // Priority: explicit !> bits: N > !> maxbits: N > int_bits
-        if let Some(bits) = get_exact_bits(rt) {
-            return Ok(format!("i{}", bits));
-        }
-        if let Some(ceiling) = get_maxbits(rt) {
-            return Ok(format!("i{}", int_bits.min(ceiling)));
-        }
-        return Ok(format!("i{}", int_bits));
-    }
-
-    if has_cast_float {
-        let bits = get_exact_bits(rt).unwrap_or(32);
-        let llvm_ty = match bits {
-            16 => {
-                let is_bfloat = rt.properties.get("disamb")
-                    .map(|pv| matches!(pv, PropertyValue::String(s) if s == "bfloat"))
-                    .unwrap_or(false);
-                if is_bfloat { "bfloat".to_string() } else { "half".to_string() }
-            }
-            32 => "float".to_string(),
-            64 => "double".to_string(),
-            80 => "x86_fp80".to_string(),
-            128 => "fp128".to_string(),
-            _ => return Err(format!("Float type '{}' has unsupported bit width {}", rt.name, bits)),
-        };
-        return Ok(llvm_ty);
-    }
-
-    Err(format!(
-        "cannot determine LLVM type for type '{}' — \
-         has Cast.#Int/.#UInt/.#Float but no resolution path succeeded",
-        rt.name
-    ))
-}
-
-/// Read exact !> bits: N metadata from type properties.
-fn get_exact_bits(rt: &ResolvedType) -> Option<u64> {
-    rt.properties.get("bits").and_then(|pv| {
-        if let PropertyValue::Int(n) = pv { Some(*n as u64) } else { None }
-    })
-}
-
-/// Read !> maxbits: N metadata from type properties.
-fn get_maxbits(rt: &ResolvedType) -> Option<u64> {
-    rt.properties.get("maxbits").and_then(|pv| {
-        if let PropertyValue::Int(n) = pv { Some(*n as u64) } else { None }
-    })
-}
 
 #[cfg(test)]
 mod tests {

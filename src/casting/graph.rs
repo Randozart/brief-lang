@@ -2,6 +2,10 @@ use std::collections::{HashMap, HashSet, VecDeque};
 
 use crate::ast::top::{CastDirection, ProtocolDef};
 use crate::ast::Type;
+use crate::ast::PropertyValue;
+use crate::type_universe::TypeUniverse;
+
+// ── Lane Kinds ──────────────────────────────────────────────────────────
 
 // ── Lane Kinds ──────────────────────────────────────────────────────────
 
@@ -50,6 +54,17 @@ pub struct CastStep {
     pub dst_variant: String,
 }
 
+// ── LLVM Type Resolver ──────────────────────────────────────────────────
+
+/// How a protocol category + variant maps to an LLVM type string.
+#[derive(Debug, Clone, PartialEq)]
+pub enum LlvmTypeResolver {
+    /// Fixed LLVM type string (e.g., "double", "ptr", "{ i64, i64 }")
+    Fixed(&'static str),
+    /// Width-parametric: !> bits → !> maxbits → !> minbits → int_bits
+    WidthParametric,
+}
+
 // ── Casting Graph ───────────────────────────────────────────────────────
 
 /// Protocol-to-protocol casting graph.
@@ -81,6 +96,10 @@ pub struct CastingGraph {
 
     /// Type-level CastFrom(#Bit) overrides: type_name → function_name.
     cast_from_bit_overrides: HashMap<String, String>,
+
+    /// Protocol (category, variant) → LLVM type resolver.
+    /// Used by resolve_llvm_type() to derive LLVM types from protocol + metadata.
+    protocol_llvm_types: HashMap<(String, String), LlvmTypeResolver>,
 }
 
 impl CastingGraph {
@@ -92,9 +111,11 @@ impl CastingGraph {
             variant_reverse: HashMap::new(),
             defaults: HashMap::new(),
             cast_from_bit_overrides: HashMap::new(),
+            protocol_llvm_types: HashMap::new(),
         };
         graph.seed_base_lanes();
         graph.seed_defaults();
+        graph.seed_protocol_llvm_types();
         graph
     }
 
@@ -236,6 +257,43 @@ impl CastingGraph {
         self.defaults.insert("String".to_string(), "UTF8".to_string());
         self.defaults.insert("Float".to_string(), "IEEE754".to_string());
         self.defaults.insert("Char".to_string(), "unicode".to_string());
+    }
+
+    /// Seed hardcoded protocol (category, variant) → LLVM type mappings.
+    /// 2026-07-30: Replaces the normalizer's three-phase llvm_type derivation
+    /// and the disamb metadata hack. Protocol variants are first-class graph nodes.
+    fn seed_protocol_llvm_types(&mut self) {
+        // Base protocols
+        self.set_llvm_type("Bit", "",    LlvmTypeResolver::WidthParametric);
+        self.set_llvm_type("Int", "",    LlvmTypeResolver::WidthParametric);
+        self.set_llvm_type("UInt", "",   LlvmTypeResolver::WidthParametric);
+        self.set_llvm_type("Float", "",  LlvmTypeResolver::Fixed("float"));
+        self.set_llvm_type("Bool", "",   LlvmTypeResolver::Fixed("i8"));
+        self.set_llvm_type("Char", "",   LlvmTypeResolver::Fixed("i32"));
+        self.set_llvm_type("String", "", LlvmTypeResolver::Fixed("{ i64, i64 }"));
+        self.set_llvm_type("Data", "",   LlvmTypeResolver::Fixed("ptr"));
+
+        // Float protocol variants (hardcoded — no disamb hack)
+        self.set_llvm_type("Float", "IEEE754",  LlvmTypeResolver::Fixed("float"));
+        self.set_llvm_type("Float", "Half",     LlvmTypeResolver::Fixed("half"));
+        self.set_llvm_type("Float", "BFloat",   LlvmTypeResolver::Fixed("bfloat"));
+        self.set_llvm_type("Float", "Double",   LlvmTypeResolver::Fixed("double"));
+        self.set_llvm_type("Float", "FP128",    LlvmTypeResolver::Fixed("fp128"));
+        self.set_llvm_type("Float", "X86_FP80", LlvmTypeResolver::Fixed("x86_fp80"));
+
+        // String protocol variants
+        self.set_llvm_type("String", "UTF8",  LlvmTypeResolver::Fixed("{ i64, i64 }"));
+        self.set_llvm_type("String", "ASCII", LlvmTypeResolver::Fixed("{ i64, i64 }"));
+    }
+
+    /// Insert a protocol (category, variant) → LLVM type resolver entry.
+    fn set_llvm_type(&mut self, category: &'static str, variant: &'static str, resolver: LlvmTypeResolver) {
+        self.protocol_llvm_types.insert((category.to_string(), variant.to_string()), resolver);
+    }
+
+    /// Get the LLVM type resolver for a (category, variant) pair.
+    pub fn get_llvm_type(&self, category: &str, variant: &str) -> Option<&LlvmTypeResolver> {
+        self.protocol_llvm_types.get(&(category.to_string(), variant.to_string()))
     }
 
     /// Insert a base lane between two protocol categories.
@@ -431,7 +489,7 @@ impl CastingGraph {
     ///
     /// Compiler constructs not stored in the universe (Bits, Ptr, Void, HashWord) are
     /// handled directly as permitted exceptions (Rule 18a).
-    pub fn type_to_protocol(&self, universe: &crate::type_universe::TypeUniverse, ty: &Type) -> (String, String) {
+    pub fn type_to_protocol(&self, universe: &TypeUniverse, ty: &Type) -> (String, String) {
         match ty {
             // Compiler constructs (not in universe) — permitted direct handling per Rule 18a.
             Type::Bits(_) => return ("Bit".to_string(), String::new()),
@@ -470,6 +528,63 @@ impl CastingGraph {
             // Every type is a member of #Bit via Cast.#Bit injection in normalizer.
             ("Bit".to_string(), String::new())
         }
+    }
+
+    // ── LLVM Type Resolution ──────────────────────────────────────────
+
+    /// Resolve the LLVM type string for a given Brief type.
+    ///
+    /// Derived from (protocol, metadata) by the casting graph. This replaces
+    /// the normalizer's three-phase llvm_type derivation and primordial
+    /// llvm_type properties.
+    ///
+    /// Width resolution priority (WidthParametric protocols):
+    /// 1. `!> bits: N` — exact width (hard contract)
+    /// 2. `!> maxbits: N` — upper bound
+    /// 3. `!> minbits: N` — lower bound
+    /// 4. `int_bits` — target default (64 for x86_64, 32 for wasm32)
+    pub fn resolve_llvm_type(&self, universe: &TypeUniverse, ty: &Type, int_bits: u64) -> String {
+        // Compiler constructs handled directly
+        match ty {
+            Type::Ptr(_) | Type::PtrConst(_) => return "ptr".to_string(),
+            Type::Bits(n) => return format!("i{}", n * 8),
+            Type::Void => return "void".to_string(),
+            _ => {}
+        }
+
+        let (category, variant) = self.type_to_protocol(universe, ty);
+        match self.get_llvm_type(&category, &variant) {
+            Some(LlvmTypeResolver::Fixed(ty_str)) => return ty_str.to_string(),
+            Some(LlvmTypeResolver::WidthParametric) => {
+                // Check metadata from universe entry
+                let key = ty.universe_key().and_then(|k| universe.get(k));
+                let bits = key.and_then(|rt| {
+                    // Priority: !> bits → !> maxbits → !> minbits
+                    rt.properties.get("bits")
+                        .or_else(|| rt.properties.get("maxbits"))
+                        .or_else(|| rt.properties.get("minbits"))
+                        .and_then(|pv| match pv {
+                            PropertyValue::Int(n) => Some(*n as u64),
+                            _ => None,
+                        })
+                }).unwrap_or(int_bits);
+                return format!("i{}", bits);
+            }
+            None => {}
+        }
+
+        // Fallback for non-protocol types (plain structs, user types without protocol)
+        if let Some(rt) = ty.universe_key().and_then(|k| universe.get(k)) {
+            if !rt.fields.is_empty() {
+                let field_tys: Vec<String> = rt.fields.iter()
+                    .map(|(_, fty)| self.resolve_llvm_type(universe, fty, int_bits))
+                    .collect();
+                return format!("{{ {} }}", field_tys.join(", "));
+            }
+        }
+
+        // Ultimate fallback
+        "i64".to_string()
     }
 }
 

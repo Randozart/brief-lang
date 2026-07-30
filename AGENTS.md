@@ -164,6 +164,107 @@ if it becomes obsolete. Temporary solutions are explicitly flagged with
 `// TEMP: YYYY-MM-DD: <reason>` and describe the path to permanence.
 This prevents "I'll fix it later" from fossilizing into architecture.
 
+## Type Philosophy: Protocol + Metadata
+
+Types are **protocol + metadata**. Nothing else. No cached LLVM type, no
+precomputed layout, no name-based lookup. The system has been wrong about
+this too many times — get it right now and never again.
+
+### What a type IS
+
+```
+type Int: #Int;                           // protocol-only
+type Int32: #Int { !> bits: 32; };        // protocol + width metadata
+type Float64: #Float { !> bits: 64; };    // protocol + width metadata
+type String: #String;                     // protocol-only
+type BFloat: #Float<BFloat>;              // protocol variant (no disamb hack)
+```
+
+That is the complete definition. No fields, no `llvm_type`, no `primitive <~`,
+no `ctd`, no `alu`. Everything else is derived from `(protocol, metadata)`
+by the casting graph at codegen time.
+
+### What a type is NOT
+
+- **NOT a name match.** `t == "Int"` in Rust code is ALWAYS wrong.
+  Query `is_protocol_member(ty, "#Int")` via the casting graph instead.
+  Rule 18 exists precisely because this mistake has been made repeatedly.
+
+- **NOT a cached llvm_type property.** `ResolvedType.properties["llvm_type"]`
+  does not exist. The LLVM type is derived on demand by the casting graph's
+  `resolve_llvm_type()`. The normalizer registers types in the universe;
+  it does NOT resolve types.
+
+- **NOT a disamb workaround.** `#Float<BFloat>` is a hardcoded protocol
+  variant in the casting graph. The `disamb` metadata hack is removed.
+  If the compiler needs to distinguish two representations of the same width,
+  it hardcodes a protocol variant — it does NOT add a metadata key that
+  codegen must check.
+
+- **NOT a struct shape.** String has `{ i64, i64 }` in LLVM because the
+  casting graph says `#String → Fixed("{ i64, i64 }")`, not because the
+  normalizer computes field layout. A type with no protocol (a plain struct)
+  derives its LLVM type from field shapes, but a type with protocol membership
+  gets its LLVM type from the protocol.
+
+### Width resolution
+
+`!> bits: N` is a shortcut for `!> minbits: N; !> maxbits: N;`. It asserts
+that the type is **exactly** N bits wide on every target — a hard contract,
+not a hint.
+
+Width resolution priority (for `WidthParametric` protocols `#Int`, `#UInt`, `#Bit`):
+1. `!> bits: N` → exact width, emitted as `iN`
+2. `!> maxbits: N` → upper bound (optimizer may narrow, never widen past N)
+3. `!> minbits: N` → lower bound (optimizer may narrow down to N, no further)
+4. `int_bits` → target default (e.g., 64 for x86_64, 32 for wasm32)
+
+`!> bits: 32` means "this type IS 32 bits, on every target, no negotiation."
+
+### The normalizer's job
+
+The normalizer (`register_typedefs()`) has ONE job: register types in the
+TypeUniverse with their protocol membership, metadata, bytes, and alignment.
+It does NOT:
+- Resolve LLVM types (that's the casting graph's job)
+- Inject `Cast.#` properties (that's the casting graph's job)
+- Compute `llvm_type` (it doesn't exist)
+- Apply `disamb` hacks (they don't exist)
+
+If you find yourself adding type-resolution logic to the normalizer, stop.
+Put it in the casting graph.
+
+### Protocol variants
+
+Well-known sub-protocols are hardcoded in the casting graph with known LLVM types:
+
+| Variant | LLVM type |
+|---------|-----------|
+| `#Float<BFloat>` | `bfloat` |
+| `#Float<Half>` | `half` |
+| `#Float<IEEE754>` | `float` |
+| `#Float<Double>` | `double` |
+| `#Float<FP128>` | `fp128` |
+| `#Float<X86_FP80>` | `x86_fp80` |
+| `#String<UTF8>` | `{ i64, i64 }` |
+| `#String<ASCII>` | `{ i64, i64 }` |
+
+This removes the `disamb` metadata hack. If you need to distinguish two
+representations of the same bit width, add a hardcoded protocol variant
+to the casting graph. Do NOT add a new metadata property that codegen
+must check on every type.
+
+### The casting graph is the single source of truth
+
+The `CastingGraph` owns:
+1. **Cast paths** between protocols (`find_path()`)
+2. **LLVM type resolution** (`resolve_llvm_type()`)
+3. **Protocol variant membership** (hardcoded variants + proto declarations)
+
+Every codegen site that needs to know "what LLVM type does this Brief type
+have?" calls `self.ctx.casting_graph.resolve_llvm_type(universe, ty, int_bits)`.
+No exceptions. No special cases. No fallbacks to `rt.properties["llvm_type"]`.
+
 ## Golden Rules
 
 1. **CONTRACT-FIRST**: Contracts are the source of truth. Never weaken
@@ -299,20 +400,23 @@ This prevents "I'll fix it later" from fossilizing into architecture.
      ensures they are adopted incrementally without dedicated refactoring passes.
 
  18. **NO TYPE NAME MATCHING**: Never match on Brief type names (`t == "Int"`,
-     `t == "Float"`, `s == "String"`) in Rust code. The type's LLVM representation,
-     protocol category, boxing behavior, and ABI width are derived from its
-     `ResolvedType` in the `TypeUniverse` — specifically the `llvm_type` property,
-     `max_bits`/`min_bits` bounds, and `Cast.#<Protocol>` properties. These are
-     populated by the PRIMORDIALS table and the normalizer. The only exceptions
-     are: (a) `Type::Ptr(_)` and `Type::Vector(_, _)` — compiler constructs not
-     stored in the universe, (b) `Type::Bits(N)` — a width construct, and
-     (c) the `tbaa_node` function — operates on LLVM IR type strings, not Brief
-     type names. Everything else must go through the universe.
+      `t == "Float"`, `s == "String"`) in Rust code. The type's LLVM representation,
+      protocol category, boxing behavior, and ABI width are derived from its
+      `ResolvedType` in the `TypeUniverse` and the `CastingGraph` — specifically
+      the `max_bits`/`min_bits` bounds, protocol membership via the casting graph's
+      `resolve_llvm_type()`, and cast paths via `find_path()`. These are
+      populated by the PRIMORDIALS table, the normalizer, and the casting graph's
+      hardcoded protocol lanes. The only exceptions
+      are: (a) `Type::Ptr(_)` and `Type::Vector(_, _)` — compiler constructs not
+      stored in the universe, (b) `Type::Bits(N)` — a width construct, and
+      (c) the `tbaa_node` function — operates on LLVM IR type strings, not Brief
+      type names. Everything else must go through the universe or the casting graph.
 
-     **DO**:  `self.is_protocol_member(&ty, "#Float")`
-     **DON'T**: `t == "Float"` or `type_is(&universe, ty, "Float")`
+      **DO**:  `self.is_protocol_member(&ty, "#Float")`
+      **DON'T**: `t == "Float"` or `type_is(&universe, ty, "Float")`
 
-     **DO**:  `self.ctx.type_universe.and_then(|u| u.get(key)).map(|rt| rt.properties.get("llvm_type"))`
+      **DO**:  `self.ctx.casting_graph.as_ref().map(|g| g.resolve_llvm_type(universe, ty, int_bits))`
+      **DON'T**: `universe.get(key).map(|rt| rt.properties.get("llvm_type"))`
      **DON'T**: `match s.as_str() { "Int" => "i64", "Float" => "float", ... }`
 
      Violations are caught by code review and automated audit. A `git grep`

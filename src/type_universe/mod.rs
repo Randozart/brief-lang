@@ -83,49 +83,69 @@ impl TypeUniverse {
     /// from bytes) doesn't re-derive well-known types as raw integers.
     /// Hashword op signatures are the new dispatch mechanism.
     fn seed_primordial_types(&mut self) {
-        // Table: (name, bytes, min_bits, max_bits, alignment, llvm_type)
+        // 2026-07-30: Bit is the axiomatic anchor — NOT a primordial.
+        // It cannot be overloaded or redeclared. Primordials are
+        // overrideable; Bit is the compiler's sole hardcoded constant.
+        self.types.insert("Bit".to_string(), ResolvedType {
+            name: "Bit".to_string(),
+            base: "Bit".to_string(),
+            bytes: 0,
+            min_bits: 0,
+            max_bits: 0,
+            alignment: 0,
+            properties: {
+                let mut p = std::collections::HashMap::new();
+                p.insert("Cast.#Bit".into(), crate::ast::PropertyValue::Bool(true));
+                p
+            },
+            fields: vec![],
+        });
+
+        // Table: (name, bytes, min_bits, max_bits, alignment, &[(&str, &str)])
         // bytes is the exact width for fixed types; min_bits/max_bits is
         // the range for flexible types (Int has max_bits=64, min_bits=0).
-        const PRIMORDIALS: &[(&str, u64, u64, u64, u64, &str, &[(&str, &str)])] = &[
+        // 2026-07-30: These are overrideable by stdlib — adding a type
+        // declaration of the same name in bootstrap.bv replaces the
+        // primordial entry without error.
+        // 2026-07-30: No llvm_type column — LLVM type is resolved by the
+        // casting graph from (protocol, metadata). See resolve_llvm_type().
+        const PRIMORDIALS: &[(&str, u64, u64, u64, u64, &[(&str, &str)])] = &[
             // 2026-07-29: Flexible protocol types — all fields resolved by normalizer from int_bits.
             // No baked-in width, alignment, or bytes. Every value is 0 = "not yet resolved."
-            ("Int",    0, 0, 0,  0, "", &[("Cast.#Int", "true"), ("Cast.#Bit", "true")]),
-            ("UInt",   0, 0, 0,  0, "", &[("Cast.#UInt", "true"), ("Cast.#Bit", "true")]),
-            ("Bit",    0, 0, 0,  0, "", &[("Cast.#Bit", "true")]),
+            ("Int",    0, 0, 0,  0, &[("Cast.#Int", "true"), ("Cast.#Bit", "true")]),
+            ("UInt",   0, 0, 0,  0, &[("Cast.#UInt", "true"), ("Cast.#Bit", "true")]),
             // Fixed-width integer types — exact bit width is absolute
-            ("Int8",   1, 8, 8,  1, "i8", &[("Cast.#Int", "true"), ("Cast.#Bit", "true")]),
-            ("UInt8",  1, 8, 8,  1, "i8", &[("Cast.#UInt", "true"), ("Cast.#Bit", "true")]),
-            ("Int16",  2, 16, 16, 2, "i16", &[("Cast.#Int", "true"), ("Cast.#Bit", "true")]),
-            ("UInt16", 2, 16, 16, 2, "i16", &[("Cast.#UInt", "true"), ("Cast.#Bit", "true")]),
-            ("Int32",  4, 32, 32, 4, "i32", &[("Cast.#Int", "true"), ("Cast.#Bit", "true")]),
-            ("UInt32", 4, 32, 32, 4, "i32", &[("Cast.#UInt", "true"), ("Cast.#Bit", "true")]),
-            ("Int64",  8, 64, 64, 8, "i64", &[("Cast.#Int", "true"), ("Cast.#Bit", "true")]),
-            ("UInt64", 8, 64, 64, 8, "i64", &[("Cast.#UInt", "true"), ("Cast.#Bit", "true")]),
-            ("Int128", 16, 128, 128, 16, "i128", &[("Cast.#Int", "true"), ("Cast.#Bit", "true")]),
-            ("UInt128",16, 128, 128, 16, "i128", &[("Cast.#UInt", "true"), ("Cast.#Bit", "true")]),
+            ("Int8",   1, 8, 8,  1, &[("Cast.#Int", "true"), ("Cast.#Bit", "true")]),
+            ("UInt8",  1, 8, 8,  1, &[("Cast.#UInt", "true"), ("Cast.#Bit", "true")]),
+            ("Int16",  2, 16, 16, 2, &[("Cast.#Int", "true"), ("Cast.#Bit", "true")]),
+            ("UInt16", 2, 16, 16, 2, &[("Cast.#UInt", "true"), ("Cast.#Bit", "true")]),
+            ("Int32",  4, 32, 32, 4, &[("Cast.#Int", "true"), ("Cast.#Bit", "true")]),
+            ("UInt32", 4, 32, 32, 4, &[("Cast.#UInt", "true"), ("Cast.#Bit", "true")]),
+            ("Int64",  8, 64, 64, 8, &[("Cast.#Int", "true"), ("Cast.#Bit", "true")]),
+            ("UInt64", 8, 64, 64, 8, &[("Cast.#UInt", "true"), ("Cast.#Bit", "true")]),
+            ("Int128", 16, 128, 128, 16, &[("Cast.#Int", "true"), ("Cast.#Bit", "true")]),
+            ("UInt128",16, 128, 128, 16, &[("Cast.#UInt", "true"), ("Cast.#Bit", "true")]),
             // Floating-point types — bit-width is accuracy, not maximum storage.
             // Each float type carries an explicit bits property for the normalizer.
-            ("Half",   2, 16, 16, 2, "half", &[("Cast.#Float", "true"), ("Cast.#Bit", "true"), ("bits", "16")]),
-            ("BFloat", 2, 16, 16, 2, "bfloat", &[("disamb", "bfloat"), ("Cast.#Float", "true"), ("Cast.#Bit", "true"), ("bits", "16")]),
-            ("Float",  4, 32, 32, 4, "float", &[("Cast.#Float", "true"), ("Cast.#Bit", "true"), ("bits", "32")]),
-            ("Float32",4, 32, 32, 4, "float", &[("Cast.#Float", "true"), ("Cast.#Bit", "true"), ("bits", "32")]),
-            ("Float64",8, 64, 64, 8, "double", &[("Cast.#Float", "true"), ("Cast.#Bit", "true"), ("bits", "64")]),
-            ("Double", 8, 64, 64, 8, "double", &[("Cast.#Float", "true"), ("Cast.#Bit", "true"), ("bits", "64")]),
-            ("X86_FP80",10, 80, 80, 4, "x86_fp80", &[("Cast.#Float", "true"), ("Cast.#Bit", "true"), ("bits", "80")]),
-            ("FP128",  16, 128, 128, 16, "fp128", &[("Cast.#Float", "true"), ("Cast.#Bit", "true"), ("bits", "128")]),
+            ("Half",   2, 16, 16, 2, &[("Cast.#Float", "true"), ("Cast.#Bit", "true"), ("bits", "16")]),
+            ("BFloat", 2, 16, 16, 2, &[("Cast.#Float", "true"), ("Cast.#Bit", "true"), ("bits", "16")]),
+            ("Float",  4, 32, 32, 4, &[("Cast.#Float", "true"), ("Cast.#Bit", "true"), ("bits", "32")]),
+            ("Float32",4, 32, 32, 4, &[("Cast.#Float", "true"), ("Cast.#Bit", "true"), ("bits", "32")]),
+            ("Float64",8, 64, 64, 8, &[("Cast.#Float", "true"), ("Cast.#Bit", "true"), ("bits", "64")]),
+            ("Double", 8, 64, 64, 8, &[("Cast.#Float", "true"), ("Cast.#Bit", "true"), ("bits", "64")]),
+            ("X86_FP80",10, 80, 80, 4, &[("Cast.#Float", "true"), ("Cast.#Bit", "true"), ("bits", "80")]),
+            ("FP128",  16, 128, 128, 16, &[("Cast.#Float", "true"), ("Cast.#Bit", "true"), ("bits", "128")]),
             // Other
-            ("Bool",   1, 8, 8,  1, "i8", &[("Cast.#Bool", "true"), ("Cast.#Bit", "true")]),
-            ("Char",   4, 32, 32, 4, "i32", &[("Cast.#Bit", "true")]),
-            ("Data",   8, 64, 64, 8, "ptr", &[("Cast.#Data", "true"), ("Cast.#Bit", "true")]),
-            ("Void",   0, 0,  0,  0, "void", &[]),
+            ("Bool",   1, 8, 8,  1, &[("Cast.#Bool", "true"), ("Cast.#Bit", "true")]),
+            ("Char",   4, 32, 32, 4, &[("Cast.#Bit", "true")]),
+            ("Data",   8, 64, 64, 8, &[("Cast.#Data", "true"), ("Cast.#Bit", "true")]),
+            ("Void",   0, 0,  0,  0, &[]),
         ];
-        for &(name, bytes, min_bits, max_bits, alignment, llvm_ty, extras) in PRIMORDIALS {
+        for &(name, bytes, min_bits, max_bits, alignment, extras) in PRIMORDIALS {
             let mut properties = std::collections::HashMap::new();
-            properties.insert("llvm_type".into(), crate::ast::PropertyValue::String(llvm_ty.to_string()));
             properties.insert("alignment".into(), crate::ast::PropertyValue::Int(alignment as i64));
             for &(k, v) in extras {
-                // 2026-07-29: Numeric extras (bits, maxbits) are stored as Int so
-                // the normalizer's get_exact_bits/get_maxbits can read them directly.
+                // 2026-07-30: Numeric extras (bits, maxbits) are stored as Int so
                 if let Ok(n) = v.parse::<i64>() {
                     properties.insert(k.to_string(), crate::ast::PropertyValue::Int(n));
                 } else {
@@ -144,11 +164,10 @@ impl TypeUniverse {
             });
         }
         // 2026-07-18: String primordial — 2-field struct (data: Int, len: Int)
-        // llvm_type is "{ i64, i64 }" (SSO-capable struct). The hashword
-        // protocol (#String category ops) drives codegen behavior.
+        // The casting graph resolves String's LLVM type as Fixed("{ i64, i64 }")
+        // from #String protocol membership. No llvm_type property needed.
         {
             let mut p = std::collections::HashMap::new();
-            p.insert("llvm_type".into(), crate::ast::PropertyValue::String("{ i64, i64 }".to_string()));
             p.insert("alignment".into(), crate::ast::PropertyValue::Int(8));
             self.types.insert("String".to_string(), ResolvedType {
                 name: "String".to_string(),

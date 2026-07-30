@@ -5,17 +5,6 @@ use crate::type_universe::{ResolvedType, TypeUniverse};
 use std::fmt::Write;
 use std::sync::LazyLock;
 
-/// Derive LLVM type string from a ResolvedType.
-/// 2026-07-20: Reads from normalizer-set llvm_type property exclusively.
-/// Every properly normalized type has llvm_type stamped by the normalizer.
-fn rt_llvm_type(rt: &ResolvedType) -> String {
-    if let Some(crate::ast::PropertyValue::String(s)) = rt.properties.get("llvm_type") {
-        return s.clone();
-    }
-    // Safety net: bytes-based fallback
-    format!("i{}", rt.bytes * 8)
-}
-
 impl LlvmBackend {
     /// Check if any modifier has the given name and extract its export name.
     /// Returns Some(export_name) if #export or #export("name") was found.
@@ -304,27 +293,26 @@ impl LlvmBackend {
         // This handles Slice<T> (fields: { Ptr<T>, Int } → { ptr, i64 }),
         // List<T>, and any future struct type without requiring llvm_type
         // metadata or primordial entries. Must come AFTER the SSO/SVO/String
-        // special cases but BEFORE the universe llvm_type property lookup.
+        // special cases but BEFORE the casting graph resolution.
         if let Some(rt) = self.ctx.type_universe.as_ref()
             .and_then(|u| ty.universe_key().and_then(|k| u.get(k)))
         {
-            if !rt.fields.is_empty()
-                && !rt.properties.contains_key("llvm_type")
-            {
+            if !rt.fields.is_empty() {
                 let field_tys: Vec<String> = rt.fields.iter()
                     .map(|(_, fty)| self.llvm_type(fty))
                     .collect();
                 return format!("{{ {} }}", field_tys.join(", "));
             }
         }
-        // 2026-07-14: Universe query reads llvm_type property set by normalizer.
-        // After Phase 0d, the normalizer resolves Int/UInt from protocol + int_bits,
-        // so no name-based override is needed. Fixed-width types (Int32, Float) have
-        // their primordial llvm_type preserved.
-        self.ctx.type_universe.as_ref()
-            .and_then(|u| ty.universe_key().and_then(|k| u.get(k)))
-            .map(rt_llvm_type)
-            .unwrap_or_else(|| Self::fallback_llvm_type(ty).to_string())
+        // 2026-07-30: Casting graph resolves LLVM type from (protocol, metadata).
+        // This replaces the old universe llvm_type property lookup.
+        // Types without protocol membership fall through to fallback_llvm_type.
+        if let Some(graph) = self.ctx.casting_graph.as_ref() {
+            if let Some(universe) = self.ctx.type_universe.as_ref() {
+                return graph.resolve_llvm_type(universe, ty, self.ctx.int_bits);
+            }
+        }
+        Self::fallback_llvm_type(ty).to_string()
     }
 
 
@@ -570,15 +558,12 @@ impl LlvmBackend {
     }
 
     pub(super) fn align_of(&self, ty: &str) -> u32 {
-        // 2026-07-29: Alignment is the bit-width of the resolved LLVM type.
-        // Flexible types (Int, UInt, Bit) have alignment 0 in the primordial
-        // table — their width is resolved by the normalizer from int_bits +
-        // protocol membership. The universe stores explicit alignment for
-        // fixed-width types (Int64→8, Float→4). Zero-alignment entries
-        // are skipped so the fallback computes alignment from llvm_type.
+        // 2026-07-30: Query the casting graph to find the alignment by
+        // comparing against resolved LLVM types for all universe entries.
         if let Some(u) = &self.ctx.type_universe {
             for rt in u.types.values() {
-                if rt_llvm_type(rt) == ty && rt.alignment > 0 {
+                let rt_ll = self.llvm_type(&Type::Custom(rt.name.clone()));
+                if rt_ll == ty && rt.alignment > 0 {
                     return rt.alignment as u32;
                 }
             }
