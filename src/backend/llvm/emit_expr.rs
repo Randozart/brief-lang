@@ -2445,7 +2445,7 @@ impl LlvmBackend {
 
     /// Try to resolve a cast through the casting graph protocol path.
     /// Returns None if no path exists (caller falls back to LLVM coercion).
-    fn emit_cast_path(
+    pub(super) fn emit_cast_path(
         &mut self, out: &mut String, v: &str,
         src: &TypedRegister, target: &Type, indent: &str,
     ) -> Option<TypedRegister> {

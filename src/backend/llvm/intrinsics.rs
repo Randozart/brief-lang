@@ -1003,11 +1003,8 @@ fn emit_intrinsic_index(
 }
 
 // ── Cast Resolution Pipeline ───────────────────────────────────────────
-// 2026-07-20: Cast#(source, target) resolves in this order:
-//   1. op Cast(Target) on source — direct type-to-type
-//   2. CastTo(#Category) → CastFrom(#Category) — protocol path
-//   3. meld Source <-> Target — structural bit shuffle
-//   4. Implicit Cast(#Bits) — raw bitcast (always available)
+// 2026-07-30: Cast#(source, target) resolved by casting graph.
+// Falls back to LLVM bitcast when no graph path exists.
 
 fn emit_intrinsic_cast(
     backend: &mut LlvmBackend, out: &mut String, v: &str,
@@ -1015,160 +1012,30 @@ fn emit_intrinsic_cast(
 ) -> BTypedRegister {
     if args.len() < 2 { return BTypedRegister { name: v.to_string(), ty: Type::int() }; }
     let src = backend.emit_expr(out, &args[0], indent);
+
+    // Extract target type from second argument
+    let target = extract_type_from_expr(&args[1]).unwrap_or(Type::int());
+
+    // Try casting graph path first
+    if let Some(result) = backend.emit_cast_path(out, v, &src, &target, indent) {
+        return BTypedRegister { name: result.name, ty: target };
+    }
+
+    // Fallback: LLVM bitcast
     let src_ll = backend.llvm_type(&src.ty);
-    let target_ll = if src.ty == Type::float64() { "double" } else if src.ty == Type::float() { "float" } else { "i64" };
-
-    // Step 1: Check for direct op Cast(Target) on source type
-    let src_name = type_name_str(&src.ty);
-    if let Some(name) = &src_name {
-        if let Some(impl_args) = find_cast_impl(backend, name, "Cast") {
-            let result = emit_simple_call(backend, out, v, &src, &impl_args, "i64", indent);
-            return BTypedRegister { name: result, ty: src.ty.clone() };
-        }
-    }
-
-    // Step 2: Check for CastTo(#Category) → CastFrom(#Category) protocol path
-    if let (Some(s_name), Some(t_name)) = (src_name.as_ref(), type_name_str_from_llvm(&target_ll).as_ref()) {
-        let protocol_path = try_cast_protocol_path(backend, s_name, t_name);
-        if let Some(impl_args) = protocol_path {
-            let result = emit_simple_call(backend, out, v, &src, &impl_args, "i64", indent);
-            return BTypedRegister { name: result, ty: src.ty.clone() };
-        }
-    }
-
-    // Step 3: Check for meld shuffle metadata (structural bit remapping)
-    let shuffle_data: Option<Vec<(u64, u64, u64)>> = (|| {
-        let tu = backend.ctx.type_universe.as_ref()?;
-        let key = src.ty.universe_key()?;
-        let rt = tu.get(key)?;
-        let fields: Vec<String> = rt.properties.keys()
-            .filter(|k| k.starts_with("shuffle.") && k.ends_with(".src_offset"))
-            .map(|k| k.strip_prefix("shuffle.").unwrap()
-                 .strip_suffix(".src_offset").unwrap().to_string())
-            .collect();
-        if fields.is_empty() { return None; }
-        let data: Vec<(u64, u64, u64)> = fields.iter().map(|f| {
-            let src_off = get_shuffle_int_owned(&rt.properties, &format!("shuffle.{}.src_offset", f));
-            let src_wid = get_shuffle_int_owned(&rt.properties, &format!("shuffle.{}.src_width", f));
-            let dst_off = get_shuffle_int_owned(&rt.properties, &format!("shuffle.{}.dst_offset", f));
-            (src_off, src_wid, dst_off)
-        }).collect();
-        Some(data)
-    })();
-    if let Some(data) = shuffle_data {
-        if !data.is_empty() {
-            return emit_meld_shuffle(backend, out, v, &src, &data, indent);
-        }
-    }
-
-    // Step 4: Implicit Cast(#Bits) — raw bitcast
+    let target_ll = backend.llvm_type(&target);
     writeln!(out, "{}{} = bitcast {} {} to {}", indent, v, src_ll, src.name, target_ll).ok();
-    BTypedRegister { name: v.to_string(), ty: src.ty.clone() }
+    BTypedRegister { name: v.to_string(), ty: target }
 }
 
-/// 2026-07-20: Emit lshr/and/shl/or sequence for meld structural remapping.
-pub(super) fn emit_meld_shuffle(
-    backend: &mut LlvmBackend, out: &mut String, v: &str,
-    src: &BTypedRegister, shuffle_data: &[(u64, u64, u64)],
-    indent: &str,
-) -> BTypedRegister {
-    let mut acc = backend.fun.gen_reg();
-    writeln!(out, "{}{} = add i64 0, 0", indent, acc).ok();
-
-    for &(src_offset, src_width, dst_offset) in shuffle_data {
-        let shifted = backend.fun.gen_reg();
-        let masked = backend.fun.gen_reg();
-        let repositioned = backend.fun.gen_reg();
-        let mask = if src_width < 64 { (1u64 << src_width) - 1 } else { !0u64 };
-
-        writeln!(out, "{}{} = lshr i64 {}, {}", indent, shifted, src.name, src_offset).ok();
-        writeln!(out, "{}{} = and i64 {}, {}", indent, masked, shifted, mask).ok();
-        writeln!(out, "{}{} = shl i64 {}, {}", indent, repositioned, masked, dst_offset).ok();
-        writeln!(out, "{}{} = or i64 {}, {}", indent, acc, acc, repositioned).ok();
-    }
-
-    BTypedRegister { name: acc, ty: src.ty.clone() }
-}
-
-/// Extract type name string from a Type for operator_defs lookup.
-pub(super) fn type_name_str(ty: &Type) -> Option<String> {
-    match ty {
-        Type::Custom(n) | Type::Applied(n, _) => Some(n.clone()),
+/// Extract a Type from an Expr that represents a type name.
+fn extract_type_from_expr(expr: &Expr) -> Option<Type> {
+    match expr {
+        Expr::Identifier(name) => Some(Type::Custom(name.clone())),
         _ => None,
     }
 }
 
-/// Extract a type name string from an LLVM type string (simplified).
-fn type_name_str_from_llvm(llvm_ty: &str) -> Option<String> {
-    // Map common LLVM types back to Brief type names
-    match llvm_ty {
-        "double" => Some("Float64".to_string()),
-        "float" => Some("Float".to_string()),
-        "i64" => Some("Int".to_string()),
-        _ => None,
-    }
-}
-
-/// Find a Cast/CastTo/CastFrom implementation on a type via operator_defs.
-pub(super) fn find_cast_impl(backend: &LlvmBackend, type_name: &str, op_name: &str) -> Option<crate::ast::PropertyValue> {
-    let defs = backend.ctx.operator_defs.get(type_name)?;
-    for d in defs {
-        if d.op == op_name && d.impl_args.is_some() {
-            return d.impl_args.clone();
-        }
-    }
-    None
-}
-
-/// Find a matching CastTo → CastFrom pair between two types.
-pub(super) fn try_cast_protocol_path(backend: &LlvmBackend, src_name: &str, dst_name: &str) -> Option<crate::ast::PropertyValue> {
-    let src_defs = backend.ctx.operator_defs.get(src_name)?.clone();
-    let dst_defs = backend.ctx.operator_defs.get(dst_name)?.clone();
-
-    let cast_to = src_defs.iter().find(|d| d.op == "CastTo" && d.impl_args.is_some())?.clone();
-    let cast_cat = category_from_params(&cast_to.params).map(|s| s.to_string());
-
-    let cast_from = dst_defs.iter().find(|d| {
-        d.op == "CastFrom" && d.impl_args.is_some()
-            && category_from_params(&d.params).map(|s| s.to_string()) == cast_cat
-    })?.clone();
-
-    cast_to.impl_args
-}
-
-fn category_from_params(params: &[Type]) -> Option<&str> {
-    if params.len() != 1 { return None; }
-    match &params[0] {
-        Type::HashWord(s) => Some(s.strip_prefix('#').unwrap_or(s)),
-        Type::HashWordVariant(s, _) => Some(s.strip_prefix('#').unwrap_or(s)),
-        _ => None,
-    }
-}
-
-/// Emit a simple function call with a single argument.
-/// `out_ll_ty` is the LLVM return type string (e.g., "i64", "{ i64, i64 }").
-/// Must match the actual return type of the called function.
-pub(super) fn emit_simple_call(
-    backend: &mut LlvmBackend, out: &mut String, v: &str,
-    src: &BTypedRegister, impl_args: &crate::ast::PropertyValue,
-    out_ll_ty: &str, indent: &str,
-) -> String {
-    let fn_name = match impl_args {
-        crate::ast::PropertyValue::Identifier(s) => s.clone(),
-        _ => return v.to_string(),
-    };
-    let ll_ty = backend.llvm_type(&src.ty);
-    writeln!(out, "{}{} = call {} @{}({} {})", indent, v, out_ll_ty, fn_name, ll_ty, src.name).ok();
-    v.to_string()
-}
-
-fn get_shuffle_int_owned(properties: &std::collections::HashMap<String, crate::ast::PropertyValue>, key: &str) -> u64 {
-    properties.get(key)
-        .and_then(|pv| if let crate::ast::PropertyValue::Int(n) = pv { Some(*n as u64) } else { None })
-        .unwrap_or(0)
-}
-
-// ─── External call fallback ──────────────────────────────────────────
 
 fn emit_external_call(
     backend: &mut LlvmBackend, out: &mut String, v: &str, name: &str,
