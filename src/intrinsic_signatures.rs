@@ -69,7 +69,6 @@ pub fn get_intrinsic_signature(name: &str) -> Option<Signature> {
         // ── Pointer operations ─────────────────────────────────────────
         "Deref#" => Some(Signature { name: "Deref#", parameters: vec![], return_kind: ReturnKind::Inferred, observable: false, variadic: false }),
         "Index#" => Some(Signature { name: "Index#", parameters: vec![], return_kind: ReturnKind::Inferred, observable: false, variadic: false }),
-        "Cast#" => Some(Signature { name: "Cast#", parameters: vec![], return_kind: ReturnKind::Inferred, observable: false, variadic: false }),
         "Ptr#" => Some(Signature { name: "Ptr#", parameters: vec![], return_kind: ReturnKind::Inferred, observable: false, variadic: false }),
 
         // ── Float math (returns native Float) ─────────────────────────
