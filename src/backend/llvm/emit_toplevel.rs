@@ -246,12 +246,16 @@ impl LlvmBackend {
         if matches!(ty, Type::Ptr(_)) {
             return "ptr".to_string();
         }
-        // 2026-07-18: UTF8View always uses {i64, i64} (fat pointer), regardless of SSO.
-        // Must be checked BEFORE the general struct_types check because UTF8View is
-        // also registered as a struct type but should be passed by value, not by pointer.
+        // 2026-07-18: UTF8View/Slice always use {ptr, i64} or {i64, i64} (fat pointer),
+        // regardless of SSO. Must be checked BEFORE the general struct_types check
+        // because they are also registered as struct types but should be passed by value.
+        // 2026-07-30: Slice<T> replaces UTF8View. UTF8View kept for backward compat.
         if let Type::Custom(name) = ty {
             if name == "UTF8View" {
                 return "{ i64, i64 }".to_string();
+            }
+            if name == "Slice" {
+                return "{ ptr, i64 }".to_string();
             }
         }
         // 2026-07-10: Phase 1 — check for user-defined struct types first.
