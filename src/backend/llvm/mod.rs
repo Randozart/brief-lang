@@ -221,6 +221,10 @@ fn remap_stmt_identifiers(s: &mut Statement, map: &HashMap<String, String>) {
                 remap_stmt_identifiers(stmt, map);
             }
         }
+        Statement::Let { expr: Some(e), .. } => {
+            remap_expr_into(e, map);
+        }
+        Statement::Let { expr: None, .. } => {}
         _ => {}
     }
 }
@@ -234,6 +238,11 @@ fn remap_expr_into(e: &mut Expr, map: &HashMap<String, String>) {
             }
         }
         Expr::Call(_, args, _) => {
+            for arg in args.iter_mut() {
+                remap_expr_into(arg, map);
+            }
+        }
+        Expr::PluginIntercept { args, .. } => {
             for arg in args.iter_mut() {
                 remap_expr_into(arg, map);
             }
@@ -490,6 +499,12 @@ fn collect_strings_expr(expr: &Expr, seen: &mut std::collections::HashSet<String
 pub fn protocol_llvm_type(ty: &Type, universe: Option<&crate::type_universe::TypeUniverse>) -> String {
     if matches!(ty, Type::Ptr(_) | Type::Vector(_, _)) {
         return "ptr".to_string();
+    }
+    // 2026-07-30: String/UTF8View use { i64, i64 } fat-pointer representation.
+    // Check by name BEFORE the bytes-based fallback to avoid i128 (16 bytes
+    // → i128) which changes FFI ABI and triggers clang 18.1.3 LICM crashes.
+    if matches!(ty, Type::Custom(name) if name == "String" || name == "UTF8View") {
+        return "{ i64, i64 }".to_string();
     }
     if let Some(ref u) = universe {
         if let Some(rt) = ty.universe_key().and_then(|k| u.get(k)) {

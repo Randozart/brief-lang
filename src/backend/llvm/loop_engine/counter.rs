@@ -619,18 +619,40 @@ impl LlvmBackend {
         writeln!(out, "  br label %.inner_{}", c0).ok();
 
         // ── Inner Exit / Outer Body ──────────────────────────────
-        // The inner loop completed one batch. Store final values to %state
-        // so the outer body and subsequent batches can read them.
+        // The inner loop completed one batch. Emit guard statements here
+        // where all phi registers from the inner loop header are valid
+        // (.inner_124 dominates .inner_exit_124).
         writeln!(out, "{}:", inner_exit_label).ok();
-        // At this point, i_counter is the value that FAILED the exit check,
-        // meaning i_counter >= inner_end. The inner loop is done.
-        // Store the final counter and field values to %state.
+        // Build let-to-field remapping (e.g., energy → last_energy).
+        // This maps let-bindings that are stored to state fields, so the
+        // guard body can resolve them from phi registers.
+        let mut let_to_field: HashMap<String, String> = HashMap::new();
+        for stmt in body {
+            if let Statement::Assign(lhs, Expr::Identifier(let_name)) = stmt {
+                if let Some(field_name) = lhs.as_var_name() {
+                    if self.ctx.field_index_map.contains_key(field_name) {
+                        let_to_field.insert(let_name.clone(), field_name.to_string());
+                    }
+                }
+            }
+        }
+        // Emit hoisted outer guards (periodic prints etc.) with remapped
+        // identifiers so let-bindings point to state field phi registers.
+        let mut remapped_guards: Vec<Statement> = batch_info.outer_guards.clone();
+        for guard in &mut remapped_guards {
+            crate::backend::llvm::remap_stmt_identifiers(guard, &let_to_field);
+        }
+        if !remapped_guards.is_empty() {
+            // Clear last_val_temps so identifiers resolve to phi registers
+            // (for state fields) or state loads (for remapped let-bindings).
+            self.fun.last_val_temps.clear();
+            self.fun.last_val_types.clear();
+            self.emit_countable_body(out, &remapped_guards, write_set, &mut vec![]);
+        }
+        // Store final values to %state for the outer latch.
         let final_counter = i_counter.clone();
         for fname in &sorted_fields {
             if fname.as_str() == batch_info.counter_var { continue; }
-            if let Some(cv) = counter_var {
-                if fname.as_str() == cv { continue; }
-            }
             let phi_reg = self.fun.phi_field_regs.get(fname.as_str())
                 .cloned().unwrap_or_else(|| "0".to_string());
             if let Some(&idx) = self.ctx.field_index_map.get(fname.as_str()) {
@@ -640,15 +662,9 @@ impl LlvmBackend {
         self.emit_state_store_i64_by_idx(out, "  ", counter_idx, &final_counter);
         writeln!(out, "  br label %.ox_{}", c0).ok();
 
-        // ── Outer Body (Guard Checks + Termination) ───────────────
+        // ── Outer Body (Termination Check) ─────────────────────────
         writeln!(out, ".ox_{}:", c0).ok();
-        // 2026-07-30: Emit hoisted outer guards (periodic prints etc.)
-        // before the termination check. These run once per batch and
-        // read the state values left by the inner loop exit.
-        if !batch_info.outer_guards.is_empty() {
-            self.emit_countable_body(out, &batch_info.outer_guards, &HashSet::new(), &mut vec![]);
-        }
-        // Load the final count from %state (stored by inner exit)
+        // Load the final count from %state (stored above).
         let (final_count_load, _) = self.emit_state_load_i64_by_idx(out, "  ", counter_idx);
         // Check termination: is count >= bound?
         let done_reg = self.fun.next_reg_with_prefix("odn");
@@ -661,22 +677,15 @@ impl LlvmBackend {
 
         // ── Done / Exit ──────────────────────────────────────────
         writeln!(out, ".done_{}:", c0).ok();
-        // 2026-07-30: Emit post-loop hoisted statement groups (termination
-        // prints like when ops == TOTAL { PrintLn!(chk) }).
+        // 2026-07-30: Emit post-loop hoisted statement groups (termination prints).
+        // These read from %State (stored by inner exit above).
         let pending: Vec<Vec<Statement>> = self.fun.pending_post_hoist.clone();
         if !pending.is_empty() {
+            self.fun.phi_field_regs.clear();
+            self.fun.last_val_temps.clear();
             for group in &pending {
                 self.emit_countable_body(out, group, &HashSet::new(), &mut vec![]);
             }
-        }
-        // Emit the termination print(s) from the hoisted guards
-        // Reload the final last_energy from %state for the print
-        let energy_idx = self.ctx.field_index_map.get("last_energy").copied();
-        if let Some(ei) = energy_idx {
-            let (energy_reg, _) = self.emit_state_load_i64_by_idx(out, "  ", ei);
-            // Emit a call to __print_float for the energy value
-            writeln!(out, "  call i64 @__print_float(float {})", energy_reg).ok();
-            writeln!(out, "  call i64 @__print_char(i64 10) ; newline").ok();
         }
         writeln!(out, "  ret i32 0").ok();
 
@@ -918,6 +927,60 @@ impl LlvmBackend {
                 _ => {}
             }
             i += 1;
+        }
+    }
+
+    /// Emit a single guard statement (when cond { body } or term! -> print)
+    /// as a simple if-block, without phi backedge tracking or field write sets.
+    /// Suitable for outer loop guards and post-loop termination prints.
+    fn emit_guard_block(&mut self, out: &mut String, stmt: &Statement, indent: &str) {
+        match stmt {
+            Statement::Guarded(cond, body) => {
+                let cond_reg = self.emit_expr(out, cond, indent);
+                let bool_reg = self.as_bool_reg(out, indent, &cond_reg);
+                let body_label = format!(".ogb{}", self.fun.txn_counter);
+                let next_label = format!(".ogn{}", self.fun.txn_counter);
+                self.fun.txn_counter += 1;
+                writeln!(out, "{}br i1 {}, label %{}, label %{}", indent, bool_reg, body_label, next_label).ok();
+                writeln!(out, "{}:", body_label).ok();
+                for s in body {
+                    self.emit_guard_body_stmt(out, s, indent);
+                }
+                writeln!(out, "{}br label %{}", indent, next_label).ok();
+                writeln!(out, "{}:", next_label).ok();
+            }
+            Statement::Term(Some(e)) | Statement::Expression(e) | Statement::TermBang(Some(e)) => {
+                self.emit_expr(out, e, indent);
+            }
+            _ => {}
+        }
+    }
+
+    /// Emit a single statement inside a guard body (Let → compute, Expression → call).
+    fn emit_guard_body_stmt(&mut self, out: &mut String, stmt: &Statement, indent: &str) {
+        match stmt {
+            Statement::Let { name, expr: Some(e), .. } => {
+                let reg = self.emit_expr(out, e, indent);
+                self.fun.last_val_temps.insert(name.clone(), reg.name.clone());
+                self.fun.last_val_types.insert(name.clone(), reg.ty);
+            }
+            Statement::Expression(e) => {
+                self.emit_expr(out, e, indent);
+            }
+            Statement::Guarded(cond, body) => {
+                self.emit_guard_block(out, stmt, indent);
+            }
+            Statement::Term(Some(e)) | Statement::TermBang(Some(e)) => {
+                self.emit_expr(out, e, indent);
+            }
+            Statement::Assign(lhs, expr) => {
+                let val = self.emit_expr(out, expr, indent);
+                if let Expr::Identifier(n) = lhs {
+                    self.fun.last_val_temps.insert(n.clone(), val.name.clone());
+                    self.fun.last_val_types.insert(n.clone(), val.ty.clone());
+                }
+            }
+            _ => {}
         }
     }
 

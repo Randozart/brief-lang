@@ -131,13 +131,48 @@ impl LlvmBackend {
     ///
     /// 2026-07-10: Phase 1 — zero-copy GLUE bridge struct type declarations.
     pub(super) fn declare_struct_types(&self, out: &mut String) {
+        writeln!(out).ok();
+        // 2026-07-30: Emit known struct types from the universe (String, SmallString64,
+        // UTF8View, Slice, etc.) BEFORE user-defined struct types. These affect LLVM's
+        // struct layout and alignment computation — without them, LICM/sinkRegion in
+        // clang 18.1.3 crashes on loops that reference these types through FFI calls.
+        // Also hardcode common stdlib types that may not have universe entries if the
+        // importing benchmark doesn't reference them directly.
+        //
+        // Hardcoded stdlib struct types (always emitted for ABI consistency):
+        for (name, field_tys) in &[
+            ("SmallString64", "i64, i64, i64, i64, i64, i64, i64, i64, i64"),
+            ("StaticString", "i64, i64"),
+            ("String", "i64, i64"),
+            ("UTF8View", "i64, i64"),
+        ] {
+            writeln!(out, "%{} = type {{ {} }}", name, field_tys).ok();
+        }
+        // Universe-registered struct types (from type declarations with slots):
+        // 2026-07-30: Skip types already hardcoded above — prevents duplicate
+        // %String = type { i64, i64 } declarations that clang rejects.
+        let hardcoded: std::collections::HashSet<&str> = [
+            "SmallString64", "StaticString", "String", "UTF8View",
+        ].iter().cloned().collect();
+        if let Some(u) = &self.ctx.type_universe {
+            let mut universe_fields: Vec<(String, Vec<String>)> = Vec::new();
+            for rt in u.types.values() {
+                if rt.fields.is_empty() { continue; }
+                if hardcoded.contains(rt.name.as_str()) { continue; }
+                let field_tys: Vec<String> = rt.fields.iter()
+                    .map(|(_, fty)| self.llvm_type(fty))
+                    .collect();
+                universe_fields.push((rt.name.clone(), field_tys));
+            }
+            universe_fields.sort_by_key(|(k, _)| k.clone());
+            for (name, field_tys) in &universe_fields {
+                writeln!(out, "%{} = type {{ {} }}", name, field_tys.join(", ")).ok();
+            }
+        }
         if self.ctx.struct_types.is_empty() {
             return;
         }
-        writeln!(out).ok();
         // Iteration order MUST be sorted by key for deterministic IR emission.
-        // Rust's HashMap iteration order is randomized per process — sorting
-        // by name ensures identical .ll output across compilations.
         let mut sorted: Vec<(String, Vec<(String, Type)>)> = self.ctx.struct_types.iter()
             .map(|(k, v)| (k.clone(), v.clone()))
             .collect();
@@ -558,13 +593,17 @@ impl LlvmBackend {
     }
 
     pub(super) fn align_of(&self, ty: &str) -> u32 {
-        // 2026-07-30: Query the casting graph to find the alignment by
-        // comparing against resolved LLVM types for all universe entries.
-        if let Some(u) = &self.ctx.type_universe {
-            for rt in u.types.values() {
-                let rt_ll = self.llvm_type(&Type::Custom(rt.name.clone()));
-                if rt_ll == ty && rt.alignment > 0 {
-                    return rt.alignment as u32;
+        // 2026-07-30: For standard LLVM types, use direct alignment (below).
+        // Only query the universe for non-standard types (struct types, typed enums),
+        // matching by BOTH LLVM type string AND type name to avoid finding wrong
+        // entries (e.g., a struct with alignment 2 whose LLVM type resolves to "float").
+        if !matches!(ty, "i8" | "i16" | "i32" | "i64" | "i128" | "float" | "double" | "half" | "bfloat" | "ptr") {
+            if let Some(u) = &self.ctx.type_universe {
+                for rt in u.types.values() {
+                    let rt_ll = self.llvm_type(&Type::Custom(rt.name.clone()));
+                    if rt_ll == ty && rt.alignment > 0 {
+                        return rt.alignment as u32;
+                    }
                 }
             }
         }
