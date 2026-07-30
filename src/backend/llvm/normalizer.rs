@@ -88,9 +88,15 @@ pub fn normalize(items: &mut Vec<TopLevel>, universe: &mut TypeUniverse, int_bit
     }
 
     // Strip metadata LLVM doesn't use
-        // 2026-07-30: Only Cast.# properties are retained for protocol membership.
+        // 2026-07-30: Keep Cast.# properties for protocol membership,
+        // plus width metadata (bits, maxbits, minbits) for resolve_llvm_type(),
+        // and alignment for align_of().
         for rt in universe.types.values_mut() {
-            rt.properties.retain(|k, _| k.starts_with("Cast."));
+            rt.properties.retain(|k, _| {
+                k.starts_with("Cast.")
+                    || k == "bits" || k == "maxbits" || k == "minbits"
+                    || k == "alignment"
+            });
         }
 
     Ok(())
@@ -264,61 +270,14 @@ fn register_typedefs(items: &[TopLevel], universe: &mut TypeUniverse) -> Result<
         universe.register(rt);
     }
 
-    // 2026-07-23: Inject Cast.# properties from operator_defs and TypeDef.protocol.
-    // This makes protocol edges visible to find_cast_path BFS.
-    for item in items {
-        let td = match item {
-            TopLevel::TypeDef(td) => td,
-            _ => continue,
-        };
-        let type_name = &td.name;
-
-        // Implicit CastTo from TypeDef.protocol field (e.g., type Int: #Int)
-        if let Some(ref proto) = td.protocol {
-            let cat = proto.strip_prefix('#').unwrap_or(proto).to_string();
-            if let Some(rt) = universe.types.get_mut(type_name) {
-                rt.properties.insert(format!("Cast.#{}", cat), PropertyValue::Bool(true));
-            }
-        }
-
-        // Explicit CastTo/CastFrom from operator definitions (old-style)
-        for op in &td.body.operators {
-            if op.op == "CastTo" || op.op == "CastFrom" {
-                for param in &op.params {
-                    let cat = match param {
-                        Type::HashWord(name) | Type::HashWordVariant(name, _)
-                            => name.strip_prefix('#').unwrap_or(name).to_string(),
-                        _ => continue,
-                    };
-                    if let Some(rt) = universe.types.get_mut(type_name) {
-                        rt.properties.insert(format!("Cast.#{}", cat), PropertyValue::Bool(true));
-                    }
-                }
-            }
-        }
-
-        // 2026-07-30: CastTo/CastFrom from op_bindings (new-style OperatorBinding)
-        for b in &td.body.op_bindings {
-            if b.name == "CastTo" || b.name == "CastFrom" {
-                if let Some(ref pv) = b.protocol_variant {
-                    let cat = pv.strip_prefix('#').unwrap_or(pv).to_string();
-                    if let Some(rt) = universe.types.get_mut(type_name) {
-                        rt.properties.insert(format!("Cast.#{}", cat), PropertyValue::Bool(true));
-                    }
-                }
-            }
-        }
-    }
-
-    // 2026-07-30: Inject Cast.#Bit for all types with base == "Bit".
-    // Since every type without an explicit parent defaults to base: "Bit",
-    // this ensures all types are reachable from #Bits in the protocol graph.
-    // Previously, only types explicitly seeded in PRIMORDIALS had Cast.#Bit.
-    for rt in universe.types.values_mut() {
-        if rt.base == "Bit" && !rt.properties.contains_key("Cast.#Bit") {
-            rt.properties.insert("Cast.#Bit".to_string(), PropertyValue::Bool(true));
-        }
-    }
+    // 2026-07-30: Cast.# properties are no longer injected by the normalizer.
+    // Protocol membership is determined by the casting graph via type_to_protocol()
+    // and is_protocol_member(). The casting graph hardcodes base protocol lanes
+    // and receives proto declarations via register_protocol_def().
+    //
+    // Cast.# properties from primordial seeding are retained for backward compat
+    // during migration. They will be removed in a future cleanup pass after
+    // is_protocol_member() fully transitions to the casting graph.
     Ok(())
 }
 

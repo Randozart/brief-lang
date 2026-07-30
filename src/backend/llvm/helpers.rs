@@ -1397,6 +1397,23 @@ impl LlvmBackend {
     /// 2026-07-26: Check if a type implements a protocol by looking for
     /// Cast.<protocol> in its ResolvedType properties. No name matching.
     pub(super) fn is_protocol_member(&self, ty: &Type, protocol: &str) -> bool {
+        // 2026-07-30: Check casting graph first — resolves protocol membership
+        // from (type → protocol) via type_to_protocol + find_path.
+        if let Some(graph) = self.ctx.casting_graph.as_ref() {
+            if let Some(universe) = self.ctx.type_universe.as_ref() {
+                let (cat, var) = graph.type_to_protocol(universe, ty);
+                let target = protocol.strip_prefix('#').unwrap_or(protocol);
+                if cat == target {
+                    return true;
+                }
+                if graph.find_path(&cat, &var, target, "").is_some()
+                    || graph.find_path(target, "", &cat, &var).is_some()
+                {
+                    return true;
+                }
+            }
+        }
+        // Fallback: check Cast.# universe properties (primordial backward compat)
         let prop_key = if protocol.starts_with('#') {
             format!("Cast.{}", protocol)
         } else {
