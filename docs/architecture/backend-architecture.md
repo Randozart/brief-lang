@@ -375,7 +375,202 @@ bash benchmarks/compare_baseline.sh <benchmark_name>
 grep -rn 'Type::Custom.*if.*==.*"' src/backend/llvm/ | grep -v 'tests\.rs\|Int\b\|Float\b\|Bool\b'
 ```
 
-## 9. Quick Reference: Protocol Categories vs LLVM Types
+## 9. Fragile Strategies — What Breaks If You Change It
+
+The backend has several interacting subsystems. A change in one area can silently break another. This section documents each fragile subsystem, what it depends on, and what breaks if those dependencies are violated.
+
+### 9.1 Batch-Loop Optimization (emit_countable_batched_main)
+
+**What it does:** Splits a convergence loop into an outer structural loop and an inner pure-compute loop when hoistable `when` guards are detected.
+
+**Dependencies:**
+- `loop_peeling.rs::split_hoistable()` — detects guards in the body
+- `loop_peeling.rs::extract_batch_size_from_guards()` — extracts batch_size from `when count % N == 0` conditions
+- `counter.rs::emit_countable_batched_main()` — emits the two-loop structure
+
+**What breaks if changed carelessly:**
+
+| Change | Failure mode |
+|--------|--------------|
+| Emit outer guards in `.ox_` block instead of `.inner_exit_` | **Instruction does not dominate all uses** — phi registers from `.inner_124` are invalid in `.ox_124`. Use `.inner_exit_124` which IS dominated by `.inner_124`. |
+| Skip the `let_to_field` remapping | **`@energy` undefined global** — guard bodies reference let-bindings (`energy`) that aren't state fields. Must be remapped to their state field equivalent (`last_energy`). |
+| Clear `last_val_temps` before guard emission | Identifiers resolve to globals instead of phi registers. Guards must see phi registers, not state loads. |
+| Remove the `write_set` from `emit_countable_body` call | State field assignments in guards write to phi backedge tables that don't exist in the exit block. |
+| Change `batch_size` computation | Wrong batch count — inner loop runs incorrect number of iterations, producing wrong results. |
+
+**The dominance tree for the batch loop:**
+
+```
+.oh_124 [outer header]
+  │
+  └──→ .inner_124 [inner header — phis ARE valid here and in .inner_exit_124]
+         │
+         ├──→ .il_124 [inner latch — computed values, NOT valid in outer blocks]
+         │      │
+         │      └──→ back to .inner_124
+         │
+         └──→ .inner_exit_124 [guard emission — phi registers from .inner_124 ARE valid]
+                │
+                └──→ .ox_124 [termination check — load from %State only]
+                       │
+                       ├──→ .done_124 [exit — load from %State only]
+                       └──→ .ol_124 [outer latch]
+                              │
+                              └──→ back to .oh_124
+```
+
+**Key invariant:** The only registers valid in `.inner_exit_124` are:
+- PHI registers defined in `.inner_124` (all fields in `phi_field_regs`)
+- Registers computed inside `.inner_exit_124` itself
+- Registers loaded from `%State`
+
+Registers from `.il_124` (computed body values) are NOT valid in `.inner_exit_124` because `.il_124` does not dominate `.inner_exit_124`.
+
+### 9.2 PerFieldPhi Register Tracking
+
+**What it does:** Each written state field gets a phi node. The body writes to `pending_phi_backedge`, the latch reads it for the backedge identity copy.
+
+**Dependencies:**
+- `phi_field_regs` — maps field name → phi register name (set in header)
+- `backedge_field_regs` — maps field name → backedge register name (set in header)
+- `pending_phi_backedge` — maps field name → computed value (set by body)
+- `last_val_temps` — maps let-binding name → register name (set by body)
+
+**What breaks if changed carelessly:**
+
+| Change | Failure mode |
+|--------|--------------|
+| Add a field to `write_set` without a corresponding phi | **Undefined value** in the backedge — LLVM picks `undef` for the missing phi. |
+| Remove a field from `write_set` that's still assigned | **Silent value loss** — the assignment writes to `pending_phi_backedge` but no phi picks it up. The next iteration reads the old value. |
+| Clear `phi_field_regs` without clearing `pending_phi_backedge` | **Dominance violation** — stale entries make the body reference registers that no longer exist. |
+| Mix up `phi_field_regs` and `backedge_field_regs` in the latch | **Wrong backedge value** — the phi selects the wrong predecessor register. |
+| Emit `fadd float 0.0` instead of `add i64 0` for integer fields | **LLVM IR type error** — float operation on i64 type. |
+| Forget to sort `sorted_fields` | **Non-deterministic IR** — HashMap iteration order changes every compilation, producing ~9% performance variation between runs. |
+
+### 9.3 SoA Field Reorder (analysis/soa_reorder.rs)
+
+**What it does:** Reorders state field declarations from AoS to SoA layout before `build_field_index` assigns indices.
+
+**Dependencies:**
+- Runs between `items` extraction and `build_field_index` in `generate()`
+- Uses `parse_numeric_prefix` to detect indexed families (bx0, bx1, etc.)
+- Proves data independence between family members
+
+**What breaks if changed carelessly:**
+
+| Change | Failure mode |
+|--------|--------------|
+| Move SoA reorder after `build_field_index` | **Wrong indices** — field_index_map is already built with AoS layout. All GEP offsets shift. |
+| Skip the independence proof | **Wrong results** — if `bx0` references `bx1` (through let-bindings), reordering changes computation order. |
+| Change the field name prefix detection | **Fields not grouped** — renamed fields (e.g., `body0_x`) produce wrong prefixes. |
+| Sort `non_float_indices` differently | **Non-deterministic output** — non-field items move around, changing the IR structure. |
+
+### 9.4 Brief-Level LICM (analysis/licm.rs)
+
+**What it runs:** Before the dispatch, identites loop-invariant let-bindings and prepends them to the body.
+
+**Dependencies:**
+- Runs after `hoist_terminating_guard` but before the dispatch
+- Depends on `write_set` to determine which identifiers are variant
+
+**What breaks if changed carelessly:**
+
+| Change | Failure mode |
+|--------|--------------|
+| Remove the `state_fields` parameter check | **Local variables hoisted as loop-invariant** — a let-binding `step = dt * 0.5` uses `dt` (not a state field) so it's not in `write_set`. Without checking `state_fields`, the function thinks `dt` is invariant (it IS, but because it's a const, not because it's a state field). Actually this is correct — `dt` IS invariant. The bug would be if a LOCAL variable that changes each iteration is NOT in `state_fields` — the function would incorrectly mark it as invariant. |
+| Hoist expressions containing `Expr::Call` | **Side effects lost** — function calls inside invariant-looking expressions are hoisted, changing execution count. |
+| Hoist after the dispatch instead of before | **Different dispatch decisions** — if a hoisted binding changes the body structure, the dispatch might select a different strategy. |
+
+### 9.5 Hoist Terminating Guard (hoist_terminating_guard)
+
+**What it does:** Removes `Term(..)` / `TermBang(..)` statements from the body and places the last guard's body in `post_hoist` if it contains `TermBang`.
+
+**Dependencies:**
+- Runs before the dispatch and before the batch-loop detection
+- Must be called before `split_hoistable` because it removes the termination guard from the body
+
+**What breaks if changed carelessly:**
+
+| Change | Failure mode |
+|--------|--------------|
+| Swap order with `split_hoistable` | **Guard body emitted in inner loop** — the termination guard's TermBang body (containing `PrintLn!`) ends up in the inner loop, blocking if-conversion. |
+| Don't check for `TermBang` in the last guard | **Terminating print never fires** — the guard body isn't hoisted to `post_hoist`. |
+| Don't remove `Term(..)` from the body | **`emit_countable_body` hits the catch-all** — `Statement::Term(None)` falls through to `_ => {}` and is silently dropped. |
+
+### 9.6 Vector Phi Emission (Dormant — DO NOT RE-ENABLE WITHOUT RESEARCH)
+
+**What it is:** The dispatch selects a "VectorPhi" path when `detect_vector_groups` finds groups and `total_fields > 14`. However, `counter.rs:213-221` immediately clears all vector phi state, so the actual emission is PerFieldPhi.
+
+**Why it's dormant:** Vector phi emission was disabled because:
+1. `<2 x float>` groups added extract/insert overhead that dwarfed register-pressure benefit
+2. `<8 x float>` groups triggered AVX lane-crossing latency
+3. Naming-based grouping was a fragile heuristic
+4. The SoA reorder pass + SLP vectorizer achieves the same result without explicit vector phis
+
+**What breaks if re-enabled without fixing the root cause:**
+
+| Risk | Why |
+|------|-----|
+| `extractelement_cache` used without clearing | Same extract value used across iterations — stale values. |
+| `field_to_phi` conflicts with `phi_field_regs` | Two sets of phi nodes for the same field — which one does the body read? |
+| Vector phis + batch-loop interaction | The batch loop's inner exit stores phi values to %State. Vector phi values are `<N x float>` — storing them would require deconstructing the vector. |
+
+### 9.7 `push_field_type` i64 Override
+
+**What it does:** Forces all state field LLVM types to `"i64"` regardless of their Brief type.
+
+**Dependencies:**
+- `field_types` — used by `emit_state_load_i64_by_idx` / `emit_state_store_i64_by_idx` for GEP+load/store
+- `field_brief_types` — used by `llvm_type()` / `protocol_llvm_type()` for protocol-based type resolution
+
+**What breaks if changed carelessly:**
+
+| Change | Failure mode |
+|--------|--------------|
+| Remove the i64 override | **%State struct layout changes** — float fields would be `float` instead of `i64`. All GEP offsets stay the same (the struct is reified by `declare_state_type` which uses `protocol_llvm_type`), but the load/store type would mismatch. |
+| Change the override to `float` for float fields | **`push_field_type` comment says "always i64"** — code paths that `load i64` from state would get wrong types. The `adapt_to_i64` path expects `i64` loads. |
+
+### 9.8 `!invariant.load` on Ptr Fields
+
+**What it does:** Adds `!invariant.load` metadata to all loads of `Type::Ptr(_)` state fields.
+
+**Dependency:** Asserts that `Ptr<T>` fields are assigned exactly once (at init) and never reassigned.
+
+**What breaks if changed carelessly:**
+
+| Change | Failure mode |
+|--------|--------------|
+| Apply `!invariant.load` to non-Ptr fields | **Stale values** — if a field IS modified, LLVM caches the initial load value forever. |
+| Remove the `!invariant.load` from Ptr fields | **One extra GEP+load per iteration per Ptr field** — LICM doesn't hoist the pointer load, adding ~4 cycles per iteration. |
+
+### 9.9 `declare_struct_types` Hardcoded Skip Set
+
+**What it does:** Emits `%SmallString64`, `%StaticString`, `%String`, `%UTF8View` as hardcoded type declarations, then skips them during the universe iteration to avoid duplicates.
+
+**Dependency:** The skip set must always include ALL names emitted in the hardcoded block.
+
+**What breaks if changed carelessly:**
+
+| Change | Failure mode |
+|--------|--------------|
+| Add a name to the hardcoded block without adding it to the skip set | **Clang error: `redefinition of type '%NewType'`** — duplicate type declaration. |
+| Remove a name from the skip set without removing it from the hardcoded block | Same — duplicate declaration. |
+| Remove a name from the hardcoded block | **If the universe doesn't have it, clang LICM may segfault** — missing struct type triggers `sinkRegion` crash in clang 18.1.3. |
+
+### 9.10 Constant Float Emission Pattern
+
+**What it does:** Emits `float` literals as a single `bitcast i32 <hex> to float` instruction instead of the old `add i32 0, N` + `bitcast` + `fadd float 0.0` sequence.
+
+**Dependency:** All `float` literals go through `emit_expr.rs::Expr::Float`. The `float_to_llvm_hex` function converts the f32 value to its i32 bit pattern.
+
+**What breaks if changed carelessly:**
+
+| Change | Failure mode |
+|--------|--------------|
+| Revert to the old pattern | **~2100 extra IR instructions per nbody compilation** — no runtime impact but more work for LLVM's optimizer. |
+| Use `float <value>` directly instead of `bitcast` | **LLVM verifier error** — high-precision float literals like `"0.001660076642744037"` have more significant digits than f32 can represent. The bitcast from hex avoids this. |
+
+## 10. Quick Reference: Protocol Categories vs LLVM Types
 
 | Protocol | Default LLVM type | Width (bytes) |
 |----------|-------------------|:-------------:|
