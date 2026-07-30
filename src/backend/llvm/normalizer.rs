@@ -366,6 +366,16 @@ fn register_typedefs(items: &[TopLevel], universe: &mut TypeUniverse) {
             }
         }
     }
+
+    // 2026-07-30: Inject Cast.#Bit for all types with base == "Bit".
+    // Since every type without an explicit parent defaults to base: "Bit",
+    // this ensures all types are reachable from #Bits in the protocol graph.
+    // Previously, only types explicitly seeded in PRIMORDIALS had Cast.#Bit.
+    for rt in universe.types.values_mut() {
+        if rt.base == "Bit" && !rt.properties.contains_key("Cast.#Bit") {
+            rt.properties.insert("Cast.#Bit".to_string(), PropertyValue::Bool(true));
+        }
+    }
 }
 
 use std::collections::HashSet;
