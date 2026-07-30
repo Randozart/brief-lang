@@ -2811,7 +2811,11 @@ impl LlvmBackend {
                             // bindings (like `let dist01 = Sqrt#(dsq01)`) with no outer
                             // loop to emit them — producing undefined globals.
                             let (inner_body, batch_info) = {
-                                let guards = crate::analysis::loop_peeling::split_hoistable(&body_stmts);
+                                let state_field_set: std::collections::HashSet<String>
+                                    = self.ctx.field_index_map.keys().cloned().collect();
+                                let guards = crate::analysis::loop_peeling::split_hoistable(
+                                    &body_stmts, &state_field_set,
+                                );
                                 if !guards.is_empty() {
                                     let bsize = crate::analysis::loop_peeling::extract_batch_size_from_guards(
                                         &guards, &bp.var,
