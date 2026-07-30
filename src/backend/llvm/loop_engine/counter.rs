@@ -757,9 +757,6 @@ impl LlvmBackend {
                     self.fun.last_val_temps.insert(name.clone(), reg.name.clone());
                     self.fun.last_val_types.insert(name.clone(), reg.ty);
                 }
-                stmt @ Statement::Let { .. } => {
-                    eprintln!("DEBUG emit_countable_body Let (OTHER FORM): {:?}", stmt);
-                }
                 Statement::Assign(lhs, expr) => {
                     let lhs_name = Self::assign_target_name(lhs);
                      let val = self.emit_expr(out, expr, "  ");
@@ -848,7 +845,7 @@ impl LlvmBackend {
                             let ptr_reg = self.emit_expr(out, inner, "  ");
                             writeln!(out, "  store i64 {}, ptr {}", val.name, ptr_reg.name).ok();
                         }
-                _ => {}
+                        _ => {}
                     }
                 }
                 Statement::Term(Some(e)) | Statement::TermBang(Some(e)) => {

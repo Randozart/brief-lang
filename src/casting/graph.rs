@@ -704,7 +704,9 @@ mod tests {
 
         // Compiler constructs (no universe needed)
         assert_eq!(graph.type_to_protocol(&universe, &Type::Bits(42)), ("Bit".to_string(), String::new()));
-        assert_eq!(graph.type_to_protocol(&universe, &Type::Ptr(Box::new(Type::Custom("Int".to_string())))), ("Data".to_string(), String::new()));
+        // 2026-07-30: Ptr<T> is no longer mapped to Data — it's not in
+        // type_to_protocol. resolve_llvm_type handles Ptr directly.
+        // Ptr fields are stored as i64 in %State to avoid ptrtoint conversion.
 
         // Universe-resolved types (seeded primordials)
         assert_eq!(graph.type_to_protocol(&universe, &Type::Custom("Int".to_string())), ("Int".to_string(), String::new()));
