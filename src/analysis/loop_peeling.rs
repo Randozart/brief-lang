@@ -13,7 +13,7 @@
 // PrintInt, etc.) that prevents LLVM's if-conversion.
 
 use crate::ast::{BinaryOpKind, Expr, Statement};
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
 /// Reorder a loop body so that pure compute statements come first
 /// and hoistable guards (containing function calls) come last.
@@ -84,27 +84,33 @@ fn is_zero(expr: &Expr) -> bool {
 /// main body (like dx01, energy) are NOT hoistable because those let-
 /// bindings have no %State representation and their computed registers
 /// are invalid in the outer guard block.
-pub fn split_hoistable(body: &[Statement], field_index_map: &HashSet<String>) -> Vec<Statement> {
-    body.iter().filter(|s| is_safe_to_hoist(s, field_index_map)).cloned().collect()
+/// `let_to_field` maps let-binding names to state field names (e.g.,
+/// energy → last_energy), used to accept identifiers that can be remapped.
+pub fn split_hoistable(
+    body: &[Statement],
+    field_index_map: &HashSet<String>,
+    let_to_field: &HashMap<String, String>,
+) -> Vec<Statement> {
+    body.iter().filter(|s| is_safe_to_hoist(s, field_index_map, let_to_field)).cloned().collect()
 }
 
 /// A guard is safe to hoist iff every identifier referenced in its body
-/// is either a state field (in field_index_map) or defined within the
-/// guard body itself. Guards that reference main-body let-bindings
-/// (like dx01 = bx0 - bx1) cannot be remapped to state fields and
-/// their computed registers dominate the inner exit block.
-fn is_safe_to_hoist(stmt: &Statement, field_index_map: &HashSet<String>) -> bool {
+/// is either a state field (in field_index_map), an identifier remappable
+/// through `let_to_field` (e.g., energy → last_energy), or defined within
+/// the guard body itself.
+fn is_safe_to_hoist(
+    stmt: &Statement, field_index_map: &HashSet<String>,
+    let_to_field: &HashMap<String, String>,
+) -> bool {
     match stmt {
         Statement::Guarded(_, body) => {
-            // Collect identifiers defined within the guard body.
             let mut defined_here: HashSet<String> = HashSet::new();
             for s in body {
                 if let Statement::Let { name, .. } = s {
                     defined_here.insert(name.clone());
                 }
             }
-            // Check every statement in the guard body.
-            body.iter().all(|s| guard_stmt_uses_only_safe_refs(s, field_index_map, &defined_here))
+            body.iter().all(|s| guard_stmt_uses_only_safe_refs(s, field_index_map, let_to_field, &defined_here))
         }
         _ => false,
     }
@@ -112,49 +118,61 @@ fn is_safe_to_hoist(stmt: &Statement, field_index_map: &HashSet<String>) -> bool
 
 fn guard_stmt_uses_only_safe_refs(
     stmt: &Statement, field_index_map: &HashSet<String>,
+    let_to_field: &HashMap<String, String>,
     defined_here: &HashSet<String>,
 ) -> bool {
     match stmt {
         Statement::Let { expr: Some(e), .. } => {
-            expr_uses_only_safe_refs(e, field_index_map, defined_here)
+            expr_uses_only_safe_refs(e, field_index_map, let_to_field, defined_here)
         }
         Statement::Expression(e) => {
-            expr_uses_only_safe_refs(e, field_index_map, defined_here)
+            expr_uses_only_safe_refs(e, field_index_map, let_to_field, defined_here)
         }
-        _ => false, // Any other statement type is unsafe
+        _ => false,
     }
 }
 
 fn expr_uses_only_safe_refs(
     expr: &Expr, field_index_map: &HashSet<String>,
+    let_to_field: &HashMap<String, String>,
     defined_here: &HashSet<String>,
 ) -> bool {
     match expr {
         Expr::Identifier(name) => {
             // State fields are safe (loaded from %State via phi register).
+            // Identifiers remappable through let_to_field are safe
+            // (e.g., energy → last_energy, which IS a state field).
             // Identifiers defined within the guard body are safe.
-            // Everything else (main-body let-bindings) is NOT safe.
-            field_index_map.contains(name.as_str()) || defined_here.contains(name.as_str())
+            field_index_map.contains(name.as_str())
+                || let_to_field.contains_key(name.as_str())
+                || defined_here.contains(name.as_str())
         }
         Expr::Call(_, args, _) => {
-            args.iter().all(|a| expr_uses_only_safe_refs(a, field_index_map, defined_here))
+            args.iter().all(|a| expr_uses_only_safe_refs(a, field_index_map, let_to_field, defined_here))
         }
         Expr::BinaryOp(_, l, r) => {
-            expr_uses_only_safe_refs(l, field_index_map, defined_here)
-                && expr_uses_only_safe_refs(r, field_index_map, defined_here)
+            expr_uses_only_safe_refs(l, field_index_map, let_to_field, defined_here)
+                && expr_uses_only_safe_refs(r, field_index_map, let_to_field, defined_here)
         }
-        Expr::UnaryOp(_, e) => expr_uses_only_safe_refs(e, field_index_map, defined_here),
-        Expr::Cast(e, _) => expr_uses_only_safe_refs(e, field_index_map, defined_here),
-        Expr::Field(obj, _) => expr_uses_only_safe_refs(obj, field_index_map, defined_here),
+        Expr::UnaryOp(_, e) => expr_uses_only_safe_refs(e, field_index_map, let_to_field, defined_here),
+        Expr::Cast(e, _) => expr_uses_only_safe_refs(e, field_index_map, let_to_field, defined_here),
+        Expr::Block(stmts) => stmts.iter().all(|s| {
+            match s {
+                Statement::Expression(e) => expr_uses_only_safe_refs(e, field_index_map, let_to_field, defined_here),
+                Statement::Let { expr: Some(e), .. } => expr_uses_only_safe_refs(e, field_index_map, let_to_field, defined_here),
+                _ => false,
+            }
+        }),
+        Expr::Field(obj, _) => expr_uses_only_safe_refs(obj, field_index_map, let_to_field, defined_here),
         Expr::Index(arr, idx) => {
-            expr_uses_only_safe_refs(arr, field_index_map, defined_here)
-                && expr_uses_only_safe_refs(idx, field_index_map, defined_here)
+            expr_uses_only_safe_refs(arr, field_index_map, let_to_field, defined_here)
+                && expr_uses_only_safe_refs(idx, field_index_map, let_to_field, defined_here)
         }
-        Expr::List(items) => items.iter().all(|i| expr_uses_only_safe_refs(i, field_index_map, defined_here)),
-        Expr::Tuple(items) => items.iter().all(|i| expr_uses_only_safe_refs(i, field_index_map, defined_here)),
+        Expr::List(items) => items.iter().all(|i| expr_uses_only_safe_refs(i, field_index_map, let_to_field, defined_here)),
+        Expr::Tuple(items) => items.iter().all(|i| expr_uses_only_safe_refs(i, field_index_map, let_to_field, defined_here)),
         Expr::Quoted(_) | Expr::Decimal(_) | Expr::Float(_) | Expr::Bool(_) => true,
         Expr::PluginIntercept { args, .. } => {
-            args.iter().all(|a| expr_uses_only_safe_refs(a, field_index_map, defined_here))
+            args.iter().all(|a| expr_uses_only_safe_refs(a, field_index_map, let_to_field, defined_here))
         }
         _ => false,
     }

@@ -2813,8 +2813,20 @@ impl LlvmBackend {
                             let (inner_body, batch_info) = {
                                 let state_field_set: std::collections::HashSet<String>
                                     = self.ctx.field_index_map.keys().cloned().collect();
+                                // Build let_to_field map (e.g., energy → last_energy).
+                                let mut let_to_field: std::collections::HashMap<String, String>
+                                    = std::collections::HashMap::new();
+                                for stmt in &body_stmts {
+                                    if let crate::ast::Statement::Assign(lhs, crate::ast::Expr::Identifier(n)) = stmt {
+                                        if let crate::ast::Expr::Identifier(lhs_name) = lhs {
+                                            if self.ctx.field_index_map.contains_key(lhs_name) {
+                                                let_to_field.insert(n.clone(), lhs_name.clone());
+                                            }
+                                        }
+                                    }
+                                }
                                 let guards = crate::analysis::loop_peeling::split_hoistable(
-                                    &body_stmts, &state_field_set,
+                                    &body_stmts, &state_field_set, &let_to_field,
                                 );
                                 if !guards.is_empty() {
                                     let bsize = crate::analysis::loop_peeling::extract_batch_size_from_guards(
