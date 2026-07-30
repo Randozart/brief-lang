@@ -113,7 +113,10 @@ fn contains_function_call(stmt: &Statement) -> bool {
         }
         Statement::Term(Some(e)) | Statement::Expression(e) => has_call_expr(e),
         Statement::TermBang(Some(e)) => has_call_expr(e),
-        Statement::Let { expr, .. } => expr.as_ref().map_or(false, |e| has_call_expr(e)),
+        // 2026-07-30: Let bindings are NOT hoistable guards — they compute
+        // values needed inside the loop body. Only Guards with FFI calls
+        // should be hoisted for batch processing.
+        // Statement::Let { expr, .. } => expr.as_ref().map_or(false, |e| has_call_expr(e)),
         Statement::Assign(_, rhs) => has_call_expr(rhs),
         _ => false,
     }

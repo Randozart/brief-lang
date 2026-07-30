@@ -1398,7 +1398,9 @@ impl LlvmBackend {
     /// Cast.<protocol> in its ResolvedType properties. No name matching.
     pub(super) fn is_protocol_member(&self, ty: &Type, protocol: &str) -> bool {
         // 2026-07-30: Check casting graph first — resolves protocol membership
-        // from (type → protocol) via type_to_protocol + find_path.
+        // from (type → protocol) via type_to_protocol. Only EXACT category match
+        // qualifies as membership (is_protocol_member(Int, "#Float") = false,
+        // even though Int can be cast to Float — castability ≠ membership).
         if let Some(graph) = self.ctx.casting_graph.as_ref() {
             if let Some(universe) = self.ctx.type_universe.as_ref() {
                 let (cat, var) = graph.type_to_protocol(universe, ty);
@@ -1406,9 +1408,9 @@ impl LlvmBackend {
                 if cat == target {
                     return true;
                 }
-                if graph.find_path(&cat, &var, target, "").is_some()
-                    || graph.find_path(target, "", &cat, &var).is_some()
-                {
+                // Variant membership: String<UTF8> is member of #String if
+                // UTF8 is the default variant for String.
+                if !var.is_empty() && target == cat {
                     return true;
                 }
             }

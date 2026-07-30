@@ -482,7 +482,7 @@ fn collect_strings_expr(expr: &Expr, seen: &mut std::collections::HashSet<String
 /// type's ResolvedType in the universe. No name matching — the primordial
 /// llvm_type property is the single source of truth. Returns "i64" if the
 /// universe is unavailable or the type is unknown (safe default).
-/// Derive LLVM type string from a Type, using bytes-based fallback.
+/// Derive LLVM type string from a Type, using protocol membership + bytes.
 /// 2026-07-30: No longer reads llvm_type from universe properties.
 /// Protocol-based resolution is handled by CastingGraph::resolve_llvm_type()
 /// (accessible via LlvmBackend::llvm_type() in codegen contexts).
@@ -493,8 +493,13 @@ pub fn protocol_llvm_type(ty: &Type, universe: Option<&crate::type_universe::Typ
     }
     if let Some(ref u) = universe {
         if let Some(rt) = ty.universe_key().and_then(|k| u.get(k)) {
-            // Use bytes as fallback — types with protocol membership get
-            // their LLVM type from the casting graph instead.
+            // Check protocol membership first — float types get native float/double
+            if rt.properties.contains_key("Cast.#Float") {
+                return if rt.max_bits <= 32 { "float".to_string() }
+                       else if rt.max_bits <= 64 { "double".to_string() }
+                       else { "i64".to_string() };
+            }
+            // Use bytes as fallback for non-protocol types
             if rt.bytes > 0 {
                 return format!("i{}", rt.bytes * 8);
             }
