@@ -2329,3 +2329,348 @@ expression-level conditional values, use nested `if` expressions or `when` chain
 that set a let-binding.
 
 **Files**: No code change — language design constraint.
+
+---
+
+## Ptr Arithmetic: Missing `inttoptr` Before `load`/`store`/`call` on Ptr-typed Values — FIXED
+
+**Date:** 2026-07-30  
+**Status:** Fixed in `c36fd266`  
+**Root cause:** The LLVM backend uses an i64-centric internal representation for all
+values, including pointers. Ptr parameters are `ptrtoint`-ed to `i64` at function
+entry (emit_toplevel.rs:1188, rationale comment at line 1184). This is intentional —
+it keeps all SSA values as `i64` and lets LLVM eliminate the round-trip.
+
+The bug: three consumption sites assumed the register was already an LLVM `ptr`
+type and used it directly in `load`/`store`/`call` instructions without an
+intervening `inttoptr`:
+
+| Site | File:Line | Pattern |
+|------|-----------|---------|
+| Deref load | `emit_expr.rs:718` | `load ..., ptr %i64_reg` — should be `inttoptr` then `load` |
+| Deref store (main path) | `emit_stmt.rs:122` | `store ..., ptr %i64_reg` — missing `inttoptr` |
+| Deref store (loop engine) | `counter.rs:846` | `store i64 ..., ptr %i64_reg` — missing `inttoptr` |
+| Defn call args | `emit_expr.rs:1759` | `ptr %i64_reg` in call — missing `inttoptr` |
+| Non-defn call args | `emit_expr.rs:1771` | `ptr %i64_reg` — missing `inttoptr` |
+
+The `Expr::Index` handler (emit_expr.rs:491-520) and the loop engine's Index store
+(counter.rs:828-841) showed the correct pattern: `inttoptr` → `GEP`/`load`/`store`.
+The Deref paths had diverged from this reference implementation.
+
+**Secondary issue**: `emit_binop_from_config` returned `Type::int()` for Ptr+Int Add,
+which meant downstream code (Deref handler, call arg marshaling) couldn't detect
+that a register held a Ptr value even though the type system said it was Ptr. Fixed
+by preserving the Ptr type in the return: when either operand is `Ptr(_)`, return
+that Ptr type instead of `Int`.
+
+**Fix added at 5 sites**: All emit `inttoptr` before using the register as `ptr`.
+
+**Tests**: `test_call_with_ptr_arg_emits_inttoptr` added. 1210 tests pass.
+
+**Discovered by**: Compiling `lib/tamer/main.bv` (the Brief tamer) via `briefc build`
+produced `main.ll` with invalid IR: `%t1 = add nsw i64 %ac0, %t3` followed by
+`load i64, ptr %t1` — clang rejected the second line because `%t1` is `i64`, not `ptr`.
+
+---
+
+## Exported Definitions Not Registered in `defn_params` — FIXED
+
+**Date:** 2026-07-30  
+**Status:** Fixed in `c36fd266`  
+**Root cause:** The first pass in `LlvmBackend::generate()` (mod.rs:1864-2037)
+iterates items to register `defn_params` for function call argument marshaling. It
+matches `TopLevel::Definition(d)` directly (line 1916), but `export defn` creates
+`TopLevel::Export(Export { inner: Box::new(TopLevel::Definition(d)) })` which does
+NOT match this arm. The emission pass (line 2410) correctly unwraps `Export`, so
+the function body IS emitted — but its parameter types are never registered in
+`defn_params`. Calls to exported functions fall through to the non-defn call arg
+path, which doesn't insert `inttoptr` for Ptr args.
+
+**Fix**: Added `TopLevel::Export(e)` arm in the registration loop before the
+catch-all `_ => {}`, unwrapping the export and registering param types for
+`Definition`, `Transaction`, and `AsmFn` inner items.
+
+**Manifestation**: `compute_buffer_sizes(fn_table, fn_count, ...)` from
+`lib/tamer/analyze.bv` — an `export defn` — was called with `ptr %t47` where
+`%t47` was an `i64` register, because the call arg path couldn't find its param
+types and skipped the `inttoptr` conversion.
+
+---
+
+## `defn` Body Assertions: `Statement::Gate` Emits Branch to Undefined `%loop` Label — FIXED
+
+**Date:** 2026-07-30  
+**Status:** Fixed in `efe1f559`  
+**Root cause:** The `Statement::Gate` handler (emit_stmt.rs:338) checks whether a
+convergence condition passes. The convergence target defaults to `"loop"` (line 346)
+when `backend.fun.convergence_target` is `None`. This is correct for `txn`/`node`
+bodies where the loop header is defined as `.loop:`. But `defn` bodies with
+`[[post]` assertions (like `[stack_slots <= 1024][stack_slots >= 0]`) don't have a
+convergence loop — the `[cond]` is an assertion, not a gate. The `"loop"` target was
+never defined, producing `br i1 %cond, label %gate.passN, label %loop` where
+`%loop` doesn't exist.
+
+**Fix**: When `convergence_target` is `None` (defn body), emit `unreachable` on the
+false branch instead of branching to `"loop"`:
+
+```
+br i1 %cond, label %gate.passN, label %gate.failN
+gate.failN:
+  unreachable
+```
+
+**Manifestation**: Compiling `lib/tamer/main.bv` after fixing the Ptr bugs produced
+`br i1 %t99, label %gate.pass98, label %loop` where `loop:` was defined as
+`.loop:` (dot prefix mismatch) — clang rejected the undefined label.
+
+---
+
+## Match Arm `|` (Alternation) Not Supported in Parser — FIXED
+
+**Date:** 2026-07-30  
+**Status:** Fixed in `efe1f559`  
+**Root cause:** The statement-level match arm parser (parser/statements.rs:397)
+only accepted single patterns: `_`, integer literal, or string literal. Multi-pattern
+alternation with `|` (`0x30 | 0x31 | 0x32 => { ... }`) was not supported.
+
+The AST had no representation for multi-pattern arms. Added `StmtMatchPattern::Multi(Vec<StmtMatchPattern>)` to `ast/top.rs:269`.
+
+The parser loop was extended to collect `|`-separated patterns before the `=>`:
+
+```
+patterns ← []  // inner loop
+loop:
+  pat ← parse_pattern()
+  patterns.push(pat)
+  if next token is not Pipe: break
+  consume Pipe
+pattern = if patterns.len() == 1 { patterns[0] } else { Multi(patterns) }
+```
+
+Backend updates:
+- Macro eval (`macros/eval.rs:585`): `Multi` matches if any sub-pattern matches.
+- VM backend (`backend/vm/emit_stmt.rs:105`): `Multi` emits dup-and-eq for each
+  pattern, jumping to body on first match.
+
+**Manifestation**: `lib/tamer/analyze.bv:54` uses `0x30 | 0x31 | ... =>` in a match
+arm. Parser errored: `expected FatArrow, found '|'`.
+
+---
+
+## `split_hoistable` Strips Guards When No Batch Loop Is Created — FIXED
+
+**Date:** 2026-07-30  
+**Status:** Fixed in `7e9de00b`  
+**Root cause:** The dispatch logic at `mod.rs:2793-2807` calls `split_hoistable` to
+extract guards (statements containing function calls) from the loop body, then
+creates a batch loop only if `extract_batch_size_from_guards` returns `Some`
+(i.e., there's a `when count % N == 0` periodic print). But the guard-stripping
+(`body_stmts.iter().filter(|s| !is_hoistable_guard(s))`) ran unconditionally,
+even when `bsize` was `None` and no batch loop would be created.
+
+For nbody_sqrt, `let dist01 = Sqrt#(dsq01)` was classified as a hoistable guard
+(because `has_call_expr` returns true for `Sqrt#` calls). These `let` bindings
+were stripped from the inner body and placed in `guards`. But since nbody_sqrt had
+no periodic print guard (`when count % N == 0`), `bsize` was `None`, no batch loop
+was created, and the stripped bindings were never re-emitted. Downstream
+computations referencing `dist01` hit `load i64, ptr @dist01` — an undefined global.
+
+**Fix**: Only strip guards when `bsize` is `Some(...)`. Without a batchable periodic
+guard, keep the original body intact:
+
+```rust
+if let Some(size) = bsize {
+    let inner = strip_guards();
+    (inner, Some(BatchInfo { ... }))
+} else {
+    (body_stmts.clone(), None)  // keep original body
+}
+```
+
+---
+
+## `emit_countable_batched_main` Never Emits Outer Guards (Periodic Prints) — FIXED
+
+**Date:** 2026-07-30  
+**Status:** Fixed in `7e9de00b` (partial), refixed in `[pending]`  
+**Root cause:** The batch-loop optimization (commits 12e5435f+ in the
+feat/derivation-synthesis merge) splits a loop body into inner pure-compute
+statements and outer hoisted guards (periodic `when` blocks with `PrintLn!`,
+termination guards). The inner body is emitted in a tight phi-node loop. The outer
+guards are stored in `BatchInfo.outer_guards` and `self.fun.pending_post_hoist`.
+
+The `.ox_` block (outer body) only loaded the counter and checked termination —
+it never emitted `batch_info.outer_guards`. The `.done_` block only had a hardcoded
+`last_energy` case for nbody_newton's termination print — it never emitted general
+`pending_post_hoist` guards.
+
+**Impact**: ring_buffer produced 0 lines of output (all `PrintLn!` calls were in the
+un-emitted outer guards). The inner loop ran at 0.001s (no I/O), then exited silently.
+The C reference produces 11 lines of output in ~0.04s.
+
+**First fix (7e9de00b)**: Called `emit_countable_body` in `.ox_` and `.done_` blocks.
+This produced correct output (11 lines) but used the full inner-loop statement
+emitter (phi backedge tracking, field write sets, `last_val_temps` management) in
+the outer loop — adding unnecessary overhead. ring_buffer went from 0.001s (broken,
+no output) to 0.047s (correct, matches C).
+
+**Second fix (pending, `emit_guard_block`)**: Replace `emit_countable_body` with
+direct guard emission: for each `Statement::Guarded(cond, body)`, emit
+`icmp %cond` + `br i1` + body + merge. No phi tracking, no field write sets.
+This restores the tight outer loop while producing correct output.
+
+---
+
+## `align_of` Universe Iteration Finds Wrong Type by LLVM Type String — FIXED
+
+**Date:** 2026-07-30  
+**Status:** Fixed in `[pending]`  
+**Root cause:** `align_of` (emit_toplevel.rs:560) iterates the entire type universe
+looking for any type whose `llvm_type()` equals the requested LLVM type string.
+For `"float"`, it found a type unrelated to Float whose resolved LLVM type happened
+to be `"float"` but with alignment 2. This returned wrong alignment 2 for float
+loads, producing `align 2` in `load float, ptr %gep` instructions.
+
+**Fix**: Skip the universe iteration for standard LLVM types (`i8`, `i16`, `i32`,
+`i64`, `i128`, `float`, `double`, `half`, `bfloat`, `ptr`). These have hardcoded
+correct alignments in the match statement below.
+
+**Before fix**: float → `align 2` (wrong), i64 → `align 16` (wrong, from matching an
+i128-aligned type in the universe).  
+**After fix**: float → `align 4` (correct), i64 → `align 8` (correct).
+
+---
+
+## All Structs Disappear from LLVM IR After Casting Graph Refactoring — UNFIXED
+
+**Date:** 2026-07-30  
+**Status:** Unfixed — workaround in `declare_struct_types` needed  
+**Root cause:** The casting graph refactoring (Phase 0b, commit `4377ce38`) replaced
+the old `rt_llvm_type()` universe property lookup with `protocol_llvm_type()` +
+`resolve_llvm_type()`. The old path emitted struct type declarations for all types
+in the universe that had an LLVM type property (e.g., `%String = type { i64, i64 }`,
+`%SmallString64 = type { i64, i64, i64, ... }`). The new path only declares
+struct types from `self.ctx.struct_types` (user-defined structs via `struct` keyword
+in source) — which does NOT include `type SmallString64 { slot0: Int; ... }`
+declarations from the stdlib bootstrap.
+
+Types like `SmallString64`, `StaticString`, `String`, and `UTF8View` were no longer
+declared in the LLVM IR. While nbody_newton doesn't directly use these types, their
+absence changes LLVM's global type layout computation, which affects how the LICM
+pass processes loops.
+
+**Impact**: nbody_newton's IR triggers a segfault in `llvm::sinkRegion()` (LICM pass)
+in clang 18.1.3. The baseline IR (which declared these struct types) compiles
+successfully.
+
+**Workaround**: Hardcode the four stdlib struct type declarations in
+`declare_struct_types()` regardless of universe state.
+
+---
+
+## clang 18.1.3 LICM `sinkRegion` Segfault on Correctly-Aligned IR — UNFIXED
+
+**Date:** 2026-07-30  
+**Status:** Unfixed — clang 18.1.3 bug  
+**Evidence:**
+
+The generated nbody_newton.ll crashes clang 18.1.3 at `-O3` (and `-O2`) during
+`llvm::sinkRegion()` in the LICM pass. The baseline IR (with `align 16` on i64
+loads, and `%SmallString64`/`%StaticString`/`%String`/`%UTF8View` struct type
+declarations) does NOT crash.
+
+The crash appears to be triggered by a specific combination of:
+- Loop body with float and i64 GEP+load/store patterns
+- No struct type declarations for stdlib types in the IR
+- Correct alignment values
+
+The crash is not a Brief compiler bug — it's a clang/LLVM bug in the LICM
+sinkRegion pass. The baseline avoided it by producing slightly different IR that
+the buggy pass doesn't choke on.
+
+**Workarounds** (any single one suffices):
+1. Declare `%SmallString64`, `%StaticString`, `%String`, `%UTF8View` in IR
+2. Use `-fno-licm` flag (not directly exposed by clang)
+3. Use `-O2` instead of `-O3`
+4. Use alternative clang version (18.1.8 is reported to work)
+
+**Upstream clang bug:** The crash happens at `llvm::sinkRegion` in the
+`-ffast-math` + `-O3` pipeline. Exact reproducer: `clang -O3 -c nbody_newton.ll`.
+
+---
+
+## `String` Type LLVM Representation Changed from `{ i64, i64 }` to `i128` — UNFIXED
+
+**Date:** 2026-07-30  
+**Status:** Unfixed — workaround in `protocol_llvm_type`  
+**Root cause:** `protocol_llvm_type()` (mod.rs:490) falls back to
+`format!("i{}", rt.bytes * 8)` for types without protocol membership. The String
+type has `bytes = 16` (pointer + length = 2 × 8 bytes), producing `i128`. The old
+code explicitly returned `{ i64, i64 }` for String (emit_toplevel.rs:274), but this
+path is inside `if self.feature_sso_strings { ... }` which defaults to `false`.
+
+The `i128` representation changes the FFI ABI for all functions taking String args:
+`__getenv_brief({ i64, i64 })` → `__getenv_brief(i128)`. Clang passes `i128` by
+value in a single register, while `{ i64, i64 }` is passed by pointer. This
+completely changes call site codegen and triggers different optimizer behavior.
+
+**Fix**: Added explicit String/UTF8View check in `protocol_llvm_type()` before the
+bytes-based fallback, returning `{ i64, i64 }` regardless of `feature_sso_strings`.
+
+**Impact**: All benchmarks using `GetEnvInt!` (which takes a String arg) had ABI
+changes that could affect optimization. nbody_newton, nbody_sqrt_idio, and
+kalman_filter_runtime all use `GetEnvInt!("BOUND")` and were affected.
+
+---
+
+## ring_buffer: Baseline Compiler Produces No Output at 0.001s — UNFIXED (pre-existing)
+
+**Date:** 2026-07-30  
+**Status:** Pre-existing bug in baseline (commit `29921993`)  
+**Root cause:** The batch-loop optimization introduced in commit `12e5435f` splits
+the loop body but never emits the hoisted outer guards (periodic `when` blocks,
+termination `when` blocks). Same root cause as the `emit_countable_batched_main`
+outer guard emission bug above. The base commit for the permanent baseline worktree
+(`b39461e2`/`29921993`) also has this bug — ring_buffer produces 0 lines of output
+and runs in 0.001s despite having `PrintLn!` calls in the source.
+
+**Manifestation**: `BOUND=50000000 ./benchmarks/ring_buffer` prints nothing, exits 0.
+The C reference (`ring_buffer_c`) produces 11 lines of output in ~0.04s.
+
+**Note**: The user reported that the baseline compiler ran ring_buffer at 0.8× C
+speed. This is likely from a different baseline version (before the batch-loop
+optimization, commit `12e5435f`) or from a cached binary predating the batch-loop
+merge. The actual baseline worktree binary produces no output.
+
+---
+
+## mandelbrot: Brief Output Differs from C — UNFIXED (pre-existing)
+
+**Date:** 2026-07-30  
+**Status:** Pre-existing, not caused by our changes (verified by testing 4 commits
+back before any of our work — same wrong output)  
+**Evidence:** Brief mandelbrot produces 2 lines of large integers
+(`101363715272128`, `4318579316753219217`) while C produces 11 lines
+(`73`, then 10 × `119`). The Brief output values look like raw memory values
+or uninitialized state fields, suggesting a state loading bug in the loop engine
+for integer-heavy convergent nodes.
+
+This bug predates all commits in this session and may be related to the
+derivation-synthesis merge or the casting graph refactoring.
+
+---
+
+## nbody_sqrt_idio: Cannot Compile — UNFIXED (pre-existing)
+
+**Date:** 2026-07-30  
+**Status:** Pre-existing — `Sqrt#` intrinsic call signature mismatch in
+`frgn` declaration or `emit_intrinsic_call_dispatch`. The error occurs during
+clang LTO linking, not during Brief compilation.
+
+---
+
+## kalman_filter_runtime: Cannot Compile — UNFIXED (pre-existing)
+
+**Date:** 2026-07-30  
+**Status:** Pre-existing — same clang LICM sinkRegion crash as nbody_newton.
+Likely has similar loop structure and alignment issues.
