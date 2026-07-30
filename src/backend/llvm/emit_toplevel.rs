@@ -296,6 +296,23 @@ impl LlvmBackend {
                 }
             }
         }
+        // 2026-07-30: Struct-like types derive LLVM type from field shapes.
+        // This handles Slice<T> (fields: { Ptr<T>, Int } → { ptr, i64 }),
+        // List<T>, and any future struct type without requiring llvm_type
+        // metadata or primordial entries. Must come AFTER the SSO/SVO/String
+        // special cases but BEFORE the universe llvm_type property lookup.
+        if let Some(rt) = self.ctx.type_universe.as_ref()
+            .and_then(|u| ty.universe_key().and_then(|k| u.get(k)))
+        {
+            if !rt.fields.is_empty()
+                && !rt.properties.contains_key("llvm_type")
+            {
+                let field_tys: Vec<String> = rt.fields.iter()
+                    .map(|(_, fty)| self.llvm_type(fty))
+                    .collect();
+                return format!("{{ {} }}", field_tys.join(", "));
+            }
+        }
         // 2026-07-14: Universe query reads llvm_type property set by normalizer.
         // After Phase 0d, the normalizer resolves Int/UInt from protocol + int_bits,
         // so no name-based override is needed. Fixed-width types (Int32, Float) have

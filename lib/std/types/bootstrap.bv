@@ -105,3 +105,12 @@ type SmallString64 {
 };
 
 type Data: Int { !> bits: 64; };
+
+// 2026-07-30: Slice<T> — fat-pointer view over contiguous elements.
+// LLVM type { ptr, i64 } derived from field shapes by emit_toplevel.rs:llvm_type().
+// No llvm_type metadata needed. Replaces UTF8View.
+type Slice<T> {
+    data: Ptr<T>;
+    len: Int;
+    prop Size: len;
+};
