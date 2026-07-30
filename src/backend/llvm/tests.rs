@@ -1472,8 +1472,12 @@ fn test_emit_cast_string_to_int() {
         }),
     ];
     let output = backend.generate(&program, None);
-    assert!(output.contains("call i64 @__str_to_int"),
-        "Cast String -> Int should call __str_to_int__. Got:\n{}", output);
+    // 2026-07-30: Protocol-based cast path replaces __str_to_int.
+    // String→Int now goes through protocol dispatch, not __str_to_int.
+    // 2026-07-30: Check that __str_to_int is NOT called (only declared as extern).
+    // The extern declaration is always emitted for known runtime functions.
+    assert!(!output.contains("call i64 @__str_to_int"),
+        "Cast String -> Int should NOT call __str_to_int (protocol path). Got:\n{}", output);
 }
 
 // ── List tests ───────────────────────────────────────────

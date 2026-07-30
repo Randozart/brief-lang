@@ -1022,7 +1022,7 @@ fn emit_intrinsic_cast(
     let src_name = type_name_str(&src.ty);
     if let Some(name) = &src_name {
         if let Some(impl_args) = find_cast_impl(backend, name, "Cast") {
-            let result = emit_simple_call(backend, out, v, &src, &impl_args, indent);
+            let result = emit_simple_call(backend, out, v, &src, &impl_args, "i64", indent);
             return BTypedRegister { name: result, ty: src.ty.clone() };
         }
     }
@@ -1031,7 +1031,7 @@ fn emit_intrinsic_cast(
     if let (Some(s_name), Some(t_name)) = (src_name.as_ref(), type_name_str_from_llvm(&target_ll).as_ref()) {
         let protocol_path = try_cast_protocol_path(backend, s_name, t_name);
         if let Some(impl_args) = protocol_path {
-            let result = emit_simple_call(backend, out, v, &src, &impl_args, indent);
+            let result = emit_simple_call(backend, out, v, &src, &impl_args, "i64", indent);
             return BTypedRegister { name: result, ty: src.ty.clone() };
         }
     }
@@ -1146,16 +1146,19 @@ fn category_from_params(params: &[Type]) -> Option<&str> {
 }
 
 /// Emit a simple function call with a single argument.
+/// `out_ll_ty` is the LLVM return type string (e.g., "i64", "{ i64, i64 }").
+/// Must match the actual return type of the called function.
 pub(super) fn emit_simple_call(
     backend: &mut LlvmBackend, out: &mut String, v: &str,
-    src: &BTypedRegister, impl_args: &crate::ast::PropertyValue, indent: &str,
+    src: &BTypedRegister, impl_args: &crate::ast::PropertyValue,
+    out_ll_ty: &str, indent: &str,
 ) -> String {
     let fn_name = match impl_args {
         crate::ast::PropertyValue::Identifier(s) => s.clone(),
         _ => return v.to_string(),
     };
     let ll_ty = backend.llvm_type(&src.ty);
-    writeln!(out, "{}{} = call i64 @{}({} {})", indent, v, fn_name, ll_ty, src.name).ok();
+    writeln!(out, "{}{} = call {} @{}({} {})", indent, v, out_ll_ty, fn_name, ll_ty, src.name).ok();
     v.to_string()
 }
 

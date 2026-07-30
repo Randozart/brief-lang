@@ -540,20 +540,15 @@ impl LlvmBackend {
             // ── Cast ─────────────────────────────────────────────────
             // 2026-07-14: Added string conversion paths. i64→ptr calls
             // __int_to_str__, ptr→i64 calls __str_to_int after inttoptr.
-            // 2026-07-16: String → Int must check is_string_chain because
-            // emit_string_literal returns Type::int() (ptrtoint representation)
-            // but the value is semantically a String — the LLVM type match
-            // alone would produce a no-op bitcast.
             // 2026-07-30: Protocol-based cast resolution (physical vs semantic)
             // checked before LLVM coercion. If the source or target participates
             // in a known protocol (Cast.#<Cat>), delegate to resolve_cast.
             Expr::Cast(expr, target) => {
                 let src = self.emit_expr(out, expr, indent);
                 // 2026-07-30: Check protocol-based cast path first.
-                // Physical (target is #Bit) → literal memory bytes.
+                // Physical (target is Bits(N) or type Bit) → literal memory bytes.
                 // Semantic (target is any other protocol) → operator pipeline.
-                if self.is_protocol_member(&src.ty, "#Bit")
-                    || self.is_protocol_member(target, "#Bit")
+                if self.resolve_cast_should_try(&src.ty, target)
                     || type_name_str(&src.ty).and_then(|n| find_cast_impl(self, &n, "Cast")).is_some()
                     || type_name_str(&src.ty).and_then(|n| find_cast_impl(self, &n, "CastTo")).is_some()
                     || type_name_str(target).and_then(|n| find_cast_impl(self, &n, "CastFrom")).is_some()
@@ -595,11 +590,6 @@ impl LlvmBackend {
                     }
                 } else if target_ll == "i64" && matches!(src.ty, Type::Ptr(_)) {
                     writeln!(out, "{}{} = ptrtoint ptr {} to i64", indent, v, src.name).ok();
-                } else if target_ll == "i64" && self.is_string_chain(expr) {
-                    // String literal or string-producing expr → Int
-                    let ip = self.fun.gen_reg();
-                    writeln!(out, "{}{} = inttoptr i64 {} to ptr", indent, ip, src.name).ok();
-                    writeln!(out, "{}{} = call i64 @__str_to_int(ptr {})", indent, v, ip).ok();
                 } else if target_ll == "double" {
                     writeln!(out, "{}{} = sitofp i64 {} to double", indent, v, src.name).ok();
                 } else if target_ll == "i64" && src_ll == "double" {
@@ -2463,32 +2453,65 @@ impl LlvmBackend {
         }
     }
 
+    /// 2026-07-30: Check whether protocol-based cast resolution should be attempted.
+    /// Returns true if the source or target type warrants protocol dispatch.
+    /// Guards against calling resolve_cast for trivial cases where LLVM coercion suffices.
+    fn resolve_cast_should_try(&self, src_ty: &Type, target: &Type) -> bool {
+        // Physical target: Bits(N) or type Bit → protocol may provide custom CastTo(#Bit)
+        if matches!(target, Type::Bits(_))
+            || type_name_str(target).map(|n| n == "Bit").unwrap_or(false)
+        {
+            return true;
+        }
+        // Source has operator bindings for Cast or CastTo
+        if let Some(ref name) = type_name_str(src_ty) {
+            if let Some(defs) = self.ctx.operator_defs.get(name) {
+                if defs.iter().any(|d| d.op == "Cast" || d.op == "CastTo") {
+                    return true;
+                }
+            }
+        }
+        // Target has operator bindings for CastFrom
+        if let Some(ref name) = type_name_str(target) {
+            if let Some(defs) = self.ctx.operator_defs.get(name) {
+                if defs.iter().any(|d| d.op == "CastFrom") {
+                    return true;
+                }
+            }
+        }
+        false
+    }
+
     // 2026-07-30: Unified cast resolution — physical vs semantic paths.
-    // Physical: target is #Bit or Bit-derived → literal memory bytes.
-    // Semantic: target is any other protocol → protocol pipeline.
+    // Physical: target is explicit Bits(N) or type Bit → literal memory bytes.
+    // Semantic: target is any other protocol → operator pipeline.
     // Returns None when no protocol path exists (caller falls back to LLVM coercion).
     pub(super) fn resolve_cast(
         &mut self, out: &mut String, v: &str,
         src: &TypedRegister, target: &Type, indent: &str,
     ) -> Option<TypedRegister> {
-        // Physical path: CastTo(#Bit) → literal memory bytes
-        if self.is_protocol_member(target, "#Bit") {
+        // Physical path: target is explicit Bits(N) or type Bit → literal memory bytes.
+        // Do NOT match by #Bit protocol membership — all types are members of #Bit.
+        let is_physical_target = matches!(target, Type::Bits(_))
+            || type_name_str(target).map(|n| n == "Bit").unwrap_or(false);
+        if is_physical_target {
             return self.resolve_physical_cast(out, v, src, indent);
         }
         // Semantic path: check operator_defs and protocol pipeline
         let src_name = type_name_str(&src.ty);
         let target_name = type_name_str(target);
         // Step 1: Direct op Cast(Target) on source type
+        let target_ll = self.llvm_type(target);
         if let Some(ref name) = src_name {
             if let Some(impl_args) = find_cast_impl(self, name, "Cast") {
-                let result = emit_simple_call(self, out, v, src, &impl_args, indent);
+                let result = emit_simple_call(self, out, v, src, &impl_args, &target_ll, indent);
                 return Some(TypedRegister { name: result, ty: target.clone() });
             }
         }
         // Step 2: CastTo(#Category) → CastFrom(#Category) protocol path
         if let (Some(s_name), Some(t_name)) = (src_name.as_ref(), target_name.as_ref()) {
             if let Some(impl_args) = try_cast_protocol_path(self, s_name, t_name) {
-                let result = emit_simple_call(self, out, v, src, &impl_args, indent);
+                let result = emit_simple_call(self, out, v, src, &impl_args, &target_ll, indent);
                 return Some(TypedRegister { name: result, ty: target.clone() });
             }
         }
@@ -2497,14 +2520,14 @@ impl LlvmBackend {
         // the source type's protocol membership.
         if let Some(ref t_name) = target_name {
             if let Some(impl_args) = find_matching_cast_from(self, &src.ty, t_name) {
-                let result = emit_simple_call(self, out, v, src, &impl_args, indent);
+                let result = emit_simple_call(self, out, v, src, &impl_args, &target_ll, indent);
                 return Some(TypedRegister { name: result, ty: target.clone() });
             }
         }
         // Step 4: Direct CastTo on source type (for target categories)
         if let Some(ref s_name) = src_name {
             if let Some(impl_args) = find_matching_cast_to(self, s_name, target) {
-                let result = emit_simple_call(self, out, v, src, &impl_args, indent);
+                let result = emit_simple_call(self, out, v, src, &impl_args, &target_ll, indent);
                 return Some(TypedRegister { name: result, ty: target.clone() });
             }
         }
@@ -2529,13 +2552,15 @@ impl LlvmBackend {
         src: &TypedRegister, indent: &str,
     ) -> Option<TypedRegister> {
         // Step 1: Check for custom CastTo(#Bit) or Cast(#Bit) operator
+        // Physical cast always returns i64 (raw bytes).
+        const PHYSICAL_OUT: &str = "i64";
         if let Some(name) = type_name_str(&src.ty) {
             if let Some(impl_args) = find_cast_impl(self, &name, "CastTo") {
-                let result = emit_simple_call(self, out, v, src, &impl_args, indent);
+                let result = emit_simple_call(self, out, v, src, &impl_args, PHYSICAL_OUT, indent);
                 return Some(TypedRegister { name: result, ty: src.ty.clone() });
             }
             if let Some(impl_args) = find_cast_impl(self, &name, "Cast") {
-                let result = emit_simple_call(self, out, v, src, &impl_args, indent);
+                let result = emit_simple_call(self, out, v, src, &impl_args, PHYSICAL_OUT, indent);
                 return Some(TypedRegister { name: result, ty: src.ty.clone() });
             }
         }
@@ -2653,12 +2678,22 @@ fn get_shuffle_int(properties: &std::collections::HashMap<String, crate::ast::Pr
 /// 2026-07-30: Find a CastFrom operator on target_type whose category matches
 /// the source type's protocol membership. For example, String::CastFrom(#Int)
 /// matches when source type is Int (which is a member of #Int).
+/// CastFrom(#Bit) matches when source is an integer-like type that can
+/// meaningfully be interpreted as raw bytes for construction.
 fn find_matching_cast_from(backend: &LlvmBackend, src_ty: &Type, target_name: &str) -> Option<crate::ast::PropertyValue> {
     let defs = backend.ctx.operator_defs.get(target_name)?;
     for d in defs {
         if d.op != "CastFrom" { continue; }
         let cat = category_from_first_param(&d.params)?;
-        let hashword = if cat.starts_with('#') { cat.to_string() } else { format!("#{}", cat) };
+        let normalized_cat = cat.strip_prefix('#').unwrap_or(&cat);
+        if normalized_cat == "Bit" {
+            // 2026-07-30: CastFrom(#Bit) matches when source is an integer type.
+            if backend.is_protocol_member(src_ty, "#Int") {
+                return d.impl_args.clone();
+            }
+            continue;
+        }
+        let hashword = format!("#{}", normalized_cat);
         if backend.is_protocol_member(src_ty, &hashword) {
             return d.impl_args.clone();
         }
@@ -2669,12 +2704,27 @@ fn find_matching_cast_from(backend: &LlvmBackend, src_ty: &Type, target_name: &s
 /// 2026-07-30: Find a CastTo operator on source_name whose category matches
 /// the target type's protocol membership. For example, Int::CastTo(#String)
 /// matches when target type is String (which is a member of #String).
+/// CastTo(#Bit) matches when target IS Bit/Bits(N) OR when target is an
+/// integer-like type that can meaningfully hold raw bytes (.data pointer).
 fn find_matching_cast_to(backend: &LlvmBackend, src_name: &str, target: &Type) -> Option<crate::ast::PropertyValue> {
     let defs = backend.ctx.operator_defs.get(src_name)?;
     for d in defs {
         if d.op != "CastTo" { continue; }
         let cat = category_from_first_param(&d.params)?;
-        let hashword = if cat.starts_with('#') { cat.to_string() } else { format!("#{}", cat) };
+        let normalized_cat = cat.strip_prefix('#').unwrap_or(&cat);
+        if normalized_cat == "Bit" {
+            // 2026-07-30: CastTo(#Bit) matches when target IS Bit/Bits(N),
+            // OR when target is an integer type (Int, Int8..Int64, etc.)
+            // that can meaningfully hold the .data pointer as raw bytes.
+            if type_name_str(target).map(|n| n == "Bit").unwrap_or(false)
+                || matches!(target, Type::Bits(_))
+                || backend.is_protocol_member(target, "#Int")
+            {
+                return d.impl_args.clone();
+            }
+            continue;
+        }
+        let hashword = format!("#{}", normalized_cat);
         if backend.is_protocol_member(target, &hashword) {
             return d.impl_args.clone();
         }
