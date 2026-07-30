@@ -484,3 +484,18 @@ defn remove_suffix(s: String, suffix: String) [true][term .#Size <= s .#Size] ->
 defn is_empty_str(s: String) [true][term == (s .#Size == 0)] -> Bool {
     term s .#Size == 0;
 };
+
+// 2026-07-30: CastTo/CastFrom implementation functions.
+// Used by CastTo(#Bit) and CastFrom(#Int/#Float) on String.
+// These are stubs — Phase 4+ wires real implementations.
+defn string_get_content_bytes(s: String) [true][term >= 0] -> Int {
+    term 0;
+};
+
+defn string_from_int(n: Int) [true][term .#Size >= 0] -> String {
+    term IntToStr#(n);
+};
+
+defn string_from_float(f: Float) [true][term .#Size >= 0] -> String {
+    term "";
+};

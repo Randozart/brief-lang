@@ -69,13 +69,19 @@ type Bool: #Bool {
 type Char: #Char { !> bits: 32;
 };
 
-type String: #String {
+// 2026-07-30: String participates in both #String and #Bit protocols.
+// CastTo(#Bit) returns raw content bytes (physical cast).
+// CastFrom(#Int/Float) parse-from-number (semantic cast).
+type String: #String Bit {
     data: Int;
     len: Int;
     !> alignment: 8;
     !> encoding: "UTF-8";
     prop Size: chars(#L);
     prop Bytes: byte_len(#L);
+    op CastTo(#Bit): string_get_content_bytes(#L);
+    op CastFrom(#Int): string_from_int(#L);
+    op CastFrom(#Float): string_from_float(#L);
 };
 
 type UTF8View {

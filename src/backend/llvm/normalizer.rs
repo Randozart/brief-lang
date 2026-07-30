@@ -350,7 +350,7 @@ fn register_typedefs(items: &[TopLevel], universe: &mut TypeUniverse) {
             }
         }
 
-        // Explicit CastTo/CastFrom from operator definitions
+        // Explicit CastTo/CastFrom from operator definitions (old-style)
         for op in &td.body.operators {
             if op.op == "CastTo" || op.op == "CastFrom" {
                 for param in &op.params {
@@ -359,6 +359,18 @@ fn register_typedefs(items: &[TopLevel], universe: &mut TypeUniverse) {
                             => name.strip_prefix('#').unwrap_or(name).to_string(),
                         _ => continue,
                     };
+                    if let Some(rt) = universe.types.get_mut(type_name) {
+                        rt.properties.insert(format!("Cast.#{}", cat), PropertyValue::Bool(true));
+                    }
+                }
+            }
+        }
+
+        // 2026-07-30: CastTo/CastFrom from op_bindings (new-style OperatorBinding)
+        for b in &td.body.op_bindings {
+            if b.name == "CastTo" || b.name == "CastFrom" {
+                if let Some(ref pv) = b.protocol_variant {
+                    let cat = pv.strip_prefix('#').unwrap_or(pv).to_string();
                     if let Some(rt) = universe.types.get_mut(type_name) {
                         rt.properties.insert(format!("Cast.#{}", cat), PropertyValue::Bool(true));
                     }

@@ -893,8 +893,43 @@ fn codegen(
     let mut operator_defs: std::collections::HashMap<String, Vec<brief_compiler::ast::top::OperatorDef>> = std::collections::HashMap::new();
     for item in items.iter() {
         if let brief_compiler::ast::TopLevel::TypeDef(td) = item {
-            if !td.body.operators.is_empty() {
-                operator_defs.insert(td.name.clone(), td.body.operators.clone());
+            let mut all_ops = td.body.operators.clone();
+            // 2026-07-30: Convert op_bindings (new-style) to OperatorDef format.
+            // CastTo/CastFrom bindings carry implementation function names that
+            // the backend uses for emit_simple_call. Other ops (Add, Sub, etc.)
+            // don't need impl_args — they use hardcoded codegen.
+            for b in &td.body.op_bindings {
+                if b.name == "CastTo" || b.name == "CastFrom" {
+                    let params = match &b.protocol_variant {
+                        Some(pv) => {
+                            // Parse #HashWord or BareIdentifier as Type
+                            if pv.starts_with('#') {
+                                let rest = pv.strip_prefix('#').unwrap_or(pv);
+                                vec![brief_compiler::ast::Type::Custom(format!("#{}", rest))]
+                            } else {
+                                vec![brief_compiler::ast::Type::Custom(pv.clone())]
+                            }
+                        }
+                        None => vec![],
+                    };
+                    let impl_args = if let brief_compiler::ast::Expr::Call(fn_name, _, _) = &b.expr {
+                        Some(brief_compiler::ast::PropertyValue::Identifier(fn_name.clone()))
+                    } else {
+                        None
+                    };
+                    all_ops.push(brief_compiler::ast::top::OperatorDef {
+                        op: b.name.clone(),
+                        params,
+                        pre: b.pre.clone(),
+                        suf: b.suf.clone(),
+                        impl_args,
+                        impl_name: b.name.clone(),
+                        span: b.span.clone(),
+                    });
+                }
+            }
+            if !all_ops.is_empty() {
+                operator_defs.insert(td.name.clone(), all_ops);
             }
         }
     }
