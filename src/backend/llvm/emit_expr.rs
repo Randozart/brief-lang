@@ -12,7 +12,10 @@
 use crate::ast::*;
 use crate::ast::{Expr, Statement, Type};
 use crate::backend::llvm::emit_stmt;
-use crate::backend::llvm::intrinsics::{emit_intrinsic_call, template_for_op};
+use crate::backend::llvm::intrinsics::{
+    emit_intrinsic_call, emit_meld_shuffle, emit_simple_call, find_cast_impl,
+    template_for_op, try_cast_protocol_path, type_name_str,
+};
 use crate::backend::llvm::types;
 use crate::backend::llvm::{LlvmBackend, TypedRegister};
 
@@ -541,11 +544,27 @@ impl LlvmBackend {
             // emit_string_literal returns Type::int() (ptrtoint representation)
             // but the value is semantically a String — the LLVM type match
             // alone would produce a no-op bitcast.
+            // 2026-07-30: Protocol-based cast resolution (physical vs semantic)
+            // checked before LLVM coercion. If the source or target participates
+            // in a known protocol (Cast.#<Cat>), delegate to resolve_cast.
             Expr::Cast(expr, target) => {
                 let src = self.emit_expr(out, expr, indent);
+                // 2026-07-30: Check protocol-based cast path first.
+                // Physical (target is #Bit) → literal memory bytes.
+                // Semantic (target is any other protocol) → operator pipeline.
+                if self.is_protocol_member(&src.ty, "#Bit")
+                    || self.is_protocol_member(target, "#Bit")
+                    || type_name_str(&src.ty).and_then(|n| find_cast_impl(self, &n, "Cast")).is_some()
+                    || type_name_str(&src.ty).and_then(|n| find_cast_impl(self, &n, "CastTo")).is_some()
+                    || type_name_str(target).and_then(|n| find_cast_impl(self, &n, "CastFrom")).is_some()
+                {
+                    if let Some(result) = self.resolve_cast(out, v, &src, target, indent) {
+                        return result;
+                    }
+                }
                 let target_ll = self.llvm_type(target);
                 let src_ll = self.llvm_type(&src.ty);
-                // 2026-07-17: Priorities for cast dispatch:
+                // 2026-07-17: Priorities for cast dispatch (LLVM coercion fallback):
                 // 1. Ptr<T> target → inttoptr (never String — String/Data have Custom type)
                 // 2. String/Data target → runtime helper
                 // 3. i64 target + Ptr<T> source → ptrtoint
@@ -2443,4 +2462,97 @@ impl LlvmBackend {
             ty: Type::int(),
         }
     }
+
+    // 2026-07-30: Unified cast resolution — physical vs semantic paths.
+    // Physical: target is #Bit or Bit-derived → literal memory bytes.
+    // Semantic: target is any other protocol → protocol pipeline.
+    // Returns None when no protocol path exists (caller falls back to LLVM coercion).
+    pub(super) fn resolve_cast(
+        &mut self, out: &mut String, v: &str,
+        src: &TypedRegister, target: &Type, indent: &str,
+    ) -> Option<TypedRegister> {
+        // Physical path: CastTo(#Bit) → literal memory bytes
+        if self.is_protocol_member(target, "#Bit") {
+            return self.resolve_physical_cast(out, v, src, indent);
+        }
+        // Semantic path: check operator_defs and protocol pipeline
+        let src_name = type_name_str(&src.ty);
+        let target_name = type_name_str(target);
+        // Step 1: Direct op Cast(Target) on source type
+        if let Some(ref name) = src_name {
+            if let Some(impl_args) = find_cast_impl(self, name, "Cast") {
+                let result = emit_simple_call(self, out, v, src, &impl_args, indent);
+                return Some(TypedRegister { name: result, ty: target.clone() });
+            }
+        }
+        // Step 2: CastTo(#Category) → CastFrom(#Category) protocol path
+        if let (Some(ref s_name), Some(ref t_name)) = (src_name, target_name) {
+            if let Some(impl_args) = try_cast_protocol_path(self, s_name, t_name) {
+                let result = emit_simple_call(self, out, v, src, &impl_args, indent);
+                return Some(TypedRegister { name: result, ty: target.clone() });
+            }
+        }
+        // Step 3: Meld shuffle (structural bit remapping via @/ fields)
+        let shuffle = self.resolve_shuffle_data(&src.ty);
+        if let Some(ref data) = shuffle {
+            if !data.is_empty() {
+                return Some(emit_meld_shuffle(self, out, v, src, data, indent));
+            }
+        }
+        // No protocol path found — caller falls back to LLVM coercion
+        None
+    }
+
+    /// 2026-07-30: Physical cast — emit literal memory bytes of a value.
+    /// For types with a custom CastTo(#Bit) operator, calls through the
+    /// operator pipeline. Otherwise, bitcasts the register.
+    fn resolve_physical_cast(
+        &mut self, out: &mut String, v: &str,
+        src: &TypedRegister, indent: &str,
+    ) -> Option<TypedRegister> {
+        // Check for custom CastTo(#Bit) operator on source type
+        if let Some(name) = type_name_str(&src.ty) {
+            // First try CastTo(#Bit) directly
+            if let Some(impl_args) = find_cast_impl(self, &name, "CastTo") {
+                let result = emit_simple_call(self, out, v, src, &impl_args, indent);
+                return Some(TypedRegister { name: result, ty: src.ty.clone() });
+            }
+            // Fall back to op Cast(#Bit) (generic Cast)
+            if let Some(impl_args) = find_cast_impl(self, &name, "Cast") {
+                let result = emit_simple_call(self, out, v, src, &impl_args, indent);
+                return Some(TypedRegister { name: result, ty: src.ty.clone() });
+            }
+        }
+        // Fallback: bitcast the register to i64 (literal bytes)
+        let src_ll = self.llvm_type(&src.ty);
+        writeln!(out, "{}{} = bitcast {} {} to i64", indent, v, src_ll, src.name).ok();
+        Some(TypedRegister { name: v.to_string(), ty: Type::int() })
+    }
+
+    /// 2026-07-30: Extract meld shuffle data from type universe properties.
+    fn resolve_shuffle_data(&self, ty: &Type) -> Option<Vec<(u64, u64, u64)>> {
+        let tu = self.ctx.type_universe.as_ref()?;
+        let key = ty.universe_key()?;
+        let rt = tu.get(key)?;
+        let fields: Vec<String> = rt.properties.keys()
+            .filter(|k| k.starts_with("shuffle.") && k.ends_with(".src_offset"))
+            .map(|k| k.strip_prefix("shuffle.").unwrap()
+                 .strip_suffix(".src_offset").unwrap().to_string())
+            .collect();
+        if fields.is_empty() { return None; }
+        let data: Vec<(u64, u64, u64)> = fields.iter().map(|f| {
+            let src_off = get_shuffle_int(&rt.properties, &format!("shuffle.{}.src_offset", f));
+            let src_wid = get_shuffle_int(&rt.properties, &format!("shuffle.{}.src_width", f));
+            let dst_off = get_shuffle_int(&rt.properties, &format!("shuffle.{}.dst_offset", f));
+            (src_off, src_wid, dst_off)
+        }).collect();
+        Some(data)
+    }
+}
+
+/// 2026-07-30: Extract integer from type properties for meld shuffle.
+fn get_shuffle_int(properties: &std::collections::HashMap<String, crate::ast::PropertyValue>, key: &str) -> u64 {
+    properties.get(key)
+        .and_then(|pv| if let crate::ast::PropertyValue::Int(n) = pv { Some(*n as u64) } else { None })
+        .unwrap_or(0)
 }

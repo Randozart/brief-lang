@@ -1067,7 +1067,7 @@ fn emit_intrinsic_cast(
 }
 
 /// 2026-07-20: Emit lshr/and/shl/or sequence for meld structural remapping.
-fn emit_meld_shuffle(
+pub(super) fn emit_meld_shuffle(
     backend: &mut LlvmBackend, out: &mut String, v: &str,
     src: &BTypedRegister, shuffle_data: &[(u64, u64, u64)],
     indent: &str,
@@ -1091,7 +1091,7 @@ fn emit_meld_shuffle(
 }
 
 /// Extract type name string from a Type for operator_defs lookup.
-fn type_name_str(ty: &Type) -> Option<String> {
+pub(super) fn type_name_str(ty: &Type) -> Option<String> {
     match ty {
         Type::Custom(n) | Type::Applied(n, _) => Some(n.clone()),
         _ => None,
@@ -1110,7 +1110,7 @@ fn type_name_str_from_llvm(llvm_ty: &str) -> Option<String> {
 }
 
 /// Find a Cast/CastTo/CastFrom implementation on a type via operator_defs.
-fn find_cast_impl(backend: &LlvmBackend, type_name: &str, op_name: &str) -> Option<crate::ast::PropertyValue> {
+pub(super) fn find_cast_impl(backend: &LlvmBackend, type_name: &str, op_name: &str) -> Option<crate::ast::PropertyValue> {
     let defs = backend.ctx.operator_defs.get(type_name)?;
     for d in defs {
         if d.op == op_name && d.impl_args.is_some() {
@@ -1121,7 +1121,7 @@ fn find_cast_impl(backend: &LlvmBackend, type_name: &str, op_name: &str) -> Opti
 }
 
 /// Find a matching CastTo → CastFrom pair between two types.
-fn try_cast_protocol_path(backend: &LlvmBackend, src_name: &str, dst_name: &str) -> Option<crate::ast::PropertyValue> {
+pub(super) fn try_cast_protocol_path(backend: &LlvmBackend, src_name: &str, dst_name: &str) -> Option<crate::ast::PropertyValue> {
     let src_defs = backend.ctx.operator_defs.get(src_name)?.clone();
     let dst_defs = backend.ctx.operator_defs.get(dst_name)?.clone();
 
@@ -1146,7 +1146,7 @@ fn category_from_params(params: &[Type]) -> Option<&str> {
 }
 
 /// Emit a simple function call with a single argument.
-fn emit_simple_call(
+pub(super) fn emit_simple_call(
     backend: &mut LlvmBackend, out: &mut String, v: &str,
     src: &BTypedRegister, impl_args: &crate::ast::PropertyValue, indent: &str,
 ) -> String {
