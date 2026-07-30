@@ -260,7 +260,7 @@ pub fn compute_protocol_path(
     if let Some(u) = universe {
         let brief_key = type_to_key(brief_type);
         let foreign_key = type_to_key(_foreign_type);
-        if let Some(path) = crate::analysis::layout_optimizer::find_cast_path(u, &brief_key, &foreign_key, None) {
+        if let Some(path) = crate::analysis::layout_optimizer::find_cast_path(u, &brief_key, &foreign_key) {
             let steps = path_to_protocol_steps(&path);
             if !steps.is_empty() {
                 return Ok(steps);

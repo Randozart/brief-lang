@@ -1295,7 +1295,7 @@ fn eval_nav_call(
         "CastPath$" => {
             let src = expect_str_arg(args, 0, "CastPath$", scope)?;
             let tgt = expect_str_arg(args, 1, "CastPath$", scope)?;
-            let path = crate::analysis::layout_optimizer::find_cast_path(universe, &src, &tgt, None);
+            let path = crate::analysis::layout_optimizer::find_cast_path(universe, &src, &tgt);
             match path {
                 Some(types) => {
                     let steps: Vec<NavValue> = types.into_iter()

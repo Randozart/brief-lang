@@ -412,13 +412,6 @@ pub fn compile_source(file_path: &str, source: &str, opts: &BuildOptions) -> Res
     emit_beast_snapshot(file_path, BeastStage::Normalize, BeastPosition::After, &items, &universe, opts)?;
 
     // ── Build protocol graph from protocol declarations ────────────────
-    // 2026-07-23: Builds variant-aware CastTo/CastFrom edges from
-    // TopLevel::ProtocolDef items (proto ASCII: #String { ... }) and
-    // TypeDef.protocol fields. Injects edges into the universe so the
-    // existing BFS can find them.
-    let protocol_graph = brief_compiler::analysis::protocol_graph::ProtocolGraph::build_from(&items);
-    protocol_graph.inject_edges(&mut universe);
-
     // ── Protocol contract enforcement via SMT ──────────────────────────
     // 2026-07-23: For each protocol declaration with a contract, prove
     // the invariant holds using the SMT solver. If unprovable, deny.
