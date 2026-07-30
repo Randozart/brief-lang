@@ -24,6 +24,7 @@
 
 pub mod annotator;
 pub mod address_resolver;
+pub mod casting;
 pub mod assertion_verify;
 pub mod ast;
 pub mod analysis;

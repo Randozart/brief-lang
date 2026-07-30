@@ -172,6 +172,12 @@ pub struct CompilerContext {
     /// backend.generate(). Empty HashMap means all ops are backend-intrinsics.
     pub operator_defs: HashMap<String, Vec<crate::ast::top::OperatorDef>>,
 
+    // 2026-07-30: Protocol casting graph — replaces operator_defs-based cast dispatch.
+    // Every base protocol has a hardcoded direct lane to every other base protocol.
+    // Variant edges from proto declarations add BFS-discoverable alternative paths.
+    // See docs/plans/2026-07-30-casting-graph-rewrite.md and src/casting/graph.rs.
+    pub casting_graph: Option<crate::casting::graph::CastingGraph>,
+
     // Dependency graph (built during generate(), then read-only)
     pub dep_graph: DependencyGraph,
 
@@ -307,6 +313,7 @@ impl CompilerContext {
             is_embedded: false,
             type_universe: None,
             operator_defs: HashMap::new(),
+            casting_graph: None,
             webstack_enabled: false,
             dep_graph: DependencyGraph {
                 topo_order: Vec::new(),
