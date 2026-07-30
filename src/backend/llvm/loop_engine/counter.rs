@@ -642,6 +642,12 @@ impl LlvmBackend {
 
         // ── Outer Body (Guard Checks + Termination) ───────────────
         writeln!(out, ".ox_{}:", c0).ok();
+        // 2026-07-30: Emit hoisted outer guards (periodic prints etc.)
+        // before the termination check. These run once per batch and
+        // read the state values left by the inner loop exit.
+        if !batch_info.outer_guards.is_empty() {
+            self.emit_countable_body(out, &batch_info.outer_guards, &HashSet::new(), &mut vec![]);
+        }
         // Load the final count from %state (stored by inner exit)
         let (final_count_load, _) = self.emit_state_load_i64_by_idx(out, "  ", counter_idx);
         // Check termination: is count >= bound?
@@ -655,6 +661,14 @@ impl LlvmBackend {
 
         // ── Done / Exit ──────────────────────────────────────────
         writeln!(out, ".done_{}:", c0).ok();
+        // 2026-07-30: Emit post-loop hoisted statement groups (termination
+        // prints like when ops == TOTAL { PrintLn!(chk) }).
+        let pending: Vec<Vec<Statement>> = self.fun.pending_post_hoist.clone();
+        if !pending.is_empty() {
+            for group in &pending {
+                self.emit_countable_body(out, group, &HashSet::new(), &mut vec![]);
+            }
+        }
         // Emit the termination print(s) from the hoisted guards
         // Reload the final last_energy from %state for the print
         let energy_idx = self.ctx.field_index_map.get("last_energy").copied();

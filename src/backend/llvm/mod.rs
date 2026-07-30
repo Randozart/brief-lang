@@ -2790,19 +2790,28 @@ impl LlvmBackend {
                             );
                             // 2026-07-29: Compute batch info BEFORE dispatch so all
                             // paths can use it. Filter guards from the inner body.
+                            // 2026-07-30: Only strip guards when a batch loop will
+                            // actually be emitted. Without a batchable periodic guard,
+                            // stripping leaves the inner body missing hoisted `let`
+                            // bindings (like `let dist01 = Sqrt#(dsq01)`) with no outer
+                            // loop to emit them — producing undefined globals.
                             let (inner_body, batch_info) = {
                                 let guards = crate::analysis::loop_peeling::split_hoistable(&body_stmts);
                                 if !guards.is_empty() {
                                     let bsize = crate::analysis::loop_peeling::extract_batch_size_from_guards(
                                         &guards, &bp.var,
                                     );
-                                    let inner: Vec<Statement> = body_stmts.iter()
-                                        .filter(|s| !crate::analysis::loop_peeling::is_hoistable_guard(s))
-                                        .cloned().collect();
-                                    let bi = bsize.map(|s| crate::backend::llvm::loop_engine::counter::BatchInfo {
-                                        batch_size: s, outer_guards: guards, counter_var: bp.var.clone(),
-                                    });
-                                    (inner, bi)
+                                    if let Some(size) = bsize {
+                                        let inner: Vec<Statement> = body_stmts.iter()
+                                            .filter(|s| !crate::analysis::loop_peeling::is_hoistable_guard(s))
+                                            .cloned().collect();
+                                        let bi = Some(crate::backend::llvm::loop_engine::counter::BatchInfo {
+                                            batch_size: size, outer_guards: guards, counter_var: bp.var.clone(),
+                                        });
+                                        (inner, bi)
+                                    } else {
+                                        (body_stmts.clone(), None)
+                                    }
                                 } else { (body_stmts.clone(), None) }
                             };
 
