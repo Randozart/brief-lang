@@ -370,7 +370,10 @@ impl Assembler {
         // Function table data
         let mut fn_data = Vec::new();
         for f in &self.functions {
-            fn_data.extend_from_slice(&f.name_idx.to_le_bytes());                    // name_idx (u32)
+            // 2026-07-30: name_idx is the string table INDEX; convert to byte OFFSET
+            // for the .lair format which expects offset into null-terminated string block.
+            let name_offset = *str_offsets.get(f.name_idx as usize).unwrap_or(&0);
+            fn_data.extend_from_slice(&name_offset.to_le_bytes());                   // name_idx (u32)
             fn_data.extend_from_slice(&(f.bytecode_offset as u64).to_le_bytes());   // bc_off (u64)
             fn_data.extend_from_slice(&(f.bytecode_len as u32).to_le_bytes());      // bc_len (u32)
             fn_data.extend_from_slice(&f.local_count.to_le_bytes());                // local_count (u16)
@@ -381,7 +384,8 @@ impl Assembler {
         // Host function table data
         let mut host_data = Vec::new();
         for h in &self.host_functions {
-            host_data.extend_from_slice(&h.name_idx.to_le_bytes()); // name_idx (u32)
+            let name_offset = *str_offsets.get(h.name_idx as usize).unwrap_or(&0);
+            host_data.extend_from_slice(&name_offset.to_le_bytes()); // name_idx (u32)
             host_data.extend_from_slice(&h.id.to_le_bytes());       // host_fn_id (u32)
         }
         let host_size = host_data.len();

@@ -8,6 +8,8 @@ pub const BOUNTY_VERSION: u32 = 1;
 pub const SECTION_LAIR: u8 = 1;
 pub const SECTION_BEASTPACK: u8 = 2;
 pub const SECTION_MANIFEST: u8 = 3;
+/// 2026-07-30: User's program compiled to .lair bytecode (data for tamer to interpret).
+pub const SECTION_USER_LAIR: u8 = 4;
 
 /// Layout:
 ///   Offset  Size  Field
@@ -26,18 +28,49 @@ pub struct BountySection {
     pub size: u64,
 }
 
-/// Write a .bounty file from its component parts.
+/// Write a .bounty file from its component parts (3-section: lair + beastpack + manifest).
 pub fn write_bounty(
     lair_data: &[u8],
     beastpack_data: &[u8],
     manifest: &str,
 ) -> Vec<u8> {
     let sections = vec![
-        BountySection { type_id: SECTION_LAIR, offset: 0, size: lair_data.len() as u64 },
-        BountySection { type_id: SECTION_BEASTPACK, offset: 0, size: beastpack_data.len() as u64 },
-        BountySection { type_id: SECTION_MANIFEST, offset: 0, size: manifest.len() as u64 },
+        (SECTION_LAIR, lair_data.len()),
+        (SECTION_BEASTPACK, beastpack_data.len()),
+        (SECTION_MANIFEST, manifest.len()),
     ];
+    let data_map: std::collections::HashMap<u8, &[u8]> = [
+        (SECTION_LAIR, lair_data as &[u8]),
+        (SECTION_BEASTPACK, beastpack_data as &[u8]),
+        (SECTION_MANIFEST, manifest.as_bytes()),
+    ].into();
+    write_bounty_impl(&sections, &data_map)
+}
 
+/// 2026-07-30: 4-section variant — includes user .lair for the tamer to interpret.
+pub fn write_bounty_full(
+    tamer_lair: &[u8],
+    user_lair: &[u8],
+    beastpack: &[u8],
+    manifest: &str,
+) -> Vec<u8> {
+    let sections = vec![
+        (SECTION_LAIR, tamer_lair.len()),
+        (SECTION_BEASTPACK, beastpack.len()),
+        (SECTION_MANIFEST, manifest.len()),
+        (SECTION_USER_LAIR, user_lair.len()),
+    ];
+    let data_map: std::collections::HashMap<u8, &[u8]> = [
+        (SECTION_LAIR, tamer_lair as &[u8]),
+        (SECTION_BEASTPACK, beastpack as &[u8]),
+        (SECTION_MANIFEST, manifest.as_bytes()),
+        (SECTION_USER_LAIR, user_lair as &[u8]),
+    ].into();
+    write_bounty_impl(&sections, &data_map)
+}
+
+/// Shared layout writer.
+fn write_bounty_impl(sections: &[(u8, usize)], data_map: &std::collections::HashMap<u8, &[u8]>) -> Vec<u8> {
     let section_count = sections.len() as u32;
     // Header: magic(9) + version(4) + flags(4) + count(4) = 21 bytes
     let header_size = 21usize;
@@ -46,10 +79,14 @@ pub fn write_bounty(
 
     // Calculate offsets (relative to end of section table)
     let mut current_offset = (header_size + table_size) as u64;
-    let mut section_offsets = Vec::new();
-    for section in &sections {
-        section_offsets.push(current_offset);
-        current_offset += section.size;
+    let mut section_entries: Vec<BountySection> = Vec::new();
+    for (type_id, size) in sections {
+        section_entries.push(BountySection {
+            type_id: *type_id,
+            offset: current_offset,
+            size: *size as u64,
+        });
+        current_offset += *size as u64;
     }
 
     let total_size = current_offset as usize;
@@ -63,16 +100,18 @@ pub fn write_bounty(
     buf.extend_from_slice(&section_count.to_le_bytes());
 
     // Section table
-    for (i, section) in sections.iter().enumerate() {
-        buf.push(section.type_id);
-        buf.extend_from_slice(&section_offsets[i].to_le_bytes());
-        buf.extend_from_slice(&section.size.to_le_bytes());
+    for entry in &section_entries {
+        buf.push(entry.type_id);
+        buf.extend_from_slice(&entry.offset.to_le_bytes());
+        buf.extend_from_slice(&entry.size.to_le_bytes());
     }
 
     // Section data
-    buf.extend_from_slice(lair_data);
-    buf.extend_from_slice(beastpack_data);
-    buf.extend_from_slice(manifest.as_bytes());
+    for entry in &section_entries {
+        if let Some(data) = data_map.get(&entry.type_id) {
+            buf.extend_from_slice(data);
+        }
+    }
 
     buf
 }

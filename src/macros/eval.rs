@@ -592,6 +592,22 @@ fn evaluate_stage_stmt(
                         NavValue::Str(v) => v == s,
                         _ => false,
                     },
+                    crate::ast::StmtMatchPattern::Multi(patterns) => {
+                        patterns.iter().any(|p| {
+                            match p {
+                                crate::ast::StmtMatchPattern::Literal(n) => match &val {
+                                    NavValue::Int(i) => *i as i128 == *n,
+                                    _ => false,
+                                },
+                                crate::ast::StmtMatchPattern::String(s) => match &val {
+                                    NavValue::Str(v) => v == s,
+                                    _ => false,
+                                },
+                                crate::ast::StmtMatchPattern::Wildcard => true,
+                                crate::ast::StmtMatchPattern::Multi(_) => false,
+                            }
+                        })
+                    }
                 };
                 if matches {
                     for s in &arm.body {

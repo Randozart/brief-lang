@@ -1,0 +1,5 @@
+export defn tame(lair_data: Ptr<Int>, lair_len: Int,
+                 beastpack_data: Ptr<Int>, beastpack_len: Int) -> Int
+{
+    term 42;
+};

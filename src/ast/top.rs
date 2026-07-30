@@ -269,6 +269,8 @@ pub enum StmtMatchPattern {
     Literal(i128),
     String(String),
     Wildcard,
+    /// 2026-07-30: Multiple patterns separated by `|`: `0x30 | 0x31 => body;`
+    Multi(Vec<StmtMatchPattern>),
 }
 
 // 2026-07-23: Manual PartialEq — InlineDefn/InlineTxn wrap Definition/Transaction

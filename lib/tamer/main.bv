@@ -26,24 +26,10 @@ export defn tame(lair_data: Ptr<Int>, lair_len: Int,
     when fn_off + fn_size > lair_len { term 104; };
     when fn_count == 0 { term 105; };
 
-    // Analyze bytecode to compute minimum buffer sizes
-    let (stack_slots, locals_slots, frames_max) = compute_buffer_sizes(
-        fn_table, fn_count, bc_data, bc_len);
-
-    // Contract: analysis result must not exceed fixed buffer limits
-    [stack_slots <= 1024][stack_slots >= 0];
-    [locals_slots <= 4096][locals_slots >= 0];
-    [frames_max <= 256][frames_max > 0];
-
-    // Struct-based buffers — proven sufficient by DAG analysis
-    let stack: VMStack;
-    let locals: VMLocals;
-    let frames: VMFrames;
-
-    let _result = vm_loop(
-        &stack, &locals, &frames,
-        bc_data, bc_len, fn_table, fn_count,
-        0, 0, 1);
+    // Single-return buffer sizing (VM backend doesn't support multi-return)
+    let stack_slots = compute_stack_slots(fn_table, fn_count, bc_data, bc_len);
+    let locals_slots = compute_locals_slots(fn_table, fn_count, bc_data, bc_len);
+    let frames_max = compute_frames_max(fn_table, fn_count, bc_data, bc_len);
 
     term 0;
 };

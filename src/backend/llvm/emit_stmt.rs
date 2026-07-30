@@ -217,13 +217,22 @@ pub fn emit_statement(backend: &mut LlvmBackend, out: &mut String, stmt: &Statem
                             let c = backend.fun.gen_reg();
                             writeln!(out, "{}{} = inttoptr i64 {} to ptr", indent, c, reg.name).ok();
                             c
-                        } else if val_ty == "ptr" && backend.fun.fn_ret_ty == "i64" {
+                        } else if val_ty == "ptr" && backend.fun.fn_ret_ty == "ptr"
+                                  && matches!(reg.ty, Type::Ptr(_)) {
+                            // 2026-07-30: Ptr values stored as i64 internally — register
+                            // is i64 but llvm_type(Ptr) returns "ptr". Need inttoptr.
                             let c = backend.fun.gen_reg();
-                            writeln!(out, "{}{} = ptrtoint ptr {} to i64", indent, c, reg.name).ok();
+                            writeln!(out, "{}{} = inttoptr i64 {} to ptr", indent, c, reg.name).ok();
                             c
                         } else {
                             reg.name
                         }
+                    } else if val_ty == "ptr" && matches!(reg.ty, Type::Ptr(_)) {
+                        // 2026-07-30: Ptr values stored as i64 internally — register
+                        // is i64 but llvm_type(Ptr) returns "ptr". Need inttoptr.
+                        let c = backend.fun.gen_reg();
+                        writeln!(out, "{}{} = inttoptr i64 {} to ptr", indent, c, reg.name).ok();
+                        c
                     } else {
                         reg.name
                     };

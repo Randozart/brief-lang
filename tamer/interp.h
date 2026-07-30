@@ -180,6 +180,10 @@ void vm_register_host(VmState* vm, uint32_t id, HostFn fn);
 // On error, returns 0 and populates error_buf.
 uint64_t vm_execute(VmState* vm, uint32_t fn_idx);
 
+// Find a function by name in the loaded .lair.
+// Returns the function index, or -1 if not found.
+int vm_find_function(VmState* vm, const char* name);
+
 // Get the last error message.
 const char* vm_error(VmState* vm);
 

@@ -63,64 +63,87 @@ defn instr_size(op: Int) -> Int {
 // Walk a function's bytecodes and find the maximum stack depth.
 // Conservative: assumes all control flow paths are taken.
 
-export defn analyze_fn_stack(bc: Ptr<Int>, fn_offset: Int, fn_len: Int) -> Int {
-    let mut pc = fn_offset;
-    let mut max_depth = 0;
-    let mut depth = 0;
-    while pc < fn_offset + fn_len {
-        let op = read_u8(bc, pc);
-        let change = opcode_stack_change(op);
-        let new_depth = depth + change;
-        when new_depth > max_depth {
-            max_depth = new_depth;
-        };
-        depth = new_depth;
-        when depth < 0 { depth = 0; };
-        pc = pc + instr_size(op);
-    };
+txn analyze_fn_stack_loop(bc: Ptr<Int>, end: Int,
+                          pc: Int, depth: Int, max_depth: Int)
+    [pc < end][pc >= end] -> Int
+{
+    let op = read_u8(bc, pc);
+    let change = opcode_stack_change(op);
+    depth = depth + change;
+    when depth > max_depth { max_depth = depth; };
+    when depth < 0 { depth = 0; };
+    pc = pc + instr_size(op);
     term max_depth;
+};
+
+defn analyze_fn_stack(bc: Ptr<Int>, fn_offset: Int, fn_len: Int) -> Int {
+    term analyze_fn_stack_loop(bc, fn_offset + fn_len, fn_offset, 0, 0);
 };
 
 // ── Call graph + worst-case analysis ────────────────────────────────────
 // Walk all functions, build call graph, compute transitive worst-case
 // stack depth accounting for function calls (which push frame + args).
 
-export defn analyze_max_stack(fn_table: Ptr<Int>, fn_count: Int,
-                              bc_data: Ptr<Int>, bc_len: Int) -> Int
+txn analyze_max_stack_loop(fn_table: Ptr<Int>, fn_count: Int,
+                           bc_data: Ptr<Int>, bc_len: Int,
+                           fn_idx: Int, global_max: Int)
+    [fn_idx < fn_count][fn_idx >= fn_count] -> Int
 {
-    // For MVP: compute per-function max depth, then pick the worst.
-    // Future: walk call graph to find paths through multiple calls.
-    let mut global_max = 0;
-    let mut fn_idx = 0;
-    while fn_idx < fn_count {
-        let bc_offset = fn_bc_offset(fn_table, fn_idx);
-        let bc_len = fn_bc_len(fn_table, fn_idx);
-        let local_count = fn_local_count(fn_table, fn_idx);
-        let fn_max = analyze_fn_stack(bc_data, bc_offset, bc_len);
-        let total = fn_max + local_count;  // stack + locals
-        when total > global_max {
-            global_max = total;
-        };
-        fn_idx = fn_idx + 1;
-    };
-    // Bounds check: if analysis exceeds fixed buffer, clamp for safety
-    when global_max > 1024 { term 1024; };
+    let bc_offset = fn_bc_offset(fn_table, fn_idx);
+    let bclen = fn_bc_len(fn_table, fn_idx);
+    let local_count = fn_local_count(fn_table, fn_idx);
+    let fn_max = analyze_fn_stack(bc_data, bc_offset, bclen);
+    let total = fn_max + local_count;  // stack + locals
+    when total > global_max { global_max = total; };
+    fn_idx = fn_idx + 1;
     term global_max;
+};
+
+defn analyze_max_stack(fn_table: Ptr<Int>, fn_count: Int,
+                       bc_data: Ptr<Int>, bc_len: Int) -> Int
+{
+    let result = analyze_max_stack_loop(
+        fn_table, fn_count, bc_data, bc_len, 0, 0);
+    when result > 1024 { term 1024; };
+    term result;
 };
 
 // ── Integration ─────────────────────────────────────────────────────────
 // Called by main.bv before vm_loop to compute buffer sizes.
-// Returns (stack_size, locals_size, frames_count).
-// For MVP: returns fixed maxes since analysis is preliminary.
+// For MVP: single-return functions (VM backend doesn't support multi-return).
 
-export defn compute_buffer_sizes(fn_table: Ptr<Int>, fn_count: Int,
-                                 bc_data: Ptr<Int>, bc_len: Int)
-    -> (Int, Int, Int)
-{
-    let max_stack = analyze_max_stack(fn_table, fn_count, bc_data, bc_len);
-    let stack_slots = when max_stack < 64 { 64 } else { max_stack };
-    let locals_slots = when max_stack < 256 { 256 } else { max_stack * 2 };
-    let frames_max = when fn_count < 16 { 16 } else { fn_count * 2 };
-    when frames_max > 256 { term (stack_slots, locals_slots, 256); };
-    term (stack_slots, locals_slots, frames_max);
+defn stack_slots(max_stack: Int) -> Int {
+    when max_stack < 64 { term 64; };
+    term max_stack;
+};
+
+defn locals_slots(max_stack: Int) -> Int {
+    when max_stack < 256 { term 256; };
+    term max_stack * 2;
+};
+
+defn frames_max(fn_count: Int) -> Int {
+    when fn_count < 16 { term 16; };
+    term fn_count * 2;
+};
+
+defn compute_stack_slots(fn_table: Ptr<Int>, fn_count: Int,
+                          bc_data: Ptr<Int>, bc_len: Int) -> Int {
+    let ms = analyze_max_stack(fn_table, fn_count, bc_data, bc_len);
+    when ms < 64 { term 64; };
+    term ms;
+};
+
+defn compute_locals_slots(fn_table: Ptr<Int>, fn_count: Int,
+                           bc_data: Ptr<Int>, bc_len: Int) -> Int {
+    let ms = analyze_max_stack(fn_table, fn_count, bc_data, bc_len);
+    when ms < 256 { term 256; };
+    term ms * 2;
+};
+
+defn compute_frames_max(fn_table: Ptr<Int>, fn_count: Int,
+                         bc_data: Ptr<Int>, bc_len: Int) -> Int {
+    when fn_count < 16 { term 16; };
+    when fn_count * 2 > 256 { term 256; };
+    term fn_count * 2;
 };

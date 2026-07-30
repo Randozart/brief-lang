@@ -577,7 +577,9 @@ impl LlvmBackend {
                         writeln!(out, "{}{} = call i64 @__str_to_int(ptr {})", indent, v, ip).ok();
                     }
                 } else if target_ll == "i64" && matches!(src.ty, Type::Ptr(_)) {
-                    writeln!(out, "{}{} = ptrtoint ptr {} to i64", indent, v, src.name).ok();
+                    // 2026-07-30: Ptr values stored as i64 internally (ptrtoint
+                    // at function entry). Register is already i64 — identity.
+                    return TypedRegister { name: src.name.clone(), ty: target.clone() };
                 } else if target_ll == "double" {
                     writeln!(out, "{}{} = sitofp i64 {} to double", indent, v, src.name).ok();
                 } else if target_ll == "i64" && src_ll == "double" {
@@ -590,6 +592,10 @@ impl LlvmBackend {
                             name: src.name.clone(),
                             ty: target.clone(),
                         };
+                    }
+                    // 2026-07-30: Ptr values stored as i64 internally — identity.
+                    if matches!(src.ty, Type::Ptr(_)) {
+                        return TypedRegister { name: src.name.clone(), ty: target.clone() };
                     }
                     writeln!(out, "{}{} = ptrtoint ptr {} to i64", indent, v, src.name).ok();
                 } else if target_ll == "ptr" && src_ll == "i64" {
@@ -1453,8 +1459,10 @@ impl LlvmBackend {
                 TypedRegister { name: result, ty: arg_reg.ty.clone() }
             }
             ("ptr", "i64") => {
-                writeln!(out, "{}  {} = ptrtoint ptr {} to i64", indent, result, arg_reg.name).ok();
-                TypedRegister { name: result, ty: Type::int() }
+                // 2026-07-30: Ptr values are stored as i64 internally (ptrtoint
+                // at function entry). The register is already i64 — no conversion
+                // needed. The Brief type says Ptr but the LLVM value is i64.
+                TypedRegister { name: arg_reg.name.clone(), ty: Type::int() }
             }
             // Integer widening: i8/i16/i32 → i64 (zext for unsigned, sext for signed)
             (src, "i64") if src.starts_with('i') && src.len() > 1 => {
@@ -2504,6 +2512,25 @@ impl LlvmBackend {
 
         // Identity (same protocol) — return source with target type
         if path.is_empty() {
+            return Some(TypedRegister { name: src.name.clone(), ty: target.clone() });
+        }
+
+        // 2026-07-30: Ptr values stored as i64 internally — register is already
+        // i64 even though llvm_type(Ptr) returns "ptr". Skip the bitcast/ptrtoint.
+        if matches!(src.ty, Type::Ptr(_)) && target_ll == "i64" {
+            if let Some(first) = path.first() {
+                use crate::casting::graph::LaneKind;
+                if matches!(first.lane, LaneKind::Bitcast | LaneKind::PtrToInt) {
+                    return Some(TypedRegister { name: src.name.clone(), ty: target.clone() });
+                }
+            }
+        }
+
+        // 2026-07-30: i64 → ptr: skip bitcast; Deref/store handlers already
+        // emit the inttoptr at consumption time. Just return the register with
+        // the correct Ptr type — the value is i64 but the type system says Ptr.
+        let src_ll = self.llvm_type(&src.ty);
+        if matches!(target, Type::Ptr(_)) && src_ll == "i64" {
             return Some(TypedRegister { name: src.name.clone(), ty: target.clone() });
         }
 

@@ -20,6 +20,7 @@
 #define SECTION_LAIR       1
 #define SECTION_BEASTPACK  2
 #define SECTION_MANIFEST   3
+#define SECTION_USER_LAIR  4
 
 // ── Host FFI stubs (MVP) ─────────────────────────────────────────────────
 // These will be replaced with real LLVM/linker bindings in a future phase.
@@ -211,16 +212,31 @@ int main(int argc, char** argv) {
     }
     printf("[tamer]   functions: %zu\n", vm.function_count);
 
-    // 6. Push .beastpack pointer as argument (convention: arg 0 = beastpack data)
+    // 6. Find the tame function by name
+    int tame_idx = vm_find_function(&vm, "tame");
+    if (tame_idx < 0) {
+        fprintf(stderr, "[tamer] Error: 'tame' function not found in .lair\n");
+        vm_free(&vm);
+        free(file_data);
+        return 1;
+    }
+    printf("[tamer]   tame function: index %d\n", tame_idx);
+
+    // 7. Push .beastpack + user .lair + output dir as arguments to tame()
+    size_t user_lair_size = 0;
+    const uint8_t* user_lair_data = find_section(file_data, (size_t)file_size, 4, &user_lair_size);
+    if (user_lair_data) {
+        printf("[tamer]   user .lair: %zu bytes\n", user_lair_size);
+    }
+    // tame(lair_data, lair_len, beastpack_data, beastpack_len)
+    vm.stack[vm.stack_len++] = (uint64_t)(uintptr_t)(user_lair_data ? user_lair_data : lair);
+    vm.stack[vm.stack_len++] = (uint64_t)(user_lair_data ? user_lair_size : lair_size);
     vm.stack[vm.stack_len++] = (uint64_t)(uintptr_t)beastpack;
     vm.stack[vm.stack_len++] = (uint64_t)beastpack_size;
-    // Push output path string as arg
-    // For MVP: arg 2 = output directory pointer (0 = cwd)
-    vm.stack[vm.stack_len++] = (uint64_t)(uintptr_t)output_dir;
 
-    // 7. Execute entry point (function 0 = main/tame)
+    // 8. Execute tame function
     printf("[tamer] Taming the beast...\n");
-    uint64_t result = vm_execute(&vm, 0);
+    uint64_t result = vm_execute(&vm, (uint32_t)tame_idx);
 
     if (vm.has_error) {
         fprintf(stderr, "[tamer] Error during execution: %s\n", vm_error(&vm));

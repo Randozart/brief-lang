@@ -410,15 +410,25 @@ fn run_bounty(args: &[String]) -> Result<(), String> {
     let beastpack = brief_compiler::beastpack::serialize(&obfuscated_items, &universe, noise_seed);
     eprintln!("[bounty]   .beastpack: {} bytes", beastpack.len());
 
-    // 4. Compile the tamer per-program .lair bytecode
-    eprintln!("[bounty] Compiling tamer to .lair bytecode...");
+    // 4. Pre-compile the tamer VM interpreter to .lair bytecode
+    eprintln!("[bounty] Compiling tamer VM interpreter to .lair...");
+    let tamer_source = std::fs::read_to_string("lib/tamer/main.bv")
+        .map_err(|e| format!("cannot read lib/tamer/main.bv: {}", e))?;
+    let (tamer_items, tamer_universe) = compile::compile_to_typed(
+        "lib/tamer/main.bv", &tamer_source, &opts)?;
     let mut vm = brief_compiler::backend::vm::VmBackend::new();
-    let lair = vm.generate(&obfuscated_items, &universe);
-    eprintln!("[bounty]   .lair bytecode: {} bytes", lair.len());
+    let tamer_lair = vm.generate(&tamer_items, &tamer_universe);
+    eprintln!("[bounty]   tamer .lair: {} bytes", tamer_lair.len());
 
-    // 5. Assemble .bounty
+    // 5. Compile user program to .lair too (data for tamer to interpret)
+    let mut vm2 = brief_compiler::backend::vm::VmBackend::new();
+    let user_lair = vm2.generate(&obfuscated_items, &universe);
+    eprintln!("[bounty]   user .lair: {} bytes", user_lair.len());
+
+    // 6. Assemble .bounty (4-section: tamer.lair + user.lair + beastpack + manifest)
     let manifest = format!(r#"{{"version":1,"entry_point":"main","noise_seed":{}}}"#, noise_seed);
-    let bounty = brief_compiler::bounty::write_bounty(&lair, &beastpack, &manifest);
+    let bounty = brief_compiler::bounty::write_bounty_full(
+        &tamer_lair, &user_lair, &beastpack, &manifest);
 
     // 6. Write .bounty file
     let output_path = file_path.replace(".bv", ".bounty");

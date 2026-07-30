@@ -232,11 +232,30 @@ impl VmBackend {
                 }
             }
 
+            // ── Array index ───────────────────────────────────────────
+            Expr::Index(obj, idx) => {
+                // data[sl] → push base, push idx, mul 8, add, LOAD
+                self.emit_expr(obj);
+                self.emit_expr(idx);
+                self.asm.emit_push_i8(3);  // scale by 8 (Int size)
+                self.asm.emit_shl();
+                self.asm.emit_add();
+                self.asm.emit_load();
+            }
+
             // ── Field access ───────────────────────────────────────────
             Expr::Field(obj, field_name) => {
-                // For MVP: trap. Full struct support is Phase 6+.
+                // 2026-07-30: Determine the struct type name to compute
+                // the correct field byte offset. If the object is an
+                // identifier, look it up in local_types.
+                let struct_name = match obj.as_ref() {
+                    Expr::Identifier(name) => self.local_types.get(name).map(|s| s.as_str()),
+                    _ => None,
+                };
+                let offset = self.field_offset(struct_name, field_name) as i64;
                 self.emit_expr(obj);
-                self.asm.emit_trap();
+                self.asm.emit_push_i64(offset);
+                self.asm.emit_add();
             }
 
             // ── Cast ───────────────────────────────────────────────────

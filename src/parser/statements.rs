@@ -401,17 +401,30 @@ impl<'a> Parser<'a> {
 
         let mut arms = Vec::new();
         while !self.check(&Token::RBrace) {
-            let pattern = if self.eat(&Token::Underscore) {
-                crate::ast::StmtMatchPattern::Wildcard
-            } else if let Some(&Token::Integer(n)) = self.peek() {
-                self.pos += 1;
-                crate::ast::StmtMatchPattern::Literal(n as i128)
-            } else if let Some(&Token::String(ref s)) = self.peek() {
-                let s = s.clone();
-                self.pos += 1;
-                crate::ast::StmtMatchPattern::String(s)
+            // 2026-07-30: Parse | -separated patterns: 0x30 | 0x31 => body;
+            let mut patterns: Vec<crate::ast::StmtMatchPattern> = Vec::new();
+            loop {
+                let pat = if self.eat(&Token::Underscore) {
+                    crate::ast::StmtMatchPattern::Wildcard
+                } else if let Some(&Token::Integer(n)) = self.peek() {
+                    self.pos += 1;
+                    crate::ast::StmtMatchPattern::Literal(n as i128)
+                } else if let Some(&Token::String(ref s)) = self.peek() {
+                    let s = s.clone();
+                    self.pos += 1;
+                    crate::ast::StmtMatchPattern::String(s)
+                } else {
+                    return self.error_at_current("expected pattern in match arm (string, integer, or _)");
+                };
+                patterns.push(pat);
+                if !self.eat(&Token::Pipe) {
+                    break;
+                }
+            }
+            let pattern = if patterns.len() == 1 {
+                patterns.into_iter().next().unwrap()
             } else {
-                return self.error_at_current("expected pattern in match arm (string, integer, or _)");
+                crate::ast::StmtMatchPattern::Multi(patterns)
             };
 
             self.expect(crate::lexer::Token::FatArrow)?;

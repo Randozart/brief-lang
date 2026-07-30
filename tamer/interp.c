@@ -177,6 +177,18 @@ void vm_register_host(VmState* vm, uint32_t id, HostFn fn) {
     }
 }
 
+// 2026-07-30: Find a function by name. Returns index or -1.
+int vm_find_function(VmState* vm, const char* name) {
+    for (size_t i = 0; i < vm->function_count; i++) {
+        LairFunction* fn = &vm->function_table[i];
+        const char* fn_name = vm->string_table + fn->name_idx;
+        if (strcmp(fn_name, name) == 0) {
+            return (int)i;
+        }
+    }
+    return -1;
+}
+
 // ── Fetch-decode-execute ─────────────────────────────────────────────────
 
 uint64_t vm_execute(VmState* vm, uint32_t fn_idx) {
