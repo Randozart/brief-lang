@@ -1415,6 +1415,7 @@ for current benchmark results and architecture decisions.
 | **Channel map** | `docs/architecture/channel-map.md` |
 | **Optimization decision tree** | `docs/design/optimization-decision-tree.md` |
 | **Backend type dispatch** | `docs/architecture/backend-type-dispatch.md` — **READ THIS FIRST** before modifying any backend type code. No hardcoded `"Int" → i64` mappings. Types are driven by source metadata + config file. |
+| **LLVM backend architecture** | `docs/architecture/backend-architecture.md` — **READ THIS FIRST** before modifying the LLVM backend. Explains the protocol dispatch chain, loop emission strategies, state field handling, and the golden rule (never match type names by string). |
 | **Backend dispatch** | `docs/architecture/features/backend-dispatch.md` |
 | **Benchmark strategy** | `docs/architecture/benchmark-strategy.md` |
 | **Intrinsics vs stdlib** | `docs/architecture/intrinsics-vs-stdlib.md` |
