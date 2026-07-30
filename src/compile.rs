@@ -891,14 +891,36 @@ fn codegen(
 ) -> Result<(String, &'static str), String> {
     // 2026-07-20: Extract operator definitions from AST for backend dispatch.
     let mut operator_defs: std::collections::HashMap<String, Vec<brief_compiler::ast::top::OperatorDef>> = std::collections::HashMap::new();
+    let mut cast_from_bit_overrides: std::collections::HashMap<String, String> = std::collections::HashMap::new();
     for item in items.iter() {
         if let brief_compiler::ast::TopLevel::TypeDef(td) = item {
             let mut all_ops = td.body.operators.clone();
             // 2026-07-30: Convert op_bindings (new-style) to OperatorDef format.
-            // CastTo/CastFrom bindings carry implementation function names that
-            // the backend uses for emit_simple_call. Other ops (Add, Sub, etc.)
-            // don't need impl_args — they use hardcoded codegen.
+            // CastFrom(#Bit) goes to the casting graph (sole user-extensible cast edge).
+            // CastTo(#Bit) is banned (hardcoded representation guarantee).
+            // Other CastTo/CastFrom remain in operator_defs as type-level lane overrides.
             for b in &td.body.op_bindings {
+                let pv = b.protocol_variant.as_deref().unwrap_or("");
+                let is_bit_target = pv == "#Bit" || pv == "Bit";
+
+                if b.name == "CastTo" && is_bit_target {
+                    return Err(format!(
+                        "CastTo(#Bit) is hardcoded on type '{}' — \
+                         use x as Bit or Cast#(x, target) for bitcasts. \
+                         CastTo(#Bit) is a compiler-guaranteed mechanical operation \
+                         (bitcast/extractvalue/ptrtoint) and cannot be overridden.",
+                        td.name
+                    ));
+                }
+
+                if b.name == "CastFrom" && is_bit_target {
+                    // Register in casting graph as the sole user-extensible cast edge
+                    if let brief_compiler::ast::Expr::Call(fn_name, _, _) = &b.expr {
+                        cast_from_bit_overrides.insert(td.name.clone(), fn_name.clone());
+                    }
+                    continue; // skip operator_defs — handled by casting graph
+                }
+
                 if b.name == "CastTo" || b.name == "CastFrom" {
                     let params = match &b.protocol_variant {
                         Some(pv) => {
@@ -948,6 +970,7 @@ fn codegen(
                 .with_optimize_budget(opts.optimize_budget)
                 .with_type_universe(universe.clone())
                 .with_operator_defs(operator_defs)
+                .with_cast_from_bit_overrides(cast_from_bit_overrides)
                 .with_resolved_frgns(resolved_frgns.clone())
                 .with_trg_unresolved_action(opts.trg_unresolved_action)
                 .with_module_init(enable_module_init);
@@ -985,6 +1008,7 @@ fn codegen(
                 .with_optimize_budget(opts.optimize_budget)
                 .with_type_universe(universe.clone())
                 .with_operator_defs(operator_defs)
+                .with_cast_from_bit_overrides(cast_from_bit_overrides)
                 .with_resolved_frgns(resolved_frgns.clone())
                 .with_trg_unresolved_action(opts.trg_unresolved_action)
                 .with_module_init(enable_module_init);

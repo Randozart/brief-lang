@@ -1086,6 +1086,18 @@ impl LlvmBackend {
         self
     }
 
+    /// 2026-07-30: Register CastFrom(#Bit) overrides on the casting graph.
+    /// Maps type_name → constructor_function_name for constructing a type
+    /// from raw memory bits. This is the sole user-extensible cast edge.
+    pub fn with_cast_from_bit_overrides(mut self, overrides: HashMap<String, String>) -> Self {
+        if let Some(ref mut graph) = self.ctx.casting_graph {
+            for (type_name, fn_name) in overrides {
+                graph.register_cast_from_bit(&type_name, &fn_name);
+            }
+        }
+        self
+    }
+
     pub fn with_dump_layout(mut self, v: bool) -> Self {
         self.ctx.dump_layout = v;
         self
