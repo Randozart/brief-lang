@@ -337,12 +337,12 @@ impl LlvmBackend {
             self.fun.needs_state_stores_in_body = true;
         }
 
-        // 2026-07-17: pending_post_hoist (set by hoist_terminating_guard) is
-        // emitted AFTER the loop closes, not inside the body. The hoisted
-        // swan song reads final accumulator values from %State (stored by
-        // Path B — needs_state_stores_in_body). Clone to satisfy borrow
-        // checker (self.emit_expr needs &mut self; pending_post_hoist is
-        // behind &self.fun).
+        // 2026-07-17: pending_post_hoist (provided by the frontend swan-song
+        // hoist, analysis/swan_song.rs) is emitted AFTER the loop closes, not
+        // inside the body. The hoisted swan song reads final accumulator values
+        // from %State (stored by Path B — needs_state_stores_in_body). Clone to
+        // satisfy borrow checker (self.emit_expr needs &mut self;
+        // pending_post_hoist is behind &self.fun).
         let hoist = self.fun.pending_post_hoist.clone();
         let mut empty = Vec::new();
         self.emit_countable_body(out, body, write_set, &mut empty);
@@ -390,8 +390,9 @@ impl LlvmBackend {
         writeln!(out, "{}:", exit_label).ok();
         // 2026-07-17: Emit hoisted post-loop prints (swan song) AFTER the loop
         // closes, so they read the final accumulator values from %State. The
-        // guard condition was hoist_terminating_guard-removed; at this point
-        // the loop postcondition guarantees it holds.
+        // guard condition was removed by the frontend swan-song hoist
+        // (analysis/swan_song.rs); at this point the loop postcondition
+        // guarantees it holds.
         // Clear the float cache to prevent reusing fpext registers from the
         // loop body (which may be defined in non-dominating conditional blocks
         // like periodic prints). Without this, the swan song reuses a register

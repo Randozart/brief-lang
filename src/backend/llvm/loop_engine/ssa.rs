@@ -521,9 +521,9 @@ impl LlvmBackend {
         for block in hoisted {
             for stmt in block {
                 match stmt {
-                    // 2026-07-17: hoist_terminating_guard wraps the swan song
-                    // as Statement::Expression(swan_song_expr). Also handle
-                    // TermBang/Term in case other paths produce those variants.
+                    // 2026-07-17: The frontend swan-song hoist (analysis/swan_song.rs)
+                    // wraps the swan song as Statement::Expression(swan_song_expr).
+                    // Also handle TermBang/Term in case other paths produce those variants.
                     Statement::TermBang(Some(e)) | Statement::Term(Some(e)) | Statement::Expression(e) => {
                         self.emit_expr(out, e, "  ");
                     }

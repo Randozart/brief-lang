@@ -533,7 +533,9 @@ pub struct FunctionContext {
     pub rotation_fields: HashSet<String>,
 
     // 2026-07-29: Active vector phi groups for the current countable body.
-    // Populated by detect_vector_groups before emit_countable_main runs.
+    // Populated by LlvmBackend::shape_vector_groups (mod.rs) from the frontend
+    // LoopShape groups. emit_countable_main clears it — vector-phi emission is
+    // deferred until the infrastructure handles all edge cases (counter.rs:236).
     pub(crate) active_vector_groups: Vec<crate::backend::llvm::vector_phi::VectorPhiGroup>,
 
     // 2026-07-29: Maps field_name → vector phi register name for extractelement.

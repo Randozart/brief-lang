@@ -266,8 +266,9 @@ fn collect_observable_bodies(body: &[Statement]) -> Vec<&[Statement]> {
 }
 
 /// Detect vector-phi groups structurally from the swan-song-stripped body.
-/// Mirrors the backend's `detect_vector_groups` minus the LLVM-type gate
-/// (which the backend applies when converting VectorGroup → VectorPhiGroup).
+/// Mirrors the backend's former `detect_vector_groups` minus the LLVM-type gate
+/// (which the backend applies when converting VectorGroup → VectorPhiGroup via
+/// LlvmBackend::shape_vector_groups).
 fn detect_vector_groups_structural(
     txn: &Transaction,
     write_set: HashSet<String>,
@@ -313,7 +314,12 @@ fn detect_vector_groups_structural(
 /// as `TopLevel::Statement(Let)`; legacy state declarations may appear as
 /// `TopLevel::StateDecl`. The LLVM backend's `build_field_index` accepts both
 /// (mod.rs:3634, 3715), so the analysis must too.
-fn collect_state_fields(items: &[TopLevel]) -> HashSet<String> {
+///
+/// 2026-07-31: `pub(crate)` — reused by `backend::build_swan_songs` so the
+/// swan-song hoist's let-to-field remap gates on the same field set the
+/// backend's `field_index_map` uses. A mismatch would let a top-level `let`
+/// state field be treated as a local and break the remap (Phase 1b).
+pub(crate) fn collect_state_fields(items: &[TopLevel]) -> HashSet<String> {
     let mut fields = HashSet::new();
     for item in items {
         match item {
@@ -530,5 +536,52 @@ mod tests {
         let shapes = build_loop_shapes(&graph, &items);
         let shape = shapes.values().next().unwrap();
         assert_eq!(shape.bound, Bound::Unknown("local_bound".to_string()));
+    }
+
+    #[test]
+    fn test_collect_state_fields_accepts_let_and_statedecl() {
+        // Phase 1b: the parser emits top-level `let` declarations as
+        // TopLevel::Statement(Let); legacy code may use TopLevel::StateDecl.
+        // build_swan_songs and the LoopShape bound resolution must agree on
+        // the field set, otherwise the swan-song let-to-field remap silently
+        // treats a top-level let state field as a local.
+        let items = parse_program(
+            "let bound: Int = 100;\n\
+             let count: Int = 0;\n\
+             node work [count < bound][count == bound] {\n\
+               count = count + 1;\n\
+               term;\n\
+             };\n",
+        );
+        let fields = collect_state_fields(&items);
+        assert!(fields.contains("bound"), "top-level let must be collected");
+        assert!(fields.contains("count"), "top-level let must be collected");
+        assert!(!fields.contains("work"), "non-let statements excluded");
+    }
+
+    #[test]
+    fn test_collect_state_fields_includes_legacy_statedecl() {
+        // Legacy state declarations (TopLevel::StateDecl) must still be
+        // collected — the backend's build_field_index accepts both forms
+        // (mod.rs build_field_index), so the shared collector must too.
+        // The parser no longer emits `state` — construct the legacy form
+        // directly, as the fuzzer/backends do.
+        let mut items = parse_program(
+            "let bound: Int = 100;\n\
+             let count: Int = 0;\n\
+             node work [count < bound][count == bound] {\n\
+               count = count + 1;\n\
+               term;\n\
+             };\n",
+        );
+        items.push(TopLevel::StateDecl(crate::ast::StateDecl {
+            name: "legacy".to_string(),
+            ty: crate::ast::Type::int(),
+            span: None,
+        }));
+        let fields = collect_state_fields(&items);
+        assert!(fields.contains("legacy"), "StateDecl must be collected");
+        assert!(fields.contains("count"), "top-level let must be collected");
+        assert!(fields.contains("bound"), "top-level let must be collected");
     }
 }

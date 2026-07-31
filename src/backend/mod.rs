@@ -80,19 +80,18 @@ pub fn analyze_program(items: &[TopLevel], optimize: bool) -> AnalysisResults {
 
 /// Hoist the swan song from every transaction body, keyed by txn name.
 ///
-/// 2026-07-31: The state-field set is derived from `TopLevel::StateDecl`
-/// (identical to the backend's `field_index_map` keys for real state fields);
-/// synthetic ring-buffer internals are never the LHS of `&field = let` body
-/// statements, so the let-to-field remap set matches the backend exactly.
+/// 2026-07-31: The state-field set must match the backend's `field_index_map`
+/// keys, which includes BOTH `TopLevel::StateDecl` AND top-level
+/// `TopLevel::Statement(Let)` (build_field_index mod.rs:3634/3715). The hoist's
+/// let-to-field remap gates on this set — a `let nesc` binding assigned from a
+/// state field is only rewritten to that field when the set contains it. Using
+/// `loop_shape::collect_state_fields` (the same collector the LoopShape bound
+/// resolution uses) keeps the remap, the shape, and the backend field index in
+/// agreement. See docs/plans/2026-07-31-frontend-driven-dispatch.md §6.
 fn build_swan_songs(
     items: &[TopLevel],
 ) -> HashMap<String, (Vec<Statement>, Vec<Vec<Statement>>)> {
-    let mut state_fields = std::collections::HashSet::new();
-    for item in items {
-        if let TopLevel::StateDecl(s) = item {
-            state_fields.insert(s.name.clone());
-        }
-    }
+    let state_fields = crate::analysis::loop_shape::collect_state_fields(items);
     let mut songs = HashMap::new();
     for item in items {
         if let TopLevel::Transaction(t) = item {
@@ -571,7 +570,98 @@ impl GuardTracker {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ast::Expr;
+    use crate::ast::{Contract, Expr, StateDecl, Type};
+
+    fn swan_song_txn() -> TopLevel {
+        // mandelbrot pattern: `escapes = nesc` binds the let to a state field;
+        // the hoisted swan song `PrintLn!(nesc)` must be remapped to `escapes`.
+        TopLevel::Transaction(Transaction {
+            name: "mb".to_string(),
+            is_reactive: true,
+            is_async: false,
+            type_params: vec![],
+            parameters: vec![],
+            output_type: None,
+            outputs: vec![],
+            contract: Contract {
+                pre_condition: Expr::Bool(true),
+                post_condition: Expr::Bool(true),
+                is_entry: false,
+                watchdog: None,
+                span: None,
+            },
+            body: vec![
+                Statement::Assign(
+                    Expr::Identifier("escapes".into()),
+                    Expr::Identifier("nesc".into()),
+                ),
+                Statement::Guarded(
+                    Expr::Bool(true),
+                    vec![Statement::TermBang(Some(Expr::Call(
+                        "PrintLn!".into(),
+                        vec![Expr::Identifier("nesc".into())],
+                        None,
+                    )))],
+                ),
+            ],
+            metadata: HashMap::new(),
+            derivation: None,
+            modifiers: vec![],
+            span: None,
+            doc: None,
+        })
+    }
+
+    fn top_level_let(name: &str) -> TopLevel {
+        TopLevel::Statement(Box::new(Statement::Let {
+            name: name.to_string(),
+            names: vec![],
+            ty: Some(Type::int()),
+            expr: Some(Expr::Decimal(0)),
+            modifiers: vec![],
+        }))
+    }
+
+    #[test]
+    fn test_build_swan_songs_remaps_top_level_let_field() {
+        // Phase 1b regression: the state-field set backing the swan-song hoist
+        // must include top-level `let` declarations (parsed as
+        // TopLevel::Statement(Let)), matching the backend field_index_map keys.
+        // The old StateDecl-only set dropped `escapes`, so the let-to-field
+        // remap silently treated `nesc` as a local and left it un-remapped.
+        let items = vec![
+            top_level_let("count"),
+            top_level_let("bound"),
+            top_level_let("escapes"),
+            swan_song_txn(),
+        ];
+        let songs = build_swan_songs(&items);
+        let (_, hoist) = songs.get("mb").expect("mb swan song must exist");
+        let song = &hoist[0];
+        let Statement::Expression(Expr::Call(_, args, _)) = &song[0] else {
+            panic!("hoisted swan song should be an Expression call");
+        };
+        assert!(matches!(&args[0], Expr::Identifier(n) if n == "escapes"),
+            "top-level let state field must enable remap: {:?}", args[0]);
+    }
+
+    #[test]
+    fn test_collect_state_fields_matches_build_field_index() {
+        // Both StateDecl (legacy) and top-level let are valid state fields —
+        // the backend's build_field_index accepts both (llvm/mod.rs), so the
+        // hoist's field set must too. A StateDecl-only set is a latent remap bug.
+        let items = vec![
+            top_level_let("bound"),
+            TopLevel::StateDecl(StateDecl {
+                name: "count".to_string(),
+                ty: Type::int(),
+                span: None,
+            }),
+        ];
+        let fields = crate::analysis::loop_shape::collect_state_fields(&items);
+        assert!(fields.contains("count"));
+        assert!(fields.contains("bound"));
+    }
 
     #[test]
     fn test_dirty_flags_mark_and_is_set() {

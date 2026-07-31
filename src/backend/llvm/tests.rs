@@ -2776,3 +2776,96 @@ fn test_struct_array_addr_of_and_frgn_call() {
     assert!(output.contains("call i64 @use_methods(ptr"),
         "Should call use_methods with ptr type.\nGot:\n{}", output);
 }
+
+#[test]
+fn test_shape_vector_groups_same_type_gate() {
+    // Phase 1b: the frontend structural pass cannot express the LLVM same-type
+    // gate; the backend re-applies it in shape_vector_groups. A mixed-type
+    // group must be dropped, an all-float group accepted.
+    let mut backend = LlvmBackend::new();
+    backend.ctx.field_index_map.insert("f0".to_string(), 0);
+    backend.ctx.field_index_map.insert("f1".to_string(), 1);
+    backend.ctx.field_index_map.insert("i0".to_string(), 2);
+    backend.ctx.field_index_map.insert("i1".to_string(), 3);
+    backend.ctx.field_types = vec![
+        "float".to_string(),
+        "float".to_string(),
+        "i64".to_string(),
+        "i64".to_string(),
+    ];
+    let write_set: HashSet<String> = [
+        "f0".to_string(),
+        "f1".to_string(),
+        "i0".to_string(),
+        "i1".to_string(),
+    ]
+    .into_iter()
+    .collect();
+    let groups = vec![
+        crate::analysis::loop_shape::VectorGroup {
+            name: "mixed".to_string(),
+            width: 2,
+            fields: vec!["f0".to_string(), "i0".to_string()],
+        },
+        crate::analysis::loop_shape::VectorGroup {
+            name: "floats".to_string(),
+            width: 2,
+            fields: vec!["f0".to_string(), "f1".to_string()],
+        },
+    ];
+    let vg = backend.shape_vector_groups(&groups, &write_set);
+    assert_eq!(vg.len(), 1, "mixed-type group must be dropped");
+    assert_eq!(vg[0].name, "floats");
+    assert_eq!(vg[0].element_ty, "float");
+}
+
+#[test]
+fn test_shape_vector_groups_drops_not_in_write_set() {
+    // A group whose fields are not all unconditionally written must be dropped.
+    let mut backend = LlvmBackend::new();
+    backend.ctx.field_index_map.insert("f0".to_string(), 0);
+    backend.ctx.field_index_map.insert("f1".to_string(), 1);
+    backend.ctx.field_types = vec!["float".to_string(), "float".to_string()];
+    // write_set only contains f0; f1 is written conditionally (e.g. in a
+    // guarded block) so the group must not be used.
+    let write_set: HashSet<String> = ["f0".to_string()].into_iter().collect();
+    let groups = vec![crate::analysis::loop_shape::VectorGroup {
+        name: "g".to_string(),
+        width: 2,
+        fields: vec!["f0".to_string(), "f1".to_string()],
+    }];
+    let vg = backend.shape_vector_groups(&groups, &write_set);
+    assert!(vg.is_empty(), "group with unwritten field must be dropped");
+}
+
+#[test]
+fn test_shape_vector_groups_no_overlap() {
+    // A group whose fields overlap an already-accepted group must be dropped.
+    let mut backend = LlvmBackend::new();
+    backend.ctx.field_index_map.insert("f0".to_string(), 0);
+    backend.ctx.field_index_map.insert("f1".to_string(), 1);
+    backend.ctx.field_index_map.insert("f2".to_string(), 2);
+    backend.ctx.field_types = vec![
+        "float".to_string(),
+        "float".to_string(),
+        "float".to_string(),
+    ];
+    let write_set: HashSet<String> =
+        ["f0".to_string(), "f1".to_string(), "f2".to_string()].into_iter().collect();
+    let groups = vec![
+        crate::analysis::loop_shape::VectorGroup {
+            name: "g0".to_string(),
+            width: 2,
+            fields: vec!["f0".to_string(), "f1".to_string()],
+        },
+        crate::analysis::loop_shape::VectorGroup {
+            name: "g1".to_string(),
+            width: 2,
+            fields: vec!["f1".to_string(), "f2".to_string()],
+        },
+    ];
+    let vg = backend.shape_vector_groups(&groups, &write_set);
+    // g1 reuses f1 from the accepted g0 → dropped; only g0 survives.
+    assert_eq!(vg.len(), 1, "overlapping group must be dropped");
+    assert_eq!(vg[0].name, "g0");
+}

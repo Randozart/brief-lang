@@ -131,152 +131,25 @@ fn primitive_from_name(name: &str) -> Option<Type> {
     }
 }
 
-/// Detect terminating guard at end of body and hoist it.
-/// Returns (body_without_guard, vec_of_(field_name, intrinsic_name)).
-pub(crate) fn hoist_terminating_guard(
-    body: &[Statement],
-    field_index_map: &std::collections::HashMap<String, usize>,
-) -> (Vec<Statement>, Vec<Vec<Statement>>) {
-    let mut stmts: Vec<&Statement> = body.iter()
-        .filter(|s| !matches!(s, Statement::Term(..) | Statement::TermBang(..)))
-        .collect();
-    // 2026-07-05: Build let-to-state-field mapping from body assignments.
-    // When the hoisted swan song references a let binding (like nesc in
-    // mandelbrot), the done: block can't use the body's register.  We remap
-    // the let binding to the state field that stores its value.
-    // Pattern: &field_name = let_name  →  map[let_name] = field_name
-    let mut let_to_field: HashMap<String, String> = HashMap::new();
-    for s in body {
-        if let Statement::Assign(lhs, Expr::Identifier(let_name)) = s {
-            if let Some(field_name) = lhs.as_var_name() {
-                if field_index_map.contains_key(field_name) {
-                    let_to_field.insert(let_name.clone(), field_name.to_string());
-                }
-            }
-        }
-    }
-    let mut hoist: Vec<Vec<Statement>> = Vec::new();
-    while let Some(last_idx) = stmts.len().checked_sub(1) {
-        if let Statement::Guarded(_, statements) = &stmts[last_idx] {
-            let is_terminating = statements.iter().any(|s| matches!(s, Statement::TermBang(..)));
-            if !is_terminating { break; }
-            // Hoist the entire guard body (all statements before the term!)
-            // into a Vec<Statement> that the post-loop block can re-emit.
-            // This handles both simple field-print patterns (original hoisting)
-            // and let-binding-based patterns (nbody: energy computation + print).
-            let mut body_stmts: Vec<Statement> = statements.iter()
-                .filter(|s| !matches!(s, Statement::TermBang(..)))
-                .cloned()
-                .collect();
-            // Remap let binding references to state field names in hoisted body.
-            for s in &mut body_stmts {
-                remap_stmt_identifiers(s, &let_to_field);
-            }
-            let swan_song_stmt = statements.iter().find_map(|s| {
-                if let Statement::TermBang(Some(ss)) = s {
-                    Some(ss.clone())
-                } else { None }
-            });
-            // Remap swan song identifiers too.
-            let swan_song_stmt = swan_song_stmt.map(|mut ss| {
-                remap_expr_into(&mut ss, &let_to_field);
-                ss
-            });
-            // 2026-07-04: Hoist even when body_stmts is empty — the
-            // guard may be just `term! -> print_int#(result)` with no
-            // preceding statements.  Previously we only hoisted when
-            // body_stmts was non-empty, leaving the swan song in the
-            // body and blocking Path A (no-dead-stores) because
-            // pending_post_hoist was empty.
-            if !body_stmts.is_empty() || swan_song_stmt.is_some() {
-                let mut full_body = body_stmts;
-                if let Some(sw) = swan_song_stmt {
-                    full_body.push(Statement::Expression(sw));
-                }
-                hoist.push(full_body);
-                stmts.pop();
-            }
-            break;
-        } else { break; }
-    }
-    let body_vec: Vec<Statement> = stmts.into_iter().cloned().collect();
-    (body_vec, hoist)
-}
-
-/// Recursively remap identifiers in a statement using the let-to-field map.
-fn remap_stmt_identifiers(s: &mut Statement, map: &HashMap<String, String>) {
-    match s {
-        Statement::Assign(_, expr) => {
-            remap_expr_into(expr, map);
-        }
-        Statement::Expression(e) => {
-            remap_expr_into(e, map);
-        }
-        Statement::TermBang(Some(ss)) => {
-            remap_expr_into(ss, map);
-        }
-        Statement::Guarded(condition, statements) => {
-            remap_expr_into(condition, map);
-            for stmt in statements.iter_mut() {
-                remap_stmt_identifiers(stmt, map);
-            }
-        }
-        Statement::Let { expr: Some(e), .. } => {
-            remap_expr_into(e, map);
-        }
-        Statement::Let { expr: None, .. } => {}
-        _ => {}
-    }
-}
-
-/// Recursively remap identifiers in an expression.
-fn remap_expr_into(e: &mut Expr, map: &HashMap<String, String>) {
-    match e {
-        Expr::Identifier(name) => {
-            if let Some(field) = map.get(name) {
-                *name = field.clone();
-            }
-        }
-        Expr::Call(_, args, _) => {
-            for arg in args.iter_mut() {
-                remap_expr_into(arg, map);
-            }
-        }
-        Expr::PluginIntercept { args, .. } => {
-            for arg in args.iter_mut() {
-                remap_expr_into(arg, map);
-            }
-        }
-        Expr::BinaryOp(_, l, r) => {
-            remap_expr_into(l, map);
-            remap_expr_into(r, map);
-        }
-        Expr::UnaryOp(_, inner) | Expr::Cast(inner, _) | Expr::IsType(inner, _) => {
-            remap_expr_into(inner, map);
-        }
-        Expr::Field(target, _) | Expr::Index(target, _) => {
-            remap_expr_into(target, map);
-        }
-        Expr::Block(stmts) => {
-            for s in stmts.iter_mut() {
-                remap_stmt_identifiers(s, map);
-            }
-        }
-        Expr::If(cond, then_b, else_b) => {
-            remap_expr_into(cond, map);
-            remap_expr_into(then_b, map);
-            if let Some(eb) = else_b {
-                remap_expr_into(eb, map);
-            }
-        }
-        Expr::Tuple(elems) | Expr::List(elems) => {
-            for e in elems.iter_mut() {
-                remap_expr_into(e, map);
-            }
-        }
-        _ => {}
-    }
-}
+// ── Swan-song hoist: moved to frontend analysis ─────────────────────
+//
+// 2026-07-31: hoist_terminating_guard / remap_stmt_identifiers /
+// remap_expr_into were removed from this file. The terminating-guard hoist
+// and its let-to-field remap now live in src/analysis/swan_song.rs
+// (hoist_swan_song), computed once per transaction in analyze_program and
+// consumed here via analysis.swan_songs. See
+// docs/plans/2026-07-31-frontend-driven-dispatch.md §6.
+//
+// Preserved rationale from the removed functions:
+//   - 2026-07-05: The let-to-state-field mapping (`&field = let_name` →
+//     map[let_name] = field_name) exists because a hoisted swan song may
+//     reference a let binding (e.g. `nesc` in mandelbrot) whose register is
+//     only valid inside the loop body; the value lives in a state field, so
+//     identifiers are rewritten to the field name.
+//   - 2026-07-04: The hoist fires even when the guard body is empty — the
+//     guard may be just `term! -> print_int#(result)` with no preceding
+//     statements. Hoisting it empties pending_post_hoist correctly, which
+//     unblocks Path A (no-dead-stores) emission in emit_countable_main.
 
 use crate::ast::{BinaryOpKind, Expr, Statement, TopLevel, Type};
 
@@ -2600,42 +2473,28 @@ impl LlvmBackend {
         // We build a synthetic exit condition: for each foldable bounded-counter txn,
         // check `counter >= bound`. When ALL counters reach their bounds, no txn can
         // fire again, and main() returns 0.
-        self.ctx.has_natural_exit = false;
-        // 2026-07-18: Build synthetic exit condition for ALL programs, not just
-        // wake-triggered ones. One-shot txns (no triggers, no async) should also
-        // auto-exit when all bounded counters reach their bounds.
-        if self.ctx.exit_condition.is_none() {
-            let has_persistent_txn = txns.iter().any(|(name, t)| {
-                t.is_reactive && !graph.nodes.iter()
-                    .filter(|n| n.name == *name)
-                    .any(|n| n.bounded_pre.is_some() && n.increments.is_some())
-            });
-            if !has_persistent_txn {
-                let mut checks: Vec<Expr> = Vec::new();
-                for (name, t) in &txns {
-                    if !t.is_reactive { continue; }
-                    if let Some(node) = graph.nodes.iter().find(|n| n.name == *name) {
-                        if let Some(ref bp) = node.bounded_pre {
-                            if let Some(ref inc) = node.increments {
-                                if bp.var == inc.var {
-                                    checks.push(Expr::BinaryOp(
-                                        crate::ast::BinaryOpKind::Ge,
-                                        Box::new(Expr::Identifier(bp.var.clone())),
-                                        Box::new(Expr::Identifier(bp.bound_var.clone())),
-                                    ));
-                                }
-                            }
-                        }
-                    }
-                }
-                if !checks.is_empty() {
-                    let combined = checks.into_iter()
-                        .reduce(|a, b| Expr::BinaryOp(crate::ast::BinaryOpKind::And, Box::new(a), Box::new(b)))
-                        .unwrap();
-                    self.ctx.exit_condition = Some(Box::new(combined));
-                    self.ctx.has_natural_exit = true;
-                }
-            }
+        //
+        // 2026-07-31: The derivation moved to the frontend pass
+        // loop_shape::program_convergence — the backend consumes the derived
+        // (counter, bound_var) pairs instead of re-walking the txn list. The
+        // 2026-07-18 behavior is preserved exactly: the synthetic exit is built
+        // for ALL programs (not just wake-triggered ones) whenever every reactive
+        // txn is foldable and no explicit exit condition exists.
+        let explicit_exit = self.ctx.exit_condition.clone();
+        let program_conv = crate::analysis::loop_shape::program_convergence(
+            graph, items, explicit_exit.is_some(),
+        );
+        self.ctx.has_natural_exit = program_conv.has_natural_exit;
+        if explicit_exit.is_none() && !program_conv.counter_ge_bounds.is_empty() {
+            let combined = program_conv.counter_ge_bounds.into_iter()
+                .map(|(counter, bound)| Expr::BinaryOp(
+                    crate::ast::BinaryOpKind::Ge,
+                    Box::new(Expr::Identifier(counter)),
+                    Box::new(Expr::Identifier(bound)),
+                ))
+                .reduce(|a, b| Expr::BinaryOp(crate::ast::BinaryOpKind::And, Box::new(a), Box::new(b)))
+                .unwrap();
+            self.ctx.exit_condition = Some(Box::new(combined));
         }
 
         // ── Loop emission strategy selection ──────────────────────
@@ -2660,21 +2519,12 @@ impl LlvmBackend {
         // The decision is driven by the transition graph (analysis), not by
         // runtime profiling data. Contracts provide the bound/liveness info.
 
-        // 2026-07-10: Count distinct fields written by the txn via &field = value.
-        // EmitPerFieldPhi per-field phi loop is optimal for 1-4 fields. Beyond that, the
-        // GEP+load+store per tick overhead exceeds the phi register benefit,
-        // and EmitSequentialSsa (direct SSA loop with full phi state) produces better code.
-        let active_writes: usize = txns.first().map_or(0, |(_, txn)| {
-            let mut seen = std::collections::HashSet::new();
-            for stmt in &txn.body {
-                if let Statement::Assign(lhs, _) = stmt {
-                    if let Some(name) = lhs.as_var_name() {
-                        seen.insert(name.to_string());
-                    }
-                }
-            }
-            seen.len()
-        });
+        // 2026-07-10: EmitPerFieldPhi per-field phi loop is optimal for 1-4
+        // fields; beyond that the GEP+load+store per tick overhead exceeds the
+        // phi register benefit. (The old `active_writes` body re-walk that fed
+        // this heuristic was removed 2026-07-31 as dead — the write set comes
+        // from the transition graph's node.write_set, and the dispatch decision
+        // now comes from the LoopShape, not a field count.)
         let foldable = graph.nodes.len() == 1
             && !graph.has_triggers
             && txns.len() == 1
@@ -2685,186 +2535,39 @@ impl LlvmBackend {
             let node = &graph.nodes[0];
             let bp = node.bounded_pre.as_ref().unwrap();
             let inc = node.increments.as_ref().unwrap();
-            if bp.var == inc.var {
-                if let Some(&counter_idx) = self.ctx.field_index_map.get(&bp.var) {
-                    let total_idx = self.ctx.field_index_map.get(&bp.bound_var).copied();
-                    let total_const_name: Option<&str> = if total_idx.is_none() {
-                        if self.ctx.constants.contains_key(&bp.bound_var) {
-                            Some(bp.bound_var.as_str())
-                        } else { None }
-                    } else { None };
-                    if total_idx.is_some() || total_const_name.is_some() || bp.bound_literal.is_some() {
-                        // 2026-07-03: Swan song check — terminating guards with FFI
-                        // (e.g. term! -> print_int#) are hoisted by hoist_terminating_guard.
-                        // If a swan song exists, the body is treated as non-pure.
-                        let has_swan_song = txns[0].1.body.iter().any(|s| {
-                            match s {
-                                Statement::Term(Some(_)) | Statement::TermBang(Some(_)) => true,
-                Statement::Term(None) | Statement::TermBang(None) => false,
-                                Statement::Guarded(Expr::Bool(true), statements) => {
-                                    statements.iter().any(|gs| matches!(gs, Statement::TermBang(Some(_))))
-                                }
-                                _ => false,
-                            }
-                        });
-                        let raw_body = &txns[0].1.body;
-                        let (body_stmts, post_hoist) = hoist_terminating_guard(raw_body, &self.ctx.field_index_map);
-                        // 2026-07-29: Brief-level LICM — hoist loop-invariant let-bindings.
-                        // The hoisted bindings are prepended to the body so LLVM's LICM
-                        // can hoist them to the preheader. See analysis/licm.rs.
-                        let state_fields: std::collections::HashSet<String> = self.ctx.field_index_map.keys().cloned().collect();
-                        let (hoisted_reordered, body_stmts) = crate::analysis::licm::hoist_loop_invariants(
-                            &body_stmts, &node.write_set, &state_fields,
-                        );
-                        // Prepend hoisted bindings to body (they appear at loop entry)
-                        let body_stmts: Vec<Statement> = hoisted_reordered.into_iter()
-                            .chain(body_stmts).collect();
-                        // ── Dispatch: pure counter vs per-field phi loop ───────
-                        //
-                        // For bodies proven pure (or effectively pure), the compiler
-                        // can emit an O(1) counter-only fold or a runtime phi pipeline.
-                        // For ALL other bodies, emit a per-field phi loop (EmitPerFieldPhi).
-                        //
-                        // Why per-field phis instead of the old EmitInlineSsa/EmitMemoryCounter paths:
-                        //   EmitInlineSsa (inline SSA) used a %slot_case alloca round-trip:
-                        //     load %State → extractvalue×N → insertvalue×N → store
-                        //     — 33-field struct load/store per iteration hid fields
-                        //       from LLVM's induction variable analysis.
-                        //   EmitMemoryCounter (memory) kept the counter in %State via GEP+load+store:
-                        //     — 3 extra memory uops per tick for the counter alone.
-                        //
-                        //   EmitPerFieldPhi creates per-field phi nodes at the loop header
-                        //   so LLVM sees a canonical loop structure (phi + icmp slt
-                        //   + add) that enables induction variable analysis, SROA,
-                        //   and loop vectorization. Guard branches in the body are
-                        //   handled naturally: every path stores to the same GEP
-                        //   addresses, and the latch reloads from them (GVN eliminates
-                        //   the redundant load-via-store round trip).
-                        //
-                        // 2026-07-04: Removed memory-loop variant. EmitPerFieldPhi (per-field
-                        // phi loop) is now used for ALL field counts. The original
-                        // concern was that 31+ phi nodes would choke SROA, but chunk
-                        // allocas (≤15 fields per chunk, MAX_FIELDS_PER_ALLLOCA=15)
-                        // decompose the state into SROA-friendly chunks. With Path A
-                        // (needs_state_stores_in_body=false), EmitPerFieldPhi emits zero memory
-                        // traffic regardless of field count — strictly better than
-                        // Removed memory-loop variant's GEP+load+store per iteration.
-                        // 2026-07-29: Three-way structural dispatch (pure counter fold
-                        // handled separately). Removed heuristics: has_body_ffi,
-                        // write_density >= 0.8, phi_cap, emit_while_main,
-                        // emit_folded_memory_main — all proven counterproductive.
-                        // See docs/plans/2026-07-29-full-recovery-plan.md §10.
-                        let mut dispatched = false;
-                        if !has_swan_song && (node.is_pure_body || node.is_effectively_pure) {
-                            let total_val = self.ctx.field_initializers
-                                .get(&bp.bound_var)
-                                .and_then(|e| e.as_ref())
-                                .and_then(|e| {
-                                    if let Expr::Decimal(n) = e { Some(*n) } else { None }
-                                })
-                                .or_else(|| {
-                                    self.ctx.constants.get(&bp.bound_var).and_then(|(_, e)| {
-                                        if let Expr::Decimal(n) = e { Some(*n) } else { None }
-                                    })
-                                });
-                            if let Some(tv) = total_val {
-                                // EmitPureCounterFold: pure counter fold (O(1) — single store, no loop)
-                                // 2026-07-14: Wrap in define i32 @main() so emitted IR is valid
-                                self.warnings.push(format!("info: txn '{}' dispatched via pure counter fold ({} iterations, O(1) store)", node.name, tv));
-                                writeln!(out, "define i32 @main() local_unnamed_addr #9 {{").ok();
-                                writeln!(out, "entry:").ok();
-                                writeln!(out, "  %state = alloca %State, align 8").ok();
-                                self.emit_inline_init_stores(&mut out, "%state");
-                                self.emit_folded_pure_counter(&mut out, counter_idx, tv);
-                                if self.ctx.exit_condition.is_some() {
-                                    self.emit_exit_check(&mut out);
-                                    writeln!(out, ".end:").ok();
-                                }
-                                writeln!(out, "  ret i32 0").ok();
-                                writeln!(out, "}}").ok();
-                                dispatched = true;
+            if bp.var != inc.var {
+                false
+            } else {
+                match self.ctx.field_index_map.get(&bp.var) {
+                    None => false,
+                    Some(&counter_idx) => {
+                        // 2026-07-31: Dispatch now switches on the frontend-computed
+                        // LoopShape (analysis.loop_shapes) instead of re-deriving
+                        // decisions from write_density/total_fields body re-walks.
+                        // Every foldable bounded-counter reactive node has a shape
+                        // (build_loop_shapes mirrors this gate); a missing shape
+                        // falls through to the conservative reactor path.
+                        // See docs/plans/2026-07-31-frontend-driven-dispatch.md §6.5.
+                        match analysis.loop_shapes.get(&node.name) {
+                            None => false,
+                            Some(shape) => {
+                                // 2026-07-31: Swan-song hoist consumed from the
+                                // frontend analysis (swan_song.rs) — the stripped
+                                // body + post-loop hoist pair replaces the backend
+                                // hoist_terminating_guard body re-walk.
+                                let (txn_body, post_hoist) = match analysis.swan_songs.get(&node.name) {
+                                    Some((stripped, hoisted)) => (stripped.clone(), hoisted.clone()),
+                                    None => (txns[0].1.body.clone(), Vec::new()),
+                                };
+                                self.emit_folded_loop_shape(
+                                    &mut out, &analysis, node, counter_idx, shape, &txn_body, post_hoist,
+                                )
                             }
                         }
-                        if !dispatched {
-                            // ── Structural 4-way dispatch ─────────────────────
-                            // 1. VectorPhiGroup — isomorphic field groups with ≥4 members
-                            // 2. InlineSsa — dense writes, small state, counter-only writes
-                            // 3. PerFieldPhi — everything else (default)
-                            //
-                            // 2026-07-29: Guardrail: InlineSsa (emit_folded_loop) passes an
-                            // EMPTY write_set to emit_countable_body (counter.rs:110), so any
-                            // non-counter state writes are silently discarded. Skip InlineSsa
-                            // when the body writes fields other than the loop counter.
-                            // See docs/plans/2026-07-29-dispatch-bug-analysis.md.
-                            let total_fields = self.ctx.field_index_map.len();
-                            let write_count = node.write_set.len();
-                            let write_density = if total_fields > 0 { write_count as f64 / total_fields as f64 } else { 1.0 };
-                            let vg = crate::backend::llvm::vector_phi::detect_vector_groups(
-                                &node.write_set, &body_stmts,
-                                &self.ctx.field_index_map, &self.ctx.field_types,
-                            );
-                            // 2026-07-31: Composite-node decomposition (version-DAG).
-                            // Try the guard-absent/guard-present emission first; if it
-                            // handles the body (a single runtime `when` guard), skip
-                            // the batch-loop heuristics below.
-                            // See docs/plans/2026-07-30-flat-node-decomposition.md §11.
-                            self.fun.pending_post_hoist = post_hoist.clone();
-                            let is_decreasing_vd = bp.direction == crate::analysis::transition_graph::ConvergeDirection::Decreasing;
-                            if self.emit_version_dag_main(
-                                &mut out, counter_idx, total_idx, total_const_name,
-                                &body_stmts, &node.write_set, is_decreasing_vd, Some(&bp.var),
-                            ) {
-                                // 2026-07-31: version-DAG handled the body.
-                                dispatched = true;
-                            }
-                            // 2026-07-31: The composite-node decomposition
-                            // (emit_version_dag_main, tried above) supersedes the
-                            // batch-loop heuristics for single-guard bodies. The
-                            // remaining dispatch paths use the FULL body (no guard
-                            // stripping) with plain PerFieldPhi (batch_info = None).
-                            let inner_body = body_stmts.clone();
-
-                            if !dispatched && !vg.is_empty() && total_fields > 14 {
-                                // Vector phi group path — per-field phi loop with vector
-                                // phi promotion. Checks before InlineSsa so nbody_newton
-                                // (large state) gets vector phis, not InlineSsa.
-                                self.fun.pending_post_hoist = post_hoist;
-                                let field_count: usize = vg.iter().map(|g| g.width).sum();
-                                self.warnings.push(format!("info: txn '{}' dispatched via vector phi ({}/{} fields in {} groups)", &node.name, field_count, total_fields, vg.len()));
-                                let is_decreasing = bp.direction == crate::analysis::transition_graph::ConvergeDirection::Decreasing;
-                                self.emit_countable_main(&mut out, &node.name, counter_idx, total_idx, total_const_name, &inner_body, &node.write_set, is_decreasing, Some(&bp.var));
-                            } else if !dispatched && write_density >= 0.5 && total_fields < 8 {
-                                // InlineSsa: insertvalue chain for small, dense-write states.
-                                // Only safe when the counter is the ONLY written field —
-                                // emit_folded_loop passes empty write_set and silently drops
-                                // non-counter writes. Guardrail below enforces this.
-                                let writes_non_counter = node.write_set.iter().any(|f| {
-                                    *f != bp.var
-                                });
-                                if writes_non_counter {
-                                    // Non-counter state writes exist — emit_folded_loop would
-                                    // silently discard them. Route to PerFieldPhi instead.
-                                    self.fun.pending_post_hoist = post_hoist;
-                                    self.warnings.push(format!("info: txn '{}' dispatched via per-field phi ({}/{} fields written, non-counter writes)", &node.name, write_count, total_fields));
-                                    let is_decreasing = bp.direction == crate::analysis::transition_graph::ConvergeDirection::Decreasing;
-                                    self.emit_countable_main(&mut out, &node.name, counter_idx, total_idx, total_const_name, &inner_body, &node.write_set, is_decreasing, Some(&bp.var));
-                                } else {
-                                    self.fun.pending_post_hoist = post_hoist;
-                                    self.warnings.push(format!("info: txn '{}' dispatched via inline SSA ({}/{} fields written)", &node.name, write_count, total_fields));
-                                    self.emit_folded_main(&mut out, &node.name, counter_idx, total_idx, total_const_name, false, Some(&body_stmts));
-                                }
-                            } else if !dispatched {
-                                self.fun.pending_post_hoist = post_hoist;
-                                self.warnings.push(format!("info: txn '{}' dispatched via per-field phi ({}/{} fields written)", &node.name, write_count, total_fields));
-                                let is_decreasing = bp.direction == crate::analysis::transition_graph::ConvergeDirection::Decreasing;
-                                self.emit_countable_main(&mut out, &node.name, counter_idx, total_idx, total_const_name, &inner_body, &node.write_set, is_decreasing, Some(&bp.var));
-                            }
-                        }
-                        true
-                      } else { false }
-                  } else { false }
-             } else { false }
-         } else { false };
+                    }
+                }
+            }
+        } else { false };
 
         // Emit the trg step() function if the program has trigger declarations.
         // The step() function recomputes dependent variables in topological order
@@ -3549,6 +3252,250 @@ impl LlvmBackend {
         }
 
         out
+    }
+
+    /// Emit the folded single-bounded-counter `main()` for a node, selecting the
+    /// emission strategy from its frontend-computed `LoopShape`.
+    ///
+    /// Returns `true` when a folded `main()` was emitted; `false` when the shape
+    /// says the node cannot be folded (unresolvable bound), so the caller falls
+    /// through to the conservative reactor path.
+    ///
+    /// # Dispatch
+    ///
+    /// 2026-07-31: The four-way dispatch replaces the previous body of
+    /// heuristics (write_density, total_fields thresholds). The decision is now
+    /// structural and backend-agnostic:
+    ///
+    /// ```text
+    /// Pure && const bound            → EmitPureCounterFold (O(1) store)
+    /// single runtime guard           → emit_version_dag_main (self-deciding)
+    /// counter_only && !swan_song     → emit_folded_main (InlineSsa)
+    /// vector groups && carried > regs→ emit_countable_main (VectorPhiGroup label)
+    /// _                              → emit_countable_main (PerFieldPhi)
+    /// ```
+    ///
+    /// The InlineSsa guardrail (2026-07-29, dispatch-bug-analysis.md) is encoded
+    /// structurally: `counter_only_writes` is true exactly when the write set is
+    /// `{counter}`, so emit_folded_loop's empty write_set never silently discards
+    /// a non-counter state write. version-DAG is tried before InlineSsa/PerFieldPhi
+    /// so a body with a single runtime `when` guard (e.g. print_loop) keeps its
+    /// guard-absent/guard-present split — see
+    /// docs/plans/2026-07-30-flat-node-decomposition.md §11.
+    ///
+    /// Why per-field phis instead of the old EmitInlineSsa/EmitMemoryCounter paths:
+    ///   EmitInlineSsa (inline SSA) used a %slot_case alloca round-trip:
+    ///     load %State → extractvalue×N → insertvalue×N → store
+    ///     — 33-field struct load/store per iteration hid fields
+    ///       from LLVM's induction variable analysis.
+    ///   EmitMemoryCounter (memory) kept the counter in %State via GEP+load+store:
+    ///     — 3 extra memory uops per tick for the counter alone.
+    ///   EmitPerFieldPhi creates per-field phi nodes at the loop header so LLVM
+    ///   sees a canonical loop structure (phi + icmp slt + add) that enables
+    ///   induction variable analysis, SROA, and loop vectorization. With Path A
+    ///   (needs_state_stores_in_body=false) it emits zero memory traffic
+    ///   regardless of field count (2026-07-04, MAX_FIELDS_PER_ALLLOCA=15 chunk
+    ///   allocas keep SROA happy past 15 phis).
+    ///
+    /// # Arguments
+    ///
+    /// * `txn_body` — the swan-song-stripped transaction body (from
+    ///   `analysis.swan_songs`); LICM hoisting runs inside.
+    /// * `post_hoist` — the hoisted post-loop swan-song tail, assigned to
+    ///   `pending_post_hoist` for Path B emission.
+    fn emit_folded_loop_shape(
+        &mut self,
+        out: &mut String,
+        analysis: &crate::backend::AnalysisResults,
+        node: &crate::analysis::transition_graph::ReactorNode,
+        counter_idx: usize,
+        shape: &crate::analysis::loop_shape::LoopShape,
+        txn_body: &[Statement],
+        post_hoist: Vec<Vec<Statement>>,
+    ) -> bool {
+        let bp = node.bounded_pre.as_ref().unwrap();
+        // 2026-07-31: Bound resolution maps the structured Bound to the backend's
+        // own index/const tables (field first, then const; literal/unknown →
+        // neither) — mirroring the old total_idx / total_const_name lookup so
+        // literal-bound txns reach emit_countable_main with both None exactly as
+        // before (emit_countable_load_bound falls back to `add i64 0, 1`).
+        let (total_idx, total_const_name) = match &shape.bound {
+            crate::analysis::loop_shape::Bound::Field(name) => {
+                (self.ctx.field_index_map.get(name.as_str()).copied(), None)
+            }
+            crate::analysis::loop_shape::Bound::Const(name) => (None, Some(name.as_str())),
+            crate::analysis::loop_shape::Bound::Literal(_) | crate::analysis::loop_shape::Bound::Unknown(_) => {
+                (None, None)
+            }
+        };
+        // 2026-07-31: Only fold when the bound resolves to something the emitters
+        // can load. Reproduces the old
+        // `total_idx.is_some() || total_const_name.is_some() || bound_literal.is_some()`
+        // gate exactly: a Field bound missing from field_index_map, or an Unknown
+        // bound, falls through to the reactor path.
+        let bound_resolvable = total_idx.is_some()
+            || total_const_name.is_some()
+            || matches!(shape.bound, crate::analysis::loop_shape::Bound::Literal(_));
+        if !bound_resolvable {
+            return false;
+        }
+        // 2026-07-29: Brief-level LICM — hoist loop-invariant let-bindings.
+        // The hoisted bindings are prepended to the body so LLVM's LICM
+        // can hoist them to the preheader. See analysis/licm.rs.
+        let state_fields: HashSet<String> = self.ctx.field_index_map.keys().cloned().collect();
+        let (hoisted_reordered, body_stmts) = crate::analysis::licm::hoist_loop_invariants(
+            txn_body, &node.write_set, &state_fields,
+        );
+        // Prepend hoisted bindings to body (they appear at loop entry).
+        let body_stmts: Vec<Statement> = hoisted_reordered.into_iter()
+            .chain(body_stmts).collect();
+
+        // ── EmitPureCounterFold ─────────────────────────────────────
+        // Pure body + constant bound → O(1) counter-only store, no loop.
+        // 2026-07-03: A swan song makes the body non-pure — the hoisted print
+        // would be silently dropped by the fold, so the fold is blocked exactly
+        // when the swan-song hoist fires (frontend has_swan_song).
+        if !shape.has_swan_song && shape.is_pure {
+            // 2026-07-31: `total_val` mirrors the old field_initializers-then-
+            // constants lookup exactly — a Literal bound never folds (the old
+            // total_val was None for it), so literal-bound pure txns still reach
+            // the version-DAG / InlineSsa / PerFieldPhi emitters below. This keeps
+            // Phase 1b strictly behavior-preserving ("pure fold stays as-is",
+            // plan §6.2).
+            let total_val = match &shape.bound {
+                crate::analysis::loop_shape::Bound::Field(name) => self.ctx.field_initializers
+                    .get(name.as_str())
+                    .and_then(|e| e.as_ref())
+                    .and_then(|e| if let Expr::Decimal(n) = e { Some(*n) } else { None }),
+                crate::analysis::loop_shape::Bound::Const(name) => self.ctx.constants
+                    .get(name.as_str())
+                    .and_then(|(_, e)| if let Expr::Decimal(n) = e { Some(*n) } else { None }),
+                crate::analysis::loop_shape::Bound::Literal(_) | crate::analysis::loop_shape::Bound::Unknown(_) => None,
+            };
+            if let Some(tv) = total_val {
+                // 2026-07-14: Wrap in define i32 @main() so emitted IR is valid.
+                self.warnings.push(format!("info: txn '{}' dispatched via pure counter fold ({} iterations, O(1) store)", node.name, tv));
+                writeln!(out, "define i32 @main() local_unnamed_addr #9 {{").ok();
+                writeln!(out, "entry:").ok();
+                writeln!(out, "  %state = alloca %State, align 8").ok();
+                self.emit_inline_init_stores(out, "%state");
+                self.emit_folded_pure_counter(out, counter_idx, tv);
+                if self.ctx.exit_condition.is_some() {
+                    self.emit_exit_check(out);
+                    writeln!(out, ".end:").ok();
+                }
+                writeln!(out, "  ret i32 0").ok();
+                writeln!(out, "}}").ok();
+                return true;
+            }
+        }
+
+        // 2026-07-31: Composite-node decomposition (version-DAG). Tried before the
+        // batch-loop strategies — a body with a single runtime `when` guard is
+        // handled by the guard-absent/guard-present emission and supersedes them.
+        // See docs/plans/2026-07-30-flat-node-decomposition.md §11.
+        self.fun.pending_post_hoist = post_hoist.clone();
+        let is_decreasing_vd = bp.direction == crate::analysis::transition_graph::ConvergeDirection::Decreasing;
+        if self.emit_version_dag_main(
+            out, counter_idx, total_idx, total_const_name,
+            &body_stmts, &node.write_set, is_decreasing_vd, Some(&bp.var),
+        ) {
+            return true;
+        }
+        // 2026-07-31: version-DAG did not handle the body — remaining paths use the
+        // FULL body (no guard stripping) with plain PerFieldPhi (batch_info = None).
+        let inner_body = body_stmts.clone();
+
+        // ── InlineSsa ───────────────────────────────────────────────
+        // counter-only write sets are the ONLY safe input (emit_folded_loop passes
+        // an empty write_set to emit_countable_body and would silently discard any
+        // non-counter state write). `counter_only_writes` encodes that structurally.
+        if shape.counter_only_writes && !shape.has_swan_song {
+            let total_fields = self.ctx.field_index_map.len();
+            self.fun.pending_post_hoist = post_hoist;
+            self.warnings.push(format!("info: txn '{}' dispatched via inline SSA ({} fields)", node.name, total_fields));
+            self.emit_folded_main(out, &node.name, counter_idx, total_idx, total_const_name, false, Some(&body_stmts));
+            return true;
+        }
+
+        // ── VectorPhiGroup vs PerFieldPhi ───────────────────────────
+        // Isomorphic groups (with the backend's same-type gate applied) on a wide
+        // carried set select the vector-phi label. Emission is identical today —
+        // emit_countable_main clears active_vector_groups (counter.rs:241) — so the
+        // split only records the intended strategy for future vector-phi emission.
+        let vg = self.shape_vector_groups(&shape.vector_groups, &node.write_set);
+        let carried_len = shape.carried_fields.len();
+        let regs = self.ctx.float_register_count();
+        let total_fields = self.ctx.field_index_map.len();
+        let write_count = node.write_set.len();
+        if !vg.is_empty() && carried_len > regs {
+            let field_count: usize = vg.iter().map(|g| g.width).sum();
+            self.warnings.push(format!("info: txn '{}' dispatched via vector phi ({}/{} fields in {} groups)", node.name, field_count, total_fields, vg.len()));
+        } else {
+            self.warnings.push(format!("info: txn '{}' dispatched via per-field phi ({}/{} fields written)", node.name, write_count, total_fields));
+        }
+        self.fun.pending_post_hoist = post_hoist;
+        let is_decreasing = bp.direction == crate::analysis::transition_graph::ConvergeDirection::Decreasing;
+        self.emit_countable_main(
+            out, &node.name, counter_idx, total_idx, total_const_name,
+            &inner_body, &node.write_set, is_decreasing, Some(&bp.var),
+        );
+        true
+    }
+
+    /// Convert frontend structural vector groups to backend `VectorPhiGroup`s,
+    /// applying the LLVM same-type gate the structural pass cannot express.
+    ///
+    /// 2026-07-31: The frontend `LoopShape` carries isomorphic groups already
+    /// filtered for write-set membership, power-of-2 width, duplicate fields, and
+    /// overlap (loop_shape::detect_vector_groups_structural). The backend re-applies
+    /// the same-LLVM-type check it used in `detect_vector_groups` so a mixed-type
+    /// group never influences dispatch. See
+    /// docs/plans/2026-07-31-frontend-driven-dispatch.md §6.2.
+    fn shape_vector_groups(
+        &self,
+        groups: &[crate::analysis::loop_shape::VectorGroup],
+        write_set: &HashSet<String>,
+    ) -> Vec<crate::backend::llvm::vector_phi::VectorPhiGroup> {
+        let mut accepted: HashSet<String> = HashSet::new();
+        let mut out_groups: Vec<crate::backend::llvm::vector_phi::VectorPhiGroup> = Vec::new();
+        for g in groups {
+            // All fields must be unconditionally written (in write_set).
+            if !g.fields.iter().all(|f| write_set.contains(f)) {
+                continue;
+            }
+            let element_ty = match g.fields.first() {
+                Some(first) => {
+                    let Some(&idx) = self.ctx.field_index_map.get(first.as_str()) else { continue; };
+                    self.ctx.field_types.get(idx).cloned().unwrap_or_else(|| "i64".to_string())
+                }
+                None => continue,
+            };
+            // All fields must have the same LLVM type.
+            if !g.fields.iter().all(|f| {
+                self.ctx.field_index_map.get(f.as_str())
+                    .and_then(|idx| self.ctx.field_types.get(*idx))
+                    .map_or(false, |t| t == &element_ty)
+            }) {
+                continue;
+            }
+            // Skip if ANY field is already in an accepted group (no overlap).
+            if g.fields.iter().any(|f| accepted.contains(f)) {
+                continue;
+            }
+            for f in &g.fields {
+                accepted.insert(f.clone());
+            }
+            out_groups.push(crate::backend::llvm::vector_phi::VectorPhiGroup {
+                name: g.name.clone(),
+                element_ty,
+                width: g.width,
+                fields: g.fields.clone(),
+                phi_reg: String::new(),
+                backedge_reg: String::new(),
+            });
+        }
+        out_groups
     }
 
     /// Return the optimization report lines collected during `generate()`.

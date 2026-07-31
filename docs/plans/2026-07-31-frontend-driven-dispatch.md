@@ -729,13 +729,21 @@ comments — rewrite them for the new structure.
 | Phase | Commit | cargo test | nbody_newton | kalman | ring_buffer | float_math | sparse_dispatch | MISMATCH? |
 |-------|--------|-----------|--------------|--------|-------------|------------|-----------------|-----------|
 | Baseline 666fb502 | — | pass | 0.83× | 1.23× | 1.15× | 0.97× | 0.83× | 0 |
-| Phase 1 (analysis) | | | | | | | | |
-| Phase 1 (dispatch) | | | | | | | | |
+| Phase 0 (baseline capture) | ed2f4234 | pass | 0.83× | 1.22× | 1.13× | 0.97× | 0.84× | 0 |
+| Phase 1a (analysis) | 0682d764 | 1232 pass | — | — | — | — | — | 0 |
+| Phase 1b (dispatch) | _pending_ | 1239 pass | 0.83× | 1.24× | 1.10× | 0.95× | 0.82× | 0 |
 | Phase 2 | | | | | | | | |
 | Phase 3 | | | | | | | | |
 | Final | | | | | | | | |
 
 Full `--runtime` table appended to this section after every phase.
+
+Phase 1b full table (see `benchmarks/results/2026-07-31-frontend-dispatch-phase1b.md`):
+all 19 runtime benchmarks within noise of Phase 0 (max delta 0.07×, queue_drain
+0.86→0.93×), zero MISMATCH, and the per-benchmark dispatch decision (`.cm_header`
+/ `.vdN_header` / bare-`main` markers) is byte-identical to Phase 0 for all 17
+programs. All six Phase 1b regression tests added per §6.7. `cargo test --lib`:
+1239 passed, 0 failed.
 
 ---
 

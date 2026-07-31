@@ -12,7 +12,6 @@
 // No shufflevector, no hand-rolled SLP traversals. Only the phi storage
 // mechanism changes — LLVM's optimizer handles the rest.
 
-use crate::ast::{Expr, Statement, Type};
 use crate::backend::llvm::context::FunctionContext;
 use std::collections::{HashMap, HashSet};
 use std::fmt::Write;
@@ -34,98 +33,14 @@ pub(crate) struct VectorPhiGroup {
     pub backedge_reg: String,
 }
 
-/// Scan a transaction body for fields that can be grouped into vector phi nodes.
-/// Uses isomorphism analysis from slp_isomorphism.rs.
-///
-/// A group is formed when:
-/// 1. All fields have the same LLVM type (e.g., all float)
-/// 2. All fields are unconditionally written every iteration (in write_set)
-/// 3. The fields' assignment expressions are structurally isomorphic
-///
-/// Returns empty vec if no groups of size >= 4 are found.
-pub(crate) fn detect_vector_groups(
-    write_set: &HashSet<String>,
-    body: &[Statement],
-    field_index_map: &HashMap<String, usize>,
-    field_types: &[String],
-) -> Vec<VectorPhiGroup> {
-    let candidates = crate::analysis::slp_isomorphism::analyze_body(body);
-    if candidates.is_empty() {
-        return Vec::new();
-    }
-
-    // 2026-07-29: Sort by width descending so the LARGEST group is processed
-    // first. When two candidates overlap (same field in two groups), the larger
-    // group takes priority and the smaller is skipped.
-    let mut candidates_sorted = candidates.clone();
-    candidates_sorted.sort_by_key(|c| std::cmp::Reverse(c.width));
-
-    let mut accepted_fields: HashSet<String> = HashSet::new();
-    let mut groups: Vec<VectorPhiGroup> = Vec::new();
-    for c in &candidates_sorted {
-        // All fields must be unconditionally written (in write_set).
-        let all_in_write_set = c.fields.iter().all(|f| write_set.contains(f));
-        if !all_in_write_set {
-            continue;
-        }
-
-        // All fields must have the same LLVM type.
-        let element_ty = match c.fields.first() {
-            Some(first) => {
-                let idx = match field_index_map.get(first.as_str()) {
-                    Some(&i) => i,
-                    None => continue,
-                };
-                field_types.get(idx).cloned().unwrap_or_else(|| "i64".to_string())
-            }
-            None => continue,
-        };
-
-        let all_same_type = c.fields.iter().all(|f| {
-            field_index_map.get(f.as_str()).and_then(|idx| field_types.get(*idx))
-                .map_or(false, |t| t == &element_ty)
-        });
-        if !all_same_type {
-            continue;
-        }
-
-        // 2026-07-29: LLVM only supports power-of-2 vector widths (2, 4, 8, 16, ...).
-        // Non-power-of-2 widths produce `<N x float>` that fails codegen.
-        if c.width.count_ones() != 1 {
-            continue;
-        }
-
-        // 2026-07-29: Skip groups with duplicate field names. The merge step
-        // in analyze_body can create groups with the same field at multiple lanes.
-        let mut seen_fields: HashSet<&str> = HashSet::new();
-        let has_dupes = c.fields.iter().any(|f| !seen_fields.insert(f));
-        if has_dupes {
-            continue;
-        }
-
-        // 2026-07-29: Skip if ANY field is already in an accepted group.
-        // Prevents overlapping field-to-phi mappings.
-        let overlaps = c.fields.iter().any(|f| accepted_fields.contains(f));
-        if overlaps {
-            continue;
-        }
-        for f in &c.fields {
-            accepted_fields.insert(f.clone());
-        }
-
-        groups.push(VectorPhiGroup {
-            name: c.group_name.clone(),
-            element_ty,
-            width: c.width,
-            fields: c.fields.clone(),
-            phi_reg: String::new(),
-            backedge_reg: String::new(),
-        });
-    }
-
-    groups
-}
-
+// ── Vector-phi group detection: moved to frontend analysis ──────────
+//
+// 2026-07-31: `detect_vector_groups` was removed. The isomorphic-group scan now
+// runs once in src/analysis/loop_shape.rs (detect_vector_groups_structural),
+// and the backend applies the LLVM same-type gate when converting the
+// structural VectorGroup → VectorPhiGroup (LlvmBackend::shape_vector_groups in
+// mod.rs). The filters are identical: write-set membership, power-of-2 width,
+// no duplicate fields, no overlap, same LLVM type.
 /// Emit the pre-header insertelement chain and loop header phi nodes
 /// for all vector groups.
 ///
