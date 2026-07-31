@@ -2803,6 +2803,20 @@ impl LlvmBackend {
                                 &node.write_set, &body_stmts,
                                 &self.ctx.field_index_map, &self.ctx.field_types,
                             );
+                            // 2026-07-31: Composite-node decomposition (version-DAG).
+                            // Try the guard-absent/guard-present emission first; if it
+                            // handles the body (a single runtime `when` guard), skip
+                            // the batch-loop heuristics below.
+                            // See docs/plans/2026-07-30-flat-node-decomposition.md §11.
+                            self.fun.pending_post_hoist = post_hoist.clone();
+                            let is_decreasing_vd = bp.direction == crate::analysis::transition_graph::ConvergeDirection::Decreasing;
+                            if self.emit_version_dag_main(
+                                &mut out, counter_idx, total_idx, total_const_name,
+                                &body_stmts, &node.write_set, is_decreasing_vd, Some(&bp.var),
+                            ) {
+                                // 2026-07-31: version-DAG handled the body.
+                                dispatched = true;
+                            }
                             // 2026-07-29: Compute batch info BEFORE dispatch so all
                             // paths can use it. Filter guards from the inner body.
                             // 2026-07-30: Only strip guards when a batch loop will
@@ -2846,7 +2860,7 @@ impl LlvmBackend {
                                 } else { (body_stmts.clone(), None) }
                             };
 
-                            if !vg.is_empty() && total_fields > 14 {
+                            if !dispatched && !vg.is_empty() && total_fields > 14 {
                                 // Vector phi group path — per-field phi loop with vector
                                 // phi promotion. Checks before InlineSsa so nbody_newton
                                 // (large state) gets vector phis, not InlineSsa.
@@ -2855,7 +2869,7 @@ impl LlvmBackend {
                                 self.warnings.push(format!("info: txn '{}' dispatched via vector phi ({}/{} fields in {} groups)", &node.name, field_count, total_fields, vg.len()));
                                 let is_decreasing = bp.direction == crate::analysis::transition_graph::ConvergeDirection::Decreasing;
                                 self.emit_countable_main(&mut out, &node.name, counter_idx, total_idx, total_const_name, &inner_body, &node.write_set, is_decreasing, Some(&bp.var), batch_info.as_ref());
-                            } else if write_density >= 0.5 && total_fields < 8 {
+                            } else if !dispatched && write_density >= 0.5 && total_fields < 8 {
                                 // InlineSsa: insertvalue chain for small, dense-write states.
                                 // Only safe when the counter is the ONLY written field —
                                 // emit_folded_loop passes empty write_set and silently drops
@@ -2875,7 +2889,7 @@ impl LlvmBackend {
                                     self.warnings.push(format!("info: txn '{}' dispatched via inline SSA ({}/{} fields written)", &node.name, write_count, total_fields));
                                     self.emit_folded_main(&mut out, &node.name, counter_idx, total_idx, total_const_name, false, Some(&body_stmts));
                                 }
-                            } else {
+                            } else if !dispatched {
                                 self.fun.pending_post_hoist = post_hoist;
                                 self.warnings.push(format!("info: txn '{}' dispatched via per-field phi ({}/{} fields written)", &node.name, write_count, total_fields));
                                 let is_decreasing = bp.direction == crate::analysis::transition_graph::ConvergeDirection::Decreasing;

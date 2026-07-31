@@ -430,6 +430,297 @@ impl LlvmBackend {
     // 2026-07-29: emit_countable_memory_main removed — dead code after Phase 4.
     // PerFieldPhi (emit_countable_main) handles all cases.
 
+    // ── Version-DAG Emission ─────────────────────────────────────────
+    //
+    // 2026-07-31: Emit the composite-node decomposition for a transaction
+    // body containing ONE runtime `when` guard. The body is split at the
+    // guard into [pre], [guard], [post] (see analysis/node_decompose.rs).
+    // Two versions are emitted:
+    //
+    //   guard-absent loop:  [pre] → check predicate → [post] (self-terminating)
+    //   guard-present block: [pre] → [guard] → [post] (fires when predicate holds)
+    //
+    // The guard predicate is evaluated BETWEEN [pre] and [post], at the split
+    // point — this captures whether the guard observes the counter pre- or
+    // post-increment naturally (no position scanning, no counter-name matching).
+    //
+    // Returns false if the body has no runtime guard or more than one — the
+    // caller falls back to PerFieldPhi (emit_countable_main).
+    //
+    // See docs/plans/2026-07-30-flat-node-decomposition.md §11.
+    pub(crate) fn emit_version_dag_main(
+        &mut self,
+        out: &mut String,
+        counter_idx: usize,
+        total_idx: Option<usize>,
+        total_const_name: Option<&str>,
+        body: &[Statement],
+        write_set: &HashSet<String>,
+        is_decreasing: bool,
+        counter_var: Option<&str>,
+    ) -> bool {
+        use crate::analysis::node_decompose::{PredicateClass, Segment, split_into_segments};
+        let segments = split_into_segments(body);
+
+        // Locate the single runtime guard and collect [pre] / [post] statements.
+        let mut pre: Vec<Statement> = Vec::new();
+        let mut post: Vec<Statement> = Vec::new();
+        let mut runtime_guard: Option<(&Expr, &Vec<Statement>)> = None;
+        let mut seen_guard = false;
+        for seg in &segments {
+            match seg {
+                Segment::Compute(stmts) => {
+                    if runtime_guard.is_none() {
+                        pre.extend(stmts.clone());
+                    } else {
+                        post.extend(stmts.clone());
+                    }
+                }
+                Segment::Guard { condition, body, classification, .. } => {
+                    if seen_guard {
+                        return false; // multiple guards — fall back to PerFieldPhi
+                    }
+                    seen_guard = true;
+                    match classification {
+                        PredicateClass::Runtime => {
+                            runtime_guard = Some((condition, body));
+                        }
+                        // 2026-07-31: Static predicates are handled by inlining
+                        // (always-true) or dropping (always-false). Both mean no
+                        // runtime version split is needed — the guard body is
+                        // either always executed or never, so we fold it into
+                        // [pre]/[post] and let PerFieldPhi emit the single loop.
+                        PredicateClass::AlwaysTrue | PredicateClass::AlwaysFalse => {
+                            return false;
+                        }
+                    }
+                }
+            }
+        }
+        let Some((guard_cond, guard_body)) = runtime_guard else {
+            return false; // no runtime guard — PerFieldPhi
+        };
+
+        // ── Emit @main with the guard-absent loop + guard-present block ──
+        let c0 = self.fun.txn_counter;
+        let vd_prefix = format!("vd{}", c0);
+        self.fun.txn_counter += 1;
+        let header_label = format!(".{}_header", vd_prefix);
+        let absent_label = format!(".{}_absent", vd_prefix);
+        let latch_label = format!(".{}_latch", vd_prefix);
+        let present_label = format!(".{}_present", vd_prefix);
+        let end_label = format!(".{}_end", vd_prefix);
+
+        writeln!(out, "define i32 @main() local_unnamed_addr {} {{", "#0").ok();
+        writeln!(out, "entry:").ok();
+        writeln!(out, "  %state = alloca %State, align 8").ok();
+        self.emit_inline_init_stores(out, "%state");
+        let bound_reg = self.fun.next_reg_with_prefix("vdb");
+        self.emit_countable_load_bound(out, &bound_reg, total_idx, total_const_name, c0);
+        let (init_name, _) = self.emit_state_load_i64_by_idx(out, "  ", counter_idx);
+
+        let mut sorted_fields: Vec<&String> = write_set.iter().collect();
+        sorted_fields.sort();
+        let mut phi_field_init: HashMap<String, String> = HashMap::new();
+        for fname in &sorted_fields {
+            let idx = match self.ctx.field_index_map.get(fname.as_str()) {
+                Some(&i) => i,
+                None => continue,
+            };
+            let (init_f, _) = self.emit_state_load_i64_by_idx(out, "  ", idx);
+            phi_field_init.insert((*fname).clone(), init_f);
+        }
+
+        // Pre-generate backedge register names: one set for the latch, one for
+        // the present block (both are header predecessors). The counter's
+        // backedge registers live in these maps too (indexed by counter_var).
+        let mut be_latch_regs: HashMap<String, String> = HashMap::new();
+        let mut be_present_regs: HashMap<String, String> = HashMap::new();
+        for fname in &sorted_fields {
+            be_latch_regs.insert((*fname).clone(), self.fun.next_reg_with_prefix("bl"));
+            be_present_regs.insert((*fname).clone(), self.fun.next_reg_with_prefix("bp"));
+        }
+
+        let counter_ty = self.ctx.field_types.get(counter_idx)
+            .cloned().unwrap_or_else(|| "i64".to_string());
+        writeln!(out, "  br label %{}", header_label).ok();
+
+        // ── Header: per-field phis ───────────────────────────────────
+        writeln!(out, "{}:", header_label).ok();
+        self.fun.phi_field_regs.clear();
+        self.fun.backedge_field_regs.clear();
+        let counter_name = self.fun.next_reg_with_prefix("vdc");
+        let counter_key = counter_var.map(|s| s.to_string()).unwrap_or_else(|| "count".to_string());
+        let be_l_count = be_latch_regs.get(&counter_key)
+            .cloned().unwrap_or_else(|| self.fun.next_reg_with_prefix("bl"));
+        let be_p_count = be_present_regs.get(&counter_key)
+            .cloned().unwrap_or_else(|| self.fun.next_reg_with_prefix("bp"));
+        writeln!(out, "  {} = phi {} [ {}, %entry ], [ {}, %{} ], [ {}, %{} ]",
+            counter_name, counter_ty, init_name, be_l_count, latch_label,
+            be_p_count, present_label).ok();
+        for fname in &sorted_fields {
+            if let Some(cv) = counter_var {
+                if fname.as_str() == cv {
+                    self.fun.phi_field_regs.insert((*fname).clone(), counter_name.clone());
+                    continue;
+                }
+            }
+            let phi_f = self.fun.next_reg_with_prefix("vdf");
+            let be_l = be_latch_regs.get(fname.as_str())
+                .cloned().unwrap_or_else(|| self.fun.next_reg_with_prefix("bl"));
+            let be_p = be_present_regs.get(fname.as_str())
+                .cloned().unwrap_or_else(|| self.fun.next_reg_with_prefix("bp"));
+            let init_f = phi_field_init.get(fname.as_str())
+                .cloned().unwrap_or_else(|| "0".to_string());
+            let phi_ty = self.ctx.field_index_map.get(fname.as_str())
+                .and_then(|idx| self.ctx.field_types.get(*idx))
+                .cloned().unwrap_or_else(|| "i64".to_string());
+            writeln!(out, "  {} = phi {} [ {}, %entry ], [ {}, %{} ], [ {}, %{} ]",
+                phi_f, phi_ty, init_f, be_l, latch_label, be_p, present_label).ok();
+            self.fun.phi_field_regs.insert((*fname).clone(), phi_f);
+        }
+        // 2026-07-31: Save the header phi registers — the present block must
+        // read them (they dominate it), not the absent body's post-[pre] regs.
+        let header_phi_regs: HashMap<String, String> = self.fun.phi_field_regs.clone();
+        // 2026-07-31: Exit check AT THE HEADER — evaluated before the guard
+        // predicate, so the present block never fires at count == bound.
+        // count < bound → absent_body; count >= bound → end.
+        let cmp_counter_h = if counter_ty != "i64" {
+            let w = self.fun.next_reg_with_prefix("vdw");
+            writeln!(out, "  {} = sext {} {} to i64", w, counter_ty, counter_name).ok();
+            w
+        } else {
+            counter_name.clone()
+        };
+        let done_h = self.fun.next_reg_with_prefix("vdd");
+        if is_decreasing {
+            writeln!(out, "  {} = icmp sgt i64 {}, {}", done_h, cmp_counter_h, bound_reg).ok();
+        } else {
+            writeln!(out, "  {} = icmp slt i64 {}, {}", done_h, cmp_counter_h, bound_reg).ok();
+        }
+        writeln!(out, "  br i1 {}, label %{}, label %{}", done_h, absent_label, end_label).ok();
+
+        // ── Guard-absent body: [pre], predicate check ───────────────
+        writeln!(out, "{}:", absent_label).ok();
+        self.fun.pending_phi_backedge.clear();
+        for fname in &sorted_fields {
+            let init_val = self.fun.phi_field_regs.get(fname.as_str())
+                .cloned().unwrap_or_else(|| "0".to_string());
+            self.fun.pending_phi_backedge.insert((*fname).clone(), init_val);
+        }
+        self.emit_countable_body(out, &pre, write_set, &mut vec![]);
+        // Update phi_field_regs to post-[pre] values so the predicate reads them.
+        for fname in &sorted_fields {
+            if let Some(v) = self.fun.pending_phi_backedge.get(fname.as_str()) {
+                self.fun.phi_field_regs.insert((*fname).clone(), v.clone());
+            }
+        }
+        // Evaluate the guard predicate at the split point.
+        let pred_reg = self.emit_expr(out, guard_cond, "  ");
+        let pred_bool = self.fun.next_reg_with_prefix("vdb");
+        writeln!(out, "  {} = trunc i8 {} to i1", pred_bool, pred_reg.name).ok();
+        writeln!(out, "  br i1 {}, label %{}, label %{}",
+            pred_bool, present_label, latch_label).ok();
+
+        // ── Latch: [post] + backedge to header ──────────────────────
+        writeln!(out, "{}:", latch_label).ok();
+        self.emit_countable_body(out, &post, write_set, &mut vec![]);
+        // 2026-07-31: The counter increment lives in [pre] or [post] (the
+        // source's `count = count + 1` statement). After [post],
+        // pending_phi_backedge[count] holds the incremented value. The loop
+        // below emits an identity copy to be_latch_regs[count] — the register
+        // the header's counter phi references from the latch predecessor.
+        // Emit latch backedges for fields (including the counter).
+        for fname in &sorted_fields {
+            if let Some(be_f) = be_latch_regs.get(fname.as_str()) {
+                let val = self.fun.pending_phi_backedge.get(fname.as_str())
+                    .cloned().unwrap_or_else(|| {
+                        self.fun.phi_field_regs.get(fname.as_str())
+                            .cloned().unwrap_or_else(|| "0".to_string())
+                    });
+                let field_ty = self.ctx.field_index_map.get(fname.as_str())
+                    .and_then(|idx| self.ctx.field_types.get(*idx))
+                    .cloned().unwrap_or_else(|| "i64".to_string());
+                if field_ty == "float" || field_ty == "double" {
+                    writeln!(out, "  {} = fadd {} 0.0, {}", be_f, field_ty, val).ok();
+                } else {
+                    writeln!(out, "  {} = add {} 0, {}", be_f, field_ty, val).ok();
+                }
+            }
+        }
+        // 2026-07-31: Exit check is at the header; the latch just backs to it.
+        writeln!(out, "  br label %{}", header_label).ok();
+
+        // ── Guard-present block: [pre] [guard] [post] ───────────────
+        writeln!(out, "{}:", present_label).ok();
+        // 2026-07-31: Restore phi_field_regs to the header phis so the
+        // present block's [pre] reads the loop-carried values (which dominate
+        // it), not the absent body's post-[pre] registers (sibling block).
+        self.fun.phi_field_regs = header_phi_regs.clone();
+        self.fun.last_val_temps.clear();
+        self.fun.last_val_types.clear();
+        self.fun.pending_phi_backedge.clear();
+        for fname in &sorted_fields {
+            let init_val = self.fun.phi_field_regs.get(fname.as_str())
+                .cloned().unwrap_or_else(|| "0".to_string());
+            self.fun.pending_phi_backedge.insert((*fname).clone(), init_val);
+        }
+        self.emit_countable_body(out, &pre, write_set, &mut vec![]);
+        self.emit_countable_body(out, guard_body, write_set, &mut vec![]);
+        self.emit_countable_body(out, &post, write_set, &mut vec![]);
+        // Present-backedges to the header. The counter increment is in
+        // [pre]/[post]; the loop below emits be_present_regs[count] from
+        // pending_phi_backedge — the register the header phi references
+        // from the present predecessor.
+        for fname in &sorted_fields {
+            if let Some(be_f) = be_present_regs.get(fname.as_str()) {
+                let val = self.fun.pending_phi_backedge.get(fname.as_str())
+                    .cloned().unwrap_or_else(|| {
+                        self.fun.phi_field_regs.get(fname.as_str())
+                            .cloned().unwrap_or_else(|| "0".to_string())
+                    });
+                let field_ty = self.ctx.field_index_map.get(fname.as_str())
+                    .and_then(|idx| self.ctx.field_types.get(*idx))
+                    .cloned().unwrap_or_else(|| "i64".to_string());
+                if field_ty == "float" || field_ty == "double" {
+                    writeln!(out, "  {} = fadd {} 0.0, {}", be_f, field_ty, val).ok();
+                } else {
+                    writeln!(out, "  {} = add {} 0, {}", be_f, field_ty, val).ok();
+                }
+            }
+        }
+        writeln!(out, "  br label %{}", header_label).ok();
+
+        // ── End: post-loop prints ───────────────────────────────────
+        writeln!(out, "{}:", end_label).ok();
+        // 2026-07-31: Materialize ALL written fields' final values to %State.
+        // The end block is a successor of the header, so it references the
+        // header phi registers (which dominate it), NOT the absent body's
+        // post-[pre] registers (sibling block). The post-loop swan song reads
+        // these from %State — boundary-only fields (e.g. `escapes`) must be
+        // stored here or the print reads the initial value.
+        self.fun.phi_field_regs = header_phi_regs;
+        for fname in &sorted_fields {
+            if let Some(&idx) = self.ctx.field_index_map.get(fname.as_str()) {
+                let phi = self.fun.phi_field_regs.get(fname.as_str())
+                    .cloned().unwrap_or_else(|| "0".to_string());
+                self.emit_state_store_i64_by_idx(out, "  ", idx, &phi);
+            }
+        }
+        let hoist = self.fun.pending_post_hoist.clone();
+        if !hoist.is_empty() {
+            self.fun.phi_field_regs.clear();
+            self.fun.last_val_temps.clear();
+            for group in &hoist {
+                self.emit_countable_body(out, group, &HashSet::new(), &mut vec![]);
+            }
+        }
+        writeln!(out, "  ret i32 0").ok();
+        writeln!(out, "}}").ok();
+        writeln!(out).ok();
+        true
+    }
+
     // ── Batch Loop Emission ─────────────────────────────────────────
     //
     // 2026-07-29: Emit outer/inner loop structure for batch-mode loops.
