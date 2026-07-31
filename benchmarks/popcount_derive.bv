@@ -22,7 +22,7 @@ defn popcount(x0: Int) -> Int := {
     7 -> 3;
 } := popcount_ref;
 
-let N: Int = GetEnvInt#("BOUND");
+let N: Int = GetEnvInt!("BOUND");
 let i: Int = 0;
 let sum: Int = 0;
 

@@ -357,7 +357,7 @@ node simulate [
     last_energy = energy;
 
     when count % 5000000 == 0 {
-        let __periodic: Bool = PrintLn!(energy);
+        let __periodic = PrintLn!(energy);
     };
     when count == bound {
         term! -> PrintLn!(last_energy);

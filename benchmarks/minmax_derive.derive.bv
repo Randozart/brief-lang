@@ -31,7 +31,7 @@ defn max(x0: Int, x1: Int) -> Int  {
     -3, -7 -> -3;
 };
 
-let N: Int = GetEnvInt#("BOUND");
+let N: Int = GetEnvInt!("BOUND");
 let i: Int = 0;
 let total: Int = 0;
 

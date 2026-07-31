@@ -60,6 +60,16 @@ pub struct TypecheckContext<'a> {
     /// (e.g. `Stack` → ["T", "N"]). Used to substitute the receiver's concrete
     /// type args into generic member signatures at call sites.
     type_params: HashMap<String, Vec<String>>,
+    /// 2026-07-31: User function/txn parameter types, keyed by name. Used to
+    /// validate call arguments (Phase 2 — re-establish type validation).
+    fn_param_types: HashMap<String, Vec<Type>>,
+    /// 2026-07-31: The declared output type of the defn/txn currently being
+    /// checked. Used to validate `term`/`term!` values.
+    current_output_type: Option<Type>,
+    /// 2026-07-31: Declared protocol hashwords, keyed by type name
+    /// (`type MyNum : #Int` → "MyNum" → "#Int"). Used to grant numeric-protocol
+    /// members literal construction.
+    type_protocols: HashMap<String, String>,
     regular_bindings: HashMap<String, Vec<crate::ast::top::OperatorBinding>>,
 }
 
@@ -77,6 +87,9 @@ impl<'a> TypecheckContext<'a> {
             type_slots: HashMap::new(),
             type_members: HashMap::new(),
             type_params: HashMap::new(),
+            fn_param_types: HashMap::new(),
+            current_output_type: None,
+            type_protocols: HashMap::new(),
         }
     }
 
@@ -489,10 +502,27 @@ pub fn infer_expression(
         Expr::FormattingAnnotation(_) => Ok((Type::void(), Provenance::Unknown)),
         Expr::Match(expr, arms) => infer_match(expr, arms, ctx).map(|ty| (ty, Provenance::Unknown)),
         // 2026-07-19: Plugin-intercept calls are resolved by Front or Mid
-        // stage plugins. The typechecker passes them through with Void return;
-        // the plugin is responsible for final dispatch.
-        Expr::PluginIntercept { .. } => Ok((Type::void(), Provenance::Unknown)),
-        Expr::Exists(_) => { unreachable!("fn? only in stage eval") },
+        // stage plugins. `briefc check` does not run plugins, so known
+        // env-variable intercepts are typed here (they desugar to stdlib
+        // `get_env`/`get_env_int` calls in the build path).
+        Expr::PluginIntercept { name, args, .. } => {
+            for a in args {
+                infer_type_only(a, ctx)?;
+            }
+            match name.as_str() {
+                "GetEnvInt" => Ok((Type::int(), Provenance::Unknown)),
+                "GetEnv" | "GetEnvOrDefault" => Ok((Type::string(), Provenance::Unknown)),
+                "PrintLn" | "println" => Ok((Type::void(), Provenance::Unknown)),
+                _ => Err(TypeError::InvalidOperation {
+                    operation: format!("plugin-intercept '{}!'", name),
+                    type_name: "unresolved plugin-intercept reached the typechecker".into(),
+                }),
+            }
+        }
+        Expr::Exists(name) => Err(TypeError::InvalidOperation {
+            operation: format!("compile-time existence check '{}'", name),
+            type_name: "Existence checks resolve during macro evaluation, not type inference".into(),
+        }),
             Expr::Slice { array, start, end, stride } => {
                 let elem_ty = infer_type_only(array, ctx)?;
                 if let Some(e) = start.as_deref() { infer_type_only(e, ctx)?; }
@@ -526,10 +556,43 @@ fn try_coerce_via_parse(
     };
     let target_name = match target_ty {
         Type::Custom(n) => n.as_str(),
+        // 2026-07-31 (Phase 2): Applied types use their base name for op
+        // lookup (`RingBuffer<Int>` → `RingBuffer`).
+        Type::Applied(n, _) => n.as_str(),
         _ => return false,
     };
-    ctx.find_parse_op(target_name, form, discriminator)
-        .is_some()
+    if ctx.find_parse_op(target_name, form, discriminator).is_some() {
+        return true;
+    }
+    // 2026-07-31 (Phase 2): `op Init: init(#L, #R)` authorizes `let t: T = v`
+    // construction (the collection stdlib pattern).
+    let has_init = ctx
+        .regular_bindings
+        .get(target_name)
+        .map_or(false, |b| b.iter().any(|op| op.name == "Init"));
+    if has_init {
+        return true;
+    }
+    // 2026-07-31 (Phase 2): Numeric-protocol members construct from numeric
+    // literals even without an explicit Parse op (`let v: MyNum = 0` where
+    // `type MyNum : #Int`). A type is numeric if it carries Cast.#Int,
+    // Cast.#UInt, or Cast.#Float.
+    if matches!(form, "Decimal") {
+        let numeric = ["Cast.#Int", "Cast.#UInt", "Cast.#Float"];
+        let is_numeric = target_ty
+            .universe_key()
+            .and_then(|k| ctx.universe.get(k))
+            .map_or(false, |rt| numeric.iter().any(|p| rt.properties.contains_key(*p)));
+        // Also honor a declared numeric protocol hashword (`type MyNum : #Int`).
+        let proto_numeric = ctx
+            .type_protocols
+            .get(target_name)
+            .map_or(false, |p| matches!(p.as_str(), "#Int" | "#UInt" | "#Float"));
+        if is_numeric || proto_numeric {
+            return true;
+        }
+    }
+    false
 }
 
 /// 2026-07-18: Convenience wrapper — infer type without provenance.
@@ -555,9 +618,45 @@ fn infer_call(name: &str, args: &[Expr], ctx: &mut TypecheckContext) -> Result<T
         return infer_intrinsic_call(&sig, args, ctx);
     }
 
-    // User function call — look up return type
-    for arg in args {
-        infer_type_only(arg, ctx)?;
+    // User function call — validate args against param types, then return type.
+    // 2026-07-31 (Phase 2): call arguments must match the callee's parameter
+    // types — no implicit coercion (literal Parse-ops excepted).
+    let param_types = ctx.fn_param_types.get(name).cloned().unwrap_or_default();
+    for (i, arg) in args.iter().enumerate() {
+        let arg_ty = infer_type_only(arg, ctx)?;
+        if let Some(param_ty) = param_types.get(i) {
+            if arg_ty != *param_ty {
+                let coercible = try_coerce_via_parse(arg, &arg_ty, param_ty, ctx);
+                if !coercible {
+                    return Err(TypeError::TypeMismatch {
+                        expected: format!("{}", param_ty),
+                        found: format!("{}", arg_ty),
+                        context: format!("argument {} of '{}'", i, name),
+                    });
+                }
+            }
+        }
+    }
+    // 2026-07-31 (Phase 2): Struct/obj constructor call — Person(args) → Person.
+    // Validates the args against the type's slots (positional order).
+    if ctx.type_slots.contains_key(name) {
+        let slots = ctx.type_slots.get(name).cloned().unwrap_or_default();
+        for (i, arg) in args.iter().enumerate() {
+            let arg_ty = infer_type_only(arg, ctx)?;
+            if let Some(slot) = slots.get(i) {
+                if arg_ty != slot.ty {
+                    let coercible = try_coerce_via_parse(arg, &arg_ty, &slot.ty, ctx);
+                    if !coercible {
+                        return Err(TypeError::TypeMismatch {
+                            expected: format!("{}", slot.ty),
+                            found: format!("{}", arg_ty),
+                            context: format!("field {} of constructor '{}'", i, name),
+                        });
+                    }
+                }
+            }
+        }
+        return Ok(Type::Custom(name.to_string()));
     }
     // 2026-07-25: Look up user-defined function return types.
     if let Some(ty) = ctx.fn_return_types.get(name) {
@@ -780,11 +879,26 @@ pub fn infer_statement(stmt: &Statement, ctx: &mut TypecheckContext) -> Result<(
             }
             // 2026-07-25: Single-name let: bind name or handle discard (_).
             let inferred = match expr {
-                Some(e) => {
-                    infer_type_only(e, ctx)?
-                }
-                None => Type::int(),
+                Some(e) => infer_type_only(e, ctx)?,
+                None => ty.clone().unwrap_or(Type::int()),
             };
+            // 2026-07-31 (Phase 2): A declared type must match the inferred
+            // initializer type — no implicit coercion. Literal Parse-ops
+            // (`let f: Float = 5`) remain the one sanctioned path.
+            if let Some(declared) = ty {
+                if inferred != *declared {
+                    let coercible = expr.as_ref().map_or(false, |e| {
+                        try_coerce_via_parse(e, &inferred, declared, ctx)
+                    });
+                    if !coercible {
+                        return Err(TypeError::TypeMismatch {
+                            expected: format!("{}", declared),
+                            found: format!("{}", inferred),
+                            context: format!("let '{}'", name),
+                        });
+                    }
+                }
+            }
             let resolved = ty.clone().unwrap_or(inferred);
             ctx.bindings.insert(name.clone(), resolved);
             Ok(())
@@ -807,7 +921,18 @@ pub fn infer_statement(stmt: &Statement, ctx: &mut TypecheckContext) -> Result<(
         }
         Statement::Term(val) | Statement::TermBang(val) => {
             if let Some(val) = val {
-                infer_type_only(val, ctx)?;
+                let vty = infer_type_only(val, ctx)?;
+                // 2026-07-31 (Phase 2): a declared return type must match the
+                // term value — no implicit coercion.
+                if let Some(out) = &ctx.current_output_type {
+                    if vty != *out {
+                        return Err(TypeError::TypeMismatch {
+                            expected: format!("{}", out),
+                            found: format!("{}", vty),
+                            context: "term value vs declared return type".into(),
+                        });
+                    }
+                }
             }
             Ok(())
         }
@@ -958,6 +1083,24 @@ pub fn check_program(items: &[TopLevel], universe: &TypeUniverse) -> Result<(), 
         }
     }).collect();
 
+    // 2026-07-31: Pre-collect user function/txn parameter types for call-arg
+    // validation (Phase 2 — re-establish type validation).
+    let fn_param_types: HashMap<String, Vec<Type>> = items
+        .iter()
+        .filter_map(|item| {
+            let (name, params) = match item {
+                TopLevel::Definition(d) => (d.name.clone(), d.parameters.iter().map(|(_, t)| t.clone()).collect::<Vec<_>>()),
+                TopLevel::Transaction(t) => (t.name.clone(), t.parameters.iter().map(|(_, t)| t.clone()).collect::<Vec<_>>()),
+                TopLevel::Export(e) => match &*e.inner {
+                    TopLevel::Definition(d) => (d.name.clone(), d.parameters.iter().map(|(_, t)| t.clone()).collect::<Vec<_>>()),
+                    _ => return None,
+                },
+                _ => return None,
+            };
+            Some((name, params))
+        })
+        .collect();
+
     // 2026-07-27: Pre-collect Parse bindings and type parents from ALL TypeDef items.
     let mut all_parse_bindings: HashMap<String, Vec<OperatorBinding>> = HashMap::new();
     let mut all_type_parents: HashMap<String, String> = HashMap::new();
@@ -984,6 +1127,7 @@ pub fn check_program(items: &[TopLevel], universe: &TypeUniverse) -> Result<(), 
     let mut all_type_slots: HashMap<String, Vec<crate::ast::top::TypeDefSlot>> = HashMap::new();
     let mut all_type_members: HashMap<String, Vec<TopLevel>> = HashMap::new();
     let mut all_type_params: HashMap<String, Vec<String>> = HashMap::new();
+    let mut all_type_protocols: HashMap<String, String> = HashMap::new();
     for item in items {
         if let TopLevel::TypeDef(td) = item {
             if !td.body.operators.is_empty() {
@@ -1004,14 +1148,17 @@ pub fn check_program(items: &[TopLevel], universe: &TypeUniverse) -> Result<(), 
                     td.type_params.iter().map(|p| p.name.clone()).collect(),
                 );
             }
+            if let Some(proto) = &td.protocol {
+                all_type_protocols.insert(td.name.clone(), proto.clone());
+            }
         }
     }
 
     for item in items {
         if let Err(e) = check_top_level(
-            item, universe, &state_bindings, &fn_return_types,
+            item, universe, &state_bindings, &fn_return_types, &fn_param_types,
             &all_parse_bindings, &all_type_parents, &all_regular_ops, &all_regular_bindings,
-            &all_type_slots, &all_type_members, &all_type_params,
+            &all_type_slots, &all_type_members, &all_type_params, &all_type_protocols,
         ) {
             errors.push(e);
         }
@@ -1029,6 +1176,7 @@ fn check_top_level(
     universe: &TypeUniverse,
     state_bindings: &HashMap<String, Type>,
     fn_return_types: &HashMap<String, Type>,
+    fn_param_types: &HashMap<String, Vec<Type>>,
     all_parse_bindings: &HashMap<String, Vec<OperatorBinding>>,
     all_type_parents: &HashMap<String, String>,
     all_regular_ops: &HashMap<String, Vec<crate::ast::top::OperatorDef>>,
@@ -1036,6 +1184,7 @@ fn check_top_level(
     all_type_slots: &HashMap<String, Vec<crate::ast::top::TypeDefSlot>>,
     all_type_members: &HashMap<String, Vec<TopLevel>>,
     all_type_params: &HashMap<String, Vec<String>>,
+    all_type_protocols: &HashMap<String, String>,
 ) -> Result<(), TypeError> {
     let mut ctx = TypecheckContext::new(universe);
     // 2026-07-27: Inject pre-collected parse bindings and type parents.
@@ -1050,6 +1199,8 @@ fn check_top_level(
     ctx.type_slots = all_type_slots.clone();
     ctx.type_members = all_type_members.clone();
     ctx.type_params = all_type_params.clone();
+    ctx.fn_param_types = fn_param_types.clone();
+    ctx.type_protocols = all_type_protocols.clone();
     // 2026-07-14: Inject state variable bindings so transactions/defns can reference them.
     for (name, ty) in state_bindings {
         ctx.bindings.insert(name.clone(), ty.clone());
@@ -1071,19 +1222,28 @@ fn check_top_level(
             for (name, ty) in &defn.parameters {
                 ctx.bindings.insert(name.clone(), ty.clone());
             }
+            ctx.current_output_type = defn.output_type.as_ref().map(output_type_to_type);
             for stmt in &defn.body {
                 infer_statement(stmt, &mut ctx)?;
             }
             Ok(())
         }
         // 2026-07-25: Unwrap exports so exported defns are type-checked.
-        TopLevel::Export(e) => check_top_level(&e.inner, universe, state_bindings, fn_return_types, all_parse_bindings, all_type_parents, all_regular_ops, all_regular_bindings, all_type_slots, all_type_members, all_type_params),
+        TopLevel::Export(e) => check_top_level(&e.inner, universe, state_bindings, fn_return_types, fn_param_types, all_parse_bindings, all_type_parents, all_regular_ops, all_regular_bindings, all_type_slots, all_type_members, all_type_params, all_type_protocols),
         TopLevel::Transaction(txn) => {
             for (name, ty) in &txn.parameters {
                 ctx.bindings.insert(name.clone(), ty.clone());
             }
+            ctx.current_output_type = txn.output_type.as_ref().map(output_type_to_type);
             for stmt in &txn.body {
                 infer_statement(stmt, &mut ctx)?;
+            }
+            Ok(())
+        }
+        // 2026-07-31: Top-level `let` initializers are typechecked too (Phase 2).
+        TopLevel::Statement(stmt) => {
+            if let Statement::Let { .. } = stmt.as_ref() {
+                return infer_statement(stmt, &mut ctx);
             }
             Ok(())
         }
@@ -1481,7 +1641,7 @@ node probe [true][true] {
     #[test]
     fn reflect_compile_time_resolves() {
         let src = r#"
-let items: Int[8] = 0;
+let items: Int[8];
 node probe [items.^^Size > 0][items == @items] {
     let sz: Int = items.^^Size;
     term;
@@ -1545,6 +1705,60 @@ node probe [true][true] {
     let n: Int = st.size();
     term;
 };
+"#;
+        let e = check(src);
+        assert!(e.is_ok(), "expected OK, got: {:?}", e);
+    }
+    #[test]
+    fn let_declared_type_mismatch_errors() {
+        let src = r#"
+node probe [true][true] {
+    let n: Int = "hello";
+    term;
+};
+"#;
+        let e = check(src);
+        assert!(e.is_err(), "expected let type-mismatch error, got: {:?}", e);
+    }
+
+    #[test]
+    fn top_level_let_initializer_checked() {
+        let src = r#"
+let s: Int = "hello";
+node probe [true][true] { term; };
+"#;
+        let e = check(src);
+        assert!(e.is_err(), "expected top-level let type-mismatch error, got: {:?}", e);
+    }
+
+    #[test]
+    fn term_must_match_declared_return() {
+        let src = r#"
+defn f() -> Int { term "hello"; };
+"#;
+        let e = check(src);
+        assert!(e.is_err(), "expected term/return type-mismatch error, got: {:?}", e);
+    }
+
+    #[test]
+    fn call_arg_must_match_param() {
+        let src = r#"
+defn takes_int(x: Int) -> Int { term x; };
+node probe [true][true] {
+    let r: Int = takes_int("hello");
+    term;
+};
+"#;
+        let e = check(src);
+        assert!(e.is_err(), "expected call-arg type-mismatch error, got: {:?}", e);
+    }
+
+    #[test]
+    fn numeric_literal_coerces_to_float() {
+        // `let f: Float = 5` remains legal via numeric literal construction.
+        let src = r#"
+let f: Float = 5;
+node probe [true][true] { term; };
 "#;
         let e = check(src);
         assert!(e.is_ok(), "expected OK, got: {:?}", e);

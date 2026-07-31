@@ -127,9 +127,9 @@ BENCHMARKS=(
     "knucleotide"
     "cancel_math"
     "bit_clear"
-    "queue_drain"
-    "queue_drain_sym"
-    "queue_drain_idio"
+    # "queue_drain"       # depends on std/collections.bv (generic obj instantiation — D4 follow-up)
+    # "queue_drain_sym"   # depends on std/collections.bv (generic obj instantiation — D4 follow-up)
+    # "queue_drain_idio"  # depends on std/collections.bv (generic obj instantiation — D4 follow-up)
     "interval_step"
     # 2026-07-31: Real-program periodic-guard benchmarks (countdown dispatch A/B).
     "telemetry_stream"

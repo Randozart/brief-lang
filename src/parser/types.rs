@@ -71,19 +71,29 @@ impl<'a> Parser<'a> {
             return Ok(Type::Custom(full));
         }
         // 2026-07-25: Array syntax: Int[1024] → Type::Vector.
-        // 2026-07-31: Only treat `[` as an array-size suffix when the NEXT
-        // token is an integer literal. A non-integer `[` after a return type
-        // is a contract (`-> Int [b != 0]`) and must be left for parse_contract.
-        if self.check(&Token::LBracket)
-            && matches!(self.peek_next(), Some(Token::Integer(_)))
-        {
-            self.pos += 1; // consume LBracket
-            let size = match self.peek() {
-                Some(&Token::Integer(n)) => { self.pos += 1; n as usize }
-                _ => { return self.error_at_current("expected array size (integer)"); }
-            };
-            self.expect(Token::RBracket)?;
-            return Ok(Type::Vector(Box::new(base.1), vec![Dimension::Anonymous(size)]));
+        // 2026-07-31: `[` is an array suffix ONLY when the next token is an
+        // integer literal (`Int[8]`) or an identifier directly followed by
+        // `]` (`T[N]` generic array). A contract bracket (`-> Int [b != 0]`)
+        // is left for parse_contract.
+        if self.check(&Token::LBracket) {
+            if matches!(self.peek_next(), Some(Token::Integer(_))) {
+                self.pos += 1; // consume LBracket
+                let size = match self.peek() {
+                    Some(&Token::Integer(n)) => { self.pos += 1; n as usize }
+                    _ => { return self.error_at_current("expected array size (integer)"); }
+                };
+                self.expect(Token::RBracket)?;
+                return Ok(Type::Vector(Box::new(base.1), vec![Dimension::Anonymous(size)]));
+            }
+            if let Some(Token::Identifier(_)) = self.peek_next() {
+                let after_ident = self.tokens.get(self.pos + 2).map(|(t, _)| t);
+                if matches!(after_ident, Some(Token::RBracket)) {
+                    self.pos += 1; // consume LBracket
+                    let name = self.expect_identifier()?;
+                    self.expect(Token::RBracket)?;
+                    return Ok(Type::Vector(Box::new(base.1), vec![Dimension::Named(name, 0)]));
+                }
+            }
         }
         Ok(base.1)
     }
@@ -167,18 +177,31 @@ impl<'a> Parser<'a> {
         }
 
         // 2026-07-25: Array syntax for custom types: MyStruct[1024].
-        // 2026-07-31: Same non-greedy lookahead as keyword types — a
-        // non-integer `[` is a contract bracket, not an array size.
-        if self.check(&Token::LBracket)
-            && matches!(self.peek_next(), Some(Token::Integer(_)))
-        {
-            self.pos += 1; // consume LBracket
-            let size = match self.peek() {
-                Some(&Token::Integer(n)) => { self.pos += 1; n as usize }
-                _ => { return self.error_at_current("expected array size (integer)"); }
-            };
-            self.expect(Token::RBracket)?;
-            return Ok(Type::Vector(Box::new(Type::Custom(name.to_string())), vec![Dimension::Anonymous(size)]));
+        // 2026-07-31: Same non-greedy lookahead as keyword types — an integer
+        // size or a `[Name]` generic dimension; otherwise the `[` is a
+        // contract bracket.
+        if self.check(&Token::LBracket) {
+            if matches!(self.peek_next(), Some(Token::Integer(_))) {
+                self.pos += 1; // consume LBracket
+                let size = match self.peek() {
+                    Some(&Token::Integer(n)) => { self.pos += 1; n as usize }
+                    _ => { return self.error_at_current("expected array size (integer)"); }
+                };
+                self.expect(Token::RBracket)?;
+                return Ok(Type::Vector(Box::new(Type::Custom(name.to_string())), vec![Dimension::Anonymous(size)]));
+            }
+            if let Some(Token::Identifier(_)) = self.peek_next() {
+                let after_ident = self.tokens.get(self.pos + 2).map(|(t, _)| t);
+                if matches!(after_ident, Some(Token::RBracket)) {
+                    self.pos += 1;
+                    let dim = self.expect_identifier()?;
+                    self.expect(Token::RBracket)?;
+                    return Ok(Type::Vector(
+                        Box::new(Type::Custom(name.to_string())),
+                        vec![Dimension::Named(dim, 0)],
+                    ));
+                }
+            }
         }
 
         Ok(Type::Custom(name.to_string()))
