@@ -68,29 +68,26 @@ impl LlvmBackend {
                         .collect();
                 let a_reads = crate::backend::collect_read_identifiers(&a.body);
                 let b_reads = crate::backend::collect_read_identifiers(&b.body);
+                // 2026-07-30: Write-write AND read-write conflicts are checked
+                // UNCONDITIONALLY. Brief's reactor design (per AGENTS.md) states:
+                //   "If two nodes firing together would lead to a race condition
+                //    due to one reading or one writing or both writing, deny
+                //    compilation. Writing is a XOR condition."
+                // Previously the read-write checks were gated behind the
+                // precondition-identifier overlap — two nodes with disjoint
+                // preconditions but overlapping read/write sets were wrongly
+                // classified as Parallel, producing a race.
                 if !a_writes.is_disjoint(&b_writes) {
                     cf = false;
                     break;
                 }
-                let mut a_pre_ids = HashSet::new();
-                crate::backend::collect_expr_identifiers(
-                    &a.contract.pre_condition,
-                    &mut a_pre_ids,
-                );
-                let mut b_pre_ids = HashSet::new();
-                crate::backend::collect_expr_identifiers(
-                    &b.contract.pre_condition,
-                    &mut b_pre_ids,
-                );
-                if !a_pre_ids.is_disjoint(&b_pre_ids) {
-                    if !a_writes.is_disjoint(&b_reads) {
-                        cf = false;
-                        break;
-                    }
-                    if !b_writes.is_disjoint(&a_reads) {
-                        cf = false;
-                        break;
-                    }
+                if !a_writes.is_disjoint(&b_reads) {
+                    cf = false;
+                    break;
+                }
+                if !b_writes.is_disjoint(&a_reads) {
+                    cf = false;
+                    break;
                 }
             }
             if !cf {

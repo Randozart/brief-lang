@@ -480,7 +480,22 @@ impl LlvmBackend {
             }
             let aw = crate::backend::collect_assigned_identifiers(&ta.body);
             let bw = crate::backend::collect_assigned_identifiers(&tb.body);
+            // 2026-07-30: Write-write AND read-write conflicts block fusion.
+            // Fusion would recreate a composite node — if A writes a field B
+            // reads (or vice versa), fusing them puts the read and write in
+            // the same loop body, reintroducing the interleaving the flat-node
+            // decomposition removes. Per Brief's reactor design, writing is a
+            // XOR condition; a shared read-write dependency means the nodes
+            // must stay sequential.
+            let ar = crate::backend::collect_read_identifiers(&ta.body);
+            let br = crate::backend::collect_read_identifiers(&tb.body);
             if aw.iter().any(|w| bw.contains(w)) {
+                return false;
+            }
+            if aw.iter().any(|w| br.contains(w)) {
+                return false;
+            }
+            if bw.iter().any(|w| ar.contains(w)) {
                 return false;
             }
             if self.trg_in_pre(&tb.contract.pre_condition) {
