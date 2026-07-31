@@ -3,6 +3,25 @@
 **Date:** 2026-07-07 (updated — is_decreasing in A005c, flexible base extraction for vector phis)
 **Status:** Current
 
+> **2026-07-31 — Composite-node decomposition supersedes batch-loop dispatch.**
+> When a reactive transaction's body contains side-effecting `when` guards
+> (periodic prints, termination checks), the compiler runs a **recursive
+> version-DAG decomposition** (§5.3 of `backend-architecture.md`, §11 of
+> `docs/plans/2026-07-30-flat-node-decomposition.md`): split the body at each
+> guard into `[pre]`/`[guard]`/`[post]`, reconstruct a guard-absent version
+> (no side effects) and a guard-present version (with the side effect) per
+> guard, and emit them as a DAG of self-terminating loops. Neither version is
+> structurally "hot" or "cold" — which dominates is a predicate-frequency
+> property. Provably always-true predicates are inlined (or kept apart for
+> LLVM); provably always-false predicates are dropped. This replaces the
+> batch-loop's heuristic boundary derivation
+> (`extract_batch_size_from_guards`, manual count=0 peel, `pre_count`
+> arithmetic). The guard-absent loop is pure compute → LLVM if-converts and
+> vectorizes it; the guard-present block runs once per interval. Guard position
+> (pre/post-increment) is captured by the split point — never by counter-name
+> matching. The hot loop carries only the minimal loop-carried state set
+> (see `docs/architecture/minimal-state-and-purity.md`).
+
 ## Purpose
 
 Select the optimal codegen strategy for each compiled program based on

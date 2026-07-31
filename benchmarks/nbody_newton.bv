@@ -349,9 +349,14 @@ node simulate [
     let energy: Float32 = epp + ekc;
     last_energy = energy;
 
-    when count % 5000000 == 0 {
-        let __periodic: Bool = PrintLn!(energy);
-    };
+    // 2026-07-31: Removed the periodic print (when count % 5000000 == 0) to
+    // make this benchmark symmetric with nbody_newton_c.c, which prints only
+    // the final energy once. Brief's benchmark philosophy mandates symmetry —
+    // the periodic print was an asymmetry that the batch-loop's count=0 miss
+    // happened to mask at BOUND=5. With the count=0 peel (which restores the
+    // periodic print for the knucleotide/mandelbrot class), the asymmetry
+    // became visible. Keeping the benchmark symmetric: Brief prints the final
+    // energy once, matching C.
     when count == bound {
         term! -> PrintLn!(last_energy);
     };

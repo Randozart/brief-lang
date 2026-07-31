@@ -288,21 +288,41 @@ Key data structures:
 | `last_val_temps` | `HashMap<String, String>` | Last computed value for each let-binding |
 | `last_val_types` | `HashMap<String, Type>` | Type for each last computed value |
 
-### 5.3 Batch-Loop Optimization
+### 5.3 Composite-Node Decomposition (Version-DAG)
 
-When the loop body contains hoistable `when` guards (periodic prints with `PrintLn!`, termination checks), the dispatch splits the loop:
+A reactive transaction whose body contains `when` guards is a **latent multi-node reactor**: each side-effecting guard is a second node trapped inside the first node's body. Brief's reactor design (concurrent firing, the XOR write rule) treats these as separate nodes that should be decomposed.
 
+Since `when` guards have **no else chain**, the body is a sequence of segments separated by guards. The compiler runs a **recursive version-DAG decomposition** (see `docs/plans/2026-07-30-flat-node-decomposition.md` §11):
+
+1. **Three-segment split** — partition the body at each top-level `when` guard into `[pre]`, `[guard]`, `[post]`.
+2. **Predicate analysis at the split point** — evaluate the guard condition with the state at its exact position in the body. This captures whether the guard observes the counter pre- or post-increment *naturally*; no position scanning, no counter-name matching.
+3. **Two-version reconstruction** (neutral framing — neither version is structurally "hot" or "cold"):
+   - **Guard-absent version** = `[pre] + [post]` (guard body removed) — no side effects.
+   - **Guard-present version** = `[pre] + [guard] + [post]` (guard body included) — contains the side effect.
+   Which version dominates at runtime is a **predicate-frequency property**, not structural. For `when count % M == 0` the guard-absent version dominates; for a predicate true most of the time, the guard-present version is the frequent path.
+4. **Static predicate simplification** — before versioning, classify each guard predicate: **always-true** → inline the guard body (or keep it apart if more efficient for LLVM); **always-false** → drop (unless observable); **runtime-dependent** → two versions.
+5. **Recursion** into nested `when` guards produces a **DAG of self-terminating while loops**.
+
+**Codegen shape** (keeps `graph.nodes.len() == 1` — the folded single-loop path, avoiding the reactor's memcpy-per-tick):
+
+```llvm
+entry:  init → br absent_entry
+absent_entry:
+  %absent = icmp (count < N) && (count % M != 0)
+  br %absent → absent_body, → present_entry
+absent_body:  [pre]+[post]  → br absent_entry        # self-terminating guard-absent loop (pure compute)
+present_entry:
+  %present = icmp (count < N) && (count % M == 0)
+  br %present → present_body, → end
+present_body:  [pre]+[guard]+[post] → br absent_entry  # self-terminating guard-present block (side effect)
+end: ...
 ```
-Outer loop (.oh_* → .ox_* → .done_*):
-  Tracks batches, checks termination
-  Inner loop (.inner_* → .il_* → .inner_exit_*):
-    Pure compute — no branches, no function calls
-    Runs for batch_size iterations
-```
 
-**Where guards must be emitted:** In `.inner_exit_124` — this block is dominated by `.inner_124` (where phi registers are valid). Never emit guards in `.ox_124` (the outer body) because that block is NOT dominated by the inner loop's body blocks, and let-binding registers from the inner loop are invalid there.
+The guard-absent loop is pure compute (no function calls) → LLVM if-converts and vectorizes it. The guard-present block runs once per interval. Count=0 handling falls out of the predicate — the guard-present version fires at the initial state when the predicate holds (pre-increment guards), or at the first interval boundary (post-increment guards). The write-conflict analysis (Phase 1, unconditional read-write checks) makes the guard-present→absent dependency sequential — a guard-present version reading state written by the guard-absent version fires only after the guard-absent version commits.
 
-**Identifier remapping:** When guards are hoisted, let-binding references (e.g., `energy`) are remapped to their corresponding state fields (e.g., `last_energy`) via `let_to_field` map built from `Statement::Assign(let_name, Expr::Identifier(field_name))` patterns.
+**Minimal-state / loop purity:** A variable is hot-loop state (a phi register) iff it is loop-carried (written in iteration N, read in iteration N+k) or read by a convergence contract / observable side effect at a different point than its write. Loop-invariant fields are hoisted; boundary-only fields are materialized to %State once at the boundary. The hot loop body must have zero %State load/store so LLVM can prove no cross-iteration dependencies and vectorize. See `docs/architecture/minimal-state-and-purity.md`.
+
+**Match normalization:** Statement-level `match` is normalized to a `when` sequence first, so this pass handles only `when` guards. The fallback arm becomes `when !(c1 ∨ ... ∨ cn)` — the negation of all other arm predicates, **never** `when true` (which would be indistinguishable from an unconditional block to the predicate analysis).
 
 ### 5.4 Loop Metadata
 
@@ -379,7 +399,16 @@ grep -rn 'Type::Custom.*if.*==.*"' src/backend/llvm/ | grep -v 'tests\.rs\|Int\b
 
 The backend has several interacting subsystems. A change in one area can silently break another. This section documents each fragile subsystem, what it depends on, and what breaks if those dependencies are violated.
 
-### 9.1 Batch-Loop Optimization (emit_countable_batched_main)
+### 9.1 Composite-Node Decomposition (emit_countable_batched_main)
+
+> **2026-07-31:** The batch-loop is being superseded by the recursive version-DAG
+> decomposition (§5.3). The batch-loop's mechanism (folded compute loop +
+> boundary checks in one `@main`) is the correct codegen; the fragility below
+> comes from its *heuristic* boundary derivation. The decomposition derives the
+> boundary from the guard predicate at the split point, eliminating
+> `extract_batch_size_from_guards`, the manual count=0 peel, `pre_count`
+> arithmetic, and position detection. Until the decomposition lands, treat the
+> batch-loop as fragile and respect the invariants below.
 
 **What it does:** Splits a convergence loop into an outer structural loop and an inner pure-compute loop when hoistable `when` guards are detected.
 
@@ -387,6 +416,15 @@ The backend has several interacting subsystems. A change in one area can silentl
 - `loop_peeling.rs::split_hoistable()` — detects guards in the body
 - `loop_peeling.rs::extract_batch_size_from_guards()` — extracts batch_size from `when count % N == 0` conditions
 - `counter.rs::emit_countable_batched_main()` — emits the two-loop structure
+
+**Pre/post-increment guard position (2026-07-31):** Whether the guard observes
+the counter pre- or post-increment is determined by where it sits in the body
+relative to the counter update — NOT by the counter's name. A naive peel that
+fires every guard at count=0 breaks post-increment benchmarks (float_math,
+print_loop, queue_drain, cancel_math, kalman_filter_runtime, float_math_nonzero)
+whose C references check `count % N` after `count++`. The version-DAG
+decomposition resolves this by evaluating the guard predicate at the split
+point; a heuristic batch-loop must NOT assume all guards are pre-increment.
 
 **What breaks if changed carelessly:**
 

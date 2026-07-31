@@ -49,6 +49,23 @@
 > favor of `render struct`/`render obj`. See
 > `docs/architecture/features/rendered-brief-wasm.md` and
 > `docs/plans/2026-07-26-rendered-brief-webstack-v2.md`.
+>
+> **2026-07-31:** Composite-node decomposition and minimal-state loop purity.
+> A reactive transaction whose body contains side-effecting `when` guards is a
+> latent multi-node reactor. Since `when` has no else chain, the compiler
+> splits the body at each guard into `[pre]`/`[guard]`/`[post]`, evaluates the
+> guard predicate at the split point (capturing pre/post-increment naturally),
+> and reconstructs a **guard-absent** version (no side effects) and a
+> **guard-present** version (with the side effect) per guard — a DAG of
+> self-terminating while loops. Neither version is structurally "hot" or
+> "cold"; which dominates is a predicate-frequency property. Provably
+> always-true predicates inline the guard body; provably always-false
+> predicates drop it. The hot loop carries only the **minimal loop-carried
+> state set** (fields written in iteration N and read in iteration N+k, or
+> read by a contract/observable at a different point) with zero %State memory
+> traffic in the body, so LLVM can prove no cross-iteration dependencies and
+> vectorize. See `docs/architecture/minimal-state-and-purity.md` and
+> `docs/plans/2026-07-30-flat-node-decomposition.md`.
 
 ## Pipeline
 

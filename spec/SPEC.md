@@ -351,6 +351,50 @@ structure.
 the identical `Statement::Guarded { condition, statements, metadata }` node.
 The SMT verifier, interpreter, and backends treat them identically.
 
+**Guards have no else chain.** A `when` guard is an independent conditional
+block. The body of a reactive transaction is therefore a *sequence of segments*
+— contiguous runs of statements separated by `when` guards. This is the basis
+of the compiler's **recursive version-DAG decomposition** (see
+`docs/plans/2026-07-30-flat-node-decomposition.md` §11):
+
+1. **Three-segment split.** The compiler splits the transaction body at each
+   top-level `when` guard into `[pre]`, `[guard]`, `[post]` segments.
+2. **Predicate analysis at the split point.** The guard condition is evaluated
+   with the state at the exact point where the guard sits in the body. This
+   captures whether the guard observes the counter pre- or post-increment
+   *naturally* — no position scanning, no counter-name matching.
+3. **Two-version reconstruction** (neutral framing — neither version is
+   structurally "hot" or "cold"). Each guard produces a *guard-absent version*
+   (`[pre] + [post]`, side effects removed) and a *guard-present version*
+   (`[pre] + [guard] + [post]`, side effects present). Which version dominates
+   at runtime is a predicate-frequency property, not structural.
+4. **Static predicate simplification.** Classify each guard predicate before
+   versioning: **provably always-true** → inline the guard body (or keep it
+   apart if that is more efficient for LLVM); **provably always-false** → drop
+   it (unless observable — keep the call for liveness); **runtime-dependent** →
+   two versions.
+5. **Recursion.** Nested `when` guards inside a guard body decompose into
+   sub-versions, producing a **DAG of self-terminating while loops** that the
+   backend emits as clean canonical loops for LLVM.
+6. **Match normalization.** Statement-level `match` is normalized to a `when`
+   sequence so the decomposition pass handles only `when`. The fallback arm
+   becomes `when !(c1 ∨ ... ∨ cn)` — the negation of ALL other arm predicates.
+   It is **never** `when true`, which would be indistinguishable from an
+   unconditional block to the predicate analysis.
+
+The write-conflict analysis (the XOR rule in §3.1 below) makes the
+guard-present→absent dependency sequential: a guard-present version that reads
+state written by the guard-absent version fires only after the guard-absent
+version commits, preserving Brief's concurrent-firing semantics.
+
+**Minimal-state / loop purity.** A variable is hot-loop state (a phi register)
+iff it is loop-carried (written in iteration N, read in iteration N+k) or read
+by a convergence contract / observable side effect at a different point than
+its write. Loop-invariant fields are hoisted; boundary-only fields are
+materialized to %State once at the loop boundary. The hot loop body must have
+zero %State load/store so LLVM can prove no cross-iteration dependencies and
+vectorize. See `docs/architecture/minimal-state-and-purity.md`.
+
 ### 2.4 Expressions
 
 ```bnf
