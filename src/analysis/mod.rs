@@ -26,6 +26,7 @@ pub mod slp_isomorphism;
 pub mod soa_reorder;
 pub mod licm;
 pub mod loop_peeling;
+pub mod match_normalize;
 pub mod layout_optimizer;
 pub mod protocol_graph;
 
