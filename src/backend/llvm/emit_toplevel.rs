@@ -304,10 +304,10 @@ impl LlvmBackend {
             }
         }
         if self.feature_sso_strings {
-            if let Type::Custom(name) = ty {
-                if name == "String" {
-                    return "{ i64, i64 }".to_string();
-                }
+            // 2026-07-31: Phase 3 (§8.4-D7) — String detection via protocol
+            // membership (#String) instead of the type name.
+            if self.is_protocol_member(ty, "#String") {
+                return "{ i64, i64 }".to_string();
             }
             if self.ctx.type_universe.as_ref().map_or(false, |u| u.is_string_like(ty)) {
                 return "{ i64, i64 }".to_string();
@@ -318,10 +318,10 @@ impl LlvmBackend {
         // between {i64, i64} and ptr internally; without SSO, the parameter
         // is treated as a raw pointer.
         if !self.feature_sso_strings {
-            if let Type::Custom(name) = ty {
-                if name == "String" || name == "Data" {
-                    return "ptr".to_string();
-                }
+            // 2026-07-31: Phase 3 (§8.4-D7) — #String/#Data membership instead
+            // of the type-name match.
+            if self.is_protocol_member(ty, "#String") || self.is_protocol_member(ty, "#Data") {
+                return "ptr".to_string();
             }
         }
         // 2026-07-30: Struct-like types derive LLVM type from field shapes.
@@ -348,6 +348,69 @@ impl LlvmBackend {
             }
         }
         Self::fallback_llvm_type(ty).to_string()
+    }
+
+    /// Is this a boxed primordial type — the set marshaled to i64 for %State
+    /// storage? Bool/Char/String/Data are always boxed; the 32-bit Float is
+    /// boxed via bitcast(float→i32→i64).
+    ///
+    /// 2026-07-31: Phase 3 (§8.4-D1) — protocol membership (is_protocol_member)
+    /// replaces the box_op hardcoded type-name fallback. Float64 (#Float with
+    /// bytes 8) is deliberately EXCLUDED: the legacy box_op only boxed the
+    /// 32-bit Float, and Float64 params pass through as native double.
+    pub(super) fn is_boxed_type(&self, ty: &Type) -> bool {
+        if self.is_protocol_member(ty, "#Bool")
+            || self.is_protocol_member(ty, "#Char")
+            || self.is_protocol_member(ty, "#String")
+            || self.is_protocol_member(ty, "#Data")
+        {
+            return true;
+        }
+        self.is_protocol_member(ty, "#Float")
+            && self.ctx.type_universe.as_ref()
+                .and_then(|u| ty.universe_key().and_then(|k| u.get(k)))
+                .map_or(false, |rt| rt.bytes <= 4)
+    }
+
+    /// Is this a boxed NON-float type (Bool/Char/String/Data)? These become
+    /// `Type::int()` in let_binding_types because their %State slot is i64.
+    /// Float is NOT included — float stays `Type::float()` and is handled by
+    /// ensure_float_reg via the reg_float_cache.
+    ///
+    /// 2026-07-31: Phase 3 (§8.4-D1) — protocol membership instead of the
+    /// hardcoded name set.
+    pub(super) fn is_boxed_int_type(&self, ty: &Type) -> bool {
+        self.is_protocol_member(ty, "#Bool")
+            || self.is_protocol_member(ty, "#Char")
+            || self.is_protocol_member(ty, "#String")
+            || self.is_protocol_member(ty, "#Data")
+    }
+
+    /// Box a value of a boxed type to its i64 representation.
+    ///
+    /// 2026-07-31: Phase 3 (§8.4-D1) — the per-protocol conversion replaces
+    /// the box_op name match: Bool → zext i8, Char → zext i32, String/Data →
+    /// ptrtoint, Float → bitcast(float→i32) + zext. `float_tmp` is a fresh
+    /// register name for the Float bitcast.
+    pub(super) fn emit_box_value_to_i64(
+        &mut self,
+        out: &mut String,
+        indent: &str,
+        ty: &Type,
+        raw: &str,
+        conv: &str,
+        float_tmp: &str,
+    ) {
+        if self.is_protocol_member(ty, "#Bool") {
+            writeln!(out, "{}{} = zext i8 {} to i64", indent, conv, raw).ok();
+        } else if self.is_protocol_member(ty, "#Char") {
+            writeln!(out, "{}{} = zext i32 {} to i64", indent, conv, raw).ok();
+        } else if self.is_protocol_member(ty, "#String") || self.is_protocol_member(ty, "#Data") {
+            writeln!(out, "{}{} = ptrtoint ptr {} to i64", indent, conv, raw).ok();
+        } else if self.is_protocol_member(ty, "#Float") {
+            writeln!(out, "{}{} = bitcast float {} to i32", indent, float_tmp, raw).ok();
+            writeln!(out, "{}{} = zext i32 {} to i64", indent, conv, float_tmp).ok();
+        }
     }
 
 
@@ -569,26 +632,22 @@ impl LlvmBackend {
     }
 
     /// Finish loading a trigger value after the raw load: convert to native LLVM type.
+    ///
+    /// 2026-07-31: Phase 3 (§8.4-D7) — protocol-membership dispatch replaces
+    /// the hardcoded type-name match.
     pub(super) fn emit_trg_load_finish(&self, out: &mut String, indent: &str, dst: &str, raw: String, trg_ty: &Type) {
-        match trg_ty {
-            Type::Custom(__t) if __t == "Bool" => {
-                writeln!(out, "{}{} = trunc i8 {} to i1", indent, dst, raw).ok();
-            }
-            Type::Custom(__t) if __t == "Int" || __t == "UInt" => {
-                writeln!(out, "{}{} = add i64 0, {}", indent, dst, raw).ok();
-            }
-            Type::Custom(__t) if __t == "Float" => {
-                writeln!(out, "{}{} = add float 0.0, {}", indent, dst, raw).ok();
-            }
-            Type::Custom(__t) if __t == "Char" => {
-                writeln!(out, "{}{} = zext i32 {} to i64", indent, dst, raw).ok();
-            }
-            Type::Custom(__t) if __t == "String" || __t == "Data" => {
-                writeln!(out, "{}{} = bitcast ptr {} to ptr", indent, dst, raw).ok();
-            }
-            _ => {
-                writeln!(out, "{}{} = add i64 0, {}", indent, dst, raw).ok();
-            }
+        if self.is_protocol_member(trg_ty, "#Bool") {
+            writeln!(out, "{}{} = trunc i8 {} to i1", indent, dst, raw).ok();
+        } else if self.is_protocol_member(trg_ty, "#Int") || self.is_protocol_member(trg_ty, "#UInt") {
+            writeln!(out, "{}{} = add i64 0, {}", indent, dst, raw).ok();
+        } else if self.is_protocol_member(trg_ty, "#Float") {
+            writeln!(out, "{}{} = add float 0.0, {}", indent, dst, raw).ok();
+        } else if self.is_protocol_member(trg_ty, "#Char") {
+            writeln!(out, "{}{} = zext i32 {} to i64", indent, dst, raw).ok();
+        } else if self.is_protocol_member(trg_ty, "#String") || self.is_protocol_member(trg_ty, "#Data") {
+            writeln!(out, "{}{} = bitcast ptr {} to ptr", indent, dst, raw).ok();
+        } else {
+            writeln!(out, "{}{} = add i64 0, {}", indent, dst, raw).ok();
         }
     }
 
@@ -1236,20 +1295,15 @@ impl LlvmBackend {
             {
                 // 2026-07-18: SSO String params are {i64, i64} — no boxing needed.
                 reg = raw;
-            } else if matches!(t, Type::Custom(__t) if __t == "Bool" || __t == "Char" || __t == "String" || __t == "Data" || __t == "Float") {
+            } else if self.is_boxed_type(t) {
                 // 2026-07-12: box_op removed from ResolvedType — use hardcoded fallback.
+                // 2026-07-31: Phase 3 (§8.4-D1) — boxed-type detection via
+                // protocol membership (is_boxed_type), conversion via
+                // emit_box_value_to_i64, replacing the name-match arm.
                 let conv = format!("%ac{}", i);
-                match t {
-                    Type::Custom(__t) if __t == "Bool" => { writeln!(out, "  {} = zext i8 {} to i64", conv, raw).ok(); }
-                    Type::Custom(__t) if __t == "Char" => { writeln!(out, "  {} = zext i32 {} to i64", conv, raw).ok(); }
-                    Type::Custom(__t) if __t == "String" || __t == "Data" => { writeln!(out, "  {} = ptrtoint ptr {} to i64", conv, raw).ok(); }
-                    Type::Custom(__t) if __t == "Float" => {
-                        let m = format!("%ai{}", i);
-                        writeln!(out, "  {} = bitcast float {} to i32", m, raw).ok();
-                        writeln!(out, "  {} = zext i32 {} to i64", conv, m).ok();
-                        self.fun.reg_float_cache.insert(conv.clone(), raw.to_string());
-                    }
-                    _ => {}
+                self.emit_box_value_to_i64(out, "  ", t, &raw, &conv, &format!("%ai{}", i));
+                if self.is_protocol_member(t, "#Float") {
+                    self.fun.reg_float_cache.insert(conv.clone(), raw.to_string());
                 }
                 reg = conv;
             } else {
@@ -1272,7 +1326,7 @@ impl LlvmBackend {
             // Without this, <- and discard on RingBuffer would fall through
             // to the default List arena path, causing realloc on non-heap memory.
             self.fun.let_original_types.insert(n.clone(), t.clone());
-            if matches!(t, Type::Custom(__t) if __t == "Bool" || __t == "Char" || __t == "String" || __t == "Data") {
+            if self.is_boxed_int_type(t) {
                 self.fun.let_binding_types.insert(n.clone(), Type::int());
             } else {
                 self.fun.let_binding_types.insert(n.clone(), t.clone());
@@ -1733,10 +1787,20 @@ impl LlvmBackend {
                 for s in reordered.iter() {
                     collect_let_names(s, &mut txn_let_names);
                     if let Statement::Let { name, ty: Some(t), .. } = s {
-                        let llvm_ty = match t {
-                            Type::Custom(s) if s == "Float" || s == "Float32" => "float",
-                            Type::Custom(s) if s == "Float64" => "double",
-                            _ => "i64",
+                        // 2026-07-31: Phase 3 (§8.4) — float let-param LLVM type
+                        // derived from #Float protocol membership + byte width
+                        // (4 → float, 8 → double) instead of the type-name match.
+                        // The casting graph's Fixed("float") for the #Float
+                        // category doesn't distinguish Float64, so width is read
+                        // from the universe bytes. Other widths (e.g. BFloat)
+                        // stay i64, matching the prior name-based behavior.
+                        let llvm_ty = if self.is_protocol_member(t, "#Float") {
+                            let bytes = self.ctx.type_universe.as_ref()
+                                .and_then(|u| t.universe_key().and_then(|k| u.get(k)))
+                                .map(|rt| rt.bytes).unwrap_or(4);
+                            if bytes == 8 { "double" } else if bytes == 4 { "float" } else { "i64" }
+                        } else {
+                            "i64"
                         };
                         txn_let_types.insert(name.clone(), llvm_ty.to_string());
                     }
@@ -1769,11 +1833,11 @@ impl LlvmBackend {
                             let llvm_ty = txn_let_types.get(ident).cloned().unwrap_or_else(|| "i64".to_string());
                             params.push((ident.clone(), llvm_ty.clone(), ParamSrc::LetBinding(llvm_ty)));
                         } else if let Some((const_ty, val_expr)) = self.ctx.constants.get(ident.as_str()) {
-                            let llvm_ty = if matches!(const_ty, Type::Custom(s) if s == "Float") {
-                                "float".to_string()
-                            } else {
-                                self.llvm_type(const_ty)
-                            };
+                            // 2026-07-31: Phase 3 (§8.4) — the old `== "Float" →
+                            // "float"` special case is redundant: llvm_type(Float)
+                            // already resolves to "float" via the casting graph,
+                            // so the const param LLVM type is derived uniformly.
+                            let llvm_ty = self.llvm_type(const_ty);
                             params.push((ident.clone(), llvm_ty, ParamSrc::Constant(val_expr.clone(), const_ty.clone())));
                         } else {
                             can_outline_all = false;
@@ -2227,20 +2291,12 @@ impl LlvmBackend {
                 conv = ac;
             } else if param_llvm_ty == "i64" {
                 conv = raw;
-            } else if matches!(t, Type::Custom(__t) if __t == "Bool" || __t == "Char" || __t == "String" || __t == "Data" || __t == "Float") {
+            } else if self.is_boxed_type(t) {
                 // 2026-07-12: box_op removed from ResolvedType — use hardcoded fallback.
+                // 2026-07-31: Phase 3 (§8.4-D1) — protocol-membership boxed-type
+                // detection + emit_box_value_to_i64 replacing the name match.
                 let ac = format!("%ac{}", i);
-                match t {
-                    Type::Custom(__t) if __t == "Bool" => { writeln!(out, "  {} = zext i8 {} to i64", ac, raw).ok(); }
-                    Type::Custom(__t) if __t == "Char" => { writeln!(out, "  {} = zext i32 {} to i64", ac, raw).ok(); }
-                    Type::Custom(__t) if __t == "String" || __t == "Data" => { writeln!(out, "  {} = ptrtoint ptr {} to i64", ac, raw).ok(); }
-                    Type::Custom(__t) if __t == "Float" => {
-                        let m = format!("%ai{}", i);
-                        writeln!(out, "  {} = bitcast float {} to i32", m, raw).ok();
-                        writeln!(out, "  {} = zext i32 {} to i64", ac, m).ok();
-                    }
-                    _ => {}
-                }
+                self.emit_box_value_to_i64(out, "  ", t, &raw, &ac, &format!("%ai{}", i));
                 conv = ac;
             } else {
                 conv = raw;
@@ -2269,7 +2325,9 @@ impl LlvmBackend {
             self.fun.let_bindings.insert(n.clone(), slot.clone());
             // loaded is i64 (boxed value from param slot). Store Type::int()
             // for boxed types so downstream doesn't treat them as native.
-            if matches!(t, Type::Custom(__t) if __t == "Bool" || __t == "Char" || __t == "String" || __t == "Data" || __t == "Float") {
+            // 2026-07-31: Phase 3 (§8.4-D1) — is_boxed_int_type (protocol
+            // membership) replaces the hardcoded name set.
+            if self.is_boxed_int_type(t) {
                 self.fun.let_binding_types.insert(n.clone(), Type::int());
             } else {
                 self.fun.let_binding_types.insert(n.clone(), t.clone());
@@ -2380,7 +2438,9 @@ impl LlvmBackend {
                 // (e.g., [ptr as Int >= BASE && ptr as Int < END]). The Cast
                 // wrapper must be unwrapped to find the state field name.
                 let field_name = match lhs.as_ref() {
-                    Expr::Cast(inner, Type::Custom(__t)) if __t == "Int" => match inner.as_ref() {
+                    // 2026-07-31: Phase 3 (§8.4) — cast-to-Int via the canonical
+                    // Type::int() primitive instead of the type-name string.
+                    Expr::Cast(inner, t) if *t == Type::int() => match inner.as_ref() {
                         Expr::Identifier(n) => Some(n.clone()),
                         _ => None,
                     },

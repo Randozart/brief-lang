@@ -118,27 +118,6 @@ fn llvm_type_byte_size(t: &str) -> i64 {
     }
 }
 
-/// Map a type name string to its primitive Type variant.
-/// Used by `resolve_bild_type` to resolve aliases and melds.
-fn primitive_from_name(name: &str) -> Option<Type> {
-    match name {
-        "Int" | "UInt" | "Signed" | "Unsigned" => Some(Type::int()),
-        "Int8" | "I8" => Some(Type::bits(1)),
-        "Int16" | "I16" => Some(Type::bits(2)),
-        "Int32" | "I32" => Some(Type::bits(4)),
-        "UInt8" | "U8" => Some(Type::bits(1)),
-        "UInt16" | "U16" => Some(Type::bits(2)),
-        "UInt32" | "U32" => Some(Type::bits(4)),
-        "Float" => Some(Type::float()),
-        "Float64" | "F64" | "Double" => Some(Type::float64()),
-        "Bool" => Some(Type::bool_()),
-        "Char" => Some(Type::char_()),
-        "String" => Some(Type::string()),
-        "Data" | "Bytes" => Some(Type::data()),
-        _ => None,
-    }
-}
-
 // ── Swan-song hoist: moved to frontend analysis ─────────────────────
 //
 // 2026-07-31: hoist_terminating_guard / remap_stmt_identifiers /
@@ -382,9 +361,18 @@ pub fn protocol_llvm_type(ty: &Type, universe: Option<&crate::type_universe::Typ
         return "ptr".to_string();
     }
     // 2026-07-30: String/UTF8View use { i64, i64 } fat-pointer representation.
-    // Check by name BEFORE the bytes-based fallback to avoid i128 (16 bytes
+    // Check BEFORE the bytes-based fallback to avoid i128 (16 bytes
     // → i128) which changes FFI ABI and triggers clang 18.1.3 LICM crashes.
-    if matches!(ty, Type::Custom(name) if name == "String" || name == "UTF8View") {
+    // 2026-07-31: Phase 3 (§8.4-D7) — String detection via the Cast.#String
+    // protocol property; legacy string-like types (UTF8View, and any type with
+    // the {Int, Int} shape) via the structural is_string_like check. This
+    // replaces the hardcoded "String"/"UTF8View" type names and also fixes the
+    // i128 mis-derivation for any 2-int-field struct.
+    let is_string_protocol = universe
+        .and_then(|u| ty.universe_key().and_then(|k| u.get(k)))
+        .map_or(false, |rt| rt.properties.contains_key("Cast.#String"));
+    let is_string_shaped = universe.map_or(false, |u| u.is_string_like(ty));
+    if is_string_protocol || is_string_shaped {
         return "{ i64, i64 }".to_string();
     }
     if let Some(ref u) = universe {
@@ -414,6 +402,25 @@ pub(super) fn trg_llvm_storage_ty(ty: &Type, universe: Option<&crate::type_unive
 /// universe is optional: when available, uses the dynamically-generated
 /// TBAA tree (sorted alphabetically, Int first).  When None, falls back
 /// to the original hardcoded indices for the 5 built-in types.
+/// Sort TBAA group names deterministically: alphabetical, with the #Int
+/// protocol member moved to the front (the fallback for unmatched types).
+///
+/// 2026-07-31: Phase 3 (§8.4-D6) — the front-member is chosen by #Int protocol
+/// membership (the `Cast.#Int` universe property) instead of the literal type
+/// name "Int". All three TBAA sites use this helper so the metadata
+/// declaration and the node-index lookups stay in agreement.
+fn sort_tbaa_groups(universe: Option<&crate::type_universe::TypeUniverse>, groups: &mut Vec<String>) {
+    groups.sort();
+    let is_int_protocol = |name: &str| {
+        universe
+            .and_then(|u| u.types.get(name))
+            .map_or(false, |rt| rt.properties.contains_key("Cast.#Int"))
+    };
+    if let Some(pos) = groups.iter().position(|g| is_int_protocol(g)) {
+        groups.swap(0, pos);
+    }
+}
+
 pub(super) fn tbaa_node(ty_str: &str, universe: Option<&crate::type_universe::TypeUniverse>) -> i32 {
     // Map string to TBAA group name
     let group = match ty_str {
@@ -427,10 +434,7 @@ pub(super) fn tbaa_node(ty_str: &str, universe: Option<&crate::type_universe::Ty
     if let Some(u) = universe {
         // 2026-07-13: Inline sorted groups from type names.
         let mut groups: Vec<String> = u.types.keys().cloned().collect();
-        groups.sort();
-        if let Some(pos) = groups.iter().position(|g| g == "Int") {
-            groups.swap(0, pos);
-        }
+        sort_tbaa_groups(Some(u), &mut groups);
         groups.iter().position(|g| g == group).map(|i| i as i32 + 1).unwrap_or(1)
     } else {
         // Fallback: hardcoded indices
@@ -454,10 +458,7 @@ pub(super) fn tbaa_node_for_type(ty: &Type, universe: &crate::type_universe::Typ
         _ => return 1,
     };
     let mut groups: Vec<String> = universe.types.keys().cloned().collect();
-    groups.sort();
-    if let Some(pos) = groups.iter().position(|g| g == "Int") {
-        groups.swap(0, pos);
-    }
+    sort_tbaa_groups(Some(universe), &mut groups);
     groups.iter().position(|g| g == group).map(|i| i as i32 + 1).unwrap_or(1)
 }
     /// at the IR level. Without TBAA, all i64 accesses within %State are
@@ -2250,14 +2251,17 @@ impl LlvmBackend {
                                Use a volatile C variable for triggers, or built-in sources like @stdin#.", sym);
                 }
                 // Warn on unsupported trigger types
-                match &trg.ty {
-                    Type::Custom(__t) if __t == "Bool" || __t == "Int" || __t == "UInt" || __t == "Char" || __t == "String" || __t == "Data" => {}
-                    _ => {
-                        eprintln!("warning:{}:{}: trigger '{}' has type {:?} which the LLVM runtime does not fully support; using i8 storage",
-                            trg.span.as_ref().map(|s| s.line).unwrap_or(0),
-                            trg.span.as_ref().map(|s| s.column).unwrap_or(0),
-                            name, trg.ty);
-                    }
+                // 2026-07-31: Phase 3 (§8.4) — supported-set via protocol
+                // membership (is_boxed_int_type + #Int/#UInt) instead of the
+                // hardcoded type-name list.
+                let supported = self.is_boxed_int_type(&trg.ty)
+                    || self.is_protocol_member(&trg.ty, "#Int")
+                    || self.is_protocol_member(&trg.ty, "#UInt");
+                if !supported {
+                    eprintln!("warning:{}:{}: trigger '{}' has type {:?} which the LLVM runtime does not fully support; using i8 storage",
+                        trg.span.as_ref().map(|s| s.line).unwrap_or(0),
+                        trg.span.as_ref().map(|s| s.column).unwrap_or(0),
+                        name, trg.ty);
                 }
             }
         }
@@ -3083,10 +3087,10 @@ impl LlvmBackend {
         writeln!(out, "!0 = !{{!\"Brief\"}}").ok();
         if let Some(ref universe) = self.ctx.type_universe {
             let mut groups: Vec<String> = universe.types.keys().cloned().collect();
-            groups.sort();
-            if let Some(pos) = groups.iter().position(|g| g == "Int") {
-                groups.swap(0, pos);
-            }
+            // 2026-07-31: Phase 3 (§8.4-D6) — shared sort (alphabetical, #Int
+            // protocol member first) keeps the declaration in agreement with
+            // the tbaa_node / tbaa_node_for_type index lookups.
+            sort_tbaa_groups(Some(universe), &mut groups);
             for (i, group) in groups.iter().enumerate() {
                 writeln!(out, "!{} = !{{!\"{}\", !0}}", i + 1, group).ok();
             }
@@ -3563,35 +3567,6 @@ impl LlvmBackend {
     /// (which disable SLP vectorization). See hazard.rs for the analysis.
     /// Check if an expression produces a `Ptr<T>` value.
     /// Used by `ListIndex` to decide between direct pointer GEP vs 2-slot header load.
-    /// Resolve a Brief type to its underlying LLVM type for BILD purposes.
-    /// Walks through type aliases and melds to find the concrete primitive.
-    pub(crate) fn resolve_bild_type(&self, ty: &Type) -> Type {
-        match ty {
-            Type::Custom(name) => {
-                // Check type universe for type definition (alias like `type UserId = Int`)
-                if let Some(tu) = &self.ctx.type_universe {
-                    if let Some(resolved) = tu.types.get(name) {
-                        if let Some(primitive) = primitive_from_name(&resolved.base) {
-                            return primitive;
-                        }
-                    }
-                    // Check melds: if this type has a meld with a primitive partner,
-                    // resolve to the primitive (e.g. `meld Meters(f: Float)` → Float)
-                    for ((a, b), _) in &tu.melds {
-                        let partner = if a == name { Some(b) } else if b == name { Some(a) } else { None };
-                        if let Some(pname) = partner {
-                            if let Some(primitive) = primitive_from_name(pname) {
-                                return primitive;
-                            }
-                        }
-                    }
-                }
-                ty.clone()
-            }
-            _ => ty.clone(),
-        }
-    }
-
     fn is_ptr_expr(&self, expr: &Expr) -> bool {
         match expr {
             Expr::Field(_, target) => target == "Ptr",

@@ -196,7 +196,10 @@ impl LlvmBackend {
     // - Cast(Identifier(n), Int): Ptr<T> field address range
     fn unwrap_cast_to_ident(e: &Expr) -> Option<&str> {
         match e {
-            Expr::Cast(inner, Type::Custom(__t)) if __t == "Int" => {
+            // 2026-07-31: Phase 3 (§8.4) — cast-to-Int matched against the
+            // canonical Type::int() (a bootstrap primitive) instead of the
+            // type-name string.
+            Expr::Cast(inner, t) if *t == crate::ast::Type::int() => {
                 Self::unwrap_cast_to_ident(inner)
             }
             Expr::Identifier(n) => Some(n.as_str()),

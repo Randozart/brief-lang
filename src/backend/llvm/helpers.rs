@@ -1838,15 +1838,19 @@ impl LlvmBackend {
         v: &str,
     ) -> Option<TypedRegister> {
         let rhs = self.emit_expr(out, arg_expr, indent);
-        let type_name = match &src_val.ty {
-            Type::Custom(n) => n.as_str(),
-            _ => return None,
-        };
-        match type_name {
-            "Int" => self.projection_int_fast_path(out, src_val, &rhs, name, v, indent),
-            "Float" => self.projection_float_fast_path(out, src_val, &rhs, name, v, indent),
-            "Bool" => self.projection_bool_fast_path(out, src_val, &rhs, name, v, indent),
-            _ => None,
+        // 2026-07-31: Phase 3 (§8.4) — fast-path selection via canonical
+        // bootstrap types (Type::int()/float()/bool_()) instead of type-name
+        // matching. Only the exact 64-bit Int / 32-bit Float / i8 Bool types
+        // take the fast path: the fast-path opcodes are width-specific
+        // (add i64 / icmp) and must not fire for Int8/Int32/Float64.
+        if src_val.ty == Type::int() {
+            self.projection_int_fast_path(out, src_val, &rhs, name, v, indent)
+        } else if src_val.ty == Type::float() {
+            self.projection_float_fast_path(out, src_val, &rhs, name, v, indent)
+        } else if src_val.ty == Type::bool_() {
+            self.projection_bool_fast_path(out, src_val, &rhs, name, v, indent)
+        } else {
+            None
         }
     }
 

@@ -1526,8 +1526,11 @@ impl LlvmBackend {
                     // 2026-07-18: SSO String → C i8* shim. When SSO is ON, the String
                     // handle is {i64, i64} but C expects i8*. Extract handle[0] and
                     // inttoptr to i8*.
+                    // 2026-07-31: Phase 3 (§8.4-D8) — String/Data detection via
+                    // protocol membership instead of the type name.
                     if self.feature_sso_strings
-                        && (ty_name == "String" || ty_name == "Data")
+                        && (self.is_protocol_member(param_ty, "#String")
+                            || self.is_protocol_member(param_ty, "#Data"))
                         && self
                             .ctx
                             .type_universe

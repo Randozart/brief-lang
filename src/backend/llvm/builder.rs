@@ -541,34 +541,31 @@ impl TypeConverter {
 
     /// Fallback boxing when universe is not available.
     /// 2026-06-29: Will be removed once all tests go through the full pipeline.
+    /// 2026-07-31: Phase 3 (§8.4-D2) — arms matched against the canonical
+    /// bootstrap Type constructors (bool_/string()/float()/...) instead of
+    /// type-name strings.
     fn box_to_i64_fallback(builder: &mut LLVMBuilder, val: &str, ty: &BriefType) -> String {
-        match ty {
-            BriefType::Custom(__t) if __t == "Bool" => {
-                builder.emit_zext(LlvmType::I1, LlvmType::I64, val)
-            }
-            BriefType::Custom(__t) if __t == "String" || __t == "Data" => {
-                builder.emit_ptrtoint(val, LlvmType::I64)
-            }
-            BriefType::Custom(__t) if __t == "Float" => {
-                let bi = builder.emit_bitcast(LlvmType::Float, LlvmType::I32, val);
-                builder.emit_zext(LlvmType::I32, LlvmType::I64, &bi)
-            }
-            BriefType::Custom(__t) if __t == "Float64" => {
-                builder.emit_bitcast(LlvmType::Double, LlvmType::I64, val)
-            }
-            BriefType::Custom(__t) if __t == "Int8" || __t == "Int16" => {
-                builder.emit_sext(LlvmType::I8, LlvmType::I64, val)
-            }
-            BriefType::Custom(__t) if __t == "UInt8" || __t == "UInt16" => {
-                builder.emit_zext(LlvmType::I8, LlvmType::I64, val)
-            }
-            BriefType::Custom(__t) if __t == "Int32" => {
-                builder.emit_sext(LlvmType::I32, LlvmType::I64, val)
-            }
-            BriefType::Custom(__t) if __t == "UInt32" => {
-                builder.emit_zext(LlvmType::I32, LlvmType::I64, val)
-            }
-            _ => val.to_string(),
+        if *ty == BriefType::bool_() {
+            builder.emit_zext(LlvmType::I1, LlvmType::I64, val)
+        } else if *ty == BriefType::string() || *ty == BriefType::data() {
+            builder.emit_ptrtoint(val, LlvmType::I64)
+        } else if *ty == BriefType::float() {
+            let bi = builder.emit_bitcast(LlvmType::Float, LlvmType::I32, val);
+            builder.emit_zext(LlvmType::I32, LlvmType::I64, &bi)
+        } else if *ty == BriefType::float64() {
+            builder.emit_bitcast(LlvmType::Double, LlvmType::I64, val)
+        } else if *ty == BriefType::bits(1) {
+            // Int8/UInt8 both lower to i8; zext preserves the bit pattern for
+            // the boxed i64 representation (the old name-based arms disagreed
+            // on sext vs zext — zext is correct for unsigned and bit-preserving
+            // for signed, so it is used uniformly here).
+            builder.emit_zext(LlvmType::I8, LlvmType::I64, val)
+        } else if *ty == BriefType::bits(2) {
+            builder.emit_zext(LlvmType::I16, LlvmType::I64, val)
+        } else if *ty == BriefType::bits(4) {
+            builder.emit_zext(LlvmType::I32, LlvmType::I64, val)
+        } else {
+            val.to_string()
         }
     }
 
@@ -585,35 +582,30 @@ impl TypeConverter {
     }
 
     /// Fallback unboxing when universe is not available.
+    /// 2026-07-31: Phase 3 (§8.4-D2) — arms matched against canonical bootstrap
+    /// Type constructors instead of type-name strings.
     fn unbox_from_i64_fallback(
         builder: &mut LLVMBuilder,
         val: &str,
         target_ty: &BriefType,
     ) -> String {
-        match target_ty {
-            BriefType::Custom(__t) if __t == "Bool" => {
-                builder.emit_trunc(LlvmType::I64, LlvmType::I1, val)
-            }
-            BriefType::Custom(__t) if __t == "String" || __t == "Data" => {
-                builder.emit_inttoptr(val, LlvmType::I64)
-            }
-            BriefType::Custom(__t) if __t == "Float" => {
-                let tr = builder.emit_trunc(LlvmType::I64, LlvmType::I32, val);
-                builder.emit_bitcast(LlvmType::I32, LlvmType::Float, &tr)
-            }
-            BriefType::Custom(__t) if __t == "Float64" => {
-                builder.emit_bitcast(LlvmType::I64, LlvmType::Double, val)
-            }
-            BriefType::Custom(__t) if __t == "Int8" || __t == "UInt8" => {
-                builder.emit_trunc(LlvmType::I64, LlvmType::I8, val)
-            }
-            BriefType::Custom(__t) if __t == "Int16" || __t == "UInt16" => {
-                builder.emit_trunc(LlvmType::I64, LlvmType::I16, val)
-            }
-            BriefType::Custom(__t) if __t == "Int32" || __t == "UInt32" => {
-                builder.emit_trunc(LlvmType::I64, LlvmType::I32, val)
-            }
-            _ => val.to_string(),
+        if *target_ty == BriefType::bool_() {
+            builder.emit_trunc(LlvmType::I64, LlvmType::I1, val)
+        } else if *target_ty == BriefType::string() || *target_ty == BriefType::data() {
+            builder.emit_inttoptr(val, LlvmType::I64)
+        } else if *target_ty == BriefType::float() {
+            let tr = builder.emit_trunc(LlvmType::I64, LlvmType::I32, val);
+            builder.emit_bitcast(LlvmType::I32, LlvmType::Float, &tr)
+        } else if *target_ty == BriefType::float64() {
+            builder.emit_bitcast(LlvmType::I64, LlvmType::Double, val)
+        } else if *target_ty == BriefType::bits(1) {
+            builder.emit_trunc(LlvmType::I64, LlvmType::I8, val)
+        } else if *target_ty == BriefType::bits(2) {
+            builder.emit_trunc(LlvmType::I64, LlvmType::I16, val)
+        } else if *target_ty == BriefType::bits(4) {
+            builder.emit_trunc(LlvmType::I64, LlvmType::I32, val)
+        } else {
+            val.to_string()
         }
     }
 }
