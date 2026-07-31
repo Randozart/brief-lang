@@ -35,6 +35,7 @@ pub mod loop_shape;
 pub mod density;
 pub mod modulo_partition;
 pub mod inline_cost;
+pub mod batch_shape;
 
 /// Determines how a state field behaves in the %State struct layout.
 /// Used by the Adaptive Layout Engine (Phase 1) to eliminate unused fields

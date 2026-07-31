@@ -48,6 +48,10 @@ pub struct AnalysisResults {
     pub modulo_partition: Option<crate::analysis::modulo_partition::ModuloPartition>,
     pub has_unguarded_ffi: std::collections::HashSet<String>,
     pub inline_decisions: HashMap<String, crate::analysis::inline_cost::InlineDecision>,
+    // 2026-07-31: Batch-loop decomposition (plan 2026-07-31-regain-kalman-float-
+    // math-parity §5, Fix 2) — the io boundary interval derived from the guard
+    // precondition, consumed by the backend's emit_countable_batched_main.
+    pub batch_shape: Option<crate::analysis::batch_shape::BatchShape>,
 }
 
 /// Intent: Run shared program analysis for backend code generation.
@@ -84,6 +88,10 @@ pub fn analyze_program(items: &[TopLevel], optimize: bool, min_width: usize) -> 
     let modulo_partition = crate::analysis::modulo_partition::detect_modulo_partition(items);
     let inline_decisions = build_inline_decisions(items);
     let has_unguarded_ffi = transition_graph.has_unguarded_ffi.clone();
+    // 2026-07-31: Batch-loop decomposition derived from the swan-song-stripped
+    // bodies (what the backend emits). The io boundary is the guard's
+    // `count % N == 0` precondition interval.
+    let batch_shape = crate::analysis::batch_shape::detect_batch_shape(&swan_songs);
     AnalysisResults {
         call_graph: CallGraph::new(),
         param_ranges: ParameterRanges::new(),
@@ -99,6 +107,7 @@ pub fn analyze_program(items: &[TopLevel], optimize: bool, min_width: usize) -> 
         modulo_partition,
         has_unguarded_ffi,
         inline_decisions,
+        batch_shape,
     }
 }
 

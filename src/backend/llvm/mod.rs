@@ -3445,12 +3445,44 @@ impl LlvmBackend {
             }
         }
 
-        // 2026-07-31: Composite-node decomposition (version-DAG). Tried before the
-        // batch-loop strategies — a body with a single runtime `when` guard is
-        // handled by the guard-absent/guard-present emission and supersedes them.
+        // 2026-07-31: Batch-loop decomposition — an inner PURE-compute loop to
+        // the next io boundary plus a cold outer guard. Tried before
+        // version-DAG: a periodic `when count % N == 0` io (post-increment) is
+        // exactly captured by the inner/outer structure, and the per-iteration
+        // modulo check disappears (kalman/float_math parity — see
+        // docs/plans/2026-07-31-regain-kalman-float-math-parity.md §5).
+        //
+        // COST MODEL (arithmetic density, ≥ 40 ops): the batch is for DENSE
+        // matrix-style bodies (kalman ~140 ops → 1.24× → 1.00×). Sparse bodies
+        // are excluded: (a) the outer/inner overhead exceeds the guard-removal
+        // benefit for tiny bodies (fmn 7 fields: 0.205s batch vs 0.196s
+        // version-DAG), and (b) LLVM reassociates reduction bodies (float_math
+        // p += Q → multiple accumulators), changing the benchmark output and
+        // violating symmetric-output. See batch_shape::arithmetic_op_count.
+        let is_decreasing_vd = bp.direction == crate::analysis::transition_graph::ConvergeDirection::Decreasing;
+        if !is_decreasing_vd {
+            if let Some(batch) = analysis.batch_shape.as_ref() {
+                if batch.counter == bp.var
+                    && crate::analysis::batch_shape::arithmetic_op_count(&batch.inner_body) >= 40
+                {
+                    self.fun.pending_post_hoist = post_hoist.clone();
+                    self.warnings.push(format!(
+                        "info: txn '{}' dispatched via batch loop (N={}, {} fields)",
+                        node.name, batch.batch_size, node.write_set.len()
+                    ));
+                    self.emit_countable_batched_main(
+                        out, &node.name, counter_idx, total_idx, total_const_name,
+                        &node.write_set, false, &bp.var, batch,
+                    );
+                    return true;
+                }
+            }
+        }
+        // 2026-07-31: Composite-node decomposition (version-DAG). Tried after the
+        // batch-loop — a body with a single runtime `when` guard is handled by
+        // the guard-absent/guard-present emission and supersedes PerFieldPhi.
         // See docs/plans/2026-07-30-flat-node-decomposition.md §11.
         self.fun.pending_post_hoist = post_hoist.clone();
-        let is_decreasing_vd = bp.direction == crate::analysis::transition_graph::ConvergeDirection::Decreasing;
         if self.emit_version_dag_main(
             out, counter_idx, total_idx, total_const_name,
             &body_stmts, &node.write_set, is_decreasing_vd, Some(&bp.var),

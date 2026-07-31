@@ -3050,3 +3050,127 @@ fn test_density_consumer_downgrades_dense_txn() {
         "dense txn must be downgraded to #0 via the density measurement, got: {}\n{}",
         txn_line, &output[..output.len().min(1500)]);
 }
+
+// ── Batch-loop dispatch (plan 2026-07-31-regain-kalman-float-math-parity) ──
+
+/// A post-increment periodic guard (`when count % N == 0` AFTER count++)
+/// dispatches via the batch loop (.oh_/.inner_ structure), eliminating the
+/// per-iteration modulo check.
+#[test]
+fn test_batch_loop_dispatch_post_increment() {
+    // Dense body (≥ 40 arithmetic ops — the batch cost-model gate) on a set of
+    // float fields, kalman-style. 12 fields each updated by a 3-term multiply
+    // chain gives ~50+ ops, so the batch dispatch fires.
+    let fld = |n: &str| TopLevel::StateDecl(StateDecl { name: n.into(), ty: Type::float(), span: None });
+    let mut program = vec![
+        TopLevel::StateDecl(StateDecl { name: "count".into(), ty: Type::int(), span: None }),
+        TopLevel::StateDecl(StateDecl { name: "total".into(), ty: Type::int(), span: None }),
+    ];
+    for i in 0..12 {
+        program.push(fld(&format!("f{}", i)));
+    }
+    let mul = |l: Expr, r: Expr| Expr::BinaryOp(BinaryOpKind::Mul, Box::new(l), Box::new(r));
+    let add = |l: Expr, r: Expr| Expr::BinaryOp(BinaryOpKind::Add, Box::new(l), Box::new(r));
+    let mut body: Vec<Statement> = Vec::new();
+    // Each f_i update = f_i*a + f_(i+1)%12*b + f_(i+2)%12*c  (5 ops each → 60 total).
+    for i in 0..12 {
+        let rhs = add(add(
+            mul(Expr::Identifier(format!("f{}", i)), Expr::Float(0.5)),
+            mul(Expr::Identifier(format!("f{}", (i + 1) % 12)), Expr::Float(0.25)),
+        ), mul(Expr::Identifier(format!("f{}", (i + 2) % 12)), Expr::Float(0.125)));
+        body.push(Statement::Assign(Expr::Identifier(format!("f{}", i)), rhs));
+    }
+    body.push(Statement::Assign(Expr::Identifier("count".into()),
+        Expr::BinaryOp(BinaryOpKind::Add,
+            Box::new(Expr::Identifier("count".into())),
+            Box::new(Expr::Decimal(1)))));
+    body.push(Statement::Guarded(
+        Expr::BinaryOp(BinaryOpKind::Eq,
+            Box::new(Expr::BinaryOp(BinaryOpKind::Mod,
+                Box::new(Expr::Identifier("count".into())),
+                Box::new(Expr::Decimal(100)))),
+            Box::new(Expr::Decimal(0))),
+        vec![Statement::Expression(Expr::Call("__print_float".into(), vec![Expr::Identifier("f0".into())], None))]));
+    body.push(Statement::Term(None));
+    program.push(TopLevel::Transaction(Transaction {
+        name: "tick".into(),
+        is_reactive: true,
+        is_async: false,
+        type_params: vec![],
+        parameters: vec![],
+        output_type: None,
+        outputs: vec![],
+        contract: Contract {
+            pre_condition: Expr::BinaryOp(BinaryOpKind::Lt,
+                Box::new(Expr::Identifier("count".into())),
+                Box::new(Expr::Identifier("total".into()))),
+            post_condition: Expr::BinaryOp(BinaryOpKind::Eq,
+                Box::new(Expr::Identifier("count".into())),
+                Box::new(Expr::Identifier("total".into()))),
+            is_entry: false, watchdog: None, span: None,
+        },
+        body,
+        metadata: HashMap::new(), derivation: None, modifiers: vec![],
+        span: None, doc: None,
+    }));
+    let output = LlvmBackend::new().generate(&program, None);
+    assert!(output.contains(".oh_"), "post-increment periodic guard must use the batch loop, got:\n{}", &output[..output.len().min(1200)]);
+    assert!(output.contains(".inner_"), "batch loop must have an inner pure-compute loop");
+    // The per-iteration modulo must be GONE from the inner body (it fires only
+    // at the boundary). A single boundary check remains at inner_exit.
+    let inner = output.split(".inner_").nth(1).unwrap_or("");
+    let inner_seg = inner.split(".inner_exit").next().unwrap_or("");
+    assert!(!inner_seg.contains("urem"), "inner pure loop must not compute count % N per iteration");
+}
+
+/// A pre-increment periodic guard (knucleotide pattern) is NOT batched — it
+/// stays on version-DAG (the batch structure is off-by-one for it).
+#[test]
+fn test_batch_loop_rejects_pre_increment() {
+    let program = vec![
+        TopLevel::StateDecl(StateDecl { name: "count".into(), ty: Type::int(), span: None }),
+        TopLevel::StateDecl(StateDecl { name: "total".into(), ty: Type::int(), span: None }),
+        TopLevel::StateDecl(StateDecl { name: "acc".into(), ty: Type::int(), span: None }),
+        TopLevel::Transaction(Transaction {
+            name: "tick".into(),
+            is_reactive: true,
+            is_async: false,
+            type_params: vec![],
+            parameters: vec![],
+            output_type: None,
+            outputs: vec![],
+            contract: Contract {
+                pre_condition: Expr::BinaryOp(BinaryOpKind::Lt,
+                    Box::new(Expr::Identifier("count".into())),
+                    Box::new(Expr::Identifier("total".into()))),
+                post_condition: Expr::BinaryOp(BinaryOpKind::Eq,
+                    Box::new(Expr::Identifier("count".into())),
+                    Box::new(Expr::Identifier("total".into()))),
+                is_entry: false, watchdog: None, span: None,
+            },
+            body: vec![
+                // Guard BEFORE the increment (pre-increment semantics).
+                Statement::Guarded(
+                    Expr::BinaryOp(BinaryOpKind::Eq,
+                        Box::new(Expr::BinaryOp(BinaryOpKind::Mod,
+                            Box::new(Expr::Identifier("count".into())),
+                            Box::new(Expr::Decimal(100)))),
+                        Box::new(Expr::Decimal(0))),
+                    vec![Statement::Expression(Expr::Call("__print_int".into(), vec![Expr::Identifier("acc".into())], None))]),
+                Statement::Assign(Expr::Identifier("acc".into()),
+                    Expr::BinaryOp(BinaryOpKind::Add,
+                        Box::new(Expr::Identifier("acc".into())),
+                        Box::new(Expr::Decimal(1)))),
+                Statement::Assign(Expr::Identifier("count".into()),
+                    Expr::BinaryOp(BinaryOpKind::Add,
+                        Box::new(Expr::Identifier("count".into())),
+                        Box::new(Expr::Decimal(1)))),
+                Statement::Term(None),
+            ],
+            metadata: HashMap::new(), derivation: None, modifiers: vec![],
+            span: None, doc: None,
+        }),
+    ];
+    let output = LlvmBackend::new().generate(&program, None);
+    assert!(!output.contains(".oh_"), "pre-increment guard must NOT use the batch loop");
+}
