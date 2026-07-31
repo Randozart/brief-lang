@@ -733,7 +733,7 @@ comments — rewrite them for the new structure.
 | Phase 1a (analysis) | 0682d764 | 1232 pass | — | — | — | — | — | 0 |
 | Phase 1b (dispatch) | c953c3c4 | 1239 pass | 0.83× | 1.24× | 1.10× | 0.95× | 0.82× | 0 |
 | Phase 2 | 322d68f3 | 1259 pass | 0.83× | 1.23× | 1.18× | 0.97× | 0.86× | 0 |
-| Phase 3 | | | | | | | | |
+| Phase 3 | f2c0daaa | 1267 pass | 0.82× | 1.21× | 1.13× | 0.99× | 0.84× | 0 |
 | Final | | | | | | | | |
 
 Full `--runtime` table appended to this section after every phase.
@@ -756,6 +756,20 @@ and queue_drain deltas are pure run-to-run noise, not codegen changes. `cargo te
 the frgn `declare` block was iterating `frgn_map` (a HashMap) unsorted, producing
 run-to-run nondeterministic declaration order (Coding Standard 7); the loop now
 sorts by key.
+
+Phase 3 full table (see `benchmarks/results/2026-07-31-frontend-dispatch-phase3.md`):
+all 19 runtime benchmarks within noise of Phase 2 (max delta 0.08×, queue_drain
+0.85→0.93×), zero MISMATCH. §8.1/§8.2 move codegen tuning constants into
+`config/targets.toml` + `config/ir-lowering.toml` (defaults = prior literals).
+§8.3 derives write-mask width (u128/i128 when >64 fields), the `!prof` cap (2^30),
+and the type-driven range. §8.4 replaces every hardcoded Brief type-name match in
+`src/backend/llvm/` with casting-graph/universe resolution (`git grep
+'Type::Custom.*==' src/backend/llvm/` → zero), including seeding `Cast.#Char` and
+`Cast.#String` in the primordials and deleting the dead `primitive_from_name` /
+`resolve_bild_type`. §8.5 removes dead code and latent bugs E1–E6 (SVO packed
+header overlap, always-false ringbuf-init stub, unreachable br-i1-true rollback,
+silent normalizer size defaults → `TypeUniverse.warnings`). `cargo test --lib`:
+1267 passed, 0 failed.
 
 ---
 
