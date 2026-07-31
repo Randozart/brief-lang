@@ -137,7 +137,11 @@ impl TypeUniverse {
             ("FP128",  16, 128, 128, 16, &[("Cast.#Float", "true"), ("Cast.#Bit", "true"), ("bits", "128")]),
             // Other
             ("Bool",   1, 8, 8,  1, &[("Cast.#Bool", "true"), ("Cast.#Bit", "true")]),
-            ("Char",   4, 32, 32, 4, &[("Cast.#Bit", "true")]),
+            // 2026-07-31: Phase 3 (§8.4) — Char gains Cast.#Char so the casting
+            // graph resolves Char → category "Char" → Fixed("i32") instead of
+            // the generic "Bit" fallback (which produced i64). The graph already
+            // had a Char lane (Fixed("i32")).
+            ("Char",   4, 32, 32, 4, &[("Cast.#Char", "true"), ("Cast.#Bit", "true")]),
             ("Data",   8, 64, 64, 8, &[("Cast.#Data", "true"), ("Cast.#Bit", "true")]),
             ("Void",   0, 0,  0,  0, &[]),
         ];
@@ -166,9 +170,14 @@ impl TypeUniverse {
         // 2026-07-18: String primordial — 2-field struct (data: Int, len: Int)
         // The casting graph resolves String's LLVM type as Fixed("{ i64, i64 }")
         // from #String protocol membership. No llvm_type property needed.
+        // 2026-07-31: Phase 3 (§8.4) — Cast.#String seeded so the casting
+        // graph resolves String → category "String" → Fixed("{ i64, i64 }").
+        // Previously the property was absent, so a bare primordial universe
+        // resolved String → "Bit" → i64 (wrong).
         {
             let mut p = std::collections::HashMap::new();
             p.insert("alignment".into(), crate::ast::PropertyValue::Int(8));
+            p.insert("Cast.#String".into(), crate::ast::PropertyValue::String("true".into()));
             self.types.insert("String".to_string(), ResolvedType {
                 name: "String".to_string(),
                 base: "Bit".to_string(),
