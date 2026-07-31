@@ -313,7 +313,14 @@ fn collect_strings_expr(expr: &Expr, seen: &mut std::collections::HashSet<String
         }
         // Leaves — no sub-expressions
         Expr::Decimal(_) | Expr::TaggedLiteral(_, _) | Expr::Bool(_) | Expr::Float(_) | Expr::Identifier(_)
-        | Expr::PropertyGet(_) | Expr::FormattingAnnotation(_) | Expr::StructLiteral { .. } => {}
+        | Expr::FormattingAnnotation(_) | Expr::StructLiteral { .. } => {}
+        Expr::Field(recv, _) | Expr::Reflect(recv, _, _) => {
+            collect_strings_expr(recv, seen, out);
+        }
+        Expr::MethodCall(recv, _, args, _) => {
+            collect_strings_expr(recv, seen, out);
+            for a in args { collect_strings_expr(a, seen, out); }
+        }
         Expr::Exists(_) => { unreachable!("fn? only in stage eval") },
             Expr::Slice { array, start, end, stride } => {
                 collect_strings_expr(array, seen, out);

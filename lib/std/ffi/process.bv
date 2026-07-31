@@ -60,7 +60,7 @@ defn spawn(command: String, args: List<String>) -> Int [command != ""][term >= -
     term -1;
 };
 
-defn spawn_with_output(command: String, args: List<String>) -> String [command != ""][term .#Size >= 0] {
+defn spawn_with_output(command: String, args: List<String>) -> String [command != ""][term .^Len >= 0] {
     let result = spawn_with_output_res(command, args);
     when is_ok(result) {
         term unwrap(result);
@@ -68,7 +68,7 @@ defn spawn_with_output(command: String, args: List<String>) -> String [command !
     term "";
 };
 
-defn env_var(name: String) -> String [name != ""][term .#Size >= 0] {
+defn env_var(name: String) -> String [name != ""][term .^Len >= 0] {
     let result = env_var_res(name);
     when result.is_ok() {
         term result.value;
@@ -84,7 +84,7 @@ defn set_env_var(name: String, value: String) -> Bool [name != ""][term == true 
     term false;
 };
 
-defn current_dir() -> String [true][term .#Size >= 0] {
+defn current_dir() -> String [true][term .^Len >= 0] {
     let result = current_dir_res();
     when result.is_ok() {
         term result.value;
@@ -118,7 +118,7 @@ defn run_command_with_args(command: String, args: List<String>) -> Bool [command
     term false;
 };
 
-defn get_env_or_default(name: String, default: String) -> String [name != ""][term .#Size >= 0] {
+defn get_env_or_default(name: String, default: String) -> String [name != ""][term .^Len >= 0] {
     let val = env_var(name);
     when val != "" {
         term val;

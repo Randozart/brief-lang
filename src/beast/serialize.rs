@@ -206,6 +206,18 @@ fn emit_expr(e: &Expr) -> SExpr {
         Expr::Field(obj, name) => {
             list(&[atom("field"), emit_expr(obj), atom(name)])
         }
+        Expr::Reflect(recv, target, kind) => {
+            let kind_atom = match kind {
+                ReflectKind::Runtime => "reflect_runtime",
+                ReflectKind::CompileTime => "reflect_compile",
+            };
+            list(&[atom(kind_atom), emit_expr(recv), atom(target)])
+        }
+        Expr::MethodCall(recv, name, args, _) => {
+            let mut children = vec![atom("method"), emit_expr(recv), atom(name)];
+            for a in args { children.push(emit_expr(a)); }
+            SExpr::List(children)
+        }
         Expr::Index(obj, idx) => {
             list(&[atom("index"), emit_expr(obj), emit_expr(idx)])
         }

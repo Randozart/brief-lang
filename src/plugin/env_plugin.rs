@@ -201,8 +201,15 @@ fn walk_expr(expr: &mut Expr) {
         }
         // Leaves — no sub-expressions
         Expr::Decimal(_) | Expr::TaggedLiteral(_, _) | Expr::Bool(_) | Expr::Float(_) | Expr::Quoted(_) | Expr::TaggedQuotedLiteral(_, _)
-        | Expr::Identifier(_) | Expr::PropertyGet(_)
+        | Expr::Identifier(_)
         | Expr::FormattingAnnotation(_) => {}
+        Expr::Field(recv, _) | Expr::Reflect(recv, _, _) => {
+            walk_expr(recv);
+        }
+        Expr::MethodCall(recv, _, args, _) => {
+            walk_expr(recv);
+            for a in args { walk_expr(a); }
+        }
         Expr::StructLiteral { .. } => {}
         Expr::Exists(_) => { unreachable!("fn? only in stage eval") },
         Expr::Slice { .. } => {},

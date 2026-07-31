@@ -303,7 +303,12 @@ impl<'a> DagBuilder<'a> {
             Expr::Block(stmts) => { self.walk_stmts(stmts); }
             Expr::Quoted(_) | Expr::TaggedQuotedLiteral(_, _) | Expr::Decimal(_) | Expr::TaggedLiteral(_, _) | Expr::Bool(_) | Expr::Float(_)
             | Expr::Identifier(_) | Expr::Lambda(_, _) | Expr::Within(_, _)
-            | Expr::DerivationBlock(_) | Expr::PropertyGet(_) | Expr::FormattingAnnotation(_) | Expr::StructLiteral { .. } => {}
+            | Expr::DerivationBlock(_) | Expr::FormattingAnnotation(_) | Expr::StructLiteral { .. } => {}
+            Expr::Field(recv, _) | Expr::Reflect(recv, _, _) => { self.walk_expr(recv); }
+            Expr::MethodCall(recv, _, args, _) => {
+                self.walk_expr(recv);
+                for a in args { self.walk_expr(a); }
+            }
             Expr::PluginIntercept { args, .. } => {
                 for a in args { self.walk_expr(a); }
             }

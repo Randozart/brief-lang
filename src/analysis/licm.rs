@@ -121,7 +121,7 @@ fn is_invariant_expression(
         Expr::Deref(_) | Expr::AddrOf(_) => false,
         Expr::Within(_, _) | Expr::IsType(_, _) | Expr::Exists(_) => false,
         Expr::StructLiteral { .. } => false,
-        Expr::PropertyGet(_) | Expr::FormattingAnnotation(_) => false,
+        Expr::Field(_, _) | Expr::Reflect(_, _, _) | Expr::MethodCall(..) | Expr::FormattingAnnotation(_) => false,
         Expr::PluginIntercept { .. } => false,
         Expr::DerivationBlock(_) => false,
     }

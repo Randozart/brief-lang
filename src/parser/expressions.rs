@@ -5,7 +5,7 @@
 // @ prefix forces any token to Quoted(bytes).
 
 use super::helpers::Parser;
-use crate::ast::{BinaryOpKind, Expr, UnaryOpKind};
+use crate::ast::{BinaryOpKind, Expr, ReflectKind, UnaryOpKind};
 use crate::errors::{Span, SyntaxError};
 use crate::lexer::Token;
 
@@ -239,7 +239,7 @@ impl<'a> Parser<'a> {
                     }
                 }
             } else if self.eat(&Token::Dot) {
-                // Field access: a.f
+                // Field access: a.f — the receiver is PRESERVED.
                 let name = self.expect_identifier()?;
                 // 2026-07-21: Navigation chain call: a.first$(args).
                 if name.ends_with('$') && self.check(&Token::LParen) {
@@ -253,15 +253,29 @@ impl<'a> Parser<'a> {
                     }
                     self.expect(Token::RParen)?;
                     expr = Expr::Call(name, args, None);
+                } else if self.check(&Token::LParen) {
+                    // 2026-07-31: Method call: a.f(x) — receiver preserved.
+                    self.expect(Token::LParen)?;
+                    let mut args = Vec::new();
+                    if !self.check(&Token::RParen) {
+                        loop {
+                            args.push(self.parse_expression()?);
+                            if !self.eat(&Token::Comma) { break; }
+                        }
+                    }
+                    self.expect(Token::RParen)?;
+                    expr = Expr::MethodCall(Box::new(expr), name, args, None);
                 } else {
-                    expr = Expr::PropertyGet(name);
+                    expr = Expr::Field(Box::new(expr), name);
                 }
-            } else if self.eat(&Token::DotHash) {
-                // Protocol property access: a.#prop
-                // 2026-07-24: Replaces the old :> syntax for accessing type
-                // properties like Size, Count, Capacity, etc.
+            } else if self.eat(&Token::DotCaretCaret) {
+                // 2026-07-31: Compile-time reflection: a.^^Size → foldable constant.
                 let name = self.expect_identifier()?;
-                expr = Expr::PropertyGet(name);
+                expr = Expr::Reflect(Box::new(expr), name, ReflectKind::CompileTime);
+            } else if self.eat(&Token::DotCaret) {
+                // 2026-07-31: Runtime reflection: a.^Len, a.^Ptr.
+                let name = self.expect_identifier()?;
+                expr = Expr::Reflect(Box::new(expr), name, ReflectKind::Runtime);
             } else if self.eat(&Token::LBracket) {
                 // Check for slice syntax: arr[start:end:stride]
                 if self.check(&Token::Colon) {

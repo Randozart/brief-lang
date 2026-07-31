@@ -182,13 +182,21 @@ impl Annotator {
                     self.collect_calls_from_expr(&ex.output, calls);
                 }
             }
-            Expr::PropertyGet(..)
-            | Expr::FormattingAnnotation(..)
+            Expr::FormattingAnnotation(..)
             | Expr::Quoted(..) | Expr::TaggedQuotedLiteral(..)
             | Expr::Decimal(..) | Expr::TaggedLiteral(..)
             | Expr::Bool(..)
             | Expr::Float(..)
             | Expr::Identifier(..) => {}
+            Expr::Field(recv, _) | Expr::Reflect(recv, _, _) => {
+                self.collect_calls_from_expr(recv, calls);
+            }
+            Expr::MethodCall(recv, _, args, _) => {
+                self.collect_calls_from_expr(recv, calls);
+                for a in args {
+                    self.collect_calls_from_expr(a, calls);
+                }
+            }
             Expr::StructLiteral { .. } => {}
             Expr::PluginIntercept { args, .. } => {
                 for a in args {
@@ -581,7 +589,15 @@ impl Annotator {
             }
             Expr::Deref(inner) => format!("*{}", self.format_expr(inner)),
             Expr::AddrOf(inner) => format!("&{}", self.format_expr(inner)),
-            Expr::PropertyGet(name) => format!("property '{}'", name),
+            Expr::Field(recv, name) => format!("{}.{}", self.format_expr(recv), name),
+            Expr::Reflect(recv, name, kind) => match kind {
+                ReflectKind::Runtime => format!("{}.^{}", self.format_expr(recv), name),
+                ReflectKind::CompileTime => format!("{}.^^{}", self.format_expr(recv), name),
+            },
+            Expr::MethodCall(recv, name, args, _) => {
+                let args_str: Vec<String> = args.iter().map(|a| self.format_expr(a)).collect();
+                format!("{}.{}({})", self.format_expr(recv), name, args_str.join(", "))
+            }
             Expr::FormattingAnnotation(f) => format!("formatting <~ {}", f.name()),
             Expr::PluginIntercept { name, args, .. } => {
                 let args_str: Vec<String> = args.iter().map(|a| self.format_expr(a)).collect();

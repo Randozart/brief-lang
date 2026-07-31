@@ -142,7 +142,14 @@ impl<'a> DataflowAnalyzer<'a> {
                     self.extract_ids_from_statement(stmt, ids);
                 }
             }
-            Expr::PropertyGet(_) | Expr::FormattingAnnotation(_) | Expr::DerivationBlock(_) | Expr::StructLiteral { .. } => {}
+            Expr::Field(recv, _) | Expr::Reflect(recv, _, _) => {
+                self.extract_ids_recursive(recv, ids);
+            }
+            Expr::MethodCall(recv, _, args, _) => {
+                self.extract_ids_recursive(recv, ids);
+                for a in args { self.extract_ids_recursive(a, ids); }
+            }
+            Expr::FormattingAnnotation(_) | Expr::DerivationBlock(_) | Expr::StructLiteral { .. } => {}
             Expr::PluginIntercept { args, .. } => {
                 for a in args { self.extract_ids_recursive(a, ids); }
             }

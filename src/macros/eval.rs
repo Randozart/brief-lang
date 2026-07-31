@@ -2052,8 +2052,16 @@ fn resolve_dollar_refs_in_expr(expr: &mut Expr, scope: &Scope) -> Result<(), Str
         }
         // Literals and simple values — no nested identifiers
         Expr::Quoted(_) | Expr::TaggedQuotedLiteral(_, _) | Expr::Decimal(_) | Expr::Float(_) | Expr::Bool(_)
-        | Expr::TaggedLiteral(_, _) | Expr::PropertyGet(_)
+        | Expr::TaggedLiteral(_, _)
         | Expr::FormattingAnnotation(_) | Expr::StructLiteral { .. } | Expr::Slice { .. } => Ok(()),
+        Expr::Field(recv, _) | Expr::Reflect(recv, _, _) => resolve_dollar_refs_in_expr(recv, scope),
+        Expr::MethodCall(recv, _, args, _) => {
+            resolve_dollar_refs_in_expr(recv, scope)?;
+            for a in args {
+                resolve_dollar_refs_in_expr(a, scope)?;
+            }
+            Ok(())
+        }
         Expr::Exists(_) => { unreachable!("fn? only in stage eval") },
 
     }

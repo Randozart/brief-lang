@@ -1,16 +1,16 @@
 // ptr — Safe, Provably-Verified Pointer Operations
 // Tier 2: Memory & Systems
 //
-// All operations use `Ptr<T>` typed pointers created via `&x .#Ptr` or `list .#Ptr`.
+// All operations use `Ptr<T>` typed pointers created via `&x .^Ptr` or `list .^Ptr`.
 // Safety is verified by the PointerVerifier pass using contract preconditions.
 // The LLVM backend emits raw load/store/GEP — zero runtime overhead.
 //
-// For raw unchecked access, use `x .#Ptr!` (returns Int, no safety envelope).
+// For raw unchecked access, use `x .^Ptr!` (returns Int, no safety envelope).
 
 // ===== READ =====
 
 defn read_i64(p: Ptr<Int>, i: Int)
-  [i >= 0 && (i + 1) * 8 <= p .#Bytes]
+  [i >= 0 && (i + 1) * 8 <= p .^^Bytes]
   [true] -> Int
 {
   term p[i];
@@ -19,7 +19,7 @@ defn read_i64(p: Ptr<Int>, i: Int)
 // ===== WRITE =====
 
 defn write_i64(p: Ptr<Int>, i: Int, val: Int)
-  [i >= 0 && (i + 1) * 8 <= p .#Bytes]
+  [i >= 0 && (i + 1) * 8 <= p .^^Bytes]
   [true]
 {
   &p[i] = val;
@@ -28,13 +28,13 @@ defn write_i64(p: Ptr<Int>, i: Int, val: Int)
 // ===== RAW ADDRESS =====
 
 defn address<T>(p: Ptr<T>) -> Int {
-  term p .#Ptr;
+  term p .^Ptr;
 };
 
 // ===== BYTE-LEVEL =====
 
 defn read_byte(p: Ptr<Int>, offset: Int)
-  [offset >= 0 && offset + 1 <= p .#Bytes]
+  [offset >= 0 && offset + 1 <= p .^^Bytes]
   [true] -> Int
 {
   // Use integer division to get element index: offset / 8
@@ -49,10 +49,10 @@ defn read_byte(p: Ptr<Int>, offset: Int)
 
 defn copy(dest: Ptr<Int>, src: Ptr<Int>, count: Int)
   [count >= 0 &&
-   count * 8 <= dest .#Bytes &&
-   count * 8 <= src .#Bytes &&
-   (dest .#Ptr >= src .#Ptr + count * 8 ||
-    src .#Ptr >= dest .#Ptr + count * 8)]
+   count * 8 <= dest .^^Bytes &&
+   count * 8 <= src .^^Bytes &&
+   (dest .^Ptr >= src .^Ptr + count * 8 ||
+    src .^Ptr >= dest .^Ptr + count * 8)]
   [true]
 {
   // Proven non-overlapping by caller — compiler emits @llvm.memcpy

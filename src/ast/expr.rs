@@ -29,6 +29,13 @@ pub enum Expr {
     BinaryOp(BinaryOpKind, Box<Expr>, Box<Expr>),
     UnaryOp(UnaryOpKind, Box<Expr>),
     Field(Box<Expr>, String),
+    /// 2026-07-31: Method call with a receiver: a.f(x). The receiver is
+    /// preserved and bound to the `self` parameter of the obj member.
+    MethodCall(Box<Expr>, String, Vec<Expr>, Option<usize>),
+    /// 2026-07-31: Reflection access: `a.^Len` (runtime) / `a.^^Size`
+    /// (compile-time). The receiver is preserved; the target is a PascalCase
+    /// compiler-known identifier resolved by the D1 reflection table.
+    Reflect(Box<Expr>, String, ReflectKind),
     Index(Box<Expr>, Box<Expr>),
     /// arr[start:end:stride] — zero-copy slice view
     Slice {
@@ -79,12 +86,21 @@ pub enum Expr {
     },
 
     // ── Metadata ────────────────────────────────────────────────
-    PropertyGet(String),
     FormattingAnnotation(super::Formatting),
     /// 2026-07-25: fn? — compile-time existence check. Evaluates to
     /// Bool(true) if the function linked, Bool(false) otherwise.
     /// Used for guarding frgn?/frgn!/frgn?! calls.
     Exists(String),
+}
+
+/// 2026-07-31: Reflection kind — distinguishes value-derived (runtime)
+/// reflection from type-derived (compile-time, foldable) reflection.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ReflectKind {
+    /// `x.^Len`, `x.^Ptr` — runtime value-derived.
+    Runtime,
+    /// `x.^^Size`, `x.^^Bytes` — compile-time type-derived, foldable.
+    CompileTime,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -212,6 +228,13 @@ impl Expr {
             }
             Expr::UnaryOp(_, e) => e.collect_vars_into(acc),
             Expr::Field(e, _) => e.collect_vars_into(acc),
+            Expr::MethodCall(recv, _, args, _) => {
+                recv.collect_vars_into(acc);
+                for a in args {
+                    a.collect_vars_into(acc);
+                }
+            }
+            Expr::Reflect(recv, _, _) => recv.collect_vars_into(acc),
             Expr::Index(l, r) => {
                 l.collect_vars_into(acc);
                 r.collect_vars_into(acc);

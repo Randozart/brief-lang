@@ -1286,6 +1286,7 @@ impl<'a> Parser<'a> {
                     operators: operators.clone(), op_bindings: op_bindings.clone(),
                     props: props.clone(),
                     constraints: vec![],
+                    members: vec![],
                     span: None,
                 },
                 span: None,
@@ -1308,6 +1309,7 @@ impl<'a> Parser<'a> {
                 op_bindings,
                 props,
                 constraints: vec![],
+                members: vec![],
                 span: None,
             },
             span: None,
@@ -1421,6 +1423,7 @@ impl<'a> Parser<'a> {
                 op_bindings,
                 props,
                 constraints: vec![],
+                members: vec![],
                 span: None,
             },
             span: None,
@@ -1605,13 +1608,51 @@ impl<'a> Parser<'a> {
     /// Consumes the `struct` keyword, then delegates to parse_type_definition
     /// obj name { fields } — dynamic object definition.
     fn parse_obj_like(&mut self) -> Result<Box<TypeDef>, SyntaxError> {
-        // struct Name { slot: Type; ... }
-        self.pos += 1; // consume struct
+        // 2026-07-31: obj Name<Params> { slot: Type; op …; txn member(…); defn member(…) }
+        // Type params, operator bindings, and self-parameterized members are
+        // collected into the TypeDef body.
+        self.pos += 1; // consume obj
         let name = self.expect_identifier()?;
+        let type_params = self.parse_type_params()?;
         let mut slots = Vec::new();
+        let mut members: Vec<crate::ast::TopLevel> = Vec::new();
+        let mut metadata = std::collections::HashMap::new();
+        let mut operators: Vec<OperatorDef> = Vec::new();
+        let mut op_bindings: Vec<OperatorBinding> = Vec::new();
+        let mut props: Vec<PropDef> = Vec::new();
         if self.eat(&Token::LBrace) {
             while !self.check(&Token::RBrace) && !self.is_at_end() {
+                if self.check(&Token::ExclaimArrow) {
+                    // !> key: value; metadata (same handling as type bodies).
+                    self.advance();
+                    let key = self.expect_identifier()?;
+                    self.expect(Token::Colon)?;
+                    let pv = self.parse_metadata_value_standalone()?;
+                    self.eat(&Token::Semicolon);
+                    metadata.insert(key, pv);
+                    continue;
+                }
+                if self.check(&Token::Txn) {
+                    let txn = self.parse_transaction(false, false)?;
+                    members.push(crate::ast::TopLevel::Transaction(txn));
+                    self.eat(&Token::Semicolon);
+                    continue;
+                }
+                if self.check(&Token::Defn) {
+                    let defn = self.parse_definition()?;
+                    members.push(crate::ast::TopLevel::Definition(defn));
+                    self.eat(&Token::Semicolon);
+                    continue;
+                }
                 let slot_name = self.expect_identifier()?;
+                if slot_name == "op" {
+                    self.parse_op_definition(&mut op_bindings)?;
+                    continue;
+                }
+                if slot_name == "prop" {
+                    self.parse_prop_definition(&mut props)?;
+                    continue;
+                }
                 self.expect(Token::Colon)?;
                 let slot_ty = self.parse_type()?;
                 self.eat(&Token::Semicolon);
@@ -1621,12 +1662,11 @@ impl<'a> Parser<'a> {
         }
         self.eat(&Token::Semicolon);
         Ok(Box::new(TypeDef {
-            name, type_params: vec![], parent: None,
+            name, type_params, parent: None,
             protocol: None,
             bit_range: None, span: None,
             body: TypeDefBody {
-                slots, metadata: std::collections::HashMap::new(),
-                projections: vec![], bindings: vec![], operators: vec![], op_bindings: vec![], props: vec![], constraints: vec![], span: None,
+                slots, metadata, projections: vec![], bindings: vec![], operators, op_bindings, props, constraints: vec![], members, span: None,
             },
         }))
     }
@@ -1703,7 +1743,7 @@ impl<'a> Parser<'a> {
             bit_range: None, span: None,
             body: TypeDefBody {
                 slots, metadata: std::collections::HashMap::new(),
-                projections: vec![], bindings: vec![], operators: vec![], op_bindings: vec![], props: vec![], constraints: vec![], span: None,
+                projections: vec![], bindings: vec![], operators: vec![], op_bindings: vec![], props: vec![], constraints: vec![], members: vec![], span: None,
             },
         }))
     }

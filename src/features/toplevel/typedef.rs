@@ -144,6 +144,7 @@ mod tests {
             ],
             operators: vec![],
             props: vec![], constraints: vec![],
+            members: vec![],
             span: None,
         };
         assert_eq!(body.bindings.len(), 2);
@@ -166,6 +167,7 @@ mod tests {
                     make_binding("Alignment", Expr::Decimal(8)),
                 ],
                 operators: vec![], op_bindings: vec![], constraints: vec![],
+                members: vec![],
                 span: None,
             },
             span: None,
@@ -245,6 +247,7 @@ mod kani_full_tests {
                 span: None,
             }],
             operators: vec![], op_bindings: vec![], constraints: vec![],
+            members: vec![],
             span: None,
         };
         assert_eq!(body.bindings.len(), 1);

@@ -378,8 +378,16 @@ ExclaimArrow,
     #[token(";")]
     Semicolon,
 
-    #[token(".#")]
-    DotHash,
+    /// `.^^` — compile-time reflection access (`x.^^Size`). Must lex before
+    /// `.^` so logos longest-match handles the triple-char form; order is
+    /// otherwise irrelevant (logos picks the longest match).
+    #[token(".^^")]
+    DotCaretCaret,
+
+    /// `.^` — runtime reflection access (`x.^Len`, `x.^Ptr`).
+    /// The caret alone remains bitwise XOR (`a ^ b`); the dot disambiguates.
+    #[token(".^")]
+    DotCaret,
 
     /// := — derivation / compile-time assertion block
     #[token(":=")]
@@ -646,7 +654,8 @@ impl std::fmt::Display for Token {
             Token::HashBangBracket => write!(f, "#!["),
             Token::Pragma => write!(f, "#pragma"),
             Token::Semicolon => write!(f, ";"),
-            Token::DotHash => write!(f, ".#"),
+            Token::DotCaretCaret => write!(f, ".^^"),
+            Token::DotCaret => write!(f, ".^"),
             Token::ColonEq => write!(f, ":="),
             Token::Colon => write!(f, ":"),
             Token::ColonColon => write!(f, "::"),

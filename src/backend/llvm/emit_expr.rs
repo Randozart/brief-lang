@@ -758,8 +758,23 @@ impl LlvmBackend {
                 }
             }
 
-            // ── DerivationBlock / PropertyGet / FormattingAnnotation ─
-            Expr::DerivationBlock(_) | Expr::PropertyGet(_) | Expr::FormattingAnnotation(_) => {
+            // ── Field access / reflection / method call (2026-07-31) ─
+            Expr::Field(recv, name) => {
+                return self.emit_field_access(out, v, recv, name, indent);
+            }
+            Expr::Reflect(recv, target, kind) => {
+                return self.emit_reflection(out, v, recv, target, *kind, indent);
+            }
+            Expr::MethodCall(recv, name, _args, _) => {
+                // 2026-07-31: MethodCall typechecks fully (member lookup, arg
+                // validation) but self-bound member emission is the Phase-1b
+                // boundary. A clear error here beats silent garbage.
+                panic!(
+                    "method call '.{}()' on '{}' reached codegen without self-bound emission (Phase-1b boundary)",
+                    name, recv
+                );
+            }
+            Expr::DerivationBlock(_) | Expr::FormattingAnnotation(_) => {
                 writeln!(out, "{}{} = add i64 0, 0", indent, v).ok();
                 TypedRegister {
                     name: v.to_string(),
@@ -1242,6 +1257,141 @@ impl LlvmBackend {
         // binding retrieves the stack address, not the ptrtoint value.
         self.fun.struct_literal_allocas.insert(result.clone(), alloca_reg.clone());
         TypedRegister { name: result, ty: struct_ty }
+    }
+
+    /// 2026-07-31: `p.name` — load a struct field. The receiver register
+    /// holds the struct's address (struct literals emit ptrtoint; state slots
+    /// store the same address form). GEP by field offset and load.
+    fn emit_field_access(
+        &mut self,
+        out: &mut String,
+        v: &str,
+        recv: &Expr,
+        name: &str,
+        indent: &str,
+    ) -> TypedRegister {
+        let _ = v;
+        let recv_tmp = self.fun.gen_reg();
+        let recv_reg = self.emit_expr_inner(out, &recv_tmp, recv, indent);
+        let type_name = match &recv_reg.ty {
+            Type::Custom(n) => n.clone(),
+            _ => panic!(
+                "field access '.{}' on non-struct type '{}' reached codegen",
+                name, recv_reg.ty
+            ),
+        };
+        let Some(fields) = self.get_struct_fields(&type_name) else {
+            panic!("field access '.{}': no struct layout for '{}'", name, type_name);
+        };
+        let mut offset = 0u64;
+        let mut field_ty: Option<Type> = None;
+        for (fname, fty) in fields {
+            if fname == name {
+                field_ty = Some(fty.clone());
+                break;
+            }
+            offset += types::type_size(fty, self.ctx.type_universe.as_ref());
+        }
+        let field_ty = field_ty.unwrap_or_else(|| {
+            panic!("field access '.{}': no field '{}' on '{}'", name, name, type_name)
+        });
+        let ptr = self.fun.gen_reg();
+        writeln!(out, "{}  {} = inttoptr i64 {} to ptr", indent, ptr, recv_reg.name).ok();
+        let gep = self.fun.gen_reg();
+        writeln!(out, "{}  {} = getelementptr i8, ptr {}, i64 {}", indent, gep, ptr, offset).ok();
+        let llvm_ty = self.llvm_type(&field_ty);
+        let val = self.fun.gen_reg();
+        writeln!(out, "{}  {} = load {}, ptr {}", indent, val, llvm_ty, gep).ok();
+        TypedRegister { name: val, ty: field_ty }
+    }
+
+    /// 2026-07-31: `x.^Meta` (runtime) / `x.^^Meta` (compile-time).
+    /// Compile-time targets emit constants (foldable); `Ptr` reuses the
+    /// address-of path; `Len` emits a constant for fixed-size vectors and a
+    /// clear error for dynamic receivers (Phase-1b boundary).
+    fn emit_reflection(
+        &mut self,
+        out: &mut String,
+        v: &str,
+        recv: &Expr,
+        target: &str,
+        kind: ReflectKind,
+        indent: &str,
+    ) -> TypedRegister {
+        let _ = v;
+        let recv_tmp = self.fun.gen_reg();
+        let recv_reg = self.emit_expr_inner(out, &recv_tmp, recv, indent);
+        match (target, kind) {
+            ("Size", ReflectKind::CompileTime) => {
+                let count = self.vector_element_count(&recv_reg.ty);
+                let r = self.fun.gen_reg();
+                writeln!(out, "{}{} = add i64 0, {}", indent, r, count).ok();
+                TypedRegister { name: r, ty: Type::int() }
+            }
+            ("Bytes", ReflectKind::CompileTime) => {
+                let sz = types::type_size(&recv_reg.ty, self.ctx.type_universe.as_ref());
+                let r = self.fun.gen_reg();
+                writeln!(out, "{}{} = add i64 0, {}", indent, r, sz).ok();
+                TypedRegister { name: r, ty: Type::int() }
+            }
+            ("Alignment", ReflectKind::CompileTime) => {
+                let align = self.type_alignment(&recv_reg.ty);
+                let r = self.fun.gen_reg();
+                writeln!(out, "{}{} = add i64 0, {}", indent, r, align).ok();
+                TypedRegister { name: r, ty: Type::int() }
+            }
+            ("Ptr", ReflectKind::Runtime) => {
+                // x.^Ptr ≡ &x — reuse the address-of path.
+                let ptr_tmp = self.fun.gen_reg();
+                self.emit_expr_inner(out, &ptr_tmp, &Expr::AddrOf(Box::new(recv.clone())), indent)
+            }
+            ("Len", ReflectKind::Runtime) => match &recv_reg.ty {
+                Type::Vector(_, _) => {
+                    let count = self.vector_element_count(&recv_reg.ty);
+                    let r = self.fun.gen_reg();
+                    writeln!(out, "{}{} = add i64 0, {}", indent, r, count).ok();
+                    TypedRegister { name: r, ty: Type::int() }
+                }
+                _ => panic!(
+                    "runtime reflection target 'Len' on '{}' has no codegen yet (Phase-1b boundary)",
+                    recv_reg.ty
+                ),
+            },
+            _ => panic!(
+                "reflection '{}' with kind '{:?}' reached codegen without emission",
+                target, kind
+            ),
+        }
+    }
+
+    /// 2026-07-31: Element count of a fixed-size vector type; 1 for scalars.
+    fn vector_element_count(&self, ty: &Type) -> u64 {
+        match ty {
+            Type::Vector(_, dims) => dims
+                .iter()
+                .map(|d| match d {
+                    Dimension::Anonymous(n) => *n as u64,
+                    _ => 1,
+                })
+                .product(),
+            _ => 1,
+        }
+    }
+
+    /// 2026-07-31: Alignment of a type in bytes (compile-time reflection).
+    fn type_alignment(&self, ty: &Type) -> u64 {
+        match ty {
+            Type::Ptr(_) => 8,
+            Type::Vector(inner, _) => self.type_alignment(inner),
+            Type::Custom(s) => match s.as_str() {
+                "Int" | "Int64" | "Float64" | "String" | "Ptr" => 8,
+                "Int32" | "Float" => 4,
+                "Int16" => 2,
+                "Int8" | "Bool" | "Char" | "Byte" => 1,
+                _ => 8,
+            },
+            _ => 8,
+        }
     }
 
     // 2026-07-24: Struct array list literal — detect when all elements

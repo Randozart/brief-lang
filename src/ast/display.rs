@@ -109,7 +109,18 @@ impl fmt::Display for Expr {
                 }
                 write!(f, ")")
             }
-            Expr::PropertyGet(name) => write!(f, "property '{}'", name),
+            Expr::Reflect(recv, name, kind) => match kind {
+                ReflectKind::Runtime => write!(f, "{}.^{}", recv, name),
+                ReflectKind::CompileTime => write!(f, "{}.^^{}", recv, name),
+            },
+            Expr::MethodCall(recv, name, args, _) => {
+                write!(f, "{}.{}(", recv, name)?;
+                for (i, arg) in args.iter().enumerate() {
+                    if i > 0 { write!(f, ", ")?; }
+                    write!(f, "{}", arg)?;
+                }
+                write!(f, ")")
+            }
             Expr::FormattingAnnotation(fmt_) => write!(f, "formatting <~ {}", fmt_.name()),
             Expr::StructLiteral { type_name, .. } => write!(f, "{} {{ ... }}", type_name),
         }

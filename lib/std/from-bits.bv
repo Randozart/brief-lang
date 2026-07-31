@@ -78,9 +78,9 @@ type String : Bits @/0..127 {
     !> Ptr: _ @/0..63;     // Pointer to UTF-8 data
     !> Len: _ @/64..127;   // Length in bytes
 
-    !> Size: _.# Len;         // Number of bytes
-    !> IsEmpty: _.# Size == 0;
-    At(i)        = _.# Ptr :> LoadU8#(i);   // Read char at index
+    !> Size: _.^Len;         // Number of bytes
+    !> IsEmpty: _.^Len == 0;
+    At(i)        = _.^Ptr :> LoadU8#(i);   // Read char at index
 };
 
 // ─────────────────────────────────────────────────────────────
@@ -95,9 +95,9 @@ type List : Bits @/0..191 {
     !> Len: _ @/64..127;   // Element count
     !> Cap: _ @/128..191;  // Allocated capacity
 
-    !> Size: _.# Len;
-    !> IsEmpty: _.# Size == 0;
-    At(i)        = _.# Ptr :> LoadElem#(i);
+    !> Size: _.^Len;
+    !> IsEmpty: _.^Len == 0;
+    At(i)        = _.^Ptr :> LoadElem#(i);
 
     // 2026-07-18: SVO — inline storage for ≤3 Int elements.
     // Tag bit 0: 0 = heap (existing ptr/len/cap), 1 = inline (packed in state).
@@ -235,12 +235,12 @@ type CString : Bits @/0..63 {
     !> maxbits: 64;       // Just a pointer
 
     // Zero-cost: reads char via pointer arithmetic, no strlen
-    At(i)     = _.# Ptr :> LoadU8#(i);
+    At(i)     = _.^Ptr :> LoadU8#(i);
 
     // O(N) cost: strlen only when Size is explicitly queried
-    !> Size: _.# Ptr :> StrLen#;
+    !> Size: _.^Ptr :> StrLen#;
 
-    !> IsEmpty: _.# Ptr :> LoadU8#(0) == '\0';
+    !> IsEmpty: _.^Ptr :> LoadU8#(0) == '\0';
 };
 
 // ─────────────────────────────────────────────────────────────

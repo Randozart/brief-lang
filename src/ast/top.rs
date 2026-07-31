@@ -905,6 +905,9 @@ pub struct TypeDefBody {
     pub op_bindings: Vec<OperatorBinding>,
     pub props: Vec<PropDef>,
     pub constraints: Vec<Expr>,
+    /// 2026-07-31: obj member declarations (txn/defn) — self-parameterized
+    /// methods on the obj. Populated by parse_obj_like.
+    pub members: Vec<TopLevel>,
     pub span: Option<Span>,
 }
 

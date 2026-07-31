@@ -267,7 +267,7 @@ pub fn eval_symbolic(expr: &Expr, state: &SymbolicState) -> SymbolicValue {
 
         // Derivation and metadata
         Expr::DerivationBlock(_) | Expr::StructLiteral { .. }
-        | Expr::PropertyGet(_)
+        | Expr::Field(_, _) | Expr::Reflect(_, _, _) | Expr::MethodCall(..)
         | Expr::FormattingAnnotation(_) => SymbolicValue::Unknown,
 
         // Pointer dereference

@@ -48,6 +48,18 @@ pub struct TypecheckContext<'a> {
     /// collected; the operand type lives in OperatorDef.params or
     /// OperatorBinding.protocol_variant.
     regular_ops: HashMap<String, Vec<crate::ast::top::OperatorDef>>,
+    /// 2026-07-31: Struct/obj field slots, keyed by type name. Used to
+    /// typecheck `Expr::Field` (`p.name`) and to resolve the receiver type
+    /// for `Expr::MethodCall`.
+    type_slots: HashMap<String, Vec<crate::ast::top::TypeDefSlot>>,
+    /// 2026-07-31: obj member declarations (txn/defn), keyed by type name.
+    /// Populated from obj bodies in check_program; used by MethodCall
+    /// resolution (self-parameterized member dispatch).
+    type_members: HashMap<String, Vec<crate::ast::top::TopLevel>>,
+    /// 2026-07-31: obj declared type-parameter names, keyed by type name
+    /// (e.g. `Stack` → ["T", "N"]). Used to substitute the receiver's concrete
+    /// type args into generic member signatures at call sites.
+    type_params: HashMap<String, Vec<String>>,
     regular_bindings: HashMap<String, Vec<crate::ast::top::OperatorBinding>>,
 }
 
@@ -62,6 +74,9 @@ impl<'a> TypecheckContext<'a> {
             fn_return_types: HashMap::new(),
             regular_ops: HashMap::new(),
             regular_bindings: HashMap::new(),
+            type_slots: HashMap::new(),
+            type_members: HashMap::new(),
+            type_params: HashMap::new(),
         }
     }
 
@@ -368,10 +383,17 @@ pub fn infer_expression(
                 Provenance::Unknown,
             ))
         }
+        // 2026-07-31: Field access: p.name → the receiver's struct slot type.
         Expr::Field(obj, name) => {
             let (obj_ty, obj_prov) = infer_expression(obj, ctx)?;
+            let field_ty = resolve_field_type(&obj_ty, name, ctx).ok_or_else(|| {
+                TypeError::InvalidOperation {
+                    operation: format!("field access '.{}'", name),
+                    type_name: format!("{}", obj_ty),
+                }
+            })?;
             Ok((
-                obj_ty,
+                field_ty,
                 Provenance::FieldAccess {
                     base: Box::new(obj_prov),
                     field: name.clone(),
@@ -449,10 +471,21 @@ pub fn infer_expression(
                 }),
             }
         }
-        Expr::PropertyGet(name) => Err(TypeError::UndefinedVariable {
-            name: name.clone(),
-            available: vec![],
-        }),
+        // 2026-07-31: Reflection: x.^Len / x.^^Size (see resolve_reflect).
+        Expr::Reflect(recv, target, kind) => {
+            let (recv_ty, recv_prov) = infer_expression(recv, ctx)?;
+            let result_ty = resolve_reflect(&recv_ty, target, *kind)?;
+            Ok((result_ty, recv_prov))
+        }
+        // 2026-07-31: Method call: a.m(args) — resolves the member on the
+        // receiver's obj type, binds the receiver as the implicit `self`, and
+        // validates the args against the member's (type-arg-substituted)
+        // parameter list.
+        Expr::MethodCall(recv, name, args, _) => {
+            let (recv_ty, recv_prov) = infer_expression(recv, ctx)?;
+            let result_ty = resolve_method_call(&recv_ty, name, args, ctx)?;
+            Ok((result_ty, recv_prov))
+        }
         Expr::FormattingAnnotation(_) => Ok((Type::void(), Provenance::Unknown)),
         Expr::Match(expr, arms) => infer_match(expr, arms, ctx).map(|ty| (ty, Provenance::Unknown)),
         // 2026-07-19: Plugin-intercept calls are resolved by Front or Mid
@@ -747,7 +780,9 @@ pub fn infer_statement(stmt: &Statement, ctx: &mut TypecheckContext) -> Result<(
             }
             // 2026-07-25: Single-name let: bind name or handle discard (_).
             let inferred = match expr {
-                Some(e) => infer_type_only(e, ctx)?,
+                Some(e) => {
+                    infer_type_only(e, ctx)?
+                }
                 None => Type::int(),
             };
             let resolved = ty.clone().unwrap_or(inferred);
@@ -944,6 +979,11 @@ pub fn check_program(items: &[TopLevel], universe: &TypeUniverse) -> Result<(), 
     // `operators` and type-body `op_bindings`.
     let mut all_regular_ops: HashMap<String, Vec<crate::ast::top::OperatorDef>> = HashMap::new();
     let mut all_regular_bindings: HashMap<String, Vec<crate::ast::top::OperatorBinding>> = HashMap::new();
+    // 2026-07-31: Pre-collect struct/obj field slots and obj member
+    // declarations for Expr::Field / Expr::MethodCall resolution.
+    let mut all_type_slots: HashMap<String, Vec<crate::ast::top::TypeDefSlot>> = HashMap::new();
+    let mut all_type_members: HashMap<String, Vec<TopLevel>> = HashMap::new();
+    let mut all_type_params: HashMap<String, Vec<String>> = HashMap::new();
     for item in items {
         if let TopLevel::TypeDef(td) = item {
             if !td.body.operators.is_empty() {
@@ -952,6 +992,18 @@ pub fn check_program(items: &[TopLevel], universe: &TypeUniverse) -> Result<(), 
             if !td.body.op_bindings.is_empty() {
                 all_regular_bindings.insert(td.name.clone(), td.body.op_bindings.clone());
             }
+            if !td.body.slots.is_empty() {
+                all_type_slots.insert(td.name.clone(), td.body.slots.clone());
+            }
+            if !td.body.members.is_empty() {
+                all_type_members.insert(td.name.clone(), td.body.members.clone());
+            }
+            if !td.type_params.is_empty() {
+                all_type_params.insert(
+                    td.name.clone(),
+                    td.type_params.iter().map(|p| p.name.clone()).collect(),
+                );
+            }
         }
     }
 
@@ -959,6 +1011,7 @@ pub fn check_program(items: &[TopLevel], universe: &TypeUniverse) -> Result<(), 
         if let Err(e) = check_top_level(
             item, universe, &state_bindings, &fn_return_types,
             &all_parse_bindings, &all_type_parents, &all_regular_ops, &all_regular_bindings,
+            &all_type_slots, &all_type_members, &all_type_params,
         ) {
             errors.push(e);
         }
@@ -980,6 +1033,9 @@ fn check_top_level(
     all_type_parents: &HashMap<String, String>,
     all_regular_ops: &HashMap<String, Vec<crate::ast::top::OperatorDef>>,
     all_regular_bindings: &HashMap<String, Vec<crate::ast::top::OperatorBinding>>,
+    all_type_slots: &HashMap<String, Vec<crate::ast::top::TypeDefSlot>>,
+    all_type_members: &HashMap<String, Vec<TopLevel>>,
+    all_type_params: &HashMap<String, Vec<String>>,
 ) -> Result<(), TypeError> {
     let mut ctx = TypecheckContext::new(universe);
     // 2026-07-27: Inject pre-collected parse bindings and type parents.
@@ -990,6 +1046,10 @@ fn check_top_level(
     // 2026-07-31: Inject regular operator declarations for cross-type overloads.
     ctx.regular_ops = all_regular_ops.clone();
     ctx.regular_bindings = all_regular_bindings.clone();
+    // 2026-07-31: Inject struct/obj slots and members for field/method access.
+    ctx.type_slots = all_type_slots.clone();
+    ctx.type_members = all_type_members.clone();
+    ctx.type_params = all_type_params.clone();
     // 2026-07-14: Inject state variable bindings so transactions/defns can reference them.
     for (name, ty) in state_bindings {
         ctx.bindings.insert(name.clone(), ty.clone());
@@ -1017,7 +1077,7 @@ fn check_top_level(
             Ok(())
         }
         // 2026-07-25: Unwrap exports so exported defns are type-checked.
-        TopLevel::Export(e) => check_top_level(&e.inner, universe, state_bindings, fn_return_types, all_parse_bindings, all_type_parents, all_regular_ops, all_regular_bindings),
+        TopLevel::Export(e) => check_top_level(&e.inner, universe, state_bindings, fn_return_types, all_parse_bindings, all_type_parents, all_regular_ops, all_regular_bindings, all_type_slots, all_type_members, all_type_params),
         TopLevel::Transaction(txn) => {
             for (name, ty) in &txn.parameters {
                 ctx.bindings.insert(name.clone(), ty.clone());
@@ -1058,6 +1118,215 @@ impl BinaryOpKind {
 
     fn is_logical(&self) -> bool {
         matches!(self, BinaryOpKind::And | BinaryOpKind::Or)
+    }
+}
+
+/// 2026-07-31: Resolve `p.name` on a struct/obj/tuple receiver.
+/// Numeric field names (`.0`, `.1`) are tuple-element indices.
+fn resolve_field_type(receiver: &Type, field: &str, ctx: &TypecheckContext) -> Option<Type> {
+    if let Type::Tuple(elems) = receiver {
+        return field
+            .parse::<usize>()
+            .ok()
+            .and_then(|i| elems.get(i).cloned());
+    }
+    let type_name = match receiver {
+        Type::Custom(n) => n.as_str(),
+        Type::Applied(n, _) => n.as_str(),
+        _ => return None,
+    };
+    let slots = ctx.type_slots.get(type_name)?;
+    slots
+        .iter()
+        .find(|s| s.name == field)
+        .map(|s| s.ty.clone())
+}
+
+/// 2026-07-31: Reflection table (D1). `^` = runtime, `^^` = compile-time.
+/// A target used with the wrong kind is an error; an unknown target is an
+/// error. `Len`/`Ptr` are runtime; `Size`/`Bytes`/`Alignment`/`Type` are
+/// compile-time (foldable).
+fn resolve_reflect(
+    receiver: &Type,
+    target: &str,
+    kind: ReflectKind,
+) -> Result<Type, TypeError> {
+    let is_compile_time = matches!(kind, ReflectKind::CompileTime);
+    let wrong_kind = |expected: &str| {
+        TypeError::InvalidOperation {
+            operation: format!("reflection target '{}'", target),
+            type_name: format!(
+                "{} is {expected}; use '.{}'",
+                target,
+                if expected == "runtime" { "^" } else { "^^" }
+            ),
+        }
+    };
+    match target {
+        "Len" => {
+            if is_compile_time {
+                return Err(wrong_kind("runtime"));
+            }
+            // Len is meaningful on value-carrying types (String, vectors,
+            // collections); scalars have no length.
+            match receiver {
+                Type::Custom(n) if n == "String" => Ok(Type::int()),
+                Type::Vector(..) | Type::Applied(..) | Type::Custom(_) => Ok(Type::int()),
+                _ => Err(TypeError::InvalidOperation {
+                    operation: format!("reflection target 'Len'"),
+                    type_name: format!("type {} has no runtime length", receiver),
+                }),
+            }
+        }
+        "Ptr" => {
+            if is_compile_time {
+                return Err(wrong_kind("runtime"));
+            }
+            Ok(Type::ptr(receiver.clone()))
+        }
+        "Size" => {
+            if !is_compile_time {
+                return Err(wrong_kind("compile-time"));
+            }
+            Ok(Type::int())
+        }
+        "Bytes" => {
+            if !is_compile_time {
+                return Err(wrong_kind("compile-time"));
+            }
+            Ok(Type::int())
+        }
+        "Alignment" => {
+            if !is_compile_time {
+                return Err(wrong_kind("compile-time"));
+            }
+            Ok(Type::int())
+        }
+        "Type" => {
+            if !is_compile_time {
+                return Err(wrong_kind("compile-time"));
+            }
+            Ok(Type::Custom("Type".into()))
+        }
+        _ => Err(TypeError::InvalidOperation {
+            operation: format!("reflection target '{}'", target),
+            type_name: "unknown reflection target — expected Len, Ptr, Size, Bytes, Alignment, or Type".into(),
+        }),
+    }
+}
+
+/// 2026-07-31: Resolve `a.m(args)` — find the member on the receiver's obj
+/// type, substitute the receiver's type arguments for the obj's type
+/// parameters, validate each arg against the substituted parameter types, and
+/// return the member's (substituted) result type.
+fn resolve_method_call(
+    receiver: &Type,
+    name: &str,
+    args: &[Expr],
+    ctx: &mut TypecheckContext,
+) -> Result<Type, TypeError> {
+    let type_name = match receiver {
+        Type::Custom(n) => n.as_str(),
+        Type::Applied(n, _) => n.as_str(),
+        _ => {
+            return Err(TypeError::InvalidOperation {
+                operation: format!("method call '.{}()'", name),
+                type_name: format!("receiver type '{}' has no methods", receiver),
+            });
+        }
+    };
+    let members = ctx.type_members.get(type_name).ok_or_else(|| {
+        TypeError::InvalidOperation {
+            operation: format!("method call '.{}()'", name),
+            type_name: format!("type '{}' has no obj members", type_name),
+        }
+    })?;
+    let member = members
+        .iter()
+        .find(|m| member_name(m) == name)
+        .ok_or_else(|| TypeError::InvalidOperation {
+            operation: format!("method call '.{}()'", name),
+            type_name: format!("type '{}' has no member '{}'", type_name, name),
+        })?;
+    // Build the type-argument substitution: obj's declared type params → the
+    // receiver's concrete type args.
+    let subst = match receiver {
+        Type::Applied(_, args) => {
+            let obj_type_params = obj_type_params(ctx, type_name);
+            obj_type_params
+                .iter()
+                .cloned()
+                .zip(args.iter().cloned())
+                .collect::<HashMap<_, _>>()
+        }
+        _ => HashMap::new(),
+    };
+    let params = member_params(member);
+    let out = member_output(member);
+    for (i, arg) in args.iter().enumerate() {
+        let arg_ty = infer_type_only(arg, ctx)?;
+        let param_ty = params
+            .get(i)
+            .cloned()
+            .map(|t| substitute_type(&t, &subst))
+            .unwrap_or(Type::int());
+        if arg_ty != param_ty {
+            return Err(TypeError::TypeMismatch {
+                expected: format!("{}", param_ty),
+                found: format!("{}", arg_ty),
+                context: format!("argument {} of '.{}()'", i, name),
+            });
+        }
+    }
+    Ok(out.map(|t| substitute_type(&t, &subst)).unwrap_or(Type::void()))
+}
+
+fn member_name(m: &TopLevel) -> String {
+    match m {
+        TopLevel::Transaction(t) => t.name.clone(),
+        TopLevel::Definition(d) => d.name.clone(),
+        _ => String::new(),
+    }
+}
+
+fn member_params(m: &TopLevel) -> Vec<Type> {
+    match m {
+        TopLevel::Transaction(t) => t.parameters.iter().map(|(_, ty)| ty.clone()).collect(),
+        TopLevel::Definition(d) => d.parameters.iter().map(|(_, ty)| ty.clone()).collect(),
+        _ => Vec::new(),
+    }
+}
+
+fn member_output(m: &TopLevel) -> Option<Type> {
+    match m {
+        TopLevel::Transaction(t) => t.output_type.as_ref().and_then(|o| o.all_types().into_iter().next()),
+        TopLevel::Definition(d) => d.output_type.as_ref().and_then(|o| o.all_types().into_iter().next()),
+        _ => None,
+    }
+}
+
+fn obj_type_params(ctx: &TypecheckContext, type_name: &str) -> Vec<String> {
+    ctx.type_params
+        .get(type_name)
+        .cloned()
+        .unwrap_or_default()
+}
+
+/// 2026-07-31: Substitute a type's generic parameters. `Type::Custom("T")`
+/// names matching a substitution key become the mapped concrete type.
+fn substitute_type(ty: &Type, subst: &HashMap<String, Type>) -> Type {
+    match ty {
+        Type::Custom(n) => subst.get(n).cloned().unwrap_or_else(|| ty.clone()),
+        Type::Applied(n, args) => {
+            let new_args = args.iter().map(|a| substitute_type(a, subst)).collect();
+            Type::Applied(n.clone(), new_args)
+        }
+        Type::Vector(inner, dims) => Type::Vector(
+            Box::new(substitute_type(inner, subst)),
+            dims.clone(),
+        ),
+        Type::Tuple(elems) => Type::Tuple(elems.iter().map(|e| substitute_type(e, subst)).collect()),
+        _ => ty.clone(),
     }
 }
 
@@ -1167,5 +1436,117 @@ node t [count < 5][count == 5] {
             "expected an implicit-coercion error, got {:?}",
             err
         );
+    }
+    #[test]
+    fn field_access_on_non_struct_errors() {
+        let src = r#"
+let x: Int = 5;
+node probe [true][true] {
+    let n: Int = x.age;
+    term;
+};
+"#;
+        let e = check(src);
+        assert!(e.is_err(), "expected field-access error, got: {:?}", e);
+    }
+
+    #[test]
+    fn field_access_on_obj_resolves() {
+        let src = r#"
+obj Person { name: String; age: Int; }
+let p: Person = Person("Alice", 30);
+node probe [true][true] {
+    let n: String = p.name;
+    let a: Int = p.age;
+    term;
+};
+"#;
+        let e = check(src);
+        assert!(e.is_ok(), "expected OK, got: {:?}", e);
+    }
+
+    #[test]
+    fn reflect_kind_mismatch_errors() {
+        let src = r#"
+let x: Int = 5;
+node probe [true][true] {
+    let s: Int = x.^Size;
+    term;
+};
+"#;
+        let e = check(src);
+        assert!(e.is_err(), "expected reflection kind-mismatch error, got: {:?}", e);
+    }
+
+    #[test]
+    fn reflect_compile_time_resolves() {
+        let src = r#"
+let items: Int[8] = 0;
+node probe [items.^^Size > 0][items == @items] {
+    let sz: Int = items.^^Size;
+    term;
+};
+"#;
+        let e = check(src);
+        assert!(e.is_ok(), "expected OK, got: {:?}", e);
+    }
+    #[test]
+    fn method_call_arg_mismatch_errors() {
+        let src = r#"
+obj Stack {
+    data: Int[8];
+    len: Int;
+    txn push(val: Int) [len < 8][len <= 8] {
+        data[len] = val;
+        len = len + 1;
+        term;
+    };
+}
+let st: Stack = Stack();
+node probe [true][true] {
+    st.push("hello");
+    term;
+};
+"#;
+        let e = check(src);
+        assert!(e.is_err(), "expected method-arg mismatch error, got: {:?}", e);
+    }
+
+    #[test]
+    fn method_call_unknown_member_errors() {
+        let src = r#"
+obj Stack { len: Int; }
+let st: Stack = Stack();
+node probe [true][true] {
+    st.pop();
+    term;
+};
+"#;
+        let e = check(src);
+        assert!(e.is_err(), "expected unknown-method error, got: {:?}", e);
+    }
+
+    #[test]
+    fn method_call_on_obj_resolves() {
+        let src = r#"
+obj Stack {
+    data: Int[8];
+    len: Int;
+    txn push(val: Int) [len < 8][len <= 8] {
+        data[len] = val;
+        len = len + 1;
+        term;
+    };
+    defn size() -> Int { term len; };
+}
+let st: Stack = Stack();
+node probe [true][true] {
+    st.push(5);
+    let n: Int = st.size();
+    term;
+};
+"#;
+        let e = check(src);
+        assert!(e.is_ok(), "expected OK, got: {:?}", e);
     }
 }

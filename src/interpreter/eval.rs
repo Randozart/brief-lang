@@ -111,8 +111,22 @@ pub fn eval_expr(
             Ok(Value::Ref(Box::new(val)))
         }
 
-        // ── Property get ─────────────────────────────────────────
-        Expr::PropertyGet(_) => Ok(Value::Void),
+        // ── Field / reflection / method ─────────────────────────
+        Expr::Field(recv, name) => {
+            let _ = (recv, name);
+            Ok(Value::Void)
+        }
+        Expr::Reflect(recv, name, _kind) => {
+            let _ = (recv, name);
+            Ok(Value::Void)
+        }
+        Expr::MethodCall(recv, _name, args, _) => {
+            eval_expr(recv, heap, bindings)?;
+            for a in args {
+                eval_expr(a, heap, bindings)?;
+            }
+            Ok(Value::Void)
+        }
 
         // ── Formatting annotation ────────────────────────────────
         Expr::FormattingAnnotation(_) => Ok(Value::Void),

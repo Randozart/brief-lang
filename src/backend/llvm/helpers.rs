@@ -40,7 +40,7 @@ impl LlvmBackend {
             | Expr::Bool(_)
             | Expr::Float(_)
             | Expr::Quoted(_) | Expr::TaggedQuotedLiteral(_, _)
-            | Expr::PropertyGet(_) | Expr::StructLiteral { .. }
+            | Expr::StructLiteral { .. }
             | Expr::FormattingAnnotation(_)
             | Expr::TaggedLiteral(_, _) => expr.clone(),
 
@@ -66,6 +66,19 @@ impl LlvmBackend {
             Expr::Field(obj, field) => Expr::Field(
                 Box::new(Self::rewrite_cell_identifiers(obj, cell_name)),
                 field.clone(),
+            ),
+            Expr::Reflect(recv, target, kind) => Expr::Reflect(
+                Box::new(Self::rewrite_cell_identifiers(recv, cell_name)),
+                target.clone(),
+                *kind,
+            ),
+            Expr::MethodCall(recv, name, args, id) => Expr::MethodCall(
+                Box::new(Self::rewrite_cell_identifiers(recv, cell_name)),
+                name.clone(),
+                args.iter()
+                    .map(|a| Self::rewrite_cell_identifiers(a, cell_name))
+                    .collect(),
+                *id,
             ),
             Expr::Index(obj, idx) => Expr::Index(
                 Box::new(Self::rewrite_cell_identifiers(obj, cell_name)),

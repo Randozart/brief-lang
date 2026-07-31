@@ -607,6 +607,7 @@ fn test_type_with_slots_populates_struct_types() {
                 operators: vec![], op_bindings: vec![],
             props: vec![],
                 constraints: vec![],
+                members: vec![],
                 span: None,
             },
             span: None,
