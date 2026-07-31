@@ -66,18 +66,26 @@ pub(crate) fn float_to_llvm_str(f: f64, llvm_ty: &str) -> String {
 /// Recursively evaluate a constant expression tree to a concrete f64.
 /// Used to fold `const m0: Float = 4.0 * pi * pi` into a literal before
 /// global emission, avoiding the `constant float 0` bug.
-fn try_eval_cfloat(expr: &Expr, constants: &HashMap<String, (Type, Expr)>) -> Option<f64> {
+///
+/// 2026-07-31: Phase 3 (§8.4-D4) — float const resolution uses a protocol
+/// membership check (`is_protocol_member(ty, "#Float")` via the casting graph,
+/// supplied by the caller) instead of matching the type name.
+fn try_eval_cfloat(
+    expr: &Expr,
+    constants: &HashMap<String, (Type, Expr)>,
+    is_float: &impl Fn(&Type) -> bool,
+) -> Option<f64> {
     match expr {
         Expr::Float(f) => Some(*f),
         Expr::Identifier(name) => {
             match constants.get(name) {
-                Some((Type::Custom(__t), inner)) if __t == "Float" || __t == "Float64" => try_eval_cfloat(inner, constants),
+                Some((ty, inner)) if is_float(ty) => try_eval_cfloat(inner, constants, is_float),
                 _ => None,
             }
         }
         Expr::BinaryOp(kind, l, r) => {
-            let lv = try_eval_cfloat(l, constants)?;
-            let rv = try_eval_cfloat(r, constants)?;
+            let lv = try_eval_cfloat(l, constants, is_float)?;
+            let rv = try_eval_cfloat(r, constants, is_float)?;
             match kind {
                 crate::ast::BinaryOpKind::Add => Some(lv + rv),
                 crate::ast::BinaryOpKind::Sub => Some(lv - rv),
@@ -88,7 +96,7 @@ fn try_eval_cfloat(expr: &Expr, constants: &HashMap<String, (Type, Expr)>) -> Op
         }
         Expr::UnaryOp(kind, inner) => {
             if matches!(kind, crate::ast::UnaryOpKind::Neg) {
-                Some(-try_eval_cfloat(inner, constants)?)
+                Some(-try_eval_cfloat(inner, constants, is_float)?)
             } else {
                 None
             }
@@ -2054,7 +2062,9 @@ impl LlvmBackend {
         for (name, (ty, expr)) in consts_snapshot {
             // 2026-07-13: Expr::Float64 removed — all floats use Expr::Float.
             if ty == Type::float() || ty == Type::float64() {
-                if let Some(val) = try_eval_cfloat(&expr, &self.ctx.constants) {
+                // 2026-07-31: Phase 3 (§8.4-D4) — float const resolution via
+                // protocol membership instead of name matching.
+                if let Some(val) = try_eval_cfloat(&expr, &self.ctx.constants, &|t| self.is_protocol_member(t, "#Float")) {
                     self.ctx.constants.insert(name, (ty.clone(), Expr::Float(val)));
                 }
             }

@@ -4,11 +4,19 @@ use std::fmt::Write;
 // and Brief internal types (Bool zext/trunc, String ptr extract, etc.).
 
 use crate::ast::Type;
+use crate::type_universe::TypeUniverse;
 
 /// Marshal a C parameter value into a Brief internal value.
 /// Bool: trunc i8 to i1
-pub fn marshal_param_to_brief(param_ty: &Type, param_reg: &str) -> String {
-    if is_bool_type(param_ty) {
+///
+/// 2026-07-31: Phase 3 (§8.4-D9) — Bool detection via the `Cast.#Bool`
+/// protocol property (universe) instead of the type name.
+pub fn marshal_param_to_brief(
+    param_ty: &Type,
+    param_reg: &str,
+    universe: &Option<TypeUniverse>,
+) -> String {
+    if is_bool_type(param_ty, universe) {
         format!("trunc i8 %{} to i1", param_reg)
     } else {
         format!("%{}", param_reg)
@@ -18,8 +26,12 @@ pub fn marshal_param_to_brief(param_ty: &Type, param_reg: &str) -> String {
 /// Marshal a Brief return value to C calling convention.
 /// Bool: zext i1 to i8
 /// String: extract .ptr field as ptr
-pub fn marshal_brief_to_return(ret_ty: &Type, ret_reg: &str) -> String {
-    if is_bool_type(ret_ty) {
+pub fn marshal_brief_to_return(
+    ret_ty: &Type,
+    ret_reg: &str,
+    universe: &Option<TypeUniverse>,
+) -> String {
+    if is_bool_type(ret_ty, universe) {
         format!("zext i1 %{} to i8", ret_reg)
     } else {
         format!("%{}", ret_reg)
@@ -33,6 +45,7 @@ pub fn marshal_export_wrapper(
     export_name: &str,
     param_tys: &[Type],
     ret_ty: &Option<Type>,
+    universe: &Option<TypeUniverse>,
 ) -> String {
     let mut out = String::new();
     // Declare the wrapper with C calling convention
@@ -66,7 +79,7 @@ pub fn marshal_export_wrapper(
         params_llvm
             .iter()
             .enumerate()
-            .map(|(i, t)| marshal_param_to_brief(&param_tys[i], &format!("p{}", i)))
+            .map(|(i, t)| marshal_param_to_brief(&param_tys[i], &format!("p{}", i), universe))
             .collect::<Vec<_>>()
             .join(", ")
     )
@@ -78,10 +91,12 @@ pub fn marshal_export_wrapper(
 }
 
 /// Check if a type is Bool (i1 in LLVM, i8 in C ABI).
-fn is_bool_type(ty: &Type) -> bool {
-    match ty {
-        Type::Custom(name) => name == "Bool",
-        Type::Applied(name, _) => name == "Bool",
-        _ => false,
-    }
+///
+/// 2026-07-31: Phase 3 (§8.4-D9) — protocol membership via the `Cast.#Bool`
+/// property instead of matching the type name. Mirrors the casting graph's
+/// category resolution (Bool primordial seeds Cast.#Bool).
+fn is_bool_type(ty: &Type, universe: &Option<TypeUniverse>) -> bool {
+    ty.universe_key()
+        .and_then(|k| universe.as_ref().and_then(|u| u.get(k)))
+        .map_or(false, |rt| rt.properties.contains_key("Cast.#Bool"))
 }

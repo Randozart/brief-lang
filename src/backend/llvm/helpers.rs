@@ -590,15 +590,12 @@ impl LlvmBackend {
                 if let Some(crate::ast::PropertyValue::String(s)) = rt.properties.get("llvm_type") {
                     return s.clone();
                 }
-                // Fallback: use ALU + byte-width for types that bypassed normalizer
-                let is_float = rt
-                    .properties
-                    .get("alu")
-                    .and_then(|pv| match pv {
-                        crate::ast::PropertyValue::Identifier(s) => Some(s.as_str() == "Float"),
-                        _ => None,
-                    })
-                    .unwrap_or(false);
+                // Fallback: use protocol membership + byte-width for types that
+                // bypassed the normalizer.
+                // 2026-07-31: Phase 3 (§8.4-D10) — float detection via
+                // is_protocol_member(ty, "#Float") instead of the legacy `alu`
+                // property string match.
+                let is_float = self.is_protocol_member(ty, "#Float");
                 if is_float && rt.bytes <= 4 {
                     return "float".to_string();
                 }
@@ -1613,22 +1610,10 @@ impl LlvmBackend {
         implementation: &Expr,
     ) -> TypedRegister {
         let v = self.fun.next_reg();
-        // 2026-07-17: Read ALU property instead of primitive()
-        let is_native = self
-            .ctx
-            .type_universe
-            .as_ref()
-            .and_then(|u| a.ty.universe_key().and_then(|k| u.get(k)))
-            .map(|r| {
-                r.properties
-                    .get("alu")
-                    .and_then(|pv| match pv {
-                        crate::ast::PropertyValue::Identifier(s) => Some(s.as_str() == "Float"),
-                        _ => None,
-                    })
-                    .unwrap_or(false)
-            })
-            .unwrap_or(false);
+        // 2026-07-31: Phase 3 (§8.4-D10) — native-float detection via protocol
+        // membership (is_protocol_member(ty, "#Float")) instead of the legacy
+        // `alu` property string match.
+        let is_native = self.is_protocol_member(&a.ty, "#Float");
         let (op_a, op_b) = if is_native {
             (
                 self.ensure_float_reg(out, indent, a),
