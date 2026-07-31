@@ -20,6 +20,7 @@ fn make_txn(name: &str, modifiers: Vec<Annotation>) -> TopLevel {
             post_condition: Expr::Bool(true),
             is_entry: false,
             watchdog: None,
+            explicit: false,
             span: None,
         },
         body: vec![
@@ -48,6 +49,7 @@ fn default_contract() -> Contract {
         post_condition: Expr::Bool(true),
         is_entry: false,
         watchdog: None,
+        explicit: false,
         span: None,
     }
 }
@@ -350,6 +352,7 @@ fn test_no_range_lower_bound_defaults_to_i64_min() {
                 post_condition: Expr::Bool(true),
                 is_entry: false,
                 watchdog: None,
+                explicit: false,
                 span: None,
             },
             body: vec![Statement::Term(None)],
@@ -395,6 +398,7 @@ fn test_binop_no_nuw_nsw() {
                 post_condition: Expr::Bool(true),
                 is_entry: false,
                 watchdog: None,
+                explicit: false,
                 span: None,
             },
             body: vec![
@@ -847,6 +851,7 @@ fn make_wake_program_no_triggers() -> Vec<TopLevel> {
                 post_condition: Expr::Bool(true),
                 is_entry: false,
                 watchdog: None,
+                explicit: false,
                 span: None,
             },
             body: vec![
@@ -925,6 +930,7 @@ fn make_exit_program(exit_expr: Option<Expr>, is_wake: bool) -> Vec<TopLevel> {
             post_condition: Expr::Bool(true),
             is_entry: false,
             watchdog: None,
+            explicit: false,
             span: None,
         },
         body: vec![
@@ -1082,6 +1088,7 @@ fn make_slp_float_program(n_floats: usize, cross_body: Vec<Statement>, precondit
             post_condition: Expr::Identifier("count".to_string()),
             is_entry: false,
             watchdog: None,
+            explicit: false,
             span: None,
         },
         body: cross_body,
@@ -1673,6 +1680,7 @@ fn make_chain_program(
                 post_condition: Expr::Bool(true),
                 is_entry: false,
                 watchdog: None,
+                explicit: false,
                 span: None,
             },
             body,
@@ -2553,6 +2561,7 @@ fn test_trg_deref_error_flag() {
                 post_condition: Expr::Bool(true),
                 is_entry: false,
                 watchdog: None,
+                explicit: false,
                 span: None,
             },
             body: vec![Statement::Term(None)],
@@ -2598,6 +2607,7 @@ fn test_trg_deref_warn_default_no_null_check() {
                 post_condition: Expr::Bool(true),
                 is_entry: false,
                 watchdog: None,
+                explicit: false,
                 span: None,
             },
             body: vec![Statement::Term(None)],
@@ -2916,6 +2926,7 @@ fn test_modulo_partition_drives_rotated_loop() {
                     Box::new(Expr::Identifier("total".to_string()))),
                 is_entry: false,
                 watchdog: None,
+                explicit: false,
                 span: None,
             },
             body: vec![
@@ -3034,6 +3045,7 @@ fn test_density_consumer_downgrades_dense_txn() {
                 Box::new(Expr::Identifier("total".to_string()))),
             is_entry: false,
             watchdog: None,
+            explicit: false,
             span: None,
         },
         body,
@@ -3108,7 +3120,7 @@ fn test_batch_loop_dispatch_post_increment() {
             post_condition: Expr::BinaryOp(BinaryOpKind::Eq,
                 Box::new(Expr::Identifier("count".into())),
                 Box::new(Expr::Identifier("total".into()))),
-            is_entry: false, watchdog: None, span: None,
+            is_entry: false, watchdog: None, explicit: false, span: None,
         },
         body,
         metadata: HashMap::new(), derivation: None, modifiers: vec![],
@@ -3147,7 +3159,7 @@ fn test_batch_loop_rejects_pre_increment() {
                 post_condition: Expr::BinaryOp(BinaryOpKind::Eq,
                     Box::new(Expr::Identifier("count".into())),
                     Box::new(Expr::Identifier("total".into()))),
-                is_entry: false, watchdog: None, span: None,
+                is_entry: false, watchdog: None, explicit: false, span: None,
             },
             body: vec![
                 // Guard BEFORE the increment (pre-increment semantics).

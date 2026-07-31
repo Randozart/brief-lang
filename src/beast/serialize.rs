@@ -336,6 +336,7 @@ mod tests {
             post_condition: Expr::Bool(true),
             is_entry: true,
             watchdog: None,
+            explicit: false,
             span: None,
         };
         let items = vec![

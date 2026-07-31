@@ -21,12 +21,18 @@ pub fn prove_contract(
     pre: &Expr,
     post: &Expr,
     params: &[(String, Type)],
+    explicit: bool,
 ) -> Result<(), Vec<ProofError>> {
     let pre_is_true = matches!(pre, Expr::Bool(true));
     let post_is_true = matches!(post, Expr::Bool(true));
 
-    if pre_is_true && post_is_true {
-        return Ok(());
+    // 2026-07-31 (Phase 4): A contract that constrains nothing provides no
+    // optimization leverage. `[true][true]` and functionally-always-true
+    // contracts (`0 == 0`, `x == x`) are rejected at proof time with the
+    // `[[post]`/`[pre]]` sugar hint — but only when the contract was written
+    // explicitly (a no-contract default is not a tautology).
+    if let Some(tautology) = detect_tautology(pre, post, explicit) {
+        return Err(vec![tautology]);
     }
 
     let condition = if pre_is_true {
@@ -245,6 +251,42 @@ pub fn split_and(expr: &Expr) -> Vec<&Expr> {
     }
 }
 
+/// 2026-07-31 (Phase 4): Tautology-only gate for txn/node convergence
+/// contracts. Unlike `prove_contract` — whose pre/post satisfiability check is
+/// designed for simultaneous protocol invariants — txn/node pre/post describe
+/// BEFORE/AFTER states, so only vacuous-true contracts are rejected here.
+pub fn detect_tautology(pre: &Expr, post: &Expr, explicit: bool) -> Option<ProofError> {
+    if !explicit {
+        return None;
+    }
+    let pre_true = matches!(pre, Expr::Bool(true));
+    let post_true = matches!(post, Expr::Bool(true));
+    if pre_true && post_true {
+        return Some(ProofError::UnreachableState {
+            transaction: "<contract>".into(),
+            precondition: "[true][true] is a useless tautology".into(),
+            reason: "a contract with both sides always-true constrains nothing; \
+                     use `[[post]` (postcondition-only) or `[pre]]` (precondition-only) \
+                     sugar, or write a contract that constrains behavior"
+                .into(),
+            proof_trace: vec![],
+            span: crate::errors::Span::dummy(),
+        });
+    }
+    if is_vacuously_true(pre) && is_vacuously_true(post) {
+        return Some(ProofError::UnreachableState {
+            transaction: "<contract>".into(),
+            precondition: "contract is functionally always-true".into(),
+            reason: "a precondition and postcondition that are true for every input \
+                     constrain nothing; write contracts that pin down behavior"
+                .into(),
+            proof_trace: vec![],
+            span: crate::errors::Span::dummy(),
+        });
+    }
+    None
+}
+
 /// Check if two expressions are jointly satisfiable.
 pub fn check_satisfiable(a: &Expr, b: &Expr) -> bool {
     // Simplified: returns true unless there's a direct contradiction.
@@ -253,6 +295,66 @@ pub fn check_satisfiable(a: &Expr, b: &Expr) -> bool {
         (Expr::Bool(false), _) | (_, Expr::Bool(false)) => false,
         (Expr::Decimal(a), Expr::Decimal(b)) if a != b => false,
         _ => true,
+    }
+}
+
+/// 2026-07-31 (Phase 4): Is an expression vacuously true — true for every
+/// input, providing no constraint and hence no optimization leverage?
+/// Detects `true`, constant equalities (`0 == 0`), self-comparisons
+/// (`x == x`, `x >= x`), and trivially-foldable constant relations.
+pub fn is_vacuously_true(expr: &Expr) -> bool {
+    match expr {
+        Expr::Bool(true) => true,
+        Expr::BinaryOp(kind, l, r) => {
+            use crate::ast::BinaryOpKind::*;
+            match kind {
+                Eq => match (const_value(l), const_value(r)) {
+                    (Some(a), Some(b)) => a == b,
+                    _ => expr_eq(l, r),
+                },
+                Le | Ge => match (const_value(l), const_value(r)) {
+                    (Some(a), Some(b)) => a == b,
+                    _ => expr_eq(l, r),
+                },
+                Neq | Lt | Gt => false,
+                And | Or => is_vacuously_true(l) && is_vacuously_true(r),
+                _ => false,
+            }
+        }
+        _ => false,
+    }
+}
+
+/// Fold a constant expression to its integer value, if it is fully constant.
+fn const_value(expr: &Expr) -> Option<i64> {
+    match expr {
+        Expr::Decimal(n) => Some(*n),
+        Expr::BinaryOp(kind, l, r) => {
+            use crate::ast::BinaryOpKind::*;
+            let (a, b) = (const_value(l)?, const_value(r)?);
+            match kind {
+                Add => Some(a.wrapping_add(b)),
+                Sub => Some(a.wrapping_sub(b)),
+                Mul => Some(a.wrapping_mul(b)),
+                Div if b != 0 => Some(a.wrapping_div(b)),
+                Mod if b != 0 => Some(a.wrapping_rem(b)),
+                _ => None,
+            }
+        }
+        _ => None,
+    }
+}
+
+/// Structural equality of two expressions (`x == x`, `a + 1 == a + 1`).
+fn expr_eq(l: &Expr, r: &Expr) -> bool {
+    match (l, r) {
+        (Expr::Identifier(a), Expr::Identifier(b)) => a == b,
+        (Expr::Decimal(a), Expr::Decimal(b)) => a == b,
+        (Expr::Bool(a), Expr::Bool(b)) => a == b,
+        (Expr::BinaryOp(ka, la, ra), Expr::BinaryOp(kb, lb, rb)) => {
+            ka == kb && expr_eq(la, lb) && expr_eq(ra, rb)
+        }
+        _ => false,
     }
 }
 
@@ -343,5 +445,58 @@ mod tests {
     fn test_check_convergence() {
         let body = vec![Statement::Expression(Expr::Decimal(0))];
         assert!(check_convergence(&body, &Expr::Bool(true)).is_ok());
+    }
+
+    // ── 2026-07-31 (Phase 4): Tautology detection ──────────────────
+
+    #[test]
+    fn test_tautology_true_true() {
+        let err = detect_tautology(&Expr::Bool(true), &Expr::Bool(true), true);
+        assert!(err.is_some(), "[true][true] must be a tautology");
+    }
+
+    #[test]
+    fn test_tautology_not_flagged_when_implicit() {
+        let err = detect_tautology(&Expr::Bool(true), &Expr::Bool(true), false);
+        assert!(err.is_none(), "no-contract default is not a tautology");
+    }
+
+    #[test]
+    fn test_tautology_constant_equality() {
+        let zero = Expr::Decimal(0);
+        let eq = Expr::BinaryOp(
+            crate::ast::BinaryOpKind::Eq,
+            Box::new(zero.clone()),
+            Box::new(zero),
+        );
+        let err = detect_tautology(&eq, &eq, true);
+        assert!(err.is_some(), "0 == 0 must be a tautology");
+    }
+
+    #[test]
+    fn test_tautology_self_comparison() {
+        let x = Expr::Identifier("x".into());
+        let eq = Expr::BinaryOp(
+            crate::ast::BinaryOpKind::Eq,
+            Box::new(x.clone()),
+            Box::new(x),
+        );
+        assert!(is_vacuously_true(&eq), "x == x is vacuously true");
+    }
+
+    #[test]
+    fn test_real_contract_not_tautology() {
+        let pre = Expr::BinaryOp(
+            crate::ast::BinaryOpKind::Lt,
+            Box::new(Expr::Identifier("count".into())),
+            Box::new(Expr::Identifier("total".into())),
+        );
+        let post = Expr::BinaryOp(
+            crate::ast::BinaryOpKind::Eq,
+            Box::new(Expr::Identifier("count".into())),
+            Box::new(Expr::Identifier("total".into())),
+        );
+        let err = detect_tautology(&pre, &post, true);
+        assert!(err.is_none(), "[count < total][count == total] is a real contract");
     }
 }

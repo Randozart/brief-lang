@@ -183,7 +183,7 @@ fn parse_definition(parts: &[SExpr]) -> Result<Definition, String> {
     let mut params = Vec::new();
     let mut outputs = Vec::new();
     let mut contract = Contract { pre_condition: Expr::Bool(true), post_condition: Expr::Bool(true),
-        is_entry: false, watchdog: None, span: None };
+        is_entry: false, watchdog: None, span: None, explicit: false };
     let mut body = Vec::new();
     let mut metadata = HashMap::new();
     let mut i = 2;
@@ -220,7 +220,7 @@ fn parse_transaction(parts: &[SExpr]) -> Result<Transaction, String> {
     let name = tag(parts, 1)?.to_string();
     let mut params = Vec::new();
     let mut contract = Contract { pre_condition: Expr::Bool(true), post_condition: Expr::Bool(true),
-        is_entry: false, watchdog: None, span: None };
+        is_entry: false, watchdog: None, span: None, explicit: false };
     let mut body = Vec::new();
     let mut metadata = HashMap::new();
     let mut is_reactive = false;
@@ -280,7 +280,7 @@ fn parse_contract(expr: &SExpr) -> Result<Contract, String> {
             _ => { i += 1; }
         }
     }
-    Ok(Contract { pre_condition: pre, post_condition: post, is_entry, watchdog: None, span: None })
+    Ok(Contract { pre_condition: pre, post_condition: post, is_entry, watchdog: None, span: None, explicit: false })
 }
 
 fn parse_statedecl(parts: &[SExpr]) -> Result<TopLevel, String> {

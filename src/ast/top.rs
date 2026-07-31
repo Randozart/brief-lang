@@ -139,6 +139,10 @@ pub struct Contract {
     pub is_entry: bool,
     pub watchdog: Option<WatchdogSpec>,
     pub span: Option<Span>,
+    /// 2026-07-31: Whether the contract was written explicitly in source.
+    /// A defn/txn with no brackets has a default `[true][true]` — that is NOT
+    /// a tautology; only an explicit `[true][true]` is rejected at proof time.
+    pub explicit: bool,
 }
 
 impl Contract {
@@ -149,6 +153,7 @@ impl Contract {
             is_entry: false,
             watchdog: None,
             span: None,
+            explicit: false,
         }
     }
 }

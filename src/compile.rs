@@ -436,7 +436,7 @@ pub fn compile_source(file_path: &str, source: &str, opts: &BuildOptions) -> Res
                 let pre = &contract.pre_condition;
                 let post = &contract.post_condition;
                 let params = vec![("Self".to_string(), brief_compiler::ast::Type::int())];
-                if let Err(errs) = brief_compiler::proof_engine::prove_contract(pre, post, &params) {
+                if let Err(errs) = brief_compiler::proof_engine::prove_contract(pre, post, &params, contract.explicit) {
                     return Err(format!("protocol contract violation in '{}': {:?}", pd.name, errs));
                 }
             }
@@ -455,6 +455,32 @@ pub fn compile_source(file_path: &str, source: &str, opts: &BuildOptions) -> Res
     // 2026-07-25: Verify every frgn?/frgn!/frgn?! call is guarded by fn?.
     brief_compiler::analysis::frgn_guard::check_frgn_guards(&items)
         .map_err(|e| format!("frgn guard error:\n{}", e))?;
+
+    // ── Tautology check (Phase 4) ─────────────────────────────────────
+    // 2026-07-31: Reject functionally-always-true contracts at proof time.
+    // `[true][true]` and `0 == 0` constrain nothing and provide no
+    // optimization leverage. Parser stays permissive; proof is the gate.
+    for item in &items {
+        let contract: Option<&brief_compiler::ast::Contract> = match item {
+            brief_compiler::ast::TopLevel::Transaction(t) => Some(&t.contract),
+            brief_compiler::ast::TopLevel::Definition(d) => Some(&d.contract),
+            _ => None,
+        };
+        if let Some(c) = contract {
+            if let Some(err) = brief_compiler::proof_engine::detect_tautology(
+                &c.pre_condition,
+                &c.post_condition,
+                c.explicit,
+            ) {
+                let name = match item {
+                    brief_compiler::ast::TopLevel::Transaction(t) => t.name.clone(),
+                    brief_compiler::ast::TopLevel::Definition(d) => d.name.clone(),
+                    _ => "<unknown>".into(),
+                };
+                return Err(format!("tautological contract on '{}': {:?}", name, err));
+            }
+        }
+    }
 
     // ── Protocol round-trip verification ──────────────────────────────
     brief_compiler::protocol_verify::verify_roundtrips(&items, &universe)?;

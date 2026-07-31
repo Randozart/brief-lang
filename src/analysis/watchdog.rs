@@ -425,7 +425,7 @@ mod tests {
             parameters: vec![],
             output_type: None,
             outputs: vec![],
-            contract: Contract { pre_condition: pre, post_condition: post, is_entry: false, watchdog, span: None },
+            contract: Contract { pre_condition: pre, post_condition: post, is_entry: false, watchdog, span: None, explicit: false },
             body,
             metadata: HashMap::new(),
             derivation: None,
@@ -639,6 +639,7 @@ mod tests {
             ),
             is_entry: false,
             watchdog: None,
+            explicit: false,
             span: None,
         };
         assert!(check_convergent_loop(&contract));
@@ -648,6 +649,7 @@ mod tests {
             post_condition: Expr::Bool(true),
             is_entry: false,
             watchdog: None,
+            explicit: false,
             span: None,
         };
         assert!(!check_convergent_loop(&contract_flat));

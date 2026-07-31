@@ -1415,6 +1415,7 @@ mod tests {
                 post_condition: Expr::Bool(true),
                 is_entry: false,
                 watchdog: None,
+                explicit: false,
                 span: None,
             },
             body: body.clone(),
@@ -1459,6 +1460,7 @@ mod tests {
                 post_condition: Expr::Bool(true),
                 is_entry: false,
                 watchdog: None,
+                explicit: false,
                 span: None,
             },
             body: body_a,
@@ -1497,6 +1499,7 @@ mod tests {
                 post_condition: Expr::Bool(true),
                 is_entry: false,
                 watchdog: None,
+                explicit: false,
                 span: None,
             },
             body,
@@ -1531,6 +1534,7 @@ mod tests {
                     post_condition: Expr::Bool(true),
                     is_entry: false,
                     watchdog: None,
+                    explicit: false,
                     span: None,
                 },
                 body: vec![Statement::Assign(
@@ -1721,6 +1725,7 @@ mod tests {
                     post_condition: Expr::Bool(true),
                     is_entry: false,
                     watchdog: None,
+                    explicit: false,
                     span: None,
                 },
                 body: vec![
@@ -1762,6 +1767,7 @@ mod tests {
                     post_condition: Expr::Bool(true),
                     is_entry: false,
                     watchdog: None,
+                    explicit: false,
                     span: None,
                 },
                 body: vec![

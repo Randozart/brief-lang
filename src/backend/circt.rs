@@ -792,7 +792,7 @@ mod tests {
             parameters: vec![],
             output_type: None,
             outputs: vec![],
-            contract: Contract { pre_condition: pre, post_condition: post, is_entry: false, watchdog: None, span: None },
+            contract: Contract { pre_condition: pre, post_condition: post, is_entry: false, watchdog: None, explicit: false, span: None },
             body,
             metadata: HashMap::new(),
             derivation: None,

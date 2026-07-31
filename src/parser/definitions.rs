@@ -869,6 +869,9 @@ impl<'a> Parser<'a> {
         let mut pre = Expr::Bool(true);
         let mut post = Expr::Bool(true);
         let mut is_entry = false;
+        // 2026-07-31: true once any `[` was consumed — distinguishes an
+        // explicit contract from the no-contract default `[true][true]`.
+        let mut contract_saw_bracket = false;
         // Check for [#]
         if self.check(&Token::LBracket) {
             // Peek inside brackets for #
@@ -879,6 +882,7 @@ impl<'a> Parser<'a> {
             self.pos = saved; // restore
 
             if is_entry_syntax {
+                contract_saw_bracket = true;
                 self.pos += 1; // consume LBracket
                 self.pos += 1; // consume Identifier("#")
                 self.expect(Token::RBracket)?;
@@ -893,15 +897,18 @@ impl<'a> Parser<'a> {
                     is_entry,
                     watchdog: None,
                     span: None,
+                    explicit: true,
                 });
             }
         }
         // Parse: [pre] if present
         if self.check(&Token::LBracket) {
+            contract_saw_bracket = true;
             pre = self.parse_single_contract_condition()?;
         }
         // Parse: [post] if present
         if self.check(&Token::LBracket) {
+            contract_saw_bracket = true;
             post = self.parse_single_contract_condition()?;
         }
         // 2026-07-31 (Phase 3): Watchdog — optional `?[cond]` or required
@@ -909,6 +916,7 @@ impl<'a> Parser<'a> {
         let watchdog = if self.check(&Token::Question) || self.check(&Token::Not) {
             let is_required = matches!(self.peek(), Some(Token::Not));
             self.pos += 1; // consume '?' or '!'
+            contract_saw_bracket = true;
             self.expect(Token::LBracket)?;
             let cond = self.parse_expression()?;
             // 2026-07-31: Optional duration unit: `?[5000 ms]` / `?[5000ms]`.
@@ -934,12 +942,14 @@ impl<'a> Parser<'a> {
         } else {
             None
         };
+        let explicit = contract_saw_bracket;
         Ok(Contract {
             pre_condition: pre,
             post_condition: post,
             is_entry,
             watchdog,
             span: None,
+            explicit,
         })
     }
 

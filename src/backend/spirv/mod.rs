@@ -65,7 +65,8 @@ mod tests {
             post_condition: Expr::Bool(true),
             is_entry: false,
             watchdog: None,
-            span: None,
+                explicit: false,
+                span: None,
         };
         let txn = Transaction {
             name: "vec_add".into(),

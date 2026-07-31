@@ -290,6 +290,7 @@ mod tests {
                 post_condition: post,
                 is_entry: false,
                 watchdog: None,
+                explicit: false,
                 span: None,
             },
             body,

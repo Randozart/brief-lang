@@ -357,7 +357,7 @@ pub fn collect_expr_identifiers(expr: &Expr, ids: &mut std::collections::HashSet
         Expr::PluginIntercept { args, .. } => {
             for a in args { collect_expr_identifiers(a, ids); }
         }
-        Expr::Exists(_) => { unreachable!("fn? only in stage eval") },
+        Expr::Exists(name) => { panic!("compile-time existence check '{}' reached codegen", name) },
         Expr::Slice { array, start, end, stride } => {
             collect_expr_identifiers(array, ids);
             if let Some(e) = start.as_deref() { collect_expr_identifiers(e, ids); }
@@ -644,6 +644,7 @@ mod tests {
                 post_condition: Expr::Bool(true),
                 is_entry: false,
                 watchdog: None,
+                explicit: false,
                 span: None,
             },
             body: vec![

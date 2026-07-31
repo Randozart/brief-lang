@@ -611,7 +611,7 @@ use std::collections::HashMap;
             parameters: vec![],
             outputs: vec![],
             output_type: None,
-            contract: Contract { pre_condition: pre, post_condition: post, is_entry: false, watchdog: None, span: None },
+            contract: Contract { pre_condition: pre, post_condition: post, is_entry: false, watchdog: None, span: None, explicit: false },
             body,
             span: None,
             metadata: HashMap::new(),

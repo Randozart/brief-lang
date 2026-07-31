@@ -283,6 +283,7 @@ mod tests {
                 post_condition: Expr::Bool(true),
                 is_entry: false,
                 watchdog: None,
+                explicit: false,
                 span: None,
             },
             is_async: false,
