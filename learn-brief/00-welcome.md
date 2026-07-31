@@ -19,22 +19,46 @@ txn withdraw(amount: Int)
 
 The compiler **verifies** that your code actually satisfies these contracts.
 
-### 1b. Transparent Operator Taxonomy
-Brief's operators are organized into three conceptual groups:
+### 1b. Three kinds of declaration: `node`, `txn`, and `defn`
 
-| Group | Operators | Purpose |
-|-------|-----------|---------|
-| **Lens Operators** | `<:` (Derivation), `:>` (Projection) | Type boundaries and semantic lenses |
-| **Partition Operators** | `[]`, `@/` | Segment layouts into addressable sub-ranges |
-| **Transfer Operator** | `<-` | Directional data movement across boundaries |
+Brief has two kinds of state-changing declarations plus a pure function form:
 
-The **Anchor** (`@`) is the universal symbol for spatial/temporal location — prior state, bit position, string slots, and hardware links all share this single metaphor.
-
-### 2. Reactive by Default
-Transactions fire automatically when their preconditions are met:
+| | `node` | `txn` | `defn` |
+|---|--------|-------|--------|
+| **Runs** | Reactively — the main loop fires it whenever its precondition is met | Only when called by a `txn` or `node` | Only when called |
+| **Parameters** | None | Optional | Optional |
+| **Return value** | None | Optional | Required (it's a pure function) |
+| **State mutation** | May read/write global state | May read/write global state | None outside itself — its result feeds back into state only through a caller's `&state = defn(...)` |
+| **Contracts** | `[pre][post]` | `[pre][post]` | Optional (straight-line translation is inherently provable) |
+| **Typical use** | The program's driver (`node tick`, `node process`) | Callable operations (`withdraw`, `push`) | Pure computation (`next(x)`, `score(p)`) |
 
 ```brief
-node auto_save() [dirty && !saving][!dirty] {
+node tick [count < total][count == total] {
+    count = count + 1;
+    term;
+};
+
+txn deposit(amount: Int) [amount > 0][balance == @balance + amount] {
+    &balance = balance + amount;
+    term;
+};
+
+defn next(x: Int) -> Int {
+    term x + 1;
+};
+```
+
+`node` and `txn` are **not** interchangeable: a reactive driver has no
+parameters and no return value; a callable operation may have both — but a
+`txn` never fires by itself, it only runs when a `txn` or `node` calls it.
+A `defn` cannot mutate state outside itself; the only way its computation
+reaches the outside world is through a caller assigning its return value.
+
+### 2. Reactive by Default
+`node` declarations fire automatically when their preconditions are met:
+
+```brief
+node auto_save [dirty && !saving][!dirty] {
     save_to_disk();
     &dirty = false;
     term;
@@ -44,14 +68,14 @@ node auto_save() [dirty && !saving][!dirty] {
 No event handlers. No polling. Just logic.
 
 ### 3. Zero-Nesting Logic
-No `if/else` chains. Use guards instead:
+No `if/else` chains. Use `when` guards instead:
 
 ```brief
 // Instead of: if x > 0 { ... } else if x < 0 { ... }
-[x > 0] {
+when x > 0 {
     &result = x * 2;
 };
-[x < 0] {
+when x < 0 {
     &result = x * -1;
 };
 ```
@@ -82,7 +106,7 @@ once on start. No boilerplate needed.
 Run it:
 
 ```bash
-brief check hello.bv
+briefc check hello.bv
 ```
 
 For more complex programs, you can still write explicit transactions
@@ -105,7 +129,7 @@ This folder contains a complete Brief tutorial:
 10. **10-best-practices.md** - Best practices
 11. **11-triggers.md** - Triggers and events
 12. **12-pragmas.md** - Pragmas and directives
-13. **13-projections.md** - Projections (`:>` and `<:` operators)
+13. **13-projections.md** - Metadata projections (`.#Size`, `.#Ptr`, …)
 
 ## Next Steps
 
@@ -113,5 +137,4 @@ Start with [01-basics.md](01-basics.md) to learn the fundamentals!
 
 ---
 
-*Last updated: 2026-06-18*  
-*Version: Brief v0.16.0*
+*Last updated: 2026-07-31*

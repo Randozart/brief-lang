@@ -217,7 +217,7 @@ defn is_palindrome(text: String) -> Bool {
     term cleaned == reversed;
 };
 
-txn main() [true][true] {
+node run [!done][done == true] {
     let text: String = "Hello World";
     let stats = analyze_text(text);
     
@@ -227,6 +227,7 @@ txn main() [true][true] {
     println("Uppercase: " + String(stats.upper_count));
     println("Lowercase: " + String(stats.lower_count));
     
+    &done = true;
     term;
 };
 ```

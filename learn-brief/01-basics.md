@@ -1,10 +1,10 @@
 # Brief Basics
 
 > **Operator quick reference:** Brief's operators fall into three groups
-> — **Lens Operators** (`<:`, `:>`), **Partition Operators** (`[]`, `@/`),
-> and the **Transfer Operator** (`<-`). The **Anchor** (`@`) is the universal
-> symbol for spatial/temporal location. See `00a-base-design.md` for the full
-> taxonomy.
+> — **Property Access** (`.#` — `list .#Size`, `x .#Bytes`), **Partition
+> Operators** (`[]`, `@/`), and the **Transfer Operator** (`<-`). The
+> **Anchor** (`@`) prefixes prior state in contracts. See `00a-base-design.md`
+> for the full taxonomy.
 
 ## 1. State Declarations
 
@@ -42,24 +42,28 @@ const VERSION: String = "1.0.0";
 const PI: Float = 3.14159;
 ```
 
-## 3. Transactions
+## 3. Reactive Nodes and Callable Transactions
 
-Transactions are how state changes in Brief:
+State changes happen in `node`s (reactive) and `txn`s (callable). A reactive
+`node` fires whenever its precondition is met:
 
 ```brief
-txn increment [counter < 100][counter == @counter + 1] {
+node increment [counter < 100][counter == @counter + 1] {
     &counter = counter + 1;
     term;
 };
 ```
 
-**Parts of a transaction:**
-- `txn` - Keyword
-- `increment` - Name (no parentheses when no parameters)
+**Parts of a node:**
+- `node` - Keyword (reactive: no parameters, no return value)
+- `increment` - Name (no parentheses)
 - `[counter < 100]` - **Precondition** (when it can run)
 - `[counter == @counter + 1]` - **Postcondition** (what it guarantees)
 - `&counter = counter + 1` - Mutation (note the `&`)
 - `term` - Terminate successfully
+
+A callable `txn` may take parameters and return a value, but only runs when
+another transaction calls it (see §5).
 
 **The `@` operator** refers to the value **before** the transaction:
 - `@counter` = counter's value at transaction start
@@ -106,19 +110,29 @@ always emit runtime code.
 
 ## 5. Calling Transactions
 
-Transactions can be called explicitly:
+Callable `txn`s run only when called. A reactive `node` can drive them:
 
 ```brief
-txn main [true][result == 3] {
-    increment;
-    increment;
-    increment;
-    &result = 3;
+node run [counter < 100][counter == 100] {
+    increment();
+    decrement();
+    counter = counter + 1;
     term;
 };
 
-let result: Int = 0;
+txn increment() [true][counter == @counter + 1] {
+    &counter = counter + 1;
+    term;
+};
+
+txn decrement() [counter > 0][counter == @counter - 1] {
+    &counter = counter - 1;
+    term;
+};
 ```
+
+`increment`/`decrement` are callable (they may take parameters and return
+values); `run` is reactive and drives the program from the main loop.
 
 Or they can be **reactive** (fire automatically when precondition is met):
 
@@ -133,20 +147,20 @@ We'll cover reactive transactions in detail in [03-reactive.md](03-reactive.md).
 
 ## 6. Guards (Conditional Execution)
 
-Instead of `if/else`, Brief uses guards:
+Instead of `if/else`, Brief uses `when` guards:
 
 ```brief
 let x: Int = 5;
 
-txn process [x > 0 || x <= 0][result >= 0] {
+node process [x > 0 || x <= 0][result >= 0] {
     let result: Int = 0;
 
     // Guard: only executes if condition is true
-    [x > 0] {
+    when x > 0 {
         &result = x * 2;
     };
 
-    [x < 0] {
+    when x < 0 {
         &result = x * -1;
     };
 
@@ -247,8 +261,9 @@ before typechecking, with zero runtime overhead:
 ```brief
 // counter.bv
 let counter: Int = 0;
+const TOTAL: Int = 100;
 
-txn increment() [counter < 100][counter == @counter + 1] {
+txn increment() [counter < TOTAL][counter == @counter + 1] {
     &counter = counter + 1;
     term;
 };
@@ -258,15 +273,11 @@ txn decrement() [counter > 0][counter == @counter - 1] {
     term;
 };
 
-txn reset() [true][counter == 0] {
-    &counter = 0;
-    term;
-};
-
-txn main() [true][true] {
+node run [counter < TOTAL][counter == TOTAL] {
     increment();  // counter = 1
     increment();  // counter = 2
     decrement();  // counter = 1
+    counter = counter + 1;
     term;
 };
 ```

@@ -1,6 +1,8 @@
 # Functions with Contracts
 
-Functions (`defn`) are pure computations with contracts. Unlike transactions, they don't mutate state.
+Functions (`defn`) are pure computations. Unlike transactions, they don't mutate
+state outside themselves — their result reaches the outside only through a
+caller's assignment.
 
 ## 1. Basic Functions
 
@@ -18,28 +20,74 @@ defn is_positive(n: Int) -> Bool {
 - `defn` - Keyword
 - `add` - Function name
 - `(a: Int, b: Int)` - Parameters with types
-- `-> Int` - Return type (contracts are optional but recommended)
+- `-> Int` - Return type
 - `term a + b` - Return value
 
-**Note:** Contract syntax has changed. Preconditions/postconditions like `[a >= 0]` are now warnings/errors if trivial. Functions can now omit contracts entirely.
+A `defn` cannot read or write global state. Its return type is inferred from
+`term`, so `-> Int` is optional.
 
-## 2. Contracts (Optional but Recommended)
+## 2. Explicit vs Implicit Return
 
-**Contracts are now optional but trivial ones like `[true][true]` produce warnings:**
+A `defn`'s return type may be **explicit** (`-> Int`) or **implicit**
+(omitted — inferred from the `term` value):
 
 ```brief
-// ✅ Works - no contracts needed
-defn divide(a: Int, b: Int) -> Int {
+// Explicit — self-documenting, useful for public interfaces
+defn add(a: Int, b: Int) -> Int {
+    term a + b;
+};
+
+// Implicit — concise, fine for private helpers
+defn add_implicit(a: Int, b: Int) {
+    term a + b;
+};
+```
+
+**When to use explicit `-> Type`:**
+- The function is part of a public interface (a library, an FFI surface)
+- The return type is not obvious from the body (e.g. a `Bool` predicate
+  derived from a numeric comparison, or a tuple)
+- You want a compile-time assertion that the `term` value really has the
+  declared type
+
+**When to use the implicit form:**
+- Private helpers whose body makes the type obvious
+- Rapid prototyping before the interface settles
+- Contracts already pin down the shape of the result (`result == a / b`
+  tells the reader the result is a value of the same type as `a`)
+
+## 3. Contracts (Optional but Recommended)
+
+Contracts come after the parameters and may appear **before** OR **after**
+the `-> Type` return type — both are equivalent:
+
+```brief
+// ✅ Contract after the return type
+defn safe_divide(a: Int, b: Int) -> Int [b != 0][result == a / b] {
     term a / b;
 };
 
-// ✅ Better - add contracts for verification
-defn safe_divide(a: Int, b: Int) [b != 0][true] -> Int {
+// ✅ Contract before the return type (same meaning)
+defn safe_divide2(a: Int, b: Int) [b != 0][result == a / b] -> Int {
+    term a / b;
+};
+
+// ✅ No contract needed for straight-line code
+defn divide(a: Int, b: Int) -> Int {
     term a / b;
 };
 ```
 
-## 3. Multiple Return Values
+When the return type is omitted, the contract follows the parameters
+directly:
+
+```brief
+defn safe_divide3(a: Int, b: Int) [b != 0][result == a / b] {
+    term a / b;
+};
+```
+
+## 4. Multiple Return Values
 
 ```brief
 defn div_mod(a: Int, b: Int) [b != 0][quotient * b + remainder == a] -> (Int, Int) {
@@ -63,7 +111,7 @@ For nested generics like `Ptr<Ptr<Int>>`, add a space: `Ptr<Ptr<Int> >`
 to avoid the `>>` shift-right token.
 ```
 
-## 4. Named Return Values
+## 5. Named Return Values
 
 ```brief
 defn get_person() -> (name: String, age: Int) {
@@ -75,18 +123,18 @@ println(person.name);  // "Alice"
 println(person.age);   // 30
 ```
 
-## 5. Guards in Functions
+## 6. Guards in Functions
 
 ```brief
-defn abs(n: Int) [true][result >= 0] -> Int {
-    [n < 0] {
+defn abs(n: Int) [true][result >= 0] {
+    when n < 0 {
         term -n;
     };
     term n;
 };
 
-defn max(a: Int, b: Int) [true][result == a || result == b] -> Int {
-    [a >= b] {
+defn max(a: Int, b: Int) [true][result == a || result == b] {
+    when a >= b {
         term a;
     };
     term b;
@@ -95,66 +143,65 @@ defn max(a: Int, b: Int) [true][result == a || result == b] -> Int {
 defn clamp(val: Int, min_val: Int, max_val: Int) 
     [min_val <= max_val]
     [result >= min_val && result <= max_val] 
-    -> Int 
 {
-    [val < min_val] {
+    when val < min_val {
         term min_val;
     };
-    [val > max_val] {
+    when val > max_val {
         term max_val;
     };
     term val;
 };
 ```
 
-## 6. Recursive Functions
+## 7. Recursive Functions
 
 ```brief
-defn factorial(n: Int) [n >= 0 && n <= 20][result >= 1] -> Int {
-    [n == 0 || n == 1] {
+defn factorial(n: Int) [n >= 0 && n <= 20][result >= 1] {
+    when n == 0 || n == 1 {
         term 1;
     };
     term n * factorial(n - 1);
 };
 
-defn fibonacci(n: Int) [n >= 0][result >= 0] -> Int {
-    [n == 0] {
+defn fibonacci(n: Int) [n >= 0][result >= 0] {
+    when n == 0 {
         term 0;
     };
-    [n == 1] {
+    when n == 1 {
         term 1;
     };
     term fibonacci(n - 1) + fibonacci(n - 2);
 };
 
-defn gcd(a: Int, b: Int) [a >= 0 && b >= 0][result >= 0] -> Int {
-    [b == 0] {
+defn gcd(a: Int, b: Int) [a >= 0 && b >= 0][result >= 0] {
+    when b == 0 {
         term a;
     };
     term gcd(b, a % b);
 };
 ```
 
-## 7. Functions with Generics
+## 8. Functions with Generics
 
 ```brief
-defn identity<T>(x: T) [true][result == x] -> T {
+defn identity<T>(x: T) [true][result == x] {
     term x;
 };
 
-defn swap<T, U>(a: T, b: U) [true][result.0 == b && result.1 == a] -> (U, T) {
+defn swap<T, U>(a: T, b: U) [true][result.0 == b && result.1 == a] {
     term (b, a);
 };
 
-defn first<T, U>(pair: (T, U)) [[true] -> T {
+defn first<T, U>(pair: (T, U)) -> T {
     term pair.0;
 };
 
-// Note: `[true][true]` is rejected. Use `[[true]` (post-only) or `[true]]` (pre-only).
+// Note: `[true][true]` is rejected. Use `[[post]` (post-only) or `[pre]]` (pre-only).
 // The `[[post]` and `[pre]]` sugar fill the omitted side as `[true]`.
 ```
 
-## 8. Derivation Blocks — Synthesis by Example
+## 9. Derivation Blocks — Synthesis by Example
 
 Functions can be defined by examples rather than by hand-writing a body.
 The compiler searches for an expression that matches all examples.
@@ -214,14 +261,14 @@ defn sqrt(x: Float) -> Float := {
 ### CLI
 
 ```bash
-brief derive file.bv                 # Synthesize all derivation blocks
-brief derive --stochastic file.bv    # Also run MCMC superoptimizer
-brief derive --enumerative-depth 4   # Search deeper for better formulas
-brief accept file.bv                 # Fold bodies back into source
-brief build file.derive.bv          # Build with assertion verification
+briefc derive file.bv                 # Synthesize all derivation blocks
+briefc derive --stochastic file.bv    # Also run MCMC superoptimizer
+briefc derive --enumerative-depth 4   # Search deeper for better formulas
+briefc accept file.bv                 # Fold bodies back into source
+briefc build file.derive.bv           # Build with assertion verification
 ```
 
-## 9. Complete Example
+## 10. Complete Example
 
 ```brief
 // math_utils.bv
@@ -229,16 +276,15 @@ brief build file.derive.bv          # Build with assertion verification
 defn power(base: Int, exp: Int) 
     [exp >= 0]
     [result >= 1]
-    -> Int 
 {
-    [exp == 0] {
+    when exp == 0 {
         term 1;
     };
-    [exp == 1] {
+    when exp == 1 {
         term base;
     };
     let half = power(base, exp / 2);
-    [exp % 2 == 0] {
+    when exp % 2 == 0 {
         term half * half;
     };
     term base * half * half;
@@ -246,22 +292,21 @@ defn power(base: Int, exp: Int)
 
 defn is_prime(n: Int) 
     [n >= 0]
-    [[true]
-    -> Bool 
+    [result == true || result == false]
 {
-    [n < 2] {
+    when n < 2 {
         term false;
     };
-    [n == 2] {
+    when n == 2 {
         term true;
     };
-    [n % 2 == 0] {
+    when n % 2 == 0 {
         term false;
     };
     
     let i: Int = 3;
-    [i * i <= n] {
-        [n % i == 0] {
+    when i * i <= n {
+        when n % i == 0 {
             term false;
         };
         i = i + 2;
@@ -272,13 +317,12 @@ defn is_prime(n: Int)
 defn sum_range(start: Int, end: Int) 
     [start <= end]
     [result >= 0]
-    -> Int 
 {
     let n: Int = end - start + 1;
     term (start + end) * n / 2;
 };
 
-txn main() [[true] {
+node run [true][p == 1024 && prime && sum == 5050] {
     let p = power(2, 10);  // 1024
     let prime = is_prime(17);  // true
     let sum = sum_range(1, 100);  // 5050

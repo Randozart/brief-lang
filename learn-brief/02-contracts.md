@@ -7,7 +7,7 @@ Contracts are the heart of Brief. They're not just documentation - the compiler 
 The precondition declares **when** a transaction can run:
 
 ```brief
-txn withdraw [amount > 0 && balance >= amount][balance == @balance - amount] {
+node withdraw [amount > 0 && balance >= amount][balance == @balance - amount] {
     &balance = balance - amount;
     term;
 };
@@ -15,6 +15,11 @@ txn withdraw [amount > 0 && balance >= amount][balance == @balance - amount] {
 let balance: Int = 100;
 let amount: Int = 10;
 ```
+
+> A zero-parameter operation that the main loop drives is a **`node`**
+> (reactive). A **`txn`** is the same shape but callable — it may take
+> parameters and only runs when another transaction calls it. See
+> [01-basics.md](01-basics.md) §3.
 
 **This transaction can ONLY run when:**
 - `amount > 0` (can't withdraw negative or zero)
@@ -135,11 +140,11 @@ All paths must satisfy the postcondition:
 txn conditional(x: Int) [true][result >= 0] {
     let result: Int = 0;
     
-    [x > 0] {
+    when x > 0 {
         &result = x;  // result = x > 0 ✓
     };
     
-    [x <= 0] {
+    when x <= 0 {
         &result = -x;  // result = -x >= 0 ✓
     };
     
@@ -158,7 +163,7 @@ txn safe_divide(a: Int, b: Int)
     [b != 0]
     [result == a / b]
 {
-    [b == 0] {
+    when b == 0 {
         escape;  // Rollback - postcondition not checked
     };
     let result = a / b;
@@ -210,14 +215,6 @@ txn withdraw
     term;
 };
 
-txn transfer
-    [amount > 0 && balance >= amount]
-    [balance == @balance - amount]
-{
-    &balance = balance - amount;
-    term;
-};
-
 txn enable_overdraft
     [!overdraft_protection]
     [overdraft_protection == true]
@@ -225,7 +222,18 @@ txn enable_overdraft
     &overdraft_protection = true;
     term;
 };
+
+node run [balance < 10000][balance >= 10000] {
+    amount = 50;
+    deposit();
+    amount = 30;
+    withdraw();
+    term;
+};
 ```
+
+The operations are callable `txn`s; `run` is the reactive `node` that drives
+them from the main loop.
 
 ## Exercises
 

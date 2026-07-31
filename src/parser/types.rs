@@ -70,8 +70,14 @@ impl<'a> Parser<'a> {
             }
             return Ok(Type::Custom(full));
         }
-        // 2026-07-25: Array syntax: Int[1024] → Type::Vector
-        if self.eat(&Token::LBracket) {
+        // 2026-07-25: Array syntax: Int[1024] → Type::Vector.
+        // 2026-07-31: Only treat `[` as an array-size suffix when the NEXT
+        // token is an integer literal. A non-integer `[` after a return type
+        // is a contract (`-> Int [b != 0]`) and must be left for parse_contract.
+        if self.check(&Token::LBracket)
+            && matches!(self.peek_next(), Some(Token::Integer(_)))
+        {
+            self.pos += 1; // consume LBracket
             let size = match self.peek() {
                 Some(&Token::Integer(n)) => { self.pos += 1; n as usize }
                 _ => { return self.error_at_current("expected array size (integer)"); }
@@ -160,8 +166,13 @@ impl<'a> Parser<'a> {
             return Ok(Type::Custom(full));
         }
 
-        // 2026-07-25: Array syntax for custom types: MyStruct[1024]
-        if self.eat(&Token::LBracket) {
+        // 2026-07-25: Array syntax for custom types: MyStruct[1024].
+        // 2026-07-31: Same non-greedy lookahead as keyword types — a
+        // non-integer `[` is a contract bracket, not an array size.
+        if self.check(&Token::LBracket)
+            && matches!(self.peek_next(), Some(Token::Integer(_)))
+        {
+            self.pos += 1; // consume LBracket
             let size = match self.peek() {
                 Some(&Token::Integer(n)) => { self.pos += 1; n as usize }
                 _ => { return self.error_at_current("expected array size (integer)"); }

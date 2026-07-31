@@ -376,8 +376,9 @@ impl<'a> Parser<'a> {
         } else {
             Vec::new()
         };
-        let output_type = self.parse_output_type()?;
-        let contract = self.parse_contract()?;
+        // 2026-07-31: Contract may precede or follow the `-> Type` return
+        // type (see parse_output_and_contract).
+        let (output_type, contract) = self.parse_output_and_contract()?;
         // 2026-07-28: Body is optional — `defn f(x) -> T := { ... }` has no { body }.
         let body = if self.check(&Token::LBrace) {
             self.parse_block()?
@@ -434,13 +435,9 @@ impl<'a> Parser<'a> {
         } else {
             Vec::new()
         };
-        let contract = self.parse_contract()?;
-        // 2026-07-18: Optional return type for txn: txn name(params) [pre][post] -> Type { body }
-        let output_type: Option<crate::ast::OutputType> = if self.eat(&Token::Arrow) {
-            Some(crate::ast::OutputType::Single(self.parse_type()?))
-        } else {
-            None
-        };
+        // 2026-07-31: Contract may precede or follow the `-> Type` return
+        // type (see parse_output_and_contract).
+        let (output_type, contract) = self.parse_output_and_contract()?;
         // 2026-07-28: Body is optional — `txn f -> T := { ... }` has no { body }.
         let body = if self.check(&Token::LBrace) {
             self.parse_block()?
@@ -839,6 +836,32 @@ impl<'a> Parser<'a> {
         } else {
             Ok(None)
         }
+    }
+
+    /// 2026-07-31: Parse the return type and contract in EITHER order, so a
+    /// contract may come before OR after the `-> Type` return type:
+    ///
+    ///   defn f(a, b) -> Int [pre][post] { ... }   // return type first
+    ///   defn f(a, b) [pre][post] -> Int { ... }   // contract first
+    ///   txn  f(a, b) [pre][post] -> Int { ... }   // txn form
+    ///   txn  f(a, b) -> Int [pre][post] { ... }
+    ///
+    /// Both are optional: a missing return type is inferred from `term`; a
+    /// missing contract defaults to `[true][true]`. Returns (output_type,
+    /// contract). The `parse_type` array-size lookahead (types.rs) leaves a
+    /// non-integer `[` for the contract parser.
+    fn parse_output_and_contract(&mut self) -> Result<(Option<OutputType>, Contract), SyntaxError> {
+        let contract = if self.check(&Token::LBracket) {
+            Some(self.parse_contract()?)
+        } else {
+            None
+        };
+        let output_type = self.parse_output_type()?;
+        let contract = match contract {
+            Some(c) => c,
+            None => self.parse_contract()?,
+        };
+        Ok((output_type, contract))
     }
 
     /// Parse contract: [#], [pre][post], [[post], [pre]]
@@ -2459,5 +2482,99 @@ mod tests {
         );
         assert_eq!(ops.len(), 1);
         assert_eq!(ops[0].protocol_variant.as_deref(), Some("Bare"));
+    }
+
+    // ── 2026-07-31: Contracts in either position (pre/post return type) ──
+
+    fn parse_defn(src: &str) -> Result<crate::ast::Definition, crate::errors::SyntaxError> {
+        let tokens = tokenize(src).unwrap();
+        let mut p = Parser::new(tokens, src);
+        match p.parse_top_level()? {
+            crate::ast::TopLevel::Definition(d) => Ok(d),
+            other => panic!("expected Definition, got {:?}", std::mem::discriminant(&other)),
+        }
+    }
+
+    fn parse_txn(src: &str) -> Result<crate::ast::Transaction, crate::errors::SyntaxError> {
+        let tokens = tokenize(src).unwrap();
+        let mut p = Parser::new(tokens, src);
+        match p.parse_top_level()? {
+            crate::ast::TopLevel::Transaction(t) => Ok(t),
+            other => panic!("expected Transaction, got {:?}", std::mem::discriminant(&other)),
+        }
+    }
+
+    fn is_single(out: &Option<crate::ast::OutputType>) -> bool {
+        matches!(out, Some(crate::ast::OutputType::Single(_)))
+    }
+
+    fn has_pre(c: &crate::ast::Contract) -> bool {
+        !matches!(c.pre_condition, crate::ast::Expr::Bool(true))
+    }
+
+    fn has_post(c: &crate::ast::Contract) -> bool {
+        !matches!(c.post_condition, crate::ast::Expr::Bool(true))
+    }
+
+    #[test]
+    fn test_defn_contract_after_return_type() {
+        let d = parse_defn(
+            "defn f(a: Int, b: Int) -> Int [b != 0][result == a / b] { term a / b; };",
+        )
+        .unwrap();
+        assert!(is_single(&d.output_type));
+        assert!(has_pre(&d.contract));
+        assert!(has_post(&d.contract));
+    }
+
+    #[test]
+    fn test_defn_contract_before_return_type() {
+        let d = parse_defn(
+            "defn f(a: Int, b: Int) [b != 0][result == a / b] -> Int { term a / b; };",
+        )
+        .unwrap();
+        assert!(is_single(&d.output_type));
+        assert!(has_pre(&d.contract));
+        assert!(has_post(&d.contract));
+    }
+
+    #[test]
+    fn test_defn_implicit_return_type_no_contract() {
+        let d = parse_defn("defn f(a: Int, b: Int) { term a + b; };").unwrap();
+        assert!(d.output_type.is_none());
+        assert!(!has_pre(&d.contract));
+        assert!(!has_post(&d.contract));
+    }
+
+    #[test]
+    fn test_txn_contract_after_return_type() {
+        let t = parse_txn(
+            "txn f(a: Int) -> Bool [a > 0][a >= 0] { term a > 0; };",
+        )
+        .unwrap();
+        assert!(is_single(&t.output_type));
+        assert!(has_pre(&t.contract));
+        assert!(has_post(&t.contract));
+    }
+
+    #[test]
+    fn test_array_type_still_parses_with_contract_after() {
+        // Int[8] is a vector; the following [pre] is the contract, not an
+        // array size. Regression: parse_type must only consume `[` as an
+        // array suffix when the next token is an integer literal.
+        let d = parse_defn(
+            "defn f(v: Int[8]) -> Int[8] [v[0] == 0][result == v[0]] { term v[0]; };",
+        )
+        .unwrap();
+        assert!(is_single(&d.output_type));
+        assert!(has_pre(&d.contract));
+    }
+
+    #[test]
+    fn test_non_integer_bracket_left_for_contract() {
+        // parse_type on `Int [b != 0]` must stop at `Int`, leaving the
+        // bracket for the contract parser (not "expected array size").
+        let ty = parse_type("Int [b != 0]").unwrap();
+        assert_eq!(ty, crate::ast::Type::int());
     }
 }

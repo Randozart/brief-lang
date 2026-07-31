@@ -44,6 +44,13 @@ impl<'a> Parser<'a> {
         self.tokens.get(self.pos).map(|(t, _)| t)
     }
 
+    /// Peek at the token after the current one without consuming anything.
+    /// Used for lookahead disambiguation (e.g. `Int[8]` array vs `Int [pre]`
+    /// contract after a return type).
+    pub fn peek_next(&self) -> Option<&Token> {
+        self.tokens.get(self.pos + 1).map(|(t, _)| t)
+    }
+
     /// Peek at the current token and its span.
     pub fn peek_with_span(&self) -> Option<(&Token, &std::ops::Range<usize>)> {
         self.tokens.get(self.pos).map(|(t, s)| (t, s))

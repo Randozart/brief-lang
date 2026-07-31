@@ -48,12 +48,13 @@ calls (C/Rust sources) or bridge calls (Python/JavaScript):
 ```brief
 import "std/env.bv";
 
-txn print_env() [true][true] {
+node print_env [!env_printed][env_printed == true] {
     let home = frgn__getenv_brief("HOME");
-    // Result type handling...
-    [home.is_ok()] {
+    when home.is_ok() {
         frgn__print_str(home.value);
     };
+    &env_printed = true;
+    term;
 };
 ```
 
@@ -214,10 +215,12 @@ For inter-process communication at runtime, use **Metropipe**:
 ```brief
 import "std/metro_bridge.bv";
 
-txn exchange_data() [true][true] {
+node exchange_data [data_ready][data_ready == true] {
     let ch = frgn__metro_create_channel("my_channel", 1024, 1024);
     frgn__mmap_write(addr, 0, data, length);
     frgn__atomic_store_u32(addr, 0, 1);  // signal readiness
+    &data_ready = true;
+    term;
 };
 ```
 

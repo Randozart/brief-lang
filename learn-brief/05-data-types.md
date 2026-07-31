@@ -19,7 +19,7 @@ txn add_to_map [true][map.contains_key("age")] {
 // Lookup (use in transactions or functions)
 defn get_age(m: HashMap<String, Int>) -> Int {
     let val = m.get("age");
-    [val.is_some()] {
+    when val.is_some() {
         term val.unwrap();
     };
     term 0;
@@ -424,24 +424,24 @@ txn remove_contact(name: String)
     term;
 };
 
-txn lookup(name: String) [true][true] {
+txn lookup(name: String) [name != ""][contacts == @contacts] {
     let contact = contacts.get(name);
-    [contact.is_some()] {
+    when contact.is_some() {
         let c = contact.unwrap();
         println("Name: " + c.name);
         println("Phone: " + c.phone);
         println("Email: " + c.email);
     };
-    [contact.is_none()] {
+    when contact.is_none() {
         println("Contact not found");
     };
     term;
 };
 
-txn list_all() [true][true] {
+txn list_all() [true][contacts == @contacts] {
     let names = contacts.keys();
     let i: Int = 0;
-    [i < names .#Size] {
+    when i < names .#Size {
         println(names[i]);
         &i = i + 1;
     };
@@ -601,7 +601,7 @@ frame[width::4, height::4].r = frame[width::4, height::4].r / 2;
 ## 10. Pointer Types (`Ptr<T>`)
 
 `Ptr<T>` is a verified pointer whose safety is proven at compile time.
-Creation requires the `:>` projection operator — there is no way to forge a
+Creation requires the `.#` projection operator — there is no way to forge a
 `Ptr<T>` without the compiler knowing its provenance.
 
 ### Creating Pointers

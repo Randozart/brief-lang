@@ -4,16 +4,17 @@ Reactive transactions fire **automatically** when their precondition becomes tru
 
 ## 1. The `node` Keyword
 
-Add `node` to make a transaction reactive:
+A `node` is a reactive transaction — it fires **automatically** when its
+precondition becomes true, with no parameters and no return value:
 
 ```brief
-// Passive transaction (must be called explicitly)
+// Callable (must be called by a txn or node)
 txn increment [counter < 100][counter == @counter + 1] {
     &counter = counter + 1;
     term;
 };
 
-// Reactive transaction (fires automatically)
+// Reactive (fires automatically)
 node auto_increment [counter < 100][counter == @counter + 1] {
     &counter = counter + 1;
     term;
@@ -32,15 +33,15 @@ The compiler **proves** reactive transactions can terminate:
 
 ```brief
 // ✅ VERIFIES - provably terminates
-node increment() [counter < 100][counter == @counter + 1] {
+node increment [counter < 100][counter == @counter + 1] {
     &counter = counter + 1;
     term;
 };
 // Compiler proves: counter increases by 1 each iteration, will reach 100
 
 // ❌ REJECTED - cannot prove termination
-node bad_increment() [counter < 100][counter == @counter + 1] {
-    [counter < 50] {
+node bad_increment [counter < 100][counter == @counter + 1] {
+    when counter < 50 {
         &counter = counter + 1;
     };
     // No else branch - might not satisfy postcondition!
@@ -54,7 +55,7 @@ node bad_increment() [counter < 100][counter == @counter + 1] {
 Once termination is proven, the compiler optimizes:
 
 ```brief
-node fill_buffer() [buffer .#Size < 100][buffer .#Size == 100] {
+node fill_buffer [buffer .#Size < 100][buffer .#Size == 100] {
     &buffer = buffer.append(read_item());
     term;
 };
@@ -126,7 +127,7 @@ async node process_data [data != processed_data][processed == true] {
 
 ### Event Handler
 ```brief
-node on_button_click() [button_clicked][handled == true] {
+node on_button_click [button_clicked][handled == true] {
     do_something();
     &button_clicked = false;
     &handled = true;
@@ -160,9 +161,9 @@ node reset [state == State::Done][state == State::Idle] {
 let observers: List<String> = [];
 let subject_value: Int = 0;
 
-node notify_observers() [subject_value != @notified_value][true] {
+node notify_observers [subject_value != @notified_value][true] {
     let i: Int = 0;
-    [i < observers .#Size] {
+    when i < observers .#Size {
         notify(observers[i], subject_value);
         i = i + 1;
     };
@@ -176,7 +177,7 @@ node notify_observers() [subject_value != @notified_value][true] {
 let last_trigger: Int = 0;
 let debounce_time: Int = 100;  // ms
 
-node debounced_action() 
+node debounced_action 
     [current_time() - last_trigger > debounce_time]
     [last_trigger == current_time()]
 {
@@ -186,67 +187,60 @@ node debounced_action()
 };
 ```
 
-## 7. Polling Mode (`@Hz`)
+## 7. Polling
 
-By default, reactive transactions fire on **dependency changes** — the system tracks which variables each transaction's precondition reads, and only evaluates dirty transactions. This is the reactive equilibrium model.
+Reactive transactions fire on **dependency changes** — the system tracks which
+variables each transaction's precondition reads, and only evaluates dirty
+transactions. This is the reactive equilibrium model.
 
-Sometimes you need a **fixed tick rate** instead — e.g., sensor polling, animation frames, watchdog timers. Add `@Hz` to opt into polling:
+Fixed tick-rate polling (a `@Hz` annotation) is a planned scheduler feature;
+today all firing is dependency-driven. Hardware-polling loops are written
+with an explicit counter node instead:
 
 ```brief
-// Reactive (default): fires when precondition changes
-node on_signal [signal][handled == true] {
-    &handled = true;
-    term;
-};
-
-// Polling: fires every 10ms regardless of precondition state
-node read_sensor @100Hz [true][logged == true] {
+// Explicit tick-driven polling loop
+node poll_sensor [sample_count < total][sample_count == total] {
     &value = read_adc();
-    &logged = true;
+    &sample_count = sample_count + 1;
     term;
 };
 ```
 
-**How polling works:**
-1. The `@Hz` annotation attaches a speed requirement to the transaction
-2. Multiple files with different `@Hz` speeds are coordinated by the `ReactorScheduler` — the global tick runs at max(`@Hz`) and slower files are intelligently skipped
-3. Polling transactions still use the same reactive pipeline (precondition check, term verification, equilibrium loop) — `@Hz` only adds a time-based gate
-4. Pure library files with no `node` blocks consume zero overhead
-
-**When to use polling:**
+**When you might want polling:**
 - Hardware polling (ADC, GPIO, I2C)
 - Timer-driven logic
 - Animation/rendering at fixed frame rates
-- Watchdog or heartbeat patterns
 
 **Comparison:**
 
 | Mode | Syntax | Fires when | Use case |
 |------|--------|-----------|----------|
-| Passive | `txn` | Explicit call only | API, callbacks |
+| Callable | `txn` | Called by a `txn` or `node` only | API, callbacks |
 | Reactive | `node` | Precondition becomes true | State machines, event handlers |
-| Polling | `node @Hz` | Precondition true + tick interval met | Sensors, timers, animation |
 
 ## 8. Debugging Reactive Code
 
-Add logging transactions:
+Log from inside a driver node with a `when` guard (a node whose precondition
+it doesn't change would re-fire forever):
 
 ```brief
-node log_state() [true][true] {
-    println("Counter: " + String(counter));
-    println("Active: " + String(active));
+let total: Int = GetEnvInt!("BOUND");
+
+node tick [counter < total][counter == total] {
+    when counter % 100 == 0 {
+        __print_int(counter);
+        __print_char(10);
+    };
+    counter = counter + 1;
     term;
 };
 ```
 
-Or use explicit state checks:
+Or use explicit state checks with `escape` for rollback:
 
 ```brief
-node check_invariants() [true][true] {
-    [counter >= 0] {
-        // Invariant holds
-    };
-    [counter < 0] {
+node check_invariants [counter >= 0][counter >= 0] {
+    when counter < 0 {
         escape;  // Invariant violated!
     };
     term;
@@ -261,19 +255,19 @@ let items: Int = 0;
 let total: Float = 0.0;
 let discount_applied: Bool = false;
 
-node add_item(price: Float) [true][items == @items + 1] {
+txn add_item(price: Float) [true][items == @items + 1] {
     &items = items + 1;
     &total = total + price;
     term;
 };
 
-node remove_item(price: Float) [items > 0][items == @items - 1] {
+txn remove_item(price: Float) [items > 0][items == @items - 1] {
     &items = items - 1;
     &total = total - price;
     term;
 };
 
-node apply_bulk_discount() 
+node apply_bulk_discount 
     [items > 10 && total > 100.0 && !discount_applied]
     [total < @total && discount_applied == true]
 {
@@ -283,7 +277,7 @@ node apply_bulk_discount()
     term;
 };
 
-node clear_cart() [items > 0][items == 0 && total == 0.0] {
+node clear_cart [items > 0][items == 0 && total == 0.0] {
     &items = 0;
     &total = 0.0;
     &discount_applied = false;
@@ -291,8 +285,12 @@ node clear_cart() [items > 0][items == 0 && total == 0.0] {
 };
 ```
 
+`add_item`/`remove_item` are callable `txn`s (they take a price parameter);
+`apply_bulk_discount`/`clear_cart` are reactive `node`s that fire on
+precondition changes.
+
 **Reactive chain:**
-1. `add_item` fires 11 times (items: 0→11, total accumulates)
+1. A driver node calls `add_item` 11 times (items: 0→11, total accumulates)
 2. When items > 10 AND total > 100, `apply_bulk_discount` precondition true
 3. `apply_bulk_discount` fires, applies 10% discount
 4. Equilibrium: no more transactions can fire
