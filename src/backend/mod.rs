@@ -12,6 +12,7 @@ pub mod spirv;
 
 use crate::analysis::call_graph::CallGraph;
 use crate::analysis::dependency_graph::DependencyGraph;
+use crate::analysis::loop_shape::LoopShape;
 use crate::analysis::range::ParameterRanges;
 use crate::analysis::dataflow::DataflowError;
 use crate::analysis::region::RegionAnalyzer;
@@ -31,6 +32,12 @@ pub struct AnalysisResults {
     pub transition_graph: ReactorTransitionGraph,
     pub region_analyzer: RegionAnalyzer,
     pub dependency_graph: DependencyGraph,
+    // 2026-07-31: Frontend-driven dispatch (Phase 1). Per-txn structural loop
+    // shapes and swan-song hoists computed once, consumed by the LLVM backend
+    // instead of re-deriving them with body re-walks. See
+    // docs/plans/2026-07-31-frontend-driven-dispatch.md §6.
+    pub loop_shapes: HashMap<String, LoopShape>,
+    pub swan_songs: HashMap<String, (Vec<Statement>, Vec<Vec<Statement>>)>,
 }
 
 /// Intent: Run shared program analysis for backend code generation.
@@ -39,6 +46,9 @@ pub struct AnalysisResults {
 /// and applies peephole optimization.
 // 2026-07-14: Wire real transition graph and dependency graph analysis.
 // RegionAnalyzer is stubbed until Phase 16 reimplements it.
+// 2026-07-31: Frontend-driven dispatch — build per-txn loop shapes and
+// swan-song hoists so the LLVM backend consumes structured analysis instead
+// of re-deriving dispatch decisions from body re-walks.
 pub fn analyze_program(items: &[TopLevel], optimize: bool) -> AnalysisResults {
     let transition_graph = crate::analysis::transition_graph::ReactorTransitionGraph::build(
         items, &None, &vec![],
@@ -52,6 +62,8 @@ pub fn analyze_program(items: &[TopLevel], optimize: bool) -> AnalysisResults {
             is_trg: std::collections::HashSet::new(),
             all_vars: std::collections::HashSet::new(),
         });
+    let loop_shapes = crate::analysis::loop_shape::build_loop_shapes(&transition_graph, items);
+    let swan_songs = build_swan_songs(items);
     AnalysisResults {
         call_graph: CallGraph::new(),
         param_ranges: ParameterRanges::new(),
@@ -61,7 +73,37 @@ pub fn analyze_program(items: &[TopLevel], optimize: bool) -> AnalysisResults {
         transition_graph,
         region_analyzer: RegionAnalyzer::analyze(items),
         dependency_graph,
+        loop_shapes,
+        swan_songs,
     }
+}
+
+/// Hoist the swan song from every transaction body, keyed by txn name.
+///
+/// 2026-07-31: The state-field set is derived from `TopLevel::StateDecl`
+/// (identical to the backend's `field_index_map` keys for real state fields);
+/// synthetic ring-buffer internals are never the LHS of `&field = let` body
+/// statements, so the let-to-field remap set matches the backend exactly.
+fn build_swan_songs(
+    items: &[TopLevel],
+) -> HashMap<String, (Vec<Statement>, Vec<Vec<Statement>>)> {
+    let mut state_fields = std::collections::HashSet::new();
+    for item in items {
+        if let TopLevel::StateDecl(s) = item {
+            state_fields.insert(s.name.clone());
+        }
+    }
+    let mut songs = HashMap::new();
+    for item in items {
+        if let TopLevel::Transaction(t) = item {
+            let (stripped, hoisted) = crate::analysis::swan_song::hoist_swan_song(
+                &t.body,
+                &state_fields,
+            );
+            songs.insert(t.name.clone(), (stripped, hoisted));
+        }
+    }
+    songs
 }
 
 /// Intent: Apply peephole optimization after analysis. Returns a new set of top-level items

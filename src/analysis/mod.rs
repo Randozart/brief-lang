@@ -30,6 +30,8 @@ pub mod node_decompose;
 pub mod loop_carried;
 pub mod layout_optimizer;
 pub mod protocol_graph;
+pub mod swan_song;
+pub mod loop_shape;
 
 /// Determines how a state field behaves in the %State struct layout.
 /// Used by the Adaptive Layout Engine (Phase 1) to eliminate unused fields
