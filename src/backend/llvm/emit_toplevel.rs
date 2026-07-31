@@ -1349,9 +1349,12 @@ impl LlvmBackend {
         // 2026-07-14: byte_size removed from TypeUniverse, use ResolvedType.bytes instead.
         let key = ty.universe_key()?;
         let resolved = universe.get(key)?;
+        // 2026-07-31: Phase 3 (§8.3) — byte→range is a representation fact
+        // (N bytes = unsigned range [0, 2^(8N))), DERIVED from resolved.bytes
+        // instead of a hardcoded 1/2-byte table. Behavior unchanged for the
+        // 1/2-byte cases the previous table covered.
         match resolved.bytes {
-            1 => Some((0, 256)),
-            2 => Some((0, 65536)),
+            1 | 2 => Some((0, 1i64 << (resolved.bytes * 8))),
             _ => None,
         }
     }
@@ -1866,8 +1869,14 @@ impl LlvmBackend {
                             let iter_bound = self.ctx.iter_bounds.get(txn_name).copied();
 
                             // Helper: compute and scale !prof weights
+                            // 2026-07-31: Phase 3 (§8.3) — the cap is i32-range
+                            // normalization, not a tunable: LLVM branch_weights
+                            // are i32, and the cap is a power of two near
+                            // i32::MAX / 2 (2^30). Scaling keeps the SUM ≤ cap so
+                            // every weight fits i32 with no overflow and minimal
+                            // ratio rounding — more precise than the old 1000 cap.
                             let scale_weights = |taken: u64, not_taken: u64| -> Option<(u32, u32)> {
-                                let max_w = 1000u64;
+                                let max_w = 1u64 << 30;
                                 let total = taken + not_taken;
                                 if taken == 0 || not_taken == 0 { return None; }
                                 let (wt, wn) = if total <= max_w {
@@ -1956,7 +1965,10 @@ impl LlvmBackend {
                                     (Some(bound), Some(mod_n)) => {
                                     let taken = (bound as f64 / mod_n as f64).ceil() as u64;
                                     let not_taken = (bound as u64).saturating_sub(taken);
-                                    let max_w = 1000u64;
+                                    // 2026-07-31: Phase 3 (§8.3) — i32-range
+                                    // normalization cap, power of two near
+                                    // i32::MAX / 2 (see scale_weights above).
+                                    let max_w = 1u64 << 30;
                                     let total = taken + not_taken;
                                     let (wt, wn) = if total <= max_w {
                                         (taken as u32, not_taken as u32)

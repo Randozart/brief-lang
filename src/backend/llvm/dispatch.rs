@@ -287,28 +287,43 @@ impl LlvmBackend {
 
     // ── WRITE MASKS (Parallel Dispatch) ──────────────────────
     //
-    // Precomputes a 64-bit bitmask per transaction where bit N is set if
-    // the txn writes to field at index N in field_index_map.
+    // Precomputes a bitmask per transaction where bit N is set if the txn
+    // writes to field at index N in field_index_map.
     //
-    // Why 64 bits: field_index_map is partitioned so state fields get the
-    // lowest indices (0..N). Cache slots and internal variables get higher
-    // indices. A u64 mask is cheap to and/or/test and saturates any practical
-    // state size. If >64 fields are needed, this should switch to u128.
+    // 2026-07-31: Phase 3 (§8.3) — the mask is u128 and the EMITTED width is
+    // i128 when field_index_map.len() > 64 (write_mask_type), so the 65th+
+    // field is no longer silently dropped (the old `idx < 64` gate discarded
+    // it). A u128 mask saturates any practical state size; a field index of
+    // 128+ is a layout pathology that would need a wider mask (noted here).
     pub(crate) fn build_write_masks(&mut self, items: &[TopLevel]) {
         self.txn_write_masks.clear();
         for item in items {
             if let TopLevel::Transaction(t) = item {
                 let writes = crate::backend::collect_assigned_identifiers(&t.body);
-                let mut mask = 0u64;
+                let mut mask = 0u128;
                 for w in &writes {
                     if let Some(&idx) = self.ctx.field_index_map.get(w.as_str()) {
-                        if idx < 64 {
-                            mask |= 1u64 << idx;
+                        if idx < 128 {
+                            mask |= 1u128 << idx;
                         }
                     }
                 }
                 self.txn_write_masks.insert(t.name.clone(), mask);
             }
+        }
+    }
+
+    /// LLVM integer type for write-mask arithmetic: i128 when the program has
+    /// more than 64 state fields, else i64.
+    ///
+    /// 2026-07-31: Phase 3 (§8.3) — derived from field_index_map.len(), not a
+    /// hardcoded 64-bit assumption. The `%fired_mask` alloca, and/or/icmp ops
+    /// must all use the same width.
+    fn write_mask_type(&self) -> &'static str {
+        if self.ctx.field_index_map.len() > 64 {
+            "i128"
+        } else {
+            "i64"
         }
     }
 
@@ -395,8 +410,11 @@ impl LlvmBackend {
             self.sampled_triggers.insert(tn.clone(), sz);
         }
 
-        writeln!(out, "  %fired_mask = alloca i64, align 8").ok();
-        writeln!(out, "  store i64 0, i64* %fired_mask").ok();
+        // 2026-07-31: Phase 3 (§8.3) — fired-mask width derived from the state
+        // field count (i128 when >64 fields) instead of a hardcoded i64.
+        let wmt = self.write_mask_type();
+        writeln!(out, "  %fired_mask = alloca {}, align 8", wmt).ok();
+        writeln!(out, "  store {} 0, ptr %fired_mask", wmt).ok();
 
         if dispatch.is_empty() {
             self.emit_arena_fini(out, "  ");
@@ -434,9 +452,12 @@ impl LlvmBackend {
                         let fm = format!("%fm{}", i);
                         let ca = format!("%ca{}", i);
                         let nc = format!("%nc{}", i);
-                        writeln!(out, "  {} = load i64, ptr %fired_mask", fm).ok();
-                        writeln!(out, "  {} = and i64 {}, {}", ca, fm, wm).ok();
-                        writeln!(out, "  {} = icmp eq i64 {}, 0", nc, ca).ok();
+                        // 2026-07-31: Phase 3 (§8.3) — mask width derived from
+                        // field count (i128 when >64 fields).
+                        let wmt = self.write_mask_type();
+                        writeln!(out, "  {} = load {}, ptr %fired_mask", fm, wmt).ok();
+                        writeln!(out, "  {} = and {} {}, {}", ca, wmt, fm, wm).ok();
+                        writeln!(out, "  {} = icmp eq {} {}, 0", nc, wmt, ca).ok();
                         let nc_i8 = self.fun.gen_reg();
                         writeln!(out, "  {} = zext i1 {} to i8", nc_i8, nc).ok();
                         writeln!(out, "  %can{} = and i8 %pr{}, {}", i, i, nc_i8).ok();
@@ -458,9 +479,12 @@ impl LlvmBackend {
                 if wm != 0 {
                     let fm = format!("%fm{}a", i);
                     let fmu = format!("%fm{}b", i);
-                    writeln!(out, "  {} = load i64, ptr %fired_mask", fm).ok();
-                    writeln!(out, "  {} = or i64 {}, {}", fmu, fm, wm).ok();
-                    writeln!(out, "  store i64 {}, i64* %fired_mask", fmu).ok();
+                    // 2026-07-31: Phase 3 (§8.3) — mask width derived from
+                    // field count (i128 when >64 fields).
+                    let wmt = self.write_mask_type();
+                    writeln!(out, "  {} = load {}, ptr %fired_mask", fm, wmt).ok();
+                    writeln!(out, "  {} = or {} {}, {}", fmu, wmt, fm, wm).ok();
+                    writeln!(out, "  store {} {}, ptr %fired_mask", wmt, fmu).ok();
                 }
                 writeln!(out, "  br label %{}", next_c).ok();
             }

@@ -615,7 +615,10 @@ pub struct LlvmBackend {
     program_txns: Vec<String>,
     pub(crate) fused_to_first: HashMap<String, String>,
     pub(crate) sampled_triggers: HashMap<String, String>,
-    pub(crate) txn_write_masks: HashMap<String, u64>,
+    // 2026-07-31: Phase 3 (§8.3) — write masks are u128 so the 65th+ field is
+    // no longer silently dropped; the EMITTED width is i128 when the program
+    // has >64 state fields (write_mask_type), else i64.
+    pub(crate) txn_write_masks: HashMap<String, u128>,
     cell_thread_names: Vec<String>,
 
     // ── Reporting & Diagnostics ────────────────────────────
