@@ -42,6 +42,14 @@ pub struct ReactorTransitionGraph {
     pub nodes: Vec<ReactorNode>,
     pub has_triggers: bool,
     pub live_fields: HashSet<String>,
+    /// 2026-07-31: Reactive txn names whose RAW body has an unguarded FFI
+    /// statement (a top-level statement that is not `Statement::Guarded` and
+    /// contains an FFI call). Computed once so the LLVM backend's reactor
+    /// tick attribute selection (`#2` vs `#12`, dispatch.rs:68-73/357-362)
+    /// no longer re-walks bodies. `Statement::Guarded` bodies are treated as
+    /// guarded (their FFI is outlined into cold functions, so the hot path
+    /// can stay `memory(argmem: readwrite)`).
+    pub has_unguarded_ffi: HashSet<String>,
 }
 
 impl ReactorTransitionGraph {
@@ -167,8 +175,29 @@ impl ReactorTransitionGraph {
         for node in &mut nodes {
             compute_effectively_pure(node, &live_fields);
         }
+        // 2026-07-31: Phase 2 (§7.4) — scan RAW txn bodies (the backend's
+        // dispatch.rs scans `t.body`, not the simplified body). A statement
+        // is "unguarded" if it is not `Statement::Guarded`; Guarded bodies
+        // are outlined to cold functions and do not force memory(readwrite).
+        let mut has_unguarded_ffi: HashSet<String> = HashSet::new();
+        for item in items {
+            if let TopLevel::Transaction(t) = item {
+                if t.is_reactive
+                    && t.body.iter().any(|stmt| {
+                        !matches!(stmt, Statement::Guarded(_, _)) && statement_contains_ffi(stmt)
+                    })
+                {
+                    has_unguarded_ffi.insert(t.name.clone());
+                }
+            }
+        }
 
-        ReactorTransitionGraph { nodes, has_triggers, live_fields }
+        ReactorTransitionGraph {
+            nodes,
+            has_triggers,
+            live_fields,
+            has_unguarded_ffi,
+        }
     }
 }
 
@@ -1667,5 +1696,96 @@ mod tests {
         let writes = extract_write_set(&body, &fields);
         assert!(writes.contains("obj"), "field assign to obj.Size should detect obj as written");
         assert_eq!(writes.len(), 1);
+    }
+
+    /// Phase 2 (§7.4): a top-level FFI call (not inside a guard) marks the
+    /// txn as having unguarded FFI → the reactor tick forces memory(readwrite).
+    #[test]
+    fn test_has_unguarded_ffi_top_level_call() {
+        let items = vec![
+            make_state("count", Type::int()),
+            make_state("total", Type::int()),
+            TopLevel::Transaction(Transaction {
+                name: "work".to_string(),
+                is_reactive: true,
+                is_async: false,
+                type_params: vec![],
+                parameters: vec![],
+                output_type: None,
+                outputs: Vec::new(),
+                contract: crate::ast::Contract {
+                    pre_condition: Expr::BinaryOp(BinaryOpKind::Lt,
+                        Box::new(Expr::Identifier("count".to_string())),
+                        Box::new(Expr::Identifier("total".to_string())),
+                    ),
+                    post_condition: Expr::Bool(true),
+                    is_entry: false,
+                    watchdog: None,
+                    span: None,
+                },
+                body: vec![
+                    Statement::Expression(Expr::Call("PrintLn#".to_string(), vec![], None)),
+                    Statement::Term(None),
+                ],
+                span: None,
+                metadata: std::collections::HashMap::new(),
+                modifiers: vec![],
+                derivation: None,
+                doc: None,
+            }),
+        ];
+        let g = ReactorTransitionGraph::build(&items, &None, &[]);
+        assert!(g.has_unguarded_ffi.contains("work"),
+            "top-level FFI call must be flagged as unguarded");
+    }
+
+    /// Phase 2 (§7.4): FFI inside a `when` guard is OUTLINED into a cold
+    /// function — it does not force the hot path to memory(readwrite).
+    #[test]
+    fn test_guarded_ffi_not_unguarded() {
+        let items = vec![
+            make_state("count", Type::int()),
+            make_state("total", Type::int()),
+            TopLevel::Transaction(Transaction {
+                name: "work".to_string(),
+                is_reactive: true,
+                is_async: false,
+                type_params: vec![],
+                parameters: vec![],
+                output_type: None,
+                outputs: Vec::new(),
+                contract: crate::ast::Contract {
+                    pre_condition: Expr::BinaryOp(BinaryOpKind::Lt,
+                        Box::new(Expr::Identifier("count".to_string())),
+                        Box::new(Expr::Identifier("total".to_string())),
+                    ),
+                    post_condition: Expr::Bool(true),
+                    is_entry: false,
+                    watchdog: None,
+                    span: None,
+                },
+                body: vec![
+                    Statement::Guarded(
+                        Expr::BinaryOp(BinaryOpKind::Eq,
+                            Box::new(Expr::BinaryOp(BinaryOpKind::Mod,
+                                Box::new(Expr::Identifier("count".to_string())),
+                                Box::new(Expr::Decimal(5))),
+                            ),
+                            Box::new(Expr::Decimal(0)),
+                        ),
+                        vec![Statement::Expression(Expr::Call("PrintLn#".to_string(), vec![], None))],
+                    ),
+                    Statement::Term(None),
+                ],
+                span: None,
+                metadata: std::collections::HashMap::new(),
+                modifiers: vec![],
+                derivation: None,
+                doc: None,
+            }),
+        ];
+        let g = ReactorTransitionGraph::build(&items, &None, &[]);
+        assert!(!g.has_unguarded_ffi.contains("work"),
+            "FFI inside a `when` guard is guarded (outlined) — not unguarded");
     }
 }

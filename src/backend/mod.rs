@@ -38,6 +38,16 @@ pub struct AnalysisResults {
     // docs/plans/2026-07-31-frontend-driven-dispatch.md §6.
     pub loop_shapes: HashMap<String, LoopShape>,
     pub swan_songs: HashMap<String, (Vec<Statement>, Vec<Vec<Statement>>)>,
+    // 2026-07-31: Phase 2 measurement passes (plan §7). Computed once in the
+    // frontend, consumed by the LLVM backend instead of re-walking bodies:
+    //   density           — float computation density for the #11 → #0 downgrade
+    //   modulo_partition  — `count % K == N` dispatch detection
+    //   has_unguarded_ffi — reactive txns with top-level unguarded FFI
+    //   inline_decisions  — callable-txn alwaysinline decision (weighted cost)
+    pub density: HashMap<String, crate::analysis::density::ComputeDensity>,
+    pub modulo_partition: Option<crate::analysis::modulo_partition::ModuloPartition>,
+    pub has_unguarded_ffi: std::collections::HashSet<String>,
+    pub inline_decisions: HashMap<String, crate::analysis::inline_cost::InlineDecision>,
 }
 
 /// Intent: Run shared program analysis for backend code generation.
@@ -64,6 +74,13 @@ pub fn analyze_program(items: &[TopLevel], optimize: bool) -> AnalysisResults {
         });
     let loop_shapes = crate::analysis::loop_shape::build_loop_shapes(&transition_graph, items);
     let swan_songs = build_swan_songs(items);
+    // 2026-07-31: Phase 2 measurement passes (plan §7). Computed once here so
+    // every backend consumer reads frontend analysis instead of re-walking
+    // bodies. See docs/plans/2026-07-31-frontend-driven-dispatch.md §7.
+    let density = crate::analysis::density::compute_densities(items);
+    let modulo_partition = crate::analysis::modulo_partition::detect_modulo_partition(items);
+    let inline_decisions = build_inline_decisions(items);
+    let has_unguarded_ffi = transition_graph.has_unguarded_ffi.clone();
     AnalysisResults {
         call_graph: CallGraph::new(),
         param_ranges: ParameterRanges::new(),
@@ -75,7 +92,27 @@ pub fn analyze_program(items: &[TopLevel], optimize: bool) -> AnalysisResults {
         dependency_graph,
         loop_shapes,
         swan_songs,
+        density,
+        modulo_partition,
+        has_unguarded_ffi,
+        inline_decisions,
     }
+}
+
+/// Compute the callable-txn auto-inline decision for every transaction.
+///
+/// 2026-07-31: Phase 2 (§7.3) — keyed by txn name. The LLVM backend reads
+/// `inline_decisions[name]` in emit_callable_txn instead of re-deriving the
+/// `params < 8 && body < 20` heuristic. Only callable txns (non-reactive)
+/// consult the map, but computing for all transactions is harmless.
+fn build_inline_decisions(items: &[TopLevel]) -> HashMap<String, crate::analysis::inline_cost::InlineDecision> {
+    let mut out = HashMap::new();
+    for item in items {
+        if let TopLevel::Transaction(t) = item {
+            out.insert(t.name.clone(), crate::analysis::inline_cost::callable_inline_decision(t));
+        }
+    }
+    out
 }
 
 /// Hoist the swan song from every transaction body, keyed by txn name.

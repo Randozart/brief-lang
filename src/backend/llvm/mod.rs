@@ -1668,6 +1668,12 @@ impl LlvmBackend {
         // 2026-07-28: Persist transition graph for !prof computation in emit_toplevel.
         // iter_bounds populated later (at txn processing loop) — txns not in scope yet.
         self.ctx.transition_graph = Some(analysis.transition_graph.clone());
+        // 2026-07-31: Phase 2 measurement passes (plan §7.5) — persist so the
+        // emission consumers (density downgrade, modulo dispatch, auto-inline)
+        // read frontend analysis instead of re-walking bodies.
+        self.ctx.density = analysis.density.clone();
+        self.ctx.inline_decisions = analysis.inline_decisions.clone();
+        self.ctx.modulo_partition = analysis.modulo_partition.clone();
 
         let cg = &analysis.call_graph;
         self.ctx.has_cycles = cg.has_cycle();
@@ -2059,8 +2065,14 @@ impl LlvmBackend {
         // 2026-07-22: Deduplicate by foreign_name — frgn_map may have dual
         // keys (foreign_name + effective_brief_name) but declares use only the
         // C linker symbol name (sig.name = foreign_name).
+        // 2026-07-31: Sort by key before emitting — frgn_map is a HashMap with
+        // a per-process SipHash seed; unsorted iteration produced run-to-run
+        // nondeterministic declare ORDER in the IR (Coding Standard 7).
         let mut declared: std::collections::HashSet<&str> = std::collections::HashSet::new();
-        for (name, sig) in &self.ctx.frgn_map {
+        let mut frgn_sorted: Vec<(&String, &crate::ast::ForeignSignature)> =
+            self.ctx.frgn_map.iter().collect();
+        frgn_sorted.sort_by_key(|(name, _)| (*name).clone());
+        for (name, sig) in frgn_sorted {
             if trigger_linked_symbols.contains(name.as_str()) { continue; }
             // Dedup: skip if we already emitted a declare for this foreign_name
             if !declared.insert(&sig.name) { continue; }

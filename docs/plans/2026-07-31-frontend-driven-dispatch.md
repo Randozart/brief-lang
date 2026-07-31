@@ -732,7 +732,7 @@ comments — rewrite them for the new structure.
 | Phase 0 (baseline capture) | ed2f4234 | pass | 0.83× | 1.22× | 1.13× | 0.97× | 0.84× | 0 |
 | Phase 1a (analysis) | 0682d764 | 1232 pass | — | — | — | — | — | 0 |
 | Phase 1b (dispatch) | c953c3c4 | 1239 pass | 0.83× | 1.24× | 1.10× | 0.95× | 0.82× | 0 |
-| Phase 2 | | | | | | | | |
+| Phase 2 | (next commit) | 1259 pass | 0.83× | 1.23× | 1.18× | 0.97× | 0.86× | 0 |
 | Phase 3 | | | | | | | | |
 | Final | | | | | | | | |
 
@@ -744,6 +744,18 @@ all 19 runtime benchmarks within noise of Phase 0 (max delta 0.07×, queue_drain
 / `.vdN_header` / bare-`main` markers) is byte-identical to Phase 0 for all 17
 programs. All six Phase 1b regression tests added per §6.7. `cargo test --lib`:
 1239 passed, 0 failed.
+
+Phase 2 full table (see `benchmarks/results/2026-07-31-frontend-dispatch-phase2.md`):
+all 19 runtime benchmarks within noise of Phase 1b (max delta 0.08×, ring_buffer
+1.10→1.18×, queue_drain 0.93→0.85×), zero MISMATCH. The per-txn memory attribute
+(`#11`/`#0`) and the main dispatch marker are byte-identical to the Phase 1b
+reference compiler for all 38 benchmark programs, and the emitted CODE (excluding
+the `declare` block) is byte-identical for the sensitive set — so the ring_buffer
+and queue_drain deltas are pure run-to-run noise, not codegen changes. `cargo test
+--lib`: 1259 passed, 0 failed. Phase 2 also fixed a latent IR determinism bug:
+the frgn `declare` block was iterating `frgn_map` (a HashMap) unsorted, producing
+run-to-run nondeterministic declaration order (Coding Standard 7); the loop now
+sorts by key.
 
 ---
 

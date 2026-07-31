@@ -2869,3 +2869,184 @@ fn test_shape_vector_groups_no_overlap() {
     assert_eq!(vg.len(), 1, "overlapping group must be dropped");
     assert_eq!(vg[0].name, "g0");
 }
+
+// ── Phase 2 measurement-pass consumers ──────────────────────────────
+
+/// Phase 2 (§7.2): a sparse-dispatch-like modulo program must still be
+/// dispatched via the modulo-rotated main loop (`.mr_loop`), driven by the
+/// frontend-computed ModuloPartition.
+#[test]
+fn test_modulo_partition_drives_rotated_loop() {
+    let mut program = vec![
+        TopLevel::StateDecl(StateDecl {
+            name: "count".to_string(),
+            ty: Type::int(),
+            span: None,
+        }),
+        TopLevel::StateDecl(StateDecl {
+            name: "total".to_string(),
+            ty: Type::int(),
+            span: None,
+        }),
+    ];
+    for (i, name) in ["even".to_string(), "odd".to_string()].iter().enumerate() {
+        let pre = Expr::BinaryOp(BinaryOpKind::And,
+            Box::new(Expr::BinaryOp(BinaryOpKind::Lt,
+                Box::new(Expr::Identifier("count".to_string())),
+                Box::new(Expr::Identifier("total".to_string())))),
+            Box::new(Expr::BinaryOp(BinaryOpKind::Eq,
+                Box::new(Expr::BinaryOp(BinaryOpKind::Mod,
+                    Box::new(Expr::Identifier("count".to_string())),
+                    Box::new(Expr::Decimal(2)))),
+                Box::new(Expr::Decimal(i as i64)))),
+        );
+        program.push(TopLevel::Transaction(Transaction {
+            name: name.clone(),
+            is_reactive: true,
+            is_async: false,
+            type_params: vec![],
+            parameters: vec![],
+            output_type: None,
+            outputs: vec![],
+            contract: Contract {
+                pre_condition: pre,
+                post_condition: Expr::BinaryOp(BinaryOpKind::Eq,
+                    Box::new(Expr::Identifier("count".to_string())),
+                    Box::new(Expr::Identifier("total".to_string()))),
+                is_entry: false,
+                watchdog: None,
+                span: None,
+            },
+            body: vec![
+                Statement::Assign(
+                    Expr::Identifier("count".to_string()),
+                    Expr::BinaryOp(BinaryOpKind::Add,
+                        Box::new(Expr::Identifier("count".to_string())),
+                        Box::new(Expr::Decimal(1))),
+                ),
+                Statement::Term(None),
+            ],
+            metadata: HashMap::new(),
+            derivation: None,
+            modifiers: vec![],
+            span: None,
+            doc: None,
+        }));
+    }
+    let output = LlvmBackend::new().generate(&program, None);
+    assert!(output.contains(".mr_loop"),
+        "modulo-bounded set must use the rotated loop, got:\n{}", &output[..output.len().min(2000)]);
+    assert!(output.contains("srem i64"));
+}
+
+/// Phase 2 (§7.1): a dense kalman-style txn (FFI guard outlined → #11) must
+/// be downgraded to `#0` because the frontend density measurement is > 4.0.
+#[test]
+fn test_density_consumer_downgrades_dense_txn() {
+    let float_field = |name: &str| TopLevel::Statement(Box::new(Statement::Let {
+        name: name.to_string(),
+        names: vec![],
+        ty: Some(Type::Custom("Float".to_string())),
+        expr: Some(Expr::Float(0.0)),
+        modifiers: vec![],
+    }));
+    let mut program: Vec<TopLevel> = vec![
+        TopLevel::StateDecl(StateDecl {
+            name: "count".to_string(),
+            ty: Type::int(),
+            span: None,
+        }),
+        TopLevel::StateDecl(StateDecl {
+            name: "total".to_string(),
+            ty: Type::int(),
+            span: None,
+        }),
+    ];
+    for n in ["x0", "x1", "x2", "p00", "p10", "p20"] {
+        program.push(float_field(n));
+    }
+    for (n, v) in [("a00", 1.0), ("a01", 0.01), ("a02", 0.0)] {
+        program.push(TopLevel::Constant(Constant {
+            name: n.to_string(),
+            ty: Type::Custom("Float".to_string()),
+            expr: Expr::Float(v),
+        }));
+    }
+    let mul = |l: Expr, r: Expr| Expr::BinaryOp(BinaryOpKind::Mul, Box::new(l), Box::new(r));
+    let add = |l: Expr, r: Expr| Expr::BinaryOp(BinaryOpKind::Add, Box::new(l), Box::new(r));
+    let body = vec![
+        Statement::Let {
+            name: "nx0".to_string(),
+            names: vec![],
+            ty: Some(Type::Custom("Float".to_string())),
+            expr: Some(add(add(
+                mul(Expr::Identifier("a00".to_string()), Expr::Identifier("x0".to_string())),
+                mul(Expr::Identifier("a01".to_string()), Expr::Identifier("x1".to_string())),
+            ), mul(Expr::Identifier("a02".to_string()), Expr::Identifier("x2".to_string())))),
+            modifiers: vec![],
+        },
+        Statement::Let {
+            name: "ap00".to_string(),
+            names: vec![],
+            ty: Some(Type::Custom("Float".to_string())),
+            expr: Some(add(add(
+                mul(Expr::Identifier("a00".to_string()), Expr::Identifier("p00".to_string())),
+                mul(Expr::Identifier("a01".to_string()), Expr::Identifier("p10".to_string())),
+            ), mul(Expr::Identifier("a02".to_string()), Expr::Identifier("p20".to_string())))),
+            modifiers: vec![],
+        },
+        Statement::Assign(
+            Expr::Identifier("x0".to_string()),
+            Expr::Identifier("nx0".to_string()),
+        ),
+        Statement::Assign(
+            Expr::Identifier("count".to_string()),
+            Expr::BinaryOp(BinaryOpKind::Add,
+                Box::new(Expr::Identifier("count".to_string())),
+                Box::new(Expr::Decimal(1))),
+        ),
+        // Guarded FFI → outlined (cold function), so the density check fires.
+        Statement::Guarded(
+            Expr::BinaryOp(BinaryOpKind::Eq,
+                Box::new(Expr::BinaryOp(BinaryOpKind::Mod,
+                    Box::new(Expr::Identifier("count".to_string())),
+                    Box::new(Expr::Decimal(5)))),
+                Box::new(Expr::Decimal(0))),
+            vec![Statement::Expression(Expr::Call("PrintLn#".to_string(), vec![], None))],
+        ),
+        Statement::Term(None),
+    ];
+    program.push(TopLevel::Transaction(Transaction {
+        name: "propagate".to_string(),
+        is_reactive: true,
+        is_async: false,
+        type_params: vec![],
+        parameters: vec![],
+        output_type: None,
+        outputs: vec![],
+        contract: Contract {
+            pre_condition: Expr::BinaryOp(BinaryOpKind::Lt,
+                Box::new(Expr::Identifier("count".to_string())),
+                Box::new(Expr::Identifier("total".to_string()))),
+            post_condition: Expr::BinaryOp(BinaryOpKind::Eq,
+                Box::new(Expr::Identifier("count".to_string())),
+                Box::new(Expr::Identifier("total".to_string()))),
+            is_entry: false,
+            watchdog: None,
+            span: None,
+        },
+        body,
+        metadata: HashMap::new(),
+        derivation: None,
+        modifiers: vec![],
+        span: None,
+        doc: None,
+    }));
+    let output = LlvmBackend::new().generate(&program, None);
+    let txn_line = output.lines()
+        .find(|l| l.contains("define void @txn_propagate"))
+        .unwrap_or("(not found)");
+    assert!(txn_line.contains("#0"),
+        "dense txn must be downgraded to #0 via the density measurement, got: {}\n{}",
+        txn_line, &output[..output.len().min(1500)]);
+}

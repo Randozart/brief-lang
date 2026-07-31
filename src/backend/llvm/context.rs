@@ -134,6 +134,15 @@ pub struct CompilerContext {
     /// (induction variable, bound, direction) and increments per transaction name.
     /// Used by emit_toplevel.rs for precise !prof branch weights on guard conditions.
     pub transition_graph: Option<crate::analysis::transition_graph::ReactorTransitionGraph>,
+    /// 2026-07-31: Phase 2 measurement passes (plan §7) — set once in
+    /// generate() from AnalysisResults so emission consumers read frontend
+    /// analysis instead of re-walking bodies. See §7.5.
+    /// `density` per reactive txn (the `#11 → #0` downgrade),
+    /// `inline_decisions` per callable txn (auto-inline), and the program-wide
+    /// `modulo_partition` (modulo-switch dispatch).
+    pub density: HashMap<String, crate::analysis::density::ComputeDensity>,
+    pub inline_decisions: HashMap<String, crate::analysis::inline_cost::InlineDecision>,
+    pub modulo_partition: Option<crate::analysis::modulo_partition::ModuloPartition>,
     /// 2026-07-28: Per-transaction iteration bounds from RegionAnalyzer.
     /// Maps txn_name → iteration_count. Used with bounded_pre + increments for !prof.
     pub iter_bounds: HashMap<String, u64>,
@@ -299,6 +308,12 @@ impl CompilerContext {
             has_cycles: false,
             state_size_bytes: 0,
             transition_graph: None,
+            // 2026-07-31: Phase 2 measurement passes (plan §7) — stored on the
+            // context so every emission consumer reads frontend analysis instead
+            // of re-walking bodies. Set once in generate() from AnalysisResults.
+            density: std::collections::HashMap::new(),
+            inline_decisions: std::collections::HashMap::new(),
+            modulo_partition: None,
             iter_bounds: HashMap::new(),
             state_ptr_param: "ptr noundef noalias nocapture align 8 %state".to_string(),
             needs_arena: HashSet::new(),

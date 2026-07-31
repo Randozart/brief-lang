@@ -252,15 +252,30 @@ These must always be present. Without them, clang 18.1.3's LICM `sinkRegion` pas
 
 ### 5.1 Dispatch Logic (`mod.rs`)
 
-When a convergent transaction (node/txn) is emitted, the dispatch selects one of three strategies:
+Since Phase 1b (2026-07-31), the loop dispatch switches deterministically on the
+frontend-computed `LoopShape` (`analysis/loop_shape.rs`) — the backend no longer
+re-derives decisions from body re-walks. See
+`docs/plans/2026-07-31-frontend-driven-dispatch.md` §6.5:
 
 ```
-Entry → build_field_index → ... → dispatch:
-  1. Pure counter fold — if no written non-counter state fields: O(1) single store
-  2. Version-DAG — if the body has a single runtime `when` guard: emit_version_dag_main
-  3. Inline SSA — if write_density >= 0.5 AND total_fields < 8: insertvalue chain
-  4. PerFieldPhi — default: per-field phi nodes (emit_countable_main)
+Entry → build_field_index → dispatch on analysis.loop_shapes[name]:
+  LoopShape flags:
+  1. Pure + const bound + !has_swan_song      → emit_folded_loop_shape (pure O(1) fold)
+  2. version-DAG shape                        → emit_version_dag_main (self-deciding)
+  3. counter_only_writes && !has_swan_song    → emit_folded_main (InlineSsa)
+  4. vector groups && carried > regs          → emit_countable_main (VectorPhiGroup label)
+  5. _                                        → emit_countable_main (PerFieldPhi)
 ```
+
+Phase 2 (2026-07-31) additionally moved the measurement decisions into the
+frontend (`AnalysisResults`, plan §7) so the backend *reads* instead of *recomputes*:
+
+| Decision | Frontend source | Backend consumer |
+|----------|-----------------|------------------|
+| `#11 → #0` memory-attr downgrade (dense float) | `analysis/density.rs` `ComputeDensity` (cross-field float ops, `> 4.0` ops/field) | `emit_toplevel.rs` `emit_transaction` |
+| Modulo dispatch (rotated vs one-shot switch) | `analysis/modulo_partition.rs` `ModuloPartition` | `loop_engine/ssa.rs` `try_modulo_switch_dispatch` |
+| Callable-txn auto-inline | `analysis/inline_cost.rs` `InlineDecision` (weighted cost ≤ 40) | `emit_toplevel.rs` `emit_callable_txn` |
+| Reactor tick `#2`/`#12` attr | `transition_graph.has_unguarded_ffi` | `dispatch.rs` `emit_reactor` / `emit_reactor_tick` |
 
 The **composite-node decomposition** (§5.3) runs in the FRONTEND analysis
 (`analysis/node_decompose.rs`, `analysis/match_normalize.rs`,

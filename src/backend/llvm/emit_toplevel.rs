@@ -1550,30 +1550,6 @@ impl LlvmBackend {
                 _ => None,
             }
         }
-        /// Count cross-field operations in an expression.
-        /// Counts BinaryOps where LHS and RHS each contain at least one identifier.
-        /// This measures computation density — dense matrix multiply (kalman) has
-        /// many such ops; sparse force pairs (nbody) have fewer.
-        fn count_cross_float_ops_in_expr(expr: &Expr, _all_idents: &std::collections::HashSet<String>) -> u32 {
-            match expr {
-                Expr::BinaryOp(_, lhs, rhs) => {
-                    let has_lhs_id = has_any_ident(lhs);
-                    let has_rhs_id = has_any_ident(rhs);
-                    let count = if has_lhs_id && has_rhs_id { 1u32 } else { 0u32 };
-                    count + count_cross_float_ops_in_expr(lhs, _all_idents)
-                        + count_cross_float_ops_in_expr(rhs, _all_idents)
-                }
-                _ => 0,
-            }
-        }
-        fn has_any_ident(expr: &Expr) -> bool {
-            match expr {
-                Expr::Identifier(_) => true,
-                Expr::BinaryOp(_, lhs, rhs) => has_any_ident(lhs) || has_any_ident(rhs),
-                Expr::UnaryOp(_, e) => has_any_ident(e),
-                _ => false,
-            }
-        }
         fn collect_let_names(stmt: &Statement, names: &mut Vec<String>) {
             match stmt {
                 Statement::Let { name, names: extra, .. } => {
@@ -1822,27 +1798,16 @@ impl LlvmBackend {
             // force #0 = memory(readwrite) instead. LLVM's auto-vectorizer creates
             // expensive wide vectors (<12 x float>) for dense matrices that cause
             // register spilling — the kalman 3.5x regression.
+            // 2026-07-31: Phase 2 — the measurement is computed once in the
+            // frontend (src/analysis/density.rs, plan §7.1) instead of re-counting
+            // cross ops here. The frontend version FIXES the old metric's gap:
+            // count_cross_float_ops_in_expr ignored its _all_idents set, so int-only
+            // counter arithmetic inflated the count. Only txns with dense cross-field
+            // FLOAT computation downgrade. TEMP: the 4.0 threshold stays inline until
+            // Phase 3 moves it to config/targets.toml (§8.1 dense_compute_density).
             if local_txn_attr == "#11" {
-                // Count cross-field float ops across all let-expressions.
-                // Counts how many BinaryOps have 2+ distinct identifiers — this
-                // measures the density of cross-field computation. Kalman has
-                // ~84 ops across ~9 fields (9.3/field), nbody has ~50/30 (1.7).
-                let mut cross_ops = 0u32;
-                let mut float_body_idents: std::collections::HashSet<String> = std::collections::HashSet::new();
-                for s in reordered.iter() {
-                    if let Statement::Let { name, .. } = s {
-                        float_body_idents.insert(name.clone());
-                    }
-                }
-                for s in reordered.iter() {
-                    if let Statement::Let { expr: Some(e), .. } = s {
-                        cross_ops += count_cross_float_ops_in_expr(e, &float_body_idents);
-                    }
-                }
-                let n = float_body_idents.len();
-                if n > 4 {
-                    let cross_per_field = cross_ops as f64 / n as f64;
-                    if cross_per_field > 4.0 {
+                if let Some(d) = self.ctx.density.get(name) {
+                    if d.float_idents > 4 && d.per_field > 4.0 {
                         local_txn_attr = "#0".to_string();
                     }
                 }
@@ -2193,10 +2158,16 @@ impl LlvmBackend {
         };
         // 2026-07-19: Auto-inline small callable txns — few params, small body,
         // no frgn calls. Lets LLVM optimize cross-function (e.g. memcmp_loop).
+        // 2026-07-31: Phase 2 — the decision is computed once in the frontend
+        // (src/analysis/inline_cost.rs, plan §7.3) with a weighted body cost
+        // (call=10, binop=1) instead of the `params < 8 && body < 20` statement
+        // count. The `term`-statement gate is preserved (has_ffi_or_trigger_stmt
+        // treats Term as ffi-like), so callable txns that return via `term` are
+        // still never auto-inlined — matching prior behavior.
         let auto_inline = if inline_attr.is_none()
-            && txn.parameters.len() < 8
-            && txn.body.len() < 20
-            && !crate::analysis::region::has_ffi_or_trigger_stmt_in_chain(&txn.body)
+            && self.ctx.inline_decisions.get(name).map_or(false, |d| {
+                matches!(*d, crate::analysis::inline_cost::InlineDecision::AlwaysInline)
+            })
         {
             " alwaysinline"
         } else {

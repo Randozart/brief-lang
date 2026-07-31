@@ -2674,3 +2674,42 @@ clang LTO linking, not during Brief compilation.
 **Date:** 2026-07-30  
 **Status:** Pre-existing — same clang LICM sinkRegion crash as nbody_newton.
 Likely has similar loop structure and alignment issues.
+
+---
+
+## Frgn `declare` Block Non-Deterministic Order (HashMap Iteration) — FIXED
+
+**Date:** 2026-07-31
+**Status:** Fixed
+**Root cause:** `emit_declares` / the foreign-declare loop at
+`src/backend/llvm/mod.rs:2069` iterated `self.ctx.frgn_map` — a `HashMap` with a
+per-process SipHash seed — WITHOUT sorting. The emitted `declare` statements
+(e.g. `__getenv_brief`, `__print_int`, `__print_str`) appeared in run-to-run
+nondeterministic ORDER in the generated IR. Violates Coding Standard 7
+(HashMap iteration that produces LLVM IR MUST be sorted by key).
+**Fix:** The loop now collects `frgn_map.iter()` into a `Vec`, sorts by key, and
+emits in sorted order.
+**Impact:** Same compiler, same input → byte-identical IR across runs (verified
+for ring_buffer). No semantic change — only declaration order.
+**Lesson:** Any loop emitting IR from a HashMap must sort first. Discovered during
+Phase 2 IR A/B (reference vs new compiler) — the ordering masked the check that
+the actual code was unchanged.
+
+---
+
+## Density Metric Ignored Its `_all_idents` Filter — FIXED
+
+**Date:** 2026-07-31
+**Status:** Fixed
+**Root cause:** The `#11 → #0` dense-matrix downgrade in
+`emit_toplevel.rs:1820-1849` used `count_cross_float_ops_in_expr(expr,
+&float_body_idents)`, but the function ignored its `_all_idents` parameter and
+counted ANY BinaryOp with an identifier on each side — int-only counter
+arithmetic inflated the cross-op count.
+**Fix:** Moved the metric to `src/analysis/density.rs` (Phase 2, plan §7.1).
+`count_cross_float_ops` now gates each operand side on the txn's float set
+(`expr_refs_float`), so int-only ops no longer count. For all-float txns
+(kalman, nbody) the count is identical to before; decisions verified
+byte-identical across all 38 benchmark programs.
+**Impact:** Cleaner metric; behavior preserved. The `> 4.0` threshold moves to
+`config/targets.toml` in Phase 3 (§8.1).

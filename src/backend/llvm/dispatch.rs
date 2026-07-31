@@ -65,12 +65,12 @@ impl LlvmBackend {
         // is outlined into cold functions — the hot path stays argmem: readwrite.
         // Unguarded FFI (top-level prints, FFI calls outside guards) forces
         // memory(readwrite) because the call is in the hot path of every tick.
-        let rct_attr = if txns.iter().any(|(_, t)| {
-            t.is_reactive && t.body.iter().any(|stmt| match stmt {
-                Statement::Guarded(_, _) => false,
-                _ => transition_graph::statement_contains_ffi(stmt),
-            })
-        }) { "#2" } else { "#12" };
+        // 2026-07-31: Phase 2 (§7.4) — the per-txn unguarded-FFI set is computed
+        // once in the transition graph (has_unguarded_ffi) instead of re-walking
+        // bodies here.
+        let has_unguarded = self.ctx.transition_graph.as_ref()
+            .map_or(false, |g| !g.has_unguarded_ffi.is_empty());
+        let rct_attr = if has_unguarded { "#2" } else { "#12" };
         writeln!(
             out,
             "define void @reactor_tick(ptr noalias nocapture %state) local_unnamed_addr {} {{", rct_attr
@@ -354,12 +354,11 @@ impl LlvmBackend {
         }
 
         // 2026-07-27: Same FFI-aware attribute selection as emit_reactor.
-        let rct_attr = if txns.iter().any(|(_, t)| {
-            t.is_reactive && t.body.iter().any(|stmt| match stmt {
-                Statement::Guarded(_, _) => false,
-                _ => transition_graph::statement_contains_ffi(stmt),
-            })
-        }) { "#2" } else { "#12" };
+        // 2026-07-31: Phase 2 (§7.4) — consumes the transition graph's
+        // has_unguarded_ffi set instead of re-walking bodies.
+        let has_unguarded = self.ctx.transition_graph.as_ref()
+            .map_or(false, |g| !g.has_unguarded_ffi.is_empty());
+        let rct_attr = if has_unguarded { "#2" } else { "#12" };
         writeln!(
             out,
             "define void @reactor_tick({}) local_unnamed_addr {} {{",

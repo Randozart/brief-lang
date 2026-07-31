@@ -24,96 +24,83 @@ impl LlvmBackend {
 
     /// Try to detect if the reactive transaction set can be dispatched
     /// via modulo-switch on the counter register.
+    ///
+    /// 2026-07-31: Phase 2 (plan §7.2) — the partition (counter, divisor,
+    /// residue→txn cases) is computed ONCE in the frontend
+    /// (src/analysis/modulo_partition.rs), replacing the per-dispatch
+    /// `extract_mod_info` / `extract_mod_guard` body re-walks. The backend
+    /// only verifies the dispatch set matches the partition and chooses the
+    /// emitter structurally:
+    ///   - rotated loop whenever the txn set has a bounded counter
+    ///     precondition — the ONLY form that handles a bounded counter (the
+    ///     one-shot switch can't loop; see comment below),
+    ///   - one-shot switch only when no txn increments a counter
+    ///     (self-terminating: without counter advancement the set cannot
+    ///     require repeated ticks),
+    ///   - otherwise fall through to the generic SSA pipeline.
     fn try_modulo_switch_dispatch(
         &mut self,
         out: &mut String,
         reactive_txns: &[&(String, &crate::ast::Transaction)],
     ) -> bool {
-        if reactive_txns.len() < 2 {
-            return false;
-        }
-        let first_pre = &reactive_txns[0].1.contract.pre_condition;
-        let (counter_name, divisor) = match self.extract_mod_info(first_pre) {
-            Some(info) => info,
+        let partition = match self.ctx.modulo_partition.clone() {
+            Some(p) => p,
             None => return false,
         };
-        let mut cases: Vec<(i64, &str)> = Vec::new();
-        for (name, txn) in reactive_txns {
+        if partition.cases.len() < 2 {
+            return false;
+        }
+        for (_, txn) in reactive_txns {
             if !txn.is_reactive {
                 return false;
             }
-            let pre = &txn.contract.pre_condition;
-            match self.extract_mod_guard(pre, &counter_name, divisor) {
-                Some(val) => cases.push((val, name)),
-                None => return false,
-            }
         }
-        if cases.len() != reactive_txns.len() {
+        let reactive_names: Vec<&str> = reactive_txns.iter().map(|(n, _)| n.as_str()).collect();
+        if partition.cases.len() != reactive_names.len() {
             return false;
         }
-        if cases.len() <= 8 {
-            // 2026-07-17: Use modulo-rotated loop for K ≤ 8 (sparse_dispatch).
-            // emit_modulo_switch_main is one-shot (no loop) and doesn't handle
-            // the bounded counter — it was designed for the old pre-check path.
+        // Every txn in the dispatch set must appear exactly once in the cases.
+        for (_, case_name) in &partition.cases {
+            if !reactive_names.contains(&case_name.as_str()) {
+                return false;
+            }
+        }
+        let graph = self.ctx.transition_graph.as_ref();
+        let node_of = |name: &str| {
+            graph.and_then(|g| g.nodes.iter().find(|n| n.name == name))
+        };
+        let any_bounded = reactive_names
+            .iter()
+            .any(|n| node_of(n).map_or(false, |node| node.bounded_pre.is_some()));
+        let any_increments = reactive_names
+            .iter()
+            .any(|n| node_of(n).map_or(false, |node| node.increments.is_some()));
+        // 2026-07-17: Use modulo-rotated loop for bounded counter sets.
+        // emit_modulo_switch_main is one-shot (no loop) and doesn't handle
+        // the bounded counter — it was designed for the old pre-check path.
+        // 2026-07-31: The bound variable comes from the transition graph's
+        // bounded_pre (plan §7.2 fixes ssa.rs:183's hardcoded "total").
+        if any_bounded {
+            let bound_var = match reactive_names.iter().find_map(|n| {
+                node_of(n).and_then(|node| node.bounded_pre.as_ref().map(|bp| bp.bound_var.clone()))
+            }) {
+                Some(b) => b,
+                None => return false,
+            };
+            let cases_ref: Vec<(i64, &str)> = partition.cases.iter()
+                .map(|(r, n)| (*r, n.as_str())).collect();
             let txns_ref: Vec<(String, &crate::ast::Transaction)> = reactive_txns.iter()
                 .map(|(n, t)| (n.clone(), *t)).collect();
-            self.emit_modulo_rotated(out, &txns_ref, &counter_name, divisor, &cases);
-        } else {
-            self.emit_modulo_switch_main(out, reactive_txns, &counter_name, divisor, &cases);
+            self.emit_modulo_rotated(out, &txns_ref, &partition.counter, partition.divisor, &cases_ref, &bound_var);
+            return true;
         }
-        true
-    }
-
-    /// Extract (counter_name, divisor) from a modulo precondition.
-    fn extract_mod_info(&self, expr: &Expr) -> Option<(String, i64)> {
-        match expr {
-            Expr::BinaryOp(kind, l, r) if *kind == crate::ast::BinaryOpKind::Mod => {
-                let counter = match l.as_ref() {
-                    Expr::Identifier(n) => n.clone(),
-                    _ => return None,
-                };
-                let divisor = match r.as_ref() {
-                    Expr::Decimal(d) => *d,
-                    _ => return None,
-                };
-                Some((counter, divisor))
-            }
-            // 2026-07-17: Handle Eq(Mod(counter, divisor), value) — the common
-            // pattern for `count % 8 == N` which wraps Mod inside Eq.
-            Expr::BinaryOp(kind, l, r) if *kind == crate::ast::BinaryOpKind::Eq => {
-                self.extract_mod_info(l).or_else(|| self.extract_mod_info(r))
-            }
-            // 2026-07-17: Handle compound AND expressions like
-            // `count < total && count % 8 == N` — extract Mod from either side.
-            Expr::BinaryOp(kind, l, r) if *kind == crate::ast::BinaryOpKind::And => {
-                self.extract_mod_info(l).or_else(|| self.extract_mod_info(r))
-            }
-            _ => None,
+        if !any_increments {
+            let cases_ref: Vec<(i64, &str)> = partition.cases.iter()
+                .map(|(r, n)| (*r, n.as_str())).collect();
+            self.emit_modulo_switch_main(out, reactive_txns, &partition.counter, partition.divisor, &cases_ref);
+            return true;
         }
-    }
-
-    /// Extract the expected modulo value from a guard expression.
-    fn extract_mod_guard(&self, expr: &Expr, counter_name: &str, divisor: i64) -> Option<i64> {
-        match expr {
-            // 2026-07-17: Handle compound AND — try both sides.
-            Expr::BinaryOp(kind, l, r) if *kind == crate::ast::BinaryOpKind::And => {
-                self.extract_mod_guard(l, counter_name, divisor)
-                    .or_else(|| self.extract_mod_guard(r, counter_name, divisor))
-            }
-            Expr::BinaryOp(kind, l, r) if *kind == crate::ast::BinaryOpKind::Eq => {
-                let inner = match l.as_ref() {
-                    Expr::BinaryOp(k, cl, cr) if *k == crate::ast::BinaryOpKind::Mod
-                        && matches!(cl.as_ref(), Expr::Identifier(n) if n == counter_name)
-                        && matches!(cr.as_ref(), Expr::Decimal(d) if *d == divisor) => l.as_ref(),
-                    _ => return None,
-                };
-                match r.as_ref() {
-                    Expr::Decimal(v) => Some(*v),
-                    _ => None,
-                }
-            }
-            _ => None,
-        }
+        false
     }
 
     /// Emit a modulo-switch dispatch: check counter % divisor and switch
@@ -151,12 +138,18 @@ impl LlvmBackend {
     }
 
     // ═══════════════════════════════════════════════════════════════
-    // Modulo-Rotated Dispatch (K ≤ 8)
+    // Modulo-Rotated Dispatch (bounded counter sets)
     // ═══════════════════════════════════════════════════════════════
 
-    /// Emit a modulo-rotated dispatch loop. Used when the number of
-    /// reactive transactions is small (K ≤ 8). The loop body checks
-    /// `counter % divisor` and branches to the matching case.
+    /// Emit a modulo-rotated dispatch loop. Used for reactive txn sets whose
+    /// preconditions are `counter % divisor == residue` AND that have a
+    /// bounded counter (a `count < total` bound in the precondition). The
+    /// loop body checks `counter % divisor` and branches to the matching case.
+    ///
+    /// 2026-07-31: Phase 2 (plan §7.2) — the bound variable comes from the
+    /// transition graph's `bounded_pre.bound_var`, fixing the hardcoded
+    /// `"total"` lookup at the old ssa.rs:183 (`counter_idx + 1` fallback
+    /// assumed the bound field immediately follows the counter).
     pub(crate) fn emit_modulo_rotated(
         &mut self,
         out: &mut String,
@@ -164,6 +157,7 @@ impl LlvmBackend {
         counter_name: &str,
         divisor: i64,
         cases: &[(i64, &str)],
+        bound_var: &str,
     ) {
         writeln!(out, "define i32 @main() local_unnamed_addr {} {{", "#0").ok();
         writeln!(out, "entry:").ok();
@@ -178,9 +172,9 @@ impl LlvmBackend {
             c_gep, counter_idx).ok();
         let c_val = self.fun.next_reg_with_prefix("mrv");
         writeln!(out, "  {} = load i64, ptr {}, align 8", c_val, c_gep).ok();
-        // 2026-07-17: Bound check — exit when counter >= total.
-        // The total field name may not be directly after counter; find by name.
-        let total_idx = self.ctx.field_index_map.get("total").copied().unwrap_or(counter_idx + 1);
+        // 2026-07-17: Bound check — exit when counter >= bound.
+        // The bound field name may not be directly after counter; find by name.
+        let total_idx = self.ctx.field_index_map.get(bound_var).copied().unwrap_or(counter_idx + 1);
         let (bound_val, _) = self.emit_state_load_i64_by_idx(out, "  ", total_idx);
         let done = self.fun.next_reg_with_prefix("mrd");
         writeln!(out, "  {} = icmp sge i64 {}, {}", done, c_val, bound_val).ok();
