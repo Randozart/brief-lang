@@ -699,6 +699,213 @@ impl LlvmBackend {
 
     // ── Version-DAG Emission ─────────────────────────────────────────
     //
+    // ── Countdown-Loop Emission ───────────────────────────────────────
+    //
+    // 2026-07-31: Single tight loop for periodic post-increment io guards
+    // (`when count % N == 0` AFTER count++). Instead of the batch's outer/inner
+    // structure, a loop-carried `%rem` counter decrements each iteration; when
+    // it reaches 0, a COLD guard block prints and resets `%rem = N`.
+    //
+    // WHY this shape (plan 2026-07-31-fmn-countdown-vs-batch-and-new-benchmarks):
+    // the version-DAG's guard-in-loop costs a modulo + body-split (~5 extra
+    // instructions vs C) AND the batch's PURE inner loop lets LLVM's vectorizer
+    // mis-vectorize cross-indexed matrix bodies (fmn: 14 shuffle-heavy
+    // instructions, slower than 29 scalar). The countdown keeps the loop in ONE
+    // block (no body-split), replaces the modulo with `sub;cmp` (2 instructions),
+    // and its `%fire` conditional naturally blocks the bad vectorization.
+    //
+    // Structure:
+    //   entry → .cd (header: phis %count/%rem/%fields, bound check)
+    //         → .cdb (body ONE block: compute + count++ + rem--)
+    //         → .cdg (COLD guard block: print, rem = N)  /  .cdl (latch)
+    //         → .cde (done: post-loop hoist, ret)
+    pub(crate) fn emit_countable_countdown_main(
+        &mut self,
+        out: &mut String,
+        txn_name: &str,
+        counter_idx: usize,
+        total_idx: Option<usize>,
+        total_const_name: Option<&str>,
+        write_set: &HashSet<String>,
+        counter_var: &str,
+        batch: &crate::analysis::batch_shape::BatchShape,
+    ) {
+        let batch_size = batch.batch_size as i64;
+        writeln!(out, "define i32 @main() local_unnamed_addr {} {{", "#0").ok();
+        writeln!(out, "entry:").ok();
+        writeln!(out, "  %state = alloca %State, align 8").ok();
+        self.emit_inline_init_stores(out, "%state");
+        let c0 = self.fun.txn_counter;
+        self.fun.txn_counter += 1;
+        let bound_reg = self.fun.next_reg_with_prefix("cdb");
+        self.emit_countable_load_bound(out, &bound_reg, total_idx, total_const_name, c0);
+
+        // Pre-load initial values for the header phis.
+        let mut sorted_fields: Vec<&String> = write_set.iter().collect();
+        sorted_fields.sort();
+        let mut phi_field_init: HashMap<String, String> = HashMap::new();
+        for fname in &sorted_fields {
+            if let Some(&idx) = self.ctx.field_index_map.get(fname.as_str()) {
+                let (init_f, _) = self.emit_state_load_i64_by_idx(out, "  ", idx);
+                phi_field_init.insert((*fname).clone(), init_f);
+            }
+        }
+        let init_name = phi_field_init.get(counter_var)
+            .cloned().unwrap_or_else(|| "0".to_string());
+        let counter_ty = self.ctx.field_types.get(counter_idx)
+            .cloned().unwrap_or_else(|| "i64".to_string());
+        writeln!(out, "  br label %.cd_{}", c0).ok();
+
+        // ── Header ──────────────────────────────────────────────
+        writeln!(out, ".cd_{}:", c0).ok();
+        let c_counter = self.fun.next_reg_with_prefix("cdc");
+        let c_next = self.fun.next_reg_with_prefix("cdn");
+        let c_rem = self.fun.next_reg_with_prefix("cdr");
+        let c_rem_latch = self.fun.next_reg_with_prefix("cdl");
+        writeln!(out, "  {} = phi {} [ {}, %entry ], [ {}, %.cdl_{} ]",
+            c_counter, counter_ty, init_name, c_next, c0).ok();
+        writeln!(out, "  {} = phi i64 [ {}, %entry ], [ {}, %.cdl_{} ]",
+            c_rem, batch_size, c_rem_latch, c0).ok();
+
+        self.fun.phi_field_regs.clear();
+        self.fun.backedge_field_regs.clear();
+        self.fun.phi_field_regs.insert(counter_var.to_string(), c_counter.clone());
+        self.fun.backedge_field_regs.insert(counter_var.to_string(), c_next.clone());
+        for fname in &sorted_fields {
+            if fname.as_str() == counter_var {
+                continue;
+            }
+            let f_reg = self.fun.next_reg_with_prefix("cdf");
+            let f_be = self.fun.next_reg_with_prefix("cbe");
+            let init_f = phi_field_init.get(fname.as_str())
+                .cloned().unwrap_or_else(|| "0".to_string());
+            let phi_ty = self.ctx.field_index_map.get(fname.as_str())
+                .and_then(|idx| self.ctx.field_types.get(*idx))
+                .cloned().unwrap_or_else(|| "i64".to_string());
+            writeln!(out, "  {} = phi {} [ {}, %entry ], [ {}, %.cdl_{} ]",
+                f_reg, phi_ty, init_f, f_be, c0).ok();
+            self.fun.phi_field_regs.insert((*fname).clone(), f_reg);
+            self.fun.backedge_field_regs.insert((*fname).clone(), f_be);
+        }
+
+        // Exit check — continue while count < bound.
+        let cmp_counter = if counter_ty != "i64" {
+            let w = self.fun.next_reg_with_prefix("cdw");
+            writeln!(out, "  {} = sext {} {} to i64", w, counter_ty, c_counter).ok();
+            w
+        } else {
+            c_counter.clone()
+        };
+        let done_reg = self.fun.next_reg_with_prefix("cdd");
+        writeln!(out, "  {} = icmp slt i64 {}, {}", done_reg, cmp_counter, bound_reg).ok();
+        writeln!(out, "  br i1 {}, label %.cdb_{}, label %.cde_{}", done_reg, c0, c0).ok();
+
+        // ── Body (ONE block) ────────────────────────────────────
+        writeln!(out, ".cdb_{}:", c0).ok();
+        self.fun.pending_phi_backedge.clear();
+        for fname in &sorted_fields {
+            let init_val = self.fun.phi_field_regs.get(fname.as_str())
+                .cloned().unwrap_or_else(|| "0".to_string());
+            self.fun.pending_phi_backedge.insert((*fname).clone(), init_val.clone());
+        }
+        let mut empty = Vec::new();
+        self.emit_countable_body(out, &batch.inner_body, write_set, &mut empty);
+        // Countdown: remaining-- (loop-carried, independent of the counter).
+        let c_rem_next = self.fun.next_reg_with_prefix("cdm");
+        writeln!(out, "  {} = sub i64 {}, 1", c_rem_next, c_rem).ok();
+        let fire = self.fun.next_reg_with_prefix("cdf");
+        writeln!(out, "  {} = icmp eq i64 {}, 0", fire, c_rem_next).ok();
+        writeln!(out, "  br i1 {}, label %.cdg_{}, label %.cdl_{}", fire, c0, c0).ok();
+
+        // ── Guard (COLD — 1 in N iterations) ────────────────────
+        // The io guard fires here (remaining == 0 is known true), so only the
+        // guard BODY is emitted — no conditional branch structure, keeping
+        // .cdl's predecessors exactly {.cdb, .cdg}. The body reads the header
+        // phis (post-compute state); let-bindings referenced by the guard are
+        // remapped to their stored state fields.
+        writeln!(out, ".cdg_{}:", c0).ok();
+        let mut let_to_field: HashMap<String, String> = HashMap::new();
+        for stmt in &batch.inner_body {
+            if let Statement::Assign(lhs, Expr::Identifier(let_name)) = stmt {
+                if let Some(field_name) = lhs.as_var_name() {
+                    if self.ctx.field_index_map.contains_key(field_name) {
+                        let_to_field.insert(let_name.clone(), field_name.to_string());
+                    }
+                }
+            }
+        }
+        let mut guard_body = batch.guard_body.clone();
+        for s in &mut guard_body {
+            crate::analysis::swan_song::remap_stmt_identifiers(s, &let_to_field);
+        }
+        // 2026-07-31: Do NOT clear last_val_temps here. The guard fires mid-loop
+        // (before the latch), so the header phis still hold the PRE-body values;
+        // the current iteration's computed state lives in last_val_temps (the
+        // body's assigns, defined in .cdb which dominates .cdg). Clearing it
+        // would make the guard print the previous iteration's state — the
+        // 5M+1-compute bug (kalman printed 8.188e12 instead of 8.139e12).
+        let mut empty2 = Vec::new();
+        self.emit_countable_body(out, &guard_body, write_set, &mut empty2);
+        let rem_reset = self.fun.next_reg_with_prefix("cdz");
+        writeln!(out, "  {} = add i64 0, {}", rem_reset, batch_size).ok();
+        writeln!(out, "  br label %.cdl_{}", c0).ok();
+
+        // ── Latch ──────────────────────────────────────────────
+        // %rem_latch = phi [remaining-1, body], [N, guard].
+        writeln!(out, ".cdl_{}:", c0).ok();
+        writeln!(out, "  {} = phi i64 [ {}, %.cdb_{} ], [ {}, %.cdg_{} ]",
+            c_rem_latch, c_rem_next, c0, rem_reset, c0).ok();
+        // Counter increment (native width) — the counter's backedge.
+        writeln!(out, "  {} = add nuw nsw {} {}, 1", c_next, counter_ty, c_counter).ok();
+        self.fun.pending_phi_backedge.insert(counter_var.to_string(), c_next.clone());
+        // Field backedges (skip the counter — its backedge is c_next above).
+        for fname in sorted_fields.iter().filter(|f| f.as_str() != counter_var) {
+            if let Some(be_f) = self.fun.backedge_field_regs.get(fname.as_str()) {
+                let val = self.fun.pending_phi_backedge.get(fname.as_str())
+                    .cloned().unwrap_or_else(|| {
+                        self.fun.phi_field_regs.get(fname.as_str())
+                            .cloned().unwrap_or_else(|| "0".to_string())
+                    });
+                let field_ty = self.ctx.field_index_map.get(fname.as_str())
+                    .and_then(|idx| self.ctx.field_types.get(*idx))
+                    .cloned().unwrap_or_else(|| "i64".to_string());
+                if field_ty == "float" || field_ty == "double" {
+                    writeln!(out, "  {} = fadd {} 0.0, {}", be_f, field_ty, val).ok();
+                } else {
+                    writeln!(out, "  {} = add {} 0, {}", be_f, field_ty, val).ok();
+                }
+            }
+        }
+        writeln!(out, "  br label %.cd_{}", c0).ok();
+
+        // ── Done / Exit ─────────────────────────────────────────
+        writeln!(out, ".cde_{}:", c0).ok();
+        self.fun.reg_float_cache.clear();
+        self.fun.last_val_temps.clear();
+        self.fun.last_val_types.clear();
+        // Store final phi values so a post-loop hoist can read them from %State.
+        for fname in &sorted_fields {
+            let val = self.fun.phi_field_regs.get(fname.as_str())
+                .cloned().unwrap_or_else(|| "0".to_string());
+            if let Some(&idx) = self.ctx.field_index_map.get(fname.as_str()) {
+                self.emit_state_store_i64_by_idx(out, "  ", idx, &val);
+            }
+        }
+        let pending: Vec<Vec<Statement>> = self.fun.pending_post_hoist.clone();
+        if !pending.is_empty() {
+            for group in &pending {
+                let mut empty3 = Vec::new();
+                self.emit_countable_body(out, group, &HashSet::new(), &mut empty3);
+            }
+        }
+        writeln!(out, "  ret i32 0").ok();
+        writeln!(out, "}}").ok();
+        writeln!(out).ok();
+        let _ = txn_name;
+    }
+
+    // ── Version-DAG Emission ─────────────────────────────────────────
+    //
     // 2026-07-31: Emit the composite-node decomposition for a transaction
     // body containing ONE runtime `when` guard. The body is split at the
     // guard into [pre], [guard], [post] (see analysis/node_decompose.rs).

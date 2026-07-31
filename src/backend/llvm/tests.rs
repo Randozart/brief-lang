@@ -3054,7 +3054,7 @@ fn test_density_consumer_downgrades_dense_txn() {
 // ── Batch-loop dispatch (plan 2026-07-31-regain-kalman-float-math-parity) ──
 
 /// A post-increment periodic guard (`when count % N == 0` AFTER count++)
-/// dispatches via the batch loop (.oh_/.inner_ structure), eliminating the
+/// dispatches via the countdown loop (.cd_/.cdg_ structure), eliminating the
 /// per-iteration modulo check.
 #[test]
 fn test_batch_loop_dispatch_post_increment() {
@@ -3114,13 +3114,13 @@ fn test_batch_loop_dispatch_post_increment() {
         span: None, doc: None,
     }));
     let output = LlvmBackend::new().generate(&program, None);
-    assert!(output.contains(".oh_"), "post-increment periodic guard must use the batch loop, got:\n{}", &output[..output.len().min(1200)]);
-    assert!(output.contains(".inner_"), "batch loop must have an inner pure-compute loop");
-    // The per-iteration modulo must be GONE from the inner body (it fires only
-    // at the boundary). A single boundary check remains at inner_exit.
-    let inner = output.split(".inner_").nth(1).unwrap_or("");
-    let inner_seg = inner.split(".inner_exit").next().unwrap_or("");
-    assert!(!inner_seg.contains("urem"), "inner pure loop must not compute count % N per iteration");
+    assert!(output.contains(".cd_"), "post-increment periodic guard must use the countdown loop, got:\n{}", &output[..output.len().min(1200)]);
+    assert!(output.contains(".cdg_"), "countdown loop must have a cold guard block");
+    // The per-iteration modulo must be GONE from the body (it fires only when
+    // the countdown %rem hits 0).
+    let body = output.split(".cdb_").nth(1).unwrap_or("");
+    let body_seg = body.split(".cdg_").next().unwrap_or("");
+    assert!(!body_seg.contains("urem"), "countdown body must not compute count % N per iteration");
 }
 
 /// A pre-increment periodic guard (knucleotide pattern) is NOT batched — it
@@ -3172,5 +3172,5 @@ fn test_batch_loop_rejects_pre_increment() {
         }),
     ];
     let output = LlvmBackend::new().generate(&program, None);
-    assert!(!output.contains(".oh_"), "pre-increment guard must NOT use the batch loop");
+    assert!(!output.contains(".cd_"), "pre-increment guard must NOT use the countdown loop");
 }

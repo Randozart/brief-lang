@@ -26,6 +26,10 @@ pub struct BatchShape {
     pub batch_size: usize,
     /// The full `when count % N == 0 { io }` guard, re-emitted at each boundary.
     pub guard: Statement,
+    /// The guard's INNER statements (the io), emitted directly when the
+    /// boundary is known to have fired (the countdown's cold block) so no
+    /// conditional branch structure is introduced.
+    pub guard_body: Vec<Statement>,
     /// All compute statements (pre + post segments, guard removed) — the inner
     /// pure-compute loop body.
     pub inner_body: Vec<Statement>,
@@ -71,6 +75,7 @@ pub fn detect_batch_shape(
 fn detect_for_body(body: &[Statement]) -> Option<BatchShape> {
     let segments = split_into_segments(body);
     let mut guard: Option<Statement> = None;
+    let mut guard_body: Vec<Statement> = Vec::new();
     let mut counter: Option<String> = None;
     let mut batch_size: Option<usize> = None;
     let mut pre: Vec<Statement> = Vec::new();
@@ -98,6 +103,7 @@ fn detect_for_body(body: &[Statement]) -> Option<BatchShape> {
                 counter = Some(c);
                 batch_size = Some(n);
                 guard = Some(Statement::Guarded(condition.clone(), gbody.clone()));
+                guard_body = gbody.clone();
             }
         }
     }
@@ -123,6 +129,7 @@ fn detect_for_body(body: &[Statement]) -> Option<BatchShape> {
         counter,
         batch_size,
         guard,
+        guard_body,
         inner_body,
     })
 }

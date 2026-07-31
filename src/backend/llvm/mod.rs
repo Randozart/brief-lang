@@ -3445,34 +3445,27 @@ impl LlvmBackend {
             }
         }
 
-        // 2026-07-31: Batch-loop decomposition — an inner PURE-compute loop to
-        // the next io boundary plus a cold outer guard. Tried before
-        // version-DAG: a periodic `when count % N == 0` io (post-increment) is
-        // exactly captured by the inner/outer structure, and the per-iteration
-        // modulo check disappears (kalman/float_math parity — see
-        // docs/plans/2026-07-31-regain-kalman-float-math-parity.md §5).
-        //
-        // COST MODEL (arithmetic density, ≥ 40 ops): the batch is for DENSE
-        // matrix-style bodies (kalman ~140 ops → 1.24× → 1.00×). Sparse bodies
-        // are excluded: (a) the outer/inner overhead exceeds the guard-removal
-        // benefit for tiny bodies (fmn 7 fields: 0.205s batch vs 0.196s
-        // version-DAG), and (b) LLVM reassociates reduction bodies (float_math
-        // p += Q → multiple accumulators), changing the benchmark output and
-        // violating symmetric-output. See batch_shape::arithmetic_op_count.
+        // 2026-07-31: Countdown-loop decomposition — a SINGLE tight loop with a
+        // loop-carried `%rem` counter, a cold guard block firing every N
+        // iterations. Tried before version-DAG. The hypothesis (plan
+        // 2026-07-31-fmn-countdown-vs-batch-and-new-benchmarks §3): the
+        // countdown is universal for periodic post-increment guards — it
+        // removes the version-DAG's modulo + body-split, and its `%fire`
+        // conditional blocks LLVM's mis-vectorization of cross-indexed matrix
+        // bodies (which is why the batch's pure inner loop regressed fmn).
+        // A/B vs the batch + version-DAG is recorded in the plan's §10.
         let is_decreasing_vd = bp.direction == crate::analysis::transition_graph::ConvergeDirection::Decreasing;
         if !is_decreasing_vd {
             if let Some(batch) = analysis.batch_shape.as_ref() {
-                if batch.counter == bp.var
-                    && crate::analysis::batch_shape::arithmetic_op_count(&batch.inner_body) >= 40
-                {
+                if batch.counter == bp.var {
                     self.fun.pending_post_hoist = post_hoist.clone();
                     self.warnings.push(format!(
-                        "info: txn '{}' dispatched via batch loop (N={}, {} fields)",
+                        "info: txn '{}' dispatched via countdown loop (N={}, {} fields)",
                         node.name, batch.batch_size, node.write_set.len()
                     ));
-                    self.emit_countable_batched_main(
+                    self.emit_countable_countdown_main(
                         out, &node.name, counter_idx, total_idx, total_const_name,
-                        &node.write_set, false, &bp.var, batch,
+                        &node.write_set, &bp.var, batch,
                     );
                     return true;
                 }

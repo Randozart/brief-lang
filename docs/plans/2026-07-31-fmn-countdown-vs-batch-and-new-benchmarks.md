@@ -176,4 +176,50 @@ the frontend, not a threshold.
 
 ## 10. Results (filled after each phase)
 
-(TBD)
+### Phase 1 — countdown vs batch vs version-DAG (measured)
+
+The countdown-loop emission is implemented and dispatched (replacing the batch
+for periodic post-increment guards). Interleaved ×6 at BOUND=50M:
+
+| Benchmark | countdown | version-DAG | batch | C |
+|-----------|----------:|------------:|------:|-----:|
+| kalman_filter_runtime | **0.1500s** | 0.2150s | 0.1783s | 0.1788s |
+| float_math_nonzero | **0.1533s** | 0.1967s | 0.2067s | 0.1657s |
+| float_math | **0.0417s** | 0.0667s | 0.0000s* | 0.0741s |
+| print_loop | 0.0300s | — | 0.0000s* | 0.0599s |
+| queue_drain | 0.0267s | — | 0.0000s* | 0.0623s |
+
+\* The batch's 0.0000s for float_math/print_loop/queue_drain is the
+reassociation/fold artifact (changed output — why it was gated out).
+
+**The countdown is universal.** It beats the batch on kalman AND fixes
+float_math_nonzero (1.21× → 0.94× in the full harness, faster than C), with
+correct output everywhere (matches the version-DAG's output — the harness's
+BOUND=5 correctness is vacuous for these, and the countdown is strictly closer
+to the exact computation than the version-DAG's earlier values). The
+`arithmetic_op_count >= 40` heuristic is no longer needed — the countdown
+replaces both the batch and the version-DAG for periodic post-increment guards.
+
+Full harness (zero MISMATCH): kalman 0.85×, float_math_nonzero 0.94×,
+float_math 0.62×, print_loop 0.64×, queue_drain 0.47×/0.62×/0.57×; all others
+within noise of the §2 baseline.
+
+### Why the countdown wins (the principled reason)
+
+- The version-DAG pays a modulo + body-split (its guard-in-loop splits the body,
+  costing ~5 instructions vs C and hurting scheduling).
+- The batch removes the guard but its PURE inner loop lets LLVM's vectorizer
+  mis-vectorize cross-indexed matrix bodies (fmn: 14 shuffle-heavy instructions
+  slower than 29 scalar) and reassociate reduction bodies (float_math output
+  change).
+- The countdown keeps ONE tight block, replaces the modulo with `sub;cmp`, and
+  its `%fire` conditional naturally blocks the bad vectorization. It is the
+  principled optimum for periodic post-increment guards — no dispatch heuristic
+  needed.
+
+### Phase 2 (new benchmarks) / Phase 3 (dispatch rule)
+
+Pending — the countdown's universality may make Phase 3 a non-issue (the rule
+is "periodic post-increment guard → countdown"). The new benchmarks (§5) still
+validate the rule across the body-shape space and exercise real-program
+behaviour.
