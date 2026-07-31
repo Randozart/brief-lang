@@ -176,6 +176,15 @@ collapses (`mod.rs:416-430`).
 
 ### 1.2 Path Selection Tree
 
+> **2026-07-31 (frontend-driven dispatch):** the tree below is the legacy
+> heuristic dispatch. Since Phase 1b the DECISION is computed once in the
+> frontend (`AnalysisResults` / `LoopShape`) and the backend merely consumes
+> it — see `docs/plans/2026-07-31-frontend-driven-dispatch.md` §5-§6 and
+> `docs/architecture/backend-architecture.md` §5. The periodic-guard paths now
+> go through the **countdown loop** (`loop_engine/counter.rs:
+> emit_countable_countdown_main`) or the version-DAG; the per-field phi loop
+> remains for non-periodic bounded loops.
+
 The backend selects a codegen strategy at `mod.rs:2162-2190` by walking
 a decision tree: all-const inputs within budget → precompute; else check
 single foldable txn → pure counter or A005c per-field phi loop; else

@@ -225,9 +225,10 @@ type                declares           protocol
   ▼                                        ▼
 Normalizer injects                   Normalizer injects
 properties for layout                 Cast.#Category property
-(bytes, llvm_type, bits, fields)           │
+(bytes, bits, fields)                       │
                                            ▼
-                                     Cast BFS finds paths
+                                     Casting graph resolves
+                                     LLVM type + cast paths
                                            │
                                            ▼
                                      Backend dispatches ops

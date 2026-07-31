@@ -46,25 +46,31 @@ The frontend (parser + AST), normalizer, and backend are coupled through a narro
 |-------|------|---------|--------------|
 | **Source** | Type definitions | `bootstrap.bv` | — |
 | **Parser** | Syntax + AST construction | `TypeDefBody`, `TypeDefSlot`, `PropertyValue` | — |
-| **TypeUniverse** | Type resolution | `ResolvedType { bytes, properties, name, base, alignment }` | `resolve_type()` |
-| **Normalizer** | CTD → LLVM type mapping | `llvm_type` property on every `ResolvedType` | `properties["llvm_type"]` |
+| **TypeUniverse** | Type resolution + protocols | `ResolvedType { bytes, properties, name, base, alignment }` | `resolve_type()` |
+| **Normalizer** | Registering types in the universe (protocol metadata) | the universe | — |
+| **Casting Graph** | LLVM type resolution, cast paths, protocol categories | `resolve_llvm_type()`, `find_path()`, `type_to_protocol()` | `resolve_llvm_type(universe, ty, int_bits)` |
 | **Backend** | IR emission | — | Everything above, read-only |
 
 **The frontend never calls backend code.** The backend never modifies the AST.
-The contract is: **frontend provides metadata and CTD, normalizer maps to backend types, backend consumes.**
+The contract is: **frontend provides metadata and CTD, the casting graph maps
+to backend types, backend consumes.** The normalizer does NOT compute LLVM
+types (the old `properties["llvm_type"]` mechanism was removed in Phase 3 —
+see `docs/plans/2026-07-31-frontend-driven-dispatch.md` §8).
 
 A metadata slot added to a type definition in source is automatically visible to every backend.
 No Rust changes needed. No recompilation. Example:
 
 ```brief
-type HalfFloat : Bits { maxbits <~ 16; ctd <~ Float; alu <~ Float; }
+type HalfFloat : Bits { maxbits <~ 16; op Add(#Float, #Float); }
 ```
 
-The parser stores `ctd <~ Float` in `TypeDefBody.metadata["ctd"]`.
-The universe reads it into `ResolvedType.properties["ctd"] = PropertyValue::Identifier("Float")`.
-The LLVM normalizer maps CTD `"Float"` → LLVM type `"half"` via `ctd_to_llvm()`.
-The LLVM backend reads `properties["llvm_type"]` — no recomputation needed.
-The CIRCT backend ignores CTD, reads `maxbits=16` → emits 16 wires.
+The parser stores `op Add(#Float, #Float)` in `TypeDefBody.operators`.
+The universe registers the type with its protocol ops; `Cast.#Float` makes it
+a `#Float`-category member.
+The casting graph resolves `HalfFloat` → LLVM type `"half"` via
+`resolve_llvm_type(universe, ty, int_bits)` — the normalizer never computes
+LLVM types (the old `ctd`/`alu`/`llvm_type` metadata mechanism was removed).
+The CIRCT backend ignores the protocol ops, reads `maxbits=16` → emits 16 wires.
 
 **Zero Rust changes across the entire pipeline.**
 
@@ -73,12 +79,19 @@ The CIRCT backend ignores CTD, reads `maxbits=16` → emits 16 wires.
 Every backend receives the same `ResolvedType { bytes, properties, ... }`.
 Each backend reads what it needs and ignores the rest.
 
+> **2026-07-31:** the `ctd` / `alu` / `llvm_type` property mechanism described
+> in this section is superseded (removed in Phase 3). LLVM-type resolution and
+> arithmetic category now come from the **casting graph**
+> (`resolve_llvm_type(universe, ty, int_bits)` and `Cast.#Float` membership) —
+> never from `properties`. The tables below are retained as historical
+> reference for the pre-casting-graph design; the LLVM rows are updated.
+
 ### LLVM Backend
 
 | Metadata | What it reads | What it emits |
 |----------|--------------|---------------|
-| `properties["llvm_type"]` | Set by normalizer; direct read, no recomputation | LLVM type string (`"i64"`, `"float"`, `"ptr"`, ...) |
-| `properties["alu"] == "Float"` | Determines float arithmetic vs integer | `fadd`/`fsub`/`fmul` vs `add`/`sub`/`mul` |
+| `resolve_llvm_type(universe, ty, int_bits)` | `(protocol, bytes)` via the casting graph | LLVM type string (`"i64"`, `"float"`, `"ptr"`, ...) |
+| `Cast.#Float` membership | Protocol category via `type_to_protocol` | `fadd`/`fsub`/`fmul` vs `add`/`sub`/`mul` |
 | `is_string_like(ty, universe)` | Shape (2 Int fields) + encoding property | SSO handle or heap-allocated string helpers |
 | `is_vector_like(ty, universe)` | Has `op.SVO <~ N` metadata | SVO inline list handle (N+1 slot struct) |
 | `svo_capacity(ty, universe)` | Reads `N` from `op.SVO` metadata | Number of inline elements before heap promotion |
@@ -87,7 +100,7 @@ Each backend reads what it needs and ignores the rest.
 | `bytes` | Storage width. Derived from fields for struct types | `alloca`, `malloc` size, GEP offsets |
 | `alignment` | Memory alignment | `align N` attribute on `alloca`/`store` |
 | `fields` | Struct field list on `ResolvedType` | LLVM `{ i64, i64 }` type, `extractvalue`/`insertvalue` |
-| No `ctd` + no `llvm_type` | Falls back to `derive_llvm_type(None, bytes)` | `format!("i{}", bytes * 8)` — structural only |
+| No protocol match | Casting-graph structural fallback from `(None, bytes)` | `format!("i{}", bytes * 8)` — structural only |
 
 ### CIRCT (Hardware) Backend
 

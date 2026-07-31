@@ -551,7 +551,12 @@ present/end blocks must restore the header phis.
 
 ### 9.6 Vector Phi Emission (Dormant — DO NOT RE-ENABLE WITHOUT RESEARCH)
 
-**What it is:** The dispatch selects a "VectorPhi" path when `detect_vector_groups` finds groups and `total_fields > 14`. However, `counter.rs:213-221` immediately clears all vector phi state, so the actual emission is PerFieldPhi.
+**What it is (2026-07-31 update):** the frontend computes isomorphic vector
+groups (`LoopShape.vector_groups` via `slp_isomorphism::analyze_body`); the
+dispatch records a "VectorPhi" label when groups exist AND `carried_len >
+float_register_count()`, but the emission is still PerFieldPhi (the vector-phi
+infrastructure is not wired). The group DETECTION moved frontend-side in
+Phase 1b; the EMISSION remains dormant for the reasons below.
 
 **Why it's dormant:** Vector phi emission was disabled because:
 1. `<2 x float>` groups added extract/insert overhead that dwarfed register-pressure benefit

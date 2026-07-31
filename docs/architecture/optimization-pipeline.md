@@ -20,17 +20,29 @@ flowchart TD
     F --> G{is_counter_bounded?}
     G -->|Yes| H{Const bound + pure + no swan song?}
     H -->|Yes| I[A001: O(1) pure counter store]
-    H -->|No| J{write_density >= 50%<br>AND fields < 8<br>AND no body FFI?}
-    J -->|Yes| K[A005a: Inline SSA insertvalue chain]
-    J -->|No| L[A005c: Per-field phi loop]
-    L --> M{Dual-path + vector phi selection}
-    M -->|No vector groups| N[Path A/B standard]
-    M -->|Vector groups detected| O[<4 x float> vector phis]
+    H -->|No| C{Periodic post-increment guard<br>count % N == 0?}
+    C -->|Yes| D[A007: Countdown loop — single tight loop<br>+ cold guard block]
+    C -->|No| V{One runtime when guard?}
+    V -->|Yes| E[A008: version-DAG guard-absent/present]
+    V -->|No| K[A005a: Inline SSA — counter-only writes]
+    K -->|No| L[A005c: Per-field phi loop]
+    L --> M{Dual-path memory + swan-song hoist}
+    M -->|No post-loop hoist| N[Path A: zero stores in body]
+    M -->|Post-loop hoisted guards| O[Path B: filtered stores]
     
     G -->|No| P{Async/MMIO/triggers?}
     P -->|Yes| Q[Reactor tick loop]
     P -->|No| R[A006: Direct SSA loop]
 ```
+
+> **2026-07-31 (frontend-driven dispatch):** the dispatch tree above is the
+> CURRENT structure — computed once in the frontend (`AnalysisResults` /
+> `LoopShape`), not re-derived in the backend. The old `write_density >= 50%
+> AND fields < 8` heuristic dispatch (A005a-vs-A005c by body re-walk) was
+> removed in Phase 1b (`c953c3c4`). The **countdown loop** (A007) is the
+> universal emission for periodic post-increment guards (`when count % N == 0`
+> after `count++`); see `docs/plans/2026-07-31-fmn-countdown-vs-batch-and-
+> new-benchmarks.md`. See the plan for the current 5-way switch order.
 
 ## Codegen Strategies
 
@@ -60,6 +72,11 @@ counter value. No runtime loop.
 File: `src/backend/llvm/loop_engine.rs` — `emit_folded_pure_counter`
 
 ### A005a: Inline SSA (insertvalue chain)
+
+> **2026-07-31:** The heuristic gate below (`write_density >= 50%, fields < 8,
+> no FFI`) was removed in Phase 1b. The InlineSsa path is now selected
+> STRUCTURALLY by `LoopShape.counter_only_writes` (the write set is exactly
+> `{counter}`) — see the dispatch plan §6.5.
 
 For bodies with write_density >= 50%, field_count < 8, and no FFI calls,
 the compiler emits a single `%State` phi with extractvalue/insertvalue

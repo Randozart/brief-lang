@@ -22,6 +22,12 @@
 > inferred unless `bits <~ N` is explicit. The `.#` operator replaces `:>`
 > for property access: `x.#Size` not `x .#Size`.
 >
+> **2026-07-31:** LLVM-type resolution is the **casting graph's** job, not
+> the normalizer's. The normalizer only registers types in the universe
+> (`register_typedefs`); the backend calls
+> `casting_graph.resolve_llvm_type(universe, ty, int_bits)`. Any mention of
+> `llvm_type` as a `ResolvedType` property in this doc is historical.
+>
 > The primordial seed table still exists as a convenience — it pre-populates
 > the universe with well-known type names so `--disable-plugin prelude` works. But the
 > semantic identity of a type is now determined by its op signatures, not

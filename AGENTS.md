@@ -228,9 +228,11 @@ contracts.
 
 | Resource | Location |
 |----------|----------|
+| **Rigorous methodology (REQUIRED reading)** | `docs/handoff-methodology.md` — the investigate→plan→experiment→implement→verify→document loop, evidence standard, and failure modes, with the frontend-driven-dispatch session as the worked example |
 | **Language syntax, contracts, coding standards, backend rules** | `docs/architecture/agent-reference.md` |
 | **Full pre-rewrite guidelines** | `AGENTS.md.archive` |
 | **Historical context** | `AGENTS_HISTORY.md`, `AGENTS_HISTORY_2.md` |
+| **Session report (2026-07-31)** | `docs/2026-07-31-session-report.md` |
 | **Bug diagnoses** | `BUGS.md` |
 | **Architecture overview** | `docs/architecture/overview.md` |
 | **Backend type dispatch** | `docs/architecture/backend-type-dispatch.md` — read first before backend type code |

@@ -3,24 +3,17 @@
 **Date:** 2026-07-07 (updated — is_decreasing in A005c, flexible base extraction for vector phis)
 **Status:** Current
 
-> **2026-07-31 — Composite-node decomposition supersedes batch-loop dispatch.**
-> When a reactive transaction's body contains side-effecting `when` guards
-> (periodic prints, termination checks), the compiler runs a **recursive
-> version-DAG decomposition** (§5.3 of `backend-architecture.md`, §11 of
-> `docs/plans/2026-07-30-flat-node-decomposition.md`): split the body at each
-> guard into `[pre]`/`[guard]`/`[post]`, reconstruct a guard-absent version
-> (no side effects) and a guard-present version (with the side effect) per
-> guard, and emit them as a DAG of self-terminating loops. Neither version is
-> structurally "hot" or "cold" — which dominates is a predicate-frequency
-> property. Provably always-true predicates are inlined (or kept apart for
-> LLVM); provably always-false predicates are dropped. This replaces the
-> batch-loop's heuristic boundary derivation
-> (`extract_batch_size_from_guards`, manual count=0 peel, `pre_count`
-> arithmetic). The guard-absent loop is pure compute → LLVM if-converts and
-> vectorizes it; the guard-present block runs once per interval. Guard position
-> (pre/post-increment) is captured by the split point — never by counter-name
-> matching. The hot loop carries only the minimal loop-carried state set
-> (see `docs/architecture/minimal-state-and-purity.md`).
+> **2026-07-31 — Frontend-driven dispatch.** The decision tree below is the
+> LEGACY heuristic dispatch. Since Phase 1b the dispatch is computed ONCE in
+> the frontend (`AnalysisResults` / `LoopShape`) and the backend consumes it —
+> no body re-walks, no `write_density` arithmetic, no hardcoded field counts.
+> The periodic-post-increment-guard case now emits the **countdown loop** (a
+> single tight loop + cold guard block), and single `when`-guard bodies go
+> through the recursive version-DAG decomposition (§5.3 of
+> `backend-architecture.md`). See `docs/plans/2026-07-31-frontend-driven-
+> dispatch.md` §5-§6 and `docs/plans/2026-07-31-fmn-countdown-vs-batch-and-
+> new-benchmarks.md`. The composite-node/version-DAG note below is retained for
+> the guard-decomposition history.
 
 ## Purpose
 
@@ -38,18 +31,24 @@ graph TD
     AllConst -->|No| CounterBounded{Counter-bounded?}
 
     CounterBounded -->|Yes + pure + const bound| PureCounter[Pure counter fold — O(1)]
-    CounterBounded -->|Yes| DensityTest{Dense writes + <8 fields + no FFI?}
-    DensityTest -->|Yes| A005a[Inline SSA — insertvalue chain A005a]
-    DensityTest -->|No| A005c{Per-field phi loop A005c}
-    A005c --> VectorPhi{Vector phi detected?}
-    VectorPhi -->|Yes + 4+ float fields| V4[<4 x float> vector phis]
-    VectorPhi -->|No| Scalar[Scalar phis]
+    CounterBounded -->|Yes| Periodic{Periodic post-increment guard<br>count % N == 0?}
+    Periodic -->|Yes| Countdown[Countdown loop A007 — tight loop + cold guard]
+    Periodic -->|No| OneGuard{One runtime when guard?}
+    OneGuard -->|Yes| VersionDAG[Recursive version-DAG decomposition]
+    OneGuard -->|No| InlineSsa{Write set is exactly {counter}?}
+    InlineSsa -->|Yes| A005a[Inline SSA — insertvalue chain A005a]
+    InlineSsa -->|No| A005c[Per-field phi loop A005c]
     A005c --> Rotate{Rotation pattern detected?}
     Rotate -->|Yes + 12+ cycle| Step4[Step-4 GEP reload decomposition]
     Rotate -->|No| Standard[Standard latch backedge]
 
     CounterBounded -->|No, reactive| A006[Direct SSA Loop A006]
 ```
+
+> **2026-07-31:** the decisions above (periodic guard, one-guard, write-set
+> subset) are computed by the frontend analysis passes — see
+> `src/analysis/batch_shape.rs`, `loop_shape.rs`, and the dispatch switch in
+> `src/backend/llvm/mod.rs`.
 
 ## Path Details
 
@@ -67,7 +66,9 @@ graph TD
 
 ### A005a: Inline SSA (insertvalue chain, re-added 2026-07-05)
 **File:** `loop_engine.rs:emit_folded_main`
-**Condition:** write_density >= 50%, field_count < 8, no body FFI calls
+**Condition (2026-07-31):** selected structurally when the write set is exactly
+`{counter}` (`LoopShape.counter_only_writes`) — the old heuristic gate below is
+historical.
 **Gate:** `mod.rs:2245` (adaptive dispatch for pure bodies)
 **Mechanism:** Single `%State` phi with extractvalue/insertvalue for field
 access. LLVM's SROA+GVN sees the entire state as one SSA unit.

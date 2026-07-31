@@ -322,7 +322,13 @@ protocol graph without backend changes.
 
 ---
 
-## `disamb` — Disambiguation Hint
+## `disamb` — Disambiguation Hint (superseded)
+
+> **2026-07-31:** `disamb` is superseded by the hardcoded well-known protocol
+> variants in the casting graph (`#Float<BFloat>` → `bfloat`,
+> `#Float<Half>` → `half`, …). See `docs/architecture/agent-reference.md` §1.0
+> "Protocol variants". The section below is retained as historical reference
+> for the pre-variant mechanism.
 
 The `disamb <~ "value"` metadata property disambiguates representations that
 structure + bytes + protocol ops cannot distinguish. Currently only needed
