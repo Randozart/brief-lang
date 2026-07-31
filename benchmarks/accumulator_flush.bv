@@ -1,0 +1,33 @@
+
+// Accumulator Flush — batch accumulation (sum + sumsq) with a periodic flush
+// that prints and RESETS the accumulators. The clean-reduction case: a
+// SIMD-friendly body where the batch/vectorization path is expected to help.
+// Stresses: periodic guard with an in-guard RESET, clean reduction body.
+
+let sum: Float = 0.0;
+let sumsq: Float = 0.0;
+let n: Int = 0;
+let count: Int = 0;
+let total: Int = GetEnvInt!("BOUND");
+
+node tick [
+    count < total
+][count == total] {
+    let x: Float = (count % 101) as Float * 0.5;
+    sum = sum + x;
+    sumsq = sumsq + x * x;
+    n = n + 1;
+    count = count + 1;
+    when count % 100000 == 0 {
+        __print_int(n);
+        __print_char(32);
+        __print_float(sum);
+        __print_char(32);
+        __print_float(sumsq);
+        __print_char(10);
+        sum = 0.0;
+        sumsq = 0.0;
+        n = 0;
+    };
+    term;
+};

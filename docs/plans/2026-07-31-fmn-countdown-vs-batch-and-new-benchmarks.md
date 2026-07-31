@@ -174,6 +174,51 @@ the frontend, not a threshold.
    vs the heuristic. Keep whichever passes (zero regressions, zero MISMATCH).
 5. Commits per logical step (auto-commit between checkpoints).
 
+### Phase 2 — new real-program benchmarks (added, harness-verified)
+
+Seven benchmarks added (each with a C reference): `telemetry_stream`, `pid_control`,
+`matrix_pipeline`, `accumulator_flush`, `sweep_sparse`, `sweep_mid`, `sweep_dense`.
+Full harness (BOUND=50M, zero MISMATCH):
+
+| Benchmark | Brief | C | Ratio | Pattern |
+|-----------|------:|---:|------:|---------|
+| telemetry_stream | — | — | **0.99×** | rolling EMA + periodic telemetry |
+| pid_control | — | — | **0.97×** | PID loop + periodic log |
+| matrix_pipeline | — | — | **0.66×** | dense 4×4 matmul + checkpoint |
+| accumulator_flush | — | — | **0.71×** | clean reduction + flush/reset |
+| sweep_sparse | — | — | **1.40×** | 4 fields, N=1e5, cyclic chain |
+| sweep_mid | — | — | **1.10×** | 8 fields, N=1e6, cyclic chain |
+| sweep_dense | — | — | **1.49×** | 16 fields, N=5e6, cyclic chain |
+
+**Finding (the WHY the plan set out to establish):** the countdown wins on the
+REAL-PROGRAM bodies (EMA, PID, matmul, reduction — 0.66–0.99×, several faster
+than C) but loses on the synthetic CYCLIC-TRIDIAGONAL sweep bodies (1.10–1.49×).
+The `%fire` conditional is NOT a reliable vectorizer-blocker: for the
+cross-indexed sweep chain (`fi = a·fi + b·f(i+1) + c·f(i−1)`) LLVM vectorizes
+the countdown loop into shuffle-heavy AVX code (vshufps/vblendps/vperm2f128)
+that runs slower than C's scalar loop — the same mis-vectorization that sank
+the batch on fmn. The countdown is the right structure for bodies whose reads
+are per-field independent (matrix multiply rows, EMA recurrences); cross-indexed
+neighbor chains remain a gap (Phase 3).
+
+### Phase 3 (dispatch rule)
+
+The countdown is the dispatch for periodic post-increment guards (replacing the
+`>= 40` heuristic). The sweep finding shows the rule is not perfect for
+cross-indexed chain bodies — a follow-up would detect those (structural
+cross-indexing) and prefer scalar/version-DAG for them.
+
+### Implicit-coercion type-safety (executive request)
+
+`Int * Float` (any mixed-type arithmetic) is now a TYPE ERROR unless the LHS or
+RHS type declares a cross-type / cross-protocol overload (`op Mul(#Float)` /
+`op Mul(Float)`). The old behavior silently bitcast the Int to Float (garbage —
+accumulator_flush summed ~0). Added the typechecker check + `regular_ops` /
+`regular_bindings` collection + 4 tests. Also fixed two latent bugs found by the
+new benchmarks: the casting graph's IntToFloat lane emitted `sitofp to double`
+(now the target width), and the outlined-guard float-param path allocated i64
+slots (now the binding's type).
+
 ## 10. Results (filled after each phase)
 
 ### Phase 1 — countdown vs batch vs version-DAG (measured)

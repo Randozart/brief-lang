@@ -79,8 +79,16 @@ pub fn emit_statement(backend: &mut LlvmBackend, out: &mut String, stmt: &Statem
                             reg
                         } else {
                             let slot = backend.fun.gen_reg();
-                            writeln!(out, "{}{} = alloca i64, align 8", indent, slot).ok();
-                            writeln!(out, "{}store i64 {}, ptr {}", indent, reg, slot).ok();
+                            // 2026-07-31: The slot type must match the binding's Brief
+                            // type — an outlined guard param that is a FLOAT state field
+                            // (e.g. `sum = 0.0` reset in accumulator_flush) is a `float`
+                            // register; boxing it as i64 produces
+                            // `store i64 %__cp_sum` on a float param (type error).
+                            let slot_ty = backend.fun.let_binding_types.get(name)
+                                .map(|t| backend.llvm_type(t))
+                                .unwrap_or_else(|| "i64".to_string());
+                            writeln!(out, "{}{} = alloca {}, align 8", indent, slot, slot_ty).ok();
+                            writeln!(out, "{}store {} {}, ptr {}", indent, slot_ty, reg, slot).ok();
                             backend.fun.let_bindings.insert(name.clone(), slot.clone());
                             backend.fun.let_binding_allocas.insert(slot.clone());
                             slot

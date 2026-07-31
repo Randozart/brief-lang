@@ -1,0 +1,33 @@
+
+// Sweep Mid — medium-density periodic-guard loop (8 fields, ~16 ops/iter,
+// N=1000000). Part of the sweep_density family.
+
+let f0: Float = 1.0;
+let f1: Float = 0.5;
+let f2: Float = 0.25;
+let f3: Float = 0.125;
+let f4: Float = 0.0625;
+let f5: Float = 0.03125;
+let f6: Float = 0.015625;
+let f7: Float = 0.0078125;
+let count: Int = 0;
+let total: Int = GetEnvInt!("BOUND");
+
+node tick [
+    count < total
+][count == total] {
+    f0 = f0 * 0.999 + f1 * 0.001;
+    f1 = f1 * 0.999 + f2 * 0.001;
+    f2 = f2 * 0.999 + f3 * 0.001;
+    f3 = f3 * 0.999 + f4 * 0.001;
+    f4 = f4 * 0.999 + f5 * 0.001;
+    f5 = f5 * 0.999 + f6 * 0.001;
+    f6 = f6 * 0.999 + f7 * 0.001;
+    f7 = f7 * 0.999 + f0 * 0.001;
+    count = count + 1;
+    when count % 1000000 == 0 {
+        __print_float(f0 + f1 + f2 + f3 + f4 + f5 + f6 + f7);
+        __print_char(10);
+    };
+    term;
+};

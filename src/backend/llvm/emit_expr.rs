@@ -2582,8 +2582,12 @@ impl LlvmBackend {
                         indent, dst, cur_ll, cur, dst_ll).ok();
                 }
                 crate::casting::graph::LaneKind::IntToFloat => {
-                    writeln!(out, "{}{} = sitofp {} {} to double",
-                        indent, dst, cur_ll, cur).ok();
+                    // 2026-07-31: The destination type is dst_ll (float for a
+                    // Float target, double for Float64/Double) — the old
+                    // hardcoded `to double` broke `as Float` casts (telemetry
+                    // stream): a double register fed a fadd float.
+                    writeln!(out, "{}{} = sitofp {} {} to {}",
+                        indent, dst, cur_ll, cur, dst_ll).ok();
                 }
                 crate::casting::graph::LaneKind::FloatToInt => {
                     writeln!(out, "{}{} = fptosi {} {} to i64",

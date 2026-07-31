@@ -817,6 +817,24 @@ impl LlvmBackend {
         writeln!(out, "  {} = icmp eq i64 {}, 0", fire, c_rem_next).ok();
         writeln!(out, "  br i1 {}, label %.cdg_{}, label %.cdl_{}", fire, c0, c0).ok();
 
+        // Fields the guard WRITES (e.g. accumulator_flush's `sum = 0` reset)
+        // need a latch phi merging the body's value (.cdb) with the guard's
+        // (.cdg) — the guard's write register does not dominate the latch.
+        // Print-only guards have an empty set and take the plain backedge path.
+        let mut guard_writes: HashSet<String> = HashSet::new();
+        for stmt in &batch.guard_body {
+            if let Statement::Assign(lhs, _) = stmt {
+                if let Some(field_name) = lhs.as_var_name() {
+                    if self.ctx.field_index_map.contains_key(field_name) {
+                        guard_writes.insert(field_name.to_string());
+                    }
+                }
+            }
+        }
+        // Save the body's per-field values BEFORE the guard overwrites them, so
+        // the latch's .cdb phi entry sees the body's compute.
+        let body_backedges = self.fun.pending_phi_backedge.clone();
+
         // ── Guard (COLD — 1 in N iterations) ────────────────────
         // The io guard fires here (remaining == 0 is known true), so only the
         // guard BODY is emitted — no conditional branch structure, keeping
@@ -851,15 +869,38 @@ impl LlvmBackend {
         writeln!(out, "  br label %.cdl_{}", c0).ok();
 
         // ── Latch ──────────────────────────────────────────────
-        // %rem_latch = phi [remaining-1, body], [N, guard].
+        // %rem_latch = phi [remaining-1, body], [N, guard]. All phis (rem +
+        // guard-written fields) are grouped at the TOP of the block per LLVM
+        // rules; non-phi backedges follow.
         writeln!(out, ".cdl_{}:", c0).ok();
         writeln!(out, "  {} = phi i64 [ {}, %.cdb_{} ], [ {}, %.cdg_{} ]",
             c_rem_latch, c_rem_next, c0, rem_reset, c0).ok();
+        for fname in sorted_fields.iter().filter(|f| {
+            f.as_str() != counter_var && guard_writes.contains(f.as_str())
+        }) {
+            if let Some(be_f) = self.fun.backedge_field_regs.get(fname.as_str()) {
+                let field_ty = self.ctx.field_index_map.get(fname.as_str())
+                    .and_then(|idx| self.ctx.field_types.get(*idx))
+                    .cloned().unwrap_or_else(|| "i64".to_string());
+                let body_val = body_backedges.get(fname.as_str())
+                    .cloned().unwrap_or_else(|| {
+                        self.fun.phi_field_regs.get(fname.as_str())
+                            .cloned().unwrap_or_else(|| "0".to_string())
+                    });
+                let guard_val = self.fun.pending_phi_backedge.get(fname.as_str())
+                    .cloned().unwrap_or_else(|| body_val.clone());
+                writeln!(out, "  {} = phi {} [ {}, %.cdb_{} ], [ {}, %.cdg_{} ]",
+                    be_f, field_ty, body_val, c0, guard_val, c0).ok();
+            }
+        }
         // Counter increment (native width) — the counter's backedge.
         writeln!(out, "  {} = add nuw nsw {} {}, 1", c_next, counter_ty, c_counter).ok();
         self.fun.pending_phi_backedge.insert(counter_var.to_string(), c_next.clone());
-        // Field backedges (skip the counter — its backedge is c_next above).
-        for fname in sorted_fields.iter().filter(|f| f.as_str() != counter_var) {
+        // Non-guard-written field backedges (skip the counter — its backedge is
+        // c_next above).
+        for fname in sorted_fields.iter().filter(|f| {
+            f.as_str() != counter_var && !guard_writes.contains(f.as_str())
+        }) {
             if let Some(be_f) = self.fun.backedge_field_regs.get(fname.as_str()) {
                 let val = self.fun.pending_phi_backedge.get(fname.as_str())
                     .cloned().unwrap_or_else(|| {

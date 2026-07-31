@@ -2713,3 +2713,39 @@ arithmetic inflated the cross-op count.
 byte-identical across all 38 benchmark programs.
 **Impact:** Cleaner metric; behavior preserved. The `> 4.0` threshold moves to
 `config/targets.toml` in Phase 3 (§8.1).
+
+---
+
+## `as Float` cast emitted `sitofp to double` — FIXED
+
+**Date:** 2026-07-31
+**Status:** Fixed
+**Root cause:** the casting graph's `IntToFloat` lane hardcoded `sitofp … to
+double` (both `emit_cast_steps` sites in `emit_expr.rs`). An `(count % 97) as
+Float` cast produced a `double` register that fed a `fadd float` — type error
+(telemetry_stream benchmark).
+**Fix:** the lane now emits `sitofp {src} to {dst_ll}` (float for a Float
+target, double for Float64/Double).
+
+## Implicit Int × Float coercion silently bitcasts the int — OPEN
+
+**Date:** 2026-07-31
+**Status:** Open (benchmark worked around with explicit `as Float`)
+**Root cause:** `(count % 101) * 0.5` (Int * Float) compiles WITHOUT error and
+coerces the Int via `bitcast i32 to float` (reinterpreting the bits), producing
+garbage (accumulator_flush printed 0). AGENTS.md forbids implicit coercions —
+this should be a compile error (or a semantic `sitofp`). The correct pattern is
+an explicit `as Float` cast. Needs the typechecker to reject implicit
+Int↔Float arithmetic or coerce via sitofp.
+
+## Outlined guard float params allocated as i64 — FIXED
+
+**Date:** 2026-07-31
+**Status:** Fixed
+**Root cause:** `emit_statement`'s param-mutation path (`emit_stmt.rs`) allocated
+`alloca i64` unconditionally when a value-register binding is assigned. An
+outlined guard param that is a FLOAT state field (e.g. accumulator_flush's
+`sum = 0` reset) is a `float` register — boxing it as i64 produced
+`store i64 %__cp_sum` on a float param (type error).
+**Fix:** the alloca uses the binding's Brief type (`let_binding_types` →
+`llvm_type`).

@@ -7,7 +7,7 @@ use crate::ast::{OpBinding, Type};
 use crate::type_universe::TypeUniverse;
 
 /// The rune-to-op-name mapping. These are the same across all types.
-fn rune_to_op_name(rune: &str) -> Option<&'static str> {
+pub(crate) fn rune_to_op_name(rune: &str) -> Option<&'static str> {
     Some(match rune {
         "+" => "Add",
         "-" => "Sub",

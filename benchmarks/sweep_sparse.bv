@@ -1,0 +1,26 @@
+
+// Sweep Sparse — low-density periodic-guard loop (4 fields, ~6 ops/iter,
+// N=100000). Part of the sweep_density family mapping where the countdown
+// vs version-DAG structures win across body densities.
+
+let f0: Float = 1.0;
+let f1: Float = 0.5;
+let f2: Float = 0.25;
+let f3: Float = 0.125;
+let count: Int = 0;
+let total: Int = GetEnvInt!("BOUND");
+
+node tick [
+    count < total
+][count == total] {
+    f0 = f0 * 0.999 + f1 * 0.001;
+    f1 = f1 * 0.999 + f2 * 0.001;
+    f2 = f2 * 0.999 + f3 * 0.001;
+    f3 = f3 * 0.999 + f0 * 0.001;
+    count = count + 1;
+    when count % 100000 == 0 {
+        __print_float(f0 + f1 + f2 + f3);
+        __print_char(10);
+    };
+    term;
+};

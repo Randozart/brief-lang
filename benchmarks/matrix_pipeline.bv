@@ -1,0 +1,77 @@
+
+// Matrix Pipeline — dense 4x4 matrix multiply (m' = A * m) with a periodic
+// checkpoint. The kalman-like dense cross-pattern at a larger scale (16 fields).
+// Stresses: periodic guard, dense cross-indexed matrix body, high register
+// pressure.
+
+let m00: Float = 1.0;
+let m01: Float = 0.0;
+let m02: Float = 0.0;
+let m03: Float = 0.0;
+let m10: Float = 0.0;
+let m11: Float = 1.0;
+let m12: Float = 0.0;
+let m13: Float = 0.0;
+let m20: Float = 0.0;
+let m21: Float = 0.0;
+let m22: Float = 1.0;
+let m23: Float = 0.0;
+let m30: Float = 0.0;
+let m31: Float = 0.0;
+let m32: Float = 0.0;
+let m33: Float = 1.0;
+let count: Int = 0;
+let total: Int = GetEnvInt!("BOUND");
+
+const a00: Float = 0.999;
+const a01: Float = 0.001;
+const a02: Float = 0.0001;
+const a03: Float = 0.00001;
+const a10: Float = 0.001;
+const a11: Float = 0.999;
+const a12: Float = 0.001;
+const a13: Float = 0.0001;
+const a20: Float = 0.0001;
+const a21: Float = 0.001;
+const a22: Float = 0.999;
+const a23: Float = 0.001;
+const a30: Float = 0.00001;
+const a31: Float = 0.0001;
+const a32: Float = 0.001;
+const a33: Float = 0.999;
+
+node tick [
+    count < total
+][count == total] {
+    let n00: Float = a00 * m00 + a01 * m10 + a02 * m20 + a03 * m30;
+    let n01: Float = a00 * m01 + a01 * m11 + a02 * m21 + a03 * m31;
+    let n02: Float = a00 * m02 + a01 * m12 + a02 * m22 + a03 * m32;
+    let n03: Float = a00 * m03 + a01 * m13 + a02 * m23 + a03 * m33;
+
+    let n10: Float = a10 * m00 + a11 * m10 + a12 * m20 + a13 * m30;
+    let n11: Float = a10 * m01 + a11 * m11 + a12 * m21 + a13 * m31;
+    let n12: Float = a10 * m02 + a11 * m12 + a12 * m22 + a13 * m32;
+    let n13: Float = a10 * m03 + a11 * m13 + a12 * m23 + a13 * m33;
+
+    let n20: Float = a20 * m00 + a21 * m10 + a22 * m20 + a23 * m30;
+    let n21: Float = a20 * m01 + a21 * m11 + a22 * m21 + a23 * m31;
+    let n22: Float = a20 * m02 + a21 * m12 + a22 * m22 + a23 * m32;
+    let n23: Float = a20 * m03 + a21 * m13 + a22 * m23 + a23 * m33;
+
+    let n30: Float = a30 * m00 + a31 * m10 + a32 * m20 + a33 * m30;
+    let n31: Float = a30 * m01 + a31 * m11 + a32 * m21 + a33 * m31;
+    let n32: Float = a30 * m02 + a31 * m12 + a32 * m22 + a33 * m32;
+    let n33: Float = a30 * m03 + a31 * m13 + a32 * m23 + a33 * m33;
+
+    m00 = n00; m01 = n01; m02 = n02; m03 = n03;
+    m10 = n10; m11 = n11; m12 = n12; m13 = n13;
+    m20 = n20; m21 = n21; m22 = n22; m23 = n23;
+    m30 = n30; m31 = n31; m32 = n32; m33 = n33;
+
+    count = count + 1;
+    when count % 5000000 == 0 {
+        __print_float(m00 + m11 + m22 + m33);
+        __print_char(10);
+    };
+    term;
+};

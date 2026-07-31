@@ -3,7 +3,7 @@
 // All types are resolved to Bits(N) with metadata overlays.
 // The TypeUniverse is built during the type-checking pass.
 
-mod operators;
+pub(crate) mod operators;
 mod resolve;
 mod validate;
 

@@ -96,6 +96,14 @@ TAG[precompute_sum_runtime]=runtime
 TAG[binary_trees]=runtime
 TAG[meld-bridge]=runtime
 TAG[meld-bridge-sym]=runtime
+# 2026-07-31: Real-program periodic-guard benchmarks.
+TAG[telemetry_stream]=runtime
+TAG[pid_control]=runtime
+TAG[matrix_pipeline]=runtime
+TAG[accumulator_flush]=runtime
+TAG[sweep_sparse]=runtime
+TAG[sweep_mid]=runtime
+TAG[sweep_dense]=runtime
 
 BENCHMARKS=(
     "iir_filter"
@@ -123,6 +131,14 @@ BENCHMARKS=(
     "queue_drain_sym"
     "queue_drain_idio"
     "interval_step"
+    # 2026-07-31: Real-program periodic-guard benchmarks (countdown dispatch A/B).
+    "telemetry_stream"
+    "pid_control"
+    "matrix_pipeline"
+    "accumulator_flush"
+    "sweep_sparse"
+    "sweep_mid"
+    "sweep_dense"
     "bridge_glue"
     "bridge_multi"
     # "gpu/saxpy"        # no .bv file exists

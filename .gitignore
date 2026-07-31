@@ -255,3 +255,17 @@ src/backend/x86_64.rs
 ptr-demo
 /benchmarks/metropolitan/out/
 /ffi-out/
+benchmarks/telemetry_stream
+benchmarks/telemetry_stream_c
+benchmarks/pid_control
+benchmarks/pid_control_c
+benchmarks/matrix_pipeline
+benchmarks/matrix_pipeline_c
+benchmarks/accumulator_flush
+benchmarks/accumulator_flush_c
+benchmarks/sweep_sparse
+benchmarks/sweep_sparse_c
+benchmarks/sweep_mid
+benchmarks/sweep_mid_c
+benchmarks/sweep_dense
+benchmarks/sweep_dense_c

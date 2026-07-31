@@ -1,0 +1,55 @@
+
+// Sweep Dense — high-density periodic-guard loop (16 fields, ~40 ops/iter,
+// N=5000000). Part of the sweep_density family (the kalman-like dense end).
+
+let f0: Float = 1.0;
+let f1: Float = 0.5;
+let f2: Float = 0.25;
+let f3: Float = 0.125;
+let f4: Float = 0.0625;
+let f5: Float = 0.03125;
+let f6: Float = 0.015625;
+let f7: Float = 0.0078125;
+let f8: Float = 0.00390625;
+let f9: Float = 0.001953125;
+let f10: Float = 0.0009765625;
+let f11: Float = 0.00048828125;
+let f12: Float = 0.000244140625;
+let f13: Float = 0.0001220703125;
+let f14: Float = 0.00006103515625;
+let f15: Float = 0.000030517578125;
+let count: Int = 0;
+let total: Int = GetEnvInt!("BOUND");
+
+node tick [
+    count < total
+][count == total] {
+    // Lets capture the OLD field values (all reads before any write), matching
+    // the C reference's n[]-then-f[] structure.
+    let n0: Float = f0 * 0.999 + f1 * 0.001 + f15 * 0.000001;
+    let n1: Float = f1 * 0.999 + f2 * 0.001 + f0 * 0.000001;
+    let n2: Float = f2 * 0.999 + f3 * 0.001 + f1 * 0.000001;
+    let n3: Float = f3 * 0.999 + f4 * 0.001 + f2 * 0.000001;
+    let n4: Float = f4 * 0.999 + f5 * 0.001 + f3 * 0.000001;
+    let n5: Float = f5 * 0.999 + f6 * 0.001 + f4 * 0.000001;
+    let n6: Float = f6 * 0.999 + f7 * 0.001 + f5 * 0.000001;
+    let n7: Float = f7 * 0.999 + f8 * 0.001 + f6 * 0.000001;
+    let n8: Float = f8 * 0.999 + f9 * 0.001 + f7 * 0.000001;
+    let n9: Float = f9 * 0.999 + f10 * 0.001 + f8 * 0.000001;
+    let n10: Float = f10 * 0.999 + f11 * 0.001 + f9 * 0.000001;
+    let n11: Float = f11 * 0.999 + f12 * 0.001 + f10 * 0.000001;
+    let n12: Float = f12 * 0.999 + f13 * 0.001 + f11 * 0.000001;
+    let n13: Float = f13 * 0.999 + f14 * 0.001 + f12 * 0.000001;
+    let n14: Float = f14 * 0.999 + f15 * 0.001 + f13 * 0.000001;
+    let n15: Float = f15 * 0.999 + f0 * 0.001 + f14 * 0.000001;
+    f0 = n0; f1 = n1; f2 = n2; f3 = n3;
+    f4 = n4; f5 = n5; f6 = n6; f7 = n7;
+    f8 = n8; f9 = n9; f10 = n10; f11 = n11;
+    f12 = n12; f13 = n13; f14 = n14; f15 = n15;
+    count = count + 1;
+    when count % 5000000 == 0 {
+        __print_float(f0 + f1 + f2 + f3 + f4 + f5 + f6 + f7 + f8 + f9 + f10 + f11 + f12 + f13 + f14 + f15);
+        __print_char(10);
+    };
+    term;
+};

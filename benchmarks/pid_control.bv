@@ -1,0 +1,33 @@
+
+// PID Control Loop — a controller tracking a setpoint with periodic logging.
+// Realistic control-system pattern. Stresses: periodic guard, cross-term body
+// (P+I+D gains), 6-8 fields, plant feedback.
+
+let sp: Float = 100.0;
+let pv: Float = 0.0;
+let err_prev: Float = 0.0;
+let integral: Float = 0.0;
+let output: Float = 0.0;
+let count: Int = 0;
+let total: Int = GetEnvInt!("BOUND");
+
+const Kp: Float = 0.1;
+const Ki: Float = 0.01;
+const Kd: Float = 0.5;
+
+node tick [
+    count < total
+][count == total] {
+    let err: Float = sp - pv;
+    integral = integral + err;
+    let deriv: Float = err - err_prev;
+    output = Kp * err + Ki * integral + Kd * deriv;
+    pv = pv + output * 0.001;
+    err_prev = err;
+    count = count + 1;
+    when count % 1000000 == 0 {
+        __print_float(output + pv);
+        __print_char(10);
+    };
+    term;
+};

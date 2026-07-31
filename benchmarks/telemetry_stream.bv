@@ -1,0 +1,26 @@
+
+// Telemetry Stream — rolling EMA + variance over a synthetic sensor stream
+// with periodic telemetry output. Realistic streaming-monitoring pattern.
+// Stresses: periodic guard, SIMD-friendly recurrence body, few fields.
+
+let ema: Float = 0.0;
+let m2: Float = 0.0;
+let count: Int = 0;
+let total: Int = GetEnvInt!("BOUND");
+
+const alpha: Float = 0.05;
+
+node tick [
+    count < total
+][count == total] {
+    let sample: Float = 100.0 + (count % 97) as Float;
+    let delta: Float = sample - ema;
+    ema = ema + alpha * delta;
+    m2 = m2 + delta * delta;
+    count = count + 1;
+    when count % 1000000 == 0 {
+        __print_float(ema + m2);
+        __print_char(10);
+    };
+    term;
+};

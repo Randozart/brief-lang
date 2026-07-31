@@ -38,6 +38,17 @@ pub struct TypecheckContext<'a> {
     /// 2026-07-25: Function return types for user-defined functions.
     /// Populated by check_program before type-checking bodies.
     fn_return_types: HashMap<String, Type>,
+    /// 2026-07-31: Regular operator declarations from TypeDef bodies
+    /// (`op Add(#Float): func(#L,#R);` / `op Add(Float): ...;`), keyed by type
+    /// name. Used to ALLOW mixed-type arithmetic ONLY when a cross-type /
+    /// cross-protocol overload is explicitly declared — otherwise
+    /// `Int * Float` is a type error (no implicit numeric coercion).
+    /// Both `td.body.operators` (ProtocolDef-style OperatorDefs) and
+    /// `td.body.op_bindings` (type-body `op Name(#Proto): fn(#L,#R);`) are
+    /// collected; the operand type lives in OperatorDef.params or
+    /// OperatorBinding.protocol_variant.
+    regular_ops: HashMap<String, Vec<crate::ast::top::OperatorDef>>,
+    regular_bindings: HashMap<String, Vec<crate::ast::top::OperatorBinding>>,
 }
 
 impl<'a> TypecheckContext<'a> {
@@ -49,6 +60,85 @@ impl<'a> TypecheckContext<'a> {
             parse_ops: HashMap::new(),
             type_parents: HashMap::new(),
             fn_return_types: HashMap::new(),
+            regular_ops: HashMap::new(),
+            regular_bindings: HashMap::new(),
+        }
+    }
+
+    /// 2026-07-31: Does a cross-type / cross-protocol operator overload exist
+    /// for `rune` between `lhs` and `rhs`? A type declaring `op Add(#Float)` or
+    /// `op Add(Float)` on its body authorizes `T + Float` without an explicit
+    /// cast. The builtin primordials (Int, Float, …) declare NO cross-type ops,
+    /// so `Int * Float` stays a type error (the type-safety guarantee).
+    fn has_cross_type_overload(&self, rune: &str, lhs: &Type, rhs: &Type) -> bool {
+        let Some(op_name) = crate::type_universe::operators::rune_to_op_name(rune) else {
+            return false;
+        };
+        self.type_declares_op(lhs, op_name, rhs) || self.type_declares_op(rhs, op_name, lhs)
+    }
+
+    /// Does `ty` declare `op <op_name>` whose declared operand covers `operand`?
+    fn type_declares_op(&self, ty: &Type, op_name: &str, operand: &Type) -> bool {
+        let type_name = match ty {
+            Type::Custom(n) => n.as_str(),
+            Type::Applied(n, _) => n.as_str(),
+            _ => return false,
+        };
+        if let Some(ops) = self.regular_ops.get(type_name) {
+            if ops.iter().any(|op| {
+                op.op == op_name
+                    && op.params.first().map_or(false, |p| self.param_covers(p, operand))
+            }) {
+                return true;
+            }
+        }
+        if let Some(bindings) = self.regular_bindings.get(type_name) {
+            if bindings.iter().any(|b| {
+                b.name == op_name && b.protocol_variant.as_ref().map_or(false, |v| self.variant_covers(v, operand))
+            }) {
+                return true;
+            }
+        }
+        false
+    }
+
+    /// Does a declared operator parameter cover the operand type?
+    /// A `#Float` hashword covers any #Float-protocol member; a concrete
+    /// `Float` covers exactly that type.
+    fn param_covers(&self, param: &Type, operand: &Type) -> bool {
+        if param == operand {
+            return true;
+        }
+        let Type::HashWord(hw) = param else {
+            return false;
+        };
+        if hw == "#Bit" {
+            // Universal — every type is a member of #Bit via Cast.#Bit.
+            return operand.universe_key().is_some();
+        }
+        let prop = format!("Cast.{}", hw);
+        operand
+            .universe_key()
+            .and_then(|k| self.universe.get(k))
+            .map_or(false, |rt| rt.properties.contains_key(&prop))
+    }
+
+    /// Does a type-body op's declared variant (`#Float` or `Float`) cover the
+    /// operand type?
+    fn variant_covers(&self, variant: &str, operand: &Type) -> bool {
+        if variant.starts_with('#') {
+            let prop = format!("Cast.{}", variant);
+            operand
+                .universe_key()
+                .and_then(|k| self.universe.get(k))
+                .map_or(false, |rt| rt.properties.contains_key(&prop))
+        } else {
+            // Concrete type name.
+            match operand {
+                Type::Custom(n) => n == variant,
+                Type::Applied(n, _) => n == variant,
+                _ => false,
+            }
         }
     }
 
@@ -542,6 +632,25 @@ fn infer_binary_op(
                 context: format!("binary op '{}'", kind),
             });
         }
+    } else if lhs_str != rhs_str {
+        // 2026-07-31: No implicit numeric coercion — `Int * Float` is a TYPE
+        // ERROR unless the LHS (or RHS) type declares a cross-type / cross-
+        // protocol operator overload (`op Mul(#Float)` / `op Mul(Float)`). The
+        // old behavior silently bitcast the Int to Float, producing garbage
+        // (accumulator_flush `(count % 101) * 0.5` summed ~0). Add an explicit
+        // `as Float` / `as Int` cast, or declare the overload. AGENTS.md:
+        // "All type reinterpretations must be explicit via `as` casts."
+        if !ctx.has_cross_type_overload(&format!("{}", kind), &lhs_ty, &rhs_ty) {
+            return Err(TypeError::TypeMismatch {
+                expected: lhs_str,
+                found: rhs_str,
+                context: format!(
+                    "binary op '{}' — no implicit Int/Float coercion and no \
+                     cross-type `op` overload; add an explicit `as` cast",
+                    kind
+                ),
+            });
+        }
     }
 
     Ok(result_ty)
@@ -830,8 +939,27 @@ pub fn check_program(items: &[TopLevel], universe: &TypeUniverse) -> Result<(), 
         }
     }
 
+    // 2026-07-31: Pre-collect regular operator declarations (cross-type /
+    // cross-protocol overloads) from TypeDef bodies: ProtocolDef-style
+    // `operators` and type-body `op_bindings`.
+    let mut all_regular_ops: HashMap<String, Vec<crate::ast::top::OperatorDef>> = HashMap::new();
+    let mut all_regular_bindings: HashMap<String, Vec<crate::ast::top::OperatorBinding>> = HashMap::new();
     for item in items {
-        if let Err(e) = check_top_level(item, universe, &state_bindings, &fn_return_types, &all_parse_bindings, &all_type_parents) {
+        if let TopLevel::TypeDef(td) = item {
+            if !td.body.operators.is_empty() {
+                all_regular_ops.insert(td.name.clone(), td.body.operators.clone());
+            }
+            if !td.body.op_bindings.is_empty() {
+                all_regular_bindings.insert(td.name.clone(), td.body.op_bindings.clone());
+            }
+        }
+    }
+
+    for item in items {
+        if let Err(e) = check_top_level(
+            item, universe, &state_bindings, &fn_return_types,
+            &all_parse_bindings, &all_type_parents, &all_regular_ops, &all_regular_bindings,
+        ) {
             errors.push(e);
         }
     }
@@ -850,6 +978,8 @@ fn check_top_level(
     fn_return_types: &HashMap<String, Type>,
     all_parse_bindings: &HashMap<String, Vec<OperatorBinding>>,
     all_type_parents: &HashMap<String, String>,
+    all_regular_ops: &HashMap<String, Vec<crate::ast::top::OperatorDef>>,
+    all_regular_bindings: &HashMap<String, Vec<crate::ast::top::OperatorBinding>>,
 ) -> Result<(), TypeError> {
     let mut ctx = TypecheckContext::new(universe);
     // 2026-07-27: Inject pre-collected parse bindings and type parents.
@@ -857,6 +987,9 @@ fn check_top_level(
         ctx.register_parse_bindings(type_name, bindings.clone(), None);
     }
     ctx.type_parents = all_type_parents.clone();
+    // 2026-07-31: Inject regular operator declarations for cross-type overloads.
+    ctx.regular_ops = all_regular_ops.clone();
+    ctx.regular_bindings = all_regular_bindings.clone();
     // 2026-07-14: Inject state variable bindings so transactions/defns can reference them.
     for (name, ty) in state_bindings {
         ctx.bindings.insert(name.clone(), ty.clone());
@@ -884,7 +1017,7 @@ fn check_top_level(
             Ok(())
         }
         // 2026-07-25: Unwrap exports so exported defns are type-checked.
-        TopLevel::Export(e) => check_top_level(&e.inner, universe, state_bindings, fn_return_types, all_parse_bindings, all_type_parents),
+        TopLevel::Export(e) => check_top_level(&e.inner, universe, state_bindings, fn_return_types, all_parse_bindings, all_type_parents, all_regular_ops, all_regular_bindings),
         TopLevel::Transaction(txn) => {
             for (name, ty) in &txn.parameters {
                 ctx.bindings.insert(name.clone(), ty.clone());
@@ -946,5 +1079,93 @@ fn type_byte_size(ty: &Type) -> u64 {
         Type::Custom(s) if s == "Float64" => 8,
         Type::Ptr(_) => 8,
         _ => 8, // default for unknown types
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn check(src: &str) -> Result<(), Vec<TypeError>> {
+        let tokens = crate::lexer::tokenize(src).unwrap();
+        let mut p = crate::parser::Parser::new(tokens, src);
+        let items = p.parse_program().unwrap();
+        let universe = crate::type_universe::TypeUniverse::new();
+        check_program(&items, &universe)
+    }
+
+    /// `Int * Float` is a type error — no implicit numeric coercion.
+    #[test]
+    fn mixed_int_float_arithmetic_errors() {
+        let src = r#"
+let x: Float = 0.0;
+let count: Int = 0;
+node t [count < 5][count == 5] {
+    x = x + (count * 0.5);
+    count = count + 1;
+    term;
+};
+"#;
+        let err = check(src).unwrap_err();
+        assert!(
+            err.iter().any(|e| format!("{}", e).contains("no implicit Int/Float coercion")),
+            "expected an implicit-coercion error, got {:?}",
+            err
+        );
+    }
+
+    /// An explicit `as Float` cast resolves the mixed operation.
+    #[test]
+    fn explicit_cast_resolves_mixed_arithmetic() {
+        let src = r#"
+let x: Float = 0.0;
+let count: Int = 0;
+node t [count < 5][count == 5] {
+    x = x + (count as Float) * 0.5;
+    count = count + 1;
+    term;
+};
+"#;
+        assert!(check(src).is_ok(), "explicit cast must typecheck");
+    }
+
+    /// A custom type declaring `op Mul(#Int)` authorizes `Int * MyType`
+    /// without a cast (a cross-protocol overload).
+    #[test]
+    fn cross_type_overload_allows_mixed_arithmetic() {
+        let src = r#"
+type MyNum : #Int {
+    op Mul(#Int): func(#L, #R);
+};
+let count: Int = 0;
+let v: MyNum = 0;
+node t [count < 5][count == 5] {
+    count = count * v;
+    term;
+};
+"#;
+        assert!(check(src).is_ok(), "cross-type op overload must authorize Int * MyNum");
+    }
+
+    /// Without the cross-type overload, `Int * MyNum` errors.
+    #[test]
+    fn missing_cross_type_overload_errors() {
+        let src = r#"
+type MyNum : #Int {
+    op Sub(#Int): func(#L, #R);
+};
+let count: Int = 0;
+let v: MyNum = 0;
+node t [count < 5][count == 5] {
+    count = count * v;
+    term;
+};
+"#;
+        let err = check(src).unwrap_err();
+        assert!(
+            err.iter().any(|e| format!("{}", e).contains("no implicit Int/Float coercion")),
+            "expected an implicit-coercion error, got {:?}",
+            err
+        );
     }
 }
