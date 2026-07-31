@@ -731,7 +731,7 @@ comments — rewrite them for the new structure.
 | Baseline 666fb502 | — | pass | 0.83× | 1.23× | 1.15× | 0.97× | 0.83× | 0 |
 | Phase 0 (baseline capture) | ed2f4234 | pass | 0.83× | 1.22× | 1.13× | 0.97× | 0.84× | 0 |
 | Phase 1a (analysis) | 0682d764 | 1232 pass | — | — | — | — | — | 0 |
-| Phase 1b (dispatch) | _pending_ | 1239 pass | 0.83× | 1.24× | 1.10× | 0.95× | 0.82× | 0 |
+| Phase 1b (dispatch) | c953c3c4 | 1239 pass | 0.83× | 1.24× | 1.10× | 0.95× | 0.82× | 0 |
 | Phase 2 | | | | | | | | |
 | Phase 3 | | | | | | | | |
 | Final | | | | | | | | |
