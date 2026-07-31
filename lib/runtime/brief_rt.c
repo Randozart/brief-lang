@@ -180,8 +180,11 @@ int64_t __print_int(int64_t n) {
     return 0;
 }
 
+// 2026-07-31: %.9g — round-trips any float32 uniquely (~7 sig decimal digits).
+// The prior %g (6 sig digits) truncated precision, making Brief's float output
+// differ from C references that print %.9f even for identical values.
 int64_t __print_float(float f) {
-    printf("%g", (double)f);
+    printf("%.9g", (double)f);
     return 0;
 }
 

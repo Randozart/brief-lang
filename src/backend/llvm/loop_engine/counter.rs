@@ -531,6 +531,16 @@ impl LlvmBackend {
         writeln!(out, "  br label %{}", header_label).ok();
 
         // ── Header: per-field phis ───────────────────────────────────
+        // 2026-07-31: Minimal-state classification (Phase 7). Fields never
+        // written in the loop are hoisted (no phi); fields written but never
+        // read are dropped. Only loop-carried fields get phis. The body
+        // includes the guard, so a field read only by the guard is carried.
+        let hoist_flat: Vec<Statement> = self.fun.pending_post_hoist.iter()
+            .flat_map(|g| g.clone()).collect();
+        let observables: Vec<&[Statement]> = vec![guard_body, &hoist_flat];
+        let field_classes = crate::analysis::loop_carried::classify_fields(
+            &write_set, body, &[], &observables,
+        );
         writeln!(out, "{}:", header_label).ok();
         self.fun.phi_field_regs.clear();
         self.fun.backedge_field_regs.clear();
@@ -560,9 +570,22 @@ impl LlvmBackend {
             let phi_ty = self.ctx.field_index_map.get(fname.as_str())
                 .and_then(|idx| self.ctx.field_types.get(*idx))
                 .cloned().unwrap_or_else(|| "i64".to_string());
-            writeln!(out, "  {} = phi {} [ {}, %entry ], [ {}, %{} ], [ {}, %{} ]",
-                phi_f, phi_ty, init_f, be_l, latch_label, be_p, present_label).ok();
-            self.fun.phi_field_regs.insert((*fname).clone(), phi_f);
+            // 2026-07-31: Minimal-state — loop-invariant fields are hoisted
+            // (their entry load is the hoisted value, no phi); dead fields are
+            // dropped; loop-carried fields get a phi.
+            match field_classes.get(fname.as_str()) {
+                Some(crate::analysis::loop_carried::FieldClass::LoopInvariant) => {
+                    self.fun.phi_field_regs.insert((*fname).clone(), init_f);
+                }
+                Some(crate::analysis::loop_carried::FieldClass::Dead) => {
+                    // Skipped — no phi, no backedge, body writes dropped.
+                }
+                _ => {
+                    writeln!(out, "  {} = phi {} [ {}, %entry ], [ {}, %{} ], [ {}, %{} ]",
+                        phi_f, phi_ty, init_f, be_l, latch_label, be_p, present_label).ok();
+                    self.fun.phi_field_regs.insert((*fname).clone(), phi_f);
+                }
+            }
         }
         // 2026-07-31: Save the header phi registers — the present block must
         // read them (they dominate it), not the absent body's post-[pre] regs.
