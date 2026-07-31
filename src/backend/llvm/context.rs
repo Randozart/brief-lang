@@ -208,19 +208,11 @@ impl CompilerContext {
     /// Returns `usize::MAX` for virtual-register targets (WASM).
     /// See docs/plans/2026-07-29-phi-register-pressure-capping.md.
     pub fn float_register_count(&self) -> usize {
-        if self.target_triple.starts_with("aarch64")
-            || self.target_triple.starts_with("arm64")
-        {
-            32
-        } else if self.target_triple.starts_with("wasm32")
-            || self.target_triple.starts_with("wasm64")
-        {
-            usize::MAX
-        } else if self.target_triple.starts_with("spirv64") {
-            32
-        } else {
-            16
-        }
+        // 2026-07-31: Phase 3 (§8.1) — the register budget comes from
+        // config/targets.toml `[target.<triple-prefix>]`, replacing the
+        // hardcoded triple-prefix match. Unknown targets fall back to the
+        // x86_64 default and generate() warns (no silent x86 assumptions).
+        crate::config_tuning::target_settings_for(&self.target_triple).float_registers
     }
 
     /// 2026-07-27: Parse the default pointer width (in bits) from a target data
@@ -298,8 +290,10 @@ impl CompilerContext {
             cell_trigger_bindings: Vec::new(),
             variant_disc: HashMap::new(),
             optimize_budget: 256,
-            arena_initial_size: 65536,
-            stack_threshold: 4096,
+            // 2026-07-31: Phase 3 (§8.2) — arena/stack sizing comes from
+            // config/ir-lowering.toml instead of hardcoded literals.
+            arena_initial_size: crate::config_tuning::ir_lowering().arena_initial_size,
+            stack_threshold: crate::config_tuning::ir_lowering().stack_threshold,
             optimize_report: false,
             optimize_size: None,
             pgo_profile: None,

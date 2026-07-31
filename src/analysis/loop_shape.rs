@@ -99,9 +99,13 @@ pub struct ProgramConvergence {
 ///
 /// Only reactive, foldable txns get a shape — callable txns (defn-style) are
 /// emitted through the plain function path, not the loop dispatch.
+///
+/// 2026-07-31: Phase 3 (§8.1) — `min_width` (vector-phi promotion gate) is
+/// config-driven: config/targets.toml `vector_min_width` for the target triple.
 pub fn build_loop_shapes(
     graph: &ReactorTransitionGraph,
     items: &[TopLevel],
+    min_width: usize,
 ) -> HashMap<String, LoopShape> {
     let state_fields = collect_state_fields(items);
     let consts = collect_const_names(items);
@@ -121,7 +125,7 @@ pub fn build_loop_shapes(
         let Some(txn) = txns.get(&node.name) else {
             continue;
         };
-        shapes.insert(node.name.clone(), build_shape(node, txn, &state_fields, &consts));
+        shapes.insert(node.name.clone(), build_shape(node, txn, &state_fields, &consts, min_width));
     }
     shapes
 }
@@ -181,12 +185,13 @@ fn build_shape(
     txn: &Transaction,
     state_fields: &HashSet<String>,
     consts: &HashSet<String>,
+    min_width: usize,
 ) -> LoopShape {
     let bp = node.bounded_pre.as_ref().unwrap();
     let bound = resolve_bound(bp, state_fields, consts);
     let counter_only_writes = node.write_set.len() == 1 && node.write_set.contains(&bp.var);
     let carried_fields = classify_carried(node.write_set.clone(), txn);
-    let vector_groups = detect_vector_groups_structural(txn, node.write_set.clone(), state_fields);
+    let vector_groups = detect_vector_groups_structural(txn, node.write_set.clone(), state_fields, min_width);
     let has_swan = swan_song::has_swan_song(&txn.body);
     let is_pure = node.is_pure_body || node.is_effectively_pure;
     LoopShape {
@@ -273,9 +278,10 @@ fn detect_vector_groups_structural(
     txn: &Transaction,
     write_set: HashSet<String>,
     state_fields: &HashSet<String>,
+    min_width: usize,
 ) -> Vec<VectorGroup> {
     let (stripped, _hoist) = swan_song::hoist_swan_song(&txn.body, state_fields);
-    let mut candidates = crate::analysis::slp_isomorphism::analyze_body(&stripped);
+    let mut candidates = crate::analysis::slp_isomorphism::analyze_body(&stripped, min_width);
     // Sort by width descending so the LARGEST group is processed first.
     candidates.sort_by_key(|c| std::cmp::Reverse(c.width));
     let mut accepted_fields: HashSet<String> = HashSet::new();
@@ -385,7 +391,7 @@ mod tests {
                term;\n\
              };\n",
         );
-        let shapes = build_loop_shapes(&graph, &items);
+        let shapes = build_loop_shapes(&graph, &items, 4);
         assert_eq!(shapes.len(), 1, "one foldable txn expected");
         let shape = shapes.values().next().unwrap();
         assert_eq!(shape.counter, "count");
@@ -407,7 +413,7 @@ mod tests {
                term;\n\
              };\n",
         );
-        let shapes = build_loop_shapes(&graph, &items);
+        let shapes = build_loop_shapes(&graph, &items, 4);
         let shape = shapes.values().next().unwrap();
         assert!(!shape.counter_only_writes, "acc write breaks counter-only");
         // acc and count are both loop-carried (count is read by the contract).
@@ -423,7 +429,7 @@ mod tests {
                term;\n\
              };\n",
         );
-        let shapes = build_loop_shapes(&graph, &items);
+        let shapes = build_loop_shapes(&graph, &items, 4);
         let shape = shapes.values().next().unwrap();
         assert_eq!(shape.bound, Bound::Literal(50));
     }
@@ -451,7 +457,7 @@ mod tests {
                term;\n\
              };\n",
         );
-        let shapes = build_loop_shapes(&graph, &items);
+        let shapes = build_loop_shapes(&graph, &items, 4);
         let shape = shapes.values().next().unwrap();
         // At least one isomorphic 4+ lane group must be detected.
         assert!(!shape.vector_groups.is_empty(), "expected vector groups");
@@ -474,7 +480,7 @@ mod tests {
                term;\n\
              };\n",
         );
-        let shapes = build_loop_shapes(&graph, &items);
+        let shapes = build_loop_shapes(&graph, &items, 4);
         let shape = shapes.values().next().unwrap();
         assert!(shape.has_swan_song);
     }
@@ -533,7 +539,7 @@ mod tests {
                term;\n\
              };\n",
         );
-        let shapes = build_loop_shapes(&graph, &items);
+        let shapes = build_loop_shapes(&graph, &items, 4);
         let shape = shapes.values().next().unwrap();
         assert_eq!(shape.bound, Bound::Unknown("local_bound".to_string()));
     }

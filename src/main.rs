@@ -296,7 +296,10 @@ fn parse_build_args(args: &[String]) -> Result<compile::BuildOptions, String> {
             let ext = get_extension(&file_path);
             let config = load_target_config(config_dir.as_deref());
             match config.lookup(&ext) {
-                Some(entry) => TargetConfig::resolve(&entry.backend)?,
+                // 2026-07-31: backend is Option now (target-tuning tables in the
+                // same file omit it); extension entries always set it, so a
+                // missing backend falls back to the LLVM default.
+                Some(entry) => TargetConfig::resolve(entry.backend.as_deref().unwrap_or("llvm"))?,
                 None => BackendKind::Llvm,
             }
         }

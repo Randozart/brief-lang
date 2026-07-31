@@ -383,7 +383,9 @@ impl LlvmBackend {
                 }
                 // 2026-07-18: SVO — emit inline handle for small lists
                 // when feature_svo is ON and the type is vector-like.
-                if self.feature_svo && exprs.len() <= 3 {
+                // 2026-07-31: Phase 3 (§8.2) — element cap from
+                // config/ir-lowering.toml `svo_max_elements`.
+                if self.feature_svo && exprs.len() <= crate::config_tuning::ir_lowering().svo_max_elements {
                     // Check if the expression type is List<T> (vector-like)
                     // by inspecting the iteration variable's type context.
                     // For now, always emit inline for lists ≤3 elements.
@@ -1013,8 +1015,11 @@ impl LlvmBackend {
         indent: &str,
     ) -> TypedRegister {
         // 2026-07-18: Phase B — SSO string path when feature is enabled.
+        // 2026-07-31: Phase 3 (§8.2) — the payload cap comes from
+        // config/ir-lowering.toml `sso_max_bytes`; its derivation is align 8
+        // − 2 tag bits = 6, documented at the config key.
         if self.feature_sso_strings {
-            if bytes.len() <= 6 {
+            if bytes.len() <= crate::config_tuning::ir_lowering().sso_max_bytes {
                 return self.emit_sso_literal(out, v, bytes, indent);
             }
             return self.emit_sso_heap_literal(out, v, bytes, indent);

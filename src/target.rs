@@ -17,9 +17,17 @@ pub enum BackendKind {
 }
 
 /// One entry from config/targets.toml.
+///
+/// 2026-07-31: `backend`/`defaults` are optional so the `[target.<prefix>]`
+/// tuning tables (plan §8.1) coexist in the same file without failing the
+/// flatten parse — extension entries always set them; target-tuning entries
+/// do not (they carry float_registers/dense_compute_density/vector_min_width,
+/// read by config_tuning.rs, which serde ignores here).
 #[derive(Debug, Clone, serde::Deserialize)]
 pub struct TargetEntry {
-    pub backend: String,
+    #[serde(default)]
+    pub backend: Option<String>,
+    #[serde(default)]
     pub defaults: Vec<String>,
     /// System plugins enabled for this extension. None = default set.
     pub plugins: Option<Vec<String>>,

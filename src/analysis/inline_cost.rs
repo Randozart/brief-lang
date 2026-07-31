@@ -19,10 +19,6 @@
 use crate::ast::{Expr, Statement, Transaction};
 use crate::analysis::region::has_ffi_or_trigger_stmt_in_chain;
 
-/// Weight threshold below which a callable txn body is auto-inlined.
-/// TEMP: 2026-07-31 — becomes `config/ir-lowering.toml` in Phase 3 (§8.2).
-pub const CALLABLE_INLINE_WEIGHT_THRESHOLD: u32 = 40;
-
 /// Whether a callable txn should be emitted with `alwaysinline`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum InlineDecision {
@@ -37,11 +33,13 @@ pub enum InlineDecision {
 /// 2026-07-31: Inline when the weighted body cost is ≤ the threshold AND the
 /// body has no FFI/trigger statements (a call inside the body defeats the
 /// inline benefit and could hoist an external side effect into every caller).
+/// The threshold is config-driven (plan §8.2 `callable_inline_weight_threshold`,
+/// default 40) — see config/ir-lowering.toml.
 pub fn callable_inline_decision(txn: &Transaction) -> InlineDecision {
     if has_ffi_or_trigger_stmt_in_chain(&txn.body) {
         return InlineDecision::No;
     }
-    if weight_of_body(&txn.body) <= CALLABLE_INLINE_WEIGHT_THRESHOLD {
+    if weight_of_body(&txn.body) <= crate::config_tuning::ir_lowering().callable_inline_weight_threshold {
         InlineDecision::AlwaysInline
     } else {
         InlineDecision::No

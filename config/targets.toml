@@ -30,3 +30,48 @@ plugins = ["prelude"]
 backend = "spirv"
 defaults = ["--gpu-offload"]
 plugins = ["prelude"]
+
+# ── Per-target tuning (plan §8.1, frontend-driven-dispatch) ──────────
+# Looked up by matching the compiler's target_triple PREFIX. Absent prefix →
+# x86_64 defaults (below) + a compiler warning, so silent x86 assumptions never
+# apply to unknown targets. Loaded by src/config_tuning.rs (TargetSettings).
+#
+#   float_registers      — register-pressure budget for vector-phi promotion
+#                          (wasm = u32::MAX ≈ unlimited; the old code used
+#                          usize::MAX, but TOML ints are i64 so u32::MAX keeps
+#                          the "never fire" semantics).
+#   dense_compute_density — cross-float-ops-per-field threshold for the
+#                          #11 → #0 memory-attribute downgrade.
+#   vector_min_width      — minimum isomorphic-group width for vector-phi
+#                          promotion (below this the scalar-phi +
+#                          extract/insert overhead exceeds the gain).
+
+[target.x86_64]
+float_registers = 16
+dense_compute_density = 4.0
+vector_min_width = 4
+
+[target.aarch64]
+float_registers = 32
+dense_compute_density = 4.0
+vector_min_width = 4
+
+[target.arm64]
+float_registers = 32
+dense_compute_density = 4.0
+vector_min_width = 4
+
+[target.wasm32]
+float_registers = 4294967295
+dense_compute_density = 4.0
+vector_min_width = 4
+
+[target.wasm64]
+float_registers = 4294967295
+dense_compute_density = 4.0
+vector_min_width = 4
+
+[target.spirv64]
+float_registers = 32
+dense_compute_density = 4.0
+vector_min_width = 4

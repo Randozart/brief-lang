@@ -167,7 +167,7 @@ mod tests {
     #[test]
     fn test_get_assembler_unknown_fallback() {
         let entry = crate::target::TargetEntry {
-            backend: "llvm".into(),
+            backend: Some("llvm".to_string()),
             defaults: vec![],
             plugins: None,
             target_triple: None,
@@ -182,7 +182,7 @@ mod tests {
     #[test]
     fn test_get_assembler_none() {
         let entry = crate::target::TargetEntry {
-            backend: "llvm".into(),
+            backend: Some("llvm".to_string()),
             defaults: vec![],
             plugins: None,
             target_triple: None,
@@ -197,7 +197,7 @@ mod tests {
     #[test]
     fn test_get_assembler_platform() {
         let entry = crate::target::TargetEntry {
-            backend: "llvm".into(),
+            backend: Some("llvm".to_string()),
             defaults: vec![],
             plugins: None,
             target_triple: None,

@@ -1,0 +1,31 @@
+# ── IR Lowering Tuning (plan §8.2, frontend-driven-dispatch) ─────────
+# Global (target-independent) codegen tuning knobs, baked into the binary via
+# include_str!. Absent keys fall back to these defaults in code.
+#
+# SSO derivation (documented per plan §8.2): the 6-byte small-string limit
+# derives from the String handle representation — align 8, 2 tag bits →
+# 8 - 2 = 6 payload bytes. This config entry is an OVERRIDE of that derivation;
+# the derivation is the source of truth if this key is removed.
+
+# Below this --optimize-budget, skip the bump arena entirely and use direct
+# heap allocation (simpler IR, faster compile for shallow-simulation programs).
+arena_min_budget = 128
+
+# Initial size of the per-txn bump arena (emit_arena_alloc).
+arena_initial_size = 65536
+
+# Stack-allocation threshold for transient collections.
+stack_threshold = 4096
+
+# Chunk size for %StateChunk<N> struct emission so LLVM SROA can decompose
+# each chunk into scalar registers.
+max_fields_per_alloca = 15
+
+# SSO small-string inline payload limit (see derivation above).
+sso_max_bytes = 6
+
+# SVO small-vector/list inline element cap.
+svo_max_elements = 3
+
+# Weighted body-cost threshold for callable-txn auto-inline (analysis/inline_cost.rs).
+callable_inline_weight_threshold = 40

@@ -1261,8 +1261,10 @@ impl LlvmBackend {
 
         // 2026-07-22: Low budget → direct malloc (simpler IR, faster compile).
         // The --optimize-budget flag (default 256) controls simulation depth;
-        // below 128, skip the bump arena entirely and use heap allocation.
-        if self.ctx.optimize_budget < 128 {
+        // below the config arena_min_budget, skip the bump arena entirely and
+        // use heap allocation.
+        // 2026-07-31: Phase 3 (§8.2) — threshold from config/ir-lowering.toml.
+        if (self.ctx.optimize_budget as u32) < crate::config_tuning::ir_lowering().arena_min_budget {
             let r = self.fun.next_reg_with_prefix("aam");
             writeln!(out, "{}{} = call noalias ptr @malloc(i64 {})", indent, r, size_reg).ok();
             let ri = self.fun.next_reg_with_prefix("aami");
@@ -1632,7 +1634,23 @@ impl LlvmBackend {
     }
 
     pub fn generate(&mut self, items: &[TopLevel], exit_condition: Option<Box<Expr>>) -> String {
-        let mut analysis = crate::backend::analyze_program(items, false);
+        // 2026-07-31: Phase 3 (§8.1) — warn once when the target triple's prefix
+        // is unknown to config/targets.toml, so the x86_64 tuning fallback is
+        // never applied silently to a foreign target.
+        if !crate::config_tuning::known_target_triple(&self.ctx.target_triple) {
+            self.warnings.push(format!(
+                "warning: target triple '{}' has no [target.<prefix>] entry in \
+                 config/targets.toml — using x86_64 tuning defaults",
+                self.ctx.target_triple
+            ));
+        }
+        let mut analysis = crate::backend::analyze_program(
+            items,
+            false,
+            // 2026-07-31: Phase 3 (§8.1) — vector-phi promotion gate from
+            // config/targets.toml `vector_min_width` for this target.
+            crate::config_tuning::target_settings_for(&self.ctx.target_triple).vector_min_width,
+        );
         self.ctx.dep_graph = analysis.dependency_graph.clone();
 
         analysis.region_analyzer.compose_chains();

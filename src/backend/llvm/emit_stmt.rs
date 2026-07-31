@@ -1,14 +1,13 @@
 // ── Statement Codegen ──────────────────────────────────────────────────
 // 2026-07-12: Phase 4 — Emit LLVM IR for all Statement variants.
 //
-// 2026-07-04: MAX_FIELDS_PER_ALLLOCA=15 ensures LLVM's SROA can decompose
-// %State chunks into scalars for alias analysis and vectorization.
+// 2026-07-04: The 15-field %State chunk cap (now config/ir-lowering.toml
+// `max_fields_per_alloca`) ensures LLVM's SROA can decompose %State chunks
+// into scalars for alias analysis and vectorization.
 
 use crate::ast::{Expr, Statement, Type};
 use crate::backend::llvm::{LlvmBackend, TypedRegister};
 use std::fmt::Write;
-
-pub(crate) const MAX_FIELDS_PER_ALLLOCA: usize = 15;
 
 /// Emit LLVM IR for a statement. Returns the last expression's register.
 pub fn emit_statement(backend: &mut LlvmBackend, out: &mut String, stmt: &Statement, indent: &str) -> TypedRegister {

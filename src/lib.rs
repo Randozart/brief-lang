@@ -35,6 +35,7 @@ pub mod bounty;
 pub mod beastpack;
 pub mod config;
 pub mod config_resolver;
+pub mod config_tuning;
 pub mod target;
 pub mod features;
 pub mod type_universe;

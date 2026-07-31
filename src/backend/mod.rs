@@ -59,7 +59,10 @@ pub struct AnalysisResults {
 // 2026-07-31: Frontend-driven dispatch — build per-txn loop shapes and
 // swan-song hoists so the LLVM backend consumes structured analysis instead
 // of re-deriving dispatch decisions from body re-walks.
-pub fn analyze_program(items: &[TopLevel], optimize: bool) -> AnalysisResults {
+// 2026-07-31: Phase 3 (§8.1) — `min_width` is the target-config vector-phi
+// promotion gate (config/targets.toml `vector_min_width`), threaded into
+// loop-shape building.
+pub fn analyze_program(items: &[TopLevel], optimize: bool, min_width: usize) -> AnalysisResults {
     let transition_graph = crate::analysis::transition_graph::ReactorTransitionGraph::build(
         items, &None, &vec![],
     );
@@ -72,7 +75,7 @@ pub fn analyze_program(items: &[TopLevel], optimize: bool) -> AnalysisResults {
             is_trg: std::collections::HashSet::new(),
             all_vars: std::collections::HashSet::new(),
         });
-    let loop_shapes = crate::analysis::loop_shape::build_loop_shapes(&transition_graph, items);
+    let loop_shapes = crate::analysis::loop_shape::build_loop_shapes(&transition_graph, items, min_width);
     let swan_songs = build_swan_songs(items);
     // 2026-07-31: Phase 2 measurement passes (plan §7). Computed once here so
     // every backend consumer reads frontend analysis instead of re-walking

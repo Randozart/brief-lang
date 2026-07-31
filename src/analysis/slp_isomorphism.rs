@@ -445,9 +445,12 @@ fn merge_groups(body: &[Statement], groups: Vec<VectorPhiCandidate>) -> Vec<Vect
 /// 2. All fields are unconditionally written (not inside `when` guards)
 /// 3. All fields have structurally isomorphic assignment expressions
 ///
-/// Groups of width >= 4 are returned. Smaller groups are filtered out,
-/// since <4-wide vectors don't justify the insertelement/extractelement overhead.
-pub fn analyze_body(body: &[Statement]) -> Vec<VectorPhiCandidate> {
+/// Only groups of width >= `min_width` are returned — smaller groups don't
+/// justify the insertelement/extractelement overhead.
+///
+/// 2026-07-31: Phase 3 (§8.1) — `min_width` is config-driven
+/// (config/targets.toml `vector_min_width`, default 4) instead of a literal.
+pub fn analyze_body(body: &[Statement], min_width: usize) -> Vec<VectorPhiCandidate> {
     let mut groups = Vec::new();
     let mut i = 0;
     while i < body.len() {
@@ -474,7 +477,7 @@ pub fn analyze_body(body: &[Statement]) -> Vec<VectorPhiCandidate> {
     }
 
     // Only return groups that are wide enough to justify vector phi overhead.
-    groups.into_iter().filter(|g| g.width >= 4).collect()
+    groups.into_iter().filter(|g| g.width >= min_width).collect()
 }
 
 #[cfg(test)]
@@ -557,7 +560,7 @@ mod tests {
                 modifiers: vec![],
             },
         ];
-        let result = analyze_body(&body);
+        let result = analyze_body(&body, 4);
         assert!(result.is_empty(),
             "dx01/dy01/dz01 width=3 should be filtered (width < 4)");
 
@@ -572,7 +575,7 @@ mod tests {
             Statement::Let { names: vec![], name: "bx3".to_string(), ty: Some(Type::float()),
                 expr: Some(add_expr(ident("ax"), ident("ay"))), modifiers: vec![] },
         ];
-        let result4 = analyze_body(&body4);
+        let result4 = analyze_body(&body4, 4);
         // 2026-07-29: analyze_body no longer processes Statement::Let (temporary
         // locals are not loop-carried state). Only Statement::Assign groups are
         // returned. Let-based groups are skipped.
@@ -615,7 +618,7 @@ mod tests {
             Statement::Assign(Expr::Identifier("vx4".to_string()),
                 Expr::Identifier("nvx4".to_string())),
         ];
-        let result = analyze_body(&body);
+        let result = analyze_body(&body, 4);
         assert!(!result.is_empty(),
             "5 consecutive isomorphic scalar assigns should form groups");
         assert_eq!(result[0].width, 5,

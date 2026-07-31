@@ -646,7 +646,8 @@ impl LlvmBackend {
         // each chunk into scalar registers.  Each chunk has ≤CHUNK fields
         // (15).  The monolithic %State is kept for backward compat with
         // non-routed paths (old EmitInlineSsa/b, @init_state).
-        let chunk_size = crate::backend::llvm::emit_stmt::MAX_FIELDS_PER_ALLLOCA;
+        // 2026-07-31: Phase 3 (§8.2) — chunk cap from config/ir-lowering.toml.
+        let chunk_size = crate::config_tuning::ir_lowering().max_fields_per_alloca;
         let total = self.ctx.field_types.len();
         let num_chunks = (total + chunk_size - 1) / chunk_size;
         for chunk in 0..num_chunks {
@@ -1803,11 +1804,14 @@ impl LlvmBackend {
             // cross ops here. The frontend version FIXES the old metric's gap:
             // count_cross_float_ops_in_expr ignored its _all_idents set, so int-only
             // counter arithmetic inflated the count. Only txns with dense cross-field
-            // FLOAT computation downgrade. TEMP: the 4.0 threshold stays inline until
-            // Phase 3 moves it to config/targets.toml (§8.1 dense_compute_density).
+            // FLOAT computation downgrade.
+            // 2026-07-31: Phase 3 (§8.1) — the threshold comes from
+            // config/targets.toml `dense_compute_density` (default 4.0).
             if local_txn_attr == "#11" {
                 if let Some(d) = self.ctx.density.get(name) {
-                    if d.float_idents > 4 && d.per_field > 4.0 {
+                    let threshold = crate::config_tuning::target_settings_for(&self.ctx.target_triple)
+                        .dense_compute_density;
+                    if d.float_idents > 4 && d.per_field > threshold {
                         local_txn_attr = "#0".to_string();
                     }
                 }
