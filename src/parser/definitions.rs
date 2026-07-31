@@ -904,11 +904,41 @@ impl<'a> Parser<'a> {
         if self.check(&Token::LBracket) {
             post = self.parse_single_contract_condition()?;
         }
+        // 2026-07-31 (Phase 3): Watchdog — optional `?[cond]` or required
+        // `![cond]` after the postcondition. Populated into Contract.watchdog.
+        let watchdog = if self.check(&Token::Question) || self.check(&Token::Not) {
+            let is_required = matches!(self.peek(), Some(Token::Not));
+            self.pos += 1; // consume '?' or '!'
+            self.expect(Token::LBracket)?;
+            let cond = self.parse_expression()?;
+            // 2026-07-31: Optional duration unit: `?[5000 ms]` / `?[5000ms]`.
+            // The condition carries the numeric bound; the unit token is
+            // consumed so the documented `ms`/`cyc`/`seconds` forms parse.
+            match self.peek() {
+                Some(Token::Ms) | Some(Token::Cyc)
+                | Some(Token::Seconds) | Some(Token::Minute) => {
+                    self.pos += 1;
+                }
+                _ => {}
+            }
+            self.expect(Token::RBracket)?;
+            Some(WatchdogSpec {
+                condition: cond,
+                is_required,
+                cycles_bound: None,
+                seconds_bound: None,
+                is_proven: false,
+                retries: 0,
+                fallback: None,
+            })
+        } else {
+            None
+        };
         Ok(Contract {
             pre_condition: pre,
             post_condition: post,
             is_entry,
-            watchdog: None,
+            watchdog,
             span: None,
         })
     }
@@ -2616,5 +2646,33 @@ mod tests {
         // bracket for the contract parser (not "expected array size").
         let ty = parse_type("Int [b != 0]").unwrap();
         assert_eq!(ty, crate::ast::Type::int());
+    }
+
+    // ── 2026-07-31 (Phase 3): Watchdog parsing ───────────────────
+
+    #[test]
+    fn test_watchdog_optional_parses() {
+        let t = parse_txn(
+            "txn f() [true][done] ?[5000ms] { term; };",
+        )
+        .unwrap();
+        let w = t.contract.watchdog.expect("watchdog must parse");
+        assert!(!w.is_required);
+    }
+
+    #[test]
+    fn test_watchdog_required_parses() {
+        let t = parse_txn(
+            "txn f() [true][done] ![1000ms] { term; };",
+        )
+        .unwrap();
+        let w = t.contract.watchdog.expect("watchdog must parse");
+        assert!(w.is_required);
+    }
+
+    #[test]
+    fn test_contract_without_watchdog() {
+        let t = parse_txn("txn f() [true][done] { term; };").unwrap();
+        assert!(t.contract.watchdog.is_none());
     }
 }
