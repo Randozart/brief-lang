@@ -736,106 +736,6 @@ impl LlvmBackend {
     //   to inline into, so they need @init_state as a named function. Both share
     //   the same store logic; the tradeoff is SROA opportunity (inline) vs callable
     //   interface (function).
-    // ── emit_ringbuf_init ──────────────────────────────────────────────
-    //
-    // 2026-07-01: Emit LLVM IR for a RingBuffer initialized from a bracket
-    // expression [e0, e1, ..., e_{n-1}]. Called from emit_init_state and
-    // emit_inline_init_stores when the target field type is RingBuffer<T>.
-    //
-    // Generates:
-    //   malloc(32) for RingBuf struct (data_ptr, head, tail, mask = 4 × i64)
-    //   malloc(capacity * 8) for element buffer (capacity = power-of-2 ≥ max(4, n))
-    //   stores each element into buffer slots 0..n-1
-    //   writes struct fields: data_ptr = ptrtoint(buffer), head = 0, tail = n, mask = cap-1
-    //   stores ptrtoint(struct) to %State field
-    //
-    // RingBuf struct layout (matches intrinsics.rs expectations):
-    //   slot 0: data_ptr (i64) — ptrtoint of element buffer base
-    //   slot 1: head    (i64) — read index (next element to pop)
-    //   slot 2: tail    (i64) — write index (next empty slot)
-    //   slot 3: mask    (i64) — capacity - 1 (bitwise wrap)
-    fn emit_ringbuf_init(
-        &mut self,
-        out: &mut String,
-        items: &[Expr],
-        field_idx: usize,
-        field_name: &str,
-        state_gep: &str,
-        indent: &str,
-    ) {
-        let n = items.len() as i64;
-        let raw_cap = std::cmp::max(4u64, n as u64);
-        let cap = raw_cap.next_power_of_two();
-        let mask = cap - 1;
-
-        // Register prefix scoped to this field — unique within each function
-        let rb = format!("%rb{}", field_idx);
-
-        // Allocate RingBuf struct: 4 × i64 = 32 bytes
-        let rm = format!("{}_m", rb);
-        writeln!(out, "{}{} = call ptr @malloc(i64 32)", indent, rm).ok();
-        let rbc = format!("{}_bc", rb);
-        writeln!(out, "{}{} = bitcast ptr {} to ptr", indent, rbc, rm).ok();
-
-        // Allocate element buffer
-        let eb_m = format!("{}_eb", rb);
-        let eb_size = cap * 8;
-        writeln!(out, "{}{} = call ptr @malloc(i64 {})", indent, eb_m, eb_size).ok();
-        let ebc = format!("{}_ebc", rb);
-        writeln!(out, "{}{} = bitcast ptr {} to ptr", indent, ebc, eb_m).ok();
-
-        // Struct slot 0: data_ptr = ptrtoint(element_buffer)
-        let dp = format!("{}_dp", rb);
-        writeln!(out, "{}{} = ptrtoint ptr {} to i64", indent, dp, ebc).ok();
-        let dg = format!("{}_dg", rb);
-        writeln!(out, "{}{} = getelementptr i64, ptr {}, i64 0", indent, dg, rbc).ok();
-        writeln!(out, "{}store i64 {}, ptr {}, align 8", indent, dp, dg).ok();
-
-        // Struct slot 1: head = 0
-        let hg = format!("{}_hg", rb);
-        writeln!(out, "{}{} = getelementptr i64, ptr {}, i64 1", indent, hg, rbc).ok();
-        writeln!(out, "{}store i64 0, ptr {}, align 8", indent, hg).ok();
-
-        // Struct slot 2: tail = n
-        let tg = format!("{}_tg", rb);
-        writeln!(out, "{}{} = getelementptr i64, ptr {}, i64 2", indent, tg, rbc).ok();
-        writeln!(out, "{}store i64 {}, ptr {}, align 8", indent, n, tg).ok();
-
-        // Struct slot 3: mask = cap - 1
-        let mg = format!("{}_mg", rb);
-        writeln!(out, "{}{} = getelementptr i64, ptr {}, i64 3", indent, mg, rbc).ok();
-        writeln!(out, "{}store i64 {}, ptr {}, align 8", indent, mask, mg).ok();
-
-        // Store each element into buffer slots 0..n-1
-        for (i, item) in items.iter().enumerate() {
-            let val = self.emit_expr(out, item, indent);
-            let boxed = self.adapt_to_i64(out, indent, &val);
-            let ep = format!("{}_e{}", rb, i);
-            writeln!(out, "{}{} = getelementptr i64, ptr {}, i64 {}", indent, ep, ebc, i).ok();
-            writeln!(out, "{}store i64 {}, ptr {}, align 8", indent, boxed, ep).ok();
-        }
-
-        // Store handle = ptrtoint(struct) into state field
-        let handle = format!("{}_h", rb);
-        writeln!(out, "{}{} = ptrtoint ptr {} to i64", indent, handle, rbc).ok();
-        writeln!(out, "{}store i64 {}, ptr {}, align 8", indent, handle, state_gep).ok();
-
-        // 2026-07-02: If this RingBuffer has inline fields (registered by
-        // build_field_index), also store data_ptr/head/tail/mask directly into
-        // %State. This lets LLVM's SROA promote them to SSA registers in the
-        // hot loop body, bypassing the inttoptr handle indirection.
-        if let Some(inline) = self.ctx.ringbuf_inline.get(field_name) {
-            let data_idx = inline.data_idx;
-            let head_idx = inline.head_idx;
-            let tail_idx = inline.tail_idx;
-            let mask_idx = inline.mask_idx;
-            self.emit_state_store_i64_by_idx(out, indent, data_idx, &dp);
-            self.emit_state_store_i64_by_idx(out, indent, head_idx, "0");
-            self.emit_state_store_i64_by_idx(out, indent, tail_idx, &n.to_string());
-            self.emit_state_store_i64_by_idx(out, indent, mask_idx, &mask.to_string());
-        }
-    }
-
     /// 2026-07-03: Shared field initializer value emitter. Handles the
     /// match-on-init_expr dispatch for field initialization, shared by
     /// emit_init_state and emit_inline_init_stores. Arguments:
@@ -975,16 +875,10 @@ impl LlvmBackend {
             let p = format!("%ip_{}", idx);
             writeln!(out, "  {} = getelementptr inbounds %State, ptr %state, i32 0, i32 {}", p, idx).ok();
             let init_clone = self.ctx.field_initializers.get(&name).and_then(|e| e.clone());
-            // 2026-07-01: RingBuffer initialization from bracket expression [e0, e1, ...].
-            if let Some(Expr::List(ref items)) = init_clone {
-                if let Type::Applied(type_name, _) = &self.ctx.field_brief_types[idx] {
-                    if self.ctx.type_universe.as_ref().and_then(|tu| tu.get(type_name)).map_or(false, |_rt| false) {
-                        // 2026-07-14: insert_at removed from ResolvedType.
-                        self.emit_ringbuf_init(out, items, idx, &name, &p, "  ");
-                        continue;
-                    }
-                }
-            }
+            // 2026-07-31: Phase 3 (§8.5-E4) — the ringbuf-init detection branch
+            // (always-false stub after insert_at removal) is deleted. RingBuffer
+            // state fields are expanded inline via ringbuf_inline; a bracket-list
+            // initializer falls through to emit_field_init_value as before.
             self.emit_field_init_value(out, "  ", init_clone, &ty, &p, idx, false);
         }
         let mmio_inits: Vec<(u64, Expr)> = {
@@ -1035,16 +929,8 @@ impl LlvmBackend {
             let gep_reg = self.emit_state_gep(out, indent, "ip", "%state", *idx);
             let init_clone = self.ctx.field_initializers.get(name).and_then(|e| e.clone());
             let ty = self.ctx.field_types[*idx].clone();
-            // 2026-07-01: RingBuffer initialization from bracket expression [e0, e1, ...].
-            if let Some(Expr::List(ref items)) = init_clone {
-                if let Type::Applied(type_name, _) = &self.ctx.field_brief_types[*idx] {
-                    if self.ctx.type_universe.as_ref().and_then(|tu| tu.get(type_name)).map_or(false, |_rt| false) {
-                        // 2026-07-14: insert_at removed from ResolvedType.
-                        self.emit_ringbuf_init(out, items, *idx, name, &gep_reg, indent);
-                        continue;
-                    }
-                }
-            }
+            // 2026-07-31: Phase 3 (§8.5-E4) — always-false ringbuf-init branch
+            // deleted; bracket-list initializers go through emit_field_init_value.
             self.emit_field_init_value(out, indent, init_clone, &ty, &gep_reg, *idx, true);
         }
         // Initialize cache slots for LazyCached fields: cache_value = 0, valid_flag = 0
@@ -1692,7 +1578,11 @@ impl LlvmBackend {
                 }
             });
 
-        if let Some(action) = assume_action {
+        // 2026-07-31: Phase 3 (§8.5-E5) — the unconditional `br i1 true, label
+        // %body, label %rollback` made the rollback block (and its
+        // exit/run/escape action handling) unreachable dead code; both removed.
+        // The assume_shape modifier still selects this emission path.
+        if assume_action.is_some() {
             // 2026-07-17: Use @txn_<name> prefix so call sites in emit_ssa_loop
             // and emit_folded_multi_main can reference the function (they call
             // @txn_{name}). Without this, the definition is @<name> but the
@@ -1703,8 +1593,6 @@ impl LlvmBackend {
             // the reactor dispatch calls @txn_name as a separate function,
             // so arena allocas must live here, not in main().
             self.emit_arena_init(out, "  ");
-            writeln!(out, "  br i1 true, label %body, label %rollback").ok();
-            writeln!(out, "  body:").ok();
             self.fun.ssa_old_int_regs.clear();
             self.fun.ssa_old_float_regs.clear();
             // 2026-06-28: Do NOT reset txn_counter here — this emits into the
@@ -1733,20 +1621,6 @@ impl LlvmBackend {
             if !self.fun.terminated {
                 self.emit_arena_fini(out, "  ");
                 writeln!(out, "  ret void").ok();
-            }
-            writeln!(out, "  rollback:").ok();
-            match action.as_str() {
-                "exit" => {
-                    writeln!(out, "    call void @__exit(i64 1)").ok();
-                    writeln!(out, "    unreachable").ok();
-                }
-                "run" => {
-                    writeln!(out, "    br label %body").ok();
-                }
-                _ => {
-                    self.emit_arena_fini(out, "    ");
-                    writeln!(out, "    ret void").ok();
-                }
             }
             writeln!(out, "}}").ok();
         } else {
@@ -2631,44 +2505,6 @@ impl LlvmBackend {
         writeln!(out, "}}").ok();
     }
 
-    pub(super) fn emit_shape_guarded_body(&mut self, out: &mut String, body: &[Statement], name: &str, action: &str) {
-        let fused_attr = "#0";
-        writeln!(out, "define void @{}({}) local_unnamed_addr {} {{", name, self.ctx.state_ptr_param, fused_attr).ok();
-        writeln!(out, "  entry:").ok();
-        writeln!(out, "  br i1 true, label %body, label %rollback").ok();
-        writeln!(out, "  body:").ok();
-        self.fun.txn_counter = 0; self.fun.let_bindings.clear(); self.fun.let_binding_types.clear(); self.fun.let_original_types.clear(); self.fun.reg_float_cache.clear(); self.fun.reg_type_cache.clear();         self.fun.terminated = false; self.fun.returns_i64 = false;
-            self.fun.fn_ret_ty = "void".to_string();
-        for s in body {
-            if self.fun.terminated { break; }
-            emit_statement(self, out, s, "  ");
-        }
-        if !self.fun.terminated { writeln!(out, "  ret void").ok(); }
-        writeln!(out, "  rollback:").ok();
-        match action {
-            "exit" => {
-                writeln!(out, "    call void @__exit(i64 1)").ok();
-                writeln!(out, "    unreachable").ok();
-            }
-            "run" => {
-                writeln!(out, "    br label %body").ok();
-            }
-            _ => {
-                writeln!(out, "    ret void").ok();
-            }
-        }
-        writeln!(out, "}}").ok();
-    }
-
-    //
-    // WHY emit_fused_composed mirrors emit_fused (same concatenation strategy):
-    //   Composed fusion is the N-ary generalization of binary fusion. The analysis
-    //   pass has already proven that all N bodies are conflict-free and that
-    //   intermediate terminators are dead. The concatenation strategy is identical
-    //   to the binary case — the only difference is that the composed variant
-    //   takes a pre-built body slice (the fusion pass constructed the concatenated
-    //   body) instead of stitching two txns at emit time. Both produce the same
-    //   straight-line IR and both share the ptr rationale above.
     pub(super) fn emit_fused_composed(&mut self, out: &mut String, body: &[Statement], name: &str) {
         let fused_attr = "#0";
         writeln!(out, "define void @{}({}) local_unnamed_addr {} {{", name, self.ctx.state_ptr_param, fused_attr).ok();

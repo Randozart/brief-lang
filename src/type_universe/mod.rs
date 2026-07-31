@@ -58,6 +58,13 @@ pub struct TypeUniverse {
     pub types: HashMap<String, ResolvedType>,
     /// Melds keyed by (type_a, type_b). Both orderings are stored.
     pub melds: HashMap<(String, String), MeldDeclaration>,
+    /// 2026-07-31: Phase 3 (§8.5-E6) — non-fatal diagnostics surfaced by the
+    /// normalizer when a type's size/width/alignment falls back to a default
+    /// (e.g. a type with no primordial and no `!> bits` metadata). The LLVM
+    /// backend copies these into its warning report so the fallback is never
+    /// silent. The default VALUES are preserved (behavior unchanged); this
+    /// channel just makes them observable.
+    pub warnings: Vec<String>,
 }
 
 /// Return the default ALU for a given Common Type Definition.
@@ -68,6 +75,7 @@ impl TypeUniverse {
         let mut universe = TypeUniverse {
             types: HashMap::new(),
             melds: HashMap::new(),
+            warnings: Vec::new(),
         };
         universe.seed_primordial_types();
         universe

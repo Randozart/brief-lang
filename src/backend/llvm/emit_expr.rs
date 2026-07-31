@@ -12,6 +12,22 @@
 use crate::ast::*;
 use crate::ast::{Expr, Statement, Type};
 use crate::backend::llvm::emit_stmt;
+
+/// Pack an SVO inline header: `len` and `cap` into disjoint bit ranges with
+/// bit 0 as the inline tag.
+///
+/// Layout (2026-07-31, §8.5-E2):
+///   bit 0        — inline tag (1 = inline storage, 0 = heap)
+///   bits 1..32   — capacity
+///   bits 32..64  — length
+///
+/// The previous packing `(len << 32) | (cap << 32) | 1` shifted both fields
+/// by 32, so `cap` and `len` OR'd into the SAME bits and were unrecoverable.
+/// The disjoint layout lets a reader round-trip len/cap/tag from the header.
+pub fn pack_svo_header(len: usize, cap: usize) -> u64 {
+    ((len as u64) << 32) | ((cap as u64) << 1) | 1u64
+}
+
 use crate::backend::llvm::intrinsics::{
     emit_intrinsic_call, template_for_op,
 };
@@ -820,7 +836,14 @@ impl LlvmBackend {
     // 2026-07-18: SVO list literal — emit inline handle for ≤3 elements.
     // Handle format (N data slots + 1 len+cap+tag slot):
     //   slot[0..N-1] = element values as i64
-    //   slot[N]      = (len << 32) | (cap << 32) | 1  (bit 0 = inline tag)
+    //   slot[N]      = pack_svo_header(len, cap):
+    //                  bit 0 = inline tag (1 = inline, 0 = heap)
+    //                  bits 1..32 = cap
+    //                  bits 32..64 = len
+    // 2026-07-31: Phase 3 (§8.5-E2) — len and cap previously both shifted by
+    // 32, so they OVERLAPPED (OR'd into the same bits). The header is now
+    // packed disjointly via pack_svo_header; a round-trip test asserts the
+    // layout (emit_expr.rs tests).
     fn emit_svo_list(
         &mut self,
         out: &mut String,
@@ -828,7 +851,9 @@ impl LlvmBackend {
         exprs: &[Expr],
         indent: &str,
     ) -> TypedRegister {
-        let cap = 3usize;
+        // 2026-07-31: Phase 3 (§8.2) — slot count from config svo_max_elements
+        // (was a hardcoded 3 that could diverge from the emit gate).
+        let cap = crate::config_tuning::ir_lowering().svo_max_elements;
         let len = exprs.len();
         // Build the struct via insertvalue
         let mut reg = format!("%svo_{}", self.fun.txn_counter);
@@ -859,7 +884,7 @@ impl LlvmBackend {
         }
         // Pack len+cap+tag into the last slot
         let last_idx = cap;
-        let packed = ((len as u64) << 32) | ((cap as u64) << 32) | 1u64;
+        let packed = pack_svo_header(len, cap);
         let tag_reg = self.fun.gen_reg();
         writeln!(out, "{}{} = add i64 0, {}", indent, tag_reg, packed).ok();
         let final_reg = self.fun.gen_reg();
@@ -2652,5 +2677,42 @@ impl LlvmBackend {
                     indent, dst, src_ll, src_name).ok();
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Phase 3 (§8.5-E2): the SVO header must round-trip len/cap/tag from a
+    /// single packed i64 — the previous `(len << 32) | (cap << 32)` packing
+    /// OR'd both fields into the same bits.
+    #[test]
+    fn svo_header_round_trips() {
+        for len in 0..=3usize {
+            for cap in 0..=8usize {
+                if len > cap {
+                    continue;
+                }
+                let packed = pack_svo_header(len, cap);
+                assert_eq!(packed & 1, 1, "inline tag bit must be set");
+                // cap lives in bits 1..32, len in bits 32..64. Mask out the
+                // len bits BEFORE the right-shift so they don't spill into the
+                // cap field (mask-then-shift, not shift-then-mask).
+                let cap_bits = (packed & 0xFFFF_FFFF) >> 1;
+                let len_bits = packed >> 32;
+                assert_eq!(cap_bits, cap as u64, "cap must round-trip (len={}, cap={})", len, cap);
+                assert_eq!(len_bits, len as u64, "len must round-trip (len={}, cap={})", len, cap);
+            }
+        }
+    }
+
+    /// The disjoint layout must NOT collapse distinct (len, cap) pairs.
+    #[test]
+    fn svo_header_is_injective() {
+        assert_ne!(pack_svo_header(1, 2), pack_svo_header(2, 2),
+            "different lens with the same cap must differ");
+        assert_ne!(pack_svo_header(1, 1), pack_svo_header(1, 2),
+            "different caps with the same len must differ");
     }
 }

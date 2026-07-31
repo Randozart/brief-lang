@@ -494,18 +494,6 @@ impl LlvmBackend {
         }
     }
 
-    /// Emit a single post-loop print statement.
-    fn emit_post_print(
-        &mut self,
-        out: &mut String,
-        name: &str,
-        reg: &str,
-        _ty: &str,
-        indent: &str,
-    ) {
-        writeln!(out, "{}call void @PrintInt#(i64 {})  ; {}", indent, reg, name).ok();
-    }
-
     /// Emit hoisted post-loop print calls.
     pub(crate) fn emit_hoisted_post_loop_prints(
         &mut self,

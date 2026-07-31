@@ -326,6 +326,7 @@ mod tests {
         TypeUniverse {
             types,
             melds: HashMap::new(),
+            warnings: Vec::new(),
         }
     }
 

@@ -1656,6 +1656,14 @@ impl LlvmBackend {
                 self.ctx.target_triple
             ));
         }
+        // 2026-07-31: Phase 3 (§8.5-E6) — surface normalizer diagnostics (silent
+        // size/width/alignment fallbacks recorded on the universe) into the
+        // backend warning report so they are never silent.
+        if let Some(u) = self.ctx.type_universe.as_ref() {
+            for w in &u.warnings {
+                self.warnings.push(w.clone());
+            }
+        }
         let mut analysis = crate::backend::analyze_program(
             items,
             false,

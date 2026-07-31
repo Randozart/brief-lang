@@ -30,7 +30,9 @@ pub fn normalize(items: &mut Vec<TopLevel>, universe: &mut TypeUniverse, int_bit
     // ── Register all TopLevel::TypeDef items into the TypeUniverse ─────────
     // After registration, the casting graph resolves LLVM types from
     // (protocol, metadata) at codegen time — no llvm_type derivation needed.
-    register_typedefs(items, universe)?;
+    // 2026-07-31: Phase 3 (§8.6) — int_bits threaded through so a type with no
+    // width metadata falls back to the TARGET default width, not a hardcoded 64.
+    register_typedefs(items, universe, int_bits)?;
 
     // 2026-07-16: P0+P6 — Process meld layout declarations in a single pass.
     for item in items.iter() {
@@ -135,7 +137,7 @@ fn validate_explicit_llvm(llvm_val: &str) -> Result<(), String> {
 /// 2026-07-16: Register all TopLevel::TypeDef items into the TypeUniverse.
 /// Extracts byte size from layout metadata or slots, attaches field annotations,
 /// and registers each type so meld validation can look it up.
-fn register_typedefs(items: &[TopLevel], universe: &mut TypeUniverse) -> Result<(), String> {
+fn register_typedefs(items: &[TopLevel], universe: &mut TypeUniverse, int_bits: u64) -> Result<(), String> {
     for item in items {
         let td = match item {
             TopLevel::TypeDef(td) => td,
@@ -155,9 +157,22 @@ fn register_typedefs(items: &[TopLevel], universe: &mut TypeUniverse) -> Result<
             .and_then(|pv| if let PropertyValue::Int(n) = pv { Some(*n as u64) } else { None });
         let floor = td.body.metadata.get("minbits")
             .and_then(|pv| if let PropertyValue::Int(n) = pv { Some(*n as u64) } else { None });
-        let primordial = universe.get(&td.name);
-        let prim_max = primordial.map(|p| p.max_bits).unwrap_or(64);
-        let prim_min = primordial.map(|p| p.min_bits).unwrap_or(0);
+        // 2026-07-31: Phase 3 (§8.6) — clone the primordial so the warning
+        // closures below can borrow `universe.warnings` mutably without
+        // conflicting with an outstanding immutable borrow of the universe.
+        let primordial = universe.get(&td.name).cloned();
+        // 2026-07-31: Phase 3 (§8.6) — a type with no primordial falls back to
+        // the TARGET int width (int_bits), not a hardcoded 64; a diagnostic is
+        // recorded so the fallback is never silent.
+        let prim_max = primordial.as_ref().map(|p| p.max_bits).unwrap_or_else(|| {
+            universe.warnings.push(format!(
+                "normalizer: type '{}' has no primordial entry and no `!> bits` \
+                 metadata — defaulting max width to target int width ({})",
+                td.name, int_bits
+            ));
+            int_bits
+        });
+        let prim_min = primordial.as_ref().map(|p| p.min_bits).unwrap_or(0);
         let (min_bits, max_bits) = if let Some(bits) = exact_bits {
             (bits, bits)
         } else {
@@ -175,7 +190,17 @@ fn register_typedefs(items: &[TopLevel], universe: &mut TypeUniverse) -> Result<
                     slot.ty.universe_key()
                         .and_then(|k| universe.get(k))
                         .map(|rt| rt.bytes)
-                        .unwrap_or(8)
+                        .unwrap_or_else(|| {
+                            // 2026-07-31: Phase 3 (§8.6) — unknown slot type falls
+                            // back to 8-byte (conservative max scalar); recorded so
+                            // the assumption is not silent.
+                            universe.warnings.push(format!(
+                                "normalizer: slot type {:?} of type '{}' is not in the \
+                                 universe — assuming 8-byte slot size",
+                                slot.ty, td.name
+                            ));
+                            8
+                        })
                 }).sum();
                 Some(total)
             })
@@ -195,9 +220,19 @@ fn register_typedefs(items: &[TopLevel], universe: &mut TypeUniverse) -> Result<
                             if let PropertyValue::List(parts) = entry {
                                 if parts.len() >= 2 {
                                     if let PropertyValue::Identifier(type_name) = &parts[1] {
+                                        // 2026-07-31: Phase 3 (§8.6) — unknown layout
+                                        // type falls back to the target int width;
+                                        // recorded so it is not silent.
                                         let bits = universe.get(type_name)
                                             .map(|r| r.bytes * 8)
-                                            .unwrap_or(64);
+                                            .unwrap_or_else(|| {
+                                                universe.warnings.push(format!(
+                                                    "normalizer: layout type '{}' of '{}' is not \
+                                                     in the universe — assuming {} bits",
+                                                    type_name, td.name, int_bits
+                                                ));
+                                                int_bits
+                                            });
                                         total_bits += bits;
                                     }
                                 }
@@ -207,12 +242,31 @@ fn register_typedefs(items: &[TopLevel], universe: &mut TypeUniverse) -> Result<
                     } else { None }
                 })
             })
-            .unwrap_or_else(|| primordial.map(|p| p.bytes).unwrap_or(8));
+            .unwrap_or_else(|| primordial.as_ref().map(|p| p.bytes).unwrap_or_else(|| {
+                // 2026-07-31: Phase 3 (§8.6) — no metadata-derived size and no
+                // primordial: assume 8 bytes (conservative max scalar) and record
+                // the fallback so it is not silent.
+                universe.warnings.push(format!(
+                    "normalizer: type '{}' has no size metadata and no primordial \
+                     entry — assuming 8 bytes",
+                    td.name
+                ));
+                8
+            }));
         let alignment = td.body.metadata.get("alignment")
             .and_then(|pv| {
                 if let PropertyValue::Int(n) = pv { Some(*n as u64) } else { None }
             })
-            .unwrap_or_else(|| primordial.map(|p| p.alignment).unwrap_or_else(|| bytes.min(8)));
+            .unwrap_or_else(|| primordial.as_ref().map(|p| p.alignment).unwrap_or_else(|| {
+                // 2026-07-31: Phase 3 (§8.6) — conservative alignment fallback
+                // (min(bytes, 8)); recorded so it is not silent.
+                universe.warnings.push(format!(
+                    "normalizer: type '{}' has no alignment metadata and no \
+                     primordial entry — assuming alignment {}",
+                    td.name, bytes.min(8)
+                ));
+                bytes.min(8)
+            }));
         let mut properties: std::collections::HashMap<String, PropertyValue> = td.body.metadata.clone();
         let base = td.parent.as_ref()
             .and_then(|e| match e.as_ref() { Expr::Identifier(n) => Some(n.clone()), _ => None })
@@ -379,11 +433,27 @@ fn synthesize_meld_shuffle(meld: &crate::ast::top::Meld, universe: &mut TypeUniv
         let src_offset = source_rt.properties.get(&format!("field.{}.offset", src_field))
             .and_then(|pv| if let PropertyValue::Int(n) = pv { Some(*n as u64) } else { None }).unwrap_or(0);
         let src_width = source_rt.properties.get(&format!("field.{}.width", src_field))
-            .and_then(|pv| if let PropertyValue::Int(n) = pv { Some(*n as u64) } else { None }).unwrap_or(64);
+            .and_then(|pv| if let PropertyValue::Int(n) = pv { Some(*n as u64) } else { None })
+            .unwrap_or_else(|| {
+                // 2026-07-31: Phase 3 (§8.6) — meld shuffle width missing: assume
+                // 64 bits and record the fallback so it is not silent.
+                universe.warnings.push(format!(
+                    "normalizer: meld '{}' field '{}' has no width — assuming 64 bits",
+                    meld.name, src_field
+                ));
+                64
+            });
         let dst_offset = target_rt.properties.get(&format!("field.{}.offset", dst_field))
             .and_then(|pv| if let PropertyValue::Int(n) = pv { Some(*n as u64) } else { None }).unwrap_or(0);
         let dst_width = target_rt.properties.get(&format!("field.{}.width", dst_field))
-            .and_then(|pv| if let PropertyValue::Int(n) = pv { Some(*n as u64) } else { None }).unwrap_or(64);
+            .and_then(|pv| if let PropertyValue::Int(n) = pv { Some(*n as u64) } else { None })
+            .unwrap_or_else(|| {
+                universe.warnings.push(format!(
+                    "normalizer: meld '{}' field '{}' has no width — assuming 64 bits",
+                    meld.name, dst_field
+                ));
+                64
+            });
 
         let rt = universe.types.get_mut(&meld.name).unwrap();
         rt.properties.insert(format!("shuffle.{}.src_offset", dst_field), PropertyValue::Int(src_offset as i64));
