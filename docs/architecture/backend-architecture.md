@@ -60,8 +60,8 @@ generate(items)
   │     │
   │     └─ [Loop emission]           — One of:
   │           • emit_folded_main()     — Inline SSA (small states, dense writes)
+  │           • emit_version_dag_main() — Version-DAG (single runtime when guard)
   │           • emit_countable_main()  — Per-field phi nodes (default)
-  │           • emit_countable_batched_main() — Outer/inner loop (guards detected)
   │
   └─ Metadata + function epilogue
 ```
@@ -257,10 +257,16 @@ When a convergent transaction (node/txn) is emitted, the dispatch selects one of
 ```
 Entry → build_field_index → ... → dispatch:
   1. Pure counter fold — if no written non-counter state fields: O(1) single store
-  2. Inline SSA — if write_density >= 0.5 AND total_fields < 8: insertvalue chain
-  3. PerFieldPhi — default: per-field phi nodes
-     (may be further split into batch-loop if hoistable guards detected)
+  2. Version-DAG — if the body has a single runtime `when` guard: emit_version_dag_main
+  3. Inline SSA — if write_density >= 0.5 AND total_fields < 8: insertvalue chain
+  4. PerFieldPhi — default: per-field phi nodes (emit_countable_main)
 ```
+
+The **composite-node decomposition** (§5.3) runs in the FRONTEND analysis
+(`analysis/node_decompose.rs`, `analysis/match_normalize.rs`,
+`analysis/loop_carried.rs`) and emits via `emit_version_dag_main`. It handles
+single runtime `when` guards; multi-guard or statically-fixed-guard bodies fall
+to PerFieldPhi.
 
 ### 5.2 PerFieldPhi (Default)
 
@@ -291,6 +297,11 @@ Key data structures:
 ### 5.3 Composite-Node Decomposition (Version-DAG)
 
 A reactive transaction whose body contains `when` guards is a **latent multi-node reactor**: each side-effecting guard is a second node trapped inside the first node's body. Brief's reactor design (concurrent firing, the XOR write rule) treats these as separate nodes that should be decomposed.
+
+The decomposition is a **frontend analysis** (`analysis/match_normalize.rs`,
+`analysis/node_decompose.rs`, `analysis/loop_carried.rs`) that emits via
+`counter.rs::emit_version_dag_main`. It replaces the removed batch-loop
+heuristics (`loop_peeling.rs`).
 
 Since `when` guards have **no else chain**, the body is a sequence of segments separated by guards. The compiler runs a **recursive version-DAG decomposition** (see `docs/plans/2026-07-30-flat-node-decomposition.md` §11):
 
@@ -399,70 +410,58 @@ grep -rn 'Type::Custom.*if.*==.*"' src/backend/llvm/ | grep -v 'tests\.rs\|Int\b
 
 The backend has several interacting subsystems. A change in one area can silently break another. This section documents each fragile subsystem, what it depends on, and what breaks if those dependencies are violated.
 
-### 9.1 Composite-Node Decomposition (emit_countable_batched_main)
+### 9.1 Composite-Node Decomposition (emit_version_dag_main)
 
-> **2026-07-31:** The batch-loop is being superseded by the recursive version-DAG
-> decomposition (§5.3). The batch-loop's mechanism (folded compute loop +
-> boundary checks in one `@main`) is the correct codegen; the fragility below
-> comes from its *heuristic* boundary derivation. The decomposition derives the
-> boundary from the guard predicate at the split point, eliminating
-> `extract_batch_size_from_guards`, the manual count=0 peel, `pre_count`
-> arithmetic, and position detection. Until the decomposition lands, treat the
-> batch-loop as fragile and respect the invariants below.
+**What it does:** For a transaction body with ONE runtime `when` guard, emits
+a version-DAG: a guard-absent loop (`[pre] + [post]`, no side effect) and a
+guard-present block (`[pre] + [guard] + [post]`, with the side effect). The
+guard predicate is evaluated BETWEEN `[pre]` and `[post]` — the split point —
+which captures whether the guard observes the counter pre- or post-increment
+naturally (no counter-name matching, no position scanning).
 
-**What it does:** Splits a convergence loop into an outer structural loop and an inner pure-compute loop when hoistable `when` guards are detected.
+**Dependencies (frontend analysis, not backend heuristics):**
+- `analysis/match_normalize.rs::normalize_match_to_when` — statement-level `match` → `when` sequence
+- `analysis/node_decompose.rs::split_into_segments` — partition body at top-level `when` guards; classify predicates (AlwaysTrue/AlwaysFalse/Runtime)
+- `analysis/loop_carried.rs::classify_fields` — minimal-state classification (hoist invariant, drop dead, phi carried)
+- `counter.rs::emit_version_dag_main` — the emission
 
-**Dependencies:**
-- `loop_peeling.rs::split_hoistable()` — detects guards in the body
-- `loop_peeling.rs::extract_batch_size_from_guards()` — extracts batch_size from `when count % N == 0` conditions
-- `counter.rs::emit_countable_batched_main()` — emits the two-loop structure
-
-**Pre/post-increment guard position (2026-07-31):** Whether the guard observes
-the counter pre- or post-increment is determined by where it sits in the body
-relative to the counter update — NOT by the counter's name. A naive peel that
-fires every guard at count=0 breaks post-increment benchmarks (float_math,
-print_loop, queue_drain, cancel_math, kalman_filter_runtime, float_math_nonzero)
-whose C references check `count % N` after `count++`. The version-DAG
-decomposition resolves this by evaluating the guard predicate at the split
-point; a heuristic batch-loop must NOT assume all guards are pre-increment.
+**Pre/post-increment guard position:** Whether the guard observes the counter
+pre- or post-increment is determined by WHERE the guard sits in the body
+relative to the counter update — NOT by the counter's name. The split at the
+guard captures this: pre-increment guards fire at count=0, post-increment
+guards fire at count=N. A naive peel that fires every guard at count=0 breaks
+post-increment benchmarks (float_math, print_loop, queue_drain, cancel_math,
+kalman_filter_runtime, float_math_nonzero).
 
 **What breaks if changed carelessly:**
 
 | Change | Failure mode |
 |--------|--------------|
-| Emit outer guards in `.ox_` block instead of `.inner_exit_` | **Instruction does not dominate all uses** — phi registers from `.inner_124` are invalid in `.ox_124`. Use `.inner_exit_124` which IS dominated by `.inner_124`. |
-| Skip the `let_to_field` remapping | **`@energy` undefined global** — guard bodies reference let-bindings (`energy`) that aren't state fields. Must be remapped to their state field equivalent (`last_energy`). |
-| Clear `last_val_temps` before guard emission | Identifiers resolve to globals instead of phi registers. Guards must see phi registers, not state loads. |
-| Remove the `write_set` from `emit_countable_body` call | State field assignments in guards write to phi backedge tables that don't exist in the exit block. |
-| Change `batch_size` computation | Wrong batch count — inner loop runs incorrect number of iterations, producing wrong results. |
+| Evaluate the guard predicate at the loop header instead of the split point | Post-increment guards fire at the wrong count (pre-increment value). |
+| Present block fires without a `count < bound` check at the header | Off-by-one — fires at count == bound, which C references exclude. |
+| Present block reads the absent body's post-`[pre]` registers | **Instruction does not dominate all uses** — the present block is a sibling, not a successor, of the absent body. It must read the header phis. |
+| Skip materializing written fields to %State in the end block | Post-loop swan song reads the INITIAL value (boundary-only fields like `escapes`). |
+| Manually increment the counter in the latch/present | Double increment — `[pre]`/`[post]` already contain the source's `count = count + 1`. |
 
-**The dominance tree for the batch loop:**
+**The dominance tree for the version-DAG:**
 
 ```
-.oh_124 [outer header]
+entry → header
+header [phis + exit check count < bound]
   │
-  └──→ .inner_124 [inner header — phis ARE valid here and in .inner_exit_124]
-         │
-         ├──→ .il_124 [inner latch — computed values, NOT valid in outer blocks]
-         │      │
-         │      └──→ back to .inner_124
-         │
-         └──→ .inner_exit_124 [guard emission — phi registers from .inner_124 ARE valid]
-                │
-                └──→ .ox_124 [termination check — load from %State only]
-                       │
-                       ├──→ .done_124 [exit — load from %State only]
-                       └──→ .ol_124 [outer latch]
-                              │
-                              └──→ back to .oh_124
+  ├──→ absent_body [runs [pre] → predicate check]
+  │      │
+  │      ├──→ latch [runs [post] → backedge → header]
+  │      └──→ present [runs [pre] [guard] [post] → backedge → header]
+  │
+  └──→ end [materialize ALL fields to %State → swan song prints → ret]
 ```
 
-**Key invariant:** The only registers valid in `.inner_exit_124` are:
-- PHI registers defined in `.inner_124` (all fields in `phi_field_regs`)
-- Registers computed inside `.inner_exit_124` itself
-- Registers loaded from `%State`
-
-Registers from `.il_124` (computed body values) are NOT valid in `.inner_exit_124` because `.il_124` does not dominate `.inner_exit_124`.
+**Key invariant:** The present block and end block must reference the HEADER
+phi registers (which dominate them), not the absent body's post-`[pre]`
+registers (sibling block, does not dominate). The absent body may update
+`phi_field_regs` to post-`[pre]` values for the predicate check, but the
+present/end blocks must restore the header phis.
 
 ### 9.2 PerFieldPhi Register Tracking
 
@@ -524,14 +523,14 @@ Registers from `.il_124` (computed body values) are NOT valid in `.inner_exit_12
 **What it does:** Removes `Term(..)` / `TermBang(..)` statements from the body and places the last guard's body in `post_hoist` if it contains `TermBang`.
 
 **Dependencies:**
-- Runs before the dispatch and before the batch-loop detection
-- Must be called before `split_hoistable` because it removes the termination guard from the body
+- Runs before the dispatch and before the composite-node decomposition
+- Must be called before `node_decompose::split_into_segments` because it removes the termination guard from the body
 
 **What breaks if changed carelessly:**
 
 | Change | Failure mode |
 |--------|--------------|
-| Swap order with `split_hoistable` | **Guard body emitted in inner loop** — the termination guard's TermBang body (containing `PrintLn!`) ends up in the inner loop, blocking if-conversion. |
+| Swap order with `split_into_segments` | **Guard body emitted in inner loop** — the termination guard's TermBang body (containing `PrintLn!`) ends up in the version-DAG's absent body, blocking if-conversion. |
 | Don't check for `TermBang` in the last guard | **Terminating print never fires** — the guard body isn't hoisted to `post_hoist`. |
 | Don't remove `Term(..)` from the body | **`emit_countable_body` hits the catch-all** — `Statement::Term(None)` falls through to `_ => {}` and is silently dropped. |
 
@@ -551,7 +550,7 @@ Registers from `.il_124` (computed body values) are NOT valid in `.inner_exit_12
 |------|-----|
 | `extractelement_cache` used without clearing | Same extract value used across iterations — stale values. |
 | `field_to_phi` conflicts with `phi_field_regs` | Two sets of phi nodes for the same field — which one does the body read? |
-| Vector phis + batch-loop interaction | The batch loop's inner exit stores phi values to %State. Vector phi values are `<N x float>` — storing them would require deconstructing the vector. |
+| Vector phis + version-DAG interaction | The version-DAG's end block materializes fields to %State. Vector phi values are `<N x float>` — storing them would require deconstructing the vector. |
 
 ### 9.7 `push_field_type` i64 Override
 
