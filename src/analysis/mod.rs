@@ -27,6 +27,7 @@ pub mod soa_reorder;
 pub mod licm;
 pub mod loop_peeling;
 pub mod match_normalize;
+pub mod node_decompose;
 pub mod layout_optimizer;
 pub mod protocol_graph;
 
