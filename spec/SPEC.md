@@ -69,32 +69,33 @@ compile during a deprecation window but emit a warning.
 ```
 Source (.bv/.rbv/.ebv/.abv/.cbv/.dbv)
   ↓
-Lexer (lexer.rs)
+Lexer (src/lexer.rs)
   ↓ Token stream
-Parser (parser.rs)
-  ↓ AST
-Import Resolver (import_resolver.rs)
+Parser (src/parser/)  — defn / txn / node, contracts in either position,
+  ↓                     .^ / .^^ reflection, obj generics + methods
+AST
+  ↓
+Import Resolver (src/import_resolver.rs)
   ↓ Resolved AST
-Desugarer (desugarer.rs)
-  ↓ Desugared AST
-Type Universe Build (type_universe.rs)
+Type Universe Build (src/type_universe.rs)  — hashword protocols, casting graph
   ↓ Frozen universe
-NormalizeTypes Pass (normalize_types.rs)
-  ↓ Normalized AST (Custom→Applied→Bits resolved)
-  └─ Phase 5: detects DeferredLiteral from type codec parse handler
-Type Checker (typechecker.rs)
-  ↓ Typed AST
-  └─ DeferredLiteral typechecks as its expected_type
-Plugin Hook: AfterTypeCheck ───→ loaded plugins can inspect/abort
-Proof Engine (proof_engine.rs)
-  ↓ Verified AST
-Shared Analysis (CallGraph, Range, Dataflow, Protocol)
+NormalizeTypes Pass (src/backend/llvm/normalizer.rs)  — registers types; the
+  ↓                                              casting graph resolves LLVM types
+Type Checker (src/typechecker/)  — declaration-level validation (let/term/args),
+  ↓                         field/method/reflection resolution, no implicit coercion
+Proof Engine (src/proof_engine/)  — tautology detection, convergence
   ↓
-Plugin Hook: BeforeCodegen  ───→ loaded plugins can inspect/abort
+Shared Analysis (src/analysis/)  — frontend-driven: LoopShape, swan songs,
+  ↓                         density, modulo partitions, inline decisions
+Plugin Hooks (Front/Mid/Back)  — prelude injection, env intercepts
   ↓
-Three Canonical Backends:
-  ├── LLVM (llvm/) → .bv → native binary, .ebv → MCU, .abv → SPIR-V
-  │   └── Phase 6: --triple wasm32-unknown-wasi → .wasm via llc + wasm-ld
+Backends — consume frontend decisions; never re-derive them
+  ├── LLVM (src/backend/llvm/) → .bv → native binary, .ebv → MCU, .abv → SPIR-V
+  │   └── wasm32-wasi target via llc + wasm-ld
+  ├── CIRCT (src/backend/circt.rs) → .cbv → Verilog/VHDL
+  ├── Webstack (src/backend/webstack.rs) → .rbv → TS + WASM
+  └── (archived: aarch64/x86_64/rust/c/wasm/verilog/vhdl assembler backends)
+```
   ├── Webstack (webstack.rs + LlvmBackend wasm32) → .rbv → WASM + JS shim
   └── CIRCT (circt.rs) → .cbv → MLIR → Verilog/VHDL
 ```
@@ -118,12 +119,11 @@ Brief's symbols are not arbitrary ASCII choices. Each symbol's **visual shape** 
 | Symbol | Visual Shape | Cognitive Metaphor | Systems Meaning | Group |
 |:---:|---|---|---|---|
 | **`;`** | A dot with a tail falling away | A hard stop, a reset | Universal statement termination | — |
-| **`.`** | A single pinpoint | Puncturing, reaching into | Struct field access / UFCS | — |
+| **`.`** | A single pinpoint | Puncturing, reaching into | Struct field access / method call | — |
 | **`->`** | An arrow pointing right | Forward motion | Dataflow / State transition | — |
 | **`<-`** | An arrow pointing left | Backward motion | Mutation / Discard | **Transfer** |
 | **`:`** | Two stacked dots | Identity, equivalence | Static type definition | — |
-| **`:>`** | Colon + right-arrow | Projecting identity outward | Compile-time metadata extraction — reveals meaning through a semantic lens | **Lens (Projection)** |
-| **`<:`** | Left-arrow + colon | Derived projection inward | Type derivation — restricts what conforms to a type | **Lens (Derivation)** |
+| **`.^` / `.^^`** | Pinpoint + caret(s) | Reflecting on a value/type | **Reflection** — runtime (`.^`) and compile-time (`.^^`) metadata | **Reflection** |
 | **`[]`** | Brackets that enclose | Containment, boundary | Constraints, guards, partitions — segments a layout into addressable sub-ranges | **Partition** |
 | **`{}`** | Curly braces that hug | Grouping, bundling | Code block / organization | — |
 | **`()`** | Parentheses that cup | Holding, containing | Argument enclosure | — |
@@ -138,15 +138,15 @@ Brief's symbols are not arbitrary ASCII choices. Each symbol's **visual shape** 
 
 ### Operator Taxonomy
 
-Brief's operators fall into three conceptual groups that govern how types relate, how data is partitioned, and how data moves:
+Brief's operators fall into conceptual groups that govern how types relate, how data is partitioned, how data moves, and how metadata is read:
 
-| Group | Collective Name | Operators | Purpose |
-|-------|----------------|-----------|---------|
-| **Lens Operators** | The `<:` and `:>` pair | `<:` (Derivation), `:>` (Projection) | Establish the relationship between a raw bit layout and its high-level meaning. `<:` restricts what can conform to a type; `:>` reveals meaning through a semantic lens. |
-| **Partition Operators** | Bracket and bit-anchor | `[]`, `@/` | Constrain focus to a spatial sub-range of a layout. `list[3]` selects the 4th element; `bits @/0..3` selects bits 0-3. |
-| **Transfer Operator** | The arrow | `<-` | Directional data movement across layout boundaries. `&list <- x` pushes x into list; `val <- &list` pops from list. |
+| Group | Operators | Purpose |
+|-------|-----------|---------|
+| **Reflection** | `.^` (runtime), `.^^` (compile-time) | Read compiler-known metadata about a value/type: `s.^Len`, `x.^^Bytes`. The targets are PascalCase compiler-known identifiers (explicitly marked). |
+| **Partition Operators** | `[]`, `@/` | Constrain focus to a spatial sub-range of a layout. `list[3]` selects the 4th element; `bits @/0..3` selects bits 0-3. |
+| **Transfer Operator** | `<-` | Directional data movement across layout boundaries. `&list <- x` pushes x into list; `val <- &list` pops from list. |
 
-The **Anchor** (`@`) is not itself an operator but a universal modifier — it anchors a value to a position in space or time, used across all three groups (e.g., `@` for prior state, `@/` for bit position, `@"..."` for compile-time strings).
+The **Anchor** (`@`) is not itself an operator but a universal modifier — it anchors a value to a position in space or time (`@` for prior state, `@/` for bit position, `@"..."` for compile-time strings).
 
 ---
 
@@ -179,7 +179,11 @@ type_def ::= "type" identifier type_params? ":" type_expr "{" (slot_decl | type_
 slot_decl ::= identifier ":" type_expr ";"
 type_property ::= identifier ("(" params? ")")? "<~" expression ";"
 constraint ::= "[" expression "]"
-op_decl ::= "op" rune_name "(" param_type? ")" "->" return_type "=" intrinsic ";"
+op_decl ::= "op" rune_name ":" fn_call                                (* binding: op Add: func(#L, #R); *)
+          | "op" rune_name "(" rhs_type? ")" ":" fn_call             (* RHS-only overload, declared on the LHS type: op Add(Float): func(#L, #R); *)
+(* The LHS operand type is the declaring type/protocol — it is never listed.
+   op Add(#Int, #Int) (two operands) is REMOVED: protocols know their own
+   self-arithmetic; only the RHS overload goes between the parens. *)
 prop_decl ::= "prop" identifier "=" expression ";"
 
 exit_condition ::= "#!exit" expression
@@ -447,13 +451,10 @@ coordinate ::= expression                    // Single index: 5
 
 addr_of ::= "&" expression           // Address-of: generalized beyond identifiers
 
-projection ::= expression ":>" projection_target
-projection_target ::= "Size" | "Bytes" | "Ptr" | "Alignment" | "Range"
-                    | "Popcount" | "LeadingZeros" | "TrailingZeros"
-                    | "Absolute" | "BitReverse" | "Type" | "Ptr!"
-                    | "Keys" | "Values" | "Contains" "(" expression ")"
-                    | "Pop" | "Index" "(" integer ")" | "Get" "(" expression ")"
-                    | "Top" | "Front" | "Elements"
+reflect_runtime      ::= expression ".^" reflect_target   // x.^Len, x.^Ptr
+reflect_compile_time ::= expression ".^^" reflect_target  // x.^^Size, x.^^Bytes
+reflect_target ::= "Len" | "Ptr" | "Size" | "Bytes" | "Alignment" | "Type"
+                   // PascalCase compiler-known targets; any other name is an error.
                     | "AsStack" | "AsQueue"
 
 arrow_mut ::= expression "<-" expression           // Push: list <- x (no & needed)
@@ -526,153 +527,6 @@ result_type ::= "Result" "<" type "," type ">"
 (* `inop` and `#out` modifiers are removed from the language. *)
 ```
 
-### 2.3 Statements
-
-```bnf
-statement ::= assignment
-            | unification
-            | guarded
-            | term
-            | termbang
-            | escape
-            | expression_stmt
-            | let_binding
-            | inline_asm
-
-assignment ::= "&"? lhs "=" expression ("," expression)* ";"
-
-lhs ::= identifier | field_access | index_access
-
-unification ::= identifier "(" pattern ")" "=" expression ";"
-
-guarded ::= "[" condition "]" ("{" statement* "}" | statement)
-
-term ::= "term" (expression ("," expression)*)? ("->" statement)? ";"
-
-termbang ::= "term!" (expression ("," expression)*)? ("->" statement)? ";"
-
-escape ::= "escape" expression? ";"
-
-expression_stmt ::= expression ";"
-
-let_binding ::= "let" identifier (":" type)? ("=" expression)? ";"
-
-inline_asm ::= "asm" string_literal ("{" string_literal ("," string_literal)* "}")? ";"
-```
-
-### 2.4 Expressions
-
-```bnf
-expression ::= literal
-             | identifier
-             | binary_op
-             | unary_op
-             | call
-             | field_access
-             | index_access
-             | slice
-             | tuple
-             | list
-             | range
-             | cast
-             | prior_state
-             | addr_of
-             | projection
-             | arrow_mut
-             | arrow_discard
-             | block
-
-literal ::= Int | Float | Bool | String | Char | "true" | "false"
-
-binary_op ::= expression operator expression
-
-operator ::= "+" | "-" | "*" | "/" | "%"
-           | "==" | "!=" | "<" | ">" | "<=" | ">="
-           | "&&" | "||"
-           | "&" | "|" | "^" | "<<" | ">>"
-
-unary_op ::= "-" expression | "!" expression | "~" expression 
-           | "&" expression          // Address-of
-           | "*" expression           // Dereference
-
-call ::= expression "(" (expression ("," expression)*)? ")"
-
-field_access ::= expression "." identifier
-
-index_access ::= expression "[" expression "]"
-
-slice ::= expression "[" coordinate ("," coordinate)* (";" condition)? "]"
-
-coordinate ::= expression                    // Single index: 5
-             | expression? ".." expression?  // Range: 0..10, ..10, 5..
-             | "::" expression               // Stride: ::2
-             | identifier ":" coordinate     // Named dimension: time:5
-             | "..."                         // Ellipsis: fill unspecified dimensions
-             | "@" integer ":" coordinate    // Dimension specifier: @3:0..10
-
-addr_of ::= "&" expression           // Address-of: generalized beyond identifiers
-
-projection ::= expression ":>" projection_target
-projection_target ::= "Size" | "Bytes" | "Ptr" | "Alignment" | "Range"
-                    | "Popcount" | "LeadingZeros" | "TrailingZeros"
-                    | "Absolute" | "BitReverse" | "Type" | "Ptr!"
-                    | "Keys" | "Values" | "Contains" "(" expression ")"
-                    | "Pop" | "Index" "(" integer ")" | "Get" "(" expression ")"
-                    | "Top" | "Front" | "Elements"
-                    | "AsStack" | "AsQueue"
-
-arrow_mut ::= expression "<-" expression           // Push: list <- x (no & needed)
-            | expression "<-" addr_of              // Pop: x <- &list (& on RHS = consumption)
-            | expression "[" expression "]" "<-" expression  // Indexed write
-arrow_discard ::= "<-" addr_of                     // Drain: <- &list (& = consumption)
-                | "<-" addr_of "[" expression "]"  // Indexed remove: <- &list[i]
-                | "<-" expression                    // Discard expression result: <- syscall! @ 1 (...)
-
-tuple ::= "(" (expression ("," expression)*)? ")"
-
-list ::= "[" (expression ("," expression)*)? "]"
-
-range ::= expression ".." expression?
-
-cast ::= expression "as" type
-
-prior_state ::= "@" identifier
-
-block ::= "{" statement* "}"
-```
-
-### 2.5 Contracts
-
-```bnf
-contract ::= "[" expression "]" "[" expression "]" watchdog?
-
-watchdog ::= ("?" | "!") "[" expression "]"
-```
-
-* **Precondition**: First bracket `[pre]` - must be true for transaction to fire
-* **Postcondition**: Second bracket `[post]` - must be true after transaction completes
-* **Watchdog**: Optional timeout/condition `?[timeout]` (optional) or `![timeout]` (required)
-
-### 2.6 FFI Grammar
-
-```bnf
-foreign_sig ::= ("frgn" | "frgn!" | "syscall" | "syscall!") "sig" identifier parameters? "->" result_type "from" string_literal ";"
-
-frgn_binding ::= identifier parameters? "->" "Result" "[" type_params "]" "from" string_literal
-
-result_type ::= "Result" "[" type "," type "]"
-              | "void"
-              | type
-
-ffi_attributes ::= "#![" ffi_attr ("," ffi_attr)* "]"
-
-ffi_attr ::= "ffi" "(" string_literal ")"
-           | "bind" "(" string_literal ")"
-           | "import" "(" string_literal ")"
-           | "map" "(" string_literal "," string_literal ")"
-```
-
-### 2.3 FFI Types and Contracts
 
 ```bnf
 foreign_sig ::= ("frgn" | "syscall") "sig" identifier "(" parameters? ")" "->" output_types ";"
@@ -726,6 +580,37 @@ async node fetch_data [needs_update][data != @data] {
 **Contract semantics:**
 - `[pre]` - Precondition: when the transaction is allowed to fire
 - `[post]` - Postcondition: what must be true after completion
+
+### 3.2 Guard-Based Control Flow
+
+Brief eliminates imperative branching (`if`/`else`) in favor of guards:
+
+```brief
+txn process(value: Int) [true][result != 0] {
+    let result: Int = 0;
+    
+    // Guard: only executes if condition is true
+    [value > 0] {
+        result = value * 2;
+    };
+    
+    [value < 0] {
+        result = value * -1;
+    };
+    
+    [value == 0] {
+        escape;  // Rollback transaction
+    };
+    
+    term;
+};
+```
+
+**Guard behavior:**
+- Multiple guards can execute (unlike `if`/`else if`)
+- Guards are evaluated in order
+- Empty guard body is valid: `[x > 0] &positive = true;`
+- `escape` inside a guard rolls back the entire transaction
 
 ### 3.3 Definitions (Functions)
 
@@ -860,135 +745,6 @@ txn increment() [true][counter == @counter + 1] {
 - `[post]` - Postcondition: what must be true after completion
 - `@var` - Prior state: value of `var` at transaction start
 - `term` - Completes transaction; verifies postcondition
-
-### 3.2 Guard-Based Control Flow
-
-Brief eliminates imperative branching (`if`/`else`) in favor of guards:
-
-```brief
-txn process(value: Int) [true][result != 0] {
-    let result: Int = 0;
-    
-    // Guard: only executes if condition is true
-    [value > 0] {
-        result = value * 2;
-    };
-    
-    [value < 0] {
-        result = value * -1;
-    };
-    
-    [value == 0] {
-        escape;  // Rollback transaction
-    };
-    
-    term;
-};
-```
-
-**Guard behavior:**
-- Multiple guards can execute (unlike `if`/`else if`)
-- Guards are evaluated in order
-- Empty guard body is valid: `[x > 0] &positive = true;`
-- `escape` inside a guard rolls back the entire transaction
-
-### 3.3 Definitions (Functions)
-
-Functions (`defn`) are pure computations with contracts:
-
-```brief
-// Simple function
-defn abs(n: Int) [true][result >= 0] -> Int {
-    [n < 0] {
-        term -n;
-    };
-    term n;
-};
-
-// Generic function
-defn max<T>(a: T, b: T) [a >= b || b >= a][result == a.max(b)] -> T {
-    [a >= b] {
-        term a;
-    };
-    term b;
-};
-
-// Multi-output function
-defn div_mod(a: Int, b: Int) [b != 0][quotient * b + remainder == a] -> (Int, Int) {
-    term (a / b, a % b);
-};
-
-// Function with named outputs
-defn get_coords() -> (x: Int, y: Int) {
-    term (10, 20);
-}
-```
-
-**Definition syntax:**
-- `defn name(params) -> output_type [pre][post] { body }`
-- Can return multiple values: `-> (Type1, Type2)`
-- Named outputs: `-> (name: Type, ...)`
-- Contracts are verified at compile time
-
-### 3.4 Signatures (FFI)
-
-Signatures declare external function bindings. The `frgn` keyword declares an external symbol; `frgn!` is fire-and-forget with no return.
-
-```brief
-// Standard FFI returning Result — caller must handle both Ok and Err
-frgn sqrt(x: Float) -> Result<Float, MathError>;
-
-// Fire-and-forget — no return type parsed, result discarded
-frgn! log_message(msg: String);
-
-// sig #out — observable output
-import { OUT__print_int } from "std/out.bv";
-```
-
-**FFI keywords:**
-- `frgn` — Foreign function returning `Result<T, E>` — caller must handle both paths
-- `frgn!` — Fire-and-forget — no return captured, errors cause runtime panic
-- `sig #out` — Observable output modifier — prevents dead-code elimination
-- `sig #inline` — Pure modifier — safe to fold/eliminate
-
-**`from` clause:**
-  - `from "c"` — C calling convention
-  - `from "rust"` — Rust calling convention
-  - `from "js"` — JavaScript (interpreter only)
-  - `from "python"` — Python (interpreter only)
-  - Omitted — compiler searches `import "link/..."` targets
-- `syscall` - Kernel call returning `Result<Int, E>`
-- `syscall!` - Kernel call returning `void`
-
-### 3.5 State Management
-
-State is declared globally and mutated with `&`:
-
-```brief
-// Simple state
-let counter: Int = 0;
-let name: String = "default";
-
-// State without initial value (defaults to 0, "", false)
-let balance: Int;
-let active: Bool;
-
-// Constant (immutable)
-const MAX_SIZE: Int = 100;
-const VERSION: String = "1.0.0";
-
-// Mutable state in transaction
-txn increment() [true][counter == @counter + 1] {
-    counter = counter + 1;  // & required for mutation
-    term;
-};
-```
-
-**State rules:**
-- `let` - Mutable state
-- `const` - Immutable constant
-- `&var = expr` - Mutation (required in transactions)
-- `@var` - Prior state value in contracts
 
 ### 3.6 Structs and Rstructs
 
@@ -1268,7 +1024,7 @@ arr[i:j:k]     // Dynamic stride — runtime step
 
 All components are optional:
 - `start = None` → `0`
-- `end = None` → `arr .#Size` (array length)
+- `end = None` → `arr .^Len` (array length)
 - `stride = None` → `1`
 
 **Type rules:**
@@ -1484,92 +1240,82 @@ The expression discard `<- expr` evaluates any expression and discards its resul
 
 ---
 
-### 3.15 Projection Operator (`:>`)
+### 3.15 Reflection (`.^` runtime, `.^^` compile-time)
 
-The `.#` (DotHash) operator projects compile-time-known metaproperties from
-values without runtime overhead. All operations map directly to LLVM intrinsics
-or constant evaluation.
+Brief has two reflection operators, both compile-time-resolved and explicitly
+marked (a lower-case name after the operator is a parse error):
 
-**Syntax:** `expression :> projection_target`
+| Operator | Kind | Result |
+|----------|------|--------|
+| `expr.^Meta` | **Runtime** reflection — value-derived | a runtime value (`Len`, `Ptr`) |
+| `expr.^^Meta` | **Compile-time** reflection — type-derived | a foldable constant (`Size`, `Bytes`, `Alignment`, `Type`) |
 
-**Metadata projections:**
+**Target table (all PascalCase compiler-known):**
 
-| Target | Source type | Result | LLVM emission |
-|--------|-------------|--------|---------------|
-| `Size` | List, String | Length (elements) | Load from 2-slot header slot 1 |
-| `Bytes` | Any | Byte size of value | Compile-time constant |
-| `Ptr` | Variable, List | Verified pointer `Ptr<T>` | Load data pointer from 2-slot header slot 0 |
-| `Alignment` | Any | Memory alignment | Compile-time constant |
-| `Range` | Any | `(min, max)` tuple | Compile-time constant |
+| Target | Kind | Result | Notes |
+|--------|:----:|--------|-------|
+| `Len` | `.^` | `Int` | runtime length of a String/List value |
+| `Ptr` | `.^` | `Ptr<T>` | address-of; `&x` is the primary spelling |
+| `Size` | `.^^` | `Int` | fixed-size element count (`Int[8].^^Size` → 8) |
+| `Bytes` | `.^^` | `Int` | storage size of the type — compile-time constant |
+| `Alignment` | `.^^` | `Int` | alignment of the type — compile-time constant |
+| `Type` | `.^^` | type token | type identity, usable in cast position |
 
-**Bit manipulation projections (LLVM intrinsics):**
+**Static/runtime boundary.** `.^` is strictly runtime, `.^^` is strictly
+compile-time: a compile-time-only target after `.^` (and vice versa) is an
+error. Compile-time results fold — usable in `const` initializers and contract
+expressions. Runtime introspection beyond these targets uses method calls
+(`s.trim()`, `list.len()`) — never a reflection operator.
 
-| Target | Source type | Result | LLVM intrinsic |
-|--------|-------------|--------|----------------|
-| `Popcount` | Int | Number of set bits | `@llvm.ctpop.i64` |
-| `LeadingZeros` | Int | Leading zero count | `@llvm.ctlz.i64` |
-| `TrailingZeros` | Int | Trailing zero count | `@llvm.cttz.i64` |
-| `Absolute` | Int, Float | Absolute value | `@llvm.abs.i64`, `@llvm.fabs.f64` |
-| `BitReverse` | Int | Bit-reversed value | `@llvm.bitreverse.i64` |
-
-*(Regex matching moved to `<:` string projection — see §3.17)*
-
-**Reflection projection:**
-
-| Target | Source type | Result | Notes |
-|--------|-------------|--------|-------|
-| `Type` | Any | Type discriminant (Int) | Compile-time constant |
-| `Ptr!` | Any | Raw address (Int) | No safety envelope — use with care |
-
-**Example:**
+**Examples:**
 
 ```brief
-let v: Int = 0x0F0F0F0F0F0F0F0F;
-let ones   = v :> Popcount;       // 32 — single @llvm.ctpop call
-let lz     = v :> LeadingZeros;   // 4 — single @llvm.ctlz call
-let abs_v  = (-42) :> Absolute;   // 42 — single @llvm.abs call
-let rev    = v :> BitReverse;     // bit-reversed — single @llvm.bitreverse call
-let len    = list .#Size;        // list length — header load
-let addr   = &x .#Ptr;           // Ptr<Int> — verified pointer
-let raw    = x .#Ptr!;           // Int — raw unchecked address
+let n: Int   = s.^Len;         // runtime length
+let p: Ptr<T> = &x;            // & is primary; x.^Ptr is the reflection form
+let sz: Int  = x.^^Bytes;      // compile-time constant
+let al: Int  = x.^^Alignment;  // compile-time constant
+let size: Int = arr.^^Size;    // fixed-size count (Int[8].^^Size → 8)
 ```
+
+> **Note on the `^` glyph:** `^` alone remains bitwise XOR (`a ^ b`). The dot
+> disambiguates: `expr.^Meta` / `expr.^^Meta` are reflection, `a ^ b` is XOR.
+
+> **Bit intrinsics** (`ctpop`, `ctlz`, `cttz`, `abs`, `bitreverse`) are LLVM
+> declarations in the backend; their operator-form projections were removed
+> with the `:>` system. They are reachable as stdlib/`#` intrinsics.
 
 ### 3.16 Ptr\<T\> Type and Safe Pointer Operations
 
 The `Ptr<T>` type represents a verified pointer to a value of type `T`.
-Creation is restricted to the `:>` projection operator, ensuring the compiler
-tracks provenance.
+Creation is via **address-of** (`&x`), and dereference via `*p` / `p[i]`. The
+compiler tracks provenance (`Provenance::Deref`) so it can verify bounds.
 
 **Creating a pointer:**
 
 | Expression | Result type | Provenance |
 |------------|-------------|------------|
-| `&x .#Ptr` | `Ptr<Int>` | Bound = sizeof(x), non-null guaranteed |
-| `list .#Ptr` | `Ptr<T>` | Bound = list .#Bytes, non-null guaranteed |
-| `ptr .#Ptr` (on Ptr\<T\>) | `Int` | Escape hatch — raw address |
-| `x .#Ptr!` | `Int` | Raw unchecked address (no safety envelope) |
+| `&x` | `Ptr<Int>` | Bound = sizeof(x), non-null guaranteed |
+| `&list[0]` | `Ptr<T>` | Bound = list byte length, non-null guaranteed |
+| `x.^Ptr` | `Ptr<T>` | Reflection form — the address-of spelling `&x` is primary |
 
 **Dereferencing:**
 
-When a `Ptr<T>` variable is indexed with `ptr[i]`, the compiler emits a direct
+When a `Ptr<T>` is indexed with `ptr[i]`, the compiler emits a direct
 `getelementptr + load` (or `store`) instruction — identical to raw C pointer
 access — but only after verifying the access is within bounds.
 
 ```brief
-let p: Ptr<Int> = &x .#Ptr;
+let p: Ptr<Int> = &x;
 let val = p[0];                   // Read — compiler verifies 0 < sizeof(x)
-&p[0] = 42;                       // Write — compiler verifies bounds
+p[0] = 42;                        // Write — compiler verifies bounds
 ```
 
 **Safety verification:**
 
 The `PointerVerifier` pass checks every `ptr[i]` access at compile time:
 1. `i >= 0` — must be proven or specified as a precondition
-2. `(i + 1) * sizeof(T) <= ptr .#Bytes` — must be proven
+2. `(i + 1) * sizeof(T) <= ptr.^^Bytes` — must be proven
 3. Unprovable → `ProofError(P200)` "out of bounds access"
-
-For raw unchecked access, use `x .#Ptr!` (returns `Int`) — no compiler
-verification, no safety envelope, full programmer control.
 
 **Standard library:** `std/ptr.bv` provides `read_i64`, `write_i64`,
 `address`, `read_byte`, and `copy` with contract-proven safety. See §6.9.
@@ -1633,13 +1379,13 @@ These emit direct `@llvm.memcpy` / `@memcmp` / `@llvm.memset` calls with
 no intermediate wrappers. Available via `lib/std/spatial.bv`:
 `block_copy`, `block_compare`, `block_fill`, `block_hash`.
 
-#### 3.16.4 Function Pointers via `.#Ptr` (2026-07-03)
+#### 3.16.4 Function Pointers via `.^Ptr` (2026-07-03)
 
 A function reference can be converted to a function pointer:
 
 ```brief
 defn my_cmp(a: Int, b: Int) -> Bool { term a == b; };
-let cmp_fn = my_cmp .#Ptr;   // fn pointer type: Fn(Int, Int) -> Bool
+let cmp_fn = &my_cmp;   // fn pointer type: Fn(Int, Int) -> Bool
 let eq = cmp_fn(3, 5);        // indirect call through fn pointer
 ```
 
@@ -1651,95 +1397,39 @@ The LLVM backend marshals arguments per the internal calling convention
 
 #### 3.16.5 Extract-Operate-Repack (EOR) Optimization (2026-07-03)
 
-When `meld T <:> Int`, the pattern `(x as Int) op (y as Int) as T` is
+When `meld T -> Int`, the pattern `(x as Int) op (y as Int) as T` is
 detected and compiled as a single native operation without redundant casts:
 
 ```brief
-meld Meters <:> Int;
+meld Meters -> Int;
 defn scale(val: Meters, factor: Int) -> Meters {
     term (val as Int) * factor as Meters;  // single mul i64
 };
 ```
 
 The backend detects `Cast(BinaryOp(Cast(a, T), Cast(b, T)), U)` where
-`U <:> T` and emits the inner operation directly. Both integer and float
+`U -> T` and emits the inner operation directly. Both integer and float
 arithmetic are supported.
 
 ---
 
-### 3.17 Subtype Projection (`<:`)
+### 3.17 Subtyping and Meld
 
-The `<:` operator performs a **compile-time optimized projection** from a source
-value into a derived value. Two forms exist depending on the source type.
-
-#### Collection Projection
-
-For `List<T>`, `HashMap<K,V>`, or other collections, `<:` applies a sequence of
-relational operations in a single fused pass with zero intermediate allocations:
+The historical `<:` (derivation) and `:>` (projection) operators were removed
+with the hashword-protocol architecture (2026-07-20). Type relationships are
+now expressed with protocol hashwords (`type Int: #Int`) and reflection
+(§3.15). Cross-layout reuse is expressed with `meld`:
 
 ```brief
-let regional_stats : transactions {
-    FILTER(.is_active);
-    GROUP(.region);
-    COUNT;
+meld CBuffer -> RSBuffer {
+    layout { bytes; alignment; };
 };
 ```
 
-**Allowed operations:**
-
-| Op | Signature | Semantics | Output |
-|----|-----------|-----------|--------|
-| `FILTER(.expr)` | `T -> Bool` | Keep matching elements | `List<T>` |
-| `MAP(.expr)` | `T -> U` | Transform each element | `List<U>` |
-| `SORT(.expr)` | `T -> Ord` | Sort by key | `List<T>` |
-| `LIMIT(N)` | `Int` | Take first N | `List<T>` |
-| `SKIP(N)` | `Int` | Skip first N | `List<T>` |
-| `UNIQUE` | — | Remove adjacent dupes | `List<T>` |
-| `JOIN(other, .key)` | `(T,U) -> K` | Merge collections | `List<(T,U)>` |
-| `GROUP(.key)` | `T -> K` | Group by key | (must be followed by aggregate) |
-| `COUNT` | — | Count elements | `Int` |
-| `SUM(.field)` | `T -> num` | Sum | `Int` / `Float` |
-| `AVG(.field)` | `T -> num` | Average | `Float` |
-| `MIN(.field)` | `T -> Ord` | Minimum | `typeof(field)` |
-| `MAX(.field)` | `T -> Ord` | Maximum | `typeof(field)` |
-
-The last operation determines the return type. Aggregates (COUNT, SUM, AVG, MIN,
-MAX) are terminal — they collapse the collection to a scalar. Non-aggregates
-return a `List<T>`. GROUP must be followed by an aggregate.
-
-#### String Projection
-
-For `String` sources, `<:` compiles a regular expression into a DFA at compile
-time and captures groups in a single O(n) scan:
-
-```brief
-let (user, domain) : email["^([a-z]+)@(.+)$"];
-```
-
-Patterns can be a string literal or a `const` variable:
-
-```brief
-const pat = "^([a-z]+)@(.+)$";
-let (user, domain) : email[pat];
-```
-
-**Return type inference:**
-
-| Capture groups | Return type |
-|----------------|-------------|
-| 0 | `Bool` — match/no-match |
-| 1 | `String` — captured content |
-| N | `Tuple([String; N])` — all captures |
-
-**Supported syntax:** Literals, `.` (any char), `*` (zero-or-more),
-`+` (one-or-more), `?` (zero-or-one), `[...]` character classes,
-`^`/`$` anchors, `()` capture groups, `|` alternation,
-`\d`/`\w`/`\s`/`\D`/`\W` escape sequences.
-
-The DFA is built via Thompson construction → subset construction at parse time.
-Invalid patterns produce a compile-time error. The DFA transition table is
-embedded as a constant LLVM global array; the scan loop is a tight O(n)
-character-by-character state machine with no dynamic allocations.
+The collection-query pipeline (`FILTER`/`GROUP`/`COUNT` fusion) and the
+compile-time regex→DFA capture (§3.17 historical) are **planned** features —
+not yet implemented. When they land, they will use method-call syntax
+(`list.filter(...)`, `str.match(...)`), not operator projections.
 
 ---
 
@@ -2269,7 +1959,7 @@ let list: List<Int> = [1, 2, 3];
 let empty: List<String> = [];
 
 // Operations
-list .#Size;           // Length
+list .^Len;           // Length
 list[i];              // Index access
 list[i..j];           // Slice
 list + [4];           // Concatenation
@@ -2283,7 +1973,7 @@ let matrix: Float[3][3];  // 3x3 matrix
 
 // Operations
 vec[i];             // Index access (bounds-checked)
-vec .#Size;          // Size (compile-time constant)
+vec .^Len;          // Size (compile-time constant)
 ```
 
 **Options (nullable types):**
@@ -2310,7 +2000,7 @@ result.is_err();    // true if Err
 result.unwrap();    // Extract Ok value
 result.unwrap_err(); // Extract Err value
 result.map(|x| x * 2);  // Transform Ok
-result.map_err(|e| e .#Size); // Transform Err
+result.map_err(|e| e .^Len); // Transform Err
 result.and_then(|x| Ok(x * 2)); // Chain operations
 ```
 
@@ -2331,7 +2021,7 @@ let value: Int Union String Union Bool = 42;
 
 // Pattern matching
 unification value(Int(n)) = n;
-unification value(String(s)) = s .#Size;
+unification value(String(s)) = s .^Len;
 unification value(Bool(b)) = if b { 1 } else { 0 };
 ```
 
@@ -2468,7 +2158,7 @@ let p = make_pair(1, 2);  // Inferred: (Int, Int)
 
 > **Added 2026-06-09 (Phase 1.5)**
 
-Brief types can be defined via `Type Name : Base { ... }` declarations. The `<:`
+Brief types are defined via `Type Name : [Parent] [Protocol] { ... }` declarations. The old `<:`
 operator (read as "derives from") connects a new type to its base type. Properties
 and constraints within the `{ }` body define how the new type differs from the base.
 
@@ -2484,7 +2174,7 @@ and constraints within the `{ }` body define how the new type differs from the b
 | `ElementType` | `Type` | _(none)_ | Unlocks `[]` and slicing — compiler synthesizes GEP |
 | `FixedSize` | `Bool` | _(none)_ | `false` unlocks `<-`/`->` — heap/circular buffer |
 | `InsertAt` | `Expr` | _(none)_ | Index expression for insertion position |
-| `ExtractFrom` | `Expr` | _(none)_ | Index or `<:{}` query for extraction position |
+| `ExtractFrom` | `Expr` | _(none)_ | Index for extraction position |
 | `AllowIndex` | `Bool` | `true` | Override to `false` to block `[]` |
 | `AllowSlice` | `Bool` | `true` | Override to `false` to block slicing |
 | `AllowArrow` | `Bool` | `true` | Override to `false` to block `<-`/`->` |
@@ -2495,8 +2185,8 @@ and constraints within the `{ }` body define how the new type differs from the b
 | Expression | Strategy | Example |
 |---|---|---|
 | `0` | Constant front, head-pointer advance | Queue pop |
-| `.#Size` | Append position, pointer increments | List/Queue push |
-| `.#Size - N` | Offset from end, pointer decrements | Stack pop |
+| `.^Len` | Append position, pointer increments | List/Queue push |
+| `.^Len - N` | Offset from end, pointer decrements | Stack pop |
 | `: { MIN(.key) }` | Maintain heap by key | Priority queue |
 | `: { MAX(.key) }` | Maintain heap by key | Priority queue |
 
@@ -2515,8 +2205,8 @@ Type MmioReg : U32 { Volatile <~ true; };
 Type List<T> : Bits {
     ElementType <~ T;
     FixedSize <~ false;
-    InsertAt <~ .#Size;
-    ExtractFrom <~ .#Size - 1;
+    InsertAt <~ .^Len;
+    ExtractFrom <~ .^Len - 1;
 };
 
 Type Stack<T> : List<T> { AllowIndex = false; };
@@ -2547,7 +2237,7 @@ PASS 1: Type-Universe Pass
 PASS 2: Executable Pass
   - Parse defn/txn/node
   - Resolve let x: Type against frozen universe
-  - Validate :> projections against metadata
+  - Validate reflection targets against metadata
   - Synthesize bracket/arrow from AllowIndex/AllowArrow
   - Encode literals via Codec
   - Emit backend code with frozen metadata
@@ -2733,7 +2423,7 @@ Declares that `guard_expr` is expected to be true at runtime. The compiler
 generates a runtime guard check and splits execution into fast/slow paths:
 
 ```brief
-#assume_shape(packet :> PaymentTxn, escape)
+#assume_shape(packet, escape)
 node [*][*] {
     &processed = processed + 1;
     term;
@@ -2856,7 +2546,7 @@ Resources are declared and managed:
 rsrc file: File("data.txt", "read");
 
 // Use in transaction
-txn read_data() [file.exists()][data .#Size > 0] {
+txn read_data() [file.exists()][data .^Len > 0] {
     let result = file.read();
     [result.is_ok()] {
         data = result.value;
@@ -3028,7 +2718,7 @@ import "std/collections";
 
 // Lists
 let list = [1, 2, 3];
-let len = list .#Size;                  // 3
+let len = list .^Len;                  // 3
 let appended = list + [4];             // [1, 2, 3, 4]
 let contains = list.contains(2);       // true
 let idx = list.find(2);                // 1
@@ -3121,7 +2811,7 @@ time.sleep(time.duration_millis(100));
 
 ### 6.10 String Pattern Match Module
 
-Compile-time regex compilation via `<:` string projection (§3.17). The DFA is
+Compile-time regex compilation (planned; see §3.17). The DFA is
 compiled during parsing using Thompson construction → subset construction.
 The transition table is embedded as a constant; the scan loop is O(n) linear.
 
@@ -3440,10 +3130,10 @@ reset = "RESETn"
 | Generics | ⚠️ Partial | Syntax works, trait bounds pending |
 | Traits | ❌ Planned | For generic constraints |
 | `Ptr<T>` types | ✅ Complete | Verified pointer with compile-time bounds tracking \[2026-06-05\] |
-| `:>` projections | ✅ Complete | 23 targets: Size, Bytes, Ptr, Alignment, Range, Popcount, LeadingZeros, TrailingZeros, Absolute, BitReverse, Type, Ptr!, Keys, Values, Contains, Pop, Index, Get, Top, Front, Elements, AsStack, AsQueue \[2026-06-05\] |
-| LLVM intrinsic projections | ✅ Complete | ctpop, ctlz, cttz, abs, bitreverse via `:>` operator \[2026-06-05\] |
+| Reflection `.^`/`.^^` | ✅ Implemented | Len, Ptr (runtime); Size, Bytes, Alignment, Type (compile-time) \[2026-07-31\] |
+| LLVM bit intrinsics | ⚠️ Declared, no operator form | ctpop, ctlz, cttz, abs, bitreverse \[2026-07-31: operator form removed with `:>`\] |
 | Pointer dereference (`ptr[i]`) | ✅ Complete | Direct GEP for Ptr\<T\>; checked by PointerVerifier \[2026-06-05\] |
-| `<:` subtype projection | ✅ Complete | Collection ops (FILTER, MAP, SORT, GROUP, aggregate) + string regex MATCH via DFA \[2026-06-08\] |
+| Collection-query / regex-DFA | ❌ Planned | FILTER/GROUP/COUNT fusion + regex captures (not yet implemented) \[2026-07-31\] |
 | RooflineAnalyzer | ✅ Complete | Cache-aware LUT sizing, roofline model via bottlenecks.dbvs \[2026-06-05\] |
 | Bottleneck config | ✅ Complete | bottlenecks.dbvs schema for PCIe, cache, bandwidth, FPGA \[2026-06-05\] |
 | **FFI** | | |

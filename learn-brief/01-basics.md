@@ -1,7 +1,7 @@
 # Brief Basics
 
 > **Operator quick reference:** Brief's operators fall into three groups
-> — **Property Access** (`.#` — `list .#Size`, `x .#Bytes`), **Partition
+> — **Reflection** (`.^` — `s.^Len` runtime; `.^^` — `x.^^Bytes` compile-time), **Partition
 > Operators** (`[]`, `@/`), and the **Transfer Operator** (`<-`). The
 > **Anchor** (`@`) prefixes prior state in contracts. See `00a-base-design.md`
 > for the full taxonomy.

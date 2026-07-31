@@ -11,12 +11,11 @@ Brief's symbols are not arbitrary ASCII choices. Each symbol's **visual shape** 
 | Symbol | Visual Shape | Cognitive Metaphor | Systems Meaning | Group |
 |--------|-------------|-------------------|----------------|-------|
 | **`;`** | A dot with a tail falling away | A hard stop, a reset | Universal statement termination. The parser syncs here. | — |
-| **`.`** | A single pinpoint | Puncturing, reaching into | Struct field access / UFCS — you reach into a thing. | — |
+| **`.`** | A single pinpoint | Puncturing, reaching into | Struct field access / method call — you reach into a thing. | — |
 | **`->`** | An arrow pointing right | Forward motion, transformation | Dataflow / State transition — something becomes something else. | — |
 | **`<-`** | An arrow pointing left | Backward motion, extraction | Mutation / Discard — something comes out of something. | **Transfer** |
 | **`:`** | Two stacked dots | Identity, equivalence | Static type / definition — "This IS that." | — |
-| **`:>`** | Colon combined with right-arrow | Identity that projects outward | Compile-time metadata extraction — the compiler's knowledge ABOUT this. | **Lens (Projection)** |
-| **`<:`** | Left-arrow combined with colon | Derived projection inward | Compile-time optimized queries and subtype projections — the compiler's knowledge FROM this. | **Lens (Derivation)** |
+| **`.^` / `.^^`** | Pinpoint + caret(s) | Reflecting on a value/type | **Reflection** — read compiler-known metadata. `.^` = runtime (length, pointer), `.^^` = compile-time (size, bytes, alignment). | **Reflection** |
 | **`[]`** | Brackets that enclose | Containment, boundary | Constraints, bounds, guards — everything inside `[]` is bounded. | **Partition** |
 | **`{}`** | Curly braces that hug | Grouping, bundling | Code block / organizational unit. | — |
 | **`()`** | Parentheses that cup | Holding, containing | Parameter / argument enclosure. | — |
@@ -130,7 +129,7 @@ list.len()           // UFCS: desugars to len(list)
 result.value         // Result unwrapping
 ```
 
-**UFCS (Uniform Function Call Syntax):** `subject.method(args)` is desugared at parse time to `method(subject, args)`. There is zero magic — the compiler has no hardcoded knowledge of `.len()` or any method name. `list.len()` becomes `len(list)`, which calls the standard library function that uses `list .#Size`.
+**UFCS (Uniform Function Call Syntax):** `subject.method(args)` is desugared at parse time to `method(subject, args)`. There is zero magic — the compiler has no hardcoded knowledge of `.len()` or any method name. `list.len()` becomes `len(list)`, which calls the standard library function that uses `list .^Len`.
 
 **Priority hierarchy:**
 1. **Internal struct field/defn** — if `subject` has a field or internal `defn` defined in its struct body, it compiles as a direct access
@@ -140,29 +139,28 @@ result.value         // Result unwrapping
 
 ---
 
-### `:>` — The Projection Lens (Lens Operator)
+### Reflection (`.^` runtime, `.^^` compile-time)
 
-`:>` reads compile-time-known metadata from a value. Think of it as "ask the
-compiler for a property of this thing":
+Reflection reads compiler-known metadata about a value or its type. Think of
+it as "ask the compiler for a property of this thing":
 
 ```brief
-list .#Size;       // How many elements?
-str .#Bytes;       // How many bytes does this occupy?
-&x .#Ptr;          // Get a verified pointer to x
-val :> Popcount;    // How many set bits (via @llvm.ctpop)?
-val :> Absolute;    // Absolute value (via @llvm.fabs)
-val :> Type;        // What type is this at compile time?
-x .#Ptr!;          // Raw address — dangerous, no safety envelope
-map :> Keys;        // List of keys from a HashMap
-set :> Contains(v); // Check membership in a HashSet
-pair :> Index(0);   // Access first element of a tuple
-stack :> Top;       // Peek at top of a Stack
+list.^Len;       // runtime length (elements)
+x.^^Bytes;       // compile-time storage size
+&x;              // verified pointer (the & operator; x.^Ptr is the reflection form)
+x.^^Size;        // compile-time element count (Int[8].^^Size → 8)
+x.^^Alignment;   // compile-time alignment
+x.^^Type;        // compile-time type identity
 ```
 
-`:>` is the "cheat code" — it lets the compiler handle operations it can
-prove or optimize, rather than requiring the programmer to write them in
-user-space. Every `:>` target maps to either a compile-time constant or a
-zero-cost LLVM intrinsic.
+`.^` is **runtime** reflection (value-derived: length, pointer); `.^^` is
+**compile-time** reflection (type-derived, foldable: size, bytes, alignment).
+Targets are PascalCase compiler-known identifiers — using one with the wrong
+operator (or an unknown name) is a compile error. The historical `:>`/`<:`
+lens operators and bit-intrinsic projections (Popcount, Absolute, …) were
+removed with the hashword-protocol architecture; the LLVM bit intrinsics are
+declared but have no operator form. Every `.^`/`.^^` target maps to either a
+compile-time constant or a zero-cost intrinsic.
 
 See `learn-brief/13-projections.md` for the complete reference.
 
@@ -194,7 +192,7 @@ txn withdraw(amount: Int)
 let nibble = word @/0..3;
 
 // String anchor — compile-time memory slot
-@"hello world" .#Size   // 11
+@"hello world" .^Len   // 11
 ```
 
 ---
@@ -457,7 +455,7 @@ And `escape` means "Rollback everything - pretend this never happened." Not "bre
 `node` can self-verify when to end:
 
 ```brief
-node fill_buffer() [buffer .#Size < 100][buffer .#Size == 100] {
+node fill_buffer() [buffer .^Len < 100][buffer .^Len == 100] {
     &buffer = buffer + [new_item];
     term;
 };
@@ -550,7 +548,7 @@ When you see **arrow** `<-` → think **mutation / discard**
 
 When you see **colon** `:` → think **type identity**
 
-When you see **colon-arrow** `:>` → think **compiler metadata projection**
+When you see **dot-caret** `.^` / `.^^` → think **reflection** — compiler-known metadata about a value/type
 
 When you see **semicolon** `;` → think **statement boundary**
 

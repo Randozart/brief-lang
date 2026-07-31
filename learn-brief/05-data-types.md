@@ -34,7 +34,7 @@ defn count_words(text: String) -> HashMap<String, Int> {
     let words = text.split(" ");
     
     let i: Int = 0;
-    [i < words .#Size] {
+    [i < words .^Len] {
         let word = words[i];
         let current = counts.get(word);
         [current.is_some()] {
@@ -72,7 +72,7 @@ set = set.insert("cherry");
 set = set.remove("banana");
 
 // Metadata
-let len = set .#Size;
+let len = set .^Len;
 [set.is_empty()] {
     println("Set is empty");
 };
@@ -89,7 +89,7 @@ defn unique_items(list: List<String>) -> List<String> {
     let result: List<String> = [];
     
     let i: Int = 0;
-    [i < list .#Size] {
+    [i < list .^Len] {
         let item = list[i];
         [!seen.contains(item)] {
             seen = seen.insert(item);
@@ -126,7 +126,7 @@ let result = stack.pop();
 let top = stack.peek();
 
 // Metadata
-let len = stack .#Size;
+let len = stack .^Len;
 [stack.is_empty()] {
     println("Stack is empty");
 };
@@ -142,7 +142,7 @@ defn evaluate_rpn(expr: List<String>) -> Int {
     let stack: Stack<Int> = new_stack();
     
     let i: Int = 0;
-    [i < expr .#Size] {
+    [i < expr .^Len] {
         let token = expr[i];
         [token == "+"] {
             let (b, s) = stack.pop().unwrap();
@@ -189,7 +189,7 @@ let result = queue.dequeue();
 let front = queue.front();
 
 // Metadata
-let len = queue .#Size;
+let len = queue .^Len;
 [queue.is_empty()] {
     println("Queue is empty");
 };
@@ -216,7 +216,7 @@ defn bfs(start: Node) -> List<Node> {
         
         let neighbors = node.get_neighbors();
         let i: Int = 0;
-        [i < neighbors .#Size] {
+        [i < neighbors .^Len] {
             let neighbor = neighbors[i];
             [!visited.contains(neighbor)] {
                 visited = visited.insert(neighbor);
@@ -250,7 +250,7 @@ sb = sb.append_float(3.14);
 let result = sb.to_string();  // "Hello42true3.14"
 
 // Metadata
-let len = sb .#Size;
+let len = sb .^Len;
 [sb.is_empty()] {
     println("Builder is empty");
 };
@@ -266,10 +266,10 @@ defn build_csv(rows: List<List<String>>) -> String {
     let sb = new_builder();
     
     let i: Int = 0;
-    [i < rows .#Size] {
+    [i < rows .^Len] {
         let row = rows[i];
         let j: Int = 0;
-        [j < row .#Size] {
+        [j < row .^Len] {
             [j > 0] {
                 sb = sb.append_char(',');
             };
@@ -320,7 +320,7 @@ struct Cache {
 ```
 
 `Int[1024]` → `[1024 x i64]`, `Frame[256]` → `[256 x %Frame]`.
-Bounds proven by contract: `[i >= 0 && i < stack .#Size]`.
+Bounds proven by contract: `[i >= 0 && i < stack .^Len]`.
 
 #### Array Slices: `arr[start:end:stride]`
 
@@ -441,7 +441,7 @@ txn lookup(name: String) [name != ""][contacts == @contacts] {
 txn list_all() [true][contacts == @contacts] {
     let names = contacts.keys();
     let i: Int = 0;
-    when i < names .#Size {
+    when i < names .^Len {
         println(names[i]);
         &i = i + 1;
     };
@@ -601,32 +601,31 @@ frame[width::4, height::4].r = frame[width::4, height::4].r / 2;
 ## 10. Pointer Types (`Ptr<T>`)
 
 `Ptr<T>` is a verified pointer whose safety is proven at compile time.
-Creation requires the `.#` projection operator — there is no way to forge a
-`Ptr<T>` without the compiler knowing its provenance.
+Creation is via the **address-of** operator `&` — the compiler tracks
+provenance, so there is no way to forge a `Ptr<T>` without the compiler
+knowing its origin.
 
 ### Creating Pointers
 
 ```brief
 // Verified pointer (compiler tracks bounds, guarantees non-null)
-let p: Ptr<Int> = &x .#Ptr;
+let p: Ptr<Int> = &x;
 
-// Raw unchecked address (no safety envelope)
-let raw: Int = x .#Ptr!;
+// From a collection's first element
+let list_ptr: Ptr<Int> = &my_list[0];
 
-// From collections
-let list_ptr: Ptr<Int> = my_list .#Ptr;
-
-// Get raw address from a verified pointer
-let addr: Int = p .#Ptr;
+// Reflection form (same meaning as &x)
+let p2: Ptr<Int> = x.^Ptr;
 ```
 
 ### Dereferencing
 
-Use bracket indexing — `ptr[i]` — just like array access:
+Use bracket indexing — `ptr[i]` — or the `*` dereference operator:
 
 ```brief
 let val: Int = p[0];          // Read element 0 — bounds-checked at compile time
-&p[0] = 42;                   // Write element 0 — bounds-checked
+p[0] = 42;                    // Write element 0 — bounds-checked
+let first: Int = *p;          // Dereference — first element
 ```
 
 The compiler emits the same raw `load`/`store` instructions as C, but only
@@ -636,9 +635,9 @@ after proving the access is within bounds.
 
 | Property | Guaranteed by |
 |----------|---------------|
-| Bounds | `i * sizeof(T) < ptr .#Bytes` is proven by the SMT solver |
-| Non-null | `Ptr<T>` from `&x` or `list .#Ptr` is always valid |
-| Alignment | Address is always aligned to `T .#Alignment` |
+| Bounds | `i * sizeof(T) < ptr.^^Bytes` is proven by the SMT solver |
+| Non-null | `Ptr<T>` from `&x` or `&list[0]` is always valid |
+| Alignment | Address is always aligned to `T.^^Alignment` |
 | No use-after-free | Brief has no `free` — global state lives forever |
 
 ### Standard Library
@@ -648,7 +647,7 @@ after proving the access is within bounds.
 ```brief
 import { read_i64, write_i64, copy, address } from "std/ptr.bv";
 
-// Safe read — precondition: i >= 0 && (i+1)*8 <= p .#Bytes
+// Safe read — precondition: i >= 0 && (i+1)*8 <= p .^^Bytes
 let v = read_i64(p, 0);
 
 // Safe write — same precondition

@@ -311,9 +311,41 @@ Commit the uncommitted contract-position parser fix + 6 tests (`definitions.rs`
 
 ## 9. Results (filled after each phase)
 
-- Phase 0: committed; baseline worktree updated.
-- Phase 1: …
-- Phase 2: …
-- Phase 3: …
-- Phase 4: …
-- Phase 5: …
+- **Phase 0** — committed (`dea31ae3`); baseline worktree updated to it.
+- **Phase 1** — committed (`4706845a`). Postfix layer rebuilt: `.` → `Field` /
+  `MethodCall` (receiver preserved), `.^`/`.^^` → `Reflect` (DotCaret/
+  DotCaretCaret tokens, `#` DotHash removed), `Expr::PropertyGet` deleted
+  (it was dropping the receiver — field access, tuple index, and method calls
+  were all broken). `parse_obj_like` accepts `<T,N>` params + member txn/defn
+  (self-parameterized). Typechecker resolves Field slots/tuple indices,
+  the D1 reflection table, and MethodCall member dispatch with type-arg
+  substitution. Backend emits Field GEP-loads, compile-time reflection
+  constants, `Ptr`→address-of; `Len`-on-dynamic and MethodCall codegen are
+  documented Phase-1b boundaries (clear panics, never garbage). `.#`→`.^`/
+  `.^^` migration across lib/std (~400 sites). Tests 1292 (+7).
+  **Boundary:** generic obj instantiation and MethodCall/Len emission deferred;
+  collection stdlib (collections.bv) needs generic structs + instantiation.
+- **Phase 2** — committed (`2084086c`). The gate is real: `let x: T = expr`,
+  top-level `let`, `term` vs declared return, and call args are all validated
+  (no implicit coercion; literal Parse-ops, numeric-protocol members, and
+  `op Init` construction remain sanctioned). Known plugin-intercepts typed for
+  the plugin-free check path. `Expr::Exists` unreachable → proper error.
+  Generic arrays `T[N]` parse. Latent benchmark errors fixed (PrintLn void
+  annotation, GetEnvInt#→!, Malloc cast); queue_drain removed from the harness
+  (depends on the D4 collections stdlib). Tests 1297 (+5).
+- **Phase 3** — committed (`86978508`). Watchdogs parse back in: `?[expr]`
+  optional / `![expr]` required → `Contract.watchdog`, with ms/cyc/seconds/
+  minute units. LLVM deadline check is a documented follow-up (needs a time
+  source in the loop engines). Tests 1300 (+3).
+- **Phase 4** — committed (`d8d81b88`). Proof-time tautology detection:
+  `is_vacuously_true` catches `true`, `0 == 0`, `x == x`; `detect_tautology`
+  is the txn/node gate (explicit contracts only — `Contract.explicit` added).
+  frgn return types registered so `term frgn_foo(x)` typechecks. Tests 1305
+  (+5).
+- **Phase 5** — committed. SPEC de-duplicated (3728→3483 lines; the doubled
+  §2.3–2.6 and §3.x are single), `:>` projection and `<:` lens sections
+  replaced with the Reflection `.^`/`.^^` spec + real meld, op grammar is
+  RHS-only, §1.4 architecture refreshed, Ptr section leads with `&`/`*`,
+  `async node` parses. Tutorials: `13-projections.md` is now the Reflection
+  chapter, `15-custom-types.md` op syntax is RHS-only, `05-data-types.md` Ptr
+  leads with `&`/`*`, all `. #`/`:>` swept to `.^`/`.^^`.

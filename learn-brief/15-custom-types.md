@@ -4,25 +4,28 @@ Brief lets you define types that behave like built-in `Int`, `Float`, and
 `String`. The same hashword protocol system that drives primitives also
 drives your custom types — no special compiler support needed.
 
-## 1. `type MyType { ... }`
+## 1. `type MyType : #Protocol { ... }`
 
-Use the `type` keyword to define a new type. Layout comes from fields;
-operations come from `op` declarations:
+Use the `type` keyword with a protocol hashword to define a new type. Layout
+comes from fields; the protocol provides its own self-arithmetic; overloads
+are declared **RHS-only** (the LHS is the declaring type):
 
 ```brief
-type MyInt {
-    data: Bits<64>;          // layout: 8 bytes, llvm_type: i64
-    op Add(#Int, #Int);      // backend knows integer addition
-    op Sub(#Int, #Int);      // backend knows integer subtraction
-    op Parse(#Int);           // identity literal construction — 42 → MyInt
-    op Parse(Decimal);        // numeric literal via conversion function
+type MyInt : #Int {
+    data: Bits<64>;              // layout: 8 bytes
+    op Add: func(#L, #R);        // binding form — the generic self-add
+    op Add(Float): func(#L, #R); // RHS-only overload: MyInt + Float
+    op Parse(Decimal): parse_num(#L);  // literal construction: 42 → MyInt
 };
 ```
 
 - **Layout**: determined by fields (`data: Bits<N>`, `field: Type`)
-- **Hashword ops**: `Add(#Int)` — backend dispatches to its intrinsic handlers
-- **Parse ops**: `Parse(#Int)` — identity literal construction (zero-cost)
-- **Parse ops**: `Parse(Decimal) = fn(#L)` — custom literal construction
+- **Self-arithmetic is implicit**: a `#Int`-protocol member already knows how
+  to add to itself — you only declare overloads whose RHS differs from the
+  declaring type (`op Add(Float)`, declared on the LHS type)
+- **The two-variant form is removed**: `op Add(#Int, #Int)` never lists the
+  LHS — the declaring type/protocol IS the left operand
+- **Parse ops**: `op Parse(Decimal): fn(#L)` — custom literal construction
 
 No `maxbits <~`, `alignment <~`, `llvm <~`, `storage <~`, `default_width`,
 `commuting`, or LLVM opcode strings needed.
@@ -33,23 +36,22 @@ The hashword in an op signature tells the backend to dispatch to its
 intrinsic handler for that category:
 
 ```brief
-type Bfloat16 {
+type Bfloat16 : #Float {
     data: Bits<16>;
-    op Add(#Float, #Float) = bfloat_add(#L, #R);   // override with custom fn
-    op Mul(#Float, #Float) = bfloat_mul(#L, #R);
-    op Parse(#Float);                                // identity — literal IS float
+    op Add(#Float): bfloat_add(#L, #R);   // protocol-family RHS overload
+    op Mul(#Float): bfloat_mul(#L, #R);
+    op Parse(#Float): identity(#L);       // identity — literal IS float
 };
 ```
 
-| Op form | Meaning | Conversion function? |
-|---|---|---|
-| `op Add(#Int, #Int)` | Backend intrinsic integer add | No |
-| `op Add(#Float) = fn(#L,#R)` | Override float add with custom fn | Yes — auto-alwaysinline |
-| `op Add(Posit32) = fn(#L,#R)` | Custom op for this type only | Yes — auto-alwaysinline |
-| `op Parse(#Category)` | Identity literal construction | No |
-| `op Parse(Form) = fn(#L)` | Custom literal construction | Yes — auto-alwaysinline |
+| Op form | Meaning |
+|---|---|
+| `op Add: func(#L, #R);` | Binding form — operands are `#L`/`#R` placeholders |
+| `op Add(Float): func(#L, #R);` | RHS-only overload for the concrete type `Float` |
+| `op Add(#Float): func(#L, #R);` | RHS-only overload for the whole `#Float` protocol family |
+| `op Parse(Decimal): fn(#L);` | Custom literal construction |
 
-Functions bound to ops via `= fn(...)` are emitted with LLVM's `alwaysinline`.
+Functions bound to ops via `: fn(...)` are emitted with LLVM's `alwaysinline`.
 
 ### `prop` — Metaproperty Declarations
 
@@ -58,12 +60,12 @@ Alongside `op`, types declare metaproperties via `prop`:
 ```brief
 type MyString: Bits #String {
     op CastTo(#Bits) = my_encode(#L);
-    prop Size = my_chars(#L);     // .#Size → character count
-    prop Bytes = my_byte_len(#L); // .#Bytes → encoded byte length
+    prop Size = my_chars(#L);     // .^Len → character count
+    prop Bytes = my_byte_len(#L); // .^^Bytes → encoded byte length
 };
 ```
 
-A `prop` declares a metaproperty accessible via `expr .#Name`. The compiler
+A `prop` declares a metaproperty accessible via reflection (`expr.^Name` / `expr.^^Name`). The compiler
 resolves it through the protocol chain — `#String` provides `Size` and `Bytes`,
 but a custom type can override them. Same resolution mechanism as `op`.
 
@@ -71,8 +73,8 @@ but a custom type can override them. Same resolution mechanism as `op`.
 
 | Protocol | Metaproperties |
 |----------|---------------|
-| `#Bits` | `.#Bits`, `.#Alignment` |
-| `#String` | `.#Size`, `.#Bytes` |
+| `#Bits` | `.^^Bits`, `.^^Alignment` |
+| `#String` | `.^Len`, `.^^Bytes` |
 | Any type | User-defined via `prop` |
 
 ## 3. Protocol Variants
@@ -182,7 +184,7 @@ type HashMap<K: #String, V> {
 
 `K: #String` checks that `K` implements the `#String` protocol ops
 (`CastTo(#String)`, `CastFrom(#String)`, `Extract(#Char)`, `InsertAt(#Char)`,
-`Concat(#String)`, `.#Size`). At instantiation, the concrete type is
+`Concat(#String)`, `.^Len`). At instantiation, the concrete type is
 verified against the protocol.
 
 ## 8. Protocol Participation and GLUE Bridge

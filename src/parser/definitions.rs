@@ -25,6 +25,11 @@ impl<'a> Parser<'a> {
                 .parse_transaction(false, false)
                 .map(TopLevel::Transaction),
             Some(Token::Node) => self.parse_node().map(TopLevel::Transaction),
+            // 2026-07-31: `async node` (prefix) — same as `node async`.
+            Some(Token::Async) if matches!(self.tokens.get(self.pos + 1).map(|(t, _)| t), Some(Token::Node)) => {
+                self.pos += 1; // consume async
+                self.parse_node().map(TopLevel::Transaction)
+            }
             Some(Token::Cell) => self.parse_cell().map(TopLevel::Cell),
             Some(Token::Import) => self.parse_import().map(TopLevel::Import),
             Some(Token::Meld) => self.parse_meld().map(TopLevel::Meld),

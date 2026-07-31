@@ -39,7 +39,7 @@ If the precondition is false, the transaction simply doesn't run.
 ```brief
 [!locked]                      // Must be unlocked
 [status == "active"]           // Must be active
-[items .#Size > 0]             // Must have items
+[items .^Len > 0]             // Must have items
 ```
 
 **Resource checks:**
@@ -71,7 +71,7 @@ txn withdraw(amount: Int)
 **State changes:**
 ```brief
 [counter == @counter + 1]      // Counter incremented
-[items .#Size == @items .#Size + 1]  // One item added
+[items .^Len == @items .^Len + 1]  // One item added
 [active == false]              // Now inactive
 ```
 
