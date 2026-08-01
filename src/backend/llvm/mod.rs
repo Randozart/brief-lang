@@ -1354,6 +1354,11 @@ impl LlvmBackend {
 
         // OK path
         writeln!(out, "aaok_{}:", ok_l_n).ok();
+        // 2026-08-01 (D): the arena realloc-grow inserts control flow (check /
+        // grow / ok) inside whatever block the Alloc# sits in. The countdown's
+        // latch phis use cur_block as the body predecessor — it must point at
+        // the REAL final block (aaok_), not the block the Alloc# started in.
+        self.fun.cur_block = Some(format!("aaok_{}", ok_l_n));
         let phi = self.fun.next_reg_with_prefix("aaphi");
         writeln!(out, "{}{} = phi ptr [ {}, %{} ], [ {}, %{} ]",
             indent, phi, cur, check_l, new_base, grow_l).ok();

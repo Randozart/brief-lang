@@ -1,0 +1,21 @@
+// arena_churn — bump-arena exhaustion stress.
+// Each iteration Alloc#s 64 bytes from the per-txn arena. The arena bumps
+// until its 64KB buffer is exhausted, then must realloc-grow (never realloc
+// non-heap memory). The Store#/Load# keep the allocation observable.
+//
+// C reference: arena_churn_c.c
+
+let N: Int = get_env_int!("BOUND");
+let ops: Int = 0;
+let sum: Int = 0;
+
+node churn [ops < N][ops == N] {
+    let a: Int = Alloc#(64) as Int;
+    Store#(a, ops);
+    sum = sum + Load#(a);
+    ops = ops + 1;
+    when ops % 5000000 == 0 {
+        println!(sum);
+    };
+    term;
+};

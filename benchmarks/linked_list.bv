@@ -1,0 +1,26 @@
+// linked_list — Malloc# heap nodes + pointer chasing.
+// Each iteration allocates a 2-slot heap node (value, next) and links it onto
+// the front of the list (the classic pointer-chasing pattern). The running
+// sum of node values keeps the allocations observable. The Free#-after-
+// last-consumer is global-lifetime inference's target (like global_lifetime);
+// here the Malloc#/Store#/Load# machinery is exercised with C parity.
+//
+// C reference: linked_list_c.c
+
+let N: Int = get_env_int!("BOUND");
+let head: Ptr<Int>;
+let count: Int = 0;
+let sum: Int = 0;
+
+node build [count < N][count == N] {
+    let node: Ptr<Int> = Malloc#(16) as Ptr<Int>;
+    node[0] = count;
+    node[1] = head as Int;
+    head = node;
+    sum = sum + node[0];
+    count = count + 1;
+    when count % 5000000 == 0 {
+        println!(sum);
+    };
+    term;
+};
