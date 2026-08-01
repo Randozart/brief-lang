@@ -169,7 +169,15 @@ impl LlvmBackend {
                                 writeln!(out, "{}{} = ptrtoint ptr {} to i64", indent, addr, gep).ok();
                                 return TypedRegister { name: addr, ty: slot_ty };
                             }
-                            let llvm_ty = self.llvm_type(&slot_ty);
+                            // 2026-08-01 (D3): a Ptr-typed self-slot stores the
+                            // i64 HANDLE (ptrtoint at store) — load i64, not
+                            // `ptr`, so inttoptr consumers (`buckets[h]`)
+                            // work.
+                            let llvm_ty = if matches!(slot_ty, Type::Ptr(_)) {
+                                "i64".to_string()
+                            } else {
+                                self.llvm_type(&slot_ty)
+                            };
                             let val = self.fun.gen_reg();
                             writeln!(out, "{}{} = load {}, ptr {}", indent, val, llvm_ty, gep).ok();
                             return TypedRegister { name: val, ty: slot_ty };
@@ -694,9 +702,17 @@ impl LlvmBackend {
                     )
                     .ok();
                 }
+                // 2026-08-01 (D3): a Ptr-index read returns the POINTEE type
+                // (`buckets[h]` on a Ptr<List<...>> → List<...>) so a method
+                // call on it resolves the obj; was Int (the fallback), which
+                // broke '.push()' dispatch.
+                let elem_ty = match &obj_reg.ty {
+                    Type::Ptr(inner) => (**inner).clone(),
+                    _ => Type::int(),
+                };
                 TypedRegister {
                     name: v.to_string(),
-                    ty: Type::int(),
+                    ty: elem_ty,
                 }
             }
 

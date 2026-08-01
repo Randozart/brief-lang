@@ -481,7 +481,17 @@ pub fn infer_expression(
         // 2026-07-31: Struct literal — `TypeName { field: e, ... }` resolves
         // to the struct type and validates the fields against its slots.
         Expr::StructLiteral { type_name, fields } => {
-            let ty = Type::Custom(type_name.clone());
+            // 2026-08-01 (D3): a struct literal for a GENERIC type infers as
+            // the Applied form with the type params as placeholders
+            // (`HashMapEntry { key, val }` in a HashMap<K, V> member → 
+            // `HashMapEntry<K, V>`), so it matches a member's param type.
+            let ty = match ctx.type_params.get(type_name) {
+                Some(params) if !params.is_empty() => Type::Applied(
+                    type_name.clone(),
+                    params.iter().map(|p| Type::Custom(p.clone())).collect(),
+                ),
+                _ => Type::Custom(type_name.clone()),
+            };
             let slots = ctx.type_slots.get(type_name).cloned().unwrap_or_default();
             // 2026-08-01 (D3): a generic struct literal (`ListBuffer<Int> { ... }`)
             // — the slot types reference type params (data: Ptr<T>). The strict
@@ -983,6 +993,12 @@ pub fn infer_statement(stmt: &Statement, ctx: &mut TypecheckContext) -> Result<(
                     // declared type application pins the type params.
                     match (declared, &inferred) {
                         (Type::Applied(dn, _), Type::Custom(inm)) => dn == inm,
+                        // 2026-08-01 (D3): a generic struct literal now infers
+                        // as the Applied form with type-param placeholders
+                        // (`HashMapEntry<K, V>`, `ListBuffer<T>`) — same base
+                        // accepts; the declared type's concrete args are pinned
+                        // by the mono instantiation.
+                        (Type::Applied(dn, _), Type::Applied(inm, _)) => dn == inm,
                         _ => false,
                     }
                 };
