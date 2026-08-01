@@ -1,4 +1,4 @@
-// Phase 3 CLI argv capture demo: entry_cmd() reads the subcommand, arg_present
+// Phase 3a CLI argv capture demo: entry_cmd() reads the subcommand, arg_present
 // checks a flag.
 import { entry_cmd, arg_present } from "std/cli.bv";
 

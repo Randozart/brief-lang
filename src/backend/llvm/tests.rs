@@ -3595,5 +3595,31 @@ fn test_main_signature_and_argv_capture() {
     );
 }
 
+/// 2026-08-01 (Phase 3b): a Bool (i8) state field must NOT get `!range
+/// !{ i64 0, i64 256 }` — LLVM range bounds must match the load width; the
+/// i64 bounds on a load i8 crash clang. The range is skipped as vacuous.
+#[test]
+fn test_bool_field_no_malformed_i8_range() {
+    let src = r#"
+        let done: Bool = false;
+        node work [done == false][done] {
+            term;
+        };
+    "#;
+    let mut items = parse_bv_source(src);
+    let mut universe = crate::type_universe::TypeUniverse::new();
+    let mut pm = crate::plugin::PluginManager::new();
+    pm.run_ast(crate::ast::StageKind::Parsed, &mut items, &mut universe)
+        .expect("plugin stage failed");
+
+    let mut backend = LlvmBackend::new().with_type_universe(universe);
+    let ir = backend.generate(&items, None);
+    assert!(
+        !ir.contains("!range !{ i64 0, i64 256 }"),
+        "Bool field must not emit malformed i64 range on i8 load; got:\n{ir}"
+    );
+}
+
+
 
 

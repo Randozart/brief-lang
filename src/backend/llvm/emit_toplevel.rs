@@ -1326,6 +1326,43 @@ impl LlvmBackend {
         }
     }
 
+    /// Emit a range metadata node in the LLVM integer width of the field's
+    /// storage type. LLVM range metadata requires its bounds to be the same
+    /// integer type as the load they annotate — `!range !{ i64 0, i64 256 }`
+    /// on a `load i8` (Bool/UInt8/Int8 fields) is malformed and crashes clang
+    /// (computeKnownBitsFromRangeMetadata, APInt::setBitsSlowCase). Returns
+    /// the metadata id, or None if the bound does not fit the field width
+    /// (the range is vacuous for that type and must be skipped).
+    /// 2026-08-01: exposed by the entry!/args! plugin's Bool done-flags.
+    fn emit_range_metadata(
+        range_meta: &mut Vec<String>,
+        field_llvm_ty: &str,
+        lo: i64,
+        hi: i64,
+    ) -> Option<usize> {
+        // Extract the integer width from the LLVM type ("i8"/"i16"/"i32"/"i64").
+        let bits: u32 = field_llvm_ty
+            .strip_prefix('i')
+            .and_then(|s| s.parse().ok())
+            .or(Some(64))?;
+        // The range bounds must be representable in `bits`. For a signed load
+        // width N, LLVM interprets range bounds as that integer type; hi must
+        // fit. If the bound exceeds the width (e.g. 256 in i8), the range is
+        // vacuous for this storage type — skip it. 64-bit uses the full i64
+        // span (1 << 63 overflows a signed i64, so handle it explicitly).
+        let (max_signed, min_signed) = if bits >= 64 {
+            (i64::MAX, i64::MIN)
+        } else {
+            (1i64 << (bits - 1), -(1i64 << (bits - 1)))
+        };
+        if hi > max_signed || lo < min_signed {
+            return None;
+        }
+        let mi = range_meta.len() + 50;
+        range_meta.push(format!("!{} = !{{ {} {}, {} {} }}", mi, field_llvm_ty, lo, field_llvm_ty, hi));
+        Some(mi)
+    }
+
     /// 2026-07-27: Rewrite identifier references in a statement to use cold-function
     /// parameter names. Each Expr::Identifier matching a field_name is replaced with
     /// the corresponding parameter name (__cp_{field}).
@@ -1430,9 +1467,14 @@ impl LlvmBackend {
             if hi < i64::MAX && !written_fields.contains(f) {
                 // 2026-07-18: Offset by 50 to avoid collision with TBAA metadata nodes
                 // (!0 through ~!20). LLVM metadata IDs must be unique across the module.
-                let mi = range_meta.len() + 50;
-                range_meta.push(format!("!{} = !{{ i64 {}, i64 {} }}", mi, lo, hi));
-                self.ctx.field_to_meta_idx.insert(f.clone(), mi);
+                // 2026-08-01: bounds emitted in the field's LLVM integer width
+                // (range metadata must match the load type — see emit_range_metadata).
+                let field_llvm = self.ctx.field_types.get(
+                    self.ctx.field_index_map.get(f).copied().unwrap_or(0),
+                ).cloned().unwrap_or_else(|| "i64".to_string());
+                if let Some(mi) = Self::emit_range_metadata(range_meta, &field_llvm, lo, hi) {
+                    self.ctx.field_to_meta_idx.insert(f.clone(), mi);
+                }
             }
         }
         // 2026-07-04: Type-driven !range for narrow integer types.
@@ -1450,9 +1492,17 @@ impl LlvmBackend {
                 // (contract ranges are tighter and take priority).
                 if !self.ctx.field_to_meta_idx.contains_key(field_name) {
                     // 2026-07-18: Offset by 50 to avoid TBAA node collision.
-                    let mi = range_meta.len() + 50;
-                    range_meta.push(format!("!{} = !{{ i64 {}, i64 {} }}", mi, range_bounds.0, range_bounds.1));
-                    self.ctx.field_to_meta_idx.insert(field_name.clone(), mi);
+                    // 2026-08-01: bounds emitted in the field's LLVM width —
+                    // `!{ i64 0, i64 256 }` on a load i8 (Bool/UInt8/Int8)
+                    // crashes clang. Skip when the bound is vacuous for the
+                    // storage type (e.g. 256 does not fit i8).
+                    let field_llvm = self.ctx.field_types.get(idx)
+                        .cloned().unwrap_or_else(|| "i64".to_string());
+                    if let Some(mi) = Self::emit_range_metadata(
+                        range_meta, &field_llvm, range_bounds.0, range_bounds.1,
+                    ) {
+                        self.ctx.field_to_meta_idx.insert(field_name.clone(), mi);
+                    }
                 }
             }
         }

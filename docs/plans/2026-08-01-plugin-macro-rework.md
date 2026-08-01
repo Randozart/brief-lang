@@ -718,8 +718,31 @@ main is now `define i32 @main(i32 %argc, ptr %argv)` via a central
 __argv_command` (command = first non-flag argv[1..], honoring `$BRIEF_ENTRY_CMD`).
 `lib/std/cli.bv` declares the frgns + `entry_cmd`/`arg_present`. Verified
 end-to-end in `.smoke/cli_demo.bv` (build/run/flag/env fallback) and a backend
-IR test (`test_main_signature_and_argv_capture`). Remaining: 3b (`entry!`/
-`args!` plugin), 3c (concurrency gate).
+IR test (`test_main_signature_and_argv_capture`). Remaining: 3c (concurrency
+gate).
+
+**Status (2026-08-01): 3b (`entry!`/`args!` plugin) IMPLEMENTED.** New
+`src/plugin/entry_plugin.rs` (Parsed stage, registered in compile.rs + `.bv`
+targets.toml): `entry!("cmd")` rewrites to `entry_cmd() == "cmd" &&
+!__entry_<cmd>_done`, injects the done-flag as a top-level `let`, and appends
+the flip; `args!("--flag")` / `args!("--flag", T)` rewrite to `arg_<flag>`
+snapshot state fields bound from `__argv_has`/`__argv_value` (Bool/typed), in
+contracts AND bodies. Non-reactive `defn` entry points get a synthesized
+reactive wrapper (helper-node path) that calls the defn and flips the
+done-flag; its postcondition is the done-flag so the reactor converges
+(one-shot). Helper names are compiler-reserved (collision = error);
+`import "std/cli.bv"` is injected. `[true]` is never emitted. Verified
+end-to-end: `.smoke/entry_demo2.bv` (build/run subcommand dispatch),
+`.smoke/entry_args.bv` (body args! snapshot), `.smoke/entry_defn.bv` (defn
+wrapper). 5 plugin unit tests.
+
+**Bug fixed (BUGS.md):** type-driven `!range` metadata emitted `!{ i64 0,
+i64 256 }` on `load i8` (Bool/UInt8/Int8 state fields) — malformed LLVM (range
+bounds must match the load width) that crashed clang
+(computeKnownBitsFromRangeMetadata). Exposed by the entry plugin's Bool
+done-flags. `emit_range_metadata` now emits bounds in the field's LLVM integer
+width and skips vacuous ranges (256 does not fit i8). Regression test
+`test_bool_field_no_malformed_i8_range`.
 
 ### Phase 4 — Flat-scripting plugin (one-shot opening node)
 

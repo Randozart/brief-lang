@@ -203,8 +203,19 @@ fn collect_strings(items: &[TopLevel]) -> Vec<String> {
 }
 fn collect_strings_tl(tl: &TopLevel, seen: &mut std::collections::HashSet<String>, out: &mut Vec<String>) {
     match tl {
-        TopLevel::Transaction(t) => { for s in &t.body { collect_strings_stmt(s, seen, out); } }
-        TopLevel::Definition(d) => { for s in &d.body { collect_strings_stmt(s, seen, out); } }
+        TopLevel::Transaction(t) => {
+            // 2026-08-01 (Phase 3b): entry!/args! rewrite string literals into
+            // the contract precondition (e.g. entry_cmd() == "build") — scan
+            // the contract so those @str.N constants are emitted.
+            collect_strings_expr(&t.contract.pre_condition, seen, out);
+            collect_strings_expr(&t.contract.post_condition, seen, out);
+            for s in &t.body { collect_strings_stmt(s, seen, out); }
+        }
+        TopLevel::Definition(d) => {
+            collect_strings_expr(&d.contract.pre_condition, seen, out);
+            collect_strings_expr(&d.contract.post_condition, seen, out);
+            for s in &d.body { collect_strings_stmt(s, seen, out); }
+        }
         TopLevel::Export(e) => collect_strings_tl(&e.inner, seen, out),
         TopLevel::Cell(c) => {
             // 2026-07-13: Field.default removed in new AST.

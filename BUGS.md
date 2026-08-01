@@ -2793,3 +2793,26 @@ with `VALUE=same` returns true; `VALUE=other` returns false. Verified in
 `.smoke/eq_demo.bv`.
 **Lesson:** any pointer-tagging must be gated on the representation that uses
 tags (SSO); a representation change (bits model) must audit every tag site.
+
+---
+
+## Malformed !range on Narrow State Fields Crashes clang — FIXED
+
+**Date:** 2026-08-01
+**Status:** Fixed (Phase 3b)
+**Root cause:** `type_driven_range` emitted `!{ i64 0, i64 256 }` range metadata
+for 1-byte types (Bool/UInt8/Int8 state fields), but the field loads as `i8`.
+LLVM range metadata bounds must be the same integer type as the load — i64
+bounds on `load i8` are malformed and crash clang
+(`computeKnownBitsFromRangeMetadata`, `APInt::setBitsSlowCase`). Latent until
+the entry!/args! plugin introduced Bool done-flag state fields (any Bool/
+UInt8 state field triggered it; `let done: Bool = false;` alone crashes).
+**Fix:** `emit_range_metadata` (emit_toplevel.rs) emits bounds in the field's
+LLVM integer width (`i8`/`i16`/`i32`/`i64`) and skips ranges that don't fit
+the storage width (256 is vacuous for i8 — the whole space — so it is
+dropped). Applies to both contract-driven and type-driven ranges.
+**Impact:** `.smoke/bool_range.bv` and `.smoke/entry_demo.bv` link and run;
+`test_bool_field_no_malformed_i8_range` guards it.
+**Lesson:** LLVM metadata must be type-coherent with the instruction it
+annotates; representation facts (N bytes → [0, 2^8N)) must be projected into
+the actual storage type before emission.

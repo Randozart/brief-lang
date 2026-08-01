@@ -1,0 +1,5 @@
+// defn entry point → synthesized reactive wrapper node (helper path §4.3).
+defn build() -> Int [entry!("build")][result == 0] {
+    println!("building...");
+    term 0;
+};
