@@ -95,8 +95,11 @@ frgn XXH64(data_ptr: Int, len: Int, seed: Int) -> Int as frgn__xxh64 from "link/
 - Tuples are heap-allocated (`(1, 2)` calls `@malloc`); SROA promotes small
   tuples in optimized builds.
 - `Byte` is defined in `lib/std/types.bv` — import it or use `Int`.
-- No `main()`: programs start via state-space triggers on `node` declarations.
-  The scripting plugin creates a node + bootup variable pair.
+- `defn main()` and bare top-level `let`/`const` bindings run via the
+  flat-scripting plugin (2026-08-01): a synthesized one-shot
+  `node __script_main [__script_done == false][__script_done]` executes them
+  exactly once. Reactive programs start via state-space triggers on `node`
+  declarations; CLI subcommands use `entry!`/`args!`.
 
 ### 1.6 Import / narrowing
 

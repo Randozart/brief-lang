@@ -1798,25 +1798,47 @@ defn clamp(val: Int) -> Int
   permanent specification.
 - `#no_derive` pragma blocks synthesis during drafting.
 
-### 3.24 Entry Points \[removed 2026-08-01: Phase 2\]
+### 3.24 Entry Points \[2026-08-01: Phase 3\]
 
 The `[#]` entry-point contract marker is **removed**. Writing `[#]` is a
 syntax error. CLI-addressable entry points and `argc`/`argv` parsing are
-expressed with the `entry!` and `args!` macros (the entry-point plugin, Phase
-3), which expand to explicit preconditions and guard injection:
+expressed with the `entry!` and `args!` macros (the entry-point plugin),
+which expand to explicit preconditions and guard injection.
+
+**`entry!("<cmd>")`** in a node's contract makes it a one-shot CLI subcommand:
 
 ```brief
-// Phase 3 (planned): explicit entry-point macro
-entry!(build);
-defn build(project: String, clean: Bool) -> Int [project != ""] [result == 0] { ... };
+// `myapp build` fires this node exactly once; `myapp run` fires the other.
+node build [entry!("build")][result == 0] { ... };
+node run   [entry!("run")][result == 0]   { ... };
 ```
 
-**Removed rules:**
-- `[#]` functions could not be called from internal Brief code (call graph
-  isolation). The entry!/args! plugin enforces entry isolation instead.
-- Top-level scripting (bare statements outside any `defn`/`txn`) gets an
-  implicit one-shot opening node via the flat-scripting plugin — no marker
-  needed (Phase 4).
+Expansion: the plugin injects `let __entry_build_done: Bool = false;`,
+rewrites the guard to `entry_cmd() == "build" && !__entry_build_done`, and
+appends `__entry_build_done = true;` to the body (one-shot). `[true]` is never
+emitted. A non-reactive `defn` entry point gets a synthesized reactive wrapper
+(the helper-node path) that calls it once.
+
+**`args!("--flag")`** / **`args!("--flag", T)`** bind a snapshot state field
+from `__argv_has` / `__argv_value`:
+
+```brief
+let clean: Bool = args!("--clean");   // __argv_has("--clean")
+let out: String = args!("--out", String); // __argv_value("--out")
+```
+
+**Command semantics:** `entry_cmd()` returns the first non-flag `argv[1..]`
+token (`<prog> --verbose build` → `"build"`), honoring `$BRIEF_ENTRY_CMD` as
+the sole environment fallback.
+
+**Rules:**
+- Two entry nodes with mutually exclusive commands are UNSAT
+  (`cmd == "build"` ∧ `cmd == "run"`) → legal subcommand dispatch.
+- Generated entry/script nodes are never `async` and never `sync<group>`;
+  the concurrency gate (rule #21) demands explicit classification for any
+  eligible pair.
+- Helper names (`__entry_<cmd>_done`, `arg_<flag>`) are compiler-reserved;
+  a collision is a compile error.
 
 ### 3.25 `export` Keyword \[2026-07-12: Phase 15\]
 
@@ -1889,26 +1911,42 @@ defn print_int(n: Int) -> Bool {
 Both are implicitly set by `alloc(0x...)` — physical MMIO accesses are
 always observable and volatile. Default for all other bindings is `false`.
 
-### 3.28 Top-Level Scripting \[2026-07-12: Phase 16E\]
+### 3.28 Top-Level Scripting \[2026-08-01: Phase 4\]
 
-When a `.bv` file contains bare statements outside any `defn` or `txn`,
-the compiler wraps them in an implicit entry transaction with `[#]`.
+When a `.bv` file contains only bare top-level `let` bindings / `const`
+declarations — or a single `defn main()` with no explicit `entry!` — the
+flat-scripting plugin synthesizes a **one-shot opening node**:
 
 ```brief
-// No defn, no txn — this is a script
-let name = __get_env("USER")?;
-frgn printf("Hello, %s!\n", name);
+// No defn, no txn, no node — this is a script (bare let bindings).
+let x: Int = 42;
+let y: Int = x + 1;
 ```
 
-The implicit transaction is named after the file stem and has `[#]`
-as the entry precondition. The generated wrapper has no subcommand
-dispatch — execution is direct.
+becomes:
+
+```brief
+let __script_done: Bool = false;
+node __script_main [__script_done == false][__script_done] {
+    let x: Int = 42;
+    let y: Int = x + 1;
+    __script_done = true;
+};
+```
+
+The guard `[__script_done == false]` is true exactly once; the final flip
+makes it false afterward. `[true]` is never emitted.
+
+A `defn main() -> Int { ... }` (no `entry!`) is also wired to run exactly once
+via the same synthesized node (calling the renamed `brief_main`), fixing the
+dead-code gap where a plain `defn main` was defined but never invoked.
 
 **Rules:**
-- Scripting mode only activates when the file has zero explicit `defn`
-  or `txn` declarations.
-- Scripting and explicit `[#]` functions are mutually exclusive (compile
-  error if both present).
+- Scripting mode activates only when the file has zero reactive `node`/`txn`,
+  zero `sync<group>`, zero non-`main` `defn`, and zero explicit `entry!`.
+- `__script_main` / `__script_done` are compiler-reserved; a user binding
+  with either name is a compile error (no silent shadowing).
+- Scripting and explicit `entry!` are mutually exclusive in the same file.
 
 ### 3.29 `.f` Layout Parsing (Formatted Brief) \[2026-07-12: Phase 16C\]
 
