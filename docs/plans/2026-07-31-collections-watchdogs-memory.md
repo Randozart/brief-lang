@@ -269,18 +269,27 @@ grammar, `learn-brief` collections + watchdog chapters, `docs/architecture`).
   PRE-EXISTING `-O3` clang crash on Bool state fields blocks harness-level
   testing of struct programs (a plain Bool-only program fails to build at
   -O3; at `-O0` the method-call program runs correctly).
-- **Phase A5b** — committed (`1c064b2d`). `collect_state_identifiers` now
-  walks MethodCall/Reflect receivers, so a struct-typed state field used as a
-  method-call receiver is no longer dead-eliminated by `apply_field_modes` —
-  the state slot stays in %State and the receiver resolves to its declared
-  type (verified: `%State = { i64, i8, i64 }` includes the struct slot).
-- **Phase A5c** — committed (`c7a12f35`). Member bodies can index a self ARRAY
-  slot (`data[i]` reads/writes GEP self + slot offset + elem_size*idx); the
-  scalar self-slot read skips Vector slots.
-  **Remaining:** the state-slot receiver's member body is emitted through a
-  multi-pass reactor path; the pass producing the final IR does not set the
-  self binding, so scalar slot reads fall through and the index resolves to
-  the self pointer. Local receivers (single-pass) emit correctly.
+- **Phase A5d + blocker 2** — committed (`ea60b4e2`). State-slot MethodCall
+  works at `-O3`: emit_method_call saves/restores `last_val_temps` (the reactor
+  emits a body twice; stale temps leaked). The pre-existing clang `-O3`
+  segfault on Bool state fields was root-caused to `!range` metadata always
+  using `i64` bounds on `i8` (Bool) loads; `range_metadata` now formats the
+  range in the field's load width and skips unrepresentable bounds. A plain
+  Bool program builds and runs at `-O3` (previously segfaulted).
+- **Phase A6** — committed (`a9ca39ff`). `<-` dispatch routes onto obj-member
+  bindings (`op InsertAt: push(#L,#R)`): `emit_member_body` extracted (shared
+  by MethodCall + `<->`), `emit_strategy_member_call` emits a self-bound
+  member call; the typechecker treats `&collection <- value` as a push (RHS
+  checked against the member's first param type).
+- **Phase A7** — committed (`d0964aad`, `e7f1db90`). `op Init` construction:
+  `let x: T = val` with `op Init: init(#L,#R)` builds the instance via the
+  Init member (allocate + self-bound call + address store). All op_bindings
+  now reach operator_defs (not just Cast*). Struct field reads on state-slot
+  receivers fixed (scalar via emit_field_access GEP; array via address GEP) —
+  the old extractvalue/alloca-spill paths treated the stored instance address
+  as a struct value (invalid IR at -O3).
+  **Obj instances now work end-to-end at -O3**: state-slot receivers,
+  `<-` dispatch, `op Init`, scalar + array field reads.
 - Phase B: …
 - Phase C: …
 - Phase D: …
