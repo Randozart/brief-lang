@@ -108,6 +108,7 @@ TAG[sweep_dense]=runtime
 TAG[sweep_arr]=runtime
 TAG[series_converge]=runtime
 TAG[global_lifetime]=runtime
+TAG[deep_recursion]=runtime
 TAG[arena_churn]=runtime
 TAG[linked_list]=runtime
 TAG[hash_ops]=runtime
@@ -150,7 +151,8 @@ BENCHMARKS=(
     "sweep_dense"
     "sweep_arr"     # Float[16] array-state sweep — array machinery is competitive (1.17x)
     "series_converge"   # watchdog liveliness — fires print_best(x) on convergence
-    "global_lifetime"   # Malloc#/Load#/Store# heap buffer lifecycle (free-after-last-consumer target)
+    "global_lifetime"   # garbage-scheduled heap buffer (free after last consumer)
+    "deep_recursion"    # runtime-depth recursion
     "arena_churn"       # bump-arena exhaustion + realloc-grow
     "linked_list"       # Malloc# heap nodes + pointer chasing
     "hash_ops"          # hash-indexed flat table ops

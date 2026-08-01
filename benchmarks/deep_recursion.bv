@@ -1,0 +1,26 @@
+// deep_recursion — recursion with a runtime-determined depth.
+// `sum(n)` recurses to sum 1..n; the depth is the runtime BOUND, so the
+// compiler cannot fold it. Validates the proof engine's termination proof
+// against a non-constant bound (the defn contract `[n >= 0][n == 0]` proves
+// the recursion terminates). Both Brief and C share the C stack, so a deep
+// depth overflows identically — the benchmark runs at a moderate depth.
+//
+// C reference: deep_recursion_c.c
+
+let N: Int = get_env_int!("BOUND");
+let total: Int = 0;
+let done: Bool = false;
+
+defn sum(n: Int) -> Int [n >= 0][n == 0] {
+    when n == 0 {
+        term 0;
+    };
+    term n + sum(n - 1);
+};
+
+node run [!done][done] {
+    total = sum(N);
+    println!(total);
+    done = true;
+    term;
+};
