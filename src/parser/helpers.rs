@@ -161,6 +161,12 @@ impl<'a> Parser<'a> {
         }
     }
 
+    /// Check if the current token is any identifier.
+    /// 2026-08-01 (C2): for `-> handler(val)` — an identifier arg name.
+    pub fn peek_is_identifier(&self) -> bool {
+        self.peek().map_or(false, |t| matches!(t, Token::Identifier(_)))
+    }
+
     /// Check if the current token is an identifier with a specific name.
     pub fn check_identifier(&self, name: &str) -> bool {
         self.peek()

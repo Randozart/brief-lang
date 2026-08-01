@@ -366,6 +366,11 @@ pub struct WatchdogSpec {
 #[derive(Debug, Clone)]
 pub struct WatchdogOnFire {
     pub handler: String,
+    /// 2026-08-01 (C2): the value passed to the handler — `val` in
+    /// `-> handler(val)`. Names the field/let whose current value the loop
+    /// passes on the fire path (the "last computed value"). None for
+    /// `-> handler()` (no argument).
+    pub arg: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq)]

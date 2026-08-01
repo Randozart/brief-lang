@@ -941,14 +941,27 @@ impl<'a> Parser<'a> {
             // placeholder — the emitter always passes the last value).
             let on_fire = if self.eat(&Token::Arrow) {
                 let handler = self.expect_identifier()?;
-                if self.eat(&Token::LParen) {
-                    if !self.check(&Token::RParen) {
-                        // Optional arg-name placeholder (`(val)`) — consumed.
-                        self.parse_expression()?;
-                    }
+                // 2026-08-01 (C2): `-> handler(val)` — the parens optionally
+                // name the value passed on the fire path (the last computed
+                // value). `()` and `(any_identifier)` both parse; the arg
+                // name is captured for the emission (None for `()`).
+                let arg = if self.eat(&Token::LParen) {
+                    let name = if !self.check(&Token::RParen) {
+                        if self.peek_is_identifier() {
+                            Some(self.expect_identifier()?)
+                        } else {
+                            self.parse_expression()?;
+                            None
+                        }
+                    } else {
+                        None
+                    };
                     self.expect(Token::RParen)?;
-                }
-                Some(WatchdogOnFire { handler })
+                    name
+                } else {
+                    None
+                };
+                Some(WatchdogOnFire { handler, arg })
             } else {
                 None
             };
@@ -2722,7 +2735,9 @@ mod tests {
         )
         .unwrap();
         let w = t.contract.watchdog.expect("watchdog must parse");
-        assert_eq!(w.on_fire.as_ref().map(|f| f.handler.as_str()), Some("report"));
+        let on = w.on_fire.expect("on_fire must parse");
+        assert_eq!(on.handler, "report");
+        assert_eq!(on.arg.as_deref(), Some("val"));
     }
 
     #[test]
@@ -2732,7 +2747,9 @@ mod tests {
         )
         .unwrap();
         let w = t.contract.watchdog.expect("watchdog must parse");
-        assert_eq!(w.on_fire.as_ref().map(|f| f.handler.as_str()), Some("report"));
+        let on = w.on_fire.expect("on_fire must parse");
+        assert_eq!(on.handler, "report");
+        assert_eq!(on.arg, None);
     }
 
     #[test]
