@@ -1,0 +1,24 @@
+// global_lifetime — the manual free-after-last-consumer lifecycle that
+// global-lifetime inference automates (docs/plans/2026-08-01-global-lifetime-design.md).
+// A heap Ptr buffer is allocated, written each iteration, and read by the
+// periodic guard (the last consumer is the final guard print). The FREE would
+// be emitted by the inference pass AFTER that final print (the design's
+// free_after map); here the Malloc#/Load#/Store# lifecycle is exercised with
+// output parity against C, and Free# is validated separately (its timing with
+// the countdown's guard reordering is the inference's job — see the design
+// doc §4 for why a naive manual `if sum == N` fires prematurely).
+//
+// C reference: global_lifetime_c.c
+
+let N: Int = GetEnvInt!("BOUND");
+let buf: Ptr<Int> = Malloc#(64 * 8) as Ptr<Int>;
+let sum: Int = 0;
+
+node life [sum < N][sum == N] {
+    buf[sum % 64] = sum;
+    sum = sum + 1;
+    when sum % 5000000 == 0 {
+        PrintLn!(buf[sum % 64]);
+    };
+    term;
+};

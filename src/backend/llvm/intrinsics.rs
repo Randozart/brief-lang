@@ -523,7 +523,11 @@ fn emit_free(
         }
         Some(AllocStrategy::Malloc) | Some(AllocStrategy::Custom(_)) | _ => {
             // Heap-allocated (Malloc) or unknown → emit @free.
-            writeln!(out, "{}call void @free(ptr {})", indent, ptr_reg).ok();
+            // 2026-08-01 (D2): a Ptr value is stored as an i64 handle (ptrtoint
+            // at store); the handle must be inttoptr'd before the @free call.
+            let p = backend.fun.gen_reg();
+            writeln!(out, "{}  {} = inttoptr i64 {} to ptr", indent, p, ptr_reg).ok();
+            writeln!(out, "{}call void @free(ptr {})", indent, p).ok();
         }
     }
     writeln!(out, "{}{} = add i64 0, 0", indent, v).ok();

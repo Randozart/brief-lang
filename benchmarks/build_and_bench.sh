@@ -107,6 +107,7 @@ TAG[sweep_mid]=runtime
 TAG[sweep_dense]=runtime
 TAG[sweep_arr]=runtime
 TAG[series_converge]=runtime
+TAG[global_lifetime]=runtime
 
 BENCHMARKS=(
     "iir_filter"
@@ -145,6 +146,7 @@ BENCHMARKS=(
     "sweep_dense"
     "sweep_arr"     # Float[16] array-state sweep — array machinery is competitive (1.17x)
     "series_converge"   # watchdog liveliness — fires print_best(x) on convergence
+    "global_lifetime"   # Malloc#/Load#/Store# heap buffer lifecycle (free-after-last-consumer target)
     "bridge_glue"
     "bridge_multi"
     # "gpu/saxpy"        # no .bv file exists

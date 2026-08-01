@@ -400,3 +400,20 @@ grammar, `learn-brief` collections + watchdog chapters, `docs/architecture`).
 - Phase C: …
 - Phase D: …
 - Phase E: …
+
+## 8. Merge reconciliation — plugin-macro-rework (2026-08-01)
+
+The other agent's `feat/plugin-macro-rework` merged into `main` at `b00c9681`
+(17 commits, 1359 tests, zero regressions). Our branch (`feat/
+collections-watchdogs-memory`, 25 commits past the shared base `d6c6c818`)
+merges `main` in. Textual conflicts: `BUGS.md` + `emit_toplevel.rs`. Semantic
+conflicts (git-silent):
+
+1. Countdown functions keep our `watchdog` param AND adopt their
+   `emit_main_header` (`main(i32,ptr)`); callers in `mod.rs` thread both.
+2. `!range` — both branches fixed the same clang crash; consolidate
+   `range_metadata` / `emit_range_metadata` to one.
+3. Macro renames — their Phase 1 makes `GetEnvInt!`/`PrintLn!` errors; our
+   benchmark files move to `get_env_int!`/`println!`.
+4. Float-param unboxing composes with their B1 `#String` changes.
+5. Concurrency gate (now enforced) — our single-node benchmarks must pass.
