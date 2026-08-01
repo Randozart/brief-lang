@@ -509,7 +509,7 @@ fn emit_self_slot_array_store(
 /// 2026-07-31 (A4): Array state-field store — `f[i] = v` where `f` is a
 /// single-dimension Vector state field. GEP into %State + scalar store.
 /// Flat guard clauses; returns false when the pattern does not apply.
-fn emit_array_state_store(
+pub(super) fn emit_array_state_store(
     backend: &mut LlvmBackend,
     out: &mut String,
     indent: &str,

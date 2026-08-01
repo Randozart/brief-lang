@@ -814,6 +814,7 @@ impl LlvmBackend {
 
         // ── Body (ONE block) ────────────────────────────────────
         writeln!(out, ".cdb_{}:", c0).ok();
+        self.fun.cur_block = Some(format!(".cdb_{}", c0));
         self.fun.pending_phi_backedge.clear();
         for fname in &sorted_fields {
             let init_val = self.fun.phi_field_regs.get(fname.as_str())
@@ -823,6 +824,12 @@ impl LlvmBackend {
         let mut empty = Vec::new();
         self.emit_countable_body(out, &batch.inner_body, write_set, &mut empty);
         // Countdown: remaining-- (loop-carried, independent of the counter).
+        // 2026-08-01 (B): the rem/fire instructions land in the inner body's
+        // FINAL block (cur_block) — an if-ended body leaves the emitter in the
+        // if's merge block, so `.cdb_`'s terminator is the if's br. The latch
+        // phis below use that block as the `.cdb_` predecessor.
+        let body_final = self.fun.cur_block.clone()
+            .unwrap_or_else(|| format!(".cdb_{}", c0));
         let c_rem_next = self.fun.next_reg_with_prefix("cdm");
         writeln!(out, "  {} = sub i64 {}, 1", c_rem_next, c_rem).ok();
         let fire = self.fun.next_reg_with_prefix("cdf");
@@ -904,8 +911,8 @@ impl LlvmBackend {
         let guard_pred = self.fun.cur_block.clone()
             .unwrap_or_else(|| format!(".cdg_{}", c0));
         writeln!(out, ".cdl_{}:", c0).ok();
-        writeln!(out, "  {} = phi i64 [ {}, %.cdb_{} ], [ {}, %{} ]",
-            c_rem_latch, c_rem_next, c0, rem_reset, guard_pred).ok();
+        writeln!(out, "  {} = phi i64 [ {}, %{} ], [ {}, %{} ]",
+            c_rem_latch, c_rem_next, body_final, rem_reset, guard_pred).ok();
         for fname in sorted_fields.iter().filter(|f| {
             f.as_str() != counter_var && guard_writes.contains(f.as_str())
         }) {
@@ -920,8 +927,8 @@ impl LlvmBackend {
                     });
                 let guard_val = self.fun.pending_phi_backedge.get(fname.as_str())
                     .cloned().unwrap_or_else(|| body_val.clone());
-                writeln!(out, "  {} = phi {} [ {}, %.cdb_{} ], [ {}, %{} ]",
-                    be_f, field_ty, body_val, c0, guard_val, guard_pred).ok();
+                writeln!(out, "  {} = phi {} [ {}, %{} ], [ {}, %{} ]",
+                    be_f, field_ty, body_val, body_final, guard_val, guard_pred).ok();
             }
         }
         // Counter increment (native width) — the counter's backedge.
@@ -1429,6 +1436,16 @@ impl LlvmBackend {
                     // assignments (assign_target_name returns None for non-Ident).
                     match lhs {
                         Expr::Index(obj, idx) => {
+                            // 2026-08-01 (B): array-state field store
+                            // (`f[i] = v` for Float[16]) — route through
+                            // emit_array_state_store like the normal path. The
+                            // countdown previously only handled Ptr-indexed
+                            // stores, silently DROPPING array-state writes
+                            // (the seed + the loop's f[j]=n[j] both vanished).
+                            if super::emit_stmt::emit_array_state_store(self, out, "  ", obj, idx, &val) {
+                                i += 1;
+                                continue;
+                            }
                             let obj_reg = self.emit_expr(out, obj, "  ");
                             if matches!(obj_reg.ty, Type::Ptr(_)) {
                                 let idx_reg = self.emit_expr(out, idx, "  ");

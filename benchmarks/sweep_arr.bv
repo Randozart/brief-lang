@@ -1,0 +1,45 @@
+// sweep_arr — Float[16] array-state mirror of sweep_dense.
+// Tests whether indexed-GEP array state is competitive with 16 scalar fields.
+// f[j] reads f[j], f[j+1], f[j+15] (cyclic) each iteration — the dense
+// cross-indexed pattern through a single array state slot.
+
+let N: Int = GetEnvInt!("BOUND");
+let f: Float[16];
+let i: Int = 0;
+
+node tick [
+    i < N
+][i == N] {
+    if i == 0 {
+        f[0] = 1.0; f[1] = 0.5; f[2] = 0.25; f[3] = 0.125;
+        f[4] = 0.0625; f[5] = 0.03125; f[6] = 0.015625; f[7] = 0.0078125;
+        f[8] = 0.00390625; f[9] = 0.001953125; f[10] = 0.0009765625; f[11] = 0.00048828125;
+        f[12] = 0.000244140625; f[13] = 0.0001220703125; f[14] = 0.00006103515625; f[15] = 0.000030517578125;
+    };
+    let n0: Float = f[0] * 0.999 + f[1] * 0.001 + f[15] * 0.000001;
+    let n1: Float = f[1] * 0.999 + f[2] * 0.001 + f[0] * 0.000001;
+    let n2: Float = f[2] * 0.999 + f[3] * 0.001 + f[1] * 0.000001;
+    let n3: Float = f[3] * 0.999 + f[4] * 0.001 + f[2] * 0.000001;
+    let n4: Float = f[4] * 0.999 + f[5] * 0.001 + f[3] * 0.000001;
+    let n5: Float = f[5] * 0.999 + f[6] * 0.001 + f[4] * 0.000001;
+    let n6: Float = f[6] * 0.999 + f[7] * 0.001 + f[5] * 0.000001;
+    let n7: Float = f[7] * 0.999 + f[8] * 0.001 + f[6] * 0.000001;
+    let n8: Float = f[8] * 0.999 + f[9] * 0.001 + f[7] * 0.000001;
+    let n9: Float = f[9] * 0.999 + f[10] * 0.001 + f[8] * 0.000001;
+    let n10: Float = f[10] * 0.999 + f[11] * 0.001 + f[9] * 0.000001;
+    let n11: Float = f[11] * 0.999 + f[12] * 0.001 + f[10] * 0.000001;
+    let n12: Float = f[12] * 0.999 + f[13] * 0.001 + f[11] * 0.000001;
+    let n13: Float = f[13] * 0.999 + f[14] * 0.001 + f[12] * 0.000001;
+    let n14: Float = f[14] * 0.999 + f[15] * 0.001 + f[13] * 0.000001;
+    let n15: Float = f[15] * 0.999 + f[0] * 0.001 + f[14] * 0.000001;
+    f[0] = n0; f[1] = n1; f[2] = n2; f[3] = n3;
+    f[4] = n4; f[5] = n5; f[6] = n6; f[7] = n7;
+    f[8] = n8; f[9] = n9; f[10] = n10; f[11] = n11;
+    f[12] = n12; f[13] = n13; f[14] = n14; f[15] = n15;
+    i = i + 1;
+    when i % 5000000 == 0 {
+        __print_float(f[0] + f[1] + f[2] + f[3] + f[4] + f[5] + f[6] + f[7] + f[8] + f[9] + f[10] + f[11] + f[12] + f[13] + f[14] + f[15]);
+        __print_char(10);
+    };
+    term;
+};
