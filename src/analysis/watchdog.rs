@@ -448,6 +448,7 @@ mod tests {
             is_proven: false,
             condition: Expr::Identifier(trigger.to_string()),
             is_required,
+            on_fire: None,
         }
     }
 
@@ -582,6 +583,7 @@ mod tests {
             is_required: true,
             retries: 0,
             fallback: None,
+            on_fire: None,
         };
 
         let spec_var = WatchdogSpec {
@@ -592,6 +594,7 @@ mod tests {
             is_required: true,
             retries: 0,
             fallback: None,
+            on_fire: None,
         };
         // 2026-07-14: Any Identifier counts as a trigger-watch condition,
         // but the caller validates the name against known triggers.
@@ -715,6 +718,7 @@ mod tests {
                     retries: 0,
                     fallback: None,
                     condition: Expr::Bool(true), is_required: true,
+                    on_fire: None,
                 }),
                 vec![]),
         ]);

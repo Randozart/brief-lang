@@ -935,6 +935,23 @@ impl<'a> Parser<'a> {
                 _ => {}
             }
             self.expect(Token::RBracket)?;
+            // 2026-08-01 (C1): optional `-> handler(val)` on-fire callback.
+            // The handler is called with the LAST COMPUTED VALUE on the fire
+            // path; the parens are the call marker (`()` or a `(val)` arg-name
+            // placeholder — the emitter always passes the last value).
+            let on_fire = if self.eat(&Token::Arrow) {
+                let handler = self.expect_identifier()?;
+                if self.eat(&Token::LParen) {
+                    if !self.check(&Token::RParen) {
+                        // Optional arg-name placeholder (`(val)`) — consumed.
+                        self.parse_expression()?;
+                    }
+                    self.expect(Token::RParen)?;
+                }
+                Some(WatchdogOnFire { handler })
+            } else {
+                None
+            };
             Some(WatchdogSpec {
                 condition: cond,
                 is_required,
@@ -943,6 +960,7 @@ impl<'a> Parser<'a> {
                 is_proven: false,
                 retries: 0,
                 fallback: None,
+                on_fire,
             })
         } else {
             None
@@ -2694,6 +2712,27 @@ mod tests {
         .unwrap();
         let w = t.contract.watchdog.expect("watchdog must parse");
         assert!(w.is_required);
+    }
+
+    #[test]
+    fn test_watchdog_on_fire_parses() {
+        // 2026-08-01 (C1): `-> handler(val)` on-fire callback.
+        let t = parse_txn(
+            "txn f() [true][done] ?[x < 5] -> report(val) { term; };",
+        )
+        .unwrap();
+        let w = t.contract.watchdog.expect("watchdog must parse");
+        assert_eq!(w.on_fire.as_ref().map(|f| f.handler.as_str()), Some("report"));
+    }
+
+    #[test]
+    fn test_watchdog_on_fire_empty_parens() {
+        let t = parse_txn(
+            "txn f() [true][done] ?[x < 5] -> report() { term; };",
+        )
+        .unwrap();
+        let w = t.contract.watchdog.expect("watchdog must parse");
+        assert_eq!(w.on_fire.as_ref().map(|f| f.handler.as_str()), Some("report"));
     }
 
     #[test]

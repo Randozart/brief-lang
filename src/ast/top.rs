@@ -356,6 +356,16 @@ pub struct WatchdogSpec {
     pub is_proven: bool,
     pub retries: u64,
     pub fallback: Option<Box<Expr>>,
+    /// 2026-08-01 (C1): `-> handler(val)` on-fire callback. The loop calls the
+    /// handler with the last computed value on the fire path — never a
+    /// reference to state that may be reset.
+    pub on_fire: Option<WatchdogOnFire>,
+}
+
+/// The `-> handler(val)` on-fire callback of a watchdog.
+#[derive(Debug, Clone)]
+pub struct WatchdogOnFire {
+    pub handler: String,
 }
 
 #[derive(Debug, Clone, PartialEq)]
