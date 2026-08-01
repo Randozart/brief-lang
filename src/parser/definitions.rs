@@ -1722,6 +1722,8 @@ impl<'a> Parser<'a> {
     fn parse_struct_def(&mut self) -> Result<StructDef, SyntaxError> {
         self.pos += 1; // consume struct
         let name = self.expect_identifier()?;
+        // 2026-07-31: Generic struct: struct ListBuffer<T> { ... }.
+        let type_params = self.parse_type_params()?;
         let mut fields = Vec::new();
         let mut annotations: std::collections::HashMap<String, Vec<String>> = std::collections::HashMap::new();
         if self.eat(&Token::LBrace) {
@@ -1753,7 +1755,7 @@ impl<'a> Parser<'a> {
             metadata.insert("annotations".to_string(), crate::ast::PropertyValue::String(format!("{:?}", annotations)));
         }
         Ok(StructDef {
-            name, fields,
+            name, type_params, fields,
             metadata,
             span: None,
         })
@@ -1765,6 +1767,8 @@ impl<'a> Parser<'a> {
         // enum Name { A, B, C(Int) }
         self.pos += 1;
         let name = self.expect_identifier()?;
+        // 2026-07-31: Generic enum: enum Option<T> { Some(T), None }.
+        let type_params = self.parse_type_params()?;
         let mut slots = Vec::new();
         if self.eat(&Token::LBrace) {
             while !self.check(&Token::RBrace) && !self.is_at_end() {
@@ -1783,7 +1787,7 @@ impl<'a> Parser<'a> {
         }
         self.eat(&Token::Semicolon);
         Ok(Box::new(TypeDef {
-            name, type_params: vec![], parent: None,
+            name, type_params, parent: None,
             protocol: None,
             bit_range: None, span: None,
             body: TypeDefBody {

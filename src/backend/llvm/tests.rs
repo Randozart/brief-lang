@@ -2311,6 +2311,7 @@ fn test_struct_literal_field_offsets() {
     let mut backend = LlvmBackend::new().with_type_universe(tu);
     let program = vec![
         TopLevel::StaticStruct(StructDef {
+            type_params: vec![],
             name: "Mixed".to_string(),
             fields: vec![
                 ("a".to_string(), Type::int()),
@@ -2366,6 +2367,7 @@ fn test_addr_of_struct_literal() {
     let mut backend = LlvmBackend::new();
     let program = vec![
         TopLevel::StaticStruct(StructDef {
+            type_params: vec![],
             name: "Point".to_string(),
             fields: vec![
                 ("x".to_string(), Type::int()),
@@ -2451,6 +2453,7 @@ fn test_frgn_ptr_param_inttoptr() {
     let mut backend = LlvmBackend::new();
     let program = vec![
         TopLevel::StaticStruct(StructDef {
+            type_params: vec![],
             name: "Point".to_string(),
             fields: vec![
                 ("x".to_string(), Type::int()),
@@ -2634,6 +2637,7 @@ fn test_struct_array_list_literal() {
     let mut backend = LlvmBackend::new();
     let program = vec![
         TopLevel::StaticStruct(StructDef {
+            type_params: vec![],
             name: "Point".to_string(),
             fields: vec![
                 ("x".to_string(), Type::int()),
@@ -2704,6 +2708,7 @@ fn test_struct_array_addr_of_and_frgn_call() {
     let mut backend = LlvmBackend::new();
     let program = vec![
         TopLevel::StaticStruct(StructDef {
+            type_params: vec![],
             name: "PyMethodDef".to_string(),
             fields: vec![
                 ("name".to_string(), Type::int()),

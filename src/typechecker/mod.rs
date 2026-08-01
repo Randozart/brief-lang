@@ -450,7 +450,36 @@ pub fn infer_expression(
             let (_, _) = infer_expression(scope, ctx)?;
             infer_expression(expr, ctx)
         }
-        Expr::DerivationBlock(_) | Expr::StructLiteral { .. } => Ok((Type::void(), Provenance::Unknown)),
+        // 2026-07-31: Struct literal — `TypeName { field: e, ... }` resolves
+        // to the struct type and validates the fields against its slots.
+        Expr::StructLiteral { type_name, fields } => {
+            let ty = Type::Custom(type_name.clone());
+            let slots = ctx.type_slots.get(type_name).cloned().unwrap_or_default();
+            let mut resolved = Vec::new();
+            for (fname, fval) in fields {
+                let fty = slots
+                    .iter()
+                    .find(|s| s.name == *fname)
+                    .map(|s| s.ty.clone());
+                let vty = infer_type_only(fval, ctx)?;
+                if let Some(ft) = &fty {
+                    if vty != *ft {
+                        let coercible = try_coerce_via_parse(fval, &vty, ft, ctx);
+                        if !coercible {
+                            return Err(TypeError::TypeMismatch {
+                                expected: format!("{}", ft),
+                                found: format!("{}", vty),
+                                context: format!("field '{}' of struct literal '{}'", fname, type_name),
+                            });
+                        }
+                    }
+                }
+                resolved.push(());
+            }
+            let _ = resolved;
+            Ok((ty, Provenance::Unknown))
+        }
+        Expr::DerivationBlock(_) => Ok((Type::void(), Provenance::Unknown)),
         // 2026-07-17: Address-of: &expr returns a Ptr to the inner type.
         // Provenance carries through so the backend can distinguish
         // mutable state borrows from immutable local borrows.
@@ -886,7 +915,18 @@ pub fn infer_statement(stmt: &Statement, ctx: &mut TypecheckContext) -> Result<(
             // initializer type — no implicit coercion. Literal Parse-ops
             // (`let f: Float = 5`) remain the one sanctioned path.
             if let Some(declared) = ty {
-                if inferred != *declared {
+                let compatible = if inferred == *declared {
+                    true
+                } else {
+                    // 2026-07-31: `let lb: ListBuffer<Int> = ListBuffer {...}`
+                    // — a generic-struct constructor infers the bare type; the
+                    // declared type application pins the type params.
+                    match (declared, &inferred) {
+                        (Type::Applied(dn, _), Type::Custom(inm)) => dn == inm,
+                        _ => false,
+                    }
+                };
+                if !compatible {
                     let coercible = expr.as_ref().map_or(false, |e| {
                         try_coerce_via_parse(e, &inferred, declared, ctx)
                     });
@@ -916,7 +956,20 @@ pub fn infer_statement(stmt: &Statement, ctx: &mut TypecheckContext) -> Result<(
                 }
             }
             infer_type_only(lhs, ctx)?;
-            infer_type_only(rhs, ctx)?;
+            let lhs_ty = infer_expression(lhs, ctx).map(|(t, _)| t)?;
+            let rhs_ty = infer_type_only(rhs, ctx)?;
+            // 2026-07-31 (A2): assignment must preserve the LHS type — no
+            // implicit coercion (`len = "hello"` where len: Int errors).
+            if lhs_ty != rhs_ty {
+                let coercible = try_coerce_via_parse(rhs, &rhs_ty, &lhs_ty, ctx);
+                if !coercible {
+                    return Err(TypeError::TypeMismatch {
+                        expected: format!("{}", lhs_ty),
+                        found: format!("{}", rhs_ty),
+                        context: "assignment".into(),
+                    });
+                }
+            }
             Ok(())
         }
         Statement::Term(val) | Statement::TermBang(val) => {
@@ -1079,6 +1132,17 @@ pub fn check_program(items: &[TopLevel], universe: &TypeUniverse) -> Result<(), 
                 TopLevel::Definition(d) => defn_return_type(d).map(|ty| (d.name.clone(), ty)),
                 _ => None,
             },
+            // 2026-07-31 (Phase 2): frgn return types — `term frgn_foo(x)`
+            // must see the declared foreign return type, not the Int fallback.
+            TopLevel::ForeignBinding(fb) => {
+                let brief_name = fb
+                    .brief_name
+                    .clone()
+                    .unwrap_or_else(|| fb.foreign_name.clone());
+                fb.success_output
+                    .first()
+                    .map(|(_, ty)| (brief_name, ty.clone()))
+            }
             _ => None,
         }
     }).collect();
@@ -1163,6 +1227,73 @@ pub fn check_program(items: &[TopLevel], universe: &TypeUniverse) -> Result<(), 
             errors.push(e);
         }
     }
+
+    // 2026-07-31 (A2): Typecheck obj member bodies with `self` + slot names
+    // bound. Without this, `len = "hello"` inside a member passes silently.
+    for item in items {
+        if let TopLevel::TypeDef(td) = item {
+            if td.body.members.is_empty() {
+                continue;
+            }
+            let self_ty = if td.type_params.is_empty() {
+                Type::Custom(td.name.clone())
+            } else {
+                Type::Applied(
+                    td.name.clone(),
+                    td.type_params.iter().map(|p| Type::Custom(p.name.clone())).collect(),
+                )
+            };
+            for member in &td.body.members {
+                let mut mctx = TypecheckContext::new(universe);
+                mctx.type_parents = all_type_parents.clone();
+                mctx.regular_ops = all_regular_ops.clone();
+                mctx.regular_bindings = all_regular_bindings.clone();
+                mctx.type_slots = all_type_slots.clone();
+                mctx.type_members = all_type_members.clone();
+                mctx.type_params = all_type_params.clone();
+                mctx.fn_param_types = fn_param_types.clone();
+                mctx.type_protocols = all_type_protocols.clone();
+                for (name, ty) in &fn_return_types {
+                    mctx.fn_return_types.insert(name.clone(), ty.clone());
+                }
+                for (name, ty) in &state_bindings {
+                    mctx.bindings.insert(name.clone(), ty.clone());
+                    mctx.state_keys.insert(name.clone());
+                }
+                mctx.bindings.insert("self".into(), self_ty.clone());
+                for slot in &td.body.slots {
+                    mctx.bindings.insert(slot.name.clone(), slot.ty.clone());
+                    mctx.state_keys.insert(slot.name.clone());
+                }
+                match member {
+                    TopLevel::Transaction(t) => {
+                        for (n, ty) in &t.parameters {
+                            mctx.bindings.insert(n.clone(), ty.clone());
+                        }
+                        mctx.current_output_type = t.output_type.as_ref().map(output_type_to_type);
+                        for stmt in &t.body {
+                            if let Err(e) = infer_statement(stmt, &mut mctx) {
+                                errors.push(e);
+                            }
+                        }
+                    }
+                    TopLevel::Definition(d) => {
+                        for (n, ty) in &d.parameters {
+                            mctx.bindings.insert(n.clone(), ty.clone());
+                        }
+                        mctx.current_output_type = d.output_type.as_ref().map(output_type_to_type);
+                        for stmt in &d.body {
+                            if let Err(e) = infer_statement(stmt, &mut mctx) {
+                                errors.push(e);
+                            }
+                        }
+                    }
+                    _ => {}
+                }
+            }
+        }
+    }
+
     if errors.is_empty() {
         Ok(())
     } else {
@@ -1759,6 +1890,78 @@ node probe [true][true] {
         let src = r#"
 let f: Float = 5;
 node probe [true][true] { term; };
+"#;
+        let e = check(src);
+        assert!(e.is_ok(), "expected OK, got: {:?}", e);
+    }
+    #[test]
+    fn generic_struct_and_constructor() {
+        let src = r#"
+struct ListBuffer<T> {
+    data: Ptr<T>;
+    cap: Int;
+};
+let lb: ListBuffer<Int> = ListBuffer { data: 0 as Ptr<Int>, cap: 8 };
+node probe [true][true] { term; };
+"#;
+        let e = check(src);
+        assert!(e.is_ok(), "expected OK, got: {:?}", e);
+    }
+
+    #[test]
+    fn generic_enum_parses() {
+        // Enum DECLARATION with type params parses (variant construction /
+        // pattern-matching is part of the collections rewrite, A9).
+        let src = r#"
+enum Option<T> {
+    Some(T),
+    None
+};
+let o: Int = 0;
+node probe [true][true] { term; };
+"#;
+        let e = check(src);
+        assert!(e.is_ok(), "expected OK, got: {:?}", e);
+    }
+
+    #[test]
+    fn struct_literal_bare_shorthand() {
+        let src = r#"
+struct Arena { base: Ptr<Int>; offset: Int; }
+let base: Ptr<Int> = 0 as Ptr<Int>;
+let offset: Int = 0;
+defn mk() -> Arena { term Arena { base, offset }; };
+node probe [true][true] { term; };
+"#;
+        let e = check(src);
+        assert!(e.is_ok(), "expected OK, got: {:?}", e);
+    }
+
+    #[test]
+    fn member_body_type_error_caught() {
+        let src = r#"
+obj Stack { len: Int; txn push(val: Int) [len < 8][len <= 8] { len = "hello"; term; }; }
+let st: Stack = Stack();
+node probe [true][true] { st.push(5); term; };
+"#;
+        let e = check(src);
+        assert!(e.is_err(), "expected member-body type error, got: {:?}", e);
+    }
+
+    #[test]
+    fn member_body_with_self_slots_resolves() {
+        let src = r#"
+obj Stack {
+    data: Int[8];
+    len: Int;
+    txn push(val: Int) [len < 8][len <= 8] {
+        data[len] = val;
+        len = len + 1;
+        term;
+    };
+}
+let st: Stack = Stack();
+node probe [true][true] { st.push(5); term; };
 "#;
         let e = check(src);
         assert!(e.is_ok(), "expected OK, got: {:?}", e);

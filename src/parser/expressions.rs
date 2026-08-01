@@ -593,15 +593,27 @@ impl<'a> Parser<'a> {
 
     /// Parse a struct literal: TypeName { field: expr; ... }
     /// 2026-07-24: Constructs a value of a static struct type.
+    /// 2026-07-31: Accepts semicolon OR comma separators, and the bare
+    /// shorthand `TypeName { field, other }` where the value is the
+    /// identifier `field`.
     fn parse_struct_literal(&mut self, type_name: String) -> Result<Expr, SyntaxError> {
         self.pos += 1; // consume {
         let mut fields = Vec::new();
         while !self.check(&Token::RBrace) && !self.is_at_end() {
             let name = self.expect_identifier()?;
-            self.expect(Token::Colon)?;
-            let value = self.parse_expression()?;
-            self.eat(&Token::Semicolon);
-            fields.push((name, value));
+            if self.eat(&Token::Colon) {
+                let value = self.parse_expression()?;
+                fields.push((name, value));
+            } else {
+                // 2026-07-31: Bare shorthand: `Arena { base, offset }` means
+                // `Arena { base: base, offset: offset }`.
+                fields.push((name.clone(), Expr::Identifier(name)));
+            }
+            // 2026-07-31: Accept either `;` or `,` separators (and a single
+            // trailing separator before the closing brace).
+            if !self.eat(&Token::Semicolon) && !self.eat(&Token::Comma) {
+                break;
+            }
         }
         self.expect(Token::RBrace)?;
         Ok(Expr::StructLiteral { type_name, fields })
@@ -611,6 +623,8 @@ impl<'a> Parser<'a> {
     /// looks like struct fields (identifier: expr) rather than guard/block
     /// bodies. Prevents `when TOTAL { let x ...` from being parsed as a
     /// struct literal when TOTAL is a PascalCase variable, not a type.
+    /// 2026-07-31: Accepts the bare shorthand too: `T { a, b }` (identifier
+    /// followed by ',' or '}') as well as `T { a: e }`.
     fn lookahead_is_struct_literal(&self) -> bool {
         // Look at the token after the current position (which is {)
         let after_brace = self.pos + 1;
@@ -618,10 +632,11 @@ impl<'a> Parser<'a> {
         let next_tok = &self.tokens[after_brace].0;
         let next_is_ident = matches!(next_tok, Token::Identifier(_));
         if !next_is_ident { return false; }
-        // Check the token after the identifier — must be ':' for struct field
+        // Check the token after the identifier — must be ':' or ',' for a
+        // struct field (comma = bare shorthand); otherwise it's a block body.
         let after_ident = after_brace + 1;
         if after_ident >= self.tokens.len() { return false; }
-        matches!(&self.tokens[after_ident].0, Token::Colon)
+        matches!(&self.tokens[after_ident].0, Token::Colon | Token::Comma)
     }
 
     pub fn parse_block(&mut self) -> Result<Vec<crate::ast::Statement>, SyntaxError> {

@@ -834,6 +834,9 @@ pub struct ResourceDeclaration {
 #[derive(Debug, Clone)]
 pub struct StructDef {
     pub name: String,
+    /// 2026-07-31: Type parameters (`struct ListBuffer<T>`) — a generic,
+    /// C-compatible data container. Instantiated at first use.
+    pub type_params: Vec<TypeParam>,
     pub fields: Vec<(String, Type)>,
     pub metadata: HashMap<String, PropertyValue>,
     pub span: Option<Span>,
