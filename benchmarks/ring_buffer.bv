@@ -34,11 +34,11 @@ node enqueue [ops < TOTAL][ops == TOTAL] {
         // them (and the loop) entirely.
         let filled: Int = tail - head;
         let buf_val: Int = data[tail % CAP];
-        PrintLn!(filled + buf_val);
+        println!(filled + buf_val);
     };
     when ops == TOTAL {
         let chk: Int = data[0] + data[512];
-        PrintLn!(chk);
+        println!(chk);
     };
     term;
 };

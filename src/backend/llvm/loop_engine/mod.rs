@@ -228,8 +228,7 @@ impl LlvmBackend {
     /// The memcpy round-trip saves/restores all state fields so each
     /// reactor tick sees a consistent snapshot.
 pub(crate) fn emit_main(&mut self, out: &mut String, has_wake_triggers: bool) {
-    writeln!(out, "define i32 @main() local_unnamed_addr {} {{", "#0").ok();
-    writeln!(out, "entry:").ok();
+    self.emit_main_header(out, "#0", true);
     writeln!(out, "  %state = alloca %State, align 8").ok();
     self.emit_inline_init_stores(out, "%state");
     // 2026-07-14: Initialize thread pool for async programs

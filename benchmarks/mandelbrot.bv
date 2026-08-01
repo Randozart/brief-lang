@@ -4,7 +4,7 @@
 
 
 let count: Int = 0;
-let N: Int = GetEnvInt!("BOUND");
+let N: Int = get_env_int!("BOUND");
 let seed: Int = 42;
 let zr: Int = 100;
 let zi: Int = 0;
@@ -34,8 +34,8 @@ node mb [count < N][count == N] {
     let nzi: Int = nt3 + zi * ncr / SCALE;
     let nesc: Int = escapes + nzr * nzr / SCALE + nzi * nzi / SCALE;
     seed = ns2;  cr = ncr;  ci = nci;  t1 = nt1;  t2 = nt2;  t3 = nt3;  zr = nzr;  zi = nzi;  escapes = nesc;
-    when count % 5000000 == 0 { PrintLn!(nesc); };
+    when count % 5000000 == 0 { println!(nesc); };
     count = count + 1;
-    when count == N { term! -> PrintLn!(nesc); };
+    when count == N { term! -> println!(nesc); };
     term;
 };

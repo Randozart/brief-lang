@@ -1262,6 +1262,15 @@ fn collect_identifiers(expr: &Expr, out: &mut HashSet<String>) {
         Expr::Field(obj, _) => {
             collect_identifiers(obj, out);
         }
+        // 2026-08-01 (B3): reflection (`s.^Len`, `s.^^Bytes`, `s.^Ptr`)
+        // READS its receiver — the field must stay live. Without this arm,
+        // a String `let` used only via reflection was eliminated as a dead
+        // state field, and `s.^Len` emitted `load i64, ptr @s` with @s
+        // undefined (the field was dropped from %State). This is the same
+        // liveness rule as FFI args: an observation keeps the value alive.
+        Expr::Reflect(recv, _, _) => {
+            collect_identifiers(recv, out);
+        }
         Expr::Block(stmts) => {
             for stmt in stmts {
                 if let Statement::Expression(e) = stmt {
@@ -1425,7 +1434,6 @@ mod tests {
             contract: crate::ast::Contract {
                 pre_condition: Expr::Bool(true),
                 post_condition: Expr::Bool(true),
-                is_entry: false,
                 watchdog: None,
                 explicit: false,
                 span: None,
@@ -1470,7 +1478,6 @@ mod tests {
             contract: crate::ast::Contract {
                 pre_condition: Expr::Bool(true),
                 post_condition: Expr::Bool(true),
-                is_entry: false,
                 watchdog: None,
                 explicit: false,
                 span: None,
@@ -1509,7 +1516,6 @@ mod tests {
             contract: crate::ast::Contract {
                 pre_condition: Expr::Bool(true),
                 post_condition: Expr::Bool(true),
-                is_entry: false,
                 watchdog: None,
                 explicit: false,
                 span: None,
@@ -1544,7 +1550,6 @@ mod tests {
                         Box::new(Expr::Identifier("total".to_string())),
                     ),
                     post_condition: Expr::Bool(true),
-                    is_entry: false,
                     watchdog: None,
                     explicit: false,
                     span: None,
@@ -1735,7 +1740,6 @@ mod tests {
                         Box::new(Expr::Identifier("total".to_string())),
                     ),
                     post_condition: Expr::Bool(true),
-                    is_entry: false,
                     watchdog: None,
                     explicit: false,
                     span: None,
@@ -1777,7 +1781,6 @@ mod tests {
                         Box::new(Expr::Identifier("total".to_string())),
                     ),
                     post_condition: Expr::Bool(true),
-                    is_entry: false,
                     watchdog: None,
                     explicit: false,
                     span: None,

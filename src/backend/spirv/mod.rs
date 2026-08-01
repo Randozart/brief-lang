@@ -63,7 +63,6 @@ mod tests {
                 Box::new(Expr::Decimal(64)),
             ),
             post_condition: Expr::Bool(true),
-            is_entry: false,
             watchdog: None,
                 explicit: false,
                 span: None,

@@ -14,8 +14,8 @@
 
 import "std/types/UTF8view.bv";
 
-const TOTAL: Int = GetEnvInt!("BOUND");
-const SEED: Int = GetEnvInt!("SEED");
+const TOTAL: Int = get_env_int!("BOUND");
+const SEED: Int = get_env_int!("SEED");
 
 let ops: Int = 0;
 let checksum: Int = 0;
@@ -32,7 +32,7 @@ node work [ops < TOTAL][ops == TOTAL] {
     checksum = checksum + cmp + valid;
     ops = ops + 1;
     when ops % 5000000 == 0 {
-        PrintLn!(checksum);
+        println!(checksum);
     };
     term;
 };

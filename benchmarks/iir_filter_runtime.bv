@@ -8,7 +8,7 @@
 //       --out benchmarks --optimize-budget 256
 
 
-let bound: Int = GetEnvInt!("BOUND");
+let bound: Int = get_env_int!("BOUND");
 let x1: Float = 0.0;
 let x2: Float = 0.0;
 let y1: Float = 0.0;
@@ -41,7 +41,7 @@ node process [bound > 0 && count < bound][count == bound] {
 
     count = count + 1;
     when count % 5000000 == 0 {
-        PrintLn!(out);
+        println!(out);
     };
     term;
 };

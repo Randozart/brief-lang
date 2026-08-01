@@ -92,16 +92,18 @@ pub fn emit_intrinsic_call(
         }
         "PrintStr#" => {
             let a = backend.emit_expr(out, &args[0], indent);
+            // 2026-08-01 (B0): A Brief String value IS the ptr to a
+            // length-prefixed [len][bytes] buffer, and __print_str takes
+            // that pointer (the runtime's int64_t msg_bstr is the address,
+            // typed as const char* in brief_rt.c to match this ABI). The
+            // value register is already that ptr (literals emit it directly,
+            // state loads inttoptr it via the state adapter, frgns return it).
+            // Undo: if the ptr representation is ever reverted to an i64
+            // handle, restore the ptrtoint boxing here and in
+            // emit_legacy_string_literal.
             writeln!(out, "{}{} = call i64 @__print_str(ptr {})", indent, v, a.name).ok();
             return BTypedRegister { name: v.to_string(), ty: Type::int() };
         }
-        // 2026-07-28: Print intrinsics — emit the same @__print_* calls as
-        // before, but through the intrinsic path so they're recognized as
-        // non-FFI by is_ffi_call (guards become outline-able).
-        "PrintInt#"   => return emit_external_call(backend, out, v, "__print_int", args, indent),
-        "PrintFloat#" => return emit_external_call(backend, out, v, "__print_float", args, indent),
-        "PrintChar#"  => return emit_external_call(backend, out, v, "__print_char", args, indent),
-        "PrintStr#"   => return emit_external_call(backend, out, v, "__print_str", args, indent),
         // 2026-07-18: Pointer operations — special-case because they need
         // type-dependent codegen (Deref# needs pointee type, Index# needs
         // element type, Cast# needs target type). Ptr# is a simple inttoptr.

@@ -500,7 +500,10 @@ bench_self_term() {
             echo "  SKIP — no Python"
         fi
         if [ -d "$multi_dir" ] && [ -x "$(command -v node)" ]; then
-            node "$multi_dir/bench_node.mjs" 2>&1 | sed 's/^/    /'
+            # 2026-08-01: Guard against node bench failure (missing koffi) —
+            # under `set -e` a failing node bench aborted the whole suite before
+            # the summary table. A broken benchmark must not kill the run.
+            node "$multi_dir/bench_node.mjs" 2>&1 | sed 's/^/    /' || echo "    SKIP — node bench failed (missing koffi?)"
         else
             echo "  SKIP — no Node.js"
         fi

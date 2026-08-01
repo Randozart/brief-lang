@@ -88,6 +88,21 @@ impl<'a> Parser<'a> {
             if let Some(Token::Identifier(_)) = self.peek_next() {
                 let after_ident = self.tokens.get(self.pos + 2).map(|(t, _)| t);
                 if matches!(after_ident, Some(Token::RBracket)) {
+                    // 2026-08-01 (Phase 2): `Type[#]` (from `-> Int [#]`) is
+                    // the removed entry-point marker, NOT a named array
+                    // dimension. Reject it with the same clear error as
+                    // parse_contract so `defn main() -> Int [#]` fails loudly
+                    // instead of producing `Int[#]` (a named dimension "#").
+                    if let Some(Token::Identifier(ident)) = self.peek_next() {
+                        if ident == "#" {
+                            return Err(crate::errors::SyntaxError::InvalidStatement {
+                                reason: "'[#]' entry-point syntax removed — use the entry!/args! \
+                                         macros (Phase 3) or write an explicit contract"
+                                    .to_string(),
+                                span: crate::errors::Span::dummy(),
+                            });
+                        }
+                    }
                     self.pos += 1; // consume LBracket
                     let name = self.expect_identifier()?;
                     self.expect(Token::RBracket)?;

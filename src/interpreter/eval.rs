@@ -117,8 +117,31 @@ pub fn eval_expr(
             Ok(Value::Void)
         }
         Expr::Reflect(recv, name, _kind) => {
-            let _ = (recv, name);
-            Ok(Value::Void)
+            // 2026-08-01 (B3): reflection on String values — `Len` (Size prop)
+            // = UTF8 character count, `Bytes` = byte length. A String is
+            // `Value::Bits(bytes)` (direct) or a heap handle `Value::Int(addr)`
+            // (`[len: i64][bytes]`). Mirrors the backend's brief_char_len /
+            // header-read emission (rule #4: interpreter is the reference).
+            let val = eval_expr(recv, heap, bindings)?;
+            match name.as_str() {
+                "Len" => {
+                    let bytes = val
+                        .string_bytes(heap)
+                        .unwrap_or_default();
+                    let chars = bytes
+                        .iter()
+                        .filter(|b| (**b & 0xC0) != 0x80)
+                        .count();
+                    Ok(i64_to_bits(chars as i64))
+                }
+                "Bytes" => {
+                    let bytes = val
+                        .string_bytes(heap)
+                        .unwrap_or_default();
+                    Ok(i64_to_bits(bytes.len() as i64))
+                }
+                _ => Ok(Value::Void),
+            }
         }
         Expr::MethodCall(recv, _name, args, _) => {
             eval_expr(recv, heap, bindings)?;
@@ -132,11 +155,12 @@ pub fn eval_expr(
         Expr::FormattingAnnotation(_) => Ok(Value::Void),
 
         // 2026-07-19: Plugin-intercept calls must be resolved by Front plugins
-        // before evaluation. If one reaches here, the plugin system failed.
-        Expr::PluginIntercept { name, .. } => Err(RuntimeError::UnsupportedIntrinsic(format!(
-            "plugin-intercept {}",
-            name
-        ))),
+        // before evaluation. The compiler's build path rewrites the lowercase
+        // macros (`print!`, `println!`, `get_env!`, `get_env_int!`) at the
+        // Parsed stage; this native path keeps direct interpreter use correct
+        // (rule #4: the interpreter is the reference) and reports a rename
+        // hint for the deprecated PascalCase names.
+        Expr::PluginIntercept { name, args, .. } => eval_intercept(name, args, heap, bindings),
         Expr::Exists(_) => { unreachable!("fn? only in stage eval") },
             Expr::Slice { array, .. } => eval_expr(array, heap, bindings),
 
@@ -163,6 +187,131 @@ fn eval_call(
             .get(name)
             .cloned()
             .ok_or_else(|| RuntimeError::UndefinedVariable { name: name.into() })
+    }
+}
+
+/// 2026-08-01: Native evaluation for plugin intercepts — the reference
+/// implementation of the lowercase macros. The build path rewrites these
+/// to stdlib/intrinsic calls at the Parsed stage; this path keeps the
+/// interpreter correct when it runs the raw AST. Format strings parse
+/// identically to codegen via crate::plugin::print_plugin::parse_format.
+fn eval_intercept(
+    name: &str,
+    args: &[Expr],
+    heap: &mut VirtualHeap,
+    bindings: &mut HashMap<String, Value>,
+) -> Result<Value, RuntimeError> {
+    match name {
+        "print" | "println" => eval_print_macro(name, args, heap, bindings),
+        "get_env" => {
+            let key = eval_string_arg(args, heap, bindings)?;
+            let val = std::env::var(&key).unwrap_or_default();
+            Ok(Value::bits(val.into_bytes()))
+        }
+        "get_env_int" => {
+            let key = eval_string_arg(args, heap, bindings)?;
+            let val = std::env::var(&key).unwrap_or_default();
+            Ok(i64_to_bits(val.parse::<i64>().unwrap_or(0)))
+        }
+        // Deprecated PascalCase names — rejected by the typechecker with a
+        // rename hint in the build path; mirrored here for interpreter parity.
+        "Print" | "PrintLn" => Err(RuntimeError::UnsupportedIntrinsic(format!(
+            "'{}!' is deprecated — use the lowercase 'print!' / 'println!' macros",
+            name
+        ))),
+        "GetEnvInt" | "GetEnv" | "GetEnvOrDefault" => Err(RuntimeError::UnsupportedIntrinsic(
+            format!(
+                "'{}!' is deprecated — use the lowercase 'get_env_int!' / 'get_env!' macros",
+                name
+            ),
+        )),
+        _ => Err(RuntimeError::UnsupportedIntrinsic(format!(
+            "plugin-intercept {}",
+            name
+        ))),
+    }
+}
+
+/// Evaluate the print!/println! macro against runtime values.
+fn eval_print_macro(
+    name: &str,
+    args: &[Expr],
+    heap: &mut VirtualHeap,
+    bindings: &mut HashMap<String, Value>,
+) -> Result<Value, RuntimeError> {
+    let is_println = name == "println";
+    if args.is_empty() {
+        if is_println {
+            return execute_intrinsic("PrintChar#", &[i64_to_bits(10)], heap);
+        }
+        return Err(RuntimeError::UnsupportedIntrinsic(
+            "print! requires a value or a format-string argument".to_string(),
+        ));
+    }
+
+    if let Expr::Quoted(fmt) = &args[0] {
+        let parts = crate::plugin::print_plugin::parse_format(fmt)
+            .map_err(|msg| RuntimeError::UnsupportedIntrinsic(format!("{msg}")))?;
+        let value_args = &args[1..];
+        let mut next = 0usize;
+        for part in &parts {
+            match part {
+                crate::plugin::print_plugin::FmtPart::Literal(seg) => {
+                    print!("{}", String::from_utf8_lossy(seg));
+                }
+                crate::plugin::print_plugin::FmtPart::Next => {
+                    let value = eval_expr(&value_args[next], heap, bindings)?;
+                    print_value(&value, heap)?;
+                    next += 1;
+                }
+                crate::plugin::print_plugin::FmtPart::Position(n) => {
+                    let value = eval_expr(&value_args[*n], heap, bindings)?;
+                    print_value(&value, heap)?;
+                }
+            }
+        }
+    } else {
+        let value = eval_expr(&args[0], heap, bindings)?;
+        print_value(&value, heap)?;
+    }
+
+    if is_println {
+        execute_intrinsic("PrintChar#", &[i64_to_bits(10)], heap)?;
+    }
+    Ok(Value::Void)
+}
+
+/// Print a runtime value by its representation: Float, integer, or string
+/// bits — mirroring the PrintFloat#/PrintInt#/PrintStr# dispatch in codegen.
+fn print_value(value: &Value, heap: &mut VirtualHeap) -> Result<(), RuntimeError> {
+    match value {
+        Value::Float(f) => {
+            print!("{}", f);
+        }
+        Value::Int(n) => {
+            print!("{}", n);
+        }
+        Value::Bits(bytes) => {
+            execute_intrinsic("PrintStr#", &[Value::bits(bytes.clone())], heap)?;
+        }
+        _ => {}
+    }
+    Ok(())
+}
+
+/// Evaluate args[0] and decode it as a string (Bits) for env-var keys.
+fn eval_string_arg(
+    args: &[Expr],
+    heap: &mut VirtualHeap,
+    bindings: &mut HashMap<String, Value>,
+) -> Result<String, RuntimeError> {
+    let value = eval_expr(&args[0], heap, bindings)?;
+    match value {
+        Value::Bits(bytes) => Ok(String::from_utf8_lossy(&bytes).to_string()),
+        other => Err(RuntimeError::TypeError {
+            expected: "String".into(),
+            found: format!("{other:?}"),
+        }),
     }
 }
 
@@ -203,7 +352,19 @@ fn eval_binary_op(
                 _ => execute_intrinsic("Mul#", &[lv, rv], heap),
             }
         }
-        BinaryOpKind::Eq => Ok(bool_to_bits(lv.as_i64() == rv.as_i64())),
+        BinaryOpKind::Eq => {
+            // 2026-08-01 (B1): content equality — two Strings are equal when
+            // their payload bytes match, not when they live at the same
+            // address. string_bytes() derefs both representations (raw Bits
+            // and heap handles); when BOTH operands are Strings, compare
+            // content. Otherwise fall through to numeric equality (ints,
+            // floats, bools). This is the interpreter-first half of B1 (rule
+            // #4); the LLVM backend mirrors it in emit_expr.rs.
+            match (lv.string_bytes(heap), rv.string_bytes(heap)) {
+                (Some(a), Some(b)) => Ok(bool_to_bits(a == b)),
+                _ => Ok(bool_to_bits(lv.as_i64() == rv.as_i64())),
+            }
+        }
         BinaryOpKind::Lt => {
             let la = lv.as_i64();
             let ra = rv.as_i64();
@@ -237,11 +398,11 @@ fn eval_binary_op(
             }
         }
         BinaryOpKind::Neq => {
-            let la = lv.as_i64();
-            let ra = rv.as_i64();
-            match (la, ra) {
+            // 2026-08-01 (B1): content inequality — mirrors the Eq arm above
+            // (deref both Strings, compare payload bytes).
+            match (lv.string_bytes(heap), rv.string_bytes(heap)) {
                 (Some(a), Some(b)) => Ok(bool_to_bits(a != b)),
-                _ => Ok(bool_to_bits(false)),
+                _ => Ok(bool_to_bits(lv.as_i64() != rv.as_i64())),
             }
         }
         BinaryOpKind::And => {
@@ -253,6 +414,29 @@ fn eval_binary_op(
             let lb = matches!(lv, Value::Bits(ref b) if b.iter().any(|x| *x > 0));
             let rb = matches!(rv, Value::Bits(ref b) if b.iter().any(|x| *x > 0));
             Ok(bool_to_bits(lb || rb))
+        }
+        BinaryOpKind::BitAnd | BinaryOpKind::BitOr | BinaryOpKind::BitXor => {
+            // 2026-08-01 (B1): #String bitwise defaults — operate on content
+            // bytes and return a NEW string of the same length (interpreter
+            // half of B1; the backend mirrors it with brief_str_band/bor/bxor).
+            // When both operands deref as strings, apply the byte-wise op.
+            match (lv.string_bytes(heap), rv.string_bytes(heap)) {
+                (Some(a), Some(b)) => {
+                    if a.len() != b.len() {
+                        return Err(RuntimeError::TypeError {
+                            expected: "String bitwise operands of equal length".into(),
+                            found: format!("{} vs {} bytes", a.len(), b.len()),
+                        });
+                    }
+                    let result: Vec<u8> = a.iter().zip(b.iter()).map(|(x, y)| match kind {
+                        BinaryOpKind::BitAnd => x & y,
+                        BinaryOpKind::BitOr => x | y,
+                        _ => x ^ y,
+                    }).collect();
+                    Ok(Value::bits(result))
+                }
+                _ => Ok(bool_to_bits(false)),
+            }
         }
         _ => {
             // Pass through unknown operators as intrinsic calls
@@ -280,6 +464,12 @@ fn eval_unary_op(
             Ok(bool_to_bits(!b))
         }
         UnaryOpKind::BitNot => {
+            // 2026-08-01 (B1): #String unary bitwise default — complement each
+            // content byte, same length (interpreter half; the backend emits
+            // brief_str_bnot).
+            if let Some(bytes) = val.string_bytes(heap) {
+                return Ok(Value::bits(bytes.iter().map(|b| !b).collect()));
+            }
             let n = val.as_i64().unwrap_or(0);
             Ok(i64_to_bits(!n))
         }

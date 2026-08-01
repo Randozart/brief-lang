@@ -399,6 +399,13 @@ pub fn collect_read_identifiers(body: &[Statement]) -> std::collections::HashSet
             Statement::Expression(e) => {
                 collect_expr_identifiers(e, &mut ids);
             }
+            // 2026-08-01 (Phase 3c): term/return expressions read their
+            // operands — a `term x;` node genuinely reads x. Without this the
+            // concurrency gate's XOR-overlap check would miss read-write
+            // dependencies through Term, wrongly requiring classification.
+            Statement::Term(Some(e)) | Statement::TermBang(Some(e)) | Statement::Return(Some(e)) => {
+                collect_expr_identifiers(e, &mut ids);
+            }
             _ => {}
         }
     }
@@ -642,7 +649,6 @@ mod tests {
             contract: Contract {
                 pre_condition: Expr::Bool(true),
                 post_condition: Expr::Bool(true),
-                is_entry: false,
                 watchdog: None,
                 explicit: false,
                 span: None,

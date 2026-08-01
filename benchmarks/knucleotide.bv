@@ -3,7 +3,7 @@
 
 
 let count: Int = 0;
-let N: Int = GetEnvInt!("BOUND");
+let N: Int = get_env_int!("BOUND");
 let seed: Int = 42;
 let hash: Int = 0;
 let chksum: Int = 0;
@@ -19,7 +19,7 @@ node kn [count < N][count == N] {
     let nhash: Int = ((hash << 2) | (nseed & 3)) & MASK;
     let nchksum: Int = chksum + nhash % 13;
     seed = nseed;  hash = nhash;  chksum = nchksum;
-    when count % 5000000 == 0 { PrintLn!(nchksum); };
+    when count % 5000000 == 0 { println!(nchksum); };
     count = count + 1;
     term;
 };

@@ -222,7 +222,6 @@ mod tests {
             contract: Contract {
                 pre_condition: pre,
                 post_condition: Expr::Bool(true),
-                is_entry: false,
                 watchdog: None,
                 explicit: false,
                 span: None,

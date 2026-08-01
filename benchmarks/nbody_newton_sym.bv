@@ -383,11 +383,11 @@ node simulate [
     let energy: Float32 = epp + ek0c + ek1c + ek2c + ek3c + ek4c;
 
     when count % 5000000 == 0 {
-        let __printed = PrintLn!(energy);
+        let __printed = println!(energy);
     };
     count = count + 1;
     when count == bound {
-        term! -> PrintLn!(energy);
+        term! -> println!(energy);
     };
     term;
 };

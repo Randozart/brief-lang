@@ -18,7 +18,6 @@ fn make_txn(name: &str, modifiers: Vec<Annotation>) -> TopLevel {
         contract: Contract {
             pre_condition: Expr::Bool(true),
             post_condition: Expr::Bool(true),
-            is_entry: false,
             watchdog: None,
             explicit: false,
             span: None,
@@ -47,7 +46,6 @@ fn default_contract() -> Contract {
     Contract {
         pre_condition: Expr::Bool(true),
         post_condition: Expr::Bool(true),
-        is_entry: false,
         watchdog: None,
         explicit: false,
         span: None,
@@ -350,7 +348,6 @@ fn test_no_range_lower_bound_defaults_to_i64_min() {
                 pre_condition: Expr::BinaryOp(BinaryOpKind::Lt,
                     Box::new(Expr::Identifier("x".to_string())), Box::new(Expr::Decimal(100))),
                 post_condition: Expr::Bool(true),
-                is_entry: false,
                 watchdog: None,
                 explicit: false,
                 span: None,
@@ -396,7 +393,6 @@ fn test_binop_no_nuw_nsw() {
                     Box::new(Expr::BinaryOp(BinaryOpKind::Lt,
                         Box::new(Expr::Identifier("x".to_string())), Box::new(Expr::Decimal(10))))),
                 post_condition: Expr::Bool(true),
-                is_entry: false,
                 watchdog: None,
                 explicit: false,
                 span: None,
@@ -415,6 +411,101 @@ fn test_binop_no_nuw_nsw() {
     let output = backend.generate(&program, None);
     assert!(!output.contains("nuw nsw"),
         "add on bounded variables should NOT emit nuw nsw (LLVM infers from !range; nuw nsw causes urem→128bit mul)");
+}
+
+#[test]
+fn test_range_metadata_suppressed_for_written_field() {
+    // 2026-08-01: Regression test — a contract-derived !range must NOT be
+    // attached to loads of a field the node body writes. The range comes from
+    // the precondition ([x < 1]) but the dispatch-loop guard re-reads the field
+    // each tick; once the body writes x = 1 the value leaves the range, which is
+    // LLVM UB and made clang fold the guard to always-true (reactor never
+    // converges — observed as an infinite loop in the B0 format demo).
+    let mut backend = LlvmBackend::new();
+    let program = vec![
+        TopLevel::StateDecl(StateDecl {
+            name: "x".to_string(),
+            ty: Type::int(),
+            span: None,
+        }),
+        TopLevel::Transaction(Transaction {
+            name: "t".to_string(),
+            is_reactive: true,
+            is_async: false,
+            type_params: vec![],
+            parameters: vec![],
+            output_type: None,
+            outputs: vec![],
+            contract: Contract {
+                pre_condition: Expr::BinaryOp(BinaryOpKind::Lt,
+                    Box::new(Expr::Identifier("x".to_string())), Box::new(Expr::Decimal(1))),
+                post_condition: Expr::Bool(true),
+                watchdog: None,
+                explicit: false,
+                span: None,
+            },
+            body: vec![
+                Statement::Assign(Expr::Identifier("x".to_string()), Expr::Decimal(1)),
+                Statement::Term(None),
+            ],
+            metadata: HashMap::new(),
+            derivation: None,
+            modifiers: vec![],
+            span: None,
+            doc: None,
+        }),
+    ];
+    let output = backend.generate(&program, None);
+    // The write_set = {x}, so no module-level !range node may reference x's
+    // field loads. The inline `!range !{0, bound}` reload emitted by
+    // emit_precondition_check is sound (fresh read inside the guard's safe path)
+    // and is allowed to remain.
+    let module_level_range_on_x_load = output.contains("!range !50")
+        || output.contains("!range !51");
+    assert!(!module_level_range_on_x_load,
+        "precondition-derived !range must not attach to loads of a written field\n{output}");
+    assert!(!output.contains("!5 = !{ i64 -9223372036854775808, i64 1 }"),
+        "the module-level range node for the written field must not be emitted\n{output}");
+}
+
+#[test]
+fn test_range_metadata_kept_for_read_only_field() {
+    // 2026-08-01: Control test for the above — a field NO node writes keeps its
+    // precondition-derived !range (it is loop-invariant and therefore sound).
+    let mut backend = LlvmBackend::new();
+    let program = vec![
+        TopLevel::StateDecl(StateDecl {
+            name: "x".to_string(),
+            ty: Type::int(),
+            span: None,
+        }),
+        TopLevel::Transaction(Transaction {
+            name: "t".to_string(),
+            is_reactive: true,
+            is_async: false,
+            type_params: vec![],
+            parameters: vec![],
+            output_type: None,
+            outputs: vec![],
+            contract: Contract {
+                pre_condition: Expr::BinaryOp(BinaryOpKind::Lt,
+                    Box::new(Expr::Identifier("x".to_string())), Box::new(Expr::Decimal(100))),
+                post_condition: Expr::Bool(true),
+                watchdog: None,
+                explicit: false,
+                span: None,
+            },
+            body: vec![Statement::Term(None)],
+            metadata: HashMap::new(),
+            derivation: None,
+            modifiers: vec![],
+            span: None,
+            doc: None,
+        }),
+    ];
+    let output = backend.generate(&program, None);
+    assert!(output.contains("!range !") || output.contains("!range !{"),
+        "read-only field should keep precondition-derived range metadata\n{output}");
 }
 
 #[test]
@@ -849,7 +940,6 @@ fn make_wake_program_no_triggers() -> Vec<TopLevel> {
                     Box::new(Expr::BinaryOp(BinaryOpKind::Lt,
                         Box::new(Expr::Identifier("ops".to_string())), Box::new(Expr::Identifier("N".to_string()))))),
                 post_condition: Expr::Bool(true),
-                is_entry: false,
                 watchdog: None,
                 explicit: false,
                 span: None,
@@ -928,7 +1018,6 @@ fn make_exit_program(exit_expr: Option<Expr>, is_wake: bool) -> Vec<TopLevel> {
         contract: Contract {
             pre_condition: pre,
             post_condition: Expr::Bool(true),
-            is_entry: false,
             watchdog: None,
             explicit: false,
             span: None,
@@ -1086,7 +1175,6 @@ fn make_slp_float_program(n_floats: usize, cross_body: Vec<Statement>, precondit
         contract: Contract {
             pre_condition: precondition.unwrap_or(Expr::Bool(true)),
             post_condition: Expr::Identifier("count".to_string()),
-            is_entry: false,
             watchdog: None,
             explicit: false,
             span: None,
@@ -1678,7 +1766,6 @@ fn make_chain_program(
             contract: Contract {
                 pre_condition: pre,
                 post_condition: Expr::Bool(true),
-                is_entry: false,
                 watchdog: None,
                 explicit: false,
                 span: None,
@@ -2562,7 +2649,6 @@ fn test_trg_deref_error_flag() {
                     Box::new(Expr::Decimal(1)),
                 ),
                 post_condition: Expr::Bool(true),
-                is_entry: false,
                 watchdog: None,
                 explicit: false,
                 span: None,
@@ -2608,7 +2694,6 @@ fn test_trg_deref_warn_default_no_null_check() {
                     Box::new(Expr::Decimal(1)),
                 ),
                 post_condition: Expr::Bool(true),
-                is_entry: false,
                 watchdog: None,
                 explicit: false,
                 span: None,
@@ -2929,7 +3014,6 @@ fn test_modulo_partition_drives_rotated_loop() {
                 post_condition: Expr::BinaryOp(BinaryOpKind::Eq,
                     Box::new(Expr::Identifier("count".to_string())),
                     Box::new(Expr::Identifier("total".to_string()))),
-                is_entry: false,
                 watchdog: None,
                 explicit: false,
                 span: None,
@@ -3048,7 +3132,6 @@ fn test_density_consumer_downgrades_dense_txn() {
             post_condition: Expr::BinaryOp(BinaryOpKind::Eq,
                 Box::new(Expr::Identifier("count".to_string())),
                 Box::new(Expr::Identifier("total".to_string()))),
-            is_entry: false,
             watchdog: None,
             explicit: false,
             span: None,
@@ -3125,7 +3208,7 @@ fn test_batch_loop_dispatch_post_increment() {
             post_condition: Expr::BinaryOp(BinaryOpKind::Eq,
                 Box::new(Expr::Identifier("count".into())),
                 Box::new(Expr::Identifier("total".into()))),
-            is_entry: false, watchdog: None, explicit: false, span: None,
+            watchdog: None, explicit: false, span: None,
         },
         body,
         metadata: HashMap::new(), derivation: None, modifiers: vec![],
@@ -3164,7 +3247,7 @@ fn test_batch_loop_rejects_pre_increment() {
                 post_condition: Expr::BinaryOp(BinaryOpKind::Eq,
                     Box::new(Expr::Identifier("count".into())),
                     Box::new(Expr::Identifier("total".into()))),
-                is_entry: false, watchdog: None, explicit: false, span: None,
+                watchdog: None, explicit: false, span: None,
             },
             body: vec![
                 // Guard BEFORE the increment (pre-increment semantics).
@@ -3192,3 +3275,460 @@ fn test_batch_loop_rejects_pre_increment() {
     let output = LlvmBackend::new().generate(&program, None);
     assert!(!output.contains(".cd_"), "pre-increment guard must NOT use the countdown loop");
 }
+
+// ── FFI regression guard (2026-08-01, Phase 0-1 of the plugin/macro rework) ──
+// print!/println! rewrite to direct C-runtime intrinsic calls (PrintInt#,
+// PrintStr#, PrintChar# etc.), which the backend emits as `call i64 @__print_*`.
+// The syntax renames in the plugin/macro rework (PrintLn! -> println!,
+// GetEnvInt! -> get_env_int!) must never introduce an indirection layer (GLUE
+// bridge shims, protocol chains) between the macro and the C runtime call.
+// This test pins that contract: if a future rewrite stops emitting the direct
+// call, it fails here.
+
+/// Lex + parse a .bv source string into an AST (test helper).
+fn parse_bv_source(src: &str) -> Vec<TopLevel> {
+    let tokens = crate::lexer::tokenize(src).expect("tokenize failed");
+    let mut parser = crate::parser::Parser::new(tokens, src);
+    parser.parse_program().expect("parse failed")
+}
+
+#[test]
+fn test_print_plugin_emits_direct_ffi_calls() {
+    let src = r#"
+        let x: Int = 5;
+        defn show(v: Int) -> Int {
+            println!(v);
+            term v;
+        };
+    "#;
+    let mut items = parse_bv_source(src);
+    let mut universe = crate::type_universe::TypeUniverse::new();
+    let mut pm = crate::plugin::PluginManager::new();
+    pm.register(Box::new(crate::plugin::print_plugin::PrintPlugin));
+    pm.run_ast(crate::ast::StageKind::Parsed, &mut items, &mut universe)
+        .expect("print plugin stage failed");
+
+    let mut backend = LlvmBackend::new();
+    let ir = backend.generate(&items, None);
+    assert!(
+        ir.contains("call i64 @__print_int("),
+        "expected direct @__print_int call after plugin rewrite; got:\n{ir}"
+    );
+    assert!(
+        ir.contains("call i64 @__print_char("),
+        "expected direct @__print_char newline call after plugin rewrite; got:\n{ir}"
+    );
+    assert!(
+        !ir.contains("bridge_"),
+        "print rewrite must not route through the GLUE bridge; got:\n{ir}"
+    );
+}
+
+/// 2026-08-01: Format-string println! — literal segments print via __print_str,
+/// placeholders dispatch on the value kind, and a newline is appended. All
+/// must remain direct runtime calls with no bridge indirection.
+#[test]
+fn test_println_format_string_emits_direct_ffi_calls() {
+    let src = r#"
+        let x: Int = 5;
+        let f: Float = 1.5;
+        defn show() -> Int {
+            println!("sum={} and {1}", x + 1, f);
+            term 0;
+        };
+    "#;
+    let mut items = parse_bv_source(src);
+    let mut universe = crate::type_universe::TypeUniverse::new();
+    let mut pm = crate::plugin::PluginManager::new();
+    pm.register(Box::new(crate::plugin::print_plugin::PrintPlugin));
+    pm.run_ast(crate::ast::StageKind::Parsed, &mut items, &mut universe)
+        .expect("print plugin stage failed");
+
+    let mut backend = LlvmBackend::new();
+    let ir = backend.generate(&items, None);
+    assert!(
+        ir.contains("call i64 @__print_str("),
+        "expected direct @__print_str call for format literal segment; got:\n{ir}"
+    );
+    assert!(
+        ir.contains("call i64 @__print_int("),
+        "expected direct @__print_int call for integer placeholder; got:\n{ir}"
+    );
+    assert!(
+        ir.contains("call i64 @__print_float("),
+        "expected direct @__print_float call for float placeholder; got:\n{ir}"
+    );
+    assert!(
+        ir.contains("call i64 @__print_char("),
+        "expected direct @__print_char newline call; got:\n{ir}"
+    );
+    assert!(
+        !ir.contains("bridge_"),
+        "format print rewrite must not route through the GLUE bridge; got:\n{ir}"
+    );
+}
+
+/// 2026-08-01: An out-of-range positional placeholder is a compile error
+/// surfaced by the plugin stage, not a silent runtime truncation.
+#[test]
+fn test_println_out_of_range_placeholder_errors() {
+    let src = r#"
+        defn show() -> Int {
+            println!("x={1}", 42);
+            term 0;
+        };
+    "#;
+    let mut items = parse_bv_source(src);
+    let mut universe = crate::type_universe::TypeUniverse::new();
+    let mut pm = crate::plugin::PluginManager::new();
+    pm.register(Box::new(crate::plugin::print_plugin::PrintPlugin));
+    let err = pm
+        .run_ast(crate::ast::StageKind::Parsed, &mut items, &mut universe)
+        .expect_err("out-of-range {1} must be a plugin-stage error");
+    assert!(
+        err.contains("out of range"),
+        "expected out-of-range message, got: {err}"
+    );
+}
+
+/// 2026-08-01: B0 acceptance — a String value is a `ptr` to [len][bytes] with
+/// no fat-pointer `{ i64, i64 }` or `i128` claim anywhere in emitted IR. The
+/// test exercises the full String path: literal → state store → load → print
+/// via __print_str with a pointer argument.
+#[test]
+fn test_string_is_ptr_no_fat_pointer_in_ir() {
+    let src = r#"
+        let name: String = "world";
+        let x: Int = 42;
+        node report [true] {
+            print!("hello, {}! x={1}", name, x);
+            term;
+        };
+    "#;
+    let mut items = parse_bv_source(src);
+    let mut universe = crate::type_universe::TypeUniverse::new();
+    let mut pm = crate::plugin::PluginManager::new();
+    pm.register(Box::new(crate::plugin::print_plugin::PrintPlugin));
+    pm.run_ast(crate::ast::StageKind::Parsed, &mut items, &mut universe)
+        .expect("print plugin stage failed");
+
+    let mut backend = LlvmBackend::new();
+    let ir = backend.generate(&items, None);
+    // String values must be pointer-sized machine words in state and registers.
+    assert!(
+        ir.contains("call i64 @__print_str(ptr "),
+        "format literal must print via __print_str(ptr); got:\n{ir}"
+    );
+    // The named %String struct type must not be declared (String is ptr now),
+    // and no i128 state load/claim may remain for String slots. (The LLVM
+    // datalayout string always contains i128:128 for the target — that is
+    // target ABI info, not a String claim, so it is excluded.)
+    assert!(
+        !ir.contains("%String = type { i64, i64 }")
+            && !ir.contains("load i128")
+            && !ir.contains("type { i128")
+            && !ir.contains("type { i64, i64, i128")
+            && !ir.contains("extractvalue"),
+        "no {{ i64, i64 }}/i128 String claim may remain in emitted IR (B0); got:\n{ir}"
+    );
+}
+
+/// 2026-08-01: Legacy PascalCase names (PrintLn!) are no longer rewritten by
+/// the plugin — they fall through to the typechecker, which rejects them with
+/// a rename hint. The plugin must leave them untouched.
+#[test]
+fn test_legacy_println_not_rewritten_by_plugin() {
+    let src = r#"
+        defn show(v: Int) -> Int {
+            PrintLn!(v);
+            term v;
+        };
+    "#;
+    let mut items = parse_bv_source(src);
+    let mut universe = crate::type_universe::TypeUniverse::new();
+    let mut pm = crate::plugin::PluginManager::new();
+    pm.register(Box::new(crate::plugin::print_plugin::PrintPlugin));
+    pm.run_ast(crate::ast::StageKind::Parsed, &mut items, &mut universe)
+        .expect("print plugin stage failed");
+    assert!(
+        format!("{:?}", items).contains("PrintLn"),
+        "legacy PrintLn! must survive the plugin for the typechecker to reject; got:\n{items:?}"
+    );
+}
+
+/// 2026-08-01 (B1): String == / != on #String operands emits a content
+/// comparison (brief_str_eq) instead of `icmp eq ptr` (address comparison).
+/// This is the backend half of B1; the interpreter already does content
+/// equality (rule #4). The entry!-shaped comparison `cmd == "build"` is the
+/// motivating pattern (Phase 3).
+#[test]
+fn test_string_content_eq_emits_brief_str_eq() {
+    let src = r#"
+        let a: String = "abc";
+        let b: String = "abc";
+        defn run() -> Bool {
+            term a == b;
+        };
+    "#;
+    let mut items = parse_bv_source(src);
+    let mut universe = crate::type_universe::TypeUniverse::new();
+    let mut pm = crate::plugin::PluginManager::new();
+    pm.register(Box::new(crate::plugin::print_plugin::PrintPlugin));
+    pm.run_ast(crate::ast::StageKind::Parsed, &mut items, &mut universe)
+        .expect("plugin stage failed");
+
+    let mut backend = LlvmBackend::new().with_type_universe(universe);
+    let ir = backend.generate(&items, None);
+    assert!(
+        ir.contains("call i64 @brief_str_eq(ptr "),
+        "String == must emit brief_str_eq content compare; got:\n{ir}"
+    );
+    assert!(
+        !ir.contains("icmp eq ptr"),
+        "String == must not compare addresses (icmp eq ptr); got:\n{ir}"
+    );
+}
+
+/// 2026-08-01 (B1): int == still emits icmp eq (numeric path) — the String
+/// content-eq arm must not swallow numeric comparisons.
+#[test]
+fn test_int_eq_still_emits_icmp() {
+    let src = r#"
+        let x: Int = 5;
+        defn run() -> Bool {
+            term x == 6;
+        };
+    "#;
+    let mut items = parse_bv_source(src);
+    let mut universe = crate::type_universe::TypeUniverse::new();
+    let mut pm = crate::plugin::PluginManager::new();
+    pm.run_ast(crate::ast::StageKind::Parsed, &mut items, &mut universe)
+        .expect("plugin stage failed");
+
+    let mut backend = LlvmBackend::new().with_type_universe(universe);
+    let ir = backend.generate(&items, None);
+    assert!(
+        ir.contains("icmp eq i64 "),
+        "int == must still emit icmp eq i64; got:\n{ir}"
+    );
+    assert!(
+        !ir.contains("call i64 @brief_str_eq("),
+        "int == must not call brief_str_eq; got:\n{ir}"
+    );
+}
+
+/// 2026-08-01 (B1): String & | ^ ~ emit content-bitwise runtime calls
+/// (brief_str_band/bor/bxor/bnot) and return a String (ptr).
+#[test]
+fn test_string_bitwise_emits_content_ops() {
+    let src = r#"
+        let a: String = "abc";
+        let b: String = "abc";
+        defn run() -> String {
+            let r1: String = a & b;
+            let r2: String = a | b;
+            let r3: String = a ^ b;
+            let r4: String = ~a;
+            term r4;
+        };
+    "#;
+    let mut items = parse_bv_source(src);
+    let mut universe = crate::type_universe::TypeUniverse::new();
+    let mut pm = crate::plugin::PluginManager::new();
+    pm.register(Box::new(crate::plugin::print_plugin::PrintPlugin));
+    pm.run_ast(crate::ast::StageKind::Parsed, &mut items, &mut universe)
+        .expect("plugin stage failed");
+
+    let mut backend = LlvmBackend::new().with_type_universe(universe);
+    let ir = backend.generate(&items, None);
+    assert!(
+        ir.contains("call ptr @brief_str_band("),
+        "String & must emit brief_str_band; got:\n{ir}"
+    );
+    assert!(
+        ir.contains("call ptr @brief_str_bor("),
+        "String | must emit brief_str_bor; got:\n{ir}"
+    );
+    assert!(
+        ir.contains("call ptr @brief_str_bxor("),
+        "String ^ must emit brief_str_bxor; got:\n{ir}"
+    );
+    assert!(
+        ir.contains("call ptr @brief_str_bnot("),
+        "String ~ must emit brief_str_bnot; got:\n{ir}"
+    );
+}
+
+/// 2026-08-01 (Phase 3a): emitted main is `main(i32 %argc, ptr %argv)` and
+/// captures argc/argv into the runtime globals for the CLI argv helpers.
+#[test]
+fn test_main_signature_and_argv_capture() {
+    let src = r#"
+        let x: Int = 5;
+        defn run() -> Int {
+            term x;
+        };
+    "#;
+    let mut items = parse_bv_source(src);
+    let mut universe = crate::type_universe::TypeUniverse::new();
+    let mut pm = crate::plugin::PluginManager::new();
+    pm.run_ast(crate::ast::StageKind::Parsed, &mut items, &mut universe)
+        .expect("plugin stage failed");
+
+    let mut backend = LlvmBackend::new().with_type_universe(universe);
+    let ir = backend.generate(&items, None);
+    assert!(
+        ir.contains("define i32 @main(i32 %argc, ptr %argv)"),
+        "main must take (i32 %argc, ptr %argv); got:\n{ir}"
+    );
+    assert!(
+        ir.contains("store i32 %argc, ptr @__brief_argc"),
+        "main must store argc into @__brief_argc; got:\n{ir}"
+    );
+    assert!(
+        ir.contains("store ptr %argv, ptr @__brief_argv"),
+        "main must store argv into @__brief_argv; got:\n{ir}"
+    );
+    assert!(
+        !ir.contains("define i32 @main()"),
+        "main() without args must not be emitted; got:\n{ir}"
+    );
+}
+
+/// 2026-08-01 (Phase 3b): a Bool (i8) state field must NOT get `!range
+/// !{ i64 0, i64 256 }` — LLVM range bounds must match the load width; the
+/// i64 bounds on a load i8 crash clang. The range is skipped as vacuous.
+#[test]
+fn test_bool_field_no_malformed_i8_range() {
+    let src = r#"
+        let done: Bool = false;
+        node work [done == false][done] {
+            term;
+        };
+    "#;
+    let mut items = parse_bv_source(src);
+    let mut universe = crate::type_universe::TypeUniverse::new();
+    let mut pm = crate::plugin::PluginManager::new();
+    pm.run_ast(crate::ast::StageKind::Parsed, &mut items, &mut universe)
+        .expect("plugin stage failed");
+
+    let mut backend = LlvmBackend::new().with_type_universe(universe);
+    let ir = backend.generate(&items, None);
+    assert!(
+        !ir.contains("!range !{ i64 0, i64 256 }"),
+        "Bool field must not emit malformed i64 range on i8 load; got:\n{ir}"
+    );
+}
+
+/// 2026-08-01 (B2): `#String → #Bit` is the CONTENT VIEW — a String value is a
+/// ptr to [len][bytes], so the cast yields the buffer ADDRESS (ptrtoint), not
+/// the old `extractvalue {i64,i64}, 0` fat-pointer extraction. This pins the
+/// content-view lane under the bits model.
+#[test]
+fn test_string_to_bit_content_view() {
+    let src = r#"
+        let s: String = "hello";
+        let tick: Int = 0;
+        node report [tick < 1][tick == 1] {
+            let b: #Bit = s as #Bit;
+            term;
+        };
+    "#;
+    let mut items = parse_bv_source(src);
+    let mut universe = crate::type_universe::TypeUniverse::new();
+    let mut pm = crate::plugin::PluginManager::new();
+    pm.run_ast(crate::ast::StageKind::Parsed, &mut items, &mut universe)
+        .expect("plugin stage failed");
+
+    let mut backend = LlvmBackend::new().with_type_universe(universe);
+    let ir = backend.generate(&items, None);
+    assert!(
+        ir.contains("ptrtoint ptr"),
+        "#String → #Bit must emit ptrtoint (content view = buffer address); got:\n{ir}"
+    );
+    assert!(
+        !ir.contains("extractvalue"),
+        "#String → #Bit must not extractvalue (String is a ptr under B0); got:\n{ir}"
+    );
+}
+
+/// 2026-08-01 (B2): `#Bit → #String` is the ENCODING DOOR — wraps the bits
+/// (a [len][bytes] buffer) back into a String by materializing the header via
+/// brief_bits_to_str. Not a bitcast.
+#[test]
+fn test_bit_to_string_encoding_door() {
+    let src = r#"
+        let s: String = "hello";
+        let tick: Int = 0;
+        node report [tick < 1][tick == 1] {
+            let b: #Bit = s as #Bit;
+            let r: String = b as String;
+            term;
+        };
+    "#;
+    let mut items = parse_bv_source(src);
+    let mut universe = crate::type_universe::TypeUniverse::new();
+    let mut pm = crate::plugin::PluginManager::new();
+    pm.run_ast(crate::ast::StageKind::Parsed, &mut items, &mut universe)
+        .expect("plugin stage failed");
+
+    let mut backend = LlvmBackend::new().with_type_universe(universe);
+    let ir = backend.generate(&items, None);
+    assert!(
+        ir.contains("call ptr @brief_bits_to_str(ptr "),
+        "#Bit → #String must emit brief_bits_to_str (UTF8 wrap); got:\n{ir}"
+    );
+    assert!(
+        !ir.contains("extractvalue"),
+        "the encoding door must not extractvalue; got:\n{ir}"
+    );
+}
+
+/// 2026-08-01 (B3): `x.^Len` on a String → the `Size` prop default = UTF8
+/// char count (brief_char_len); `x.^^Bytes` → the `Bytes` prop default = O(1)
+/// header read (byte length). Also verifies a String `let` used only via
+/// reflection stays live (not eliminated as a dead state field).
+#[test]
+fn test_string_len_and_bytes_reflect() {
+    let src = r#"
+        let s: String = "hello";
+        let tick: Int = 0;
+        node report [tick < 1][tick == 1] {
+            let c: Int = s.^Len;
+            let b: Int = s.^^Bytes;
+            term;
+        };
+    "#;
+    let mut items = parse_bv_source(src);
+    let mut universe = crate::type_universe::TypeUniverse::new();
+    let mut pm = crate::plugin::PluginManager::new();
+    pm.run_ast(crate::ast::StageKind::Parsed, &mut items, &mut universe)
+        .expect("plugin stage failed");
+
+    let mut backend = LlvmBackend::new().with_type_universe(universe);
+    let ir = backend.generate(&items, None);
+    assert!(
+        ir.contains("call i64 @brief_char_len(ptr "),
+        "String .^Len must emit brief_char_len (UTF8 char count); got:\n{ir}"
+    );
+    assert!(
+        ir.contains("load i64, ptr ") || ir.contains("load i64, ptr %"),
+        "String .^^Bytes must emit an O(1) header load; got:\n{ir}"
+    );
+    // The String field must stay live (not eliminated as dead — it's only
+    // read via reflection). Verify the state has a String slot.
+    assert!(
+        ir.contains("%State = type { i64,"),
+        "the reflect-read String field must stay in %State; got:\n{ir}"
+    );
+}
+
+
+
+
+
+
+
+
+
+

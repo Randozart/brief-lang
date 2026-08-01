@@ -479,7 +479,13 @@ fn build_supported_ops() -> HashSet<String> {
                    "AtomicLoad#", "AtomicStore#", "AtomicCas#", "AtomicXchg#",
                    "AtomicAdd#", "Fence#",
                    "DlOpen#", "DlSym#", "DlClose#",
-                    "Backtrace#", "WorkgroupSize#"] {
+                    "Backtrace#", "WorkgroupSize#",
+                    // 2026-08-01: The print/println macros expand to these
+                    // direct runtime calls. They were previously invisible to
+                    // this validator because the old PrintLn! always wrapped
+                    // them in an Expr::Block, which the validator does not
+                    // descend into; the bare println!() form exposes them.
+                    "PrintInt#", "PrintChar#", "PrintFloat#", "PrintStr#"] {
         set.insert(name.to_string());
     }
     set

@@ -1,0 +1,16 @@
+// B1 String bitwise: & = identity when both same, ^ of same = NUL string.
+let a: String = "ABC";
+let tick: Int = 0;
+
+node report [tick < 1][tick == 1] {
+    let same: Int = (a & a == "ABC") as Int;      // expect 1
+    let ident: Int = (a | a == a) as Int;          // expect 1
+    let notstr: Int = (~a == "") as Int;           // expect 0 (bnot of ABC is non-empty)
+    let xz: Int = ((a ^ a) == "\x00\x00\x00") as Int;  // expect 1
+    println!("and_identity: {}", same);
+    println!("or_identity: {}", ident);
+    println!("bnot_nonempty: {}", notstr);
+    println!("xor_nuls: {}", xz);
+    tick = 1;
+    term;
+};

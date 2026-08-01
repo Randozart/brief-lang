@@ -183,7 +183,7 @@ fn parse_definition(parts: &[SExpr]) -> Result<Definition, String> {
     let mut params = Vec::new();
     let mut outputs = Vec::new();
     let mut contract = Contract { pre_condition: Expr::Bool(true), post_condition: Expr::Bool(true),
-        is_entry: false, watchdog: None, span: None, explicit: false };
+        watchdog: None, span: None, explicit: false };
     let mut body = Vec::new();
     let mut metadata = HashMap::new();
     let mut i = 2;
@@ -220,7 +220,7 @@ fn parse_transaction(parts: &[SExpr]) -> Result<Transaction, String> {
     let name = tag(parts, 1)?.to_string();
     let mut params = Vec::new();
     let mut contract = Contract { pre_condition: Expr::Bool(true), post_condition: Expr::Bool(true),
-        is_entry: false, watchdog: None, span: None, explicit: false };
+        watchdog: None, span: None, explicit: false };
     let mut body = Vec::new();
     let mut metadata = HashMap::new();
     let mut is_reactive = false;
@@ -260,12 +260,10 @@ fn parse_contract(expr: &SExpr) -> Result<Contract, String> {
     let parts = match expr { SExpr::List(p) => p, _ => return Err("expected list for contract".into()) };
     let mut pre = Expr::Bool(true);
     let mut post = Expr::Bool(true);
-    let mut is_entry = false;
     let mut i = 1;
     while i < parts.len() {
         let key = child_tag(&parts[i])?;
         match key {
-            "entry" => { is_entry = true; i += 1; }
             "pre" => {
                 // (pre <expr>) — expr is at index 1 inside this sub-list
                 let sub = match &parts[i] { SExpr::List(p) => p, _ => return Err("expected list for pre".into()) };
@@ -280,7 +278,7 @@ fn parse_contract(expr: &SExpr) -> Result<Contract, String> {
             _ => { i += 1; }
         }
     }
-    Ok(Contract { pre_condition: pre, post_condition: post, is_entry, watchdog: None, span: None, explicit: false })
+    Ok(Contract { pre_condition: pre, post_condition: post, watchdog: None, span: None, explicit: false })
 }
 
 fn parse_statedecl(parts: &[SExpr]) -> Result<TopLevel, String> {

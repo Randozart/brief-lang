@@ -265,6 +265,20 @@ impl LlvmBackend {
                             name: fl,
                             ty: Type::float(),
                         }
+                    } else if self.is_string_operand(&brief_ty) {
+                        // 2026-08-01 (B0): A Brief String value is a ptr to a
+                        // length-prefixed [len][bytes] buffer. State slots hold
+                        // the address as an i64 machine word (uniform %State
+                        // layout, push_field_type), so a String field load must
+                        // inttoptr the slot back to the ptr representation —
+                        // mirroring the float unboxing branches above and the
+                        // Ptr<T> state-adapter pattern.
+                        let str_p = self.fun.gen_reg();
+                        writeln!(out, "{}{} = inttoptr i64 {} to ptr", indent, str_p, loaded).ok();
+                        TypedRegister {
+                            name: str_p,
+                            ty: brief_ty,
+                        }
                     } else {
                         TypedRegister {
                             name: loaded,
@@ -287,6 +301,17 @@ impl LlvmBackend {
                         TypedRegister {
                             name: v.to_string(),
                             ty: Type::float64(),
+                        }
+                    } else if self.is_string_operand(ty) {
+                        // 2026-08-01 (B3): a String constant's @s global holds
+                        // the [len][bytes] pointer; load it as a ptr and type it
+                        // String so reflection/ops see the right protocol. Was
+                        // load i64 typed Int, which broke `s.^Len` on an
+                        // unwritten literal (const-folded to a global).
+                        writeln!(out, "{}{} = load ptr, ptr @{}", indent, v, name).ok();
+                        TypedRegister {
+                            name: v.to_string(),
+                            ty: Type::string(),
                         }
                     } else {
                         writeln!(out, "{}{} = load i64, ptr @{}", indent, v, name).ok();
@@ -1162,125 +1187,10 @@ impl LlvmBackend {
         bytes: &[u8],
         indent: &str,
     ) -> TypedRegister {
-        // 2026-07-18: Phase B — SSO string path when feature is enabled.
-        // 2026-07-31: Phase 3 (§8.2) — the payload cap comes from
-        // config/ir-lowering.toml `sso_max_bytes`; its derivation is align 8
-        // − 2 tag bits = 6, documented at the config key.
-        if self.feature_sso_strings {
-            if bytes.len() <= crate::config_tuning::ir_lowering().sso_max_bytes {
-                return self.emit_sso_literal(out, v, bytes, indent);
-            }
-            return self.emit_sso_heap_literal(out, v, bytes, indent);
-        }
+        // 2026-08-01 (B4): the SSO string-literal path was retired (the
+        // feature flag is always off under the bits model — a String is a ptr
+        // to [len][bytes]). All literals emit via the ptr representation.
         self.emit_legacy_string_literal(out, v, bytes, indent)
-    }
-
-    // 2026-07-18: SSO string literal — pack ≤6 bytes inline into handle[0] with
-    // SSO tag (0b001), store length in handle[1]. Returns {i64, i64} struct.
-    // No heap allocation, no 16-byte header, no null terminator needed for SSO.
-    fn emit_sso_literal(
-        &mut self,
-        out: &mut String,
-        v: &str,
-        bytes: &[u8],
-        indent: &str,
-    ) -> TypedRegister {
-        let len = bytes.len() as u64;
-        // Pack bytes into u64 (little-endian), shift left 3 for tag bits, set bit 0 (SSO tag)
-        let packed = bytes
-            .iter()
-            .enumerate()
-            .fold(0u64, |acc, (i, &b)| acc | ((b as u64) << (i * 8)));
-        let shifted = packed << 3;
-        let t0 = self.fun.gen_reg();
-        writeln!(out, "{}{} = or i64 {}, 1", indent, t0, shifted).ok();
-        // Build {i64, i64} struct
-        let t1 = self.fun.gen_reg();
-        writeln!(
-            out,
-            "{}{} = insertvalue {{ i64, i64 }} undef, i64 {}, 0",
-            indent, t1, t0
-        )
-        .ok();
-        let t2 = self.fun.gen_reg();
-        writeln!(
-            out,
-            "{}{} = insertvalue {{ i64, i64 }} %{}, i64 {}, 1",
-            indent, t2, t1, len
-        )
-        .ok();
-        TypedRegister {
-            name: t2,
-            ty: Type::string(),
-        }
-    }
-
-    // 2026-07-18: SSO heap string literal — allocate raw bytes + null terminator
-    // on stack (no 16-byte header, no capacity slot). Handle[0] = ptrtoint with
-    // tag 0b000 (heap), handle[1] = length. Returns {i64, i64} struct.
-    fn emit_sso_heap_literal(
-        &mut self,
-        out: &mut String,
-        v: &str,
-        bytes: &[u8],
-        indent: &str,
-    ) -> TypedRegister {
-        let len = bytes.len() as u64;
-        let alloc_size = len + 1;
-        let alloca_reg = self.fun.gen_reg();
-        writeln!(
-            out,
-            "{}{} = alloca [{} x i8], align 1",
-            indent, alloca_reg, alloc_size
-        )
-        .ok();
-        for (i, &b) in bytes.iter().enumerate() {
-            let ptr = self.fun.gen_reg();
-            writeln!(
-                out,
-                "{}{} = getelementptr inbounds [{} x i8], ptr {}, i32 0, i32 {}",
-                indent, ptr, alloc_size, alloca_reg, i
-            )
-            .ok();
-            writeln!(out, "{}store i8 {}, ptr {}", indent, b, ptr).ok();
-        }
-        let last = self.fun.gen_reg();
-        writeln!(
-            out,
-            "{}{} = getelementptr inbounds [{} x i8], ptr {}, i32 0, i32 {}",
-            indent,
-            last,
-            alloc_size,
-            alloca_reg,
-            bytes.len()
-        )
-        .ok();
-        writeln!(out, "{}store i8 0, ptr {}", indent, last).ok();
-        let p2i = self.fun.gen_reg();
-        writeln!(
-            out,
-            "{}{} = ptrtoint ptr {} to i64",
-            indent, p2i, alloca_reg
-        )
-        .ok();
-        let t1 = self.fun.gen_reg();
-        writeln!(
-            out,
-            "{}{} = insertvalue {{ i64, i64 }} undef, i64 {}, 0",
-            indent, t1, p2i
-        )
-        .ok();
-        let t2 = self.fun.gen_reg();
-        writeln!(
-            out,
-            "{}{} = insertvalue {{ i64, i64 }} %{}, i64 {}, 1",
-            indent, t2, t1, len
-        )
-        .ok();
-        TypedRegister {
-            name: t2,
-            ty: Type::string(),
-        }
     }
 
     // 2026-07-22: Legacy string literal emission (SSO OFF).
@@ -1304,17 +1214,21 @@ impl LlvmBackend {
             });
         let g = format!("@str.{}", si);
         // 2026-07-22: The handle is a pointer to the start of the struct
-        // {i64 data_ptr, i64 length, [N x i8] chars}, so that handle[1]
-        // (getelementptr i64, ptr %handle, i64 1) reads the length field.
-        // Do NOT add offset — emit_load_length expects the struct pointer.
+        // {i64 length, [N x i8] chars}, so that the runtime's brief_str_to_c
+        // reads *(int64_t*)handle as the length and data at handle+8 — the
+        // [len][bytes] buffer layout. Do NOT add offset — emit_load_length
+        // expects the struct pointer.
+        // 2026-08-01 (B0): the value register IS the pointer (a Brief String
+        // value is a ptr to [len][bytes] in every type-claiming site). The
+        // old ptrtoint→i64 boxing here was one arm of the split-brain; the
+        // ptr is passed straight to consumers (PrintStr#, frgn calls, state
+        // adapt_to_i64 which does the ptrtoint for the i64 slot).
         let str_p = self.fun.gen_reg();
         writeln!(out, "{}{} = bitcast <{{ i64, [{} x i8] }}>* {} to ptr",
             indent, str_p, bytes.len() + 1, g).ok();
-        let p2i = self.fun.gen_reg();
-        writeln!(out, "{}{} = ptrtoint ptr {} to i64", indent, p2i, str_p).ok();
         TypedRegister {
-            name: p2i,
-            ty: Type::int(),
+            name: str_p,
+            ty: Type::string(),
         }
     }
 
@@ -1537,6 +1451,15 @@ impl LlvmBackend {
                 TypedRegister { name: r, ty: Type::int() }
             }
             ("Bytes", ReflectKind::CompileTime) => {
+                // 2026-08-01 (B3): `x.^^Bytes` on a #String → the `Bytes` prop
+                // default = O(1) header read (byte length is the [0] length
+                // prefix of the [len][bytes] buffer). For non-strings, the
+                // compile-time type size.
+                if self.is_string_operand(&recv_reg.ty) {
+                    let r = self.fun.gen_reg();
+                    writeln!(out, "{}{} = load i64, ptr {}", indent, r, recv_reg.name).ok();
+                    return TypedRegister { name: r, ty: Type::int() };
+                }
                 let sz = types::type_size(&recv_reg.ty, self.ctx.type_universe.as_ref());
                 let r = self.fun.gen_reg();
                 writeln!(out, "{}{} = add i64 0, {}", indent, r, sz).ok();
@@ -1560,9 +1483,18 @@ impl LlvmBackend {
                     writeln!(out, "{}{} = add i64 0, {}", indent, r, count).ok();
                     TypedRegister { name: r, ty: Type::int() }
                 }
-                _ => panic!(
-                    "runtime reflection target 'Len' on '{}' has no codegen yet (Phase-1b boundary)",
-                    recv_reg.ty
+                // 2026-08-01 (B3): `x.^Len` on a #String → the `Size` prop
+                // default = UTF8 character count (runtime helper reads the
+                // [len][bytes] buffer and counts codepoints). The O(1) byte
+                // length (header) is `x.^^Bytes` below.
+                ty if self.is_string_operand(ty) => {
+                    let r = self.fun.gen_reg();
+                    writeln!(out, "{}{} = call i64 @brief_char_len(ptr {})", indent, r, recv_reg.name).ok();
+                    TypedRegister { name: r, ty: Type::int() }
+                }
+                other => panic!(
+                    "runtime reflection target 'Len' on '{:?}' (reg ty {:?}) has no codegen yet (Phase-1b boundary)",
+                    recv, recv_reg.ty
                 ),
             },
             _ => panic!(
@@ -1918,39 +1850,10 @@ impl LlvmBackend {
                         crate::ast::Type::Custom(name) => name.as_str(),
                         _ => return arg.clone(),
                     };
-                    // 2026-07-18: SSO String → C i8* shim. When SSO is ON, the String
-                    // handle is {i64, i64} but C expects i8*. Extract handle[0] and
-                    // inttoptr to i8*.
-                    // 2026-07-31: Phase 3 (§8.4-D8) — String/Data detection via
-                    // protocol membership instead of the type name.
-                    if self.feature_sso_strings
-                        && (self.is_protocol_member(param_ty, "#String")
-                            || self.is_protocol_member(param_ty, "#Data"))
-                        && self
-                            .ctx
-                            .type_universe
-                            .as_ref()
-                            .map_or(false, |u| u.is_string_like(&arg.ty))
-                    {
-                        let extracted = self.fun.gen_reg();
-                        writeln!(
-                            out,
-                            "{}  {} = extractvalue {{ i64, i64 }} {}, 0",
-                            indent, extracted, arg.name
-                        )
-                        .ok();
-                        let ptr_reg = self.fun.gen_reg();
-                        writeln!(
-                            out,
-                            "{}  {} = inttoptr i64 {} to ptr",
-                            indent, ptr_reg, extracted
-                        )
-                        .ok();
-                        return TypedRegister {
-                            name: ptr_reg,
-                            ty: arg.ty.clone(),
-                        };
-                    }
+                    // 2026-08-01 (B4): the SSO String→C i8* shim was retired —
+                    // a String IS a ptr to [len][bytes] under the bits model,
+                    // so the arg is already pointer-typed and needs no handle
+                    // extraction.
                     if self
                         .ctx
                         .type_universe
@@ -2204,13 +2107,18 @@ impl LlvmBackend {
             .and_then(|types| types.first().cloned())
             .unwrap_or(Type::int());
         let ret_llvm = self.llvm_type(&ret_type);
+        // 2026-08-01 (Phase 4): `defn main` is renamed to `brief_main` at
+        // emission (emit_definition) to avoid colliding with the runtime
+        // entry point; calls to `main` must use the same renamed symbol or
+        // they hit an undefined `@main`.
+        let symbol = if name == "main" { "brief_main" } else { name };
         writeln!(
             out,
             "{}{} = call {} @{}({})",
             indent,
             v,
             ret_llvm,
-            name,
+            symbol,
             call_args.join(", ")
         )
         .ok();
@@ -2267,6 +2175,17 @@ impl LlvmBackend {
             BinaryOpKind::Concat => return None,
             _ => return None,
         };
+        // 2026-08-01 (B1): #String operands NEVER go through the config
+        // template path. Their flexible primordial has bytes=0, so the
+        // integer template derivation produces `i0` (invalid IR), and more
+        // fundamentally Eq/Ne on Strings is a CONTENT comparison handled by
+        // the dedicated arm in emit_binary_op (brief_str_eq). Returning None
+        // here routes String ops to that arm.
+        if self.is_string_operand(&l.ty)
+            || self.is_string_operand(&r.ty)
+        {
+            return None;
+        }
         // Get the llvm_type of the LHS operand to drive template dispatch
         let llvm_ty = self.llvm_type(&l.ty);
         // Get byte width from the universe if available
@@ -2505,6 +2424,20 @@ impl LlvmBackend {
                 }
             }
             crate::ast::BinaryOpKind::Eq => {
+                // 2026-08-01 (B1): String operands compare CONTENT, not
+                // addresses. Both operands are #String → deref via the
+                // runtime's brief_str_eq (length + memcmp on the [len][bytes]
+                // payloads). Matches the interpreter's content Eq (rule #4).
+                let is_str = self.is_string_operand(&l.ty)
+                    && self.is_string_operand(&r.ty);
+                if is_str {
+                    let eq = self.fun.gen_reg();
+                    writeln!(out, "{}{} = call i64 @brief_str_eq(ptr {}, ptr {})", indent, eq, l.name, r.name).ok();
+                    let icmp = self.fun.gen_reg();
+                    writeln!(out, "{}{} = icmp ne i64 {}, 0", indent, icmp, eq).ok();
+                    writeln!(out, "{}{} = zext i1 {} to i8", indent, v, icmp).ok();
+                    return TypedRegister { name: v.to_string(), ty: Type::bool_() };
+                }
                 let icmp = self.fun.gen_reg();
                 if is_float {
                     writeln!(
@@ -2529,6 +2462,17 @@ impl LlvmBackend {
                 }
             }
             crate::ast::BinaryOpKind::Neq => {
+                // 2026-08-01 (B1): content inequality — mirrors the Eq arm.
+                let is_str = self.is_string_operand(&l.ty)
+                    && self.is_string_operand(&r.ty);
+                if is_str {
+                    let eq = self.fun.gen_reg();
+                    writeln!(out, "{}{} = call i64 @brief_str_eq(ptr {}, ptr {})", indent, eq, l.name, r.name).ok();
+                    let icmp = self.fun.gen_reg();
+                    writeln!(out, "{}{} = icmp eq i64 {}, 0", indent, icmp, eq).ok();
+                    writeln!(out, "{}{} = zext i1 {} to i8", indent, v, icmp).ok();
+                    return TypedRegister { name: v.to_string(), ty: Type::bool_() };
+                }
                 let icmp = self.fun.gen_reg();
                 if is_float {
                     writeln!(
@@ -2677,6 +2621,36 @@ impl LlvmBackend {
             crate::ast::BinaryOpKind::Concat => {
                 self.emit_inline_concat(out, indent, l, r)
             }
+            crate::ast::BinaryOpKind::BitAnd | crate::ast::BinaryOpKind::BitOr | crate::ast::BinaryOpKind::BitXor => {
+                // 2026-08-01 (B1): #String bitwise defaults — operate on the
+                // content bytes and return a NEW [len][bytes] buffer (same
+                // length). When both operands are #String, emit the matching
+                // runtime call; otherwise fall through to the numeric path
+                // below (the config templates handle Int/etc.).
+                if self.is_string_operand(&l.ty)
+                    && self.is_string_operand(&r.ty)
+                {
+                    let rt = match kind {
+                        crate::ast::BinaryOpKind::BitAnd => "@brief_str_band",
+                        crate::ast::BinaryOpKind::BitOr => "@brief_str_bor",
+                        _ => "@brief_str_bxor",
+                    };
+                    let res = self.fun.gen_reg();
+                    writeln!(out, "{}{} = call ptr {}(ptr {}, ptr {})", indent, res, rt, l.name, r.name).ok();
+                    return TypedRegister { name: res, ty: Type::string() };
+                }
+                let cmp_ty = self.llvm_type(&l.ty);
+                let op = match kind {
+                    crate::ast::BinaryOpKind::BitAnd => "and",
+                    crate::ast::BinaryOpKind::BitOr => "or",
+                    _ => "xor",
+                };
+                writeln!(out, "{}{} = {} {} {}, {}", indent, v, op, cmp_ty, l.name, r.name).ok();
+                TypedRegister {
+                    name: v.to_string(),
+                    ty: Type::int(),
+                }
+            }
             _ => {
                 writeln!(out, "{}{} = add i64 {}, {}", indent, v, l.name, r.name).ok();
                 TypedRegister {
@@ -2723,6 +2697,14 @@ impl LlvmBackend {
                 }
             }
             crate::ast::UnaryOpKind::BitNot => {
+                // 2026-08-01 (B1): #String unary bitwise default — complement
+                // each content byte and return a NEW [len][bytes] buffer (same
+                // length). Numeric operands keep the i64 xor path below.
+                if self.is_string_operand(&operand.ty) {
+                    let res = self.fun.gen_reg();
+                    writeln!(out, "{}{} = call ptr @brief_str_bnot(ptr {})", indent, res, operand.name).ok();
+                    return TypedRegister { name: res, ty: Type::string() };
+                }
                 writeln!(out, "{}{} = xor i64 {}, -1", indent, v, operand.name).ok();
                 TypedRegister {
                     name: v.to_string(),
@@ -2995,8 +2977,30 @@ impl LlvmBackend {
                     self.emit_single_cast_lane(out, &dst, b, &temp, &temp_ll, indent);
                 }
                 crate::casting::graph::LaneKind::CastFromBitCallback => {
-                    // CastFrom(#Bit) overrides — requires lookup; fall through for now
-                    return None;
+                    // 2026-08-01 (B2): the ENCODING DOOR — `#Bit → <type>`.
+                    // A registered CastFrom(#Bit) override for the target type
+                    // calls the override function; otherwise the #String default
+                    // is the UTF8 wrap: inttoptr the address, then
+                    // brief_cstr_to_brief materializes the [len][bytes] header
+                    // by construction (length derived from the bytes). The
+                    // header is never inherited from the bits — it is created.
+                    let override_fn = match target.universe_key() {
+                        Some(key) => self
+                            .ctx
+                            .casting_graph
+                            .as_ref()
+                            .and_then(|g| g.get_cast_from_bit(key)),
+                        None => None,
+                    };
+                    if let Some(fn_name) = override_fn {
+                        writeln!(out, "{}{} = call {} @{}(i64 {})",
+                            indent, dst, dst_ll, fn_name, cur).ok();
+                    } else {
+                        let p = self.fun.gen_reg();
+                        writeln!(out, "{}{} = inttoptr i64 {} to ptr", indent, p, cur).ok();
+                        writeln!(out, "{}{} = call ptr @brief_bits_to_str(ptr {})",
+                            indent, dst, p).ok();
+                    }
                 }
             }
             cur = dst;

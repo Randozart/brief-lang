@@ -1,0 +1,32 @@
+// Format-string demo (Phase 1 / B0 acceptance artifact).
+//
+// Exercises the full String path under the bits model: a String-typed FFI
+// round-trip (get_env returns a heap String), state store/load of a String
+// value (one machine word), and println!()/print!() formatting with String,
+// Int, and Float placeholders, positional {n}, and {{ }} escapes.
+//
+// Build + run:
+//   ./target/debug/briefc build .smoke/format_demo.bv --llvm --out /tmp/demo
+//   clang -O3 -flto -march=native -ffast-math -fdata-sections -ffunction-sections \
+//       -Wl,--gc-sections /tmp/demo/format_demo.ll lib/runtime/brief_rt.c -o /tmp/demo/format_demo
+//   WHO=world /tmp/demo/format_demo
+//
+// Expected output:
+//   hello, world! x=42 pi=3.14159012
+//   42
+//   literal: {braces} 42
+import { get_env } from "std/env.bv";
+
+let name: String = get_env("WHO");
+let x: Int = 42;
+let pi: Float = 3.14159;
+let tick: Int = 0;
+
+node report [tick < 1][tick == 1] {
+    print!("hello, {}! x={1} pi={2}", name, x, pi);
+    println!();
+    println!("{}", x);
+    println!("literal: {{braces}} {0}", x);
+    tick = 1;
+    term;
+};

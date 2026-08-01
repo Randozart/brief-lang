@@ -113,8 +113,7 @@ impl LlvmBackend {
         divisor: i64,
         cases: &[(i64, &str)],
     ) {
-        writeln!(out, "define i32 @main() local_unnamed_addr {} {{", "#0").ok();
-        writeln!(out, "entry:").ok();
+        self.emit_main_header(out, "#0", true);
         writeln!(out, "  %state = alloca %State, align 8").ok();
         self.emit_inline_init_stores(out, "%state");
         let counter_idx = self.ctx.field_index_map.get(counter_name).copied().unwrap_or(0);
@@ -159,8 +158,7 @@ impl LlvmBackend {
         cases: &[(i64, &str)],
         bound_var: &str,
     ) {
-        writeln!(out, "define i32 @main() local_unnamed_addr {} {{", "#0").ok();
-        writeln!(out, "entry:").ok();
+        self.emit_main_header(out, "#0", true);
         writeln!(out, "  %state = alloca %State, align 8").ok();
         self.emit_inline_init_stores(out, "%state");
         writeln!(out, "  br label %.mr_loop").ok();
@@ -323,8 +321,7 @@ impl LlvmBackend {
             return;
         }
 
-        writeln!(out, "define i32 @main() local_unnamed_addr {} {{", "#0").ok();
-        writeln!(out, "entry:").ok();
+        self.emit_main_header(out, "#0", true);
         writeln!(out, "  %state = alloca %State, align 8").ok();
         self.emit_inline_init_stores(out, "%state");
         self.emit_ssa_mt_prealloc(out, txns);
@@ -413,8 +410,7 @@ impl LlvmBackend {
         _all_internal_map: Option<&HashMap<String, (usize, i64)>>,
         _has_wake: bool,
     ) {
-        writeln!(out, "define i32 @main() local_unnamed_addr {} {{", "#0").ok();
-        writeln!(out, "entry:").ok();
+        self.emit_main_header(out, "#0", true);
         writeln!(out, "  %state = alloca %State, align 8").ok();
         self.emit_inline_init_stores(out, "%state");
         let bound_reg = if let Some(ti) = total_idx {

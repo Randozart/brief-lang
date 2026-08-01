@@ -6,6 +6,11 @@
 // LTO inlining requires the call site and definition signatures to match
 // (mismatched return types prevent LTO from inlining frgn functions).
 frgn __print_int(n: Int) -> Int as frgn__print_int from "lib/runtime/brief_rt.c" fallback 0;
-frgn __print_str(msg: String) -> Void as frgn__print_str from "lib/runtime/brief_rt.c" fallback;
+// 2026-08-01 (B0): frgn __print_str(msg: String) -> Void REMOVED. It was dead
+// (no importers; print! literal segments go through the PrintStr# intrinsic,
+// not this frgn) AND doubly broken: `as frgn__print_str` points at a symbol
+// brief_rt.c does not define, and its String-typed param would declare
+// `{ i64, i64 }` before the B0 ptr change. The PrintStr# intrinsic owns this
+// call site. Undo: re-add the frgn only if stdlib ever needs a named wrapper.
 frgn __print_float(f: Float) -> Int as frgn__print_float from "lib/runtime/brief_rt.c" fallback 0;
 frgn __print_char(c: Int) -> Int as frgn__print_char from "lib/runtime/brief_rt.c" fallback 0;

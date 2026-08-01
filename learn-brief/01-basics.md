@@ -71,42 +71,52 @@ another transaction calls it (see §5).
 
 ## 4. Scripting Mode (Top-Level Statements)
 
-Instead of wrapping every program in a `txn`, you can write statements directly at
-global scope. The compiler automatically wraps them in a synthesized
-`node __init` that fires once on start:
+Instead of wrapping every program in a `txn`/`node`, you can write top-level
+`let`/`const` bindings (or a plain `defn main()`). The flat-scripting plugin
+synthesizes a one-shot opening node that runs them exactly once:
 
 ```brief
 let message: String = "Hello, Brief!";
-println(message);       // scripting — no txn wrapper needed
+let x: Int = 42;
 ```
 
 This is equivalent to:
 
 ```brief
 let message: String = "Hello, Brief!";
-node __init [!__booted][__booted] {
-    println(message);
-    &__booted = 1;
-    term;
+let x: Int = 42;
+let __script_done: Bool = false;
+node __script_main [__script_done == false][__script_done] {
+    let message: String = "Hello, Brief!";
+    let x: Int = 42;
+    __script_done = true;
 };
 ```
+
+A `defn main() -> Int { ... }` with no `entry!` is also wired to run exactly
+once via the same synthesized node (it is renamed to `brief_main`).
 
 **Rules:**
 - All declarations (`let`, `const`, `struct`, `enum`, `defn`, `txn`) must come
   **before** any executable statements
 - Once a top-level statement appears, no more declarations are allowed
 - Statements execute in order, exactly once, then the program exits
+- `__script_main` / `__script_done` are compiler-reserved — a user binding
+  with either name is a compile error
 - `escape` inside a top-level statement atomically rolls back all changes
+- Reactive programs (with `node`/`txn`/`entry!`) are NOT wrapped
 
 **Optimization behavior:** Scripting code goes through the same optimizer as
-any other transaction. If a script is pure (no FFI calls like `println`) with
-all-const inputs, the compiler may fully precompute it. Scripts with FFI calls
-always emit runtime code.
+any other transaction. If a script is pure (no FFI calls) with all-const
+inputs, the compiler may fully precompute it. Scripts with FFI calls always
+emit runtime code.
 
 **When to use scripting vs explicit transactions:**
 - **Scripting**: quick scripts, one-shot initialization, simple programs
 - **Explicit `txn`/`node`**: programs with loops, state machines, reactive chains,
   or multiple independent operations that need their own contracts
+- **CLI subcommands**: use `entry!("<cmd>")` / `args!("--flag")` in a node's
+  contract (see the entry-point tutorial)
 
 ## 5. Calling Transactions
 

@@ -346,7 +346,7 @@ mod tests {
 
     #[test]
     fn test_check_reactive_rejects_dead() {
-        // A reactive txn with no live field bindings and no [#]
+        // A reactive txn with no live field bindings and no entry
         let txn = Transaction {
             name: "work".into(),
             is_reactive: true,
@@ -356,7 +356,7 @@ mod tests {
             output_type: None,
             outputs: vec![],
             contract: Contract { pre_condition: Expr::Bool(true), post_condition: Expr::Bool(true),
-                is_entry: false, watchdog: None, span: None, explicit: false },
+                watchdog: None, span: None, explicit: false },
             body: vec![],
             metadata: HashMap::new(),
             derivation: None,

@@ -6,7 +6,7 @@
 let ema: Float = 0.0;
 let m2: Float = 0.0;
 let count: Int = 0;
-let total: Int = GetEnvInt!("BOUND");
+let total: Int = get_env_int!("BOUND");
 
 const alpha: Float = 0.05;
 

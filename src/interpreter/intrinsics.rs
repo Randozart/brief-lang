@@ -501,9 +501,25 @@ pub fn execute_intrinsic(
         }
         "PrintStr#" => {
             let val = args.get(0).cloned().unwrap_or(Value::Void);
-            if let Value::Int(n) = val {
-                // String handle (opaque pointer) — print as int for now
-                print!("{}", n);
+            match val {
+                // 2026-08-01: Direct string bytes (Expr::Quoted) print as text.
+                Value::Bits(bytes) => {
+                    print!("{}", String::from_utf8_lossy(&bytes));
+                }
+                // Heap string handle: 8-byte LE length header followed by the
+                // payload, as produced by the FFI string marshaller.
+                Value::Int(addr) if addr > 0 => {
+                    let len = heap
+                        .read(addr as u64, 8)
+                        .map(|b| i64::from_le_bytes(b.try_into().unwrap_or([0u8; 8])))
+                        .unwrap_or(0);
+                    if len > 0 {
+                        if let Some(payload) = heap.read(addr as u64 + 8, len as usize) {
+                            print!("{}", String::from_utf8_lossy(payload));
+                        }
+                    }
+                }
+                _ => {}
             }
             // PrintStr# returns number of bytes printed
             Ok(i64_to_bits(0))
@@ -648,6 +664,140 @@ mod tests {
     }
 
     #[test]
+    fn test_string_content_eq_literals() {
+        // 2026-08-01 (B1): content equality on String operands. Two distinct
+        // literal expressions with the same payload must compare equal; a
+        // differing payload (or length) must compare unequal. This pins the
+        // interpreter-first half of B1 (rule #4).
+        use crate::ast::{BinaryOpKind, Expr};
+        use crate::interpreter::eval_expr;
+        let eq = |a: &str, b: &str| -> bool {
+            let mut heap = VirtualHeap::new();
+            let mut bindings = std::collections::HashMap::new();
+            let expr = Expr::BinaryOp(
+                BinaryOpKind::Eq,
+                Box::new(Expr::Quoted(a.as_bytes().to_vec())),
+                Box::new(Expr::Quoted(b.as_bytes().to_vec())),
+            );
+            eval_expr(&expr, &mut heap, &mut bindings).unwrap().is_true()
+        };
+        assert!(eq("hello", "hello"));
+        assert!(!eq("hello", "world"));
+        // Differing lengths are unequal even when one is a prefix of the other.
+        assert!(!eq("ab", "abc"));
+        assert!(!eq("abc", "ab"));
+        // Empty strings are equal to each other.
+        assert!(eq("", ""));
+    }
+
+    #[test]
+    fn test_string_content_eq_heap_handles() {
+        // 2026-08-01 (B1): two equal-content strings at DIFFERENT heap
+        // addresses must compare equal (the acceptance case for B1 — address
+        // equality would be false here). Handles are [len: i64][payload].
+        use crate::ast::{BinaryOpKind, Expr};
+        use crate::interpreter::eval_expr;
+        let alloc_str = |heap: &mut VirtualHeap, s: &str| -> i64 {
+            let bytes = s.as_bytes();
+            let mut header = (bytes.len() as i64).to_le_bytes().to_vec();
+            header.extend_from_slice(bytes);
+            let addr = heap.allocate(header.len());
+            heap.write(addr, &header).unwrap();
+            addr as i64
+        };
+        let mut heap = VirtualHeap::new();
+        let a1 = alloc_str(&mut heap, "same content");
+        let a2 = alloc_str(&mut heap, "same content");
+        assert_ne!(a1, a2, "test must use two distinct addresses");
+        let mut bindings = std::collections::HashMap::new();
+        let expr = Expr::BinaryOp(
+            BinaryOpKind::Eq,
+            Box::new(Expr::Identifier("a".into())),
+            Box::new(Expr::Identifier("b".into())),
+        );
+        bindings.insert("a".into(), Value::Int(a1));
+        bindings.insert("b".into(), Value::Int(a2));
+        assert!(eval_expr(&expr, &mut heap, &mut bindings).unwrap().is_true());
+
+        // Ne on the same two handles is false.
+        let expr_ne = Expr::BinaryOp(
+            BinaryOpKind::Neq,
+            Box::new(Expr::Identifier("a".into())),
+            Box::new(Expr::Identifier("b".into())),
+        );
+        assert!(!eval_expr(&expr_ne, &mut heap, &mut bindings).unwrap().is_true());
+
+        // Differing content at distinct addresses is unequal.
+        let c = alloc_str(&mut heap, "different content");
+        bindings.insert("c".into(), Value::Int(c));
+        let expr2 = Expr::BinaryOp(
+            BinaryOpKind::Eq,
+            Box::new(Expr::Identifier("a".into())),
+            Box::new(Expr::Identifier("c".into())),
+        );
+        assert!(!eval_expr(&expr2, &mut heap, &mut bindings).unwrap().is_true());
+    }
+
+    #[test]
+    fn test_string_content_eq_numeric_fallthrough() {
+        // 2026-08-01 (B1): a String compared against a non-String must NOT
+        // hit the string path (string_bytes returns None for it) — the
+        // numeric fallback decides. This guards against the deref helper
+        // swallowing int comparisons.
+        use crate::ast::{BinaryOpKind, Expr};
+        use crate::interpreter::eval_expr;
+        let mut heap = VirtualHeap::new();
+        let mut bindings = std::collections::HashMap::new();
+        let expr = Expr::BinaryOp(
+            BinaryOpKind::Eq,
+            Box::new(Expr::Decimal(5)),
+            Box::new(Expr::Decimal(5)),
+        );
+        assert!(eval_expr(&expr, &mut heap, &mut bindings).unwrap().is_true());
+        let expr = Expr::BinaryOp(
+            BinaryOpKind::Eq,
+            Box::new(Expr::Decimal(5)),
+            Box::new(Expr::Decimal(6)),
+        );
+        assert!(!eval_expr(&expr, &mut heap, &mut bindings).unwrap().is_true());
+    }
+
+    #[test]
+    fn test_string_bitwise_ops() {
+        // 2026-08-01 (B1): & | ^ ~ on String operands operate on content bytes
+        // and produce a same-length result (interpreter parity with the
+        // backend's brief_str_band/bor/bxor/bnot calls).
+        use crate::ast::{BinaryOpKind, Expr, UnaryOpKind};
+        use crate::interpreter::eval_expr;
+        let mut heap = VirtualHeap::new();
+        let mut bindings = std::collections::HashMap::new();
+        let mut eval = |kind, a: &str, b: &str| -> Vec<u8> {
+            let expr = Expr::BinaryOp(
+                kind,
+                Box::new(Expr::Quoted(a.as_bytes().to_vec())),
+                Box::new(Expr::Quoted(b.as_bytes().to_vec())),
+            );
+            match eval_expr(&expr, &mut heap, &mut bindings).unwrap() {
+                Value::Bits(bytes) => bytes,
+                other => panic!("expected Bits, got {other:?}"),
+            }
+        };
+        // AND: 'a'(0x61) & 'd'(0x64) = 0x60, 'b'(0x62) & 'e'(0x65) = 0x60,
+        // 'c'(0x63) & 'f'(0x66) = 0x62
+        assert_eq!(eval(BinaryOpKind::BitAnd, "abc", "def"), vec![0x60, 0x60, 0x62]);
+        // OR: 'a' | 'd' = 0x65
+        assert_eq!(eval(BinaryOpKind::BitOr, "a", "d"), vec![0x65]);
+        // XOR: 'a' ^ 'a' = 0
+        assert_eq!(eval(BinaryOpKind::BitXor, "a", "a"), vec![0]);
+        // ~ on content bytes (unary)
+        let un = Expr::UnaryOp(UnaryOpKind::BitNot, Box::new(Expr::Quoted(b"a".to_vec())));
+        match eval_expr(&un, &mut heap, &mut bindings).unwrap() {
+            Value::Bits(bytes) => assert_eq!(bytes, vec![0x9E]), // ~0x61 = 0x9E
+            other => panic!("expected Bits, got {other:?}"),
+        }
+    }
+
+    #[test]
     fn test_lt_i64() {
         let mut heap = VirtualHeap::new();
         let r = execute_intrinsic("Lt#", &[i64_to_bits(1), i64_to_bits(2)], &mut heap).unwrap();
@@ -723,5 +873,31 @@ mod tests {
         let dev_str = Value::bits("unknown_device".as_bytes().to_vec());
         let r = execute_intrinsic("AddressOf#", &[dev_str], &mut heap).unwrap();
         assert_eq!(r.as_i64(), Some(0xFE000000i64));
+    }
+
+    #[test]
+    fn test_reflect_len_and_bytes() {
+        // 2026-08-01 (B3): `x.^Len` = UTF8 char count, `x.^^Bytes` = byte
+        // length (interpreter parity with the backend's brief_char_len /
+        // header read). 'héllo' is 5 chars / 6 bytes.
+        use crate::ast::{Expr, ReflectKind};
+        use crate::interpreter::eval_expr;
+        let mut heap = VirtualHeap::new();
+        let mut bindings = std::collections::HashMap::new();
+        bindings.insert("s".into(), Value::bits("héllo".as_bytes().to_vec()));
+        let len_expr = Expr::Reflect(
+            Box::new(Expr::Identifier("s".into())),
+            "Len".into(),
+            ReflectKind::Runtime,
+        );
+        let len = eval_expr(&len_expr, &mut heap, &mut bindings).unwrap();
+        assert_eq!(len.as_i64(), Some(5), "héllo has 5 UTF8 chars");
+        let bytes_expr = Expr::Reflect(
+            Box::new(Expr::Identifier("s".into())),
+            "Bytes".into(),
+            ReflectKind::CompileTime,
+        );
+        let bytes = eval_expr(&bytes_expr, &mut heap, &mut bindings).unwrap();
+        assert_eq!(bytes.as_i64(), Some(6), "héllo is 6 bytes");
     }
 }

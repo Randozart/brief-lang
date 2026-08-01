@@ -561,14 +561,25 @@ pub fn infer_expression(
         // stage plugins. `briefc check` does not run plugins, so known
         // env-variable intercepts are typed here (they desugar to stdlib
         // `get_env`/`get_env_int` calls in the build path).
+        // 2026-08-01: Phase 1 of the plugin-macro rework — only lowercase
+        // macro names are recognized. PascalCase legacy names (`PrintLn!`,
+        // `GetEnvInt!`, ...) are rejected with a rename hint.
         Expr::PluginIntercept { name, args, .. } => {
             for a in args {
                 infer_type_only(a, ctx)?;
             }
             match name.as_str() {
-                "GetEnvInt" => Ok((Type::int(), Provenance::Unknown)),
-                "GetEnv" | "GetEnvOrDefault" => Ok((Type::string(), Provenance::Unknown)),
-                "PrintLn" | "println" => Ok((Type::void(), Provenance::Unknown)),
+                "get_env_int" => Ok((Type::int(), Provenance::Unknown)),
+                "get_env" | "get_env_or_default" => Ok((Type::string(), Provenance::Unknown)),
+                "print" | "println" => Ok((Type::void(), Provenance::Unknown)),
+                "PrintLn" | "Print" => Err(TypeError::InvalidOperation {
+                    operation: format!("plugin-intercept '{}!'", name),
+                    type_name: "the lowercase macros 'println!' and 'print!' replaced 'PrintLn!' and 'Print!' — rename the call site".into(),
+                }),
+                "GetEnvInt" | "GetEnv" | "GetEnvOrDefault" => Err(TypeError::InvalidOperation {
+                    operation: format!("plugin-intercept '{}!'", name),
+                    type_name: "the lowercase macros 'get_env_int!', 'get_env!', and 'get_env_or_default!' replaced the PascalCase names — rename the call site".into(),
+                }),
                 _ => Err(TypeError::InvalidOperation {
                     operation: format!("plugin-intercept '{}!'", name),
                     type_name: "unresolved plugin-intercept reached the typechecker".into(),

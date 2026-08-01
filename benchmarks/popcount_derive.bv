@@ -22,7 +22,7 @@ defn popcount(x0: Int) -> Int := {
     7 -> 3;
 } := popcount_ref;
 
-let N: Int = GetEnvInt!("BOUND");
+let N: Int = get_env_int!("BOUND");
 let i: Int = 0;
 let sum: Int = 0;
 
@@ -30,7 +30,7 @@ node count[i < N][i == N] {
     sum = sum + popcount(i);
     i = i + 1;
     when i == N {
-        PrintLn!(sum);
+        println!(sum);
     };
     term;
 };

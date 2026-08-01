@@ -2,7 +2,9 @@
 // 2026-07-12: Phase 1.2 — Parse top-level declarations.
 // Flat code: each function is max 2 levels.
 // Handles: defn, txn, node, cell, export, import, meld, trg.
-// Also handles [#] entry contracts, derivation blocks :=, implicit entry wrapping.
+// Also handles derivation blocks :=, implicit entry wrapping.
+// 2026-08-01 (Phase 2): `[#]` entry contracts removed — entry!/args! (Phase 3)
+// replace the marker with explicit macros.
 
 use super::helpers::Parser;
 use crate::ast::*;
@@ -25,10 +27,20 @@ impl<'a> Parser<'a> {
                 .parse_transaction(false, false)
                 .map(TopLevel::Transaction),
             Some(Token::Node) => self.parse_node().map(TopLevel::Transaction),
+            // 2026-08-01 (Phase 3c): `sync<group> node name ...` — a reactive
+            // node classified into a group barrier. Members that fire hold off
+            // finishing until all fired members have (rule #21 classification).
+            Some(Token::Sync) => self.parse_sync_group(),
             // 2026-07-31: `async node` (prefix) — same as `node async`.
+            // 2026-08-01 (Phase 3c): the prefix form must preserve the async
+            // flag. parse_node reads is_async via eat(Async) AFTER consuming
+            // 'node'; with the prefix the async token is already consumed, so
+            // we set it on the returned Transaction.
             Some(Token::Async) if matches!(self.tokens.get(self.pos + 1).map(|(t, _)| t), Some(Token::Node)) => {
                 self.pos += 1; // consume async
-                self.parse_node().map(TopLevel::Transaction)
+                let mut txn = self.parse_node()?;
+                txn.is_async = true;
+                Ok(TopLevel::Transaction(txn))
             }
             Some(Token::Cell) => self.parse_cell().map(TopLevel::Cell),
             Some(Token::Import) => self.parse_import().map(TopLevel::Import),
@@ -360,9 +372,8 @@ impl<'a> Parser<'a> {
             let item = self.parse_top_level()?;
             items.push(item);
         }
-        // Implicit entry wrapping: if no explicit [#] defns/txns, and we have
-        // top-level statements, wrap them in an implicit transaction.
-        self.wrap_implicit_entry(&mut items);
+        // 2026-08-01 (Phase 4): implicit entry wrapping is owned by the script
+        // plugin (script_plugin.rs) — it synthesizes the one-shot opening node.
         Ok(items)
     }
 
@@ -503,6 +514,35 @@ impl<'a> Parser<'a> {
             modifiers: vec![],
             span: None,
             doc: self.take_doc(),
+        })
+    }
+
+    /// Parse: `sync<group> node name [pre][post] { body }`.
+    /// 2026-08-01 (Phase 3c): classifies a reactive node into a group barrier.
+    /// Members of the same group that fire hold off finishing until all fired
+    /// members have — the concurrency gate accepts a pair when both are in a
+    /// shared sync group (rule #21 classification).
+    fn parse_sync_group(&mut self) -> Result<TopLevel, SyntaxError> {
+        self.pos += 1; // consume 'sync'
+        let domains = if self.eat(&Token::Lt) {
+            let mut names = Vec::new();
+            loop {
+                let name = self.expect_identifier()?;
+                names.push(name);
+                if !self.eat(&Token::Comma) {
+                    break;
+                }
+            }
+            self.expect(Token::Gt)?;
+            names
+        } else {
+            vec![]
+        };
+        // parse_node consumes `node [async] name ...` itself.
+        let node = self.parse_node()?;
+        Ok(TopLevel::SyncGroup {
+            domains,
+            item: Box::new(TopLevel::Transaction(node)),
         })
     }
 
@@ -869,40 +909,28 @@ impl<'a> Parser<'a> {
         Ok((output_type, contract))
     }
 
-    /// Parse contract: [#], [pre][post], [[post], [pre]]
+    /// Parse contract: [pre][post], [[post], [pre]]
     fn parse_contract(&mut self) -> Result<Contract, SyntaxError> {
         let mut pre = Expr::Bool(true);
         let mut post = Expr::Bool(true);
-        let mut is_entry = false;
         // 2026-07-31: true once any `[` was consumed — distinguishes an
         // explicit contract from the no-contract default `[true][true]`.
         let mut contract_saw_bracket = false;
-        // Check for [#]
+        // 2026-08-01 (Phase 2): `[#]` entry-point marker removed. Peek for it
+        // and raise a clear error — the entry!/args! plugin (Phase 3) replaces
+        // the marker with explicit macros, so `[#]` must not silently parse as
+        // a precondition referencing the identifier `#`.
         if self.check(&Token::LBracket) {
-            // Peek inside brackets for #
-            // This is tricky: [#] is LBracket, Identifier("#"), RBracket
             let saved = self.pos;
             self.pos += 1; // peek past LBracket
             let is_entry_syntax = self.check_identifier("#");
             self.pos = saved; // restore
-
             if is_entry_syntax {
-                contract_saw_bracket = true;
-                self.pos += 1; // consume LBracket
-                self.pos += 1; // consume Identifier("#")
-                self.expect(Token::RBracket)?;
-                is_entry = true;
-                // Optional postcondition: [#][post]
-                if self.check(&Token::LBracket) {
-                    post = self.parse_single_contract_condition()?;
-                }
-                return Ok(Contract {
-                    pre_condition: pre,
-                    post_condition: post,
-                    is_entry,
-                    watchdog: None,
-                    span: None,
-                    explicit: true,
+                return Err(SyntaxError::InvalidStatement {
+                    reason: "'[#]' entry-point syntax removed — use the entry!/args! \
+                             macros (Phase 3) or write an explicit contract"
+                        .to_string(),
+                    span: Span::dummy(),
                 });
             }
         }
@@ -982,7 +1010,6 @@ impl<'a> Parser<'a> {
         Ok(Contract {
             pre_condition: pre,
             post_condition: post,
-            is_entry,
             watchdog,
             span: None,
             explicit,
@@ -1236,11 +1263,6 @@ impl<'a> Parser<'a> {
                 })
             }
         }
-    }
-
-    /// Wrap top-level statements in an implicit [#] transaction if needed.
-    fn wrap_implicit_entry(&self, _items: &mut Vec<TopLevel>) {
-        // Placeholder: full implementation in Phase 16E
     }
 
     /// 2026-07-14: Parse: type Name : Parent { slot; slot; }
@@ -1546,8 +1568,17 @@ impl<'a> Parser<'a> {
         let name = self.expect_identifier()?;
         // Optional protocol variant: (#Proto) or (ConcreteType)
         let protocol_variant = if self.eat(&Token::LParen) {
-            // Parse the protocol variant or concrete type
-            let variant = self.expect_identifier()?;
+            // 2026-08-01 (B2): parse the variant as a TYPE so hashwords work
+            // (`op CastFrom(#Bit) = fn`). Previously expect_identifier rejected
+            // the `#` — type-level CastFrom(#Bit) overrides were unparseable.
+            // Store the bare category (strip `#`) — compile.rs matches
+            // protocol_variant == "#Bit"/"Bit".
+            let variant = match self.parse_type()? {
+                crate::ast::Type::HashWord(cat) | crate::ast::Type::HashWordVariant(cat, _) => {
+                    cat.strip_prefix('#').unwrap_or(&cat).to_string()
+                }
+                other => format!("{}", other),
+            };
             // Check for discriminator key-value pairs: pre:"0x", suf:"f", reg:"..."
             let mut pre: Option<String> = None;
             let mut suf: Option<String> = None;
@@ -1611,7 +1642,11 @@ impl<'a> Parser<'a> {
         reg: Option<String>,
         op_bindings: &mut Vec<OperatorBinding>,
     ) -> Result<(), SyntaxError> {
-        self.expect(Token::Colon)?;
+        // 2026-08-01 (B2): `op CastFrom(#Bit) = fn` uses `=` (like the proto
+        // CastFrom form); other discriminated ops use `:`. Accept either.
+        if !self.eat(&Token::Eq) {
+            self.expect(Token::Colon)?;
+        }
         let fn_name = self.expect_identifier()?;
         self.expect(Token::LParen)?;
         let mut args = Vec::new();
@@ -2215,10 +2250,13 @@ mod tests {
 
     #[test]
     fn test_op_declarative_protocol_variant() {
+        // 2026-08-01 (B2): the variant parses as a TYPE, so the stored value
+        // is the BARE category ("Int") — hashwords (`op Add(#Int)`) and
+        // CastFrom(#Bit) overrides both go through parse_type now.
         let ops = parse_op_from_type_def("type T { op Add(#Int): int_add(#L, #R); };");
         assert_eq!(ops.len(), 1);
         assert_eq!(ops[0].name, "Add");
-        assert_eq!(ops[0].protocol_variant.as_deref(), Some("#Int"));
+        assert_eq!(ops[0].protocol_variant.as_deref(), Some("Int"));
     }
 
     #[test]
@@ -2757,4 +2795,78 @@ mod tests {
         let t = parse_txn("txn f() [true][done] { term; };").unwrap();
         assert!(t.contract.watchdog.is_none());
     }
+
+    // ── 2026-08-01 (Phase 2): `[#]` entry marker removal ──────────────
+
+    #[test]
+    fn test_entry_hash_bracket_is_syntax_error() {
+        // 2026-08-01 (Phase 2): `[#]` is no longer an entry-point marker — it
+        // must be rejected with a clear error, NOT silently parsed as a
+        // precondition referencing `#` or a `Type[#]` array dimension.
+        // Contract position: `txn f() [#]`.
+        let err = parse_txn("txn f() [#] { term; };").unwrap_err();
+        let msg = format!("{}", err);
+        assert!(
+            msg.contains("entry-point syntax removed"),
+            "expected a clear '[#] removed' error, got: {msg}"
+        );
+        // After the return type: `defn main() -> Int [#]` (the classic form).
+        let err = parse_defn("defn main() -> Int [#] { term 0; };").unwrap_err();
+        assert!(
+            format!("{}", err).contains("entry-point syntax removed"),
+            "expected '[#] removed' error for '-> Int [#]', got: {}",
+            err
+        );
+        // `[#][post]` form is rejected too.
+        let err = parse_txn("txn f() [#][r == 0] { term; };").unwrap_err();
+        assert!(format!("{}", err).contains("entry-point syntax removed"));
+    }
+
+    #[test]
+    fn test_plain_contract_still_parses() {
+        // 2026-08-01 (Phase 2): removing `[#]` must not disturb ordinary
+        // contracts — pre/post still parse.
+        let t = parse_txn("txn f() [x > 0][done] { term; };").unwrap();
+        assert!(t.contract.watchdog.is_none());
+        assert!(t.contract.explicit);
+    }
+
+    #[test]
+    fn test_sync_group_node_parses() {
+        // 2026-08-01 (Phase 3c): `sync<group> node name [pre][post] { body }`
+        // parses to a TopLevel::SyncGroup wrapping the reactive transaction
+        // with the group domains — the concurrency-gate classification.
+        let src = "sync<counters> node inc_a [a < 100][a == 100] { a = a + 1; term; };";
+        let tokens = tokenize(src).unwrap();
+        let mut p = Parser::new(tokens, src);
+        let item = p.parse_top_level().unwrap();
+        match item {
+            crate::ast::TopLevel::SyncGroup { domains, item: inner } => {
+                assert_eq!(domains, vec!["counters".to_string()]);
+                if let crate::ast::TopLevel::Transaction(t) = inner.as_ref() {
+                    assert_eq!(t.name, "inc_a");
+                    assert!(t.is_reactive);
+                } else {
+                    panic!("SyncGroup must wrap a Transaction");
+                }
+            }
+            _ => panic!("expected SyncGroup, got {item:?}"),
+        }
+    }
+
+    #[test]
+    fn test_async_node_prefix_preserves_async() {
+        // 2026-08-01 (Phase 3c): `async node name` must set is_async (the
+        // prefix form was silently dropping the flag).
+        let src = "async node inc_a [a < 100][a == 100] { a = a + 1; term; };";
+        let tokens = tokenize(src).unwrap();
+        let mut p = Parser::new(tokens, src);
+        let item = p.parse_top_level().unwrap();
+        if let crate::ast::TopLevel::Transaction(t) = item {
+            assert!(t.is_async, "async node prefix must set is_async");
+        } else {
+            panic!("expected Transaction, got {item:?}");
+        }
+    }
 }
+

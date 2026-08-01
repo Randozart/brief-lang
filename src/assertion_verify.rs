@@ -177,7 +177,6 @@ mod tests {
             contract: Contract {
                 pre_condition: Expr::Bool(true),
                 post_condition: Expr::Bool(true),
-                is_entry: false,
                 watchdog: None,
                 explicit: false,
                 span: None,
@@ -212,7 +211,6 @@ mod tests {
             contract: Contract {
                 pre_condition: Expr::Bool(true),
                 post_condition: Expr::Bool(true),
-                is_entry: false,
                 watchdog: None,
                 explicit: false,
                 span: None,
@@ -247,7 +245,6 @@ mod tests {
             contract: Contract {
                 pre_condition: Expr::Bool(true),
                 post_condition: Expr::Bool(true),
-                is_entry: false,
                 watchdog: None,
                 explicit: false,
                 span: None,
@@ -285,7 +282,6 @@ mod tests {
             contract: Contract {
                 pre_condition: Expr::Bool(true),
                 post_condition: Expr::Bool(true),
-                is_entry: false,
                 watchdog: None,
                 explicit: false,
                 span: None,
@@ -322,7 +318,6 @@ mod tests {
             contract: Contract {
                 pre_condition: Expr::Bool(true),
                 post_condition: Expr::Bool(true),
-                is_entry: false,
                 watchdog: None,
                 explicit: false,
                 span: None,

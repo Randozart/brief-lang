@@ -17,7 +17,7 @@
 // C reference: queue_drain_c.c
 
 
-let N: Int = GetEnvInt!("BOUND");
+let N: Int = get_env_int!("BOUND");
 import { RingBuffer } from "std/collections.bv";
 let queue: RingBuffer<Int> = 0;    // op Init: init(#L, #R)
 let count: Int = 0;
@@ -28,7 +28,7 @@ node work [count < N][count == N] {
 count = count + 1;
 
     when count % 5000000 == 0 {
-        PrintLn!(count);
+        println!(count);
     };
 
     term;

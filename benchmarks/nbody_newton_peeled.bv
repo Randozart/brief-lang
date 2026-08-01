@@ -6,7 +6,7 @@
 //
 // See docs/plans/2026-07-29-flat-allocas-and-loop-peeling.md
 
-let bound: Int = GetEnvInt!("BOUND");
+let bound: Int = get_env_int!("BOUND");
 let count: Int = 0;
 
 const pi: Float32 = 3.141592653589793f32;
@@ -353,7 +353,7 @@ node simulate [
     // PEELED: Periodic print removed from the hot path.
     // Only the termination print fires once.
     when count == bound {
-        term! -> PrintLn!(last_energy);
+        term! -> println!(last_energy);
     };
     term;
 };

@@ -106,6 +106,12 @@ a classification:
 
 ## Implementation notes
 
+- **2026-08-01 (Phase 3c): the gate is ENFORCED.** `run_concurrency_gate` in
+  `src/analysis/concurrency_gate.rs` runs after typechecking and is a hard
+  compile error for any unclassified eligible pair (rule #21). `async node`
+  (prefix) now preserves the async flag; `sync<group> node` is parseable
+  source. Benchmarks with multiple auto-firing nodes were audited and
+  classified (`async node` for parallel, `sync<group>` for barrier).
 - Modifier lexing/parsing is prefix; `node async` (postfix) is rejected.
 - The gate analysis reuses `check_satisfiable` (proof engine) for the SAT test
   and the write/read conflict analysis (`collect_assigned_identifiers` /

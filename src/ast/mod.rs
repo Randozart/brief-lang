@@ -5,9 +5,10 @@
 // - No Expr::IntrinsicCall (use Expr::Call with # suffix)
 // - InopDeclaration and TopLevel::Inop removed (2026-07-22)
 // - No "feature" types (BinaryOpExpr, CallExpr, etc.) — unified Expr variants only
-// - Added Contract.is_entry for [#] entry points
 // - Added TopLevel::Export for export defn
 // - Added Statement::Guarded (already existed in old AST)
+// 2026-08-01 (Phase 2): Contract.is_entry removed (the [#] entry marker is
+// replaced by the entry!/args! macros in Phase 3).
 
 mod display;
 mod expr;

@@ -115,6 +115,14 @@ pub fn builtin_operator_binding(rune: &str, ty: &Type) -> Option<OpBinding> {
         ("Char", "Eq") => Some(OpBinding::Intrinsic("EqI32#".into())),
         ("String", "Concat") => Some(OpBinding::Intrinsic("StringConcat#".into())),
         ("String", "Eq") => Some(OpBinding::Intrinsic("StringEq#".into())),
+        // 2026-08-01 (B1): #String bitwise defaults — & | ^ ~ operate on the
+        // content bytes and return a new String of the same length (see
+        // brief_str_band/bor/bxor/bnot). Binding here lets the typechecker
+        // accept `a & b` on Strings; the backend/interpreter dispatch to the
+        // content ops via #String protocol membership.
+        ("String", "BitAnd") => Some(OpBinding::Intrinsic("StringBitAnd#".into())),
+        ("String", "BitOr") => Some(OpBinding::Intrinsic("StringBitOr#".into())),
+        ("String", "BitXor") => Some(OpBinding::Intrinsic("StringBitXor#".into())),
         _ => None,
     }
 }

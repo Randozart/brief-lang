@@ -1,0 +1,10 @@
+// B3: length-op dispatch — Size (UTF8 char count) + Bytes (byte length).
+let s: String = "héllo";   // 5 chars, 6 bytes (é is 2 bytes)
+let tick: Int = 0;
+node report [tick < 1][tick == 1] {
+    let chars: Int = s.^Len;
+    let bytes: Int = s.^^Bytes;
+    println!("chars={} bytes={}", chars, bytes);
+    tick = 1;
+    term;
+};

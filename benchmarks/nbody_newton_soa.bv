@@ -5,7 +5,7 @@
 //
 // See docs/plans/2026-07-29-phi-register-pressure-capping.md
 
-let bound: Int = GetEnvInt!("BOUND");
+let bound: Int = get_env_int!("BOUND");
 let count: Int = 0;
 
 const pi: Float32 = 3.141592653589793f32;
@@ -357,10 +357,10 @@ node simulate [
     last_energy = energy;
 
     when count % 5000000 == 0 {
-        let __periodic = PrintLn!(energy);
+        let __periodic = println!(energy);
     };
     when count == bound {
-        term! -> PrintLn!(last_energy);
+        term! -> println!(last_energy);
     };
     term;
 };

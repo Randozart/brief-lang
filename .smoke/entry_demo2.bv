@@ -1,0 +1,14 @@
+// Entry demo with a shared field to prevent auto-async (data dependency),
+// isolating the entry! plugin logic from the pre-existing async dispatch.
+let cmd_seen: String = "";
+node build [entry!("build")][result == 0] {
+    println!("building...");
+    cmd_seen = "build";
+    term;
+};
+
+node run [entry!("run")][result == 0] {
+    println!("running...");
+    cmd_seen = "run";
+    term;
+};

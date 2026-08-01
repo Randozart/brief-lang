@@ -148,10 +148,6 @@ pub struct BuildOptions {
     pub extra_objects: Vec<PathBuf>,
     /// 2026-07-18: Build a shared library (.so) instead of an executable.
     pub shared: bool,
-    /// 2026-07-18: Phase B — Enable SSO (Short String Optimization) for String types.
-    /// When ON, String is a 2-field \`{ i64, i64 }\` struct with inline storage for ≤6
-    /// bytes, heap for longer. When OFF (default), String is passed as \`i8*\` (legacy).
-    pub feature_sso_strings: bool,
     /// 2026-07-18: SVO (Small Vector Optimization) — inline storage for
     /// small List<T> elements (≤ N where N is from svo <~ N metadata).
     pub feature_svo: bool,
@@ -379,6 +375,18 @@ pub fn compile_source(file_path: &str, source: &str, opts: &BuildOptions) -> Res
     resolve_comptime_refs(&pm, &mut items)?;
     let mut universe = TypeUniverse::new();
     check_types(&items, &universe)?;
+
+    // ── Concurrency gate (Phase 3c, rule #21: no implicit concurrency) ──
+    // Any pair of reactive txns that can fire together must be classified
+    // (async on both, or sync<group> on both). Runs after typechecking so the
+    // AST is stable; frontend-computed per the frontend-driven-dispatch pillar.
+    let gate_errors = brief_compiler::analysis::concurrency_gate::run_concurrency_gate(&items);
+    if !gate_errors.is_empty() {
+        return Err(format!(
+            "concurrency gate:\n  {}",
+            gate_errors.join("\n  ")
+        ));
+    }
 
     // ── Typed stage: AST transformation (after type check) ────────────
     emit_beast_snapshot(file_path, BeastStage::TypeCheck, BeastPosition::Before, &items, &universe, opts)?;
@@ -840,7 +848,6 @@ pub fn check_source(file_path: &str, source: &str) -> Result<(), String> {
         extra_objects: vec![],
         shared: false,
         int_bits: 64,
-        feature_sso_strings: false,
         feature_svo: false,
         glue_config: None,
         stack_threshold: 4096,
@@ -882,6 +889,8 @@ fn build_plugin_manager(file_path: &str, opts: &BuildOptions) -> PluginManager {
     // Register built-in Rust plugins
     pm.register(Box::new(brief_compiler::plugin::env_plugin::EnvPlugin));
     pm.register(Box::new(brief_compiler::plugin::print_plugin::PrintPlugin));
+    pm.register(Box::new(brief_compiler::plugin::entry_plugin::EntryPlugin));
+    pm.register(Box::new(brief_compiler::plugin::script_plugin::ScriptPlugin));
 
     // Apply per-extension filtering from config/targets.toml
     let ext = get_extension(file_path);
@@ -1001,7 +1010,6 @@ fn codegen(
                 .with_int_bits(opts.int_bits)
                 .with_alloc_strategies(alloc_strategies)
                 .with_needs_arena(needs_arena.clone())
-                .with_sso_strings(opts.feature_sso_strings)
                 .with_svo(opts.feature_svo)
                 .with_shared_lib(opts.shared)
                 .with_stack_threshold(opts.stack_threshold)
@@ -1155,7 +1163,6 @@ fn codegen(
             let mut b = LlvmBackend::new()
                 .with_int_bits(opts.int_bits)
                 .with_alloc_strategies(alloc_strategies)
-                .with_sso_strings(opts.feature_sso_strings)
                 .with_svo(opts.feature_svo)
                 .with_shared_lib(opts.shared)
                 .with_stack_threshold(opts.stack_threshold)

@@ -25,18 +25,51 @@ no guesswork. The programmer defines their own types, or loads the prelude.
 Every type is `Bits(N)` at minimum:
 
 ```brief
-type Int : Bits { maxbits <~ 64; ctd <~ Int; alu <~ Int; op Add ~> "int.add"; }
-type Float : Bits { maxbits <~ 32; ctd <~ Float; alu <~ Float; op Add ~> "float.add"; }
-type String { data: Int; len: Int; encoding <~ "UTF-8"; tbaa <~ "String"; };
+type Int : Bits { !> maxbits: 64; !> ctd: Int; !> alu: Int; op Add ~> "int.add"; }
+type Float : Bits { !> maxbits: 32; !> ctd: Float; !> alu: Float; op Add ~> "float.add"; }
+type String : #String { prop Size: chars(#L); prop Bytes: byte_len(#L); };
 ```
 
-- **`maxbits <~ N`** — Every backend reads this. `maxbits=64` = 64-bit storage. For struct types with `fields`, maxbits is derived from field type sizes (summed). Explicit `maxbits <~ N` overrides the derivation.
-- **`ctd <~ PascalCase`** — Common Type Definition. What the type *is* semantically (exhaustive closed set: `Int`, `UInt`, `Float`, `Double`, `Bool`, `Char`, `String`, `Data`, `Ptr`, `Void`). The normalizer maps CTD to backend-specific types. Inherited from the primordial when not set in source.
-- **`alu <~ PascalCase` or `alu <~ "quoted"`** — What hardware computes with values of this type. PascalCase for known ALUs (`Int`, `Float`, `Bool`), lowercase-quoted for backend/plugin-specific hardware.
+- **`!> maxbits: N`** — Every backend reads this. `maxbits=64` = 64-bit storage. For struct types with `fields`, maxbits is derived from field type sizes (summed). Explicit `!> maxbits: N` overrides the derivation.
+- **`!> ctd: PascalCase`** — Common Type Definition. What the type *is* semantically (exhaustive closed set: `Int`, `UInt`, `Float`, `Double`, `Bool`, `Char`, `String`, `Data`, `Ptr`, `Void`). The normalizer maps CTD to backend-specific types. Inherited from the primordial when not set in source.
+- **`!> alu: PascalCase` or `!> alu: "quoted"`** — What hardware computes with values of this type. PascalCase for known ALUs (`Int`, `Float`, `Bool`), lowercase-quoted for backend/plugin-specific hardware.
 - **`fields: Vec<(String, Type)>`** — Struct field declarations on `ResolvedType`. Populated from `TypeDef.body.slots` by the normalizer. Drives LLVM struct type lowering, state slot width, and `is_string_like()` detection. Example: String with `data: Int; len: Int;` → `fields = [("data", Int), ("len", Int)]`.
 - **`op Add ~> "int.add"`** — Operator binding to a generic backend-agnostic identifier. The typechecker reads this via `get_operator_intrinsic(universe, "+", &Int)`, which returns `OpBinding::Function("int.add")`. The backend then looks up `("Add", "Int", 8)` in `config/llvm-ops.toml` for the LLVM IR template.
-- **`encoding <~ "UTF-8"`** — String encoding, resolved through `config/encodings.toml`. All encoding names are quoted strings — no PascalCase hardcoded table. The config specifies `char_width` (for Index# GEP eligibility) and optional `ops.index_at`/`char_len` (stdlib functions for runtime dispatch).
+- **`!> encoding: "UTF-8"`** — String encoding, resolved through `config/encodings.toml`. All encoding names are quoted strings — no PascalCase hardcoded table. The config specifies `char_width` (for Index# GEP eligibility) and optional `ops.index_at`/`char_len` (stdlib functions for runtime dispatch).
 - **Other metadata** — Any backend is free to use any metadata it needs. Unrecognized metadata is silently ignored.
+
+## Flexible vs Fixed Width
+
+**A type is one machine word unless a bit width is explicitly given as metadata.**
+This is the single rule that decides how wide a value is stored and how its LLVM
+type resolves. It applies uniformly to every protocol category — integer,
+float, and String alike.
+
+- **Flexible-width types** (`Int`, `UInt`, `String`, and any type declared
+  without `!> bits`, `!> maxbits:`, or `!> minbits:` metadata) are **exactly one
+  machine word**: `int_bits` wide, where `int_bits` is derived from the target's
+  data-layout pointer width (or `--int-bits`, one of 8/16/32/64). On x86-64 that
+  is 64 bits; on wasm32 it is 32 bits. Their primordials carry `(bytes=0,
+  min_bits=0, max_bits=0)` = "not yet resolved"; the normalizer leaves them
+  flexible and the casting graph derives the width at codegen time
+  (`resolve_llvm_type`, priority `!> bits → maxbits → minbits → int_bits`).
+  `Int` has no bits metadata and has a *derived* width. `String` is flexible for
+  the same reason: its value *is* a pointer to `[len][bytes]`, so its storage
+  width must follow the machine word, not a hardcoded constant.
+- **Fixed-width types** are **absolute** and never follow the machine word:
+  `Int32` is always 32 bits, `Int64` always 64, `Float` always 32, `Float64`
+  always 64. They carry `!> bits: N` (or a fixed primordial) and their width does
+  not change between targets.
+- **Explicit metadata always wins.** `!> bits: N` fixes the exact width;
+  `!> maxbits: N` sets a ceiling; `!> minbits: N` sets a floor. Without any of
+  them the type is flexible and derives to the machine word.
+
+Why this is the rule: a flexible type must be able to hold a pointer (String) or
+the native register width (Int) on whatever target it lands on. Hardcoding a
+width (e.g. String = 64) is a cross-target lie. `type_size` mirrors this: it
+returns the machine word (8) as the conservative default for flexible
+`Cast.#Int`/`Cast.#UInt`/`Cast.#String` when the universe entry has no baked-in
+bytes (`src/backend/llvm/types.rs`).
 
 ## Frontend/Backend Detachment
 
@@ -61,7 +94,7 @@ A metadata slot added to a type definition in source is automatically visible to
 No Rust changes needed. No recompilation. Example:
 
 ```brief
-type HalfFloat : Bits { maxbits <~ 16; op Add(#Float, #Float); }
+type HalfFloat : Bits { !> maxbits: 16; op Add(#Float, #Float); }
 ```
 
 The parser stores `op Add(#Float, #Float)` in `TypeDefBody.operators`.
@@ -92,8 +125,8 @@ Each backend reads what it needs and ignores the rest.
 |----------|--------------|---------------|
 | `resolve_llvm_type(universe, ty, int_bits)` | `(protocol, bytes)` via the casting graph | LLVM type string (`"i64"`, `"float"`, `"ptr"`, ...) |
 | `Cast.#Float` membership | Protocol category via `type_to_protocol` | `fadd`/`fsub`/`fmul` vs `add`/`sub`/`mul` |
-| `is_string_like(ty, universe)` | Shape (2 Int fields) + encoding property | SSO handle or heap-allocated string helpers |
-| `is_vector_like(ty, universe)` | Has `op.SVO <~ N` metadata | SVO inline list handle (N+1 slot struct) |
+| `Cast.#String` / `Cast.#Data` membership | Protocol category via `type_to_protocol` | String/Data values are `ptr` to `[len][bytes]`; `is_string_operand` / adapt_to_i64 |
+| `is_vector_like(ty, universe)` | Has `!> op.SVO: N` metadata | SVO inline list handle (N+1 slot struct) |
 | `svo_capacity(ty, universe)` | Reads `N` from `op.SVO` metadata | Number of inline elements before heap promotion |
 | `properties["encoding"]` | Looked up in `config/encodings.toml` for `char_width` and stdlib ops | `Index#` emits GEP (fixed-width) or stdlib call (variable-width) |
 | `properties["op.Add"]` etc. | Generic identifier used for config dispatch | `OP_CONFIG.lookup("Add", "Int", 8)` → template fill |
@@ -161,14 +194,14 @@ Adding a new metadata field to a type definition:
 
 ```brief
 type MyColor : Bits {
-    maxbits <~ 32;
-    ctd <~ UInt;
-    alu <~ Int;
-    gamma <~ "sRGB";         // new metadata — no Rust changes
+    !> maxbits: 32;
+    !> ctd: UInt;
+    !> alu: Int;
+    !> gamma: "sRGB";         // new metadata — no Rust changes
 }
 ```
 
-**Parser**: Already handles `identifier <~ expression` in type bodies. No change.
+**Parser**: Already handles `!> key: value` in type bodies. No change.
 **Universe**: `properties["gamma"] = PropertyValue::Quoted("sRGB")`. No change.
 **Any backend**: Reads `properties.get("gamma")` if it cares. No change otherwise.
 
@@ -320,9 +353,9 @@ codegen fallback when config lookup returns None.
 All encoding names are quoted strings resolved through `config/encodings.toml`:
 
 ```
-encoding <~ "UTF-8"      → config/encodings.toml (char_width=0, ops.index_at, ops.char_len)
-encoding <~ "ASCII"      → config/encodings.toml (char_width=1, no ops — direct GEP)
-encoding <~ "shift_jis"  → config/encodings.toml (char_width=0, ops.index_at, ops.char_len)
+!> encoding: "UTF-8"      → config/encodings.toml (char_width=0, ops.index_at, ops.char_len)
+!> encoding: "ASCII"      → config/encodings.toml (char_width=1, no ops — direct GEP)
+!> encoding: "shift_jis"  → config/encodings.toml (char_width=0, ops.index_at, ops.char_len)
 ```
 
 No PascalCase hardcoded table. The `char_width` field tells the compiler
@@ -368,7 +401,7 @@ from individual slots using `when`-chained slot selection based on `i / 8`.
 
 ## Vector Type Dispatch (SVO)
 
-With `feature_svo = true` and `op.SVO <~ N` metadata on a type, the type is
+With `feature_svo = true` and `!> op.SVO: N` metadata on a type, the type is
 detected as vector-like via `is_vector_like()`. The LLVM type becomes
 `{ i64 x (N+1) }` — N data slots + 1 len+cap+tag slot. `push_field_type`
 allocates N+1 state slots per field.

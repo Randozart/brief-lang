@@ -321,7 +321,6 @@ fn parse_build_args(args: &[String]) -> Result<compile::BuildOptions, String> {
         trg_unresolved_action,
         extra_objects: vec![],
         shared,
-        feature_sso_strings: false,
         feature_svo: false,
         glue_config: None,
         stack_threshold: 4096,
@@ -370,7 +369,6 @@ fn run_bounty(args: &[String]) -> Result<(), String> {
         trg_unresolved_action: brief_compiler::backend::llvm::TrgUnresolvedAction::Warn,
         extra_objects: vec![],
         shared: false,
-        feature_sso_strings: false,
         feature_svo: false,
         glue_config: None,
         stack_threshold: 4096,
@@ -728,7 +726,7 @@ fn run_init(name: Option<&str>) -> Result<(), String> {
     let dir = Path::new(name);
     std::fs::create_dir_all(dir.join("src"))
         .map_err(|e| format!("cannot create project: {}", e))?;
-    let main_bv = format!(r#"defn main() -> Int [#] {{
+    let main_bv = format!(r#"defn main() -> Int {{
     term 0;
 }};
 "#);

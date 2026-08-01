@@ -27,7 +27,7 @@ type MyInt : #Int {
   LHS — the declaring type/protocol IS the left operand
 - **Parse ops**: `op Parse(Decimal): fn(#L)` — custom literal construction
 
-No `maxbits <~`, `alignment <~`, `llvm <~`, `storage <~`, `default_width`,
+No `!> maxbits:`, `!> alignment:`, `!> llvm:`, `!> storage:`, `default_width`,
 `commuting`, or LLVM opcode strings needed.
 
 ## 2. Protocol-Centric Ops

@@ -2,6 +2,7 @@ use crate::ast::{BinaryOpKind, Expr, OutputType, Statement, TopLevel, Type};
 use crate::backend::llvm::emit_stmt::emit_statement;
 use crate::backend::llvm::{float_to_llvm_hex, float64_to_llvm_hex, LlvmBackend, TypedRegister};
 use crate::type_universe::{ResolvedType, TypeUniverse};
+use std::collections::HashSet;
 use std::fmt::Write;
 use std::sync::LazyLock;
 
@@ -143,21 +144,10 @@ impl LlvmBackend {
         // Also hardcode common stdlib types that may not have universe entries if the
         // importing benchmark doesn't reference them directly.
         //
-        // Hardcoded stdlib struct types (always emitted for ABI consistency):
-        for (name, field_tys) in &[
-            ("SmallString64", "i64, i64, i64, i64, i64, i64, i64, i64, i64"),
-            ("StaticString", "i64, i64"),
-            ("String", "i64, i64"),
-            ("UTF8View", "i64, i64"),
-        ] {
-            writeln!(out, "%{} = type {{ {} }}", name, field_tys).ok();
-        }
-        // Universe-registered struct types (from type declarations with slots):
-        // 2026-07-30: Skip types already hardcoded above — prevents duplicate
-        // %String = type { i64, i64 } declarations that clang rejects.
-        let mut emitted: std::collections::HashSet<String> = [
-            "SmallString64", "StaticString", "String", "UTF8View",
-        ].iter().map(|s| s.to_string()).collect();
+        // 2026-08-01 (B4): the legacy struct-type declarations (SmallString64,
+        // StaticString, UTF8View) were retired with their types — nothing
+        // references them under the bits model (String is a bare #String ptr).
+        let mut emitted: std::collections::HashSet<String> = std::collections::HashSet::new();
         if let Some(u) = &self.ctx.type_universe {
             let mut universe_fields: Vec<(String, Vec<String>)> = Vec::new();
             for rt in u.types.values() {
@@ -277,14 +267,11 @@ impl LlvmBackend {
         if matches!(ty, Type::Ptr(_)) {
             return "ptr".to_string();
         }
-        // 2026-07-18: UTF8View/Slice always use {ptr, i64} or {i64, i64} (fat pointer),
-        // regardless of SSO. Must be checked BEFORE the general struct_types check
-        // because they are also registered as struct types but should be passed by value.
-        // 2026-07-30: Slice<T> replaces UTF8View. UTF8View kept for backward compat.
+        // 2026-07-30: Slice<T> always uses { ptr, i64 } (fat pointer). Must be
+        // checked BEFORE the general struct_types check because Slice is also
+        // registered as a struct type but should be passed by value.
+        // 2026-08-01 (B4): UTF8View removed (legacy type retired).
         if let Type::Custom(name) = ty {
-            if name == "UTF8View" {
-                return "{ i64, i64 }".to_string();
-            }
             if name == "Slice" {
                 return "{ ptr, i64 }".to_string();
             }
@@ -310,26 +297,14 @@ impl LlvmBackend {
                 }
             }
         }
-        if self.feature_sso_strings {
-            // 2026-07-31: Phase 3 (§8.4-D7) — String detection via protocol
-            // membership (#String) instead of the type name.
-            if self.is_protocol_member(ty, "#String") {
-                return "{ i64, i64 }".to_string();
-            }
-            if self.ctx.type_universe.as_ref().map_or(false, |u| u.is_string_like(ty)) {
-                return "{ i64, i64 }".to_string();
-            }
-        }
-        // 2026-07-22: Non-SSO strings use ptr (opaque pointer), even if the
-        // universe declares them as {i64, i64}. The SSO code path converts
-        // between {i64, i64} and ptr internally; without SSO, the parameter
-        // is treated as a raw pointer.
-        if !self.feature_sso_strings {
-            // 2026-07-31: Phase 3 (§8.4-D7) — #String/#Data membership instead
-            // of the type-name match.
-            if self.is_protocol_member(ty, "#String") || self.is_protocol_member(ty, "#Data") {
-                return "ptr".to_string();
-            }
+        // 2026-07-22: Strings use ptr (opaque pointer) — a Brief String value
+        // is a ptr to a length-prefixed [len][bytes] buffer (B0 bits model).
+        // 2026-07-31: Phase 3 (§8.4-D7) — #String/#Data membership instead
+        // of the type-name match.
+        // 2026-08-01 (B4): the SSO `{ i64, i64 }` branches were retired — a
+        // String is never a fat pointer under the bits model.
+        if self.is_protocol_member(ty, "#String") || self.is_protocol_member(ty, "#Data") {
+            return "ptr".to_string();
         }
         // 2026-07-30: Struct-like types derive LLVM type from field shapes.
         // This handles Slice<T> (fields: { Ptr<T>, Int } → { ptr, i64 }),
@@ -746,9 +721,6 @@ impl LlvmBackend {
     /// 2026-07-03: Shared field initializer value emitter. Handles the
     /// match-on-init_expr dispatch for field initialization, shared by
     /// emit_init_state and emit_inline_init_stores. Arguments:
-    ///   - tag_strings: when true, OR 1 onto string pointers to mark as
-    ///     static (not heap-allocated). Used by inline init but not by
-    ///     @init_state (which runs at first access, before heap is live).
     ///   - reg_suffix: suffix for intermediate register names (e.g. "s", "b").
     ///     Use format!("%ip_{}{}", idx, suffix) to generate stable names.
     /// 2026-07-31 (A7): `let x: T = val` where T declares `op Init: init(#L,#R)`
@@ -863,8 +835,10 @@ impl LlvmBackend {
         }
     }
 
+    /// 2026-08-01 (B4): tag_strings removed — a String is an untagged ptr to
+    /// [len][bytes] under the bits model; no static-tag bit is ever set.
     fn emit_field_init_value(&mut self, out: &mut String, indent: &str,
-        init_clone: Option<Expr>, ty: &str, gep: &str, idx: usize, tag_strings: bool)
+        init_clone: Option<Expr>, ty: &str, gep: &str, idx: usize)
     {
         let mut field_reg = |suffix: &str| -> String { format!("%ip_{}{}", idx, suffix) };
                 // 2026-06-20: Handle LiteralExpr::Float directly, matching Expr::Float arm above.
@@ -929,26 +903,15 @@ impl LlvmBackend {
             }
             Some(Expr::Quoted(s)) => {
                 // 2026-07-14: Store string constant pointer (Quoted replaces LiteralExpr::String).
+                // 2026-08-01 (B4): always the UNTAGGED store — a String value is
+                // an untagged ptr to [len][bytes] (bits model); the SSO static-tag
+                // (OR 1) path was retired (it misaligned the header for brief_str_eq).
                 let s_str = String::from_utf8_lossy(&s);
                 let si = self.ctx.string_constants.iter().position(|x| x.as_str() == s_str).unwrap_or(0);
                 let g = format!("@str.{}", si);
                 let str_p = field_reg("s");
                 writeln!(out, "{}{} = bitcast <{{ i64, [{} x i8] }}>* {} to ptr", indent, str_p, s.len() + 1, g).ok();
-                if tag_strings {
-                    // Tag with bit 0 = 1 to mark as static (not heap-allocated)
-                    let tag_p = field_reg("t");
-                    writeln!(out, "{}{} = ptrtoint ptr {} to i64", indent, tag_p, str_p).ok();
-                    let tag_o = field_reg("o");
-                    writeln!(out, "{}{} = or i64 {}, 1", indent, tag_o, tag_p).ok();
-                    let tag_b = field_reg("b");
-                    self.emit_inttoptr(out, indent, &tag_b, &tag_o);
-                    writeln!(out, "{}store i8* {}, ptr {}, align {}", indent, tag_b, gep, self.align_of("i8*")).ok();
-                } else {
-                    // 2026-07-14: No tagging for @init_state path — the init_state
-                    // function runs at first field access, before heap is live.
-                    // String constants in init_state are stored as raw untagged i8*.
-                    writeln!(out, "{}store i8* {}, ptr {}, align {}", indent, str_p, gep, self.align_of("i8*")).ok();
-                }
+                writeln!(out, "{}store i8* {}, ptr {}, align {}", indent, str_p, gep, self.align_of("i8*")).ok();
             }
             Some(expr) => {
                 let val_reg = self.emit_expr(out, &expr, indent);
@@ -1013,7 +976,7 @@ impl LlvmBackend {
             // (always-false stub after insert_at removal) is deleted. RingBuffer
             // state fields are expanded inline via ringbuf_inline; a bracket-list
             // initializer falls through to emit_field_init_value as before.
-            self.emit_field_init_value(out, "  ", init_clone, &ty, &p, idx, false);
+            self.emit_field_init_value(out, "  ", init_clone, &ty, &p, idx);
         }
         let mmio_inits: Vec<(u64, Expr)> = {
             let mut v = Vec::new();
@@ -1073,7 +1036,7 @@ impl LlvmBackend {
             }
             // 2026-07-31: Phase 3 (§8.5-E4) — always-false ringbuf-init branch
             // deleted; bracket-list initializers go through emit_field_init_value.
-            self.emit_field_init_value(out, indent, init_clone, &ty, &gep_reg, *idx, true);
+            self.emit_field_init_value(out, indent, init_clone, &ty, &gep_reg, *idx);
         }
         // Initialize cache slots for LazyCached fields: cache_value = 0, valid_flag = 0
         // 2026-07-19: Sorted for deterministic IR.
@@ -1318,11 +1281,9 @@ impl LlvmBackend {
                 reg = conv;
             } else if param_llvm_ty == "i64" {
                 reg = raw;
-            } else if self.feature_sso_strings
-                && self.ctx.type_universe.as_ref().map_or(false, |u| u.is_string_like(t))
-            {
-                // 2026-07-18: SSO String params are {i64, i64} — no boxing needed.
-                reg = raw;
+                // 2026-08-01 (B4): the SSO String-param {i64,i64} branch was
+                // retired — a String param is a ptr (handled above) or an i64
+                // address, never a fat pointer under the bits model.
             } else if self.is_boxed_type(t) {
                 // 2026-07-12: box_op removed from ResolvedType — use hardcoded fallback.
                 // 2026-07-31: Phase 3 (§8.4-D1) — boxed-type detection via
@@ -1441,38 +1402,41 @@ impl LlvmBackend {
         }
     }
 
-    /// 2026-07-31: Build a `!range` metadata string whose bounds use the
-    /// FIELD's load width (i8/i16/i32/i64) — an i64 range on an i8 load is a
-    /// verifier error and crashes the clang -O3 frontend. Returns None when
-    /// the bound is not representable in the field's width (e.g. [0,256) on
-    /// an i8 — redundant, skip it).
-    fn range_metadata(
+    /// Emit a range metadata node in the LLVM integer width of the field's
+    /// storage type. LLVM range metadata requires its bounds to be the same
+    /// integer type as the load they annotate — `!range !{ i64 0, i64 256 }`
+    /// on a `load i8` (Bool/UInt8/Int8 fields) is malformed and crashes clang
+    /// (computeKnownBitsFromRangeMetadata, APInt::setBitsSlowCase). Returns
+    /// the metadata id, or None if the bound does not fit the field width
+    /// (the range is vacuous for that type and must be skipped).
+    /// 2026-08-01: exposed by the entry!/args! plugin's Bool done-flags.
+    fn emit_range_metadata(
+        range_meta: &mut Vec<String>,
+        field_llvm_ty: &str,
         lo: i64,
         hi: i64,
-        field_name: &str,
-        field_index_map: &std::collections::HashMap<String, usize>,
-        field_types: &[String],
-    ) -> Option<String> {
-        let idx = *field_index_map.get(field_name)?;
-        let llvm_ty = field_types.get(idx)?;
-        let bits = match llvm_ty.as_str() {
-            "i8" => 8,
-            "i16" => 16,
-            "i32" => 32,
-            _ => 64,
+    ) -> Option<usize> {
+        // Extract the integer width from the LLVM type ("i8"/"i16"/"i32"/"i64").
+        let bits: u32 = field_llvm_ty
+            .strip_prefix('i')
+            .and_then(|s| s.parse().ok())
+            .or(Some(64))?;
+        // The range bounds must be representable in `bits`. For a signed load
+        // width N, LLVM interprets range bounds as that integer type; hi must
+        // fit. If the bound exceeds the width (e.g. 256 in i8), the range is
+        // vacuous for this storage type — skip it. 64-bit uses the full i64
+        // span (1 << 63 overflows a signed i64, so handle it explicitly).
+        let (max_signed, min_signed) = if bits >= 64 {
+            (i64::MAX, i64::MIN)
+        } else {
+            (1i64 << (bits - 1), -(1i64 << (bits - 1)))
         };
-        // The bound must be representable in the field's signed width. hi is
-        // EXCLUSIVE, so it may equal the type's max+1 (e.g. i8 hi=128).
-        let (min, max) = match bits {
-            8 => (i8::MIN as i64, i8::MAX as i64 + 1),
-            16 => (i16::MIN as i64, i16::MAX as i64 + 1),
-            32 => (i32::MIN as i64, i32::MAX as i64 + 1),
-            _ => (i64::MIN, i64::MAX),
-        };
-        if lo < min || hi > max {
+        if hi > max_signed || lo < min_signed {
             return None;
         }
-        Some(format!("!{{ {} {}, {} {} }}", llvm_ty, lo, llvm_ty, hi))
+        let mi = range_meta.len() + 50;
+        range_meta.push(format!("!{} = !{{ {} {}, {} {} }}", mi, field_llvm_ty, lo, field_llvm_ty, hi));
+        Some(mi)
     }
 
     /// 2026-07-27: Rewrite identifier references in a statement to use cold-function
@@ -1560,17 +1524,33 @@ impl LlvmBackend {
         for (name, &idx) in &self.ctx.field_index_map {
             self.ctx.idx_to_field_name.insert(idx, name.clone());
         }
+        // 2026-08-01: A contract-derived !range is only sound for fields that
+        // no node body writes. The range is extracted from the *precondition*
+        // (e.g. [tick < 1] ⇒ tick ∈ [MIN, 1)), but emit_state_load attaches it
+        // to EVERY load of the field — including the dispatch-loop guard that
+        // re-reads state each tick. If the node body writes tick = 1, the value
+        // leaves the range on the next iteration, which is UB in LLVM semantics;
+        // clang then assumes the guard always fires and the reactor never
+        // converges (observed: format-demo infinite loop). The write_set (computed
+        // once in the transition graph) is the exact guard: if no node writes the
+        // field, the precondition range is loop-invariant and sound. Type-driven
+        // ranges below are still emitted for written fields — a UInt8 field holds
+        // [0, 256) by type construction regardless of writes.
+        let written_fields = self.ctx.transition_graph.as_ref()
+            .map(|g| g.nodes.iter().flat_map(|n| n.write_set.iter().cloned()).collect::<HashSet<String>>())
+            .unwrap_or_default();
         for (f, &(lo, hi)) in &self.ctx.range_bounds {
-            if hi < i64::MAX {
+            if hi < i64::MAX && !written_fields.contains(f) {
                 // 2026-07-18: Offset by 50 to avoid collision with TBAA metadata nodes
                 // (!0 through ~!20). LLVM metadata IDs must be unique across the module.
-                // 2026-07-31: the range MUST use the field's load width — an i64
-                // range on an i8 load (Bool) is a verifier error and crashes the
-                // clang -O3 frontend.
-                let Some(md) = Self::range_metadata(lo, hi, f, &self.ctx.field_index_map, &self.ctx.field_types) else { continue; };
-                let mi = range_meta.len() + 50;
-                range_meta.push(format!("!{} = {}", mi, md));
-                self.ctx.field_to_meta_idx.insert(f.clone(), mi);
+                // 2026-08-01: bounds emitted in the field's LLVM integer width
+                // (range metadata must match the load type — see emit_range_metadata).
+                let field_llvm = self.ctx.field_types.get(
+                    self.ctx.field_index_map.get(f).copied().unwrap_or(0),
+                ).cloned().unwrap_or_else(|| "i64".to_string());
+                if let Some(mi) = Self::emit_range_metadata(range_meta, &field_llvm, lo, hi) {
+                    self.ctx.field_to_meta_idx.insert(f.clone(), mi);
+                }
             }
         }
         // 2026-07-04: Type-driven !range for narrow integer types.
@@ -1588,10 +1568,17 @@ impl LlvmBackend {
                 // (contract ranges are tighter and take priority).
                 if !self.ctx.field_to_meta_idx.contains_key(field_name) {
                     // 2026-07-18: Offset by 50 to avoid TBAA node collision.
-                    let Some(md) = Self::range_metadata(range_bounds.0, range_bounds.1, field_name, &self.ctx.field_index_map, &self.ctx.field_types) else { continue; };
-                    let mi = range_meta.len() + 50;
-                    range_meta.push(format!("!{} = {}", mi, md));
-                    self.ctx.field_to_meta_idx.insert(field_name.clone(), mi);
+                    // 2026-08-01: bounds emitted in the field's LLVM width —
+                    // `!{ i64 0, i64 256 }` on a load i8 (Bool/UInt8/Int8)
+                    // crashes clang. Skip when the bound is vacuous for the
+                    // storage type (e.g. 256 does not fit i8).
+                    let field_llvm = self.ctx.field_types.get(idx)
+                        .cloned().unwrap_or_else(|| "i64".to_string());
+                    if let Some(mi) = Self::emit_range_metadata(
+                        range_meta, &field_llvm, range_bounds.0, range_bounds.1,
+                    ) {
+                        self.ctx.field_to_meta_idx.insert(field_name.clone(), mi);
+                    }
                 }
             }
         }

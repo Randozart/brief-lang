@@ -2765,3 +2765,161 @@ so a guard printing the counter reads the header phi (pre-increment) and prints
 count-1; (b) the countdown inner-body emission drops the `<-` push member call
 (only the pop address + increment emit). Fix both in the countdown; keep
 queue_drain out of the harness until the output matches C (5M/10M).
+**Fixed 2026-08-01 (A9b):** three root causes — (a) the `let_to_field` alias map
+misread the `<-` push (both fields) as a let-alias and remapped the guard's
+counter reads to the collection field (exclude field-to-field assignments from
+the alias map); (b) the countdown Assign arm didn't dispatch `<-` to the member
+call (added find_insert_strategy + emit_strategy_member_call); (c) collections.bv
+declared `op Init` without an init member, and the countdown's inline init didn't
+run the Init-op construction (queue slot stored 0 → null deref). queue_drain
+re-enabled; matches C (5M/10M) and wins 0.58x.
+
+---
+
+## frgn String declares disagree with call sites when SSO is off — OPEN
+
+**Date:** 2026-08-01
+**Status:** Open (latent — no current impact; logged from plugin-rework FFI audit)
+**Root cause:** The frgn `declare` emission uses `protocol_llvm_type`
+(`src/backend/llvm/mod.rs:366`), which returns `{ i64, i64 }` for String-shaped
+types unconditionally. The frgn **call-site** uses `llvm_type`
+(`src/backend/llvm/emit_toplevel.rs:269`), which respects `feature_sso_strings`
+(default **off** → `ptr`). With SSO off, generated IR contains:
+`declare { i64, i64 } @__getenv_int({ i64, i64 })` alongside
+`call i64 @__getenv_int(ptr %key)`. LLVM treats these as two distinct functions;
+the call resolves to the C symbol with the correct ABI, and the wrong declare is
+GC-section-dropped — so it is harmless today.
+**Risk:** any path that calls through the declared `{i64,i64}` prototype (e.g. a
+future bridge or an SSO-enabled run that misses the extractvalue shim) breaks
+the ABI silently.
+**Fix (proposed):** make `protocol_llvm_type` honor the `feature_sso_strings`
+gate so the declare agrees with the call in both configurations. Additive, no
+semantic change; deferred out of the plugin/macro rework phase scope.
+**Evidence:** `benchmarks/float_math.ll:43-44` (declares) vs `:166,174` (calls);
+see `benchmarks/results/2026-08-01-plugin-rework-baseline.md` §2.3.
+
+---
+
+## SSO Tag Bit Corrupts String Literal Addresses in Inline Init — FIXED
+
+**Date:** 2026-08-01
+**Status:** Fixed (B1)
+**Root cause:** `emit_field_init_value` (emit_toplevel.rs) OR-ed tag bit 0 (= 1)
+onto String literal addresses when `tag_strings=true` (the inline-init path used
+by `emit_inline_init_stores` in `main`). Under the bits model a String value is
+an UNTAGGED `ptr` to `[len: i64][bytes]`; the tag made `brief_str_eq` read a
+misaligned length header, so equal-content strings at heap vs literal addresses
+compared unequal. The tag bit belongs to the old SSO encoding only.
+**Fix:** gate the tag with `tag_strings && self.feature_sso_strings`; the
+untagged `store i8*` is the bits-model store for both paths.
+**Impact:** content equality (B1) works end-to-end: `get_env("VALUE") == "same"`
+with `VALUE=same` returns true; `VALUE=other` returns false. Verified in
+`.smoke/eq_demo.bv`.
+**Lesson:** any pointer-tagging must be gated on the representation that uses
+tags (SSO); a representation change (bits model) must audit every tag site.
+
+---
+
+## Malformed !range on Narrow State Fields Crashes clang — FIXED
+
+**Date:** 2026-08-01
+**Status:** Fixed (Phase 3b)
+**Root cause:** `type_driven_range` emitted `!{ i64 0, i64 256 }` range metadata
+for 1-byte types (Bool/UInt8/Int8 state fields), but the field loads as `i8`.
+LLVM range metadata bounds must be the same integer type as the load — i64
+bounds on `load i8` are malformed and crash clang
+(`computeKnownBitsFromRangeMetadata`, `APInt::setBitsSlowCase`). Latent until
+the entry!/args! plugin introduced Bool done-flag state fields (any Bool/
+UInt8 state field triggered it; `let done: Bool = false;` alone crashes).
+**Fix:** `emit_range_metadata` (emit_toplevel.rs) emits bounds in the field's
+LLVM integer width (`i8`/`i16`/`i32`/`i64`) and skips ranges that don't fit
+the storage width (256 is vacuous for i8 — the whole space — so it is
+dropped). Applies to both contract-driven and type-driven ranges.
+**Impact:** `.smoke/bool_range.bv` and `.smoke/entry_demo.bv` link and run;
+`test_bool_field_no_malformed_i8_range` guards it.
+**Lesson:** LLVM metadata must be type-coherent with the instruction it
+annotates; representation facts (N bytes → [0, 2^8N)) must be projected into
+the actual storage type before emission.
+
+---
+
+## `async node` Prefix Dropped the Async Flag — FIXED
+
+**Date:** 2026-08-01
+**Status:** Fixed (Phase 3c)
+**Root cause:** the parser's `async node` prefix form (parse_top_level) consumed
+the `async` token then called `parse_node()`, which does `pos += 1` (consumes
+`node`) then `eat(Async)` — but async was already consumed, so `is_async` was
+always `false` for the prefix form. `node async` (suffix) worked; `async node`
+(prefix) silently produced a non-async node. The concurrency gate exposed this:
+explicitly-async nodes were never classified, so valid async pairs were denied.
+**Fix:** the prefix arm sets `txn.is_async = true` on the parsed node.
+**Impact:** `async node inc_a` now correctly marks the node async;
+`benchmarks/async_counters_idio.bv` (which uses the prefix) passes the gate.
+**Lesson:** when a parser entry point pre-consumes a token that a shared parser
+also consumes, the shared parser's state becomes wrong — the wrapper must
+restore/forward the consumed flag.
+
+---
+
+## HashWord Categories Kept the `#` Prefix — Casts to/from #Bit Silently Fell Through — FIXED
+
+**Date:** 2026-08-01
+**Status:** Fixed (Phase B2)
+**Root cause:** `type_to_protocol` returned the HashWord name verbatim as the
+category (`Type::HashWord("#Bit")` → category `"#Bit"`), but the casting
+graph's base lanes are keyed on bare categories (`"Bit"`, `"String"`). So
+`find_path("String", "", "#Bit", "")` found no lanes and every cast to/from
+`#Bit` silently fell through to LLVM coercion — `s as #Bit` emitted
+`bitcast i64 %ptr to i64` (invalid). `is_protocol_member` masked this by
+stripping the `#` from its target.
+**Fix:** `type_to_protocol` strips the `#` prefix from HashWord categories
+(matching base-lane keys); `type_to_protocol` also follows a type's declared
+`base` parent (`type Latin1String: #String` ⇒ "String") since the normalizer
+no longer injects `Cast.#` properties.
+**Impact:** `s as #Bit` now emits `ptrtoint` (content view); `b as String`
+emits `brief_bits_to_str` (encoding door). Verified in `.smoke/bit_let.bv`,
+`.smoke/bit_to_str.bv`, and `test_hashword_category_strip`.
+**Lesson:** a type's protocol category is derived from the universe's Cast.#
+properties OR its declared base — never from the raw HashWord text — and the
+graph keys must be normalized consistently.
+
+---
+
+## Reflect-Read String Field Eliminated as Dead — FIXED
+
+**Date:** 2026-08-01
+**Status:** Fixed (Phase B3)
+**Root cause:** `compute_live_fields`'s `collect_identifiers` did not handle
+`Expr::Reflect`, so a String `let` used ONLY via reflection (`s.^Len`,
+`s.^^Bytes`, `s.^Ptr`) was treated as a dead state field and eliminated from
+%State. At emission, `s.^Len` hit the identifier fallback and emitted
+`load i64, ptr @s` with `@s` undefined (clang link error), or the runtime
+`Len` arm panicked on the Int-typed register.
+**Fix:** `collect_identifiers` gained an `Expr::Reflect(recv, _, _)` arm that
+collects the receiver (the same liveness rule as FFI args: an observation keeps
+the value alive).
+**Impact:** `.smoke/len_demo.bv` now emits `brief_char_len` for `s.^Len`
+(chars=5) and a header load for `s.^^Bytes` (bytes=6) on "héllo".
+**Lesson:** every expression construct that reads a state value must be listed
+in the liveness identifier collector; a missing arm silently eliminates the
+field and surfaces as an undefined global / wrong register type at codegen.
+
+---
+
+## Concat Result Tagged as i64 (Temp Bit) Breaks ptr Consumers — FIXED
+
+**Date:** 2026-08-01
+**Status:** Fixed (Phase B4a)
+**Root cause:** `emit_box_concat_result` OR-ed the legacy temp bit (2) onto the
+concat result and returned an i64 register. Under the bits model a String
+value is an UNTAGGED ptr to [len][bytes]; consumers expecting `ptr` (e.g.
+`__print_str(ptr)`) failed with "defined with type i64 but expected ptr".
+Exposed when the SSO layer was retired (the boxing was an SSO-era artifact).
+**Fix:** `emit_box_concat_result` returns the untagged buffer ptr as a
+String-typed register (bitcast ptr to ptr).
+**Impact:** `a ++ b` concat now works — `.smoke/concat_demo.bv` prints
+"foobar".
+**Lesson:** any pointer-typed value must be returned as a ptr under the bits
+model; tag-bit/boxing artifacts from the SSO era corrupt the type and must be
+audited when the SSO layer is retired.

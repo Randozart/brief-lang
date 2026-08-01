@@ -1,0 +1,4 @@
+defn main() -> Int {
+    println!("main ran");
+    term 0;
+};

@@ -203,8 +203,19 @@ fn collect_strings(items: &[TopLevel]) -> Vec<String> {
 }
 fn collect_strings_tl(tl: &TopLevel, seen: &mut std::collections::HashSet<String>, out: &mut Vec<String>) {
     match tl {
-        TopLevel::Transaction(t) => { for s in &t.body { collect_strings_stmt(s, seen, out); } }
-        TopLevel::Definition(d) => { for s in &d.body { collect_strings_stmt(s, seen, out); } }
+        TopLevel::Transaction(t) => {
+            // 2026-08-01 (Phase 3b): entry!/args! rewrite string literals into
+            // the contract precondition (e.g. entry_cmd() == "build") — scan
+            // the contract so those @str.N constants are emitted.
+            collect_strings_expr(&t.contract.pre_condition, seen, out);
+            collect_strings_expr(&t.contract.post_condition, seen, out);
+            for s in &t.body { collect_strings_stmt(s, seen, out); }
+        }
+        TopLevel::Definition(d) => {
+            collect_strings_expr(&d.contract.pre_condition, seen, out);
+            collect_strings_expr(&d.contract.post_condition, seen, out);
+            for s in &d.body { collect_strings_stmt(s, seen, out); }
+        }
         TopLevel::Export(e) => collect_strings_tl(&e.inner, seen, out),
         TopLevel::Cell(c) => {
             // 2026-07-13: Field.default removed in new AST.
@@ -367,20 +378,23 @@ pub fn protocol_llvm_type(ty: &Type, universe: Option<&crate::type_universe::Typ
     if matches!(ty, Type::Ptr(_) | Type::Vector(_, _)) {
         return "ptr".to_string();
     }
-    // 2026-07-30: String/UTF8View use { i64, i64 } fat-pointer representation.
-    // Check BEFORE the bytes-based fallback to avoid i128 (16 bytes
-    // → i128) which changes FFI ABI and triggers clang 18.1.3 LICM crashes.
+    // 2026-07-30: String uses the ptr representation (bits model).
     // 2026-07-31: Phase 3 (§8.4-D7) — String detection via the Cast.#String
-    // protocol property; legacy string-like types (UTF8View, and any type with
-    // the {Int, Int} shape) via the structural is_string_like check. This
-    // replaces the hardcoded "String"/"UTF8View" type names and also fixes the
-    // i128 mis-derivation for any 2-int-field struct.
+    // protocol property.
+    // 2026-08-01 (B4): the structural is_string_like (2-int-field) check was
+    // retired — protocol membership is the sole String test (rule #18; a
+    // String has no fields under B0, so the structural check was false anyway).
     let is_string_protocol = universe
         .and_then(|u| ty.universe_key().and_then(|k| u.get(k)))
         .map_or(false, |rt| rt.properties.contains_key("Cast.#String"));
-    let is_string_shaped = universe.map_or(false, |u| u.is_string_like(ty));
-    if is_string_protocol || is_string_shaped {
-        return "{ i64, i64 }".to_string();
+    if is_string_protocol {
+        // 2026-08-01 (B0): A String value is a ptr to a length-prefixed
+        // [len][bytes] buffer. protocol_llvm_type previously claimed
+        // { i64, i64 } here, which made frgn declares disagree with the
+        // i64-typed call sites and i64 state slots (the split-brain). Every
+        // type-claiming site now says ptr; state slots keep the i64 machine
+        // word and convert via adapt_to_i64/ensure_typed_value.
+        return "ptr".to_string();
     }
     if let Some(ref u) = universe {
         if let Some(rt) = ty.universe_key().and_then(|k| u.get(k)) {
@@ -664,13 +678,6 @@ pub struct LlvmBackend {
     // Keyed by analysis_id on Expr::Call("Alloc#", ..., Some(id)).
     pub analysis_alloc_strategies: Option<std::collections::HashMap<usize, AllocStrategy>>,
 
-    // ── SSO String Optimization ──────────────────────────────
-    // 2026-07-18: Phase B — When enabled, String is a {i64, i64} struct with
-    // inline storage for ≤6 bytes (SSO tag in lower 3 bits) and heap pointer
-    // for longer strings. When disabled (default), String is a single i64
-    // (ptrtoint of heap/stack pointer, legacy 16-byte header format).
-    pub feature_sso_strings: bool,
-
     // ── SVO List Optimization ────────────────────────────────
     // 2026-07-18: Small Vector Optimization — List<T> becomes a
     // multi-slot struct with inline storage for ≤N elements (N from
@@ -775,7 +782,6 @@ impl LlvmBackend {
             arena_end_idx: None,
             arena_base_idx: None,
             analysis_alloc_strategies: None,
-            feature_sso_strings: false,
             feature_svo: false,
             resolved_frgns: None,
         }
@@ -800,12 +806,8 @@ impl LlvmBackend {
         self
     }
 
-    // 2026-07-18: Enable SSO (Short String Optimization) for String types.
-    // When ON, String is a {i64, i64} struct with inline storage for ≤6 bytes.
-    pub fn with_sso_strings(mut self, enabled: bool) -> Self {
-        self.feature_sso_strings = enabled;
-        self
-    }
+    // 2026-08-01 (B4): with_sso_strings removed — SSO (Short String
+    // Optimization) retired. A String is always a ptr to [len][bytes].
 
     // 2026-07-18: Set the stack allocation threshold for runtime fallback.
     pub fn with_stack_threshold(mut self, threshold: u64) -> Self {
@@ -841,16 +843,11 @@ impl LlvmBackend {
         // to always return "i64" for state fields — this keeps %State struct
         // layout uniform and avoids type mismatches in codegen paths that
         // assume i64 (load i64, store i64, add i64, icmp i64, etc.).
-        // 2026-07-18: SSO String / String-like fields occupy 2 consecutive i64 slots.
-        if self.feature_sso_strings
-            && self.ctx.type_universe.as_ref().map_or(false, |u| u.is_string_like(ty))
-        {
-            self.ctx.field_types.push("i64".to_string());
-            self.ctx.field_brief_types.push(ty.clone());
-            self.ctx.field_types.push("i64".to_string());
-            self.ctx.field_brief_types.push(ty.clone());
-            return;
-        }
+        // 2026-08-01 (B4): the SSO String branches were retired. A String is a
+        // ptr to [len][bytes] under the bits model and stores as ONE i64 slot
+        // (the address) via the generic protocol-derived path below — the old
+        // 2-slot SSO claim and the is_string_like (2-field structural) check
+        // no longer apply (String has no fields under B0).
         // 2026-07-18: SVO List — push N+1 slots (N inline data + 1 len+cap).
         if self.feature_svo
             && self.ctx.type_universe.as_ref().map_or(false, |u| u.is_vector_like(ty))
@@ -1515,11 +1512,12 @@ impl LlvmBackend {
     }
 
     fn type_is_heap_allocated(&self, ty: &Type) -> bool {
-        // 2026-07-26: Protocol-driven. String-like types (SSO/non-SSO) are tracked
-        // by is_string_like in the universe. Heap-allocated types declare
-        // Cast.#HeapAllocated in their type properties. UTF8View, StaticString,
-        // SmallString64 are stack-allocated (no Cast.#HeapAllocated).
-        if self.ctx.type_universe.as_ref().map_or(false, |u| u.is_string_like(ty)) {
+        // 2026-08-01 (B4): is_string_like (2-field structural) retired —
+        // protocol membership only. A #String value is a ptr to a
+        // heap-allocated [len][bytes] buffer (allocated at init/FFI time).
+        // #Data values are also pointers. UTF8View/StaticString/SmallString64
+        // (legacy stack types) are retired.
+        if self.is_protocol_member(ty, "#String") {
             return true;
         }
         if self.is_protocol_member(ty, "#Data") {
@@ -2228,7 +2226,42 @@ impl LlvmBackend {
         writeln!(out, "declare i64 @brief_futex(i64, i64, i64, i64, i64, i64) #1").ok();
         writeln!(out, "declare i64 @__ioctl__(i64, i64, i64) #1").ok();
         writeln!(out, "declare i64 @__isatty__(i64) #1").ok();
-        writeln!(out, "declare i64 @__print(i64) #1").ok();
+        writeln!(out, "declare i64 @__print(ptr) #1").ok();
+        // 2026-08-01 (B0): PrintStr# intrinsic runtime symbol. The dead frgn
+        // declaration in lib/std/ffi/io.bv was removed (it declared a wrong
+        // symbol and a { i64, i64 } String type); the intrinsic owns this
+        // call site, so the backend declares the ABI: String = ptr to a
+        // length-prefixed [len][bytes] buffer.
+        writeln!(out, "declare i64 @__print_str(ptr) #1").ok();
+        // 2026-08-01 (B1): content equality for String operands. The compiler
+        // emits a call to brief_str_eq(ptr, ptr) instead of `icmp eq ptr`
+        // (address comparison) when both operands are #String — see
+        // emit_binary_op's Eq/Ne arms. Takes two ptrs to [len][bytes].
+        writeln!(out, "declare i64 @brief_str_eq(ptr, ptr) #1").ok();
+        // 2026-08-01 (B1): content bitwise ops for String operands — return a
+        // new heap [len][bytes] buffer with the per-byte op applied (band/bor/
+        // bxor/bnot). Same ABI as brief_str_eq: ptr to [len][bytes].
+        writeln!(out, "declare ptr @brief_str_band(ptr, ptr) #1").ok();
+        writeln!(out, "declare ptr @brief_str_bor(ptr, ptr) #1").ok();
+        writeln!(out, "declare ptr @brief_str_bxor(ptr, ptr) #1").ok();
+        writeln!(out, "declare ptr @brief_str_bnot(ptr) #1").ok();
+        // 2026-08-01 (B2): the #Bit → #String ENCODING DOOR default. The bits
+        // are a Brief [len][bytes] buffer (a String's content view); wrapping
+        // re-materializes the header by construction (the bits carry their own
+        // length — not a null-terminated C string). Sub-protocols override via
+        // CastFrom(#Bit).
+        writeln!(out, "declare ptr @brief_bits_to_str(ptr) #1").ok();
+        // 2026-08-01 (B3): UTF8 character count for the #String `Size` prop
+        // default (the O(1) byte-length header read is the `Bytes` prop).
+        writeln!(out, "declare i64 @brief_char_len(ptr) #1").ok();
+        // 2026-08-01 (Phase 3): CLI argv capture. The emitted main stores
+        // its argc/argv into these globals; the runtime argv helpers
+        // (brief_rt.c) read them as externs. The compiler OWNS the globals
+        // (it stores to them), so they are external (non-internal) for the
+        // C runtime to link against. Helper FUNCTION signatures are declared
+        // by lib/std/cli.bv's frgns (Int→i64, String→ptr).
+        writeln!(out, "@__brief_argc = global i32 0").ok();
+        writeln!(out, "@__brief_argv = global ptr null").ok();
         writeln!(out, "declare i64 @brief_getuid() #1").ok();
         writeln!(out, "declare i64 @brief_geteuid() #1").ok();
         writeln!(out, "declare i64 @brief_getgid() #1").ok();
@@ -3451,8 +3484,7 @@ impl LlvmBackend {
             if let Some(tv) = total_val {
                 // 2026-07-14: Wrap in define i32 @main() so emitted IR is valid.
                 self.warnings.push(format!("info: txn '{}' dispatched via pure counter fold ({} iterations, O(1) store)", node.name, tv));
-                writeln!(out, "define i32 @main() local_unnamed_addr #9 {{").ok();
-                writeln!(out, "entry:").ok();
+                self.emit_main_header(out, "#9", true);
                 writeln!(out, "  %state = alloca %State, align 8").ok();
                 self.emit_inline_init_stores(out, "%state");
                 self.emit_folded_pure_counter(out, counter_idx, tv);

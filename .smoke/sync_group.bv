@@ -1,0 +1,11 @@
+// sync<group> classification: both nodes in the same group barrier.
+let a: Int = 0;
+let b: Int = 0;
+sync<counters> node inc_a [a < 100][a == 100] {
+    a = a + 1;
+    term;
+};
+sync<counters> node inc_b [b < 100][b == 100] {
+    b = b + 1;
+    term;
+};

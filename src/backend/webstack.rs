@@ -1105,7 +1105,6 @@ mod tests {
                 contract: Contract {
                     pre_condition: Expr::BinaryOp(BinaryOpKind::Lt, Box::new(Expr::Identifier("count".into())), Box::new(Expr::Decimal(10))),
                     post_condition: Expr::BinaryOp(BinaryOpKind::Eq, Box::new(Expr::Identifier("count".into())), Box::new(Expr::BinaryOp(BinaryOpKind::Add, Box::new(Expr::Identifier("count".into())), Box::new(Expr::Decimal(1))))),
-                    is_entry: false,
                     watchdog: None,
                     explicit: false,
                     span: None,
