@@ -855,6 +855,15 @@ impl LlvmBackend {
                     let str_p = field_reg("s");
                     writeln!(out, "{}{} = bitcast <{{ i64, i64, [1 x i8] }}>* @str.0 to ptr", indent, str_p).ok();
                     writeln!(out, "{}store i8* {}, ptr {}, align {}", indent, str_p, gep, self.align_of("i8*")).ok();
+                } else if ty.starts_with('[') {
+                    // 2026-07-31 (A4): array state fields initialize to
+                    // zeroinitializer (`store [16 x float] 0` is invalid IR).
+                    writeln!(
+                        out,
+                        "{}store {} zeroinitializer, ptr {}, align {}",
+                        indent, ty, gep, self.align_of(ty)
+                    )
+                    .ok();
                 } else {
                     writeln!(out, "{}store {} 0, ptr {}, align {}", indent, ty, gep, self.align_of(&ty)).ok();
                 }

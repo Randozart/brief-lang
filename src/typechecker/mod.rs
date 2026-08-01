@@ -414,10 +414,17 @@ pub fn infer_expression(
             ))
         }
         Expr::Index(obj, index) => {
-            let (_, obj_prov) = infer_expression(obj, ctx)?;
+            // 2026-07-31 (A4): indexing a Vector resolves the element type
+            // (`f[0]` where f: Float[16] is Float, not Int).
+            let (obj_ty, obj_prov) = infer_expression(obj, ctx)?;
             let (_, idx_prov) = infer_expression(index, ctx)?;
+            let elem_ty = match &obj_ty {
+                Type::Vector(inner, _) => (**inner).clone(),
+                Type::Custom(n) if n == "String" => Type::int(),
+                _ => Type::int(),
+            };
             Ok((
-                Type::int(),
+                elem_ty,
                 Provenance::Index {
                     base: Box::new(obj_prov),
                     index: Box::new(idx_prov),

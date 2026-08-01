@@ -141,6 +141,13 @@ pub fn emit_statement(backend: &mut LlvmBackend, out: &mut String, stmt: &Statem
                 // Emits inttoptr + GEP + store for Ptr-typed objects.
                 // List/tuple literals need idx+1 (slot 0 = length header).
                 Expr::Index(obj, idx) => {
+                    // 2026-07-31 (A4): array state-field store
+                    // (`f[i] = v` where f: Float[16]) and the Ptr/collection
+                    // store. Flattened with guard clauses — see
+                    // emit_array_state_store.
+                    if emit_array_state_store(backend, out, indent, obj, idx, &val) {
+                        return TypedRegister { name: val.name, ty: Type::void() };
+                    }
                     let obj_reg = backend.emit_expr(out, obj, indent);
                     if matches!(obj_reg.ty, Type::Ptr(_)) {
                         let idx_reg = backend.emit_expr(out, idx, indent);
@@ -399,6 +406,49 @@ pub fn emit_statement(backend: &mut LlvmBackend, out: &mut String, stmt: &Statem
             TypedRegister { name: backend.fun.gen_reg(), ty: Type::void() }
         }
     }
+}
+
+/// 2026-07-31 (A4): Array state-field store — `f[i] = v` where `f` is a
+/// single-dimension Vector state field. GEP into %State + scalar store.
+/// Flat guard clauses; returns false when the pattern does not apply.
+fn emit_array_state_store(
+    backend: &mut LlvmBackend,
+    out: &mut String,
+    indent: &str,
+    obj: &Expr,
+    idx: &Expr,
+    val: &TypedRegister,
+) -> bool {
+    let Expr::Identifier(name) = obj else { return false; };
+    let Some(&fidx) = backend.ctx.field_index_map.get(name) else { return false; };
+    let field_ty = backend.ctx.field_types[fidx].clone();
+    if !field_ty.starts_with('[') {
+        return false;
+    }
+    let idx_reg = backend.emit_expr(out, idx, indent);
+    let base = backend.emit_state_gep(out, indent, "f", "%state", fidx);
+    let elem = backend.fun.gen_reg();
+    writeln!(
+        out,
+        "{}{} = getelementptr {}, ptr {}, i64 0, i64 {}",
+        indent, elem, field_ty, base, idx_reg.name
+    )
+    .ok();
+    let elem_llvm = field_ty
+        .rsplit_once('x')
+        .map(|(_, t)| t.trim().trim_end_matches(']').to_string())
+        .unwrap_or_else(|| "i64".to_string());
+    let universe = backend.ctx.type_universe.clone();
+    let store_val = backend.ensure_typed_value(
+        out,
+        indent,
+        &elem_llvm,
+        &val.name,
+        Some(val.ty.clone()),
+        universe.as_ref(),
+    );
+    writeln!(out, "{}store {} {}, ptr {}", indent, elem_llvm, store_val, elem).ok();
+    true
 }
 
 /// Resolve a strategy property value to a function name and argument markers,

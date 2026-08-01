@@ -506,7 +506,47 @@ impl LlvmBackend {
                 {
                     return self.emit_svo_index(out, v, &obj_reg, &idx_reg, indent);
                 }
-                if matches!(obj_reg.ty, Type::Ptr(_)) {
+                 // 2026-07-31 (A4): Array state-field indexing — GEP into
+                 // %State + scalar load. A runtime index cannot extractvalue
+                 // from a loaded aggregate; the whole-array load + extract
+                 // path below is only valid for scalar fields.
+                 if let Expr::Identifier(name) = obj.as_ref() {
+                     if let Some(&fidx) = self.ctx.field_index_map.get(name) {
+                         if let Type::Vector(inner, dims) = &obj_reg.ty {
+                             if dims.len() == 1 {
+                                 let base = self.emit_state_gep(out, indent, "f", "%state", fidx);
+                                 let elem = self.fun.gen_reg();
+                                 // 2026-07-31: The GEP source type must be the
+                                 // %State field's real aggregate type
+                                 // (field_types[fidx] = "[16 x float]"), not
+                                 // llvm_type(Vector), which resolves to the
+                                 // scalar fallback.
+                                 let agg_ty = self
+                                     .ctx
+                                     .field_types
+                                     .get(fidx)
+                                     .cloned()
+                                     .unwrap_or_else(|| "i64".into());
+                                 writeln!(
+                                     out,
+                                     "{}{} = getelementptr {}, ptr {}, i64 0, i64 {}",
+                                     indent, elem, agg_ty, base, idx_reg.name
+                                 )
+                                 .ok();
+                                 let val = self.fun.gen_reg();
+                                 writeln!(
+                                     out,
+                                     "{}{} = load {}, ptr {}",
+                                     indent, val, self.llvm_type(inner), elem
+                                 )
+                                 .ok();
+                                 let _ = v;
+                                 return TypedRegister { name: val, ty: (**inner).clone() };
+                             }
+                         }
+                     }
+                 }
+                 if matches!(obj_reg.ty, Type::Ptr(_)) {
                     let ptr = self.fun.gen_reg();
                     writeln!(
                         out,
@@ -789,7 +829,7 @@ impl LlvmBackend {
             Expr::StructLiteral { type_name, fields } => {
                 return self.emit_struct_literal(out, v, type_name, fields, indent);
             }
-            Expr::Exists(_) => { unreachable!("fn? only in stage eval") },
+            Expr::Exists(name) => { panic!("compile-time existence check '{}' reached LLVM codegen", name) },
             Expr::Slice { array, start, end, stride } => {
                 // 2026-07-26: Evaluate slice bounds for side effects.
                 // The narrowing pass converts constant-bounds slices to Vector<T,N>

@@ -1689,6 +1689,13 @@ impl<'a> Parser<'a> {
                     self.eat(&Token::Semicolon);
                     continue;
                 }
+                if self.check(&Token::Node) {
+                    // 2026-07-31 (A3): Reactive per-instance node member.
+                    let node = self.parse_node()?;
+                    members.push(crate::ast::TopLevel::Transaction(node));
+                    self.eat(&Token::Semicolon);
+                    continue;
+                }
                 let slot_name = self.expect_identifier()?;
                 if slot_name == "op" {
                     self.parse_op_definition(&mut op_bindings)?;
