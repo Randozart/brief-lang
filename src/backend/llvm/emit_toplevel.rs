@@ -1311,6 +1311,40 @@ impl LlvmBackend {
         }
     }
 
+    /// 2026-07-31: Build a `!range` metadata string whose bounds use the
+    /// FIELD's load width (i8/i16/i32/i64) — an i64 range on an i8 load is a
+    /// verifier error and crashes the clang -O3 frontend. Returns None when
+    /// the bound is not representable in the field's width (e.g. [0,256) on
+    /// an i8 — redundant, skip it).
+    fn range_metadata(
+        lo: i64,
+        hi: i64,
+        field_name: &str,
+        field_index_map: &std::collections::HashMap<String, usize>,
+        field_types: &[String],
+    ) -> Option<String> {
+        let idx = *field_index_map.get(field_name)?;
+        let llvm_ty = field_types.get(idx)?;
+        let bits = match llvm_ty.as_str() {
+            "i8" => 8,
+            "i16" => 16,
+            "i32" => 32,
+            _ => 64,
+        };
+        // The bound must be representable in the field's signed width. hi is
+        // EXCLUSIVE, so it may equal the type's max+1 (e.g. i8 hi=128).
+        let (min, max) = match bits {
+            8 => (i8::MIN as i64, i8::MAX as i64 + 1),
+            16 => (i16::MIN as i64, i16::MAX as i64 + 1),
+            32 => (i32::MIN as i64, i32::MAX as i64 + 1),
+            _ => (i64::MIN, i64::MAX),
+        };
+        if lo < min || hi > max {
+            return None;
+        }
+        Some(format!("!{{ {} {}, {} {} }}", llvm_ty, lo, llvm_ty, hi))
+    }
+
     /// 2026-07-27: Rewrite identifier references in a statement to use cold-function
     /// parameter names. Each Expr::Identifier matching a field_name is replaced with
     /// the corresponding parameter name (__cp_{field}).
@@ -1400,8 +1434,12 @@ impl LlvmBackend {
             if hi < i64::MAX {
                 // 2026-07-18: Offset by 50 to avoid collision with TBAA metadata nodes
                 // (!0 through ~!20). LLVM metadata IDs must be unique across the module.
+                // 2026-07-31: the range MUST use the field's load width — an i64
+                // range on an i8 load (Bool) is a verifier error and crashes the
+                // clang -O3 frontend.
+                let Some(md) = Self::range_metadata(lo, hi, f, &self.ctx.field_index_map, &self.ctx.field_types) else { continue; };
                 let mi = range_meta.len() + 50;
-                range_meta.push(format!("!{} = !{{ i64 {}, i64 {} }}", mi, lo, hi));
+                range_meta.push(format!("!{} = {}", mi, md));
                 self.ctx.field_to_meta_idx.insert(f.clone(), mi);
             }
         }
@@ -1420,8 +1458,9 @@ impl LlvmBackend {
                 // (contract ranges are tighter and take priority).
                 if !self.ctx.field_to_meta_idx.contains_key(field_name) {
                     // 2026-07-18: Offset by 50 to avoid TBAA node collision.
+                    let Some(md) = Self::range_metadata(range_bounds.0, range_bounds.1, field_name, &self.ctx.field_index_map, &self.ctx.field_types) else { continue; };
                     let mi = range_meta.len() + 50;
-                    range_meta.push(format!("!{} = !{{ i64 {}, i64 {} }}", mi, range_bounds.0, range_bounds.1));
+                    range_meta.push(format!("!{} = {}", mi, md));
                     self.ctx.field_to_meta_idx.insert(field_name.clone(), mi);
                 }
             }

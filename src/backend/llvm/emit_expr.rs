@@ -1461,6 +1461,12 @@ impl LlvmBackend {
         let saved_bindings = self.fun.let_bindings.clone();
         let saved_types = self.fun.let_binding_types.clone();
         let saved_orig = self.fun.let_original_types.clone();
+        // 2026-07-31 (A5d): last_val_temps must NOT leak across emissions of
+        // the same node body — the reactor emits a body more than once, and a
+        // stale self-slot temp from the first pass would make the second
+        // pass's reads resolve to the wrong register.
+        let saved_lvt = self.fun.last_val_temps.clone();
+        let saved_lvt_types = self.fun.last_val_types.clone();
         let (params, body): (Vec<(String, Type)>, Vec<crate::ast::Statement>) = match &member {
             crate::ast::TopLevel::Transaction(t) => (
                 t.parameters.iter().map(|(n, ty)| (n.clone(), ty.clone())).collect(),
@@ -1486,6 +1492,8 @@ impl LlvmBackend {
         self.fun.let_bindings = saved_bindings;
         self.fun.let_binding_types = saved_types;
         self.fun.let_original_types = saved_orig;
+        self.fun.last_val_temps = saved_lvt;
+        self.fun.last_val_types = saved_lvt_types;
         let _ = v;
         TypedRegister { name: self.fun.gen_reg(), ty: Type::void() }
     }
