@@ -290,6 +290,33 @@ grammar, `learn-brief` collections + watchdog chapters, `docs/architecture`).
   as a struct value (invalid IR at -O3).
   **Obj instances now work end-to-end at -O3**: state-slot receivers,
   `<-` dispatch, `op Init`, scalar + array field reads.
+- **Phase A8 (monomorphization)** — committed (`6326d2e1`). `Stack<Int, 8>`
+  instantiates: `Type::Number(i64)` size args (parse + display + exhaustive
+  matches), Named-dimension → Anonymous substitution in `substitute_type`,
+  backend `ensure_mono`/`resolve_obj_key` registering the mono slots + members
+  under the applied key. Verified: `obj Stack<T, N> { data: T[N] }` with
+  `Stack<Int, 8>` builds and runs at -O3 (data at 0, len at 64).
+- **Phase A9 (stdlib + queue_drain)** — committed (`a686c40f`). collections.bv
+  had a malformed `defn hash` signature that broke the ENTIRE file's parse —
+  and since imports silently discard unparseable modules, it dropped
+  RingBuffer/Stack from every importer. Fixed. queue_drain (RingBuffer<Int>
+  import, `<-` push/pop, `op Init`, monomorphized RingBuffer) now builds and
+  runs, but its periodic print is off-by-one. **Two countdown bugs found**
+  (not yet fixed — next session):
+  1. The countdown's counter increment does not populate
+     `last_val_temps["count"]`, so a guard that prints the COUNTER (queue_drain
+     `PrintLn!(count)`) falls to the header phi (`%cdc`, pre-increment) and
+     prints count-1 at the boundary. Guards that print float state (kalman)
+     are correct because their Assigns populate last_val_temps. Fix: route the
+     counter read to the post-increment register when emitting the guard.
+  2. The countdown inner-body emission DROPS the `queue <- count` push member
+     call (`.cdb_` has only the pop address + increment); the member-call
+     dispatch in `emit_countable_body` needs the self-slot path. The output
+     still matches a pure-count loop because the collection ops are discards,
+     but the push must emit. Fix: the `Statement::Assign(AddrOf, _)` and
+     Expression paths in `emit_countable_body` must reach the `<-` member-call
+     dispatch (emit_strategy_member_call).
+  queue_drain stays OUT of the harness until both are fixed.
 - Phase B: …
 - Phase C: …
 - Phase D: …

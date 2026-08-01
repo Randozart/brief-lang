@@ -2757,7 +2757,11 @@ periodic print is off-by-one (prints count-1 at the boundary). Root cause: the
 batch-shape detector (`src/analysis/batch_shape.rs`) rejects the body because
 the `<-` collection ops (`queue <- count`, `<- &queue`) precede the counter
 increment — so the countdown never dispatches, and the version-DAG's periodic
-guard reads the PRE-increment count. Fix candidates: (a) teach
-`split_into_segments` that `<-` ops are compute (so the batch shape is
-recognized and the countdown handles the guard correctly), or (b) fix the
-version-DAG's guard to read the POST-body state.
+guard reads the PRE-increment count. The batch detector
+ACCEPTS the body (verified with debug). Root causes (now confirmed in the
+countdown emitter, `src/backend/llvm/loop_engine/counter.rs`):
+(a) the countdown's counter increment doesn't populate last_val_temps[counter],
+so a guard printing the counter reads the header phi (pre-increment) and prints
+count-1; (b) the countdown inner-body emission drops the `<-` push member call
+(only the pop address + increment emit). Fix both in the countdown; keep
+queue_drain out of the harness until the output matches C (5M/10M).
