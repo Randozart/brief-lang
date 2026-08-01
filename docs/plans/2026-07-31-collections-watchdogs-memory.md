@@ -317,6 +317,18 @@ grammar, `learn-brief` collections + watchdog chapters, `docs/architecture`).
      Expression paths in `emit_countable_body` must reach the `<-` member-call
      dispatch (emit_strategy_member_call).
   queue_drain stays OUT of the harness until both are fixed.
+  **Deeper investigation (2026-08-01):** the guard's counter read was traced —
+  the `.cdg_` print resolves `count` through `phi_field_regs` to the header phi
+  (`%cdc21`, pre-increment) even though `last_val_temps["count"]` holds the
+  post-increment register (`%t33`) at that point, and even after explicitly
+  overwriting `phi_field_regs["count"]` with `%t33` before the guard body
+  emission. Suspect: the multi-pass reactor re-emits the txn (the countdown ran
+  once per the guard-path trace, but `emit_member_body`'s save/restore of
+  `last_val_temps`/bindings interacts with a later emission). Next session:
+  trace the `%cdc21` source at the `.cdg_` print site across the final .ll
+  emission pass, and consider routing the guard's counter read to
+  `pending_phi_backedge[counter_var]` directly in the print's FFI arg emission
+  rather than through the identifier maps.
 - Phase B: …
 - Phase C: …
 - Phase D: …
