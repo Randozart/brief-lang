@@ -473,11 +473,6 @@ impl fmt::Display for OutputType {
 
 impl fmt::Display for Contract {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        if self.is_entry {
-            write!(f, "[#]")?;
-            write!(f, " [{}]", self.post_condition)?;
-            return Ok(());
-        }
         write!(f, "[{}]", self.pre_condition)?;
         write!(f, "[{}]", self.post_condition)
     }

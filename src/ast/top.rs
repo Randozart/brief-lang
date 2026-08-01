@@ -1,7 +1,8 @@
 // ── Top-Level Declaration AST Definitions ──────────────────────────────
 // 2026-07-12: Phase 0.2 — New architecture top-level types.
 // No InopDeclaration — removed in 2026-07-22 Ship of Theseus cleanup.
-// Added Export struct and Contract.is_entry.
+// Added Export struct. 2026-08-01 (Phase 2): Contract.is_entry removed — the
+// [#] entry-point marker is replaced by the entry!/args! macros (Phase 3).
 //
 // 2026-07-13: Added backend-compat types (TriggerDeclaration, ForeignSignature,
 // EnumDefinition, etc.) and expanded TopLevel variants so that legacy backend
@@ -134,9 +135,6 @@ pub struct Transaction {
 pub struct Contract {
     pub pre_condition: Expr,
     pub post_condition: Expr,
-    /// 2026-07-12: [#] entry point marker. When true, the function is
-    /// CLI-addressable and cannot be called from internal code.
-    pub is_entry: bool,
     pub watchdog: Option<WatchdogSpec>,
     pub span: Option<Span>,
     /// 2026-07-31: Whether the contract was written explicitly in source.
@@ -150,7 +148,6 @@ impl Contract {
         Contract {
             pre_condition: pre,
             post_condition: post,
-            is_entry: false,
             watchdog: None,
             span: None,
             explicit: false,

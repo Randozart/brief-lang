@@ -78,11 +78,7 @@ fn emit_transaction(t: &Transaction) -> SExpr {
 }
 
 fn emit_contract(c: &Contract) -> SExpr {
-    // 2026-07-15: (entry) preserves is_entry through BEAST round-trip
     let mut children = vec![atom("contract")];
-    if c.is_entry {
-        children.push(atom("entry"));
-    }
     children.push(list(&[atom("pre"), emit_expr(&c.pre_condition)]));
     children.push(list(&[atom("post"), emit_expr(&c.post_condition)]));
     SExpr::List(children)
@@ -329,14 +325,15 @@ mod tests {
     }
 
     #[test]
-    fn test_contract_entry_roundtrip() {
-        // 2026-07-15: Verify is_entry survives BEAST serialize/deserialize
-        let entry_contract = Contract {
-            pre_condition: Expr::Bool(true),
+    fn test_contract_roundtrip() {
+        // 2026-08-01 (Phase 2): is_entry removed — a contract round-trips as
+        // pre/post only (no `(entry)` atom). Verifies the BEAST serializer no
+        // longer emits the removed marker.
+        let contract = Contract {
+            pre_condition: Expr::Decimal(1),
             post_condition: Expr::Bool(true),
-            is_entry: true,
             watchdog: None,
-            explicit: false,
+            explicit: true,
             span: None,
         };
         let items = vec![
@@ -346,7 +343,7 @@ mod tests {
                 parameters: vec![],
                 output_type: None,
                 outputs: vec![Type::int()],
-                contract: entry_contract,
+                contract,
                 body: vec![],
                 metadata: std::collections::HashMap::new(),
                 derivation: None,
@@ -358,11 +355,16 @@ mod tests {
         ];
         let universe = TypeUniverse::new();
         let ir = to_beast(&items, &universe);
+        assert!(
+            !ir.contains("entry"),
+            "BEAST output must not contain the removed (entry) marker; got:\n{ir}"
+        );
         let (restored, _) = from_beast(&ir).unwrap();
         assert_eq!(items.len(), restored.len());
         match &restored[0] {
             TopLevel::Definition(d) => {
-                assert!(d.contract.is_entry, "is_entry must survive round-trip");
+                assert_eq!(d.contract.pre_condition, Expr::Decimal(1));
+                assert_eq!(d.contract.post_condition, Expr::Bool(true));
             }
             _ => panic!("expected Definition"),
         }

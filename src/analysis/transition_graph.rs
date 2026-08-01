@@ -1413,7 +1413,6 @@ mod tests {
             contract: crate::ast::Contract {
                 pre_condition: Expr::Bool(true),
                 post_condition: Expr::Bool(true),
-                is_entry: false,
                 watchdog: None,
                 explicit: false,
                 span: None,
@@ -1458,7 +1457,6 @@ mod tests {
             contract: crate::ast::Contract {
                 pre_condition: Expr::Bool(true),
                 post_condition: Expr::Bool(true),
-                is_entry: false,
                 watchdog: None,
                 explicit: false,
                 span: None,
@@ -1497,7 +1495,6 @@ mod tests {
             contract: crate::ast::Contract {
                 pre_condition: Expr::Bool(true),
                 post_condition: Expr::Bool(true),
-                is_entry: false,
                 watchdog: None,
                 explicit: false,
                 span: None,
@@ -1532,7 +1529,6 @@ mod tests {
                         Box::new(Expr::Identifier("total".to_string())),
                     ),
                     post_condition: Expr::Bool(true),
-                    is_entry: false,
                     watchdog: None,
                     explicit: false,
                     span: None,
@@ -1723,7 +1719,6 @@ mod tests {
                         Box::new(Expr::Identifier("total".to_string())),
                     ),
                     post_condition: Expr::Bool(true),
-                    is_entry: false,
                     watchdog: None,
                     explicit: false,
                     span: None,
@@ -1765,7 +1760,6 @@ mod tests {
                         Box::new(Expr::Identifier("total".to_string())),
                     ),
                     post_condition: Expr::Bool(true),
-                    is_entry: false,
                     watchdog: None,
                     explicit: false,
                     span: None,

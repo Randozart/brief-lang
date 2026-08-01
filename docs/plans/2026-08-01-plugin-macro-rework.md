@@ -679,6 +679,18 @@ String deferred per B-D8.
 **Tests:** `[#]` is a syntax error; a script compiles to a one-shot node; BEAST
 round-trip still passes without `is_entry`.
 
+**Status (2026-08-01): IMPLEMENTED.** `Contract.is_entry` removed (ast/top.rs)
+and swept from all ~50 constructor sites (`git grep "is_entry"` now returns
+zero field references). `parse_contract` rejects `[#]` with a clear
+"entry-point syntax removed" error, and the array-dimension path
+(`parser/types.rs`) rejects the `-> Int [#]` form (it previously parsed as a
+named dimension `Int[#]`). serialize/deserialize/display no longer carry the
+marker; BEAST round-trip test updated to assert no `(entry)` atom. `main.rs`
+init template now emits `defn main() -> Int { term 0; }`. SPEC §2.5 + §3.24
+updated (entry!/args! replace the marker; SPEC is the reference for the Phase 3
+macros). The lexer still tokenizes `#` as an identifier (unchanged); the PARSER
+is what rejects `[#]`.
+
 ### Phase 3 — CLI runtime, `entry!`/`args!`, concurrency gate
 
 | File | Change |

@@ -550,24 +550,21 @@ match_pattern ::= "_" | identifier ("(" identifier ("," identifier)* ")")?
 ### 2.5 Contracts
 
 ```bnf
-contract ::= entry_contract? "[" expression? "]" "[" expression? "]" watchdog?
-           | entry_contract
-
-entry_contract ::= "[#]" ("[" expression "]")?
-                 (* [#] marks a function as an environment entry point.
-                    Optional postcondition after: [#] [result == 0]. *)
+contract ::= "[" expression? "]" "[" expression? "]" watchdog?
 
 watchdog ::= ("?" | "!") "[" expression "]"
 ```
 
-* **`[#]` Entry precondition**: Marks a function as an environment entry
-  point (CLI-addressable). The function cannot be called from internal Brief
-  code — call graph is enforced at compile time. Multiple `[#]` functions
-  in the same file become subcommands (e.g., `myapp build`, `myapp test`).
+* **Precondition**: First bracket `[pre]` - what must hold before the
+  function/transaction runs.
 * **Postcondition**: Second bracket `[post]` - what the function guarantees
   will be true after execution.
 * **Watchdog**: Optional timeout/condition `?[timeout]` (optional) or
   `![timeout]` (required).
+* **Entry points**: The `[#]` entry marker is **removed** (2026-08-01, Phase
+  2). CLI-addressable entry points are expressed with the `entry!` / `args!`
+  macros instead (see the entry-point plugin). Writing `[#]` is a syntax
+  error.
 
 ### 2.6 FFI Grammar
 
@@ -1801,32 +1798,25 @@ defn clamp(val: Int) -> Int
   permanent specification.
 - `#no_derive` pragma blocks synthesis during drafting.
 
-### 3.24 `[#]` Entry Precondition \[2026-07-12: Phase 16B\]
+### 3.24 Entry Points \[removed 2026-08-01: Phase 2\]
 
-The `[#]` contract marks a function as a CLI-addressable entry point.
-The compiler generates a lightweight `argc`/`argv` parser from the
-function's parameter names, types, and preconditions.
+The `[#]` entry-point contract marker is **removed**. Writing `[#]` is a
+syntax error. CLI-addressable entry points and `argc`/`argv` parsing are
+expressed with the `entry!` and `args!` macros (the entry-point plugin, Phase
+3), which expand to explicit preconditions and guard injection:
 
 ```brief
-// Single entry point: `myapp --project ./src --clean`
-defn build(project: String, clean: Bool) -> Int
-    [#]
-    [project != ""]
-    [result == 0]
-{ ... };
-
-// Multiple entry points become subcommands: `myapp init`, `myapp build`
-defn init(name: String) -> Int [#] [name != ""] [result == 0] { ... };
-defn build(target: String) -> Int [#] [target != ""] [result == 0] { ... };
+// Phase 3 (planned): explicit entry-point macro
+entry!(build);
+defn build(project: String, clean: Bool) -> Int [project != ""] [result == 0] { ... };
 ```
 
-**Rules:**
-- `[#]` functions cannot be called from internal Brief code (call graph
-  isolation enforced at compile time).
-- `[#]` on a transaction is also valid for stateful entry points.
+**Removed rules:**
+- `[#]` functions could not be called from internal Brief code (call graph
+  isolation). The entry!/args! plugin enforces entry isolation instead.
 - Top-level scripting (bare statements outside any `defn`/`txn`) gets an
-  implicit `[#]` wrapper — no `[#]` annotation needed.
-- Scripting mode and explicit `[#]` are mutually exclusive in the same file.
+  implicit one-shot opening node via the flat-scripting plugin — no marker
+  needed (Phase 4).
 
 ### 3.25 `export` Keyword \[2026-07-12: Phase 15\]
 

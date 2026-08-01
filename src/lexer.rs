@@ -850,6 +850,10 @@ mod tests {
 
     #[test]
     fn test_entry_hash_bracket() {
+        // 2026-08-01 (Phase 2): `[#]` is no longer a contract marker — the
+        // entry!/args! macros (Phase 3) replace it. The lexer still produces
+        // Identifier("#") inside brackets; the PARSER now rejects `[#]` as a
+        // removed syntax. This test pins the tokenization only.
         let mut lexer = Token::lexer("[#]");
         assert_eq!(lexer.next(), Some(Ok(Token::LBracket)));
         // # is now an identifier character, so [#] -> LBracket, Identifier("#"), RBracket

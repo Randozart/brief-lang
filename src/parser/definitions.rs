@@ -2,7 +2,9 @@
 // 2026-07-12: Phase 1.2 — Parse top-level declarations.
 // Flat code: each function is max 2 levels.
 // Handles: defn, txn, node, cell, export, import, meld, trg.
-// Also handles [#] entry contracts, derivation blocks :=, implicit entry wrapping.
+// Also handles derivation blocks :=, implicit entry wrapping.
+// 2026-08-01 (Phase 2): `[#]` entry contracts removed — entry!/args! (Phase 3)
+// replace the marker with explicit macros.
 
 use super::helpers::Parser;
 use crate::ast::*;
@@ -869,40 +871,28 @@ impl<'a> Parser<'a> {
         Ok((output_type, contract))
     }
 
-    /// Parse contract: [#], [pre][post], [[post], [pre]]
+    /// Parse contract: [pre][post], [[post], [pre]]
     fn parse_contract(&mut self) -> Result<Contract, SyntaxError> {
         let mut pre = Expr::Bool(true);
         let mut post = Expr::Bool(true);
-        let mut is_entry = false;
         // 2026-07-31: true once any `[` was consumed — distinguishes an
         // explicit contract from the no-contract default `[true][true]`.
         let mut contract_saw_bracket = false;
-        // Check for [#]
+        // 2026-08-01 (Phase 2): `[#]` entry-point marker removed. Peek for it
+        // and raise a clear error — the entry!/args! plugin (Phase 3) replaces
+        // the marker with explicit macros, so `[#]` must not silently parse as
+        // a precondition referencing the identifier `#`.
         if self.check(&Token::LBracket) {
-            // Peek inside brackets for #
-            // This is tricky: [#] is LBracket, Identifier("#"), RBracket
             let saved = self.pos;
             self.pos += 1; // peek past LBracket
             let is_entry_syntax = self.check_identifier("#");
             self.pos = saved; // restore
-
             if is_entry_syntax {
-                contract_saw_bracket = true;
-                self.pos += 1; // consume LBracket
-                self.pos += 1; // consume Identifier("#")
-                self.expect(Token::RBracket)?;
-                is_entry = true;
-                // Optional postcondition: [#][post]
-                if self.check(&Token::LBracket) {
-                    post = self.parse_single_contract_condition()?;
-                }
-                return Ok(Contract {
-                    pre_condition: pre,
-                    post_condition: post,
-                    is_entry,
-                    watchdog: None,
-                    span: None,
-                    explicit: true,
+                return Err(SyntaxError::InvalidStatement {
+                    reason: "'[#]' entry-point syntax removed — use the entry!/args! \
+                             macros (Phase 3) or write an explicit contract"
+                        .to_string(),
+                    span: Span::dummy(),
                 });
             }
         }
@@ -951,7 +941,6 @@ impl<'a> Parser<'a> {
         Ok(Contract {
             pre_condition: pre,
             post_condition: post,
-            is_entry,
             watchdog,
             span: None,
             explicit,
@@ -1207,7 +1196,9 @@ impl<'a> Parser<'a> {
         }
     }
 
-    /// Wrap top-level statements in an implicit [#] transaction if needed.
+    /// Wrap top-level statements in an implicit entry transaction if needed.
+    /// 2026-08-01 (Phase 2): the `[#]` marker is gone — the entry!/args!
+    /// plugin (Phase 3) owns one-shot opening-node synthesis.
     fn wrap_implicit_entry(&self, _items: &mut Vec<TopLevel>) {
         // Placeholder: full implementation in Phase 16E
     }
@@ -2700,5 +2691,40 @@ mod tests {
     fn test_contract_without_watchdog() {
         let t = parse_txn("txn f() [true][done] { term; };").unwrap();
         assert!(t.contract.watchdog.is_none());
+    }
+
+    // ── 2026-08-01 (Phase 2): `[#]` entry marker removal ──────────────
+
+    #[test]
+    fn test_entry_hash_bracket_is_syntax_error() {
+        // 2026-08-01 (Phase 2): `[#]` is no longer an entry-point marker — it
+        // must be rejected with a clear error, NOT silently parsed as a
+        // precondition referencing `#` or a `Type[#]` array dimension.
+        // Contract position: `txn f() [#]`.
+        let err = parse_txn("txn f() [#] { term; };").unwrap_err();
+        let msg = format!("{}", err);
+        assert!(
+            msg.contains("entry-point syntax removed"),
+            "expected a clear '[#] removed' error, got: {msg}"
+        );
+        // After the return type: `defn main() -> Int [#]` (the classic form).
+        let err = parse_defn("defn main() -> Int [#] { term 0; };").unwrap_err();
+        assert!(
+            format!("{}", err).contains("entry-point syntax removed"),
+            "expected '[#] removed' error for '-> Int [#]', got: {}",
+            err
+        );
+        // `[#][post]` form is rejected too.
+        let err = parse_txn("txn f() [#][r == 0] { term; };").unwrap_err();
+        assert!(format!("{}", err).contains("entry-point syntax removed"));
+    }
+
+    #[test]
+    fn test_plain_contract_still_parses() {
+        // 2026-08-01 (Phase 2): removing `[#]` must not disturb ordinary
+        // contracts — pre/post still parse.
+        let t = parse_txn("txn f() [x > 0][done] { term; };").unwrap();
+        assert!(t.contract.watchdog.is_none());
+        assert!(t.contract.explicit);
     }
 }

@@ -728,7 +728,7 @@ fn run_init(name: Option<&str>) -> Result<(), String> {
     let dir = Path::new(name);
     std::fs::create_dir_all(dir.join("src"))
         .map_err(|e| format!("cannot create project: {}", e))?;
-    let main_bv = format!(r#"defn main() -> Int [#] {{
+    let main_bv = format!(r#"defn main() -> Int {{
     term 0;
 }};
 "#);
