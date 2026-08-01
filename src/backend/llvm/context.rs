@@ -551,6 +551,10 @@ pub struct FunctionContext {
     // becomes the live block — the latch edge (br .cdl_) and the latch phis'
     // guard predecessor must use it, not `.cdg_`.
     pub cur_block: Option<String>,
+    /// 2026-08-01 (E): inside a `vol let`'s RHS — state-field / Ptr loads
+    /// emit `load volatile` so an MMIO address read is never cached or
+    /// eliminated. Reset after the let.
+    pub volatile_read: bool,
 
     // 2026-07-17: Type of each last_val_temp entry. Parallel map so the
     // Identifier handler in emit_expr can return the correct Type when
@@ -667,6 +671,7 @@ impl FunctionContext {
             done_needs_fields: HashSet::new(),
             last_val_temps: HashMap::new(),
             cur_block: None,
+            volatile_read: false,
             last_val_types: HashMap::new(),
             rotation_fields: HashSet::new(),
             active_vector_groups: Vec::new(),

@@ -23,9 +23,21 @@ pub fn emit_statement_sequence(
 }
 
 pub fn emit_statement(backend: &mut LlvmBackend, out: &mut String, stmt: &Statement, indent: &str) -> TypedRegister {    match stmt {
-        Statement::Let { name, ty, expr, .. } => {
+        Statement::Let { name, ty, expr, modifiers, .. } => {
+            let is_vol = modifiers.iter().any(|m| m.name == "vol");
             let val = match expr {
-                Some(e) => backend.emit_expr(out, e, indent),
+                Some(e) => {
+                    // 2026-08-01 (E): `vol let x = <rhs>` — loads inside the
+                    // RHS are emitted `load volatile` (MMIO semantics: the
+                    // value may change externally, so it must never be cached
+                    // or eliminated). Reset after the let.
+                    if is_vol {
+                        backend.fun.volatile_read = true;
+                    }
+                    let v = backend.emit_expr(out, e, indent);
+                    backend.fun.volatile_read = false;
+                    v
+                }
                 None => {
                     let v = backend.fun.gen_reg();
                     let llvm_ty = ty.as_ref().map(|t| backend.llvm_type(t)).unwrap_or("i64".into());

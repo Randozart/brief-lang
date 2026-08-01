@@ -2098,7 +2098,18 @@ impl LlvmBackend {
 
         // Select optimization strategy via extracted decision tree
         let strategy = self.select_optimization_strategy(items, &analysis, &txns);
-        let dispatch_mode = strategy.dispatch_mode;
+        // 2026-08-01 (Phase E): `seq node`/`seq txn` forces SEQUENTIAL dispatch
+        // (no emit_parallel_reactor). Per the never-faster contract a modifier
+        // must never win — if the default parallel path is slower than seq,
+        // that is a compiler bug to fix in the default, not a seq win.
+        let has_seq_modifier = txns.iter().any(|(_, t)| {
+            t.modifiers.iter().any(|m| m.name == "seq")
+        });
+        let dispatch_mode = if has_seq_modifier {
+            DispatchMode::Sequential
+        } else {
+            strategy.dispatch_mode
+        };
         let has_wake_triggers = strategy.has_wake_triggers;
         let enumerable = strategy.enumerable;
         let enum_keys = strategy.enum_keys;

@@ -31,6 +31,26 @@ impl<'a> Parser<'a> {
             // node classified into a group barrier. Members that fire hold off
             // finishing until all fired members have (rule #21 classification).
             Some(Token::Sync) => self.parse_sync_group(),
+            // 2026-08-01 (Phase E): `seq node name` / `seq txn name` — the seq
+            // modifier requests sequential dispatch (no emit_parallel_reactor)
+            // and/or non-vectorized array access. Recorded as a modifier
+            // annotation; the backend consumes it (never a speed win — a
+            // modifier-beaten default is a compiler bug).
+            Some(Token::Seq) if matches!(self.tokens.get(self.pos + 1).map(|(t, _)| t), Some(Token::Node) | Some(Token::Txn)) => {
+                self.pos += 1; // consume seq
+                let mut txn = if matches!(self.tokens.get(self.pos).map(|(t, _)| t), Some(Token::Node)) {
+                    self.parse_node().map(TopLevel::Transaction)?
+                } else {
+                    self.parse_transaction(false, false).map(TopLevel::Transaction)?
+                };
+                if let TopLevel::Transaction(t) = &mut txn {
+                    t.modifiers.push(Annotation {
+                        name: "seq".to_string(),
+                        value: None,
+                    });
+                }
+                Ok(txn)
+            }
             // 2026-07-31: `async node` (prefix) — same as `node async`.
             // 2026-08-01 (Phase 3c): the prefix form must preserve the async
             // flag. parse_node reads is_async via eat(Async) AFTER consuming
@@ -2864,6 +2884,36 @@ mod tests {
         let item = p.parse_top_level().unwrap();
         if let crate::ast::TopLevel::Transaction(t) = item {
             assert!(t.is_async, "async node prefix must set is_async");
+        } else {
+            panic!("expected Transaction, got {item:?}");
+        }
+    }
+
+    #[test]
+    fn test_seq_node_records_seq_modifier() {
+        // 2026-08-01 (Phase E): `seq node name` records the "seq" modifier.
+        let src = "seq node work [true][done] { done = true; term; };";
+        let tokens = tokenize(src).unwrap();
+        let mut p = Parser::new(tokens, src);
+        let item = p.parse_top_level().unwrap();
+        if let crate::ast::TopLevel::Transaction(t) = item {
+            assert!(t.modifiers.iter().any(|m| m.name == "seq"), "seq modifier must be recorded");
+        } else {
+            panic!("expected Transaction, got {item:?}");
+        }
+    }
+
+    #[test]
+    fn test_vol_let_records_vol_modifier() {
+        // 2026-08-01 (Phase E): `vol let x` records the "vol" modifier.
+        let src = "node work [true][done] { vol let x: Int = 1; done = true; term; };";
+        let tokens = tokenize(src).unwrap();
+        let mut p = Parser::new(tokens, src);
+        let item = p.parse_top_level().unwrap();
+        if let crate::ast::TopLevel::Transaction(t) = item {
+            assert!(t.body.iter().any(|s| matches!(s,
+                crate::ast::Statement::Let { modifiers, .. } if modifiers.iter().any(|m| m.name == "vol")
+            )), "vol modifier must be recorded on the let");
         } else {
             panic!("expected Transaction, got {item:?}");
         }

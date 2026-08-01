@@ -661,7 +661,10 @@ impl LlvmBackend {
                         indent, gep, ptr, offset
                     )
                     .ok();
-                    writeln!(out, "{}{} = load i64, ptr {}", indent, v, gep).ok();
+                    // 2026-08-01 (E): `vol let` — Ptr-Index reads emit
+                    // `load volatile` (MMIO register arrays).
+                    writeln!(out, "{}{} = load {}{}, ptr {}", indent, v,
+                        if self.fun.volatile_read { "volatile " } else { "" }, "i64", gep).ok();
                 } else {
                     writeln!(
                         out,
@@ -884,8 +887,12 @@ impl LlvmBackend {
                 let llvm_ty = self.llvm_type(&pointee_ty);
                 writeln!(
                     out,
-                    "{}{} = load {}, ptr {}, align 8",
-                    indent, v, llvm_ty, load_ptr
+                    "{}{} = load {}{}, ptr {}, align 8",
+                    indent,
+                    v,
+                    if self.fun.volatile_read { "volatile " } else { "" },
+                    llvm_ty,
+                    load_ptr
                 )
                 .ok();
                 TypedRegister {

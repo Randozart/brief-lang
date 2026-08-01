@@ -67,6 +67,17 @@ pub enum Token {
     #[token("async")]
     Async,
 
+    /// 2026-08-01 (E): `seq` — ordering/layout/sequence modifier (prefix).
+    /// `seq struct` bypasses apply_field_modes; `seq node`/`seq txn` use
+    /// sequential dispatch; `seq Int[x]`/`seq foreach` disable vectorization.
+    #[token("seq")]
+    Seq,
+
+    /// 2026-08-01 (E): `vol` — memory-visibility modifier (prefix).
+    /// `vol let x` emits volatile load/store.
+    #[token("vol")]
+    Vol,
+
     #[token("await")]
     Await,
 
@@ -565,6 +576,8 @@ impl std::fmt::Display for Token {
             Token::Txn => write!(f, "txn"),
             Token::Node => write!(f, "node"),
             Token::Async => write!(f, "async"),
+            Token::Seq => write!(f, "seq"),
+            Token::Vol => write!(f, "vol"),
             Token::Await => write!(f, "await"),
             Token::Term => write!(f, "term"),
             Token::TermBang => write!(f, "term!"),

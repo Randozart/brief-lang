@@ -13,6 +13,20 @@ impl<'a> Parser<'a> {
     pub fn parse_statement(&mut self) -> Result<Statement, SyntaxError> {
         match self.peek() {
             Some(Token::Let) => self.parse_let_statement(),
+            // 2026-08-01 (Phase E): `vol let x` — memory-visibility modifier
+            // (prefix). The let statement records the vol annotation; the
+            // backend emits volatile load/store (reusing the mmio machinery).
+            Some(Token::Vol) if matches!(self.tokens.get(self.pos + 1).map(|(t, _)| t), Some(Token::Let)) => {
+                self.pos += 1; // consume vol
+                let mut stmt = self.parse_let_statement()?;
+                if let Statement::Let { modifiers, .. } = &mut stmt {
+                    modifiers.push(crate::ast::Annotation {
+                        name: "vol".to_string(),
+                        value: None,
+                    });
+                }
+                Ok(stmt)
+            }
             Some(Token::Term) => self.parse_term_statement(false),
             Some(Token::TermBang) => self.parse_term_statement(true),
             Some(Token::Escape) => self.parse_escape_statement(),
