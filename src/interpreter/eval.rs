@@ -132,11 +132,12 @@ pub fn eval_expr(
         Expr::FormattingAnnotation(_) => Ok(Value::Void),
 
         // 2026-07-19: Plugin-intercept calls must be resolved by Front plugins
-        // before evaluation. If one reaches here, the plugin system failed.
-        Expr::PluginIntercept { name, .. } => Err(RuntimeError::UnsupportedIntrinsic(format!(
-            "plugin-intercept {}",
-            name
-        ))),
+        // before evaluation. The compiler's build path rewrites the lowercase
+        // macros (`print!`, `println!`, `get_env!`, `get_env_int!`) at the
+        // Parsed stage; this native path keeps direct interpreter use correct
+        // (rule #4: the interpreter is the reference) and reports a rename
+        // hint for the deprecated PascalCase names.
+        Expr::PluginIntercept { name, args, .. } => eval_intercept(name, args, heap, bindings),
         Expr::Exists(_) => { unreachable!("fn? only in stage eval") },
             Expr::Slice { array, .. } => eval_expr(array, heap, bindings),
 
@@ -163,6 +164,131 @@ fn eval_call(
             .get(name)
             .cloned()
             .ok_or_else(|| RuntimeError::UndefinedVariable { name: name.into() })
+    }
+}
+
+/// 2026-08-01: Native evaluation for plugin intercepts — the reference
+/// implementation of the lowercase macros. The build path rewrites these
+/// to stdlib/intrinsic calls at the Parsed stage; this path keeps the
+/// interpreter correct when it runs the raw AST. Format strings parse
+/// identically to codegen via crate::plugin::print_plugin::parse_format.
+fn eval_intercept(
+    name: &str,
+    args: &[Expr],
+    heap: &mut VirtualHeap,
+    bindings: &mut HashMap<String, Value>,
+) -> Result<Value, RuntimeError> {
+    match name {
+        "print" | "println" => eval_print_macro(name, args, heap, bindings),
+        "get_env" => {
+            let key = eval_string_arg(args, heap, bindings)?;
+            let val = std::env::var(&key).unwrap_or_default();
+            Ok(Value::bits(val.into_bytes()))
+        }
+        "get_env_int" => {
+            let key = eval_string_arg(args, heap, bindings)?;
+            let val = std::env::var(&key).unwrap_or_default();
+            Ok(i64_to_bits(val.parse::<i64>().unwrap_or(0)))
+        }
+        // Deprecated PascalCase names — rejected by the typechecker with a
+        // rename hint in the build path; mirrored here for interpreter parity.
+        "Print" | "PrintLn" => Err(RuntimeError::UnsupportedIntrinsic(format!(
+            "'{}!' is deprecated — use the lowercase 'print!' / 'println!' macros",
+            name
+        ))),
+        "GetEnvInt" | "GetEnv" | "GetEnvOrDefault" => Err(RuntimeError::UnsupportedIntrinsic(
+            format!(
+                "'{}!' is deprecated — use the lowercase 'get_env_int!' / 'get_env!' macros",
+                name
+            ),
+        )),
+        _ => Err(RuntimeError::UnsupportedIntrinsic(format!(
+            "plugin-intercept {}",
+            name
+        ))),
+    }
+}
+
+/// Evaluate the print!/println! macro against runtime values.
+fn eval_print_macro(
+    name: &str,
+    args: &[Expr],
+    heap: &mut VirtualHeap,
+    bindings: &mut HashMap<String, Value>,
+) -> Result<Value, RuntimeError> {
+    let is_println = name == "println";
+    if args.is_empty() {
+        if is_println {
+            return execute_intrinsic("PrintChar#", &[i64_to_bits(10)], heap);
+        }
+        return Err(RuntimeError::UnsupportedIntrinsic(
+            "print! requires a value or a format-string argument".to_string(),
+        ));
+    }
+
+    if let Expr::Quoted(fmt) = &args[0] {
+        let parts = crate::plugin::print_plugin::parse_format(fmt)
+            .map_err(|msg| RuntimeError::UnsupportedIntrinsic(format!("{msg}")))?;
+        let value_args = &args[1..];
+        let mut next = 0usize;
+        for part in &parts {
+            match part {
+                crate::plugin::print_plugin::FmtPart::Literal(seg) => {
+                    print!("{}", String::from_utf8_lossy(seg));
+                }
+                crate::plugin::print_plugin::FmtPart::Next => {
+                    let value = eval_expr(&value_args[next], heap, bindings)?;
+                    print_value(&value, heap)?;
+                    next += 1;
+                }
+                crate::plugin::print_plugin::FmtPart::Position(n) => {
+                    let value = eval_expr(&value_args[*n], heap, bindings)?;
+                    print_value(&value, heap)?;
+                }
+            }
+        }
+    } else {
+        let value = eval_expr(&args[0], heap, bindings)?;
+        print_value(&value, heap)?;
+    }
+
+    if is_println {
+        execute_intrinsic("PrintChar#", &[i64_to_bits(10)], heap)?;
+    }
+    Ok(Value::Void)
+}
+
+/// Print a runtime value by its representation: Float, integer, or string
+/// bits — mirroring the PrintFloat#/PrintInt#/PrintStr# dispatch in codegen.
+fn print_value(value: &Value, heap: &mut VirtualHeap) -> Result<(), RuntimeError> {
+    match value {
+        Value::Float(f) => {
+            print!("{}", f);
+        }
+        Value::Int(n) => {
+            print!("{}", n);
+        }
+        Value::Bits(bytes) => {
+            execute_intrinsic("PrintStr#", &[Value::bits(bytes.clone())], heap)?;
+        }
+        _ => {}
+    }
+    Ok(())
+}
+
+/// Evaluate args[0] and decode it as a string (Bits) for env-var keys.
+fn eval_string_arg(
+    args: &[Expr],
+    heap: &mut VirtualHeap,
+    bindings: &mut HashMap<String, Value>,
+) -> Result<String, RuntimeError> {
+    let value = eval_expr(&args[0], heap, bindings)?;
+    match value {
+        Value::Bits(bytes) => Ok(String::from_utf8_lossy(&bytes).to_string()),
+        other => Err(RuntimeError::TypeError {
+            expected: "String".into(),
+            found: format!("{other:?}"),
+        }),
     }
 }
 

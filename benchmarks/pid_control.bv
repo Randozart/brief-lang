@@ -9,7 +9,7 @@ let err_prev: Float = 0.0;
 let integral: Float = 0.0;
 let output: Float = 0.0;
 let count: Int = 0;
-let total: Int = GetEnvInt!("BOUND");
+let total: Int = get_env_int!("BOUND");
 
 const Kp: Float = 0.1;
 const Ki: Float = 0.01;

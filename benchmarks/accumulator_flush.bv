@@ -8,7 +8,7 @@ let sum: Float = 0.0;
 let sumsq: Float = 0.0;
 let n: Int = 0;
 let count: Int = 0;
-let total: Int = GetEnvInt!("BOUND");
+let total: Int = get_env_int!("BOUND");
 
 node tick [
     count < total

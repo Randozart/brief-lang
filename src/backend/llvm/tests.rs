@@ -3193,13 +3193,14 @@ fn test_batch_loop_rejects_pre_increment() {
     assert!(!output.contains(".cd_"), "pre-increment guard must NOT use the countdown loop");
 }
 
-// ── FFI regression guard (2026-08-01, Phase 0 of the plugin/macro rework) ──
-// PrintLn!/Print! rewrite to direct C-runtime intrinsic calls (PrintInt# etc.),
-// which the backend emits as `call i64 @__print_*`. The syntax renames in the
-// plugin/macro rework (PrintLn! -> println!, GetEnvInt! -> get_env_int!) must
-// never introduce an indirection layer (GLUE bridge shims, protocol chains)
-// between the macro and the C runtime call. This test pins that contract:
-// if a future rewrite stops emitting the direct call, it fails here.
+// ── FFI regression guard (2026-08-01, Phase 0-1 of the plugin/macro rework) ──
+// print!/println! rewrite to direct C-runtime intrinsic calls (PrintInt#,
+// PrintStr#, PrintChar# etc.), which the backend emits as `call i64 @__print_*`.
+// The syntax renames in the plugin/macro rework (PrintLn! -> println!,
+// GetEnvInt! -> get_env_int!) must never introduce an indirection layer (GLUE
+// bridge shims, protocol chains) between the macro and the C runtime call.
+// This test pins that contract: if a future rewrite stops emitting the direct
+// call, it fails here.
 
 /// Lex + parse a .bv source string into an AST (test helper).
 fn parse_bv_source(src: &str) -> Vec<TopLevel> {
@@ -3213,7 +3214,7 @@ fn test_print_plugin_emits_direct_ffi_calls() {
     let src = r#"
         let x: Int = 5;
         defn show(v: Int) -> Int {
-            PrintLn!(v);
+            println!(v);
             term v;
         };
     "#;
@@ -3237,5 +3238,95 @@ fn test_print_plugin_emits_direct_ffi_calls() {
     assert!(
         !ir.contains("bridge_"),
         "print rewrite must not route through the GLUE bridge; got:\n{ir}"
+    );
+}
+
+/// 2026-08-01: Format-string println! — literal segments print via __print_str,
+/// placeholders dispatch on the value kind, and a newline is appended. All
+/// must remain direct runtime calls with no bridge indirection.
+#[test]
+fn test_println_format_string_emits_direct_ffi_calls() {
+    let src = r#"
+        let x: Int = 5;
+        let f: Float = 1.5;
+        defn show() -> Int {
+            println!("sum={} and {1}", x + 1, f);
+            term 0;
+        };
+    "#;
+    let mut items = parse_bv_source(src);
+    let mut universe = crate::type_universe::TypeUniverse::new();
+    let mut pm = crate::plugin::PluginManager::new();
+    pm.register(Box::new(crate::plugin::print_plugin::PrintPlugin));
+    pm.run_ast(crate::ast::StageKind::Parsed, &mut items, &mut universe)
+        .expect("print plugin stage failed");
+
+    let mut backend = LlvmBackend::new();
+    let ir = backend.generate(&items, None);
+    assert!(
+        ir.contains("call i64 @__print_str("),
+        "expected direct @__print_str call for format literal segment; got:\n{ir}"
+    );
+    assert!(
+        ir.contains("call i64 @__print_int("),
+        "expected direct @__print_int call for integer placeholder; got:\n{ir}"
+    );
+    assert!(
+        ir.contains("call i64 @__print_float("),
+        "expected direct @__print_float call for float placeholder; got:\n{ir}"
+    );
+    assert!(
+        ir.contains("call i64 @__print_char("),
+        "expected direct @__print_char newline call; got:\n{ir}"
+    );
+    assert!(
+        !ir.contains("bridge_"),
+        "format print rewrite must not route through the GLUE bridge; got:\n{ir}"
+    );
+}
+
+/// 2026-08-01: An out-of-range positional placeholder is a compile error
+/// surfaced by the plugin stage, not a silent runtime truncation.
+#[test]
+fn test_println_out_of_range_placeholder_errors() {
+    let src = r#"
+        defn show() -> Int {
+            println!("x={1}", 42);
+            term 0;
+        };
+    "#;
+    let mut items = parse_bv_source(src);
+    let mut universe = crate::type_universe::TypeUniverse::new();
+    let mut pm = crate::plugin::PluginManager::new();
+    pm.register(Box::new(crate::plugin::print_plugin::PrintPlugin));
+    let err = pm
+        .run_ast(crate::ast::StageKind::Parsed, &mut items, &mut universe)
+        .expect_err("out-of-range {1} must be a plugin-stage error");
+    assert!(
+        err.contains("out of range"),
+        "expected out-of-range message, got: {err}"
+    );
+}
+
+/// 2026-08-01: Legacy PascalCase names (PrintLn!) are no longer rewritten by
+/// the plugin — they fall through to the typechecker, which rejects them with
+/// a rename hint. The plugin must leave them untouched.
+#[test]
+fn test_legacy_println_not_rewritten_by_plugin() {
+    let src = r#"
+        defn show(v: Int) -> Int {
+            PrintLn!(v);
+            term v;
+        };
+    "#;
+    let mut items = parse_bv_source(src);
+    let mut universe = crate::type_universe::TypeUniverse::new();
+    let mut pm = crate::plugin::PluginManager::new();
+    pm.register(Box::new(crate::plugin::print_plugin::PrintPlugin));
+    pm.run_ast(crate::ast::StageKind::Parsed, &mut items, &mut universe)
+        .expect("print plugin stage failed");
+    assert!(
+        format!("{:?}", items).contains("PrintLn"),
+        "legacy PrintLn! must survive the plugin for the typechecker to reject; got:\n{items:?}"
     );
 }

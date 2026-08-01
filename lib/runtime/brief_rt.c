@@ -198,6 +198,17 @@ __attribute__((always_inline)) int64_t __print_char(int64_t c) {
     return 0;
 }
 
+// 2026-08-01: String printer for the PrintStr# intrinsic — the target of
+// format-string literal segments in print!/println!. Mirrors __print: takes
+// a length-prefixed bstr handle (or SSO inlined bytes via brief_str_to_c),
+// prints it without a trailing newline, and frees the C copy. Defined here
+// because the print plugin expands literal segments to PrintStr# calls.
+int64_t __print_str(int64_t msg_bstr) {
+    char* c_msg = brief_str_to_c(msg_bstr);
+    if (c_msg) { fputs(c_msg, stdout); free(c_msg); }
+    return 0;
+}
+
 void __exit(int64_t code) {
     exit((int)code);
 }

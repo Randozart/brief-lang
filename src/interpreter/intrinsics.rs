@@ -501,9 +501,25 @@ pub fn execute_intrinsic(
         }
         "PrintStr#" => {
             let val = args.get(0).cloned().unwrap_or(Value::Void);
-            if let Value::Int(n) = val {
-                // String handle (opaque pointer) — print as int for now
-                print!("{}", n);
+            match val {
+                // 2026-08-01: Direct string bytes (Expr::Quoted) print as text.
+                Value::Bits(bytes) => {
+                    print!("{}", String::from_utf8_lossy(&bytes));
+                }
+                // Heap string handle: 8-byte LE length header followed by the
+                // payload, as produced by the FFI string marshaller.
+                Value::Int(addr) if addr > 0 => {
+                    let len = heap
+                        .read(addr as u64, 8)
+                        .map(|b| i64::from_le_bytes(b.try_into().unwrap_or([0u8; 8])))
+                        .unwrap_or(0);
+                    if len > 0 {
+                        if let Some(payload) = heap.read(addr as u64 + 8, len as usize) {
+                            print!("{}", String::from_utf8_lossy(payload));
+                        }
+                    }
+                }
+                _ => {}
             }
             // PrintStr# returns number of bytes printed
             Ok(i64_to_bits(0))

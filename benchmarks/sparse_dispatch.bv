@@ -13,13 +13,13 @@
 
 
 let count: Int = 0;
-let total: Int = GetEnvInt!("BOUND");
+let total: Int = get_env_int!("BOUND");
 
-node ping  [count < total && count % 8 == 0][count == total] { count = count + 1; when count % 5000000 == 4999999 { PrintLn!(count + 1); }; term; };
-node ack   [count < total && count % 8 == 1][count == total] { count = count + 1; when count % 5000000 == 4999999 { PrintLn!(count + 1); }; term; };
-node err   [count < total && count % 8 == 2][count == total] { count = count + 1; when count % 5000000 == 4999999 { PrintLn!(count + 1); }; term; };
-node debug [count < total && count % 8 == 3][count == total] { count = count + 1; when count % 5000000 == 4999999 { PrintLn!(count + 1); }; term; };
-node data  [count < total && count % 8 == 4][count == total] { count = count + 1; when count % 5000000 == 4999999 { PrintLn!(count + 1); }; term; };
-node ctrl  [count < total && count % 8 == 5][count == total] { count = count + 1; when count % 5000000 == 4999999 { PrintLn!(count + 1); }; term; };
-node sync_ [count < total && count % 8 == 6][count == total] { count = count + 1; when count % 5000000 == 4999999 { PrintLn!(count + 1); }; term; };
-node stat  [count < total && count % 8 == 7][count == total] { count = count + 1; when count % 5000000 == 4999999 { PrintLn!(count + 1); }; term; };
+node ping  [count < total && count % 8 == 0][count == total] { count = count + 1; when count % 5000000 == 4999999 { println!(count + 1); }; term; };
+node ack   [count < total && count % 8 == 1][count == total] { count = count + 1; when count % 5000000 == 4999999 { println!(count + 1); }; term; };
+node err   [count < total && count % 8 == 2][count == total] { count = count + 1; when count % 5000000 == 4999999 { println!(count + 1); }; term; };
+node debug [count < total && count % 8 == 3][count == total] { count = count + 1; when count % 5000000 == 4999999 { println!(count + 1); }; term; };
+node data  [count < total && count % 8 == 4][count == total] { count = count + 1; when count % 5000000 == 4999999 { println!(count + 1); }; term; };
+node ctrl  [count < total && count % 8 == 5][count == total] { count = count + 1; when count % 5000000 == 4999999 { println!(count + 1); }; term; };
+node sync_ [count < total && count % 8 == 6][count == total] { count = count + 1; when count % 5000000 == 4999999 { println!(count + 1); }; term; };
+node stat  [count < total && count % 8 == 7][count == total] { count = count + 1; when count % 5000000 == 4999999 { println!(count + 1); }; term; };

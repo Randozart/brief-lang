@@ -2,6 +2,11 @@
 // 2026-07-19: Resolves !GetEnv(name) and !GetEnvInt(name) to their stdlib
 // equivalents: getenv(name) and get_env_int(name). Runs at Front stage so
 // replacements are visible to the typechecker.
+//
+// 2026-08-01: Phase 1 of the plugin-macro rework — the entry points are the
+// lowercase macros `get_env!` / `get_env_int!` (and the stdlib-backed
+// `get_env_or_default!`). The old PascalCase names are rejected by the
+// typechecker with a rename hint (see src/typechecker/mod.rs).
 
 use crate::ast::{Expr, StageKind, TopLevel};
 use crate::plugin::Plugin;
@@ -30,18 +35,14 @@ impl Plugin for EnvPlugin {
         // even though get_env_int is a regular function (not an intrinsic).
         resolve_const_env_vars(program);
         // Second pass — normal resolution for non-const contexts
-        let orig_count = count_intercepts(program);
         for item in program.iter_mut() {
             walk_item(item);
-        }
-        if orig_count > 0 {
-            let _new_count = count_intercepts(program);
         }
         Ok(())
     }
 }
 
-/// Evaluate !GetEnv/!GetEnvInt inside const declarations at compile time.
+/// Evaluate get_env!/get_env_int! inside const declarations at compile time.
 fn resolve_const_env_vars(program: &mut [TopLevel]) {
     for item in program.iter_mut() {
         let TopLevel::Constant(c) = item else { continue };
@@ -49,9 +50,9 @@ fn resolve_const_env_vars(program: &mut [TopLevel]) {
         let key = extract_string_arg(args).unwrap_or_default();
         let val = std::env::var(&key).unwrap_or_default();
         c.expr = match name.as_str() {
-            "GetEnvInt" => Expr::Decimal(val.parse::<i64>().unwrap_or(0)),
-            "GetEnv"    => Expr::Quoted(val.as_bytes().to_vec()),
-            _           => continue,
+            "get_env_int" => Expr::Decimal(val.parse::<i64>().unwrap_or(0)),
+            "get_env"     => Expr::Quoted(val.as_bytes().to_vec()),
+            _             => continue,
         };
     }
 }
@@ -62,61 +63,6 @@ fn extract_string_arg(args: &[Expr]) -> Option<String> {
         String::from_utf8(bytes.clone()).ok()
     } else {
         None
-    }
-}
-
-fn count_intercepts(program: &[TopLevel]) -> usize {
-    let mut count = 0;
-    for item in program {
-        count_expr_intercepts(item, &mut count);
-    }
-    count
-}
-
-fn count_expr_intercepts(item: &TopLevel, count: &mut usize) {
-    match item {
-        TopLevel::Definition(d) => { for s in &d.body { count_stmt_intercepts(s, count); } }
-        TopLevel::Transaction(t) => { for s in &t.body { count_stmt_intercepts(s, count); } }
-        TopLevel::Constant(c) => { count_intercepts_in_expr(&c.expr, count); }
-        TopLevel::Statement(stmt) => { count_stmt_intercepts(stmt, count); }
-        _ => {}
-    }
-}
-
-fn count_stmt_intercepts(stmt: &crate::ast::Statement, count: &mut usize) {
-    match stmt {
-        crate::ast::Statement::Assign(_, expr)
-        | crate::ast::Statement::Let { expr: Some(expr), .. }
-        | crate::ast::Statement::Expression(expr)
-        | crate::ast::Statement::Term(Some(expr))
-        | crate::ast::Statement::TermBang(Some(expr)) => {
-            count_intercepts_in_expr(expr, count);
-        }
-        _ => {}
-    }
-}
-
-fn count_intercepts_in_expr(expr: &Expr, count: &mut usize) {
-    match expr {
-        Expr::PluginIntercept { .. } => { *count += 1; }
-        Expr::BinaryOp(_, l, r) => { count_intercepts_in_expr(l, count); count_intercepts_in_expr(r, count); }
-        Expr::UnaryOp(_, e) => count_intercepts_in_expr(e, count),
-        Expr::Call(_, args, _) => { for a in args { count_intercepts_in_expr(a, count); } }
-        Expr::If(c, t, e) => { count_intercepts_in_expr(c, count); count_intercepts_in_expr(t, count); if let Some(e) = e { count_intercepts_in_expr(e, count); } }
-        Expr::Block(stmts) => { for s in stmts { count_stmt_intercepts(s, count); } }
-        Expr::Match(_, arms) => { for a in arms { count_intercepts_in_expr(&a.body, count); } }
-        Expr::Tuple(elems) | Expr::List(elems) => { for e in elems { count_intercepts_in_expr(e, count); } }
-        Expr::Field(obj, _) | Expr::Index(obj, _) => count_intercepts_in_expr(obj, count),
-        Expr::Cast(e, _) | Expr::IsType(e, _) | Expr::Deref(e) | Expr::AddrOf(e) => count_intercepts_in_expr(e, count),
-        Expr::Within(body, _) => count_intercepts_in_expr(body, count),
-        Expr::Lambda(_, body) => count_intercepts_in_expr(body, count),
-        Expr::DerivationBlock(db) => {
-            for ex in &db.examples {
-                for inp in &ex.inputs { count_intercepts_in_expr(inp, count); }
-                count_intercepts_in_expr(&ex.output, count);
-            }
-        }
-        _ => {}
     }
 }
 
@@ -159,13 +105,8 @@ fn walk_stmt(stmt: &mut crate::ast::Statement) {
 fn walk_expr(expr: &mut Expr) {
     match expr {
         Expr::PluginIntercept { name, args, type_args: _ } => {
-            eprintln!("env plugin: found PluginIntercept '{}'", name);
             if let Some(replacement) = resolve_intercept(name, args) {
-                eprintln!("env plugin: replacing '{}' with '{}'", name,
-                    match &replacement { Expr::Call(n, _, _) => n, _ => "?" });
                 *expr = replacement;
-            } else {
-                eprintln!("env plugin: no replacement for '{}'", name);
             }
         }
         Expr::BinaryOp(_, lhs, rhs) => {
@@ -217,12 +158,15 @@ fn walk_expr(expr: &mut Expr) {
     }
 }
 
-/// Resolve a plugin-intercept call to a typed stdlib function call.
+/// 2026-08-01: Resolve a plugin-intercept call to a typed stdlib function
+/// call. Only lowercase macro names are rewritten; PascalCase legacy names
+/// fall through to the typechecker, which rejects them with a rename hint.
 fn resolve_intercept(name: &str, args: &[Expr]) -> Option<Expr> {
     let call_args = args.to_vec();
     match name {
-        "GetEnv" => Some(Expr::Call("get_env".to_string(), call_args, None)),
-        "GetEnvInt" => Some(Expr::Call("get_env_int".to_string(), call_args, None)),
+        "get_env" => Some(Expr::Call("get_env".to_string(), call_args, None)),
+        "get_env_int" => Some(Expr::Call("get_env_int".to_string(), call_args, None)),
+        "get_env_or_default" => Some(Expr::Call("get_env_or_default".to_string(), call_args, None)),
         _ => None,
     }
 }

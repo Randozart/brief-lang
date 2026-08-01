@@ -12,7 +12,7 @@ let p20: Float = 0.0;
 let p21: Float = 0.0;
 let p22: Float = 0.0;
 let count: Int = 0;
-let total: Int = GetEnvInt!("BOUND");
+let total: Int = get_env_int!("BOUND");
 
 const A00: Float = 1.0;
 const A01: Float = 0.01;
@@ -52,7 +52,7 @@ node tick [
     count = count + 1;
     when count % 5000000 == 0 {
         let trace: Float = p00 + p01 + p02 + p10 + p11 + p12 + p20 + p21 + p22;
-        PrintLn!(x0 + x1 + x2 + trace);
+        println!(x0 + x1 + x2 + trace);
     };
     term;
 };

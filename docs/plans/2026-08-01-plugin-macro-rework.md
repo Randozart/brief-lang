@@ -1,9 +1,14 @@
-# Plugin / Macro Syntax Rework — `entry!`, `args!`, `print!`/`println!`, `[#]` Removal, FFI Audit
+# Brief: Plugin / Macro Syntax Rework + The Bits Model (String as `#String` Protocol)
 
 **Date:** 2026-08-01
-**Status:** Approved — awaiting execution start
+**Status:** Approved. Part A (macro rework) approved at start; Part B (the bits
+model — String as `#String` protocol) added and approved 2026-08-01.
 **Worktree:** `../brief-compiler-plugin-rework` (new, from `main` `d6c6c818`)
 **Baseline worktree:** `../brief-compiler-baseline` — synced to `d6c6c818` on 2026-08-01
+**Part B is in the queue NOW:** Phase B0 is a hard prerequisite for completing
+Part A Phase 1 (the format-demo clang error) and for Part A Phases 3-4.
+Phase B1 is a hard prerequisite for Part A Phase 3 (`entry_cmd() == "cmd"`
+needs content-based String equality). See §5.6 and the Execution order (§6).
 
 ---
 
@@ -36,6 +41,23 @@ principle (AGENTS.md #2):
 8. **Research the FFI "native performance" regression** — full audit of the
    `frgn` Inline path, print/env intercept resolution, and the bridge path, with
    a documented baseline.
+
+**Part B (added 2026-08-01) — The Bits Model.** Make `String` the `#String`
+protocol, not a primitive with a compiler-invented representation:
+
+9. A String value is a **pointer to a length-prefixed buffer** `[len: i64][bytes]`
+   in every type-claiming site. Value moves (param/return/store/FFI) pass the
+   address; **operands deref by default** through one central helper.
+10. **Encoding is a cast property**: `#Bit → #String` default = UTF8 wrap;
+    sub-protocols override via `CastFrom(#Bit)`; the unread `!> encoding`
+    metadata is removed. UTF8 exists nowhere as a symbol.
+11. **Length is an overloadable protocol op** (`prop Size` / `prop Bytes`);
+    `Bytes` default = O(1) header read; `Size` default = UTF8 char count (runtime).
+12. **Retire the competing representations** — fat pointer `{i64,i64}`, `i128`
+    state slots, the dead SSO layer, and the `is_string_like` structural
+    heuristic — and **fix String `Eq`/`Ne` to compare content** (currently
+    address-based in both interpreter and backend, which breaks
+    `entry_cmd() == "cmd"`).
 
 ---
 
@@ -297,7 +319,202 @@ messages, never semantics).
 
 ---
 
-## 5. Phase plan
+## 5. PART B — The Bits Model: String as `#String` Protocol
+
+### 5.1 Motivation
+
+The compiler treats `String` as a primitive with a compiler-invented
+representation — and the invention has **four contradictory answers** to "what
+is a String value?". Depending on which code path asks, a String is a `ptr`, an
+`i64` handle, a `{ i64, i64 }` fat pointer, or an `i128`. This is not cosmetic:
+
+- The first real String-typed FFI call (`PrintStr#` on a format-string literal)
+  fails at clang link time: the call passes a `ptr`/`i64` register but the
+  declare says `{ i64, i64 }`.
+- **String equality is address-based** in both the interpreter (`eval.rs:332`,
+  `lv.as_i64() == rv.as_i64()`) and the backend (`emit_expr.rs:2437-2454`,
+  `icmp eq` on the raw register). Two equal-content strings at different
+  addresses are `!=`. This silently breaks `entry_cmd() == "build"` (Part A
+  Phase 3) — a hard cross-part dependency, not a style preference.
+- The SSO path (`feature_sso_strings`, hardcoded `false` in
+  `main.rs:324,373` and `mod.rs:778`) is dead code that still drags a
+  `{ i64, i64 }` ABI claim and a structural heuristic (`is_string_like`: "any
+  `{Int,Int}`-shaped type is a string") along.
+- `lib/std/types/bootstrap.bv:79-86` declares `data`/`len` fields and an
+  `!> encoding: "UTF-8"` metadata that **nothing reads**
+  (`type_universe/mod.rs:89,285-287`).
+
+The fix is to stop inventing a representation and let String be what it
+actually is: a **protocol** (`#String`) whose concrete reality is a pointer to
+a length-prefixed buffer `[len: i64][bytes]`. The compiler represents the value
+honestly (a pointer), derefs operands by default, routes encoding through casts
+(default UTF8), and exposes length as an overloadable op. This is the
+mainstream, performant design (C++ `std::string`, Python, Java, Swift), not a
+purity exercise: it matches the backend's actual internal representation and
+the runtime's `int64_t`-handle contract, and it **removes** conversion churn
+(`ptrtoint`, `i128` loads, `extractvalue`, `inttoptr`) rather than adding it.
+
+### 5.2 Target model (locked)
+
+1. **`type String: #String;`** — no fields, no props, no `encoding` metadata.
+   The protocol carries defaults; sub-protocols overload. (Props move to length
+   ops, B3.)
+2. **A String value is a pointer** to `[len: i64][bytes]`. The value register
+   is the address (`ptr`); state slots store it as an `i64` machine word (via
+   the existing Ptr-state `ptrtoint`/`inttoptr` adapters — String follows the
+   `Ptr<T>` pattern). Matches the runtime contract: `brief_str_to_c(int64_t)`
+   (`lib/runtime/brief_rt.c:48-102`), `__print(int64_t)`, `__print_str(int64_t)`
+   — the `int64_t` *is* the address.
+3. **Value moves never deref; operands deref by default.** Params, returns,
+   stores, FFI args are the address. Ops/casts on `#String` operands deref
+   through **one central helper**, read the header for region bounds, and
+   operate on `bytes[0..len)`. The header is bookkeeping, never part of the bits.
+4. **`#String → #Bit`** = the buffer pointer (content view; zero instructions —
+   the value already is the pointer). **`#Bit → #String`** is the encoding
+   door: default = wrap raw bytes as UTF8 (the bytes already *are* UTF8;
+   wrapping is the only act). Sub-protocols override via the existing
+   `CastFrom(#Bit)` machinery (`graph.rs:97`, `mod.rs:1020`,
+   `emit_expr.rs:2927`).
+5. **Length is an op** (`prop Size` / `prop Bytes`): `Bytes` default = header
+   read (O(1)); `Size` default = UTF8 char count (runtime). Overloadable by
+   subtypes. This is the same category of knowledge as `#Int` hardcoding `add`
+   — protocol default behavior, not type-name matching (rule #14).
+6. **Length-prefixed buffers are mandatory.** Null-terminated C strings are
+   explicitly rejected: O(n) length on every access is the actual hot-loop
+   killer that pushed the industry to length-prefixing.
+7. **`Slice<T>` stays a `{ ptr, i64 }` fat pointer for now** — it is a sequence
+   view, a separate concern from String. Deferred (not in this plan).
+
+### 5.3 Current-state findings (verified 2026-08-01)
+
+| Type-claiming site | Claims String is | Status |
+|---|---|---|
+| `llvm_type` SSO-off branch (`emit_toplevel.rs:323-328`) | `ptr` | honest — the one correct site |
+| `protocol_llvm_type` (`mod.rs:366-384`) | `{ i64, i64 }` | never produced; breaks frgn declares |
+| casting graph `#String` (`graph.rs:273,285-286`) | `{ i64, i64 }` | never produced |
+| `push_field_type` (`mod.rs:883-910`) | `i128` | wrong; fixed to `i64` in the working tree |
+| SSO emission (`emit_expr.rs:1139-1220`, shim `:1856-1883`) | `{ i64, i64 }` | dead (`feature_sso_strings` hardcoded `false`) |
+| `is_string_like` (`type_universe/mod.rs:289`) | "{Int,Int} shape" | structural heuristic propping up the fat pointer |
+| actual registers (literals, state, runtime) | `i64` handle / `ptr` | the real representation |
+| `bootstrap.bv:79-86` | `{data,len}` + `encoding` | layout claim + unread metadata |
+
+**Verified consequences:**
+
+- **Format-demo clang error** (the Part A Phase 1 blocker): `briefc build`
+  succeeds, but `clang` rejects `'%t4' defined with type 'i64' but expected
+  'ptr'` on `call i64 @__print_str(ptr %t4)`. The IR also shows
+  `declare void @__print_str({ i64, i64 })` — sourced from the dead
+  `frgn __print_str(msg: String) -> Void` at `lib/std/ffi/io.bv:9` — and
+  `load i128` for String state fields.
+- **Address-based equality** (latent semantic bug): interpreter `eval.rs:332`,
+  backend `emit_expr.rs:2437-2454`. Breaks `entry_cmd() == "cmd"` (Phase 3).
+- **`encoding` metadata is unread** — removing it is behavior-neutral.
+  Encoding variants already ride hashwords in op signatures (`#String<UTF8>`)
+  and `CastTo`/`CastFrom` edges (`parser/definitions.rs:1888-1919`).
+- **`CastFrom(#Bit)` override machinery exists** — the encoding door is nearly free.
+- **`prop` bodies are documentation-only** (`bootstrap.bv:11-13`; parsed at
+  `definitions.rs:1483`, not dispatched) — the length-op mechanism is syntax
+  without dispatch. This is exactly the "op declaration for length, hardcoded
+  by default, overloadable" the model requires.
+- **Legacy types**: `StaticString` (`bootstrap.bv:95-98`) unused; `UTF8View`
+  ops in `lib/std/types/utf8view.bv`; `SmallString64` ops in
+  `lib/std/types/small_string.bv`. Special-cased only in
+  `emit_toplevel.rs:280-282` and `mod.rs`. **No callers outside their own
+  modules** (verified).
+- **No benchmark uses `String`** (verified: `grep` over `benchmarks/*.bv`).
+  The suite is numeric; String work is print/I/O output. A String
+  representation change is invisible to the benchmark matrix.
+- The literal emission is **already** `@str.N = <{ i64, [N x i8] }>`
+  (`emit_expr.rs:1262-1289`) — header + bytes, exactly the target model. The
+  register is currently a `ptrtoint` → `i64` handle with `Type::int()`.
+
+### 5.4 Architecture decisions (locked)
+
+- **B-D1 (representation):** A String value is a `ptr` to `[len][bytes]` in
+  every type-claiming site (`llvm_type`, `protocol_llvm_type`, casting graph).
+  State slots are `i64` words (the address) via the existing `Ptr<T>` state
+  adapters (`mod.rs:837-843`, `adapt_to_i64`/`ensure_typed_value`). SSO remains
+  a *runtime* encoding detail inside `brief_str_to_c` — never a compiler type.
+- **B-D2 (deref positions):** value moves pass the address; operands in
+  ops/casts deref by default through **one central helper**. Two-position rule;
+  no scattered deref decisions. This is what kills the split-brain: the
+  four-way register ambiguity collapses to "address in value position, deref in
+  operand position."
+- **B-D3 (`#String → #Bit`):** the buffer pointer (content view,
+  self-describing, zero instructions). The header stays reachable so region ops
+  bound the content; ops never include the header in the bits.
+- **B-D4 (encoding door):** `#Bit → #String` default = UTF8 wrap via the
+  existing `CastFrom(#Bit)` machinery; sub-protocols override the lane. Remove
+  `!> encoding` (already unread). UTF8 exists nowhere as a symbol.
+- **B-D5 (length ops):** `Bytes` = header read (O(1)); `Size` = UTF8 char count
+  (runtime default). Protocol defaults for `#String`, overloadable by subtypes.
+- **B-D6 (scope):** **B0** (representation coherence) + **B1** (deref operands +
+  content equality) are **mandatory** — B0 unblocks Part A Phase 1, B1 is a
+  hard prerequisite for Part A Phase 3. **B2** (content-view casts + encoding
+  door) + **B3** (length-op dispatch) are **gated behind a checkpoint** (§6)
+  — the philosophical core, low-risk, not blockers. **B4** (legacy retirement +
+  docs + benchmarks) is **mandatory** — it deletes the dead fat-pointer/SSO
+  machinery and closes Part B.
+- **B-D7 (buffer format):** length-prefixed. Null-terminated rejected (§5.2.6).
+- **B-D8 (legacy):** delete `StaticString`; retire `UTF8View` + `SmallString64`
+  (ops migrate into `#String` defaults or die). `Slice<T>` deferred.
+- **B-D9 (additive-only, interpreter-first):** existing optimization arms
+  unchanged; new behavior is new arms + new dispatch. Interpreter changes land
+  with (before) their backend counterparts (rule #4).
+
+### 5.5 Performance policy
+
+- **No benchmark exercises `String`** (verified §5.3). String work is
+  print/I/O output; the change is invisible to the benchmark matrix.
+- The model **removes** conversion churn (`ptrtoint`, `i128` loads,
+  `extractvalue`, `inttoptr`) rather than adding it; `#String → #Bit` becomes
+  zero instructions.
+- The one theoretical regression — a header load per `Bytes` in a length-only
+  loop vs a fat pointer's register-resident length — is L1-hot, rare, and
+  A/B-able. The fat pointer's real cost (a 2-word `{i64,i64}` value the
+  codebase already tried and failed to agree on) is avoided.
+- Rule #11: a benchmark baseline (clean `cargo build --release` + full
+  `bash benchmarks/build_and_bench.sh --runtime`) is recorded at the commit
+  *before* Part B work and again after B4. Rule #19 governs any perf fix.
+
+### 5.6 Cross-part dependencies (Part B in the queue)
+
+| Prerequisite | Required for | Why |
+|---|---|---|
+| **Phase B0** | Part A Phase 1 (format demo) | the `__print_str` declare/call/register mismatch blocks `clang` link |
+| **Phase B0** | Part A Phases 3, 4 | `args!("--flag", String)`, `entry!`, script printing need a coherent String value |
+| **Phase B1** | Part A Phase 3 | `entry_cmd() == "cmd"` is String `Eq`; address-based `Eq` never fires |
+| Phase B2 / B3 | nothing hard | deferred; gated behind the §6 checkpoint |
+| Phase B4 | closes Part B | legacy retirement + docs + final benchmarks |
+
+Execution order therefore interleaves the two parts (§6).
+
+---
+
+## 6. Phase plan
+
+**Execution order (the queue — no ambiguity).** B-phases are Part B (bits
+model); others are Part A (macro rework). Dependencies are hard unless noted.
+
+| # | Phase | Requires | Notes |
+|---|-------|----------|-------|
+| 1 | Phase 0 — FFI audit | — | **DONE** |
+| 2 | Phase 1 — lowercase macros + formatting | — | core **DONE** (working tree); format demo blocked on B0 |
+| 3 | **Phase B0 — String representation coherence** | — | unblocks Phase 1 (clang link) |
+| 4 | Phase 1 completion | B0 | format-demo end-to-end + tests |
+| 5 | **Phase B1 — deref operands + content equality** | B0 | hard prerequisite for Phase 3 (`entry_cmd() == "cmd"`) |
+| 6 | Phase 2 — `[#]` removal | none (may slide earlier) | mechanical |
+| 7 | Phase 3 — CLI / `entry!` / `args!` / gate | B0, B1 | |
+| 8 | Phase 4 — flat-scripting | B0 | |
+| 9 | **Phase B2 — content-view casts + encoding door** | B0, B1 | **gated** (checkpoint below) |
+| 10 | **Phase B3 — length-op dispatch** | B2 | **gated** (checkpoint below) |
+| 11 | Phase 5 — docs / SPEC / highlighter / verification | B0, B1, Phases 2-4 | |
+| 12 | **Phase B4 — legacy retirement + docs + benchmarks** | B0-B3 as landed | closes Part B |
+
+**B2/B3 checkpoint (B-D6):** proceed only when B0 and B1 landed green **and**
+the B2 example subtype (`Latin1String`) demonstrates the override path
+end-to-end. If the checkpoint is not met, B2/B3 defer to a follow-up plan —
+they are not blockers.
 
 ### Phase 0 — FFI full audit (research; deliverable = documented findings + regression target)
 
@@ -346,6 +563,61 @@ all runtime benchmarks at `d6c6c818` in `benchmarks/results/2026-08-01-plugin-re
 trailing-args-warning), newline semantics, PascalCase rename-hint error,
 interpreter parity (rule #4), FFI call-sequence guard (Phase 0 #4).
 
+**Blocked by Phase B0:** the format-string path crosses a String-typed FFI
+boundary (`PrintStr#`), which is where the representation split-brain bites.
+Phase 1 does not "finish" until B0 lands and `format_demo.bv` links + runs.
+
+### Phase B0 — Bits model: String representation coherence (mandatory; unblocks Phase 1)
+
+**Goal:** one representation — a String value is a `ptr` to `[len][bytes]` —
+across every type-claiming site; fix the declares that emit broken FFI; fix the
+`i128` state slot (done in the working tree). Absorbs the two working-tree
+fixes (`push_field_type` String slot → `i64`; `PrintStr#` → `i64` handle).
+
+| File | Change |
+|------|--------|
+| `src/casting/graph.rs:273,285-286` | `#String` LLVM type → `Fixed("ptr")` (base + UTF8/ASCII variants) |
+| `src/backend/llvm/mod.rs:366-384` | `protocol_llvm_type` string branch → `"ptr"` (keep `is_string_shaped` only while legacy types exist; B4 removes) |
+| `src/backend/llvm/emit_toplevel.rs:269-328` | `llvm_type`: SSO-off `ptr` branch already correct; drop SSO-on `{ i64, i64 }` branches (309-318) as unreachable (flag removed in B4) |
+| `src/backend/llvm/mod.rs:836-913` | `push_field_type` String slot → `i64` (**DONE** in working tree; keep provenance comment) |
+| `src/backend/llvm/intrinsics.rs:86-90` | `PrintStr#`: finalize to the target register/declare type (ptr value; `call @__print_str` with matching type) |
+| `src/backend/llvm/emit_expr.rs:1262-1289` | `emit_legacy_string_literal`: keep `@str.N = <{ i64, [N x i8] }>`; register becomes the `ptr` address (align all String consumers) |
+| `src/backend/llvm/emit_expr.rs:700-716` (`emit_len`), String consumers | adapt to `ptr`-register String values (drop `inttoptr i64` on handles; use the `Ptr<T>` state adapters for load/store) |
+| `lib/std/ffi/io.bv:9` | delete dead `frgn __print_str(msg: String) -> Void` (source of the `{ i64, i64 }` declare) |
+| `lib/std/types/bootstrap.bv:79-86` | `type String: #String;` — drop `data`/`len`/`encoding` (props defer to B3) |
+| `src/backend/llvm/mod.rs:2122-2151` | frgn declare loop: verify String params/returns emit `ptr` matching call sites |
+
+**Acceptance:** `format_demo.bv` links with clang and prints correctly (String +
+Int + Float placeholders, positional `{n}`, bare `println!()`); a String frgn
+round-trip (base64, `lib/std/ffi/encoding.bv`) links and runs; a String state
+field loads as one machine word (no `i128`); **no `{ i64, i64 }` or `i128`
+remains in emitted IR for String**.
+
+**Tests:** format-demo build+link+run; print_loop; String var + param printing;
+base64/encoding frgn round-trip; emitted-IR assertion (no `{ i64, i64 }` / `i128`
+for String); full `cargo test --lib`; `cargo build` no new warnings.
+
+### Phase B1 — Bits model: deref-by-default operands + content equality (mandatory; prerequisite for Phase 3)
+
+**Goal:** `#String` operands deref by default through one central helper;
+`Eq`/`Ne` compare content, not addresses; bitwise ops operate on content bytes.
+
+| File | Change |
+|------|--------|
+| new central helper (`intrinsics.rs` or a small module) | `emit_string_operand`: deref → buffer, read header, bound region; used by every `#String` op default |
+| `src/interpreter/eval.rs:332` | `Eq`/`Ne` on String operands → content comparison (**rule #4: interpreter first**) |
+| `src/backend/llvm/emit_expr.rs:2437-2454` | `Eq`/`Ne` on `#String` operands → content compare (len + bytes; runtime `brief_str_eq` or inline) |
+| op dispatch | add `#String` defaults for `band`/`bor`/`bxor`/`bnot` (content, same-length result), `Concat`, `Slice` as protocol defaults |
+| value moves | params/returns/stores/FFI remain address-only — never deref |
+
+**Acceptance:** two equal-content strings at different addresses compare `==`;
+`entry_cmd() == "build"` semantics verified; bitwise ops transform content and
+preserve length; interpreter and backend agree.
+
+**Tests:** content-eq (equal content/different address; differing content;
+differing length); bitwise on strings; interpreter parity; the `entry!`-shaped
+comparison; full `cargo test --lib`.
+
 ### Phase 2 — Remove `[#]`
 
 | File | Change |
@@ -392,6 +664,39 @@ gate deny/allow matrix (UNSAT, XOR-overlap, async, sync<group>, unclassified);
 `[true]` never present in generated preconditions (assert on emitted IR);
 `defn main` runs once; collision with `__script_done` errors.
 
+### Phase B2 — Bits model: content-view casts + encoding door (gated — B-D6)
+
+**Goal:** `#String → #Bit` yields the buffer pointer (content view);
+`#Bit → #String` default = UTF8 wrap via the existing `CastFrom(#Bit)`
+machinery; `!> encoding` metadata removed.
+
+| File | Change |
+|------|--------|
+| `src/backend/llvm/emit_expr.rs:2900,2966` | `#String → #Bit` lane (`ExtractData`) → buffer-pointer content view |
+| `src/backend/llvm/emit_expr.rs:2880,2927` | `#Bit → #String` lane (`Bitcast`) → UTF8 wrap default via `CastFrom(#Bit)` |
+| `src/backend/llvm/mod.rs:1020`, `graph.rs:97` | confirm/complete the `CastFrom(#Bit)` override wiring |
+| `lib/std/types/bootstrap.bv` | remove `!> encoding` (behavior-neutral; unread) |
+| new example subtype | `Latin1String: #String { CastFrom(#Bit) ...; op Bytes ...; }` overriding the lane + `Bytes` |
+
+**Tests:** `#String → #Bit` content view (header excluded); `#Bit → #String`
+default wrap; subtype override path; no `encoding` metadata remains in the
+universe or emitted IR.
+
+### Phase B3 — Bits model: length-op dispatch (gated — B-D6)
+
+**Goal:** wire `prop Size` / `prop Bytes` to real dispatch; `#String` default =
+O(1) header read (`Bytes`) / UTF8 char count via runtime (`Size`); overloadable
+by subtypes.
+
+| File | Change |
+|------|--------|
+| prop dispatch (`typechecker`/backend) | resolve `prop Size` / `prop Bytes` bodies to codegen instead of treating them as documentation |
+| `src/backend/llvm/intrinsics.rs:700-716` (`emit_len`) | String length routes through the op default; list length untouched |
+| runtime | `brief_len` / `brief_char_len` helpers for the `#String` defaults (via `brief_str_to_c`) |
+
+**Tests:** default `Bytes` O(1); `Size` UTF8 correctness (ASCII + multibyte);
+subtype override (the B2 example); no `Length#` regression for lists.
+
 ### Phase 5 — Docs, SPEC, highlighter, full-suite verification
 
 | File | Change |
@@ -410,37 +715,84 @@ Praetor on changed files (complexity ≤ 15, lines ≤ 100, params ≤ 6);
 `compare_baseline.sh` on the FFI regression target; no benchmark regressed
 without a documented A/B result.
 
+### Phase B4 — Bits model: legacy retirement + docs + benchmarks (mandatory; closes Part B)
+
+**Goal:** delete the dead fat-pointer/SSO machinery and the legacy string
+types; document the bits model; record the Part B bugs; run the rule #11
+before/after benchmark A/B.
+
+| File | Change |
+|------|--------|
+| SSO layer | delete `feature_sso_strings` (`mod.rs:672,778,845-853`; `main.rs:324,373`), `emit_sso_literal`/`emit_sso_heap_literal`/SSO branches (`emit_expr.rs:1139-1144,1151-1220`), SSO String→C shim (`emit_expr.rs:1856-1883`) |
+| `is_string_like` (`type_universe/mod.rs:289`) | delete; `Cast.#String` protocol membership only (rule #18) |
+| legacy types | delete `StaticString`; retire `UTF8View`/`SmallString64` + their modules (`utf8view.bv`, `small_string.bv`); migrate any surviving ops into `#String` defaults |
+| `lib/std/types/bootstrap.bv` | final `type String: #String;` (fields/encoding already dropped in B0) |
+| docs | `docs/architecture/casting-protocol.md`, `backend-type-dispatch.md`, `hash-words.md`, `agent-reference.md`, `spec/SPEC.md` — bits model, `#Bit` content view, encoding door, length ops |
+| `BUGS.md` | record root causes + fixes: address-based `Eq`; `i128` String state slot; `{ i64, i64 }` declare from dead frgn |
+| benchmarks | rule #11 final A/B (baseline before B0 vs after B4); fasta documented as String-free |
+
+**Acceptance:** `grep` over `src/` returns zero for `is_string_like`,
+`feature_sso_strings`, and any `{ i64, i64 }`/`i128` String claim; `cargo test
+--lib` green; benchmark table in `benchmarks/results/2026-08-01-plugin-rework-final.md`.
+
+**Tests:** full suite green; `--no-stdlib` still type-checks
+`let x: Int = 5`; no legacy-type callers regress (verified none exist).
+
 ---
 
-## 6. Commit order (continuous commits, rule "Continuous commits")
+## 7. Commit order (continuous commits, rule "Continuous commits")
+
+Working-tree state at plan approval: Part A Phase 1 core (lowercase macros +
+format expansion) plus two B0-aligned fixes already applied (String state slot
+→ `i64` in `push_field_type`; `PrintStr#` → `i64` handle). These two fixes are
+entangled with Phase 1 changes in the same files (`mod.rs`, `intrinsics.rs`),
+so they were committed together with Phase 1 as one green unit (tests 1323
+green, release build clean). B0 proceeds from that commit.
 
 1. `docs/plans/2026-08-01-plugin-macro-rework.md` (this file) — on `main`.
 2. Phase 0: baseline results + audit findings.
-3. Phase 1: print/env lowercase + formatting (parser-less; tests green).
-4. Phase 2: `[#]`/`is_entry` removal (mechanical; tests green).
-5. Phase 3: CLI runtime → stdlib → entry plugin → gate (each step green).
-6. Phase 4: script plugin.
-7. Phase 5: docs/highlighter/learn-brief + final benchmark run.
+3. **Phase B0: String representation coherence** (includes the two working-tree
+   fixes; tests green; `format_demo` links). *Before* Phase 1 completion.
+4. Phase 1 completion: format-demo end-to-end + remaining Phase 1 tests.
+5. **Phase B1: deref operands + content equality** (interpreter + backend).
+6. Phase 2: `[#]`/`is_entry` removal (mechanical; tests green).
+7. Phase 3: CLI runtime → stdlib → entry plugin → gate (each step green).
+8. Phase 4: script plugin.
+9. **Phase B2 (gated): content-view casts + encoding door.**
+10. **Phase B3 (gated): length-op dispatch.**
+11. Phase 5 + **Phase B4**: docs/highlighter/learn-brief, legacy retirement,
+    final benchmark A/B.
 
 Each commit: `git add` only intended files; `cargo test --lib` before commit;
 `cargo build` no new warnings; Praetor on changed files.
 
-## 7. Undo / rollback
+## 8. Undo / rollback
 
 - Every phase is a self-contained commit on `feat/plugin-macro-rework` (new
   branch in the worktree). Rollback = `git revert <commit>` (never
   `git checkout --` / `git restore` — rule #7).
 - `is_entry` removal is preceded by a commit that archives the field's semantics
   in this plan; nothing consumes it, so reversion is trivial.
+- **B0 is a prerequisite for Phase 1 completion and Phases 3-4.** Reverting B0
+  blocks those phases; the plan does not commit Phase 1 completion until B0 is
+  green. B0 is a self-contained commit (representation + tests) so it can be
+  reverted cleanly if a hidden dependency surfaces.
+- **B2/B3 are gated.** If the §6 checkpoint is not met, they are simply not
+  committed; Part A and B0/B1/B4 are unaffected.
 - The baseline worktree at `d6c6c818` remains the controlled A/B reference; it
   is not modified further during execution.
 
-## 8. Risks
+## 9. Risks
 
 | Risk | Mitigation |
 |------|-----------|
 | `main` signature change (10 sites) breaks a backend path | Phase 3 is isolated; additive global capture; full `cargo test --lib` + benchmark suite per step |
 | Concurrency gate denies existing valid programs | Explicit audit + reclassification step with per-change review (Phase 3) |
 | `println!` formatting changes emitted IR → FFI benchmark deltas | Phase 0 guard test pins the FFI call sequence; compare_baseline.sh on target |
-| Interpreter drift (rule #4) | Interpreter gains native handling in the same phase as the plugin |
+| Interpreter drift (rule #4) | Interpreter gains native handling in the same phase as the plugin (incl. B1's content-`Eq`) |
 | Stale `benchmarks/*.ll` in repo confuse verification | Rebuild from clean source; never trust committed `.ll` |
+| String type-claim changes break an existing String frgn declare | B0 compiles a real String frgn (base64, `ffi/encoding.bv`) end-to-end; frgn declares were already broken — B0 fixes them |
+| Literal register type (ptr vs i64) still mismatches declares | B0 pins one type and asserts on emitted IR (no `{ i64, i64 }`, no `i128` for String) |
+| Content-`Eq` changes semantics a program relied on | Contract-first: content equality *is* the contract; examples/benchmarks audited for address-`Eq` reliance (none expected) |
+| Retiring legacy types breaks a caller | Verified no callers outside their own modules; full suite catches regressions |
+| B0 scope creep (dead SSO layer) | SSO removal is deferred to B4 as a mechanical deletion of unreachable code; tests green before/after |

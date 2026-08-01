@@ -11,7 +11,7 @@
 // against the symmetric variant's C reference.
 
 
-let N: Int = GetEnvInt!("BOUND");
+let N: Int = get_env_int!("BOUND");
 let count: Int = 0;
 let queue: List<Int> = [0];
 
@@ -21,7 +21,7 @@ node work [count < N][count == N] {
 count = count + 1;
 
     when count % 5000000 == 0 {
-        PrintLn!(count);
+        println!(count);
     };
 
     term;

@@ -851,6 +851,25 @@ impl LlvmBackend {
             self.ctx.field_brief_types.push(ty.clone());
             return;
         }
+        // 2026-07-31: Non-SSO String / String-like values occupy ONE i64 slot
+        // — the handle. The i128 branch below (min_bits == max_bits == 128 for
+        // the String primordial) would claim a 128-bit field, but nothing
+        // stores 128 bits: the value is a single ptrtoint blob/struct handle
+        // (emit_legacy_string_literal, __print(int64_t), brief_str_to_c(int64_t)
+        // in brief_rt.c), and consumers (emit_len's `inttoptr i64`, the
+        // String→i64 cast identity at emit_expr.rs:686-694) all treat the
+        // register as one i64. An i128 slot makes load/store widths disagree
+        // with those consumers and produced `load i128` → `inttoptr i128` /
+        // `call i64 @... (i128)` clang type errors. Keep the slot i64 to match
+        // the i64-handle encoding. Undo: this arm exists only while SSO is off;
+        // the SSO branch above already reserves two i64 slots.
+        if !self.feature_sso_strings
+            && self.ctx.type_universe.as_ref().map_or(false, |u| u.is_string_like(ty))
+        {
+            self.ctx.field_types.push("i64".to_string());
+            self.ctx.field_brief_types.push(ty.clone());
+            return;
+        }
         // 2026-07-18: SVO List — push N+1 slots (N inline data + 1 len+cap).
         if self.feature_svo
             && self.ctx.type_universe.as_ref().map_or(false, |u| u.is_vector_like(ty))

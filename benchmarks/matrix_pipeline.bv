@@ -21,7 +21,7 @@ let m31: Float = 0.0;
 let m32: Float = 0.0;
 let m33: Float = 1.0;
 let count: Int = 0;
-let total: Int = GetEnvInt!("BOUND");
+let total: Int = get_env_int!("BOUND");
 
 const a00: Float = 0.999;
 const a01: Float = 0.001;

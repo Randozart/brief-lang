@@ -11,7 +11,7 @@ defn abs(x0: Int) -> Int := {
     -1 -> 1;
 };
 
-let N: Int = GetEnvInt!("BOUND");
+let N: Int = get_env_int!("BOUND");
 let i: Int = 0;
 let total: Int = 0;
 
@@ -19,7 +19,7 @@ node run[i < N][i == N] {
     total = total + abs(i - N/2);
     i = i + 1;
     when i == N {
-        PrintLn!(total);
+        println!(total);
     };
     term;
 };

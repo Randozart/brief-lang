@@ -8,7 +8,7 @@ let f1: Float = 0.5;
 let f2: Float = 0.25;
 let f3: Float = 0.125;
 let count: Int = 0;
-let total: Int = GetEnvInt!("BOUND");
+let total: Int = get_env_int!("BOUND");
 
 node tick [
     count < total

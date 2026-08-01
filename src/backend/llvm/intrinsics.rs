@@ -85,16 +85,23 @@ pub fn emit_intrinsic_call(
         }
         "PrintStr#" => {
             let a = backend.emit_expr(out, &args[0], indent);
-            writeln!(out, "{}{} = call i64 @__print_str(ptr {})", indent, v, a.name).ok();
+            // 2026-07-31: __print_str takes the i64 bstr handle (matches
+            // __print(int64_t) / brief_str_to_c(int64_t) in brief_rt.c). The
+            // String value register is already that handle for non-SSO literals
+            // and %State slots (see push_field_type); SSO values are
+            // {i64,i64} structs, so extract field 0.
+            let handle = if backend.feature_sso_strings
+                && backend.ctx.type_universe.as_ref().map_or(false, |u| u.is_string_like(&a.ty))
+            {
+                let ex = backend.fun.gen_reg();
+                writeln!(out, "{}{} = extractvalue {{ i64, i64 }} {}, 0", indent, ex, a.name).ok();
+                ex
+            } else {
+                a.name
+            };
+            writeln!(out, "{}{} = call i64 @__print_str(i64 {})", indent, v, handle).ok();
             return BTypedRegister { name: v.to_string(), ty: Type::int() };
         }
-        // 2026-07-28: Print intrinsics — emit the same @__print_* calls as
-        // before, but through the intrinsic path so they're recognized as
-        // non-FFI by is_ffi_call (guards become outline-able).
-        "PrintInt#"   => return emit_external_call(backend, out, v, "__print_int", args, indent),
-        "PrintFloat#" => return emit_external_call(backend, out, v, "__print_float", args, indent),
-        "PrintChar#"  => return emit_external_call(backend, out, v, "__print_char", args, indent),
-        "PrintStr#"   => return emit_external_call(backend, out, v, "__print_str", args, indent),
         // 2026-07-18: Pointer operations — special-case because they need
         // type-dependent codegen (Deref# needs pointee type, Index# needs
         // element type, Cast# needs target type). Ptr# is a simple inttoptr.

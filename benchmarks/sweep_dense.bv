@@ -19,7 +19,7 @@ let f13: Float = 0.0001220703125;
 let f14: Float = 0.00006103515625;
 let f15: Float = 0.000030517578125;
 let count: Int = 0;
-let total: Int = GetEnvInt!("BOUND");
+let total: Int = get_env_int!("BOUND");
 
 node tick [
     count < total
