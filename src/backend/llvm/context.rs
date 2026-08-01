@@ -558,6 +558,11 @@ pub struct FunctionContext {
     /// 2026-08-01 (E): locals bound via `vol let x` — stores THROUGH them
     /// (`x[i] = v`, `*x = v`) emit `store volatile` (MMIO register writes).
     pub volatile_locals: std::collections::HashSet<String>,
+    /// 2026-08-01 (D3): the `term <expr>` value register of a defn MEMBER body
+    /// (`defn get(i: Int) -> T { term inner.data[i]; }`). emit_member_body
+    /// returns it so `lst.get(0)` propagates the member's result (previously a
+    /// fresh unused register — the caller bound an undefined value).
+    pub member_result: Option<(String, crate::ast::Type)>,
 
     // 2026-07-17: Type of each last_val_temp entry. Parallel map so the
     // Identifier handler in emit_expr can return the correct Type when
@@ -676,6 +681,7 @@ impl FunctionContext {
             cur_block: None,
             volatile_read: false,
             volatile_locals: std::collections::HashSet::new(),
+            member_result: None,
             last_val_types: HashMap::new(),
             rotation_fields: HashSet::new(),
             active_vector_groups: Vec::new(),

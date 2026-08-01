@@ -310,6 +310,12 @@ pub fn emit_statement(backend: &mut LlvmBackend, out: &mut String, stmt: &Statem
                 if let Some(cached) = backend.fun.reg_float_cache.get(&reg.name).cloned() {
                     reg = TypedRegister { name: cached, ty: reg.ty.clone() };
                 }
+                // 2026-08-01 (D3): a defn MEMBER's `term <expr>` records its
+                // value register so emit_member_body can return it (callable
+                // txns use callable_txn_result; standalone defns use `ret`).
+                if backend.fun.self_binding.is_some() && backend.fun.callable_txn_result.is_none() {
+                    backend.fun.member_result = Some((reg.name.clone(), reg.ty.clone()));
+                }
                 if backend.fun.callable_txn_result.is_some() {
                     // 2026-07-18: In a callable txn, term stores to %result and
                     // branches to post (convergence loop). The 'ret' is at done:.

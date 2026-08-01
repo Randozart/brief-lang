@@ -1459,7 +1459,14 @@ impl LlvmBackend {
         self.fun.last_val_temps = saved_lvt;
         self.fun.last_val_types = saved_lvt_types;
         let _ = v;
-        TypedRegister { name: self.fun.gen_reg(), ty: Type::void() }
+        // 2026-08-01 (D3): a defn member's `term` value is the call's result —
+        // return it (the caller binds it). Otherwise fall back to a fresh
+        // void register (side-effect members like push/pop have no result).
+        if let Some((rname, rty)) = self.fun.member_result.take() {
+            TypedRegister { name: rname, ty: rty }
+        } else {
+            TypedRegister { name: self.fun.gen_reg(), ty: Type::void() }
+        }
     }
 
     fn emit_reflection(
