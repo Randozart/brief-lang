@@ -474,39 +474,28 @@ impl LlvmBackend {
                 if let Some(Type::Vector(inner, dims)) = &field_ty {
                     if dims.len() == 1 && matches!(dims[0], crate::ast::Dimension::Anonymous(_)) {
                         // Emit GEP to get a pointer to the array field.
-                        // First get the struct's address from let_bindings if available.
-                        let struct_ptr = if let Expr::Identifier(name) = obj.as_ref() {
-                            self.get_local(name)
-                        } else {
-                            None
+                        // 2026-07-31 (A7): the receiver register holds the
+                        // struct's ADDRESS (state-slot or struct-literal), so
+                        // GEP the address + field offset directly — no alloca
+                        // spill (which treated the address as a struct value).
+                        let obj_type = match &obj_reg.ty {
+                            Type::Custom(n) => n.clone(),
+                            _ => {
+                                if let Expr::Identifier(nm) = obj.as_ref() {
+                                    self.ctx.field_index_map.get(nm)
+                                        .and_then(|i| self.ctx.field_brief_types.get(*i))
+                                        .and_then(|t| match t {
+                                            Type::Custom(n) => Some(n.clone()),
+                                            _ => None,
+                                        })
+                                } else { None }
+                            }.unwrap_or_else(|| "".to_string()),
                         };
-                        if let Some(slot) = struct_ptr {
-                            let gep = self.fun.gen_reg();
-                            writeln!(
-                                out,
-                                "{}{} = getelementptr inbounds {}, ptr {}, i32 0, i32 {}",
-                                indent, gep, self.llvm_type(&obj_reg.ty), slot, field_idx
-                            ).ok();
-                            let result = self.fun.gen_reg();
-                            writeln!(out, "{}{} = ptrtoint ptr {} to i64", indent, result, gep).ok();
-                            return TypedRegister {
-                                name: result,
-                                ty: Type::ptr(*inner.clone()),
-                            };
-                        }
-                        // 2026-07-25: Struct not in let_bindings — spill to alloca + GEP.
-                        // The struct value is in an SSA register; we need a pointer to GEP.
-                        // Spill via alloca + store, then GEP into the alloca.
-                        // LLVM mem2reg should eliminate the alloca in opt builds.
-                        let alloca = self.fun.gen_reg();
-                        writeln!(out, "{}{} = alloca {}, align 8", indent, alloca, self.llvm_type(&obj_reg.ty)).ok();
-                        writeln!(out, "store {} {}, ptr {}, align 8", self.llvm_type(&obj_reg.ty), obj_reg.name, alloca).ok();
+                        let offset = self.lookup_field_offset(&obj_type, field);
+                        let base = self.fun.gen_reg();
+                        writeln!(out, "{}{} = inttoptr i64 {} to ptr", indent, base, obj_reg.name).ok();
                         let gep = self.fun.gen_reg();
-                        writeln!(
-                            out,
-                            "{}{} = getelementptr inbounds {}, ptr {}, i32 0, i32 {}",
-                            indent, gep, self.llvm_type(&obj_reg.ty), alloca, field_idx
-                        ).ok();
+                        writeln!(out, "{}{} = getelementptr i8, ptr {}, i64 {}", indent, gep, base, offset).ok();
                         let result = self.fun.gen_reg();
                         writeln!(out, "{}{} = ptrtoint ptr {} to i64", indent, result, gep).ok();
                         return TypedRegister {
@@ -516,20 +505,12 @@ impl LlvmBackend {
                     }
                 }
                 // Struct field access via extractvalue (numeric index required)
-                writeln!(
-                    out,
-                    "{}{} = extractvalue {} {}, {}",
-                    indent,
-                    v,
-                    self.llvm_type(&obj_reg.ty),
-                    obj_reg.name,
-                    field_idx
-                )
-                .ok();
-                TypedRegister {
-                    name: v.to_string(),
-                    ty: Type::int(),
-                }
+                // 2026-07-31 (A7): replaced by emit_field_access — a struct
+                // field's register holds the instance ADDRESS (state-slot or
+                // struct-literal), so GEP-by-offset + load is the correct
+                // access; extractvalue on an address is invalid IR.
+                let _ = (field_idx, field_ty);
+                return self.emit_field_access(out, v, obj, field, indent);
             }
 
             // ── Index ────────────────────────────────────────────────
