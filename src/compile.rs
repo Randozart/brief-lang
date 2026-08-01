@@ -482,6 +482,18 @@ pub fn compile_source(file_path: &str, source: &str, opts: &BuildOptions) -> Res
         }
     }
 
+    // ── Watchdog contract checks (Phase C4) ──────────────────────────
+    // 2026-08-01: wire the trigger->handler watchdog analysis into the
+    // pipeline, and validate the `-> handler(val)` on-fire callback (the
+    // handler must exist and be callable with the last computed value).
+    let watchdog_errors = brief_compiler::analysis::watchdog::analyze(&items);
+    if !watchdog_errors.is_empty() {
+        let msgs: Vec<String> = watchdog_errors.iter().map(|e| e.to_string()).collect();
+        return Err(format!("watchdog errors:\n{}", msgs.join("\n")));
+    }
+    brief_compiler::analysis::watchdog::check_on_fire_handlers(&items)
+        .map_err(|e| format!("watchdog error:\n{}", e))?;
+
     // ── Protocol round-trip verification ──────────────────────────────
     brief_compiler::protocol_verify::verify_roundtrips(&items, &universe)?;
 
@@ -1475,6 +1487,16 @@ fn parse_and_check(file_path: &str, source: &str, opts: &BuildOptions) -> Result
 
     let universe = TypeUniverse::new();
     check_types(&items, &universe)?;
+    // 2026-08-01 (C4): watchdog contract checks also run on the `check` path
+    // (parse_and_check) — `briefc check` must catch trigger/handler violations
+    // and missing on-fire handlers the same way `briefc build` does.
+    let watchdog_errors = brief_compiler::analysis::watchdog::analyze(&items);
+    if !watchdog_errors.is_empty() {
+        let msgs: Vec<String> = watchdog_errors.iter().map(|e| e.to_string()).collect();
+        return Err(format!("watchdog errors:\n{}", msgs.join("\n")));
+    }
+    brief_compiler::analysis::watchdog::check_on_fire_handlers(&items)
+        .map_err(|e| format!("watchdog error:\n{}", e))?;
     Ok((items, universe))
 }
 

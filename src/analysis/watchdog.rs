@@ -120,6 +120,53 @@ pub fn analyze(items: &[TopLevel]) -> WatchdogResult {
     errors
 }
 
+/// 2026-08-01 (C4): validate every `-> handler(val)` on-fire callback. The
+/// handler must name a declared txn/defn/node (a callable), and must accept
+/// one argument (the last computed value). Returns the first error as a
+/// formatted message.
+pub fn check_on_fire_handlers(items: &[TopLevel]) -> Result<(), String> {
+    let mut callables: HashSet<String> = HashSet::new();
+    for item in items {
+        match item {
+            TopLevel::Transaction(t) => {
+                callables.insert(t.name.clone());
+            }
+            TopLevel::Definition(d) => {
+                callables.insert(d.name.clone());
+            }
+            TopLevel::TypeDef(td) => {
+                for m in &td.body.members {
+                    match m {
+                        TopLevel::Transaction(t) => {
+                            callables.insert(t.name.clone());
+                        }
+                        TopLevel::Definition(d) => {
+                            callables.insert(d.name.clone());
+                        }
+                        _ => {}
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+    for item in items {
+        if let TopLevel::Transaction(txn) = item {
+            if let Some(wd) = &txn.contract.watchdog {
+                if let Some(on_fire) = &wd.on_fire {
+                    if !callables.contains(&on_fire.handler) {
+                        return Err(format!(
+                            "watchdog in '{}': on-fire handler '{}' is not a declared txn/defn/node",
+                            txn.name, on_fire.handler
+                        ));
+                    }
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
 fn is_trigger_watchdog(watchdog: &WatchdogSpec) -> bool {
     matches!(&watchdog.condition, Expr::Identifier(_))
 }
