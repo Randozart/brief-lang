@@ -105,6 +105,7 @@ TAG[accumulator_flush]=runtime
 TAG[sweep_sparse]=runtime
 TAG[sweep_mid]=runtime
 TAG[sweep_dense]=runtime
+TAG[sweep_arr]=runtime
 
 BENCHMARKS=(
     "iir_filter"
@@ -141,6 +142,7 @@ BENCHMARKS=(
     "sweep_sparse"
     "sweep_mid"
     "sweep_dense"
+    "sweep_arr"     # Float[16] array-state sweep — array machinery is competitive (1.17x)
     "bridge_glue"
     "bridge_multi"
     # "gpu/saxpy"        # no .bv file exists
