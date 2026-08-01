@@ -1037,12 +1037,14 @@ impl LlvmBackend {
         // loop completes (a per-iteration free would be a use-after-free). The
         // handle is the field's STORED value (the ptrtoint of the allocation),
         // loaded from %State — re-evaluating the initializer would re-malloc.
+        // Routed through __brief_free so the benchmark can assert frees ==
+        // allocs (no leak).
         for f in free_after {
             let Some(&fidx) = self.ctx.field_index_map.get(f) else { continue; };
             let (handle, _) = self.emit_state_load_i64_by_idx(out, "  ", fidx);
             let ptr = self.fun.gen_reg();
             writeln!(out, "  {} = inttoptr i64 {} to ptr", ptr, handle).ok();
-            writeln!(out, "  call void @free(ptr {})", ptr).ok();
+            writeln!(out, "  call void @__brief_free(ptr {})", ptr).ok();
         }
         writeln!(out, "  ret i32 0").ok();
         writeln!(out, "}}").ok();

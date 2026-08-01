@@ -219,6 +219,9 @@ impl LlvmBackend {
         writeln!(out, "declare ptr @getenv(ptr) nounwind").ok();
         writeln!(out, "declare noalias ptr @malloc(i64) nounwind").ok();
         writeln!(out, "declare void @free(ptr) nounwind").ok();
+        // 2026-08-01 (D2): garbage scheduling — scheduled frees route through
+        // __brief_free so a benchmark can assert frees == allocs.
+        writeln!(out, "declare void @__brief_free(ptr) nounwind").ok();
         // 2026-06-26: realloc used by the arena allocator grow path when
         // the bump-allocated buffer is exhausted (emit_arena_alloc in mod.rs).
         writeln!(out, "declare ptr @realloc(ptr, i64) nounwind").ok();
@@ -1788,6 +1791,19 @@ impl LlvmBackend {
             }
             if !self.fun.terminated {
                 self.emit_arena_fini(out, "  ");
+                // 2026-08-01 (D2): garbage scheduling — a non-loop transaction
+                // that is a heap-backed field's last consumer frees it after
+                // its body. The free fires exactly once, after the body (the
+                // reactor fires the node once).
+                if let Some(fields) = self.ctx.global_free_after.get(name).cloned() {
+                    for f in &fields {
+                        let Some(&fidx) = self.ctx.field_index_map.get(f) else { continue; };
+                        let (handle, _) = self.emit_state_load_i64_by_idx(out, "  ", fidx);
+                        let ptr = self.fun.gen_reg();
+                        writeln!(out, "  {} = inttoptr i64 {} to ptr", ptr, handle).ok();
+                        writeln!(out, "  call void @__brief_free(ptr {})", ptr).ok();
+                    }
+                }
                 writeln!(out, "  ret void").ok();
             }
             writeln!(out, "}}").ok();

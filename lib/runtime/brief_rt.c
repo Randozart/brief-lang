@@ -661,3 +661,17 @@ void __watchdog_fail(void) {
     fprintf(stderr, "brief: required watchdog fired\n");
     exit(1);
 }
+
+// 2026-08-01 (D2): garbage-scheduling calibration. The scheduler's scheduled
+// frees route through __brief_free so a benchmark can assert frees == allocs
+// (no premature free, no leak). __brief_free_count() is the observable getter.
+static long __brief_free_total = 0;
+
+void __brief_free(void* p) {
+    if (p) __brief_free_total++;
+    free(p);
+}
+
+long __brief_free_count(void) {
+    return __brief_free_total;
+}

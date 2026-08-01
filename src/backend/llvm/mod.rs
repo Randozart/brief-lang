@@ -1682,6 +1682,7 @@ impl LlvmBackend {
             crate::config_tuning::target_settings_for(&self.ctx.target_triple).vector_min_width,
         );
         self.ctx.dep_graph = analysis.dependency_graph.clone();
+        self.ctx.global_free_after = analysis.global_lifetime.free_after.clone();
 
         analysis.region_analyzer.compose_chains();
         analysis.region_analyzer.build_budget_plan(self.ctx.optimize_budget);
