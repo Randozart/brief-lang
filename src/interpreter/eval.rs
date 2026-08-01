@@ -329,7 +329,19 @@ fn eval_binary_op(
                 _ => execute_intrinsic("Mul#", &[lv, rv], heap),
             }
         }
-        BinaryOpKind::Eq => Ok(bool_to_bits(lv.as_i64() == rv.as_i64())),
+        BinaryOpKind::Eq => {
+            // 2026-08-01 (B1): content equality — two Strings are equal when
+            // their payload bytes match, not when they live at the same
+            // address. string_bytes() derefs both representations (raw Bits
+            // and heap handles); when BOTH operands are Strings, compare
+            // content. Otherwise fall through to numeric equality (ints,
+            // floats, bools). This is the interpreter-first half of B1 (rule
+            // #4); the LLVM backend mirrors it in emit_expr.rs.
+            match (lv.string_bytes(heap), rv.string_bytes(heap)) {
+                (Some(a), Some(b)) => Ok(bool_to_bits(a == b)),
+                _ => Ok(bool_to_bits(lv.as_i64() == rv.as_i64())),
+            }
+        }
         BinaryOpKind::Lt => {
             let la = lv.as_i64();
             let ra = rv.as_i64();
@@ -363,11 +375,11 @@ fn eval_binary_op(
             }
         }
         BinaryOpKind::Neq => {
-            let la = lv.as_i64();
-            let ra = rv.as_i64();
-            match (la, ra) {
+            // 2026-08-01 (B1): content inequality — mirrors the Eq arm above
+            // (deref both Strings, compare payload bytes).
+            match (lv.string_bytes(heap), rv.string_bytes(heap)) {
                 (Some(a), Some(b)) => Ok(bool_to_bits(a != b)),
-                _ => Ok(bool_to_bits(false)),
+                _ => Ok(bool_to_bits(lv.as_i64() != rv.as_i64())),
             }
         }
         BinaryOpKind::And => {
@@ -379,6 +391,29 @@ fn eval_binary_op(
             let lb = matches!(lv, Value::Bits(ref b) if b.iter().any(|x| *x > 0));
             let rb = matches!(rv, Value::Bits(ref b) if b.iter().any(|x| *x > 0));
             Ok(bool_to_bits(lb || rb))
+        }
+        BinaryOpKind::BitAnd | BinaryOpKind::BitOr | BinaryOpKind::BitXor => {
+            // 2026-08-01 (B1): #String bitwise defaults — operate on content
+            // bytes and return a NEW string of the same length (interpreter
+            // half of B1; the backend mirrors it with brief_str_band/bor/bxor).
+            // When both operands deref as strings, apply the byte-wise op.
+            match (lv.string_bytes(heap), rv.string_bytes(heap)) {
+                (Some(a), Some(b)) => {
+                    if a.len() != b.len() {
+                        return Err(RuntimeError::TypeError {
+                            expected: "String bitwise operands of equal length".into(),
+                            found: format!("{} vs {} bytes", a.len(), b.len()),
+                        });
+                    }
+                    let result: Vec<u8> = a.iter().zip(b.iter()).map(|(x, y)| match kind {
+                        BinaryOpKind::BitAnd => x & y,
+                        BinaryOpKind::BitOr => x | y,
+                        _ => x ^ y,
+                    }).collect();
+                    Ok(Value::bits(result))
+                }
+                _ => Ok(bool_to_bits(false)),
+            }
         }
         _ => {
             // Pass through unknown operators as intrinsic calls
@@ -406,6 +441,12 @@ fn eval_unary_op(
             Ok(bool_to_bits(!b))
         }
         UnaryOpKind::BitNot => {
+            // 2026-08-01 (B1): #String unary bitwise default — complement each
+            // content byte, same length (interpreter half; the backend emits
+            // brief_str_bnot).
+            if let Some(bytes) = val.string_bytes(heap) {
+                return Ok(Value::bits(bytes.iter().map(|b| !b).collect()));
+            }
             let n = val.as_i64().unwrap_or(0);
             Ok(i64_to_bits(!n))
         }

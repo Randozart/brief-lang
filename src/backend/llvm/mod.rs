@@ -2252,6 +2252,18 @@ impl LlvmBackend {
         // call site, so the backend declares the ABI: String = ptr to a
         // length-prefixed [len][bytes] buffer.
         writeln!(out, "declare i64 @__print_str(ptr) #1").ok();
+        // 2026-08-01 (B1): content equality for String operands. The compiler
+        // emits a call to brief_str_eq(ptr, ptr) instead of `icmp eq ptr`
+        // (address comparison) when both operands are #String — see
+        // emit_binary_op's Eq/Ne arms. Takes two ptrs to [len][bytes].
+        writeln!(out, "declare i64 @brief_str_eq(ptr, ptr) #1").ok();
+        // 2026-08-01 (B1): content bitwise ops for String operands — return a
+        // new heap [len][bytes] buffer with the per-byte op applied (band/bor/
+        // bxor/bnot). Same ABI as brief_str_eq: ptr to [len][bytes].
+        writeln!(out, "declare ptr @brief_str_band(ptr, ptr) #1").ok();
+        writeln!(out, "declare ptr @brief_str_bor(ptr, ptr) #1").ok();
+        writeln!(out, "declare ptr @brief_str_bxor(ptr, ptr) #1").ok();
+        writeln!(out, "declare ptr @brief_str_bnot(ptr) #1").ok();
         writeln!(out, "declare i64 @brief_getuid() #1").ok();
         writeln!(out, "declare i64 @brief_geteuid() #1").ok();
         writeln!(out, "declare i64 @brief_getgid() #1").ok();

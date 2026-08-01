@@ -2773,3 +2773,23 @@ gate so the declare agrees with the call in both configurations. Additive, no
 semantic change; deferred out of the plugin/macro rework phase scope.
 **Evidence:** `benchmarks/float_math.ll:43-44` (declares) vs `:166,174` (calls);
 see `benchmarks/results/2026-08-01-plugin-rework-baseline.md` §2.3.
+
+---
+
+## SSO Tag Bit Corrupts String Literal Addresses in Inline Init — FIXED
+
+**Date:** 2026-08-01
+**Status:** Fixed (B1)
+**Root cause:** `emit_field_init_value` (emit_toplevel.rs) OR-ed tag bit 0 (= 1)
+onto String literal addresses when `tag_strings=true` (the inline-init path used
+by `emit_inline_init_stores` in `main`). Under the bits model a String value is
+an UNTAGGED `ptr` to `[len: i64][bytes]`; the tag made `brief_str_eq` read a
+misaligned length header, so equal-content strings at heap vs literal addresses
+compared unequal. The tag bit belongs to the old SSO encoding only.
+**Fix:** gate the tag with `tag_strings && self.feature_sso_strings`; the
+untagged `store i8*` is the bits-model store for both paths.
+**Impact:** content equality (B1) works end-to-end: `get_env("VALUE") == "same"`
+with `VALUE=same` returns true; `VALUE=other` returns false. Verified in
+`.smoke/eq_demo.bv`.
+**Lesson:** any pointer-tagging must be gated on the representation that uses
+tags (SSO); a representation change (bits model) must audit every tag site.

@@ -823,8 +823,15 @@ impl LlvmBackend {
                 let g = format!("@str.{}", si);
                 let str_p = field_reg("s");
                 writeln!(out, "{}{} = bitcast <{{ i64, [{} x i8] }}>* {} to ptr", indent, str_p, s.len() + 1, g).ok();
-                if tag_strings {
-                    // Tag with bit 0 = 1 to mark as static (not heap-allocated)
+                if tag_strings && self.feature_sso_strings {
+                    // Tag with bit 0 = 1 to mark as static (not heap-allocated).
+                    // 2026-08-01 (B1): ONLY under SSO. Under the bits model a
+                    // String value is an UNTAGGED ptr to a length-prefixed
+                    // [len][bytes] buffer — OR-ing 1 onto the address makes
+                    // brief_str_eq read a misaligned length header and
+                    // compare garbage (observed: equal-content strings at
+                    // heap vs literal addresses compared unequal). The
+                    // untagged path below is the bits-model store.
                     let tag_p = field_reg("t");
                     writeln!(out, "{}{} = ptrtoint ptr {} to i64", indent, tag_p, str_p).ok();
                     let tag_o = field_reg("o");
@@ -836,6 +843,9 @@ impl LlvmBackend {
                     // 2026-07-14: No tagging for @init_state path — the init_state
                     // function runs at first field access, before heap is live.
                     // String constants in init_state are stored as raw untagged i8*.
+                    // 2026-08-01 (B1): the untagged store is also the bits-model
+                    // store for inline init (feature_sso_strings off) — the tag
+                    // bit belongs to the SSO encoding only.
                     writeln!(out, "{}store i8* {}, ptr {}, align {}", indent, str_p, gep, self.align_of("i8*")).ok();
                 }
             }

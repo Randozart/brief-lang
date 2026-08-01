@@ -122,6 +122,57 @@ void brief_free_brief_str(void* handle) {
     if (handle) free(handle);
 }
 
+// 2026-08-01 (B1): Content equality for Brief String values (String ABI = ptr
+// to a length-prefixed [len: i64][bytes] buffer). Compares lengths first, then
+// payload bytes. Returns 1 if equal, 0 otherwise. This is the runtime half of
+// B1's content Eq/Ne — the compiler emits a call to this instead of comparing
+// the two addresses. Both arguments must be valid [len][bytes] buffers (as all
+// Brief String values are under the bits model); handles are converted to
+// content by the caller when needed.
+int64_t brief_str_eq(const char* a, const char* b) {
+    if (a == b) return 1;
+    if (!a || !b) return 0;
+    int64_t la = *(const int64_t*)a;
+    int64_t lb = *(const int64_t*)b;
+    if (la != lb) return 0;
+    if (la <= 0) return 1;  // both empty
+    return memcmp(a + 8, b + 8, (size_t)la) == 0;
+}
+
+// 2026-08-01 (B1): Content bitwise ops for Brief String values (String ABI =
+// ptr to [len: i64][bytes]). The result is a NEW heap buffer with the same
+// length and the per-byte op applied to the payloads (band/bor/bxor) or to a
+// single payload (bnot). Length must match for binary ops (asserted by the
+// compiler; a mismatch returns the empty string defensively). Caller frees via
+// brief_free_brief_str. These are the runtime half of the #String bitwise
+// defaults; the compiler emits a call instead of treating String ptrs as ints.
+static char* brief_str_bitop(const char* a, const char* b, int op) {
+    if (!a) return 0;
+    int64_t la = *(const int64_t*)a;
+    int64_t lb = b ? *(const int64_t*)b : 0;
+    if (op != 3 && la != lb) return 0;  // binary ops need equal length
+    if (la < 0) return 0;
+    char* out = (char*)malloc((size_t)(la + 8 + 1));
+    if (!out) return 0;
+    *(int64_t*)out = la;
+    for (int64_t i = 0; i < la; i++) {
+        unsigned char x = (unsigned char)a[8 + i];
+        unsigned char y = b ? (unsigned char)b[8 + i] : 0;
+        switch (op) {
+            case 0: out[8 + i] = (char)(x & y); break;
+            case 1: out[8 + i] = (char)(x | y); break;
+            case 2: out[8 + i] = (char)(x ^ y); break;
+            default: out[8 + i] = (char)(~x); break;
+        }
+    }
+    out[8 + la] = '\0';
+    return out;
+}
+char* brief_str_band(const char* a, const char* b) { return brief_str_bitop(a, b, 0); }
+char* brief_str_bor(const char* a, const char* b)  { return brief_str_bitop(a, b, 1); }
+char* brief_str_bxor(const char* a, const char* b) { return brief_str_bitop(a, b, 2); }
+char* brief_str_bnot(const char* a)                { return brief_str_bitop(a, 0, 3); }
+
 // ── Core intrinsics (kept) ────────────────────────────────────────────
 
 // 2026-07-19: Returns the environ pointer (char **environ) as an Int.

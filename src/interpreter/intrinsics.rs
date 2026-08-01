@@ -664,6 +664,140 @@ mod tests {
     }
 
     #[test]
+    fn test_string_content_eq_literals() {
+        // 2026-08-01 (B1): content equality on String operands. Two distinct
+        // literal expressions with the same payload must compare equal; a
+        // differing payload (or length) must compare unequal. This pins the
+        // interpreter-first half of B1 (rule #4).
+        use crate::ast::{BinaryOpKind, Expr};
+        use crate::interpreter::eval_expr;
+        let eq = |a: &str, b: &str| -> bool {
+            let mut heap = VirtualHeap::new();
+            let mut bindings = std::collections::HashMap::new();
+            let expr = Expr::BinaryOp(
+                BinaryOpKind::Eq,
+                Box::new(Expr::Quoted(a.as_bytes().to_vec())),
+                Box::new(Expr::Quoted(b.as_bytes().to_vec())),
+            );
+            eval_expr(&expr, &mut heap, &mut bindings).unwrap().is_true()
+        };
+        assert!(eq("hello", "hello"));
+        assert!(!eq("hello", "world"));
+        // Differing lengths are unequal even when one is a prefix of the other.
+        assert!(!eq("ab", "abc"));
+        assert!(!eq("abc", "ab"));
+        // Empty strings are equal to each other.
+        assert!(eq("", ""));
+    }
+
+    #[test]
+    fn test_string_content_eq_heap_handles() {
+        // 2026-08-01 (B1): two equal-content strings at DIFFERENT heap
+        // addresses must compare equal (the acceptance case for B1 — address
+        // equality would be false here). Handles are [len: i64][payload].
+        use crate::ast::{BinaryOpKind, Expr};
+        use crate::interpreter::eval_expr;
+        let alloc_str = |heap: &mut VirtualHeap, s: &str| -> i64 {
+            let bytes = s.as_bytes();
+            let mut header = (bytes.len() as i64).to_le_bytes().to_vec();
+            header.extend_from_slice(bytes);
+            let addr = heap.allocate(header.len());
+            heap.write(addr, &header).unwrap();
+            addr as i64
+        };
+        let mut heap = VirtualHeap::new();
+        let a1 = alloc_str(&mut heap, "same content");
+        let a2 = alloc_str(&mut heap, "same content");
+        assert_ne!(a1, a2, "test must use two distinct addresses");
+        let mut bindings = std::collections::HashMap::new();
+        let expr = Expr::BinaryOp(
+            BinaryOpKind::Eq,
+            Box::new(Expr::Identifier("a".into())),
+            Box::new(Expr::Identifier("b".into())),
+        );
+        bindings.insert("a".into(), Value::Int(a1));
+        bindings.insert("b".into(), Value::Int(a2));
+        assert!(eval_expr(&expr, &mut heap, &mut bindings).unwrap().is_true());
+
+        // Ne on the same two handles is false.
+        let expr_ne = Expr::BinaryOp(
+            BinaryOpKind::Neq,
+            Box::new(Expr::Identifier("a".into())),
+            Box::new(Expr::Identifier("b".into())),
+        );
+        assert!(!eval_expr(&expr_ne, &mut heap, &mut bindings).unwrap().is_true());
+
+        // Differing content at distinct addresses is unequal.
+        let c = alloc_str(&mut heap, "different content");
+        bindings.insert("c".into(), Value::Int(c));
+        let expr2 = Expr::BinaryOp(
+            BinaryOpKind::Eq,
+            Box::new(Expr::Identifier("a".into())),
+            Box::new(Expr::Identifier("c".into())),
+        );
+        assert!(!eval_expr(&expr2, &mut heap, &mut bindings).unwrap().is_true());
+    }
+
+    #[test]
+    fn test_string_content_eq_numeric_fallthrough() {
+        // 2026-08-01 (B1): a String compared against a non-String must NOT
+        // hit the string path (string_bytes returns None for it) — the
+        // numeric fallback decides. This guards against the deref helper
+        // swallowing int comparisons.
+        use crate::ast::{BinaryOpKind, Expr};
+        use crate::interpreter::eval_expr;
+        let mut heap = VirtualHeap::new();
+        let mut bindings = std::collections::HashMap::new();
+        let expr = Expr::BinaryOp(
+            BinaryOpKind::Eq,
+            Box::new(Expr::Decimal(5)),
+            Box::new(Expr::Decimal(5)),
+        );
+        assert!(eval_expr(&expr, &mut heap, &mut bindings).unwrap().is_true());
+        let expr = Expr::BinaryOp(
+            BinaryOpKind::Eq,
+            Box::new(Expr::Decimal(5)),
+            Box::new(Expr::Decimal(6)),
+        );
+        assert!(!eval_expr(&expr, &mut heap, &mut bindings).unwrap().is_true());
+    }
+
+    #[test]
+    fn test_string_bitwise_ops() {
+        // 2026-08-01 (B1): & | ^ ~ on String operands operate on content bytes
+        // and produce a same-length result (interpreter parity with the
+        // backend's brief_str_band/bor/bxor/bnot calls).
+        use crate::ast::{BinaryOpKind, Expr, UnaryOpKind};
+        use crate::interpreter::eval_expr;
+        let mut heap = VirtualHeap::new();
+        let mut bindings = std::collections::HashMap::new();
+        let mut eval = |kind, a: &str, b: &str| -> Vec<u8> {
+            let expr = Expr::BinaryOp(
+                kind,
+                Box::new(Expr::Quoted(a.as_bytes().to_vec())),
+                Box::new(Expr::Quoted(b.as_bytes().to_vec())),
+            );
+            match eval_expr(&expr, &mut heap, &mut bindings).unwrap() {
+                Value::Bits(bytes) => bytes,
+                other => panic!("expected Bits, got {other:?}"),
+            }
+        };
+        // AND: 'a'(0x61) & 'd'(0x64) = 0x60, 'b'(0x62) & 'e'(0x65) = 0x60,
+        // 'c'(0x63) & 'f'(0x66) = 0x62
+        assert_eq!(eval(BinaryOpKind::BitAnd, "abc", "def"), vec![0x60, 0x60, 0x62]);
+        // OR: 'a' | 'd' = 0x65
+        assert_eq!(eval(BinaryOpKind::BitOr, "a", "d"), vec![0x65]);
+        // XOR: 'a' ^ 'a' = 0
+        assert_eq!(eval(BinaryOpKind::BitXor, "a", "a"), vec![0]);
+        // ~ on content bytes (unary)
+        let un = Expr::UnaryOp(UnaryOpKind::BitNot, Box::new(Expr::Quoted(b"a".to_vec())));
+        match eval_expr(&un, &mut heap, &mut bindings).unwrap() {
+            Value::Bits(bytes) => assert_eq!(bytes, vec![0x9E]), // ~0x61 = 0x9E
+            other => panic!("expected Bits, got {other:?}"),
+        }
+    }
+
+    #[test]
     fn test_lt_i64() {
         let mut heap = VirtualHeap::new();
         let r = execute_intrinsic("Lt#", &[i64_to_bits(1), i64_to_bits(2)], &mut heap).unwrap();

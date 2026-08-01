@@ -315,6 +315,37 @@ impl Value {
     pub fn is_true(&self) -> bool {
         self.as_bool().unwrap_or(false)
     }
+
+    /// Dereference this value as a Brief String's content bytes.
+    ///
+    /// 2026-08-01 (B1): A Brief String is either raw bytes (`Value::Bits`,
+    /// produced by literals and the get_env! macro) or a heap handle
+    /// (`Value::Int(addr)` pointing at `[len: i64][payload]`, produced by
+    /// FFI marshalling like EnvGet#). This is the single deref used by
+    /// content equality (Eq/Ne) and any op that needs the string payload.
+    /// Returns `None` when the value is not a String (so numeric comparisons
+    /// fall through to their own paths). Undo: if the heap-handle encoding is
+    /// ever removed, drop the `Value::Int(addr)` arm and keep the Bits arm.
+    pub fn string_bytes(&self, heap: &VirtualHeap) -> Option<Vec<u8>> {
+        match self {
+            Value::Bits(bytes) => Some(bytes.clone()),
+            Value::Int(addr) if *addr > 0 => {
+                // 2026-08-01 (B1): i64_to_bits(n) produces Value::Int(n), so a
+                // Value::Int is ambiguous between a real int and a heap string
+                // handle. Only deref as a heap string when the address is an
+                // actual heap allocation with a readable [len: i64] header —
+                // otherwise return None so numeric comparisons fall through.
+                let len = heap.read(*addr as u64, 8)?.to_vec();
+                let len = i64::from_le_bytes(len.try_into().unwrap_or([0u8; 8]));
+                if len > 0 {
+                    heap.read(*addr as u64 + 8, len as usize).map(|p| p.to_vec())
+                } else {
+                    Some(Vec::new())
+                }
+            }
+            _ => None,
+        }
+    }
 }
 
 /// Convert i64 to 8-byte little-endian Bits value.

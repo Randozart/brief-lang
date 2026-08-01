@@ -1456,6 +1456,18 @@ impl LlvmBackend {
         self.is_protocol_member(ty, "#Float")
     }
 
+    /// 2026-08-01 (B1): Central #String operand check — a Brief String value
+    /// is a `ptr` to a length-prefixed `[len: i64][bytes]` buffer (bits model).
+    /// This is the single decision point every #String op default uses (Eq/Ne
+    /// content compare, band/bor/bxor/bnot content ops). Rule #16: the pattern
+    /// appeared 7× inline; it lives here so changing the String representation
+    /// (or adding a sub-protocol) touches one place. Undo: replace with a bare
+    /// is_protocol_member call at each site if the protocol check ever differs
+    /// per op.
+    pub(super) fn is_string_operand(&self, ty: &Type) -> bool {
+        self.is_protocol_member(ty, "#String")
+    }
+
     /// Choose the dedup opcode based on float vs int.
     fn dedup_op<'a>(
         a_is_native: bool,

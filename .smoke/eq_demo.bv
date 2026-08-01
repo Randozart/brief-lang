@@ -1,0 +1,10 @@
+let a: String = get_env("VALUE");
+let b: String = "same";
+let tick: Int = 0;
+
+node report [tick < 1][tick == 1] {
+    let e1: Int = (a == b) as Int;
+    println!("a==b: {}", e1);
+    tick = 1;
+    term;
+};

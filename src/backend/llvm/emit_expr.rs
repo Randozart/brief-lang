@@ -253,7 +253,7 @@ impl LlvmBackend {
                             name: fl,
                             ty: Type::float(),
                         }
-                    } else if self.is_protocol_member(&brief_ty, "#String") {
+                    } else if self.is_string_operand(&brief_ty) {
                         // 2026-08-01 (B0): A Brief String value is a ptr to a
                         // length-prefixed [len][bytes] buffer. State slots hold
                         // the address as an i64 machine word (uniform %State
@@ -2215,6 +2215,17 @@ impl LlvmBackend {
             BinaryOpKind::Concat => return None,
             _ => return None,
         };
+        // 2026-08-01 (B1): #String operands NEVER go through the config
+        // template path. Their flexible primordial has bytes=0, so the
+        // integer template derivation produces `i0` (invalid IR), and more
+        // fundamentally Eq/Ne on Strings is a CONTENT comparison handled by
+        // the dedicated arm in emit_binary_op (brief_str_eq). Returning None
+        // here routes String ops to that arm.
+        if self.is_string_operand(&l.ty)
+            || self.is_string_operand(&r.ty)
+        {
+            return None;
+        }
         // Get the llvm_type of the LHS operand to drive template dispatch
         let llvm_ty = self.llvm_type(&l.ty);
         // Get byte width from the universe if available
@@ -2453,6 +2464,20 @@ impl LlvmBackend {
                 }
             }
             crate::ast::BinaryOpKind::Eq => {
+                // 2026-08-01 (B1): String operands compare CONTENT, not
+                // addresses. Both operands are #String → deref via the
+                // runtime's brief_str_eq (length + memcmp on the [len][bytes]
+                // payloads). Matches the interpreter's content Eq (rule #4).
+                let is_str = self.is_string_operand(&l.ty)
+                    && self.is_string_operand(&r.ty);
+                if is_str {
+                    let eq = self.fun.gen_reg();
+                    writeln!(out, "{}{} = call i64 @brief_str_eq(ptr {}, ptr {})", indent, eq, l.name, r.name).ok();
+                    let icmp = self.fun.gen_reg();
+                    writeln!(out, "{}{} = icmp ne i64 {}, 0", indent, icmp, eq).ok();
+                    writeln!(out, "{}{} = zext i1 {} to i8", indent, v, icmp).ok();
+                    return TypedRegister { name: v.to_string(), ty: Type::bool_() };
+                }
                 let icmp = self.fun.gen_reg();
                 if is_float {
                     writeln!(
@@ -2477,6 +2502,17 @@ impl LlvmBackend {
                 }
             }
             crate::ast::BinaryOpKind::Neq => {
+                // 2026-08-01 (B1): content inequality — mirrors the Eq arm.
+                let is_str = self.is_string_operand(&l.ty)
+                    && self.is_string_operand(&r.ty);
+                if is_str {
+                    let eq = self.fun.gen_reg();
+                    writeln!(out, "{}{} = call i64 @brief_str_eq(ptr {}, ptr {})", indent, eq, l.name, r.name).ok();
+                    let icmp = self.fun.gen_reg();
+                    writeln!(out, "{}{} = icmp eq i64 {}, 0", indent, icmp, eq).ok();
+                    writeln!(out, "{}{} = zext i1 {} to i8", indent, v, icmp).ok();
+                    return TypedRegister { name: v.to_string(), ty: Type::bool_() };
+                }
                 let icmp = self.fun.gen_reg();
                 if is_float {
                     writeln!(
@@ -2625,6 +2661,36 @@ impl LlvmBackend {
             crate::ast::BinaryOpKind::Concat => {
                 self.emit_inline_concat(out, indent, l, r)
             }
+            crate::ast::BinaryOpKind::BitAnd | crate::ast::BinaryOpKind::BitOr | crate::ast::BinaryOpKind::BitXor => {
+                // 2026-08-01 (B1): #String bitwise defaults — operate on the
+                // content bytes and return a NEW [len][bytes] buffer (same
+                // length). When both operands are #String, emit the matching
+                // runtime call; otherwise fall through to the numeric path
+                // below (the config templates handle Int/etc.).
+                if self.is_string_operand(&l.ty)
+                    && self.is_string_operand(&r.ty)
+                {
+                    let rt = match kind {
+                        crate::ast::BinaryOpKind::BitAnd => "@brief_str_band",
+                        crate::ast::BinaryOpKind::BitOr => "@brief_str_bor",
+                        _ => "@brief_str_bxor",
+                    };
+                    let res = self.fun.gen_reg();
+                    writeln!(out, "{}{} = call ptr {}(ptr {}, ptr {})", indent, res, rt, l.name, r.name).ok();
+                    return TypedRegister { name: res, ty: Type::string() };
+                }
+                let cmp_ty = self.llvm_type(&l.ty);
+                let op = match kind {
+                    crate::ast::BinaryOpKind::BitAnd => "and",
+                    crate::ast::BinaryOpKind::BitOr => "or",
+                    _ => "xor",
+                };
+                writeln!(out, "{}{} = {} {} {}, {}", indent, v, op, cmp_ty, l.name, r.name).ok();
+                TypedRegister {
+                    name: v.to_string(),
+                    ty: Type::int(),
+                }
+            }
             _ => {
                 writeln!(out, "{}{} = add i64 {}, {}", indent, v, l.name, r.name).ok();
                 TypedRegister {
@@ -2671,6 +2737,14 @@ impl LlvmBackend {
                 }
             }
             crate::ast::UnaryOpKind::BitNot => {
+                // 2026-08-01 (B1): #String unary bitwise default — complement
+                // each content byte and return a NEW [len][bytes] buffer (same
+                // length). Numeric operands keep the i64 xor path below.
+                if self.is_string_operand(&operand.ty) {
+                    let res = self.fun.gen_reg();
+                    writeln!(out, "{}{} = call ptr @brief_str_bnot(ptr {})", indent, res, operand.name).ok();
+                    return TypedRegister { name: res, ty: Type::string() };
+                }
                 writeln!(out, "{}{} = xor i64 {}, -1", indent, v, operand.name).ok();
                 TypedRegister {
                     name: v.to_string(),

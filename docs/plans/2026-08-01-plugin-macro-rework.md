@@ -647,6 +647,23 @@ preserve length; interpreter and backend agree.
 differing length); bitwise on strings; interpreter parity; the `entry!`-shaped
 comparison; full `cargo test --lib`.
 
+**Status (2026-08-01): IMPLEMENTED.** Content Eq/Ne landed interpreter-first
+(`interpreter/eval.rs` via the shared `Value::string_bytes` deref helper) and in
+the backend (`emit_expr.rs` Eq/Ne arms → `brief_str_eq` runtime call, declared
+in `mod.rs`). Bitwise `&`/`|`/`^`/`~` on `#String` operate on content bytes via
+`brief_str_band/bor/bxor/bnot` (same-length result), gated by the central
+`is_string_operand` helper (`helpers.rs`, rule #16 — the 7 inline protocol
+checks were centralized). `emit_binop_from_config` returns None for `#String`
+operands so the dedicated arms own them (the flexible primordial's `bytes=0`
+would otherwise derive `i0` in the integer template). Verified end-to-end:
+`.smoke/eq_demo.bv` (heap vs literal content-eq), `.smoke/bit_demo.bv` (bitwise
+identity/XOR-NUL/bnot-nonempty). Two real bugs found & fixed during B1: (1) the
+SSO tag bit was OR-ed onto String literal addresses in the inline-init path,
+corrupting pointers for `brief_str_eq` — now gated on `feature_sso_strings`;
+(2) the interpreter's `Value::Int(addr)` heap-handle deref must require a valid
+heap allocation so numeric comparisons fall through (see `BUGS.md`). `Slice` on
+String deferred per B-D8.
+
 ### Phase 2 — Remove `[#]`
 
 | File | Change |

@@ -3469,3 +3469,108 @@ fn test_legacy_println_not_rewritten_by_plugin() {
         "legacy PrintLn! must survive the plugin for the typechecker to reject; got:\n{items:?}"
     );
 }
+
+/// 2026-08-01 (B1): String == / != on #String operands emits a content
+/// comparison (brief_str_eq) instead of `icmp eq ptr` (address comparison).
+/// This is the backend half of B1; the interpreter already does content
+/// equality (rule #4). The entry!-shaped comparison `cmd == "build"` is the
+/// motivating pattern (Phase 3).
+#[test]
+fn test_string_content_eq_emits_brief_str_eq() {
+    let src = r#"
+        let a: String = "abc";
+        let b: String = "abc";
+        defn run() -> Bool {
+            term a == b;
+        };
+    "#;
+    let mut items = parse_bv_source(src);
+    let mut universe = crate::type_universe::TypeUniverse::new();
+    let mut pm = crate::plugin::PluginManager::new();
+    pm.register(Box::new(crate::plugin::print_plugin::PrintPlugin));
+    pm.run_ast(crate::ast::StageKind::Parsed, &mut items, &mut universe)
+        .expect("plugin stage failed");
+
+    let mut backend = LlvmBackend::new().with_type_universe(universe);
+    let ir = backend.generate(&items, None);
+    assert!(
+        ir.contains("call i64 @brief_str_eq(ptr "),
+        "String == must emit brief_str_eq content compare; got:\n{ir}"
+    );
+    assert!(
+        !ir.contains("icmp eq ptr"),
+        "String == must not compare addresses (icmp eq ptr); got:\n{ir}"
+    );
+}
+
+/// 2026-08-01 (B1): int == still emits icmp eq (numeric path) — the String
+/// content-eq arm must not swallow numeric comparisons.
+#[test]
+fn test_int_eq_still_emits_icmp() {
+    let src = r#"
+        let x: Int = 5;
+        defn run() -> Bool {
+            term x == 6;
+        };
+    "#;
+    let mut items = parse_bv_source(src);
+    let mut universe = crate::type_universe::TypeUniverse::new();
+    let mut pm = crate::plugin::PluginManager::new();
+    pm.run_ast(crate::ast::StageKind::Parsed, &mut items, &mut universe)
+        .expect("plugin stage failed");
+
+    let mut backend = LlvmBackend::new().with_type_universe(universe);
+    let ir = backend.generate(&items, None);
+    assert!(
+        ir.contains("icmp eq i64 "),
+        "int == must still emit icmp eq i64; got:\n{ir}"
+    );
+    assert!(
+        !ir.contains("call i64 @brief_str_eq("),
+        "int == must not call brief_str_eq; got:\n{ir}"
+    );
+}
+
+/// 2026-08-01 (B1): String & | ^ ~ emit content-bitwise runtime calls
+/// (brief_str_band/bor/bxor/bnot) and return a String (ptr).
+#[test]
+fn test_string_bitwise_emits_content_ops() {
+    let src = r#"
+        let a: String = "abc";
+        let b: String = "abc";
+        defn run() -> String {
+            let r1: String = a & b;
+            let r2: String = a | b;
+            let r3: String = a ^ b;
+            let r4: String = ~a;
+            term r4;
+        };
+    "#;
+    let mut items = parse_bv_source(src);
+    let mut universe = crate::type_universe::TypeUniverse::new();
+    let mut pm = crate::plugin::PluginManager::new();
+    pm.register(Box::new(crate::plugin::print_plugin::PrintPlugin));
+    pm.run_ast(crate::ast::StageKind::Parsed, &mut items, &mut universe)
+        .expect("plugin stage failed");
+
+    let mut backend = LlvmBackend::new().with_type_universe(universe);
+    let ir = backend.generate(&items, None);
+    assert!(
+        ir.contains("call ptr @brief_str_band("),
+        "String & must emit brief_str_band; got:\n{ir}"
+    );
+    assert!(
+        ir.contains("call ptr @brief_str_bor("),
+        "String | must emit brief_str_bor; got:\n{ir}"
+    );
+    assert!(
+        ir.contains("call ptr @brief_str_bxor("),
+        "String ^ must emit brief_str_bxor; got:\n{ir}"
+    );
+    assert!(
+        ir.contains("call ptr @brief_str_bnot("),
+        "String ~ must emit brief_str_bnot; got:\n{ir}"
+    );
+}
+
+
