@@ -269,6 +269,18 @@ grammar, `learn-brief` collections + watchdog chapters, `docs/architecture`).
   PRE-EXISTING `-O3` clang crash on Bool state fields blocks harness-level
   testing of struct programs (a plain Bool-only program fails to build at
   -O3; at `-O0` the method-call program runs correctly).
+- **Phase A5b** — committed (`1c064b2d`). `collect_state_identifiers` now
+  walks MethodCall/Reflect receivers, so a struct-typed state field used as a
+  method-call receiver is no longer dead-eliminated by `apply_field_modes` —
+  the state slot stays in %State and the receiver resolves to its declared
+  type (verified: `%State = { i64, i8, i64 }` includes the struct slot).
+- **Phase A5c** — committed (`c7a12f35`). Member bodies can index a self ARRAY
+  slot (`data[i]` reads/writes GEP self + slot offset + elem_size*idx); the
+  scalar self-slot read skips Vector slots.
+  **Remaining:** the state-slot receiver's member body is emitted through a
+  multi-pass reactor path; the pass producing the final IR does not set the
+  self binding, so scalar slot reads fall through and the index resolves to
+  the self pointer. Local receivers (single-pass) emit correctly.
 - Phase B: …
 - Phase C: …
 - Phase D: …
