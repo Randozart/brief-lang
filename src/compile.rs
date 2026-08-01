@@ -380,6 +380,18 @@ pub fn compile_source(file_path: &str, source: &str, opts: &BuildOptions) -> Res
     let mut universe = TypeUniverse::new();
     check_types(&items, &universe)?;
 
+    // ── Concurrency gate (Phase 3c, rule #21: no implicit concurrency) ──
+    // Any pair of reactive txns that can fire together must be classified
+    // (async on both, or sync<group> on both). Runs after typechecking so the
+    // AST is stable; frontend-computed per the frontend-driven-dispatch pillar.
+    let gate_errors = brief_compiler::analysis::concurrency_gate::run_concurrency_gate(&items);
+    if !gate_errors.is_empty() {
+        return Err(format!(
+            "concurrency gate:\n  {}",
+            gate_errors.join("\n  ")
+        ));
+    }
+
     // ── Typed stage: AST transformation (after type check) ────────────
     emit_beast_snapshot(file_path, BeastStage::TypeCheck, BeastPosition::Before, &items, &universe, opts)?;
     pm.run_ast(StageKind::Typed, &mut items, &mut universe)?;

@@ -2816,3 +2816,22 @@ dropped). Applies to both contract-driven and type-driven ranges.
 **Lesson:** LLVM metadata must be type-coherent with the instruction it
 annotates; representation facts (N bytes → [0, 2^8N)) must be projected into
 the actual storage type before emission.
+
+---
+
+## `async node` Prefix Dropped the Async Flag — FIXED
+
+**Date:** 2026-08-01
+**Status:** Fixed (Phase 3c)
+**Root cause:** the parser's `async node` prefix form (parse_top_level) consumed
+the `async` token then called `parse_node()`, which does `pos += 1` (consumes
+`node`) then `eat(Async)` — but async was already consumed, so `is_async` was
+always `false` for the prefix form. `node async` (suffix) worked; `async node`
+(prefix) silently produced a non-async node. The concurrency gate exposed this:
+explicitly-async nodes were never classified, so valid async pairs were denied.
+**Fix:** the prefix arm sets `txn.is_async = true` on the parsed node.
+**Impact:** `async node inc_a` now correctly marks the node async;
+`benchmarks/async_counters_idio.bv` (which uses the prefix) passes the gate.
+**Lesson:** when a parser entry point pre-consumes a token that a shared parser
+also consumes, the shared parser's state becomes wrong — the wrapper must
+restore/forward the consumed flag.

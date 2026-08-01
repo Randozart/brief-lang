@@ -294,7 +294,41 @@ pub fn check_satisfiable(a: &Expr, b: &Expr) -> bool {
     match (a, b) {
         (Expr::Bool(false), _) | (_, Expr::Bool(false)) => false,
         (Expr::Decimal(a), Expr::Decimal(b)) if a != b => false,
-        _ => true,
+        _ => {
+            // 2026-08-01 (Phase 3c): detect `f() == "a"` vs `f() == "b"` (same
+            // lhs expression, different constant rhs) as UNSAT — the entry!
+            // subcommand-dispatch pattern (`cmd == "build"` vs `cmd == "run"`
+            // can never both hold). This is what makes two entry! nodes with
+            // mutually exclusive commands legal WITHOUT classification.
+            if let (Some((l1, r1)), Some((l2, r2))) =
+                (as_const_eq(a), as_const_eq(b))
+            {
+                if expr_eq(l1, l2) && const_ne(r1, r2) {
+                    return false;
+                }
+            }
+            true
+        }
+    }
+}
+
+/// Match `Expr::BinaryOp(Eq, lhs, rhs)` and return (lhs, rhs).
+fn as_const_eq(expr: &Expr) -> Option<(&Expr, &Expr)> {
+    match expr {
+        Expr::BinaryOp(crate::ast::BinaryOpKind::Eq, l, r) => Some((l, r)),
+        _ => None,
+    }
+}
+
+/// Two constant expressions are unequal.
+fn const_ne(a: &Expr, b: &Expr) -> bool {
+    // String constants compare by byte content; numeric constants by value.
+    if let (Expr::Quoted(x), Expr::Quoted(y)) = (a, b) {
+        return x != y;
+    }
+    match (const_value(a), const_value(b)) {
+        (Some(x), Some(y)) => x != y,
+        _ => false,
     }
 }
 
@@ -351,6 +385,15 @@ fn expr_eq(l: &Expr, r: &Expr) -> bool {
         (Expr::Identifier(a), Expr::Identifier(b)) => a == b,
         (Expr::Decimal(a), Expr::Decimal(b)) => a == b,
         (Expr::Bool(a), Expr::Bool(b)) => a == b,
+        (Expr::Quoted(a), Expr::Quoted(b)) => a == b,
+        // 2026-08-01 (Phase 3c): Call equality — `entry_cmd()` == `entry_cmd()`.
+        // Needed so `entry_cmd() == "a"` vs `entry_cmd() == "b"` shares a lhs.
+        (Expr::Call(na, aa, ta), Expr::Call(nb, ab, tb)) => {
+            na == nb
+                && ta == tb
+                && aa.len() == ab.len()
+                && aa.iter().zip(ab.iter()).all(|(x, y)| expr_eq(x, y))
+        }
         (Expr::BinaryOp(ka, la, ra), Expr::BinaryOp(kb, lb, rb)) => {
             ka == kb && expr_eq(la, lb) && expr_eq(ra, rb)
         }

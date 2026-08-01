@@ -744,6 +744,21 @@ done-flags. `emit_range_metadata` now emits bounds in the field's LLVM integer
 width and skips vacuous ranges (256 does not fit i8). Regression test
 `test_bool_field_no_malformed_i8_range`.
 
+**Status (2026-08-01): 3c (concurrency gate) IMPLEMENTED.** New
+`src/analysis/concurrency_gate.rs` (frontend-computed, invoked in compile.rs
+after typechecking): for every unordered reactive pair, `sat =
+check_satisfiable(pre_A, pre_B)` and XOR read-write overlap decide safety;
+eligible-but-unclassified pairs are a hard compile error (rule #21).
+`check_satisfiable` extended to detect `f() == "a"` vs `f() == "b"` (same lhs,
+different constant) as UNSAT — the entry! subcommand-dispatch pattern.
+`collect_read_identifiers` gained Term/TermBang/Return arms (reads through
+`term x`). `sync<group> node` parsing added (parser) so group-barrier
+classification is expressible in source. Parser bug fixed: `async node` prefix
+now preserves the async flag (was dropped, so explicitly-async nodes were
+never classified). Benchmarks audited per §4.6: async_counters + async_counters_sym
+→ `async node`; async_counters_runtime → `sync<counters>` (sequential/barrier
+intent, matches its "not thread pool" comment). 4 gate unit tests.
+
 ### Phase 4 — Flat-scripting plugin (one-shot opening node)
 
 | File | Change |

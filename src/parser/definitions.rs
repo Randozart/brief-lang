@@ -27,10 +27,20 @@ impl<'a> Parser<'a> {
                 .parse_transaction(false, false)
                 .map(TopLevel::Transaction),
             Some(Token::Node) => self.parse_node().map(TopLevel::Transaction),
+            // 2026-08-01 (Phase 3c): `sync<group> node name ...` — a reactive
+            // node classified into a group barrier. Members that fire hold off
+            // finishing until all fired members have (rule #21 classification).
+            Some(Token::Sync) => self.parse_sync_group(),
             // 2026-07-31: `async node` (prefix) — same as `node async`.
+            // 2026-08-01 (Phase 3c): the prefix form must preserve the async
+            // flag. parse_node reads is_async via eat(Async) AFTER consuming
+            // 'node'; with the prefix the async token is already consumed, so
+            // we set it on the returned Transaction.
             Some(Token::Async) if matches!(self.tokens.get(self.pos + 1).map(|(t, _)| t), Some(Token::Node)) => {
                 self.pos += 1; // consume async
-                self.parse_node().map(TopLevel::Transaction)
+                let mut txn = self.parse_node()?;
+                txn.is_async = true;
+                Ok(TopLevel::Transaction(txn))
             }
             Some(Token::Cell) => self.parse_cell().map(TopLevel::Cell),
             Some(Token::Import) => self.parse_import().map(TopLevel::Import),
@@ -505,6 +515,35 @@ impl<'a> Parser<'a> {
             modifiers: vec![],
             span: None,
             doc: self.take_doc(),
+        })
+    }
+
+    /// Parse: `sync<group> node name [pre][post] { body }`.
+    /// 2026-08-01 (Phase 3c): classifies a reactive node into a group barrier.
+    /// Members of the same group that fire hold off finishing until all fired
+    /// members have — the concurrency gate accepts a pair when both are in a
+    /// shared sync group (rule #21 classification).
+    fn parse_sync_group(&mut self) -> Result<TopLevel, SyntaxError> {
+        self.pos += 1; // consume 'sync'
+        let domains = if self.eat(&Token::Lt) {
+            let mut names = Vec::new();
+            loop {
+                let name = self.expect_identifier()?;
+                names.push(name);
+                if !self.eat(&Token::Comma) {
+                    break;
+                }
+            }
+            self.expect(Token::Gt)?;
+            names
+        } else {
+            vec![]
+        };
+        // parse_node consumes `node [async] name ...` itself.
+        let node = self.parse_node()?;
+        Ok(TopLevel::SyncGroup {
+            domains,
+            item: Box::new(TopLevel::Transaction(node)),
         })
     }
 
@@ -2726,5 +2765,43 @@ mod tests {
         let t = parse_txn("txn f() [x > 0][done] { term; };").unwrap();
         assert!(t.contract.watchdog.is_none());
         assert!(t.contract.explicit);
+    }
+
+    #[test]
+    fn test_sync_group_node_parses() {
+        // 2026-08-01 (Phase 3c): `sync<group> node name [pre][post] { body }`
+        // parses to a TopLevel::SyncGroup wrapping the reactive transaction
+        // with the group domains — the concurrency-gate classification.
+        let src = "sync<counters> node inc_a [a < 100][a == 100] { a = a + 1; term; };";
+        let tokens = tokenize(src).unwrap();
+        let mut p = Parser::new(tokens, src);
+        let item = p.parse_top_level().unwrap();
+        match item {
+            crate::ast::TopLevel::SyncGroup { domains, item: inner } => {
+                assert_eq!(domains, vec!["counters".to_string()]);
+                if let crate::ast::TopLevel::Transaction(t) = inner.as_ref() {
+                    assert_eq!(t.name, "inc_a");
+                    assert!(t.is_reactive);
+                } else {
+                    panic!("SyncGroup must wrap a Transaction");
+                }
+            }
+            _ => panic!("expected SyncGroup, got {item:?}"),
+        }
+    }
+
+    #[test]
+    fn test_async_node_prefix_preserves_async() {
+        // 2026-08-01 (Phase 3c): `async node name` must set is_async (the
+        // prefix form was silently dropping the flag).
+        let src = "async node inc_a [a < 100][a == 100] { a = a + 1; term; };";
+        let tokens = tokenize(src).unwrap();
+        let mut p = Parser::new(tokens, src);
+        let item = p.parse_top_level().unwrap();
+        if let crate::ast::TopLevel::Transaction(t) = item {
+            assert!(t.is_async, "async node prefix must set is_async");
+        } else {
+            panic!("expected Transaction, got {item:?}");
+        }
     }
 }

@@ -1,5 +1,6 @@
 pub mod address_space;
 pub mod call_graph;
+pub mod concurrency_gate;
 pub mod cross_reference;
 pub mod dataflow;
 pub mod dependency_graph;
