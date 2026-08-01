@@ -52,7 +52,7 @@ impl LlvmBackend {
     }
 
     /// Inner dispatch: one arm per Expr variant.
-    fn emit_expr_inner(
+    pub(crate) fn emit_expr_inner(
         &mut self,
         out: &mut String,
         v: &str,
@@ -1420,7 +1420,7 @@ impl LlvmBackend {
     /// clear error for dynamic receivers (Phase-1b boundary).
     /// 2026-07-31 (A5): `recv.name(args)` — inline the obj member body with
     /// `self` bound to the receiver instance's storage.
-    fn emit_method_call(
+    pub(crate) fn emit_method_call(
         &mut self,
         out: &mut String,
         v: &str,
@@ -1452,12 +1452,34 @@ impl LlvmBackend {
         let Some(member) = member else {
             panic!("method call '.{}()': no member '{}' on '{}'", name, name, type_name);
         };
+        let arg_regs: Vec<(String, Type)> = args.iter().map(|a| {
+            let arg_tmp = self.fun.gen_reg();
+            let r = self.emit_expr_inner(out, &arg_tmp, a, indent);
+            (r.name, r.ty)
+        }).collect();
+        self.emit_member_body(out, v, &recv_reg, &type_name, &member, &arg_regs, indent)
+    }
+
+    /// 2026-07-31 (A5/A6): emit a member body with `self` bound to the
+    /// receiver register and the given arg registers bound to the member's
+    /// params. Shared by MethodCall codegen and the `<-` op dispatch
+    /// (emit_strategy_member_call).
+    pub(crate) fn emit_member_body(
+        &mut self,
+        out: &mut String,
+        v: &str,
+        recv_reg: &TypedRegister,
+        type_name: &str,
+        member: &crate::ast::TopLevel,
+        arg_regs: &[(String, Type)],
+        indent: &str,
+    ) -> TypedRegister {
         // self = the receiver's struct address (struct literals emit ptrtoint;
         // a struct-typed local's alloca is alive in this function).
         let self_ptr = self.fun.gen_reg();
         writeln!(out, "{}{} = inttoptr i64 {} to ptr", indent, self_ptr, recv_reg.name).ok();
         let saved = self.fun.self_binding.clone();
-        self.fun.self_binding = Some((type_name.clone(), self_ptr.clone()));
+        self.fun.self_binding = Some((type_name.to_string(), self_ptr.clone()));
         let saved_bindings = self.fun.let_bindings.clone();
         let saved_types = self.fun.let_binding_types.clone();
         let saved_orig = self.fun.let_original_types.clone();
@@ -1467,7 +1489,7 @@ impl LlvmBackend {
         // pass's reads resolve to the wrong register.
         let saved_lvt = self.fun.last_val_temps.clone();
         let saved_lvt_types = self.fun.last_val_types.clone();
-        let (params, body): (Vec<(String, Type)>, Vec<crate::ast::Statement>) = match &member {
+        let (params, body): (Vec<(String, Type)>, Vec<crate::ast::Statement>) = match member {
             crate::ast::TopLevel::Transaction(t) => (
                 t.parameters.iter().map(|(n, ty)| (n.clone(), ty.clone())).collect(),
                 t.body.clone(),
@@ -1478,14 +1500,13 @@ impl LlvmBackend {
             ),
             _ => (Vec::new(), Vec::new()),
         };
-        for (i, arg) in args.iter().enumerate() {
-            let arg_tmp = self.fun.gen_reg();
-            let arg_reg = self.emit_expr_inner(out, &arg_tmp, arg, indent);
+        for (i, (reg, rty)) in arg_regs.iter().enumerate() {
             if let Some((pname, pty)) = params.get(i) {
-                self.fun.let_bindings.insert(pname.clone(), arg_reg.name.clone());
+                self.fun.let_bindings.insert(pname.clone(), reg.clone());
                 self.fun.let_binding_types.insert(pname.clone(), pty.clone());
                 self.fun.let_original_types.insert(pname.clone(), pty.clone());
             }
+            let _ = rty;
         }
         crate::backend::llvm::emit_stmt::emit_statement_sequence(self, out, &body, indent);
         self.fun.self_binding = saved;

@@ -170,6 +170,26 @@ impl<'a> TypecheckContext<'a> {
         }
     }
 
+    /// 2026-07-31 (A6): For `&collection <- value`, find the collection's
+    /// InsertAt op binding's member first-parameter type (the element type).
+    pub fn push_element_type(&self, collection: &Expr) -> Option<Type> {
+        let Expr::Identifier(name) = collection else { return None; };
+        let type_name = match self.bindings.get(name)? {
+            Type::Custom(n) => n.clone(),
+            Type::Applied(n, _) => n.clone(),
+            _ => return None,
+        };
+        let bindings = self.regular_bindings.get(&type_name)?;
+        let binding = bindings.iter().find(|b| b.name == "InsertAt")?;
+        let fn_name = match &binding.expr {
+            Expr::Call(name, _, _) => name.clone(),
+            _ => return None,
+        };
+        let members = self.type_members.get(&type_name)?;
+        let member = members.iter().find(|m| member_name(m) == fn_name)?;
+        member_params(member).into_iter().next()
+    }
+
     /// 2026-07-20: Find a Parse op on a type that could accept a literal form.
     /// form: "Decimal", "Quoted", "Bare", or a hashword category like "#Int".
     /// discriminator: optional prefix/suffix hint ("0x", "h", "bf", etc.)
@@ -965,6 +985,25 @@ pub fn infer_statement(stmt: &Statement, ctx: &mut TypecheckContext) -> Result<(
             infer_type_only(lhs, ctx)?;
             let lhs_ty = infer_expression(lhs, ctx).map(|(t, _)| t)?;
             let rhs_ty = infer_type_only(rhs, ctx)?;
+            // 2026-07-31 (A6): `&collection <- value` — the `<-` PUSH. The
+            // LHS is an AddrOf of a collection with an InsertAt op binding;
+            // the RHS must match the member's first parameter type (not the
+            // Ptr<Collection> type a plain assignment would demand).
+            if let Expr::AddrOf(inner) = lhs {
+                if let Some(elem_ty) = ctx.push_element_type(inner) {
+                    if rhs_ty != elem_ty {
+                        let coercible = try_coerce_via_parse(rhs, &rhs_ty, &elem_ty, ctx);
+                        if !coercible {
+                            return Err(TypeError::TypeMismatch {
+                                expected: format!("{}", elem_ty),
+                                found: format!("{}", rhs_ty),
+                                context: "push '<- value' into collection".into(),
+                            });
+                        }
+                    }
+                    return Ok(());
+                }
+            }
             // 2026-07-31 (A2): assignment must preserve the LHS type — no
             // implicit coercion (`len = "hello"` where len: Int errors).
             if lhs_ty != rhs_ty {

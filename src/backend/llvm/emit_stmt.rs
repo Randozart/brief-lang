@@ -6,7 +6,7 @@
 // into scalars for alias analysis and vectorization.
 
 use crate::ast::{Expr, Statement, Type};
-use crate::backend::llvm::{LlvmBackend, TypedRegister};
+use crate::backend::llvm::{emit_expr::member_brief_name, LlvmBackend, TypedRegister};
 use std::fmt::Write;
 
 /// Emit LLVM IR for a statement. Returns the last expression's register.
@@ -106,9 +106,14 @@ pub fn emit_statement(backend: &mut LlvmBackend, out: &mut String, stmt: &Statem
                     }
                     // 2026-07-18: Push — emit call @fn_name(handle, val).
                     // 2026-07-20: Uses find_insert_strategy (reads OperatorDef from context).
+                    // 2026-07-31 (A6): when the InsertAt op is bound to an obj
+                    // member (`op InsertAt: push(#L, #R)`), emit a self-bound
+                    // member call instead of the free-function marker dispatch.
                     let insert_strat = backend.find_insert_strategy(lhs).cloned();
                     if let Some(op_def) = &insert_strat {
-                        emit_strategy_fn_call(backend, out, indent, lhs, op_def, Some(&val.name));
+                        if !emit_strategy_member_call(backend, out, indent, lhs, op_def, Some(&val.name)) {
+                            emit_strategy_fn_call(backend, out, indent, lhs, op_def, Some(&val.name));
+                        }
                     } else if let Some(reg) = backend.fun.let_bindings.get(name).cloned() {
                         // 2026-07-18: If the binding is a value register (not an alloca),
                         // the variable is being mutated — create an alloca and redirect.
@@ -535,6 +540,52 @@ fn emit_array_state_store(
         universe.as_ref(),
     );
     writeln!(out, "{}store {} {}, ptr {}", indent, elem_llvm, store_val, elem).ok();
+    true
+}
+
+/// 2026-07-31 (A6): `<-` dispatch onto an obj MEMBER binding
+/// (`op InsertAt: push(#L, #R)` on an obj). Emits a self-bound member call
+/// (receiver + value register) instead of the free-function marker dispatch.
+/// Flat guard clauses; returns false when the pattern does not apply.
+fn emit_strategy_member_call(
+    backend: &mut LlvmBackend,
+    out: &mut String,
+    indent: &str,
+    target: &Expr,
+    op_def: &crate::ast::top::OperatorDef,
+    value: Option<&str>,
+) -> bool {
+    let fn_name = match op_def.impl_args.as_ref() {
+        Some(crate::ast::PropertyValue::Identifier(s)) => s.clone(),
+        Some(crate::ast::PropertyValue::List(items)) => match items.first() {
+            Some(crate::ast::PropertyValue::Identifier(f)) => f.clone(),
+            _ => return false,
+        },
+        _ => return false,
+    };
+    let recv = match target {
+        Expr::AddrOf(inner) => (**inner).clone(),
+        _ => target.clone(),
+    };
+    let Expr::Identifier(recv_name) = &recv else { return false; };
+    let Some(&ridx) = backend.ctx.field_index_map.get(recv_name) else { return false; };
+    let type_name = match backend.ctx.field_brief_types.get(ridx) {
+        Some(Type::Custom(n)) => n.clone(),
+        Some(Type::Applied(n, _)) => n.clone(),
+        _ => return false,
+    };
+    let members = backend.ctx.obj_members.get(&type_name).cloned().unwrap_or_default();
+    let member = members.iter().find(|m| member_brief_name(m) == fn_name.as_str()).cloned();
+    let Some(member) = member else { return false; };
+    // Emit the receiver (the struct address) and pass the value register.
+    let recv_tmp = backend.fun.gen_reg();
+    let recv_reg = backend.emit_expr_inner(out, &recv_tmp, &recv, indent);
+    let mut arg_regs: Vec<(String, Type)> = Vec::new();
+    if let Some(vreg) = value {
+        arg_regs.push((vreg.to_string(), Type::int()));
+    }
+    let out_tmp = backend.fun.gen_reg();
+    backend.emit_member_body(out, &out_tmp, &recv_reg, &type_name, &member, &arg_regs, indent);
     true
 }
 
