@@ -247,7 +247,29 @@ grammar, `learn-brief` collections + watchdog chapters, `docs/architecture`).
 | Global-lifetime free (D) | never frees until the last-consumer proof is sound; the benchmark pins it |
 
 ## 9. Results (filled after each phase)
-- Phase A: …
+- **Phase A1+A2** — committed (`73773995`). Generic `struct ListBuffer<T>` /
+  `enum Option<T>` parse; struct-literal comma + bare-shorthand
+  (`Arena { base, offset }`); generic-constructor type application. Member
+  bodies typechecked (self + slots bound); assignment LHS/RHS checked. Tests
+  1310 (+5).
+- **Phase A3+A4** — committed (`f8017814`). Reactive `node` members in objs
+  (per-instance); array state fields emit valid IR (GEP read, array store,
+  zeroinitializer init, memory-resident in loops). Index element-type
+  inference fixed (`f[0]` on `Float[16]` is Float). Tests 1310.
+- **Phase B groundwork** — committed (`37e09173`). Aggregate fields excluded
+  from loop phis + FFI-guard outlining. Remaining: countdown guard-block
+  terminator.
+- **Phase A5** — committed (`e784e311`). MethodCall codegen for LOCAL
+  receivers (self-bound member bodies; `st.push(5)` inlines `push` with self
+  = the struct address; bare slots GEP+load/store). Struct constructor
+  `Stack()` emits a struct literal. Let bindings record declared types.
+  Struct type declarations deduplicated.
+  **Gaps documented:** struct-typed top-level lets are not state fields (an
+  obj instance in state has no %State slot — needed for `List<Enemy>`); a
+  PRE-EXISTING `-O3` clang crash on Bool state fields blocks harness-level
+  testing of struct programs (a plain Bool-only program fails to build at
+  -O3; at `-O0` the method-call program runs correctly).
 - Phase B: …
 - Phase C: …
 - Phase D: …
+- Phase E: …
