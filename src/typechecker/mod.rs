@@ -482,6 +482,27 @@ pub fn infer_expression(
         Expr::StructLiteral { type_name, fields } => {
             let ty = Type::Custom(type_name.clone());
             let slots = ctx.type_slots.get(type_name).cloned().unwrap_or_default();
+            // 2026-08-01 (D3): a generic struct literal (`ListBuffer<Int> { ... }`)
+            // — the slot types reference type params (data: Ptr<T>). The strict
+            // field check is deferred to the let-level declared-type coercion
+            // (the concrete T→Int substitution); here we only validate the
+            // field names exist. Collect the struct's type-param names.
+            let type_param_names: Vec<String> = ctx.type_params.get(type_name)
+                .cloned()
+                .unwrap_or_default();
+            let contains_type_param = |t: &Type| {
+                fn walk(t: &Type, params: &[String]) -> bool {
+                    match t {
+                        Type::Custom(n) => params.iter().any(|p| p == n),
+                        Type::Ptr(i) | Type::PtrConst(i) => walk(i, params),
+                        Type::Vector(i, _) => walk(i, params),
+                        Type::Applied(_, args) => args.iter().any(|a| walk(a, params)),
+                        Type::Tuple(elems) => elems.iter().any(|e| walk(e, params)),
+                        _ => false,
+                    }
+                }
+                walk(t, &type_param_names)
+            };
             let mut resolved = Vec::new();
             for (fname, fval) in fields {
                 let fty = slots
@@ -490,7 +511,7 @@ pub fn infer_expression(
                     .map(|s| s.ty.clone());
                 let vty = infer_type_only(fval, ctx)?;
                 if let Some(ft) = &fty {
-                    if vty != *ft {
+                    if vty != *ft && !contains_type_param(ft) {
                         let coercible = try_coerce_via_parse(fval, &vty, ft, ctx);
                         if !coercible {
                             return Err(TypeError::TypeMismatch {
@@ -1271,6 +1292,28 @@ pub fn check_program(items: &[TopLevel], universe: &TypeUniverse) -> Result<(), 
             }
             if let Some(proto) = &td.protocol {
                 all_type_protocols.insert(td.name.clone(), proto.clone());
+            }
+        }
+        // 2026-08-01 (D3): a generic `struct ListBuffer<T>` (StaticStruct) has
+        // slots too — `inner.data` on a ListBuffer<T> field must resolve. Its
+        // fields become TypeDefSlots so field access + monomorphization work.
+        if let TopLevel::StaticStruct(sd) = item {
+            let slots: Vec<crate::ast::top::TypeDefSlot> = sd.fields
+                .iter()
+                .map(|(n, ty)| crate::ast::top::TypeDefSlot {
+                    name: n.clone(),
+                    ty: ty.clone(),
+                    bit_range: None,
+                })
+                .collect();
+            if !slots.is_empty() {
+                all_type_slots.insert(sd.name.clone(), slots);
+            }
+            if !sd.type_params.is_empty() {
+                all_type_params.insert(
+                    sd.name.clone(),
+                    sd.type_params.iter().map(|p| p.name.clone()).collect(),
+                );
             }
         }
     }

@@ -110,6 +110,8 @@ TAG[series_converge]=runtime
 TAG[global_lifetime]=runtime
 TAG[arena_churn]=runtime
 TAG[linked_list]=runtime
+TAG[hash_ops]=runtime
+TAG[enemy_swarm]=runtime
 
 BENCHMARKS=(
     "iir_filter"
@@ -151,6 +153,8 @@ BENCHMARKS=(
     "global_lifetime"   # Malloc#/Load#/Store# heap buffer lifecycle (free-after-last-consumer target)
     "arena_churn"       # bump-arena exhaustion + realloc-grow
     "linked_list"       # Malloc# heap nodes + pointer chasing
+    "hash_ops"          # hash-indexed flat table ops
+    "enemy_swarm"       # SoA reactive swarm (array-state)
     "bridge_glue"
     "bridge_multi"
     # "gpu/saxpy"        # no .bv file exists

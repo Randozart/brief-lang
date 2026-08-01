@@ -1,0 +1,26 @@
+// hash_ops — hash-indexed table ops via a flat Malloc# bucket array.
+// Hashes each key i into a bucket, stores i+1, then reads the same bucket
+// back (the found-value sum is the observable output). Direct hash — no
+// probing loop (Brief's loops are reactive/countdown, not imperative).
+// Mirrors C step-for-step. A nested-obj HashMap<K, V> via collections.bv
+// needs the Ptr-deref method-call machinery (deferred — plan D3 note).
+//
+// C reference: hash_ops_c.c
+
+const CAP: Int = 16777216;
+
+let N: Int = get_env_int!("BOUND");
+let table: Ptr<Int> = Malloc#(CAP * 8) as Ptr<Int>;
+let i: Int = 0;
+let found: Int = 0;
+
+node hash [i < N][i == N] {
+    let h: Int = (i * 2654435761) % CAP;
+    table[h] = i + 1;
+    found = found + table[h];
+    i = i + 1;
+    when i % 5000000 == 0 {
+        println!(found);
+    };
+    term;
+};

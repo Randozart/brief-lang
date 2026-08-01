@@ -1,0 +1,48 @@
+// enemy_swarm — SoA (structure-of-arrays) reactive swarm.
+// 64 enemies as parallel state arrays (x, y, hp). Each tick advances one
+// enemy (i % 64 cycles the swarm): moves it, damages it if alive, and the
+// running hp-sum is the observable output. The SoA desugar keeps every enemy
+// in hot state arrays the countdown updates via indexed GEP (Phase B).
+//
+// C reference: enemy_swarm_c.c
+
+let N: Int = get_env_int!("BOUND");
+let x: Float[64];
+let y: Float[64];
+let hp: Int[64];
+let i: Int = 0;
+let sum: Int = 0;
+
+node tick [i < N][i == N] {
+    if i == 0 {
+        hp[0] = 1; hp[1] = 1; hp[2] = 1; hp[3] = 1;
+        hp[4] = 1; hp[5] = 1; hp[6] = 1; hp[7] = 1;
+        hp[8] = 1; hp[9] = 1; hp[10] = 1; hp[11] = 1;
+        hp[12] = 1; hp[13] = 1; hp[14] = 1; hp[15] = 1;
+        hp[16] = 1; hp[17] = 1; hp[18] = 1; hp[19] = 1;
+        hp[20] = 1; hp[21] = 1; hp[22] = 1; hp[23] = 1;
+        hp[24] = 1; hp[25] = 1; hp[26] = 1; hp[27] = 1;
+        hp[28] = 1; hp[29] = 1; hp[30] = 1; hp[31] = 1;
+        hp[32] = 1; hp[33] = 1; hp[34] = 1; hp[35] = 1;
+        hp[36] = 1; hp[37] = 1; hp[38] = 1; hp[39] = 1;
+        hp[40] = 1; hp[41] = 1; hp[42] = 1; hp[43] = 1;
+        hp[44] = 1; hp[45] = 1; hp[46] = 1; hp[47] = 1;
+        hp[48] = 1; hp[49] = 1; hp[50] = 1; hp[51] = 1;
+        hp[52] = 1; hp[53] = 1; hp[54] = 1; hp[55] = 1;
+        hp[56] = 1; hp[57] = 1; hp[58] = 1; hp[59] = 1;
+        hp[60] = 1; hp[61] = 1; hp[62] = 1; hp[63] = 1;
+    };
+    x[i % 64] = x[i % 64] + 0.5;
+    y[i % 64] = y[i % 64] - 0.25;
+    if hp[i % 64] > 0 {
+        hp[i % 64] = hp[i % 64] - 1;
+    } else {
+        hp[i % 64] = 3;
+    };
+    sum = sum + hp[i % 64];
+    i = i + 1;
+    when i % 5000000 == 0 {
+        println!(sum);
+    };
+    term;
+};
