@@ -186,6 +186,29 @@ edge; the aggregate path must emit that latch br after the guard's `when`
 branch. Local array variables (`let n: Float[16]`) are also unsupported (a
 local is allocated as i64) — the experiment uses state arrays for now.
 
+**B status (2026-08-01, DONE):** three countdown gaps fixed and the A/B
+recorded.
+- **Guard-block terminator** (when-ended guard bodies): `FunctionContext.cur_block`
+  tracks the emitter's live block; the rem reset is emitted BEFORE the guard
+  body (dominates the guard's control flow); the latch phis use the guard's
+  FINAL block as the guard predecessor, not `.cdg_`. Verified: a nested-when
+  guard fires correctly at -O3 (5M/10M).
+- **if-ended inner bodies**: the seed `if i == 0` broke the same way — the
+  rem/fire landed in the if's merge block. `cur_block`/`body_final` now feed
+  the latch phis' `.cdb_` predecessor.
+- **Array-state stores were silently DROPPED in the countdown** — the Assign
+  arm only handled Ptr-indexed stores, so `f[i] = v` (Float[16]) vanished
+  (seed + loop writes). Routed through the shared `emit_array_state_store`.
+- **A/B experiment (interleaved x3, BOUND=50M, countdown-dispatched,
+  non-folded)**: sweep_dense (16 scalars) Brief 0.41s vs C 0.26s = 1.57x;
+  sweep_arr (Float[16]) Brief 0.40s vs C 0.35s = 1.17x. **Conclusion (rule
+  #19): the hypothesis that the array form makes Brief faster is REFUTED** —
+  Brief's throughput is unchanged (0.40s both); the gap closure is C's array
+  reference being slower. No cyclic-shift pass is shipped (no Brief-side win).
+  sweep_arr registered as a runtime benchmark (1.18x, MATCH). Diverges from C
+  at real bounds like sweep_dense (f32 recurrence compounding; harness
+  correctness at BOUND=5 passes).
+
 ### Phase C — Watchdogs
 1. Parse `-> handler(val)` into `WatchdogSpec.on_fire`.
 2. Liveliness per-iteration check; fuel via the countdown budget; time via
