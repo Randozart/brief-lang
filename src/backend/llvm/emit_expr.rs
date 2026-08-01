@@ -781,6 +781,16 @@ impl LlvmBackend {
                 match inner.as_ref() {
                     Expr::Identifier(name) => {
                         if let Some(&idx) = self.ctx.field_index_map.get(name) {
+                            // 2026-07-31 (A7): a struct-typed state field's
+                            // slot holds the INSTANCE address — `&b` is that
+                            // address, not the %State slot pointer.
+                            let is_struct_field = self.ctx.field_brief_types.get(idx)
+                                .map_or(false, |t| matches!(t, Type::Custom(n)
+                                    if self.ctx.struct_types.contains_key(n)));
+                            if is_struct_field {
+                                let (loaded, _) = self.emit_state_load_i64_by_idx(out, indent, idx);
+                                return TypedRegister { name: loaded, ty: Type::int() };
+                            }
                             let gep = self.emit_state_gep(out, indent, "aof", "%state", idx);
                             let ptr = self.fun.gen_reg();
                             writeln!(out, "{}{} = ptrtoint ptr {} to i64", indent, ptr, gep).ok();
@@ -1703,7 +1713,7 @@ impl LlvmBackend {
 
     /// Compute total byte size of a struct type from its fields.
     /// 2026-07-24: Falls back to struct_types when universe unavailable.
-    fn struct_type_size(&self, type_name: &str) -> u64 {
+    pub(crate) fn struct_type_size(&self, type_name: &str) -> u64 {
         // Try type universe first
         if let Some(ref u) = self.ctx.type_universe {
             if let Some(info) = u.types.get(type_name) {

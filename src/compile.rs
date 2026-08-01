@@ -940,34 +940,31 @@ fn codegen(
                     continue; // skip operator_defs — handled by casting graph
                 }
 
-                if b.name == "CastTo" || b.name == "CastFrom" {
-                    let params = match &b.protocol_variant {
-                        Some(pv) => {
-                            // Parse #HashWord or BareIdentifier as Type
-                            if pv.starts_with('#') {
-                                let rest = pv.strip_prefix('#').unwrap_or(pv);
-                                vec![brief_compiler::ast::Type::Custom(format!("#{}", rest))]
-                            } else {
-                                vec![brief_compiler::ast::Type::Custom(pv.clone())]
-                            }
-                        }
-                        None => vec![],
-                    };
-                    let impl_args = if let brief_compiler::ast::Expr::Call(fn_name, _, _) = &b.expr {
-                        Some(brief_compiler::ast::PropertyValue::Identifier(fn_name.clone()))
-                    } else {
-                        None
-                    };
-                    all_ops.push(brief_compiler::ast::top::OperatorDef {
-                        op: b.name.clone(),
-                        params,
-                        pre: b.pre.clone(),
-                        suf: b.suf.clone(),
-                        impl_args,
-                        impl_name: b.name.clone(),
-                        span: b.span.clone(),
-                    });
-                }
+                // 2026-07-31 (A6/A7): every op-binding reaches operator_defs —
+                // CastTo/CastFrom (type-level lane overrides) AND the
+                // collection op bindings (InsertAt / ExtractFrom / Init). The
+                // '<-' dispatch and `op Init` construction look these up.
+                let params = match &b.protocol_variant {
+                    Some(pv) if pv.starts_with('#') => {
+                        vec![brief_compiler::ast::Type::Custom(pv.clone())]
+                    }
+                    Some(pv) => vec![brief_compiler::ast::Type::Custom(pv.clone())],
+                    None => vec![],
+                };
+                let impl_args = if let brief_compiler::ast::Expr::Call(fn_name, _, _) = &b.expr {
+                    Some(brief_compiler::ast::PropertyValue::Identifier(fn_name.clone()))
+                } else {
+                    None
+                };
+                all_ops.push(brief_compiler::ast::top::OperatorDef {
+                    op: b.name.clone(),
+                    params,
+                    pre: b.pre.clone(),
+                    suf: b.suf.clone(),
+                    impl_args,
+                    impl_name: b.name.clone(),
+                    span: b.span.clone(),
+                });
             }
             if !all_ops.is_empty() {
                 operator_defs.insert(td.name.clone(), all_ops);

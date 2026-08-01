@@ -747,6 +747,66 @@ impl LlvmBackend {
     ///     @init_state (which runs at first access, before heap is live).
     ///   - reg_suffix: suffix for intermediate register names (e.g. "s", "b").
     ///     Use format!("%ip_{}{}", idx, suffix) to generate stable names.
+    /// 2026-07-31 (A7): `let x: T = val` where T declares `op Init: init(#L,#R)`
+    /// — allocate the struct, call the Init member (self-bound) with the value,
+    /// and store the instance address into the field slot. Returns false when
+    /// the field's type has no Init-op binding.
+    fn emit_init_op_construction(
+        &mut self,
+        out: &mut String,
+        indent: &str,
+        field_name: &str,
+        idx: usize,
+        init_expr: Option<&Expr>,
+    ) -> bool {
+        let brief_ty = match self.ctx.field_brief_types.get(idx) {
+            Some(Type::Custom(n)) => n.clone(),
+            Some(Type::Applied(n, _)) => n.clone(),
+            _ => return false,
+        };
+        let defs = self.ctx.operator_defs.get(&brief_ty).cloned().unwrap_or_default();
+        let init_def = match defs.iter().find(|d| d.op == "Init") {
+            Some(d) => d.clone(),
+            None => return false,
+        };
+        let fn_name = match init_def.impl_args.as_ref() {
+            Some(crate::ast::PropertyValue::Identifier(s)) => s.clone(),
+            Some(crate::ast::PropertyValue::List(items)) => match items.first() {
+                Some(crate::ast::PropertyValue::Identifier(f)) => f.clone(),
+                _ => return false,
+            },
+            _ => return false,
+        };
+        let members = self.ctx.obj_members.get(&brief_ty).cloned().unwrap_or_default();
+        let member = members.iter().find(|m| super::emit_expr::member_brief_name(m) == fn_name).cloned();
+        let Some(member) = member else { return false; };
+        // Allocate the instance storage and pass its address as `self`.
+        let size = self.struct_type_size(&brief_ty);
+        let inst = self.fun.gen_reg();
+        writeln!(out, "{}{} = alloca i8, i64 {}", indent, inst, size).ok();
+        let addr = self.fun.gen_reg();
+        writeln!(out, "{}{} = ptrtoint ptr {} to i64", indent, addr, inst).ok();
+        let recv_reg = crate::backend::llvm::TypedRegister {
+            name: addr.clone(),
+            ty: Type::Custom(brief_ty.clone()),
+        };
+        let mut arg_regs: Vec<(String, Type)> = Vec::new();
+        if let Some(e) = init_expr {
+            let tmp = self.fun.gen_reg();
+            let vr = self.emit_expr_inner(out, &tmp, e, indent);
+            arg_regs.push((vr.name, vr.ty));
+        }
+        let out_tmp = self.fun.gen_reg();
+        self.emit_member_body(out, &out_tmp, &recv_reg, &brief_ty, &member, &arg_regs, indent);
+        // Store the instance address into the field slot.
+        let gep = self.fun.gen_reg();
+        writeln!(out, "{}{} = getelementptr inbounds %State, ptr %state, i32 0, i32 {}", indent, gep, idx).ok();
+        writeln!(out, "{}{} = getelementptr i8, ptr {}, i64 {}", indent, self.fun.gen_reg(), inst, 0).ok();
+        writeln!(out, "{}store i64 {}, ptr {}", indent, addr, gep).ok();
+        let _ = field_name;
+        true
+    }
+
     fn emit_field_init_value(&mut self, out: &mut String, indent: &str,
         init_clone: Option<Expr>, ty: &str, gep: &str, idx: usize, tag_strings: bool)
     {
@@ -887,6 +947,12 @@ impl LlvmBackend {
             let p = format!("%ip_{}", idx);
             writeln!(out, "  {} = getelementptr inbounds %State, ptr %state, i32 0, i32 {}", p, idx).ok();
             let init_clone = self.ctx.field_initializers.get(&name).and_then(|e| e.clone());
+            // 2026-07-31 (A7): `op Init: init(#L, #R)` construction — a
+            // struct-typed field initialized from a value is built by calling
+            // the Init member (self-bound) instead of storing the raw value.
+            if self.emit_init_op_construction(out, "  ", &name, idx, init_clone.as_ref()) {
+                continue;
+            }
             // 2026-07-31: Phase 3 (§8.5-E4) — the ringbuf-init detection branch
             // (always-false stub after insert_at removal) is deleted. RingBuffer
             // state fields are expanded inline via ringbuf_inline; a bracket-list
