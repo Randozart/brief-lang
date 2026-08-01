@@ -187,6 +187,11 @@ pub fn emit_statement(backend: &mut LlvmBackend, out: &mut String, stmt: &Statem
                     if emit_array_state_store(backend, out, indent, obj, idx, &val) {
                         return TypedRegister { name: val.name, ty: Type::void() };
                     }
+                    // 2026-07-31 (A5): obj member `self` ARRAY slot store —
+                    // `data[i] = v` in a member body.
+                    if emit_self_slot_array_store(backend, out, indent, obj, idx, &val) {
+                        return TypedRegister { name: val.name, ty: Type::void() };
+                    }
                     let obj_reg = backend.emit_expr(out, obj, indent);
                     if matches!(obj_reg.ty, Type::Ptr(_)) {
                         let idx_reg = backend.emit_expr(out, idx, indent);
@@ -445,6 +450,49 @@ pub fn emit_statement(backend: &mut LlvmBackend, out: &mut String, stmt: &Statem
             TypedRegister { name: backend.fun.gen_reg(), ty: Type::void() }
         }
     }
+}
+
+/// 2026-07-31 (A5): obj member `self` array-slot store — `data[i] = v` in a
+/// member body. GEP self + slot offset + elem-size*idx, then store.
+/// Flat guard clauses; returns false when the pattern does not apply.
+fn emit_self_slot_array_store(
+    backend: &mut LlvmBackend,
+    out: &mut String,
+    indent: &str,
+    obj: &Expr,
+    idx: &Expr,
+    val: &TypedRegister,
+) -> bool {
+    let Some((self_type, self_ptr)) = backend.fun.self_binding.clone() else {
+        return false;
+    };
+    let Expr::Identifier(sname) = obj else { return false; };
+    let Some((_, s_ty)) = backend
+        .ctx
+        .struct_types
+        .get(&self_type)
+        .and_then(|f| f.iter().find(|(n, _)| n == sname))
+    else {
+        return false;
+    };
+    let Type::Vector(inner, dims) = s_ty.clone() else { return false; };
+    if dims.len() != 1 {
+        return false;
+    }
+    let offset = backend.lookup_field_offset(&self_type, sname);
+    let elem_size = crate::backend::llvm::types::type_size(inner.as_ref(), backend.ctx.type_universe.clone().as_ref());
+    let elem_llvm = backend.llvm_type(&inner);
+    let idx_reg = backend.emit_expr(out, idx, indent);
+    let scaled = backend.fun.gen_reg();
+    writeln!(out, "{}{} = mul i64 {}, {}", indent, scaled, idx_reg.name, elem_size).ok();
+    let total = backend.fun.gen_reg();
+    writeln!(out, "{}{} = add i64 {}, {}", indent, total, offset, scaled).ok();
+    let gep = backend.fun.gen_reg();
+    writeln!(out, "{}{} = getelementptr i8, ptr {}, i64 {}", indent, gep, self_ptr, total).ok();
+    let universe = backend.ctx.type_universe.clone();
+    let store_val = backend.ensure_typed_value(out, indent, &elem_llvm, &val.name, Some(val.ty.clone()), universe.as_ref());
+    writeln!(out, "{}store {} {}, ptr {}", indent, elem_llvm, store_val, gep).ok();
+    true
 }
 
 /// 2026-07-31 (A4): Array state-field store — `f[i] = v` where `f` is a

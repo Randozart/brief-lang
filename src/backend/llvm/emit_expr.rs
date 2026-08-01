@@ -137,22 +137,26 @@ impl LlvmBackend {
                 }
                 // 2026-07-31 (A5): obj member `self` slot read — a bare slot
                 // name in a member body resolves to self+offset (GEP + load).
+                // Array slots are skipped here — `data[i]` is handled by the
+                // Index arm (self-slot array GEP), not loaded as a scalar.
                 let self_binding = self.fun.self_binding.clone();
                 if let Some((self_type, self_ptr)) = &self_binding {
                     let is_self_slot = self.ctx.struct_types.get(self_type)
                         .map_or(false, |f| f.iter().any(|(n, _)| n == name));
                     if is_self_slot {
-                        let offset = self.lookup_field_offset(self_type, name);
-                        let gep = self.fun.gen_reg();
-                        writeln!(out, "{}{} = getelementptr i8, ptr {}, i64 {}", indent, gep, self_ptr, offset).ok();
                         let (slot_ty, _) = self.ctx.struct_types.get(self_type)
                             .and_then(|f| f.iter().find(|(n, _)| n == name))
                             .map(|(_, ty)| (ty.clone(), ()))
                             .unwrap_or((Type::int(), ()));
-                        let llvm_ty = self.llvm_type(&slot_ty);
-                        let val = self.fun.gen_reg();
-                        writeln!(out, "{}{} = load {}, ptr {}", indent, val, llvm_ty, gep).ok();
-                        return TypedRegister { name: val, ty: slot_ty };
+                        if !matches!(slot_ty, Type::Vector(_, _)) {
+                            let offset = self.lookup_field_offset(self_type, name);
+                            let gep = self.fun.gen_reg();
+                            writeln!(out, "{}{} = getelementptr i8, ptr {}, i64 {}", indent, gep, self_ptr, offset).ok();
+                            let llvm_ty = self.llvm_type(&slot_ty);
+                            let val = self.fun.gen_reg();
+                            writeln!(out, "{}{} = load {}, ptr {}", indent, val, llvm_ty, gep).ok();
+                            return TypedRegister { name: val, ty: slot_ty };
+                        }
                     }
                 }
                 // 2026-07-17: Remaining paths: local binding,
@@ -547,6 +551,33 @@ impl LlvmBackend {
                 {
                     return self.emit_svo_index(out, v, &obj_reg, &idx_reg, indent);
                 }
+                 // 2026-07-31 (A5): obj member `self` ARRAY slot indexing —
+                 // `data[i]` in a member body. GEP self + slot offset + elem.
+                 if let Some((self_type, self_ptr)) = self.fun.self_binding.clone() {
+                     if let Expr::Identifier(sname) = obj.as_ref() {
+                         if let Some((_, s_ty)) = self.ctx.struct_types.get(&self_type)
+                             .and_then(|f| f.iter().find(|(n, _)| n == sname))
+                         {
+                             if let Type::Vector(inner, dims) = s_ty {
+                                 if dims.len() == 1 {
+                                     let offset = self.lookup_field_offset(&self_type, sname);
+                                     let elem_size = crate::backend::llvm::types::type_size(inner.as_ref(), self.ctx.type_universe.as_ref());
+                                     let scaled = self.fun.gen_reg();
+                                     writeln!(out, "{}{} = mul i64 {}, {}", indent, scaled, idx_reg.name, elem_size).ok();
+                                     let total = self.fun.gen_reg();
+                                     writeln!(out, "{}{} = add i64 {}, {}", indent, total, offset, scaled).ok();
+                                     let gep = self.fun.gen_reg();
+                                     writeln!(out, "{}{} = getelementptr i8, ptr {}, i64 {}", indent, gep, self_ptr, total).ok();
+                                     let elem_llvm = self.llvm_type(inner);
+                                     let val = self.fun.gen_reg();
+                                     writeln!(out, "{}{} = load {}, ptr {}", indent, val, elem_llvm, gep).ok();
+                                     let _ = v;
+                                     return TypedRegister { name: val, ty: (**inner).clone() };
+                                 }
+                             }
+                         }
+                     }
+                 }
                  // 2026-07-31 (A4): Array state-field indexing — GEP into
                  // %State + scalar load. A runtime index cannot extractvalue
                  // from a loaded aggregate; the whole-array load + extract
