@@ -148,6 +148,53 @@ Brief's operators fall into conceptual groups that govern how types relate, how 
 
 The **Anchor** (`@`) is not itself an operator but a universal modifier — it anchors a value to a position in space or time (`@` for prior state, `@/` for bit position, `@"..."` for compile-time strings).
 
+### Delimiter Semantic Load
+
+Each delimiter carries exactly one meaning — a delimiter used for the wrong
+load is a design error, not a stylistic choice:
+
+| Delimiter | Load | Examples |
+|-----------|------|----------|
+| `<>` | **compile-time type-level specialization** — a named kind of the thing | `Stack<T>`, `#String<UTF8>`, `asm<x86_64>`, `sync<group>` |
+| `()` | **application & binding** — call it, construct it, bind an implementation | `f(a)`, `defn f(x: Int)`, `Person(...)`, `op Add: func(#L,#R)`, `op Add(Float)` |
+| `[]` | **containment / bound** | `Int[8]`, `[pre]` guards |
+| `{}` | **grouping / definition** | blocks, struct literals |
+
+`sync<group>` uses `<>` because the group is a compile-time identity — the same
+shape as `asm<chip>` (which target) and `#String<UTF8>` (which variant).
+`op Add(Float)` stays `()`: `op` is a nested declaration, declarations take
+params, and it avoids angle-bracket nesting.
+
+### Modifiers (2026-07-31)
+
+User-facing directives (`seq`, `vol`, `async`, `sync<group>`) are ordinary
+keywords, **not** compiler-knowns (no `#`). They **must never make code
+faster** — the default is always the efficient path; a modifier-beaten default
+is a compiler bug. All modifiers are **prefix** (`async node`; `node async` is
+rejected).
+
+| Modifier | Meaning |
+|----------|---------|
+| `seq struct Name` | declared field layout preserved — no reordering/compaction/dead-field elimination |
+| `seq txn foo` / `seq node foo` | sequential dispatch — never the parallel reactor |
+| `seq Int[N]` / `seq foreach` | sequential access — `!llvm.loop.vectorize.enable = false` |
+| `vol let x` | every access is `load volatile` / `store volatile` — never folded, never promoted |
+| `async node foo` | explicit acknowledgement of simultaneous firing (a semantic declaration, not a hint) |
+| `sync<group> node foo` | group barrier — members that fire hold off finishing until every fired group member has |
+
+`seq` and `vol` are orthogonal and combinable: `vol seq let Int[x]` is a
+volatile *and* sequential array.
+
+**The concurrency gate (NO IMPLICIT CONCURRENCY):** for reactive nodes A and B,
+if the proof engine proves `pre_A ∧ pre_B` satisfiable AND there is no XOR
+read-write overlap, the pair is *eligible to fire together* and the compiler
+DEMANDS a classification — `async` on both (explicit acknowledgement of
+simultaneous firing) or `sync<group>` on both (group barrier). An unclassified
+eligible pair is a **hard error**: "nodes A and B can fire together; declare
+`async` on both or `sync<group>` on both." The escapes are provable mutual
+exclusion (`pre_A ∧ pre_B` UNSAT) or an XOR read-write dependency forcing
+sequential order.
+
 ---
 
 ## 2. Grammar Specification

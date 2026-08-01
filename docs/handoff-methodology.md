@@ -139,5 +139,55 @@ Understand the history before you propose. Write the plan with a baseline.
 Validate with a cheap experiment on the real IR before building. Build the
 principled mechanism, not a special case. Verify the optimized IR and the
 values, not just the tests. Document in the same commit. If a benchmark
-regresses, rebuild the mechanism on the current architecture — never accept it,
-never excuse it as noise without a controlled A/B.
+regresses, rebuild the mechanism on the current architecture — never accept
+it, never excuse it as noise without a controlled A/B.
+
+## 5. The design principles (2026-07-31)
+
+Three principles govern every language and compiler decision. They are the
+*why* behind the `#`/`!`/`.^` markers, the modifier family, and the concurrency
+gate. Apply them to any design before writing code.
+
+### 5.1 Avoid accidental complexity; no obfuscation of special treatment
+
+"<b>No magic</b>" is a naive purist trap — every compiler has intrinsics and
+special cases. The honest rule has two parts:
+
+1. **Avoid accidental complexity.** Essential complexity (SMT, LLVM IR
+   emission) is kept; accidental complexity (heuristic trees, hand-rolled
+   passes that fight the design) is stripped, never preserved. Ask: does this
+   code solve a real problem, or does it fight the architecture?
+2. **No obfuscation of special treatment.** Compiler-known behavior is
+   *disclosed*, never hidden: `#` (intrinsic `Sqrt#`, hashword `#Int`),
+   `!` (compile-time expansion `my_macro!`), `.^`/`.^^` (reflection). A
+   developer never has to guess whether `x + y` is a standard op or a macro —
+   the markers make it visible.
+
+### 5.2 The never-faster contract
+
+No instruction may ever make code faster. Modifiers (`seq`, `vol`, `async`,
+`sync<group>`) exist only to *restrict* the optimizer or demand a specific
+behaviour. The default is always the efficient path. If a modifier-beaten
+program is faster than the default, that is a **compiler bug** — fix the
+default, never let the modifier be the win. This is what keeps the language
+free of an optimization layer only advanced compiler engineers understand.
+When you see a modifier "winning" a benchmark, treat it as a bug to fix, not a
+feature to adopt.
+
+### 5.3 No implicit concurrency
+
+The reactor never silently decides whether two reactive nodes may fire
+together. If the proof engine proves `pre_A ∧ pre_B` satisfiable AND there is
+no XOR read-write overlap, the compiler DEMANDS the developer classify the
+pair: `async` on both (explicit acknowledgement of simultaneous firing) or
+`sync<group>` on both (a group barrier). An unclassified eligible pair is a
+compile error. The compiler's job is to *prove* safety or *demand* a decision —
+never to guess.
+
+### 5.4 The delimiter semantic load
+
+Each delimiter carries one honest meaning: `<>` = compile-time type
+specialization (`Stack<T>`, `#String<UTF8>`, `asm<chip>`, `sync<group>`);
+`()` = application & binding (`f(a)`, `Person(...)`, `op Add: func(#L,#R)`);
+`[]` = containment/bound (`Int[8]`, `[pre]`); `{}` = grouping/definition.
+A delimiter used for the wrong load is a design error.

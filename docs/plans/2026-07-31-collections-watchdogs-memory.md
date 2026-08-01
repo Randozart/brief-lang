@@ -198,6 +198,39 @@ local is allocated as i64) — the experiment uses state arrays for now.
 ### Phase D — Memory-by-proof
 Stress benchmarks + fixes as §5; global-lifetime design plan written.
 
+### Phase E — Modifiers, the concurrency gate, and the principle reframing
+
+**Principle reframing (docs):** AGENTS.md rule #2 becomes "NO OBFUSCATION OF
+SPECIAL TREATMENT" (two-part: avoid accidental complexity; disclose special
+treatment via `#`/`!`/`.^` markers). User-facing directives (`seq`, `vol`,
+`async`, `sync<g>`) are ordinary keywords and **must never make code faster** —
+a modifier-beaten default is a compiler bug (fix the default).
+
+**The modifier family (all PREFIX — `node async`, never postfix):**
+| Modifier | Axis | Meaning |
+|----------|------|---------|
+| `seq` | ordering/layout/sequence | `seq struct` (bypass `apply_field_modes`), `seq txn`/`seq node` (sequential dispatch, no `emit_parallel_reactor`), `seq Int[x]`/`seq foreach` (`!llvm.loop.vectorize.enable=false`) |
+| `vol` | memory visibility | `vol let x` → `load volatile`/`store volatile` (reuse the mmio volatile machinery) |
+| `async` | explicit simultaneous firing | an acknowledgement, not a hint; prefix-only (`node async` postfix removed) |
+| `sync<group>` | group barrier | members that fire hold off finishing until all fired group members have (a group commit / join point) |
+
+**The concurrency gate (NO IMPLICIT CONCURRENCY):** a reactive-node pair is
+"eligible to fire together" iff the proof engine proves `pre_A ∧ pre_B`
+satisfiable AND there is no XOR read-write overlap. An eligible pair that is
+neither `async`-marked nor `sync<group>`-grouped is a **hard error**: "declare
+`async` on both or `sync<group>` on both." Existing multi-node tutorials are
+reclassified in the same commit.
+
+**Delimiter semantic load (docs + `sync<group>`):** `<>` = compile-time type
+specialization (generics, protocol variants, targets, groups); `()` =
+application & binding (calls, params, construction, op bindings —
+declarations take params). `op Add(Float)` stays `()`; `sync` is `<>`.
+
+**Implementation:** modifier lexer/parser (prefix), the four targets, the gate
+analysis (SAT + XOR overlap), the barrier codegen, the never-faster regression
+test (default output never slower than the modifier output), reclassify
+tutorials/benchmarks.
+
 ## 7. Verification (per phase)
 `cargo test --lib` green (a regression test per feature); `cargo build` no new
 warnings; Praetor (one `--target` per invocation); full harness A/B zero

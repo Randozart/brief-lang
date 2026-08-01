@@ -32,9 +32,24 @@ Patches are unacceptable. There is no "go fast and break things."
 
 1. **CONTRACT-FIRST**: Contracts are the source of truth. Never weaken
    `[product > 0]` to `[true]` — fix the code, not the contract.
-2. **NO MAGIC**: Never hardcode Rust string matches as built-in functions.
-   `is_digit` → `import char from "std/char.bv"`. Primitive types (Int, Float,
-   Bool, Ptr, Void) are the sole bootstrap exceptions.
+2. **NO OBFUSCATION OF SPECIAL TREATMENT**: The compiler has intrinsics,
+   hashwords, reflection, and directives — they exist, and pretending they
+   don't is a purist trap. What is forbidden is HIDING them behind
+   ordinary-looking syntax. Two-part principle:
+   - **Avoid accidental complexity.** Essential complexity (SMT, LLVM IR
+     emission) is unavoidable and kept. Accidental complexity (heuristic
+     trees, hand-rolled passes that fight the design) is stripped, never
+     preserved.
+   - **Disclose special treatment.** Every compiler-known behavior carries an
+     explicit marker: `#` suffix (intrinsic `Sqrt#`), `#` prefix (hashword
+     `#Int`), `!` suffix (compile-time expansion `my_macro!`), `.^`/`.^^`
+     (reflection). User-facing directives (`seq`, `vol`, `async`, `sync<g>`)
+     are ordinary keywords — no `#` — and **must never make code faster**:
+     the default is always the efficient path; a modifier-beaten default is a
+     compiler bug (fix the default, never let the modifier be the win).
+   - **NEVER hardcode Rust string matches as built-in functions.**
+     `is_digit` → `import char from "std/char.bv"`. Primitive types (Int,
+     Float, Bool, Ptr, Void) are the sole bootstrap exceptions.
 3. **INTRINSICS BEFORE FRGN**: Check `get_intrinsic_signature()` before writing
    `frgn`. All intrinsic names are PascalCase + `#` suffix (`Sqrt#`).
 4. **INTERPRETER IS REFERENCE**: If the interpreter runs it correctly, the
@@ -88,6 +103,21 @@ Patches are unacceptable. There is no "go fast and break things."
     Recovery Protocol). A refuted hypothesis blocks the fix. A regression caused
     by removing a fragile-but-correct optimization is fixed by REBUILDING it on
     the current architecture — never accepted, never re-added as heuristics.
+20. **DELIMITER SEMANTIC LOAD**: Each delimiter carries one honest meaning:
+    `<>` = compile-time type-level specialization (generics `Stack<T>`,
+    protocol variants `#String<UTF8>`, targets `asm<chip>`, groups
+    `sync<group>`); `()` = application & binding (calls `f(a)`, params
+    `defn f(x)`, construction `Person(...)`, op bindings `op Add: func(#L,#R)`
+    — declarations take params, so `op Add(Float)` is `()`); `[]` =
+    containment/bound (`Int[8]`, `[pre]`); `{}` = grouping/definition. Never
+    use a delimiter for a different load.
+21. **NO IMPLICIT CONCURRENCY**: The reactor never silently decides whether two
+    reactive nodes may fire together. If the proof engine proves `pre_A ∧ pre_B`
+    satisfiable AND there is no XOR read-write overlap between A and B, the
+    compiler DEMANDS the developer classify the pair — `async` on both (explicit
+    acknowledgement of simultaneous firing) or `sync<group>` on both (group
+    barrier: members that fire hold off finishing until all fired members have).
+    An unclassified eligible pair is a compile error.
 
 ## Performance Recovery Protocol
 

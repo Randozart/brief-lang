@@ -157,7 +157,7 @@ Iteration requires `txn` with `[pre][post]` convergence, NOT `defn` + `[guard]`
 
 ```brief
 txn iter_map<T, U>(list: List<T>, f: T -> U, result: List<U>, i: Int)
-    [i < list :> Size][i == list :> Size] -> List<U>
+    [i < list.^Len][i == list.^Len] -> List<U>
 {
     result = result.append(f(list[i]));
     i = i + 1;
@@ -204,7 +204,33 @@ regex; ambiguity = error. `sql"SELECT"` → `Expr::TaggedQuotedLiteral`;
 
 ---
 
-## 4. Coding Standards (details)
+## 4. Modifiers and the concurrency gate (2026-07-31)
+
+User-facing directives are **ordinary keywords** (no `#`); they **must never
+make code faster** — a modifier-beaten default is a compiler bug. All modifiers
+are **prefix** (`async node`; `node async` is rejected). See
+`docs/architecture/concurrency-and-modifiers.md`.
+
+| Modifier | Meaning |
+|----------|---------|
+| `seq struct Name` | declared field layout preserved — `apply_field_modes` does not reorder/compact/eliminate |
+| `seq txn foo` / `seq node foo` | sequential dispatch — never the parallel reactor |
+| `seq Int[N]` / `seq foreach` | sequential access — `!llvm.loop.vectorize.enable = false` |
+| `vol let x` | every access is `load volatile`/`store volatile` |
+| `async node foo` | explicit acknowledgement of simultaneous firing (not a hint) |
+| `sync<group> node foo` | group barrier — members that fire hold off finishing until all fired members have |
+
+**The concurrency gate (NO IMPLICIT CONCURRENCY):** for reactive nodes A and B,
+if the proof engine proves `pre_A ∧ pre_B` satisfiable AND there is no XOR
+read-write overlap, the compiler DEMANDS `async` on both or `sync<group>` on
+both — an unclassified eligible pair is a hard error.
+
+**Delimiter semantic load:** `<>` = compile-time type specialization
+(`Stack<T>`, `#String<UTF8>`, `asm<chip>`, `sync<group>`); `()` = application &
+binding (`f(a)`, `Person(...)`, `op Add: func(#L,#R)`, `op Add(Float)` —
+declarations take params); `[]` = containment/bound; `{}` = grouping.
+
+## 5. Coding Standards (details)
 
 ### Doc comments on every definition
 

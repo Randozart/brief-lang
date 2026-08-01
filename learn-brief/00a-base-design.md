@@ -18,7 +18,8 @@ Brief's symbols are not arbitrary ASCII choices. Each symbol's **visual shape** 
 | **`.^` / `.^^`** | Pinpoint + caret(s) | Reflecting on a value/type | **Reflection** — read compiler-known metadata. `.^` = runtime (length, pointer), `.^^` = compile-time (size, bytes, alignment). | **Reflection** |
 | **`[]`** | Brackets that enclose | Containment, boundary | Constraints, bounds, guards — everything inside `[]` is bounded. | **Partition** |
 | **`{}`** | Curly braces that hug | Grouping, bundling | Code block / organizational unit. | — |
-| **`()`** | Parentheses that cup | Holding, containing | Parameter / argument enclosure. | — |
+| **`()`** | Parentheses that cup | Holding, containing | Parameter / argument enclosure. | **Application** |
+| **`<>`** | Angle brackets that cradle | Specializing, parameterizing | Type-level specialization — a named kind of the thing. | **Specialization** |
 | **`@`** | The at-sign — a loop with an 'a' | Position, location, anchor | Spatial / Temporal / Dimensional / Chronological anchor. | **Anchor** |
 | **`&`** | Ampersand — ligature of "et" (and) | Connection, conjunction | Mutation marker — links the name to the mutable location. | — |
 | **`!`** | A vertical line with a dot | An exclamation, a warning | Control flow anomaly / boundary — "pay attention." | — |
@@ -29,6 +30,22 @@ Brief's symbols are not arbitrary ASCII choices. Each symbol's **visual shape** 
 ### The Principle: Syntactic Radical Honesty
 
 If an operation has distinct physical, temporal, or compiler-level behavior under the hood, its visual representation must explicitly reflect that boundary. Every boundary-crossing operation uses a different visual symbol. No hidden transformations.
+
+### The Delimiter Semantic Load
+
+Four delimiters, four honest meanings — never swapped:
+
+| Delimiter | Load | Examples |
+|-----------|------|----------|
+| `<>` | **compile-time type-level specialization** — a named kind of the thing | `Stack<T>`, `#String<UTF8>`, `asm<x86_64>`, `sync<group>` |
+| `()` | **application & binding** — call it, construct it, bind an implementation to it | `f(a)`, `defn f(x: Int)`, `Person(...)`, `op Add: func(#L,#R)`, `op Add(Float)` |
+| `[]` | **containment / bound** — bounded by it | `Int[8]`, `[pre]` guards |
+| `{}` | **grouping / definition** — bundle it | blocks, struct literals |
+
+- If the thing in the delimiters is a **compile-time identity or type**, it is `<>` (which variant, which target, which group).
+- If it is a **value being applied or bound**, it is `()` (a call, a parameter, a construction).
+- `sync<group>` uses `<>` because the group is a compile-time identity — the same shape as `asm<chip>` (which target) and `#String<UTF8>` (which variant). `op Add(Float)` stays `()`: `op` is a nested declaration, declarations take params, and it avoids angle-bracket nesting.
+- A delimiter used for the wrong load is a design error, not a stylistic choice.
 
 ---
 
