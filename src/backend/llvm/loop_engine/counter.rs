@@ -741,7 +741,12 @@ impl LlvmBackend {
         self.emit_countable_load_bound(out, &bound_reg, total_idx, total_const_name, c0);
 
         // Pre-load initial values for the header phis.
-        let mut sorted_fields: Vec<&String> = write_set.iter().collect();
+        // 2026-07-31 (A4): aggregate (array) fields are excluded from phis —
+        // they are memory-resident and accessed via the %State GEP path.
+        let mut sorted_fields: Vec<&String> = write_set
+            .iter()
+            .filter(|f| !self.is_aggregate_field(f))
+            .collect();
         sorted_fields.sort();
         let mut phi_field_init: HashMap<String, String> = HashMap::new();
         for fname in &sorted_fields {

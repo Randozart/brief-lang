@@ -1706,6 +1706,13 @@ impl LlvmBackend {
                             // Ptr<T> fields are stored as i64 in %State (opaque handles).
                             // Float fields use the native float type. All others use i64.
                             let brief_ty = self.ctx.field_brief_types.get(idx).cloned().unwrap_or(Type::int());
+                            // 2026-07-31 (A4): aggregate (array) fields cannot be
+                            // outlined as scalar cold-function params — the guard
+                            // must stay inline so it reads them via the %State GEP.
+                            if matches!(brief_ty, Type::Vector(_, _)) {
+                                can_outline_all = false;
+                                break;
+                            }
                             let llvm_ty = if matches!(brief_ty, Type::Ptr(_)) {
                                 "i64".to_string()
                             } else {

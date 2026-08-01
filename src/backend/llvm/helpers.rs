@@ -144,7 +144,7 @@ impl LlvmBackend {
                     .collect(),
                 type_args: vec![],
             },
-            Expr::Exists(_) => { unreachable!("fn? only in stage eval") },
+            Expr::Exists(name) => { panic!("compile-time existence check '{}' reached LLVM codegen", name) },
             Expr::Slice { array, start, end, stride } => {
                 let new_array = Self::rewrite_cell_identifiers(array, cell_name);
                 let new_start = start.as_ref().map(|e| Box::new(Self::rewrite_cell_identifiers(e, cell_name)));
@@ -2538,6 +2538,18 @@ impl LlvmBackend {
 
     /// Emit a getelementptr for a state field and return the GEP register name.
     /// `prefix` is used to make register names unique within a function.
+    /// 2026-07-31 (A4): Is a state field an LLVM aggregate (array) type?
+    /// Aggregate fields are memory-resident — they are never loop-carried as
+    /// scalar phis (a phi cannot hold a runtime-indexed array). The loop
+    /// engines access them via the %State GEP path instead.
+    pub(crate) fn is_aggregate_field(&self, name: &str) -> bool {
+        self.ctx
+            .field_index_map
+            .get(name)
+            .and_then(|idx| self.ctx.field_types.get(*idx))
+            .map_or(false, |t| t.starts_with('['))
+    }
+
     pub(crate) fn emit_state_gep(
         &mut self,
         out: &mut String,
