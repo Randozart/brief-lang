@@ -2749,3 +2749,15 @@ outlined guard param that is a FLOAT state field (e.g. accumulator_flush's
 `store i64 %__cp_sum` on a float param (type error).
 **Fix:** the alloca uses the binding's Brief type (`let_binding_types` →
 `llvm_type`).
+
+## 2026-08-01 — queue_drain dispatches to version-DAG, not the countdown
+
+**Finding:** queue_drain (RingBuffer via `<-` ops) builds and runs, but its
+periodic print is off-by-one (prints count-1 at the boundary). Root cause: the
+batch-shape detector (`src/analysis/batch_shape.rs`) rejects the body because
+the `<-` collection ops (`queue <- count`, `<- &queue`) precede the counter
+increment — so the countdown never dispatches, and the version-DAG's periodic
+guard reads the PRE-increment count. Fix candidates: (a) teach
+`split_into_segments` that `<-` ops are compute (so the batch shape is
+recognized and the countdown handles the guard correctly), or (b) fix the
+version-DAG's guard to read the POST-body state.

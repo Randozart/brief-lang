@@ -102,7 +102,7 @@ obj HashMap<K, V> {
     op CopyFrom: get(#R);
     op Init: init(#L, #R);
 
-    defn hash(key: K) -> Int ((key as Int) % cap) {
+    defn hash(key: K) -> Int {
         term (key as Int) % cap;
     };
 
