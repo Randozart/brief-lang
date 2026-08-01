@@ -906,6 +906,25 @@ it now returns the untagged ptr as a String-typed register (concat demo prints
 
 ### Phase B4 (cont.) — B4b: legacy types + B4c: docs/benchmarks
 
+**B4b (2026-08-01): IMPLEMENTED.** Deleted `lib/std/types/utf8view.bv` +
+`small_string.bv` and their type declarations from bootstrap.bv; removed the
+hardcoded `%SmallString64/%StaticString/%UTF8View` struct decls and the
+UTF8View `{i64,i64}` special-case. grep over `src/` + `lib/std` returns zero
+for `UTF8View`/`SmallString64`/`StaticString`.
+
+**B4c (2026-08-01): IMPLEMENTED.** Docs updated to the bits model:
+`backend-type-dispatch.md` (String = ptr, `!>` metadata, protocol membership
+rows), `casting-protocol.md` (ptr concat examples), `agent-reference.md`
+(String = ptr table rows), `hash-words.md` (`op InsertAt:` strategy bindings),
+`spec/SPEC.md` §5.6 rewritten (`!> key: value;` — the `<~` metadata form was
+removed; the type_property grammar and all metadata examples converted),
+`learn-brief/12-pragmas.md` + `15-custom-types.md` (the `<~` → `!>` syntax).
+`bits-thesis.md` is a historical thesis — its `<~` references are "old
+mechanism" comparisons and the removal note, intentionally preserved. The
+final benchmark table (`2026-08-01-plugin-rework-final.md`) got a B4 note:
+the SSO/legacy-type removals are compile-time-only (the flag was always off),
+so the recorded runtime numbers are unchanged.
+
 ---
 
 ## 7. Commit order (continuous commits, rule "Continuous commits")

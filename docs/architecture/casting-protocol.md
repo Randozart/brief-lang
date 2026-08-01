@@ -258,18 +258,20 @@ The backend implements a protocol handler — a `match` on the variant:
 ```rust
 impl LlvmBackend {
     fn emit_string_concat(&mut self, a: &TypedRegister, b: &TypedRegister, protocol: &str) {
+        // 2026-08-01 (B4): String values are ptrs to [len][bytes] — the concat
+        // returns a ptr, not a {i64,i64} fat pointer.
         match protocol {
             "UTF8" => {
-                writeln!(out, "%r = call {{ i64, i64 }} @__UTF8_concat({}, {})",
+                writeln!(out, "%r = call ptr @__UTF8_concat(ptr {}, ptr {})",
                     a, b);
             }
             "ASCII" => {
-                writeln!(out, "%r = call {{ i64, i64 }} @__ASCII_concat({}, {})",
+                writeln!(out, "%r = call ptr @__ASCII_concat(ptr {}, ptr {})",
                     a, b);
             }
             "hex" | "base64" => {
                 // No hardware support — stdlib fallback
-                writeln!(out, "%r = call {{ i64, i64 }} @__string_transform({}, {}, \"{}\")",
+                writeln!(out, "%r = call ptr @__string_transform(ptr {}, ptr {}, \"{}\")",
                     a, b, protocol);
             }
             _ => compile_error!("protocol '{}' not supported by LLVM backend", protocol),

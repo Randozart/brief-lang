@@ -224,7 +224,8 @@ top_level ::= definition
 
 type_def ::= "type" identifier type_params? ":" type_expr "{" (slot_decl | type_property | op_decl | prop_decl | constraint)* "}" ";"
 slot_decl ::= identifier ":" type_expr ";"
-type_property ::= identifier ("(" params? ")")? "<~" expression ";"
+type_property ::= "!>" identifier ":" property_value ";"        (* metadata: !> bytes: 8; *)
+property_value ::= int | string | identifier
 constraint ::= "[" expression "]"
 op_decl ::= "op" rune_name ":" fn_call                                (* binding: op Add: func(#L, #R); *)
           | "op" rune_name "(" rhs_type? ")" ":" fn_call             (* RHS-only overload, declared on the LHS type: op Add(Float): func(#L, #R); *)
@@ -256,7 +257,7 @@ cell_output ::= "output" identifier ":" type ";"
               (* Only valid in .c.bv (cell-wrapped) files — declares the cell return type *)
 
 signature ::= "sig" ("#inline")? identifier "(" parameters? ")" "->" output_type ("from" path | "=" identifier)? ";"
-(* Note: `#out` modifier is removed from the language. Use `observable <~ true` metadata instead. *)
+(* Note: `#out` modifier is removed from the language. Use `!> observable: true` metadata instead. *)
 
 output_type ::= union_type
 union_type ::= product_type ("|" product_type)*
@@ -349,7 +350,7 @@ wide, derived from the target's data-layout pointer width (`--int-bits`, one of
 uniformly to integer, float, and String types:
 
 - **Flexible-width types** (`Int`, `UInt`, `String`, and any type declared
-  without `!> bits`, `maxbits <~`, or `minbits <~`): one machine word on every
+  without `!> bits`, `!> maxbits:`, or `!> minbits:`): one machine word on every
   target. `Int` carries no bits metadata and has a *derived* width; `String` is
   a pointer to `[len][bytes]`, so it too follows the machine word (64 bits on
   x86-64, 32 on wasm32).
@@ -357,7 +358,7 @@ uniformly to integer, float, and String types:
   `Int32` is always 32 bits, `Int64` always 64, `Float` always 32, `Float64`
   always 64.
 - **Explicit metadata always wins**: `!> bits: N` fixes the exact width;
-  `maxbits <~ N` sets a ceiling; `minbits <~ N` sets a floor. Absent all three,
+  `!> maxbits: N` sets a ceiling; `!> minbits: N` sets a floor. Absent all three,
   the type is flexible and derives to the machine word.
 
 ### 2.3 Statements
@@ -1656,8 +1657,8 @@ A codec declaration defines a named codec that controls how values of a type are
 codec HexColor {
     [value >= 0];               // validation constraint
     [value <= 0xFFFFFF];        // validation constraint
-    parse  <~ parse_hex_color;   // Phase 5: custom literal parser
-    format <~ format_hex_color;  // Phase 5: custom formatter
+    !> parse: parse_hex_color;   // Phase 5: custom literal parser
+    !> format: format_hex_color;  // Phase 5: custom formatter
 };
 ```
 
@@ -1667,19 +1668,19 @@ codec HexColor {
 codec_decl ::= "codec" ident "{" codec_body "}" ";"
 codec_body ::= (constraint | binding)*
 constraint ::= "[" expr "]"
-binding    ::= ("parse" | "format") "<~" ident ";"
+binding    ::= "!>" ("parse" | "format") ":" ident ";"
 ```
 
 **Semantics:**
 
 1. Constraints are expression guards that values of types referencing this codec must satisfy. They are merged into the type's guards during type resolution.
-2. `parse <~ fn_name;` registers a function that converts a literal string to a value of the codec's associated type. Used by the custom literal parser system (Phase 5).
-3. `format <~ fn_name;` registers a function that converts a value to its string representation.
-4. A type references a codec via the `codec <~` property binding in its body:
+2. `!> parse: fn_name;` registers a function that converts a literal string to a value of the codec's associated type. Used by the custom literal parser system (Phase 5).
+3. `!> format: fn_name;` registers a function that converts a value to its string representation.
+4. A type references a codec via the `!> codec:` property binding in its body:
 
 ```brief
 type MyInt : Int {
-    codec <~ PositiveInt;
+    !> codec: PositiveInt;
 };
 ```
 
@@ -1687,17 +1688,17 @@ type MyInt : Int {
 
 ### 3.21 Custom Literal Parsers \[2026-07-11: Phase 5\]
 
-When a variable is declared with a type that has a codec containing a `parse <~` handler, the compiler detects bare identifiers in the initializer position and rewrites them as deferred literals:
+When a variable is declared with a type that has a codec containing a `!> parse:` handler, the compiler detects bare identifiers in the initializer position and rewrites them as deferred literals:
 
 ```brief
 codec HexColor {
     [value >= 0];
     [value <= 0xFFFFFF];
-    parse <~ parse_hex_color;
+    !> parse: parse_hex_color;
 };
 
 type Color : Int {
-    codec <~ HexColor;
+    !> codec: HexColor;
 };
 
 let c: Color = FF00FF;   // FF00FF is a DeferredLiteral
@@ -1861,23 +1862,23 @@ deprecation window.
 ### 3.26 `alloc` Metadata \[2026-07-12: Planned\]
 
 The `alloc` annotation on variable bindings controls where and how memory
-is allocated. It follows the `<~` metadata pattern.
+is allocated. It follows the `!>` metadata pattern.
 
 ```brief
 // Stack allocation (verified no-escape at compile time)
 let buffer: List<Int>;
-buffer <~ alloc("Stack");
+!> buffer: alloc("Stack");
 
 // Physical memory-mapped I/O (MMIO)
-let uart_status: UInt32 <~ alloc(0x4000_2000);
+let uart_status: UInt32 !> buffer: alloc(0x4000_2000);;
 
 // Arena allocation (opaque — backend handles it)
 let node: TreeNode;
-node <~ alloc("Arena", scratchpad);
+!> node: alloc("Arena", scratchpad);
 
 // Placement new (bind to existing pointer)
 let header: PacketHeader;
-header <~ alloc(raw_ptr);
+!> header: alloc(raw_ptr);
 ```
 
 **Frontend validation:**
@@ -1902,9 +1903,9 @@ functions. `volatile` prevents LLVM from reordering or redundantly loading.
 
 ```brief
 defn print_int(n: Int) -> Bool {
-    observable <~ true;
-    llvm_asm <~ "call @printf";
-    interpreter_impl <~ "rust_print_int";
+    !> observable: true;
+    !> llvm_asm: "call @printf";
+    !> interpreter_impl: "rust_print_int";
 };
 ```
 
@@ -2288,17 +2289,17 @@ Unrecognized expression forms produce a compile-time error in Pass 1.
 
 ```brief
 // Scalar derivation
-Type U8  : Bits { Bytes <~ 1; Alignment <~ 1; };
-Type U32 : Bits { Bytes <~ 4; Alignment <~ 4; };
+Type U8  : Bits { !> Bytes: 1; !> Alignment: 1; };
+Type U32 : Bits { !> Bytes: 4; !> Alignment: 4; };
 Type Int : U64;
-Type MmioReg : U32 { Volatile <~ true; };
+Type MmioReg : U32 { !> Volatile: true; };
 
 // Collection derivation
 Type List<T> : Bits {
-    ElementType <~ T;
-    FixedSize <~ false;
-    InsertAt <~ .^Len;
-    ExtractFrom <~ .^Len - 1;
+    !> ElementType: T;
+    !> FixedSize: false;
+    !> InsertAt: .^Len;
+    !> ExtractFrom: .^Len - 1;
 };
 
 Type Stack<T> : List<T> { AllowIndex = false; };
@@ -2535,7 +2536,7 @@ and only the rollback action infrastructure is emitted.
 
 Brief provides a lightweight annotation system for attaching compiler directives
 to items (definitions, transactions, types). Annotations are distinct from
-metadata (`<~`) — they tell the compiler **what to do**, not **what something is**.
+metadata (`!>`) — they tell the compiler **what to do**, not **what something is**.
 
 | Form | Mode | Meaning |
 |------|------|---------|
@@ -2559,71 +2560,63 @@ Annotations appear on the signature line, before the item keyword:
 #!out txn write_port() [*][*] { &port = value; term; };
 ```
 
-### 5.6 Inline Metadata (`<~`)
+### 5.6 Inline Metadata (`!>`)
 
-The `<~` (Annotation Arrow) attaches compile-time metadata to items. Unlike
-`#` annotations (which are compiler directives), `<~` declarations are
+The `!> key: value;` declaration attaches compile-time metadata to items.
+Unlike `#` annotations (which are compiler directives), `!>` declarations are
 declarative data — they describe properties of the annotated item.
+(2026-08-01: the old `<~` (Annotation Arrow) syntax was removed; `!>` is the
+sole metadata-declaration form. Writing `<~` is a parse error.)
 
-**Inside type bodies**, `<~` declares type properties:
+**Inside type bodies**, `!>` declares type properties:
 ```brief
 type UInt32 : Bits {
-    bytes <~ 4;
-    alignment <~ 4;
-    storage <~ Native;
+    !> bytes: 4;
+    !> alignment: 4;
+    !> storage: Native;
 };
 ```
 
-Slots use `:` instead:
-```brief
-type String {
-    ptr: Ptr<UInt8>;
-    len: Int;
-    codec: UInt8;
-    bytes <~ 24;
-};
-```
-
-**Inside definition/transaction bodies**, `<~` at the body top declares
+**Inside definition/transaction bodies**, `!>` at the body top declares
 item-level metadata:
 ```brief
 defn process() -> Int {
-    jira <~ "FIN-8422";
-    priority <~ 2;
+    !> jira: "FIN-8422";
+    !> priority: 2;
     term 42;
 };
 ```
 
-**Inside guard branches**, `<~` declares branch-scoped metadata:
+**Inside guard branches**, `!>` declares branch-scoped metadata:
 ```brief
 txn compute [count < N][count == N] {
     [count % 2 == 0] {
-        priority <~ 1;
+        !> priority: 1;
         &even = even + 1;
     };
 };
 ```
 
-**Variable metadata** is reserved for future use (`x <~ (key: val);` after a
+**Variable metadata** is reserved for future use (`!> x: (key: val);` after a
 `let` binding is recognized syntax but produces a compile-time error).
 
 ### 5.7 Type Property System
 
 Every type carries a `properties` map at runtime (`HashMap<String, PropertyValue>`)
-populated from `<~` declarations in the type body. Well-known property names
+populated from `!>` declarations in the type body. Well-known property names
 like `bytes`, `alignment`, `llvm`, `storage`, and `tbaa` are dual-written to
 both the map AND the corresponding hardcoded `ResolvedType` field during the
 Phase 1B–2 migration window.
 
 | Property | Type | Example | Purpose |
 |----------|------|---------|---------|
-| `bytes` | `Int` | `bytes <~ 8;` | Physical width in bytes |
-| `alignment` | `Int` | `alignment <~ 4;` | Memory alignment |
-| `llvm` | `String` | `llvm <~ "i64";` | LLVM IR type string |
-| `storage` | `Identifier` | `storage <~ Native;` | "Boxed" (i64) or "Native" (float regs) |
-| `tbaa` | `String` | `tbaa <~ "Int";` | TBAA type tree node name |
-| `box` | `String` | `box <~ "ptrtoint#";` | Boxing intrinsic (Native → Boxed) |
-| `unbox` | `String` | `unbox <~ "inttoptr#";` | Unboxing intrinsic (Boxed → Native) |
+| `bytes` | `Int` | `!> bytes: 8;` | Physical width in bytes |
+| `alignment` | `Int` | `!> alignment: 4;` | Memory alignment |
+| `llvm` | `String` | `!> llvm: "i64";` | LLVM IR type string |
+| `storage` | `Identifier` | `!> storage: Native;` | "Boxed" (i64) or "Native" (float regs) |
+| `tbaa` | `String` | `!> tbaa: "Int";` | TBAA type tree node name |
+| `box` | `String` | `!> box: "ptrtoint#";` | Boxing intrinsic (Native → Boxed) |
+| `unbox` | `String` | `!> unbox: "inttoptr#";` | Unboxing intrinsic (Boxed → Native) |
 
 Codegen queries the property system via `TypeUniverse` convenience methods:
 `llvm_type_for()`, `byte_size_for()`, `is_native()`, `tbaa_for()`,

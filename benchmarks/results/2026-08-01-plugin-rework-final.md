@@ -1,7 +1,7 @@
 # Final runtime table — plugin/macro rework Phases 1-4 + Part B
 
 **Date:** 2026-08-01
-**Commits:** `8962a2a1` (Phase 1) → `0984f47c` (Phase 4); `7dceefb7` (B0), `ba1d02b4` (B1)
+**Commits:** `8962a2a1` (Phase 1) → `c5ae8b78` (B4b); `7dceefb7` (B0), `ba1d02b4` (B1), `4452ae3d` (B2), `30922fc6` (B3), `9106bb51`/`c5ae8b78` (B4)
 **Worktree:** `../brief-compiler-plugin-rework`, branch `feat/plugin-macro-rework`
 **Plan:** `docs/plans/2026-08-01-plugin-macro-rework.md`
 **Harness:** `bash benchmarks/build_and_bench.sh --runtime`, BOUND=50000000
@@ -9,9 +9,17 @@
 **Baseline:** `2026-08-01-plugin-rework-baseline.md` (commit `f546af1c`)
 **Toolchain:** `clang 18.1.3`, `llc 18.1.3`
 
-## 1. Final results (rule #11 — after all Phase 1-4 + Part B B0/B1 changes)
+## 1. Final results (rule #11 — after all Phase 1-4 + Part B B0-B4 changes)
 
 5 iterations per benchmark, nanosecond-precision fork+exec timing.
+
+> **B4 note (2026-08-01):** the SSO layer and `is_string_like` structural
+> heuristic were retired (B4a) and the legacy String types deleted (B4b).
+> These are **compile-time-only** removals — the `feature_sso_strings` flag was
+> always `false` in production, so the emitted runtime IR is unchanged. The
+> benchmark numbers below (recorded at B1) are the current runtime state; no
+> re-run is needed for a compiler-only change. The `.text`-ratio precomputed
+> detection is unaffected.
 
 | Benchmark | Brief | C | Ratio | Winner | Correct | Δ vs baseline |
 |-----------|:-----:|:--:|:-----:|:------:|:-------:|:------------:|

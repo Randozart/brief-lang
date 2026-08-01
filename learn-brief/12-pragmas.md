@@ -169,38 +169,39 @@ Diagnostic output shows the compiler's reasoning at compile time:
 [my_func] gpu: NOT offloaded (body contains non-GPU-safe intrinsic)
 ```
 
-## Inline Metadata (`<~`) in Body Blocks
+## Inline Metadata (`!>`) in Body Blocks
 
-The `<~` token attaches declarative metadata inside body blocks. Unlike `#`
-(directives), `<~` data describes properties of the item.
+The `!> key: value;` declaration attaches declarative metadata inside type and
+body blocks. Unlike `#` (directives), `!>` data describes properties of the
+item. (The old `<~` token was removed; `!>` is the sole metadata form.)
 
-**Type bodies**: `name <~ value;` declares a type property:
+**Type bodies**: `!> key: value;` declares a type property:
 
 ```brief
 type Foo : Bits {
-    bytes <~ 8;
-    alignment <~ 4;
-    storage <~ Native;
-    #volatile;  // shorthand for volatile <~ true
+    !> bytes: 8;
+    !> alignment: 4;
+    !> storage: Native;
+    #volatile;  // shorthand for !> volatile: true
 };
 ```
 
-**Definition bodies**: `<~` at the top of a function body declares metadata:
+**Definition bodies**: `!>` at the top of a function body declares metadata:
 
 ```brief
 defn process() -> Int {
-    jira <~ "FIN-8422";   // Documentation metadata
-    priority <~ 2;
+    !> jira: "FIN-8422";   // Documentation metadata
+    !> priority: 2;
     term 42;
 };
 ```
 
-**Guard branches**: `<~` inside a guard block scopes metadata to that branch:
+**Guard branches**: `!>` inside a guard block scopes metadata to that branch:
 
 ```brief
 txn compute [count < N][count == N] {
     [count % 2 == 0] {
-        priority <~ 1;
+        !> priority: 1;
         &even = even + 1;
     };
 };
@@ -208,20 +209,20 @@ txn compute [count < N][count == N] {
 
 ---
 
-## `observable <~ true` — Dead Code Elimination Guard
+## `!> observable: true` — Dead Code Elimination Guard
 
 Side-effecting intrinsics (like `PrintInt#`, `Malloc#`, `Memcpy#`) must
 not be eliminated by the compiler's dead code elimination pass. Use the
-`observable <~ true` metadata to mark a function or intrinsic as having
+`!> observable: true` metadata to mark a function or intrinsic as having
 external side effects:
 
 ```brief
 defn print_hello() {
-    observable <~ true;
+    !> observable: true;
     PrintInt#(42);
 };
 ```
 
-Intrinsics declared with `observable <~ true` in their metadata will
+Intrinsics declared with `!> observable: true` in their metadata will
 always be emitted, even if their return value is unused. This is the
 compile-time equivalent of C's `__attribute__((used))`.

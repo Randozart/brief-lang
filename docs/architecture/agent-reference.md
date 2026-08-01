@@ -35,8 +35,8 @@ Well-known sub-protocols are hardcoded in the casting graph with known LLVM type
 | `#Float<Double>` | `double` |
 | `#Float<FP128>` | `fp128` |
 | `#Float<X86_FP80>` | `x86_fp80` |
-| `#String<UTF8>` | `{ i64, i64 }` |
-| `#String<ASCII>` | `{ i64, i64 }` |
+| `#String<UTF8>` | `ptr` (to `[len][bytes]`) |
+| `#String<ASCII>` | `ptr` (to `[len][bytes]`) |
 
 The file extension determines the default variant (`.bv` → UTF8, `.ebv` →
 ASCII); cross-variant calls need explicit disambiguation. If the compiler must
@@ -104,7 +104,7 @@ frgn XXH64(data_ptr: Int, len: Int, seed: Int) -> Int as frgn__xxh64 from "link/
 ### 1.6 Import / narrowing
 
 - `Int` narrowing is protocol-based (`#Int`/`#UInt` membership, never type
-  names). Fixed-width types (`Int8`…`Int64`) cap the floor via `bits <~ N`.
+  names). Fixed-width types (`Int8`…`Int64`) cap the floor via `!> bits: N`.
 
 ### 1.7 Types
 
@@ -137,7 +137,7 @@ frgn XXH64(data_ptr: Int, len: Int, seed: Int) -> Int as frgn__xxh64 from "link/
   `#` is part of the identifier lexically. No `_` prefix convention.
 - No `inop` keyword — all compiler-known ops are `#` intrinsics with entries in
   `get_intrinsic_signature()` and `execute_intrinsic()`.
-- Side-effecting intrinsics MUST declare `observable <~ true` (`PrintInt#`,
+- Side-effecting intrinsics MUST declare `!> observable: true` (`PrintInt#`,
   `Malloc#`, `Memcpy#`, …) so DCE cannot eliminate the call.
 
 ---
@@ -291,7 +291,7 @@ lookups are fine. Reference: commit `139c345`,
 - `x == x` self-references to force liveness; synthetic exit-condition fields
 - Hardcoded `from "libruntime"` (use `from "c"` / `from "link/brief_rt.c"`);
   missing `from` on `frgn`
-- `#export` (use `export defn`); `#out` (use `observable <~ true`)
+- `#export` (use `export defn`); `#out` (use `!> observable: true`)
 - Hardcoded runtime declares (`__rt_init` must be `frgn` in `std/rt.bv`)
 - Name-based interpreter dispatch (dispatch on `Value::HashMap`, not names);
   `"None"`/`"Err"` discriminant magic (use declaration order); runtime type

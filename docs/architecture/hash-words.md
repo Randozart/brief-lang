@@ -80,9 +80,9 @@ type Int {
 
 | Token | Meaning | Used In |
 |-------|---------|---------|
-| `#L` | Left operand of `<-` | Strategy property bindings: `InsertAt <~ fn(#L, #R)` |
-| `#R` | Right operand of `<-` | Strategy property bindings: `ExtractFrom <~ fn(#R)` |
-| `#T` | Type parameter of generic collection | Strategy property bindings: `pop as #T` |
+| `#L` | Left operand of `<-` | Strategy op bindings: `op InsertAt: fn(#L, #R)` |
+| `#R` | Right operand of `<-` | Strategy op bindings: `op ExtractFrom: fn(#R)` |
+| `#T` | Type parameter of generic collection | Strategy op bindings: `pop as #T` |
 
 ## Semantics
 
