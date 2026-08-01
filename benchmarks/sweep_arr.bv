@@ -3,7 +3,7 @@
 // f[j] reads f[j], f[j+1], f[j+15] (cyclic) each iteration — the dense
 // cross-indexed pattern through a single array state slot.
 
-let N: Int = GetEnvInt!("BOUND");
+let N: Int = get_env_int!("BOUND");
 let f: Float[16];
 let i: Int = 0;
 

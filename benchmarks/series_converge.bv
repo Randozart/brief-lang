@@ -7,7 +7,7 @@
 //
 // C reference: series_converge_c.c
 
-let N: Int = GetEnvInt!("BOUND");
+let N: Int = get_env_int!("BOUND");
 let i: Int = 0;
 let last: Float = 0.0;
 let x: Float = 0.5;

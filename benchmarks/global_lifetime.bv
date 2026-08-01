@@ -10,7 +10,7 @@
 //
 // C reference: global_lifetime_c.c
 
-let N: Int = GetEnvInt!("BOUND");
+let N: Int = get_env_int!("BOUND");
 let buf: Ptr<Int> = Malloc#(64 * 8) as Ptr<Int>;
 let sum: Int = 0;
 
@@ -18,7 +18,7 @@ node life [sum < N][sum == N] {
     buf[sum % 64] = sum;
     sum = sum + 1;
     when sum % 5000000 == 0 {
-        PrintLn!(buf[sum % 64]);
+        println!(buf[sum % 64]);
     };
     term;
 };
