@@ -113,7 +113,14 @@ pub fn emit_statement(backend: &mut LlvmBackend, out: &mut String, stmt: &Statem
                                 .and_then(|f| f.iter().find(|(n, _)| n == name))
                                 .map(|(_, ty)| (ty.clone(), ()))
                                 .unwrap_or((Type::int(), ()));
-                            let llvm_ty = backend.llvm_type(&slot_ty);
+                            // 2026-08-01 (D3): a Ptr-typed self-slot stores the
+                            // i64 HANDLE (the value is already ptrtoint'd) —
+                            // not `ptr`, matching the self-slot read.
+                            let llvm_ty = if matches!(slot_ty, Type::Ptr(_)) {
+                                "i64".to_string()
+                            } else {
+                                backend.llvm_type(&slot_ty)
+                            };
                             let store_val = backend.ensure_typed_value(out, indent, &llvm_ty, &val.name, Some(val.ty.clone()), backend.ctx.type_universe.clone().as_ref());
                             writeln!(out, "{}store {} {}, ptr {}", indent, llvm_ty, store_val, gep).ok();
                             backend.fun.last_val_temps.insert(name.clone(), val.name.clone());

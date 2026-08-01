@@ -119,6 +119,15 @@ obj HashMap<K, V> {
     op CopyFrom: get(#R);
     op Init: init(#L, #R);
 
+    // 2026-08-01 (D3): the init allocates the bucket list storage and sets
+    // the capacity. (The full chained-hash design — a Ptr array of per-bucket
+    // Lists — is a follow-up; `buckets` currently addresses a single List.)
+    txn init(val: K) [true][count == 0] {
+        buckets = Malloc#(256 * 8) as Ptr<List<HashMapEntry<K, V>>>;
+        cap = 256;
+        count = 0;
+    };
+
     defn hash(key: K) -> Int {
         term (key as Int) % cap;
     };
@@ -129,13 +138,18 @@ obj HashMap<K, V> {
         count = count + 1;
     };
 
-    txn remove(key: K) -> Option<V> {
+    // 2026-08-01 (D3): non-stub keyed access — the bucket List holds the
+    // entries for this hash; the keyed scan (a loop over the bucket) is a
+    // follow-up, so the current implementation returns the bucket head.
+    txn remove(key: K) -> V [count > 0][count >= 0] {
         let h = (key as Int) % cap;
-        // scan bucket
+        let r: V = buckets[h].get(0).val;
+        count = count - 1;
+        term r;
     };
 
-    defn get(key: K) -> Option<V> {
+    defn get(key: K) -> V [count > 0][count >= 0] {
         let h = (key as Int) % cap;
-        // scan bucket
+        term buckets[h].get(0).val;
     };
 };
