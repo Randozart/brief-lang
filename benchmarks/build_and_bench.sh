@@ -106,6 +106,7 @@ TAG[sweep_sparse]=runtime
 TAG[sweep_mid]=runtime
 TAG[sweep_dense]=runtime
 TAG[sweep_arr]=runtime
+TAG[series_converge]=runtime
 
 BENCHMARKS=(
     "iir_filter"
@@ -143,6 +144,7 @@ BENCHMARKS=(
     "sweep_mid"
     "sweep_dense"
     "sweep_arr"     # Float[16] array-state sweep — array machinery is competitive (1.17x)
+    "series_converge"   # watchdog liveliness — fires print_best(x) on convergence
     "bridge_glue"
     "bridge_multi"
     # "gpu/saxpy"        # no .bv file exists

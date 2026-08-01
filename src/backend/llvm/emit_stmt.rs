@@ -247,7 +247,13 @@ pub fn emit_statement(backend: &mut LlvmBackend, out: &mut String, stmt: &Statem
                 writeln!(out, "{}call void @__web_flush_state(i32 0, i32 0)", indent).ok();
             }
             if let Some(val) = val {
-                let reg = backend.emit_expr(out, val, indent);
+                let mut reg = backend.emit_expr(out, val, indent);
+                // 2026-08-01 (C3): a boxed Float param returned from a defn
+                // (`term v`) is an i64 handle — unbox through the float cache so
+                // `ret float` receives the actual float, not the handle.
+                if let Some(cached) = backend.fun.reg_float_cache.get(&reg.name).cloned() {
+                    reg = TypedRegister { name: cached, ty: reg.ty.clone() };
+                }
                 if backend.fun.callable_txn_result.is_some() {
                     // 2026-07-18: In a callable txn, term stores to %result and
                     // branches to post (convergence loop). The 'ret' is at done:.

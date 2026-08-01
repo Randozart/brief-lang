@@ -1,0 +1,28 @@
+// series_converge — watchdog liveliness benchmark.
+// The series `x = x * 0.9999 + 0.0001` converges toward 1.0. The liveliness
+// watchdog `?[(x - last)^2 > eps]` fires when the series stops changing
+// (|x - last| <= sqrt(eps)), calling `print_best(x)` with the converged value.
+// The counter bound (get_env_int) keeps the loop runtime-determined; the
+// watchdog fires long before the bound.
+//
+// C reference: series_converge_c.c
+
+let N: Int = GetEnvInt!("BOUND");
+let i: Int = 0;
+let last: Float = 0.0;
+let x: Float = 0.5;
+
+defn print_best(v: Float) -> Float {
+    __print_float(v);
+    __print_char(10);
+    term v;
+};
+
+node converge [
+    i < N
+][i == N] ?[(x - last) * (x - last) > 0.000001] -> print_best(x) {
+    last = x;
+    x = last * 0.9999 + 0.0001;
+    i = i + 1;
+    term;
+};

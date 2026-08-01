@@ -466,3 +466,11 @@ int64_t ShellCmd(int64_t cmd_bstr) {
 // (uses Load# + convergent txn). Find byte substring in byte string.
 // Returns offset or -1.
 // (implemented in pure Brief in lib/std/types/utf8view.bv)
+
+// 2026-08-01 (C3): required-watchdog failure exit. A `![cond]` watchdog that
+// fires without an on-fire handler is a fatal program error — the loop engine
+// calls this on the fire path.
+void __watchdog_fail(void) {
+    fprintf(stderr, "brief: required watchdog fired\n");
+    exit(1);
+}

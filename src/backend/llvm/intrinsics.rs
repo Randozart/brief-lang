@@ -70,12 +70,19 @@ pub fn emit_intrinsic_call(
         }
         "PrintFloat#" => {
             let a = backend.emit_expr(out, &args[0], indent);
+            // 2026-08-01 (C3): a boxed Float param (i64 handle boxed at defn
+            // entry) must be unboxed through the float cache before the call —
+            // llvm_type() reports "float" from the brief type, but the register
+            // is really i64, and passing the handle to __print_float is an ABI
+            // mismatch (`float %ac0` where %ac0 is i64).
+            let unboxed = backend.fun.reg_float_cache.get(&a.name).cloned()
+                .unwrap_or_else(|| a.name.clone());
             let (arg_llvm, fn_name) = if a.ty == Type::float64() {
                 ("double", "__print_float64")
             } else {
                 ("float", "__print_float")
             };
-            writeln!(out, "{}{} = call i64 @{}({} {})", indent, v, fn_name, arg_llvm, a.name).ok();
+            writeln!(out, "{}{} = call i64 @{}({} {})", indent, v, fn_name, arg_llvm, unboxed).ok();
             return BTypedRegister { name: v.to_string(), ty: Type::int() };
         }
         "PrintChar#" => {

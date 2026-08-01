@@ -1806,6 +1806,18 @@ impl LlvmBackend {
         param_llvm_ty: &str,
         indent: &str,
     ) -> TypedRegister {
+        // 2026-08-01 (C3): a boxed Float param (i64 handle boxed at defn entry)
+        // has its native float cached (reg_float_cache maps boxed→native) —
+        // llvm_type() reports "float" from the brief type, so src_llvm == param
+        // would early-return the i64 handle. Unbox through the cache FIRST.
+        if matches!(param_llvm_ty, "float" | "double") {
+            if let Some(cached) = self.fun.reg_float_cache.get(&arg_reg.name) {
+                return TypedRegister {
+                    name: cached.clone(),
+                    ty: if param_llvm_ty == "float" { Type::float() } else { Type::float64() },
+                };
+            }
+        }
         let src_llvm = self.llvm_type(&arg_reg.ty);
         if src_llvm == param_llvm_ty {
             return arg_reg.clone();
@@ -2120,7 +2132,7 @@ impl LlvmBackend {
     /// 2026-07-17: defn functions expect (ptr %state, ...) as their first parameter.
     /// We must prepend the state pointer and adapt argument types from register
     /// types to the function's parameter types (via defn_params).
-    fn emit_user_call(
+    pub(super) fn emit_user_call(
         &mut self,
         out: &mut String,
         v: &str,

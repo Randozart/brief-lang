@@ -2635,6 +2635,7 @@ impl LlvmBackend {
                                 };
                                 self.emit_folded_loop_shape(
                                     &mut out, &analysis, node, counter_idx, shape, &txn_body, post_hoist,
+                                    txns[0].1.contract.watchdog.as_ref(),
                                 )
                             }
                         }
@@ -3377,7 +3378,7 @@ impl LlvmBackend {
     ///   `analysis.swan_songs`); LICM hoisting runs inside.
     /// * `post_hoist` — the hoisted post-loop swan-song tail, assigned to
     ///   `pending_post_hoist` for Path B emission.
-    fn emit_folded_loop_shape(
+     fn emit_folded_loop_shape(
         &mut self,
         out: &mut String,
         analysis: &crate::backend::AnalysisResults,
@@ -3386,6 +3387,7 @@ impl LlvmBackend {
         shape: &crate::analysis::loop_shape::LoopShape,
         txn_body: &[Statement],
         post_hoist: Vec<Vec<Statement>>,
+        watchdog: Option<&crate::ast::top::WatchdogSpec>,
     ) -> bool {
         let bp = node.bounded_pre.as_ref().unwrap();
         // 2026-07-31: Bound resolution maps the structured Bound to the backend's
@@ -3485,6 +3487,7 @@ impl LlvmBackend {
                     self.emit_countable_countdown_main(
                         out, &node.name, counter_idx, total_idx, total_const_name,
                         &node.write_set, &bp.var, batch,
+                        watchdog,
                     );
                     return true;
                 }
@@ -3538,6 +3541,7 @@ impl LlvmBackend {
         self.emit_countable_main(
             out, &node.name, counter_idx, total_idx, total_const_name,
             &inner_body, &node.write_set, is_decreasing, Some(&bp.var),
+            watchdog,
         );
         true
     }

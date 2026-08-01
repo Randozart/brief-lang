@@ -198,7 +198,7 @@ impl LlvmBackend {
     ///
     /// 2026-07-13: Extracted into a single function with max 2-level
     /// nesting. Loop setup, body, and latch are delegated to helpers.
-    pub(crate) fn emit_countable_main(
+     pub(crate) fn emit_countable_main(
         &mut self,
         out: &mut String,
         txn_name: &str,
@@ -209,6 +209,7 @@ impl LlvmBackend {
         write_set: &HashSet<String>,
         is_decreasing: bool,
         counter_var: Option<&str>,
+        watchdog: Option<&crate::ast::top::WatchdogSpec>,
     ) {
         writeln!(out, "define i32 @main() local_unnamed_addr {} {{", "#0").ok();
         writeln!(out, "entry:").ok();
@@ -318,7 +319,34 @@ impl LlvmBackend {
         } else {
             writeln!(out, "  {} = icmp slt i64 {}, {}", done_reg, cmp_counter, bound_reg).ok();
         }
-        writeln!(out, "  br i1 {}, label %.cm_body, label %{}", done_reg, exit_label).ok();
+        // 2026-08-01 (C2/C3): liveliness watchdog for the memory-counter loop —
+        // continue while `?[condition]` holds; on false, fire the handler with
+        // the last computed value and exit (mirrors the countdown path).
+        if let Some(wd) = watchdog {
+            writeln!(out, "  br i1 {}, label %.cmwd_{}, label %{}", done_reg, self.fun.txn_counter, exit_label).ok();
+            let wd_c0 = self.fun.txn_counter;
+            self.fun.txn_counter += 1;
+            writeln!(out, ".cmwd_{}:", wd_c0).ok();
+            self.fun.cur_block = Some(format!(".cmwd_{}", wd_c0));
+            let cond_reg = self.emit_expr(out, &wd.condition, "  ");
+            let bool_reg = self.as_bool_reg(out, "  ", &cond_reg);
+            writeln!(out, "  br i1 {}, label %.cm_body, label %.cmwdf_{}", bool_reg, wd_c0).ok();
+            writeln!(out, ".cmwdf_{}:", wd_c0).ok();
+            self.fun.cur_block = Some(format!(".cmwdf_{}", wd_c0));
+            if let Some(on_fire) = &wd.on_fire {
+                let call_reg = self.fun.gen_reg();
+                let args: Vec<crate::ast::Expr> = match &on_fire.arg {
+                    Some(name) => vec![crate::ast::Expr::Identifier(name.clone())],
+                    None => Vec::new(),
+                };
+                self.emit_user_call(out, &call_reg, &on_fire.handler, &args, "  ");
+            } else if wd.is_required {
+                writeln!(out, "  call void @__watchdog_fail()").ok();
+            }
+            writeln!(out, "  br label %{}", exit_label).ok();
+        } else {
+            writeln!(out, "  br i1 {}, label %.cm_body, label %{}", done_reg, exit_label).ok();
+        }
         writeln!(out, ".cm_body:").ok();
 
         // 2026-07-17: Initialize pending_phi_backedge with identity values.
@@ -736,6 +764,7 @@ impl LlvmBackend {
         write_set: &HashSet<String>,
         counter_var: &str,
         batch: &crate::analysis::batch_shape::BatchShape,
+        watchdog: Option<&crate::ast::top::WatchdogSpec>,
     ) {
         let batch_size = batch.batch_size as i64;
         writeln!(out, "define i32 @main() local_unnamed_addr {} {{", "#0").ok();
@@ -810,7 +839,35 @@ impl LlvmBackend {
         };
         let done_reg = self.fun.next_reg_with_prefix("cdd");
         writeln!(out, "  {} = icmp slt i64 {}, {}", done_reg, cmp_counter, bound_reg).ok();
-        writeln!(out, "  br i1 {}, label %.cdb_{}, label %.cde_{}", done_reg, c0, c0).ok();
+        // 2026-08-01 (C2/C3): liveliness watchdog — the loop continues while
+        // `?[condition]` holds; when it stops, fire the on-fire handler with
+        // the last computed value and exit. The check sits between the header
+        // and the body (per-iteration), branching to a cold `.wdf_` fire block.
+        if let Some(wd) = watchdog {
+            writeln!(out, "  br i1 {}, label %.cdw_{}, label %.cde_{}", done_reg, c0, c0).ok();
+            writeln!(out, ".cdw_{}:", c0).ok();
+            self.fun.cur_block = Some(format!(".cdw_{}", c0));
+            let cond_reg = self.emit_expr(out, &wd.condition, "  ");
+            let bool_reg = self.as_bool_reg(out, "  ", &cond_reg);
+            writeln!(out, "  br i1 {}, label %.cdb_{}, label %.wdf_{}", bool_reg, c0, c0).ok();
+            // ── Watchdog fired (COLD) ──────────────────────────
+            writeln!(out, ".wdf_{}:", c0).ok();
+            self.fun.cur_block = Some(format!(".wdf_{}", c0));
+            if let Some(on_fire) = &wd.on_fire {
+                let call_reg = self.fun.gen_reg();
+                let args: Vec<crate::ast::Expr> = match &on_fire.arg {
+                    Some(name) => vec![crate::ast::Expr::Identifier(name.clone())],
+                    None => Vec::new(),
+                };
+                self.emit_user_call(out, &call_reg, &on_fire.handler, &args, "  ");
+            } else if wd.is_required {
+                // Required watchdog with no handler: error exit.
+                writeln!(out, "  call void @__watchdog_fail()").ok();
+            }
+            writeln!(out, "  br label %.cde_{}", c0).ok();
+        } else {
+            writeln!(out, "  br i1 {}, label %.cdb_{}, label %.cde_{}", done_reg, c0, c0).ok();
+        }
 
         // ── Body (ONE block) ────────────────────────────────────
         writeln!(out, ".cdb_{}:", c0).ok();
