@@ -417,3 +417,21 @@ conflicts (git-silent):
    benchmark files move to `get_env_int!`/`println!`.
 4. Float-param unboxing composes with their B1 `#String` changes.
 5. Concurrency gate (now enforced) — our single-node benchmarks must pass.
+
+**Merge result (2026-08-01, committed `20411019` + `fa4909a0`):**
+- Textual conflicts resolved: `BUGS.md` (both bug logs kept), `emit_toplevel.rs`
+  (our A7/A8 obj/init functions + main's B4 comment + the `!range` consolidated
+  to main's `emit_range_metadata`, our `range_metadata` removed).
+- Semantic reconciliation: the countdown functions keep our `watchdog` param
+  AND adopt their `emit_main_header` (`main(i32,ptr)`); the `%state` alloca
+  follows the header; the watchdog blocks (`.cdw_`/`.wdf_`/`.cmwd_`/`.cmwdf_`)
+  + `cur_block`/`body_final`/`guard_pred` phis + array-state stores all survive.
+- Macro renames: `GetEnvInt!`→`get_env_int!`, `PrintLn!`→`println!` in
+  stack_push_pop/sweep_arr/series_converge/global_lifetime.
+- Verified: 1364 tests green; all five of our benchmarks build, llc-verify,
+  and MATCH C at -O3 with the merged signature; full harness **zero MISMATCH**
+  (queue_drain 0.56x, stack_push_pop 0.47x, global_lifetime 0.47x, sweep_arr
+  1.17x, series_converge 2.00x — the last two C-win but MATCH).
+- Praetor: only pre-existing baseline diagnostics (protocol_llvm_type
+  complexity, allocation.rs O(n²), emit_folded_loop_shape 9 params — a dispatch
+  hub already over the limit on both branches).
