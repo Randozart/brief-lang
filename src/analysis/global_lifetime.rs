@@ -31,11 +31,23 @@ pub fn analyze(
     node_order: &[String],
 ) -> GlobalLifetime {
     let state_fields: HashSet<String> = field_initializers.keys().cloned().collect();
+    // A field with a MANUAL Free# is user-managed — the scheduler must NOT
+    // also free it (a double-free). Detect manual frees across all txns.
+    let manually_freed: HashSet<String> = items
+        .iter()
+        .filter_map(|i| match i {
+            TopLevel::Transaction(t) => Some(t.body.as_slice()),
+            _ => None,
+        })
+        .flat_map(|body| body.iter())
+        .filter_map(|stmt| manual_free_target(stmt, &state_fields))
+        .collect();
     // Only heap-allocated (Malloc#/Alloc#) fields are schedulable — a plain
     // Ptr slot pointing at borrowed/static memory must never be freed.
     let heap_backed: Vec<String> = field_initializers
         .iter()
         .filter(|(_, init)| contains_heap_alloc(init))
+        .filter(|(name, _)| !manually_freed.contains(name.as_str()))
         .map(|(name, _)| name.clone())
         .collect();
     if heap_backed.is_empty() {
@@ -103,6 +115,47 @@ fn contains_heap_alloc(expr: &Expr) -> bool {
         Expr::AddrOf(inner) => contains_heap_alloc(inner),
         Expr::Deref(inner) => contains_heap_alloc(inner),
         _ => false,
+    }
+}
+
+/// The state field a manual `Free#(field)` targets, if the statement is one.
+/// 2026-08-01 (D2): a manually-freed field is user-managed — the scheduler
+/// must NOT also free it (a double-free).
+fn manual_free_target(stmt: &crate::ast::Statement, state_fields: &HashSet<String>) -> Option<String> {
+    fn walk_expr(e: &Expr, state_fields: &HashSet<String>) -> Option<String> {
+        match e {
+            Expr::Call(name, args, _) => {
+                if name == "Free#" {
+                    if let Some(arg) = args.first() {
+                        // `Free#(buf as Ptr<...>)` — the arg may be a cast.
+                        let mut inner = arg;
+                        while let Expr::Cast(i, _) = inner {
+                            inner = i;
+                        }
+                        if let Expr::Identifier(n) = inner {
+                            if state_fields.contains(n) {
+                                return Some(n.clone());
+                            }
+                        }
+                    }
+                    return None;
+                }
+                args.iter().find_map(|a| walk_expr(a, state_fields))
+            }
+            Expr::Cast(inner, _) => walk_expr(inner, state_fields),
+            Expr::AddrOf(inner) => walk_expr(inner, state_fields),
+            _ => None,
+        }
+    }
+    match stmt {
+        crate::ast::Statement::Expression(e) => walk_expr(e, state_fields),
+        crate::ast::Statement::Guarded(_, body) => {
+            body.iter().find_map(|s| manual_free_target(s, state_fields))
+        }
+        crate::ast::Statement::Block(stmts) => {
+            stmts.iter().find_map(|s| manual_free_target(s, state_fields))
+        }
+        _ => None,
     }
 }
 
@@ -186,6 +239,47 @@ mod tests {
         let fields = HashMap::from([field("plain", false)]);
         let gl = analyze(&items, &fields, &["life".to_string()]);
         assert!(gl.free_after.is_empty());
+    }
+
+    #[test]
+    fn manually_freed_field_is_never_scheduled() {
+        // 2026-08-01 (D2): a manual `Free#(buf)` means the user manages the
+        // field — the scheduler must not ALSO free it (a double-free).
+        let items = vec![TopLevel::Transaction(crate::ast::Transaction {
+            name: "life".into(),
+            is_reactive: true,
+            is_async: false,
+            type_params: vec![],
+            parameters: vec![],
+            output_type: None,
+            outputs: vec![],
+            contract: crate::ast::top::Contract {
+                pre_condition: crate::ast::Expr::Bool(true),
+                post_condition: crate::ast::Expr::Bool(true),
+                watchdog: None,
+                span: None,
+                explicit: false,
+            },
+            body: vec![
+                crate::ast::Statement::Expression(Expr::Identifier("buf".to_string())),
+                crate::ast::Statement::Expression(Expr::Call(
+                    "Free#".to_string(),
+                    vec![Expr::Cast(
+                        Box::new(Expr::Identifier("buf".to_string())),
+                        crate::ast::Type::Custom("Ptr".to_string()),
+                    )],
+                    None,
+                )),
+            ],
+            metadata: Default::default(),
+            derivation: None,
+            modifiers: vec![],
+            span: None,
+            doc: None,
+        })];
+        let fields = HashMap::from([field("buf", true)]);
+        let gl = analyze(&items, &fields, &["life".to_string()]);
+        assert!(gl.free_after.is_empty(), "manually-freed field must be excluded");
     }
 
     #[test]
