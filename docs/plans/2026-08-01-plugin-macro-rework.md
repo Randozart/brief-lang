@@ -771,6 +771,22 @@ intent, matches its "not thread pool" comment). 4 gate unit tests.
 `[true]` never present in generated preconditions (assert on emitted IR);
 `defn main` runs once; collision with `__script_done` errors.
 
+**Status (2026-08-01): IMPLEMENTED.** New `src/plugin/script_plugin.rs`
+(Parsed stage, registered after entry): a script-style program (no reactive
+node/txn, no `sync<group>`, no non-`main` defn, no explicit `entry!`) gets a
+synthesized one-shot opening node:
+`node __script_main [__script_done == false][__script_done] { ...;
+__script_done = true; }`. Two cases: (1) `defn main()` → the node calls
+`main()` once (fixes the dead-code gap — `brief_main` was defined but never
+invoked); (2) bare top-level lets/consts → the node runs them in order.
+`[true]` is never emitted; `__script_main`/`__script_done` are
+compiler-reserved (collision = error). Supporting fixes: `emit_user_call`
+now maps a call to `main` → `brief_main` (the defn rename), and the
+`wrap_implicit_entry` parser placeholder was removed. Verified:
+`.smoke/main_script.bv` (defn main runs once), `.smoke/script_let.bv`
+(one-shot bare-let script). 6 script plugin tests; the `sync<group>`/entry!
+programs are correctly NOT wrapped.
+
 ### Phase B2 — Bits model: content-view casts + encoding door (gated — B-D6)
 
 **Goal:** `#String → #Bit` yields the buffer pointer (content view);

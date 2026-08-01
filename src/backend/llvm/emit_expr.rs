@@ -2152,13 +2152,18 @@ impl LlvmBackend {
             .and_then(|types| types.first().cloned())
             .unwrap_or(Type::int());
         let ret_llvm = self.llvm_type(&ret_type);
+        // 2026-08-01 (Phase 4): `defn main` is renamed to `brief_main` at
+        // emission (emit_definition) to avoid colliding with the runtime
+        // entry point; calls to `main` must use the same renamed symbol or
+        // they hit an undefined `@main`.
+        let symbol = if name == "main" { "brief_main" } else { name };
         writeln!(
             out,
             "{}{} = call {} @{}({})",
             indent,
             v,
             ret_llvm,
-            name,
+            symbol,
             call_args.join(", ")
         )
         .ok();

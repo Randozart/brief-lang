@@ -372,9 +372,8 @@ impl<'a> Parser<'a> {
             let item = self.parse_top_level()?;
             items.push(item);
         }
-        // Implicit entry wrapping: if no explicit [#] defns/txns, and we have
-        // top-level statements, wrap them in an implicit transaction.
-        self.wrap_implicit_entry(&mut items);
+        // 2026-08-01 (Phase 4): implicit entry wrapping is owned by the script
+        // plugin (script_plugin.rs) — it synthesizes the one-shot opening node.
         Ok(items)
     }
 
@@ -1233,13 +1232,6 @@ impl<'a> Parser<'a> {
                 })
             }
         }
-    }
-
-    /// Wrap top-level statements in an implicit entry transaction if needed.
-    /// 2026-08-01 (Phase 2): the `[#]` marker is gone — the entry!/args!
-    /// plugin (Phase 3) owns one-shot opening-node synthesis.
-    fn wrap_implicit_entry(&self, _items: &mut Vec<TopLevel>) {
-        // Placeholder: full implementation in Phase 16E
     }
 
     /// 2026-07-14: Parse: type Name : Parent { slot; slot; }

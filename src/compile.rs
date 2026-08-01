@@ -873,6 +873,7 @@ fn build_plugin_manager(file_path: &str, opts: &BuildOptions) -> PluginManager {
     pm.register(Box::new(brief_compiler::plugin::env_plugin::EnvPlugin));
     pm.register(Box::new(brief_compiler::plugin::print_plugin::PrintPlugin));
     pm.register(Box::new(brief_compiler::plugin::entry_plugin::EntryPlugin));
+    pm.register(Box::new(brief_compiler::plugin::script_plugin::ScriptPlugin));
 
     // Apply per-extension filtering from config/targets.toml
     let ext = get_extension(file_path);

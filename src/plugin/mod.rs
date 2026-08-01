@@ -27,6 +27,7 @@ pub mod env_plugin;
 pub mod intrinsics;
 pub mod loader;
 pub mod print_plugin;
+pub mod script_plugin;
 
 use crate::ast::{StageKind, TopLevel};
 use crate::target::TargetConfig;
