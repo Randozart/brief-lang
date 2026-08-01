@@ -564,3 +564,27 @@ Every proposed intrinsic must have at least 3 distinct non-GLUE use cases:
 | `VecTopLevel` | Multiple AST nodes | `Insert$` |
 | `Void` | No value | `FileWrite$`, actions |
 | `Map` | Key-value pairs | `ConfigGet$` (output) |
+
+---
+
+## `!`-suffix front-end plugins (2026-08-01, Phase 1-4)
+
+Separate from the `$` compile-time macros above, Brief has `!`-suffix
+**front-end plugins** that rewrite `name!(args)` intercepts at the Parsed
+stage. These are ordinary Rust plugins (see `src/plugin/`), registered for
+the `.bv` target in `config/targets.toml`. They are NOT `$` macros and do
+NOT use the macro engine.
+
+| Macro | Plugin | Expansion |
+|-------|--------|-----------|
+| `print!(...)` / `println!(...)` | `print` | Rust-style format strings → `__print_*` runtime calls |
+| `get_env!("NAME")` / `get_env_int!("NAME")` | `env` | stdlib `get_env` / `get_env_int` wrappers |
+| `entry!("<cmd>")` | `entry` | one-shot CLI subcommand guard: `entry_cmd() == "<cmd>" && !__entry_<cmd>_done` + flip |
+| `args!("--flag")` / `args!("--flag", T)` | `entry` | snapshot state field from `__argv_has` / `__argv_value` |
+
+Naming convention: `!`-suffix = compile-time expansion of a plugin
+intercept; `$`-suffix = compile-time macro-system intrinsic; `#`-suffix =
+backend intrinsic (`Sqrt#`); `#`-prefix = hashword (`#Int`). The removed
+`[#]` entry marker is replaced by `entry!`/`args!` (Phase 2-3).
+
+See `docs/plans/2026-08-01-plugin-macro-rework.md` for the full design.
