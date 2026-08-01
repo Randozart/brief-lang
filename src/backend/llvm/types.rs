@@ -49,6 +49,13 @@ pub fn type_size(ty: &Type, universe: Option<&crate::type_universe::TypeUniverse
             if rt.properties.contains_key("Cast.#Int") || rt.properties.contains_key("Cast.#UInt") {
                 return 8; // conservative default for Int/UInt
             }
+            // 2026-08-01: Bits model (B0) — String is a flexible-width primordial
+            // (bytes=0) whose LLVM type is a pointer; it is one machine word on
+            // every target, so the conservative default is the pointer word (8).
+            // Mirrors the Int/UInt flexible fallback above.
+            if rt.properties.contains_key("Cast.#String") {
+                return 8;
+            }
             if rt.properties.contains_key("Cast.#Float") {
                 if let Some(crate::ast::PropertyValue::Int(bits)) = rt.properties.get("bits") {
                     return (*bits as u64) / 8;

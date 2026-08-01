@@ -231,7 +231,8 @@ contracts.
   never amend; never use `git checkout --`/`git restore`.
 - **Per-commit checklist**: `cargo test --lib` green; `cargo build` no new
   warnings; Praetor on changed files (complexity ≤ 15, lines ≤ 100, params ≤ 6;
-  one `--target` per invocation); Kani harnesses for safety-critical code;
+  `praetor validate --warn --target <dir>` per changed directory — **`--target`
+  takes a DIRECTORY, never a file**); Kani harnesses for safety-critical code;
   update architecture docs if API contracts changed; log bugs in BUGS.md.
 - **Regression guard**: inspect every match arm (silent regressions come from
   removed arms); verify optimized IR, not just tests; update architecture
@@ -253,6 +254,22 @@ contracts.
 - **Benchmark**: `bash benchmarks/build_and_bench.sh` — always use this harness.
   Ad-hoc timing produces false hangs and imprecise numbers.
 - **Compare against baseline**: `bash benchmarks/compare_baseline.sh <name>`
+- **Praetor (changed files)**: `praetor validate --warn --target <dir>` where
+  `<dir>` is the **directory** containing your changed files (e.g.
+  `praetor validate --warn --target src/backend/llvm`). `--target` is a
+  directory, **not** a file — `--target src/foo.rs` prints "target is not a
+  directory" and **silently passes without analyzing anything** (exit 0). To
+  check a single file, copy it to a temp dir and target that dir:
+  `mkdir -p /tmp/pt && cp src/foo.rs /tmp/pt/ && praetor validate --warn --target /tmp/pt`.
+  Pre-existing diagnostics in untouched files are the project baseline — the
+  gate is "no NEW diagnostics in changed files", not a clean tree.
+- **Praetor (full project)**: `praetor report` (markdown/html to stdout or
+  `--output`). `praetor validate` exits 1 on ERROR-level diagnostics;
+  `--warn` also fails on warnings. See `docs/architecture/praetor-log.md`.
+- **Praetor policy (2026-08-01)**: run Praetor on changed files as part of the
+  per-commit checklist to **keep the codebase clean**; there is **no pre-commit
+  git hook** (decided — do not re-enable). `[intent]` validation stays
+  **disabled** in `.praetor.toml` (do not enable).
 
 ## Reference Index
 

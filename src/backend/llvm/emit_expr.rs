@@ -253,6 +253,20 @@ impl LlvmBackend {
                             name: fl,
                             ty: Type::float(),
                         }
+                    } else if self.is_protocol_member(&brief_ty, "#String") {
+                        // 2026-08-01 (B0): A Brief String value is a ptr to a
+                        // length-prefixed [len][bytes] buffer. State slots hold
+                        // the address as an i64 machine word (uniform %State
+                        // layout, push_field_type), so a String field load must
+                        // inttoptr the slot back to the ptr representation —
+                        // mirroring the float unboxing branches above and the
+                        // Ptr<T> state-adapter pattern.
+                        let str_p = self.fun.gen_reg();
+                        writeln!(out, "{}{} = inttoptr i64 {} to ptr", indent, str_p, loaded).ok();
+                        TypedRegister {
+                            name: str_p,
+                            ty: brief_ty,
+                        }
                     } else {
                         TypedRegister {
                             name: loaded,
@@ -1274,17 +1288,21 @@ impl LlvmBackend {
             });
         let g = format!("@str.{}", si);
         // 2026-07-22: The handle is a pointer to the start of the struct
-        // {i64 data_ptr, i64 length, [N x i8] chars}, so that handle[1]
-        // (getelementptr i64, ptr %handle, i64 1) reads the length field.
-        // Do NOT add offset — emit_load_length expects the struct pointer.
+        // {i64 length, [N x i8] chars}, so that the runtime's brief_str_to_c
+        // reads *(int64_t*)handle as the length and data at handle+8 — the
+        // [len][bytes] buffer layout. Do NOT add offset — emit_load_length
+        // expects the struct pointer.
+        // 2026-08-01 (B0): the value register IS the pointer (a Brief String
+        // value is a ptr to [len][bytes] in every type-claiming site). The
+        // old ptrtoint→i64 boxing here was one arm of the split-brain; the
+        // ptr is passed straight to consumers (PrintStr#, frgn calls, state
+        // adapt_to_i64 which does the ptrtoint for the i64 slot).
         let str_p = self.fun.gen_reg();
         writeln!(out, "{}{} = bitcast <{{ i64, [{} x i8] }}>* {} to ptr",
             indent, str_p, bytes.len() + 1, g).ok();
-        let p2i = self.fun.gen_reg();
-        writeln!(out, "{}{} = ptrtoint ptr {} to i64", indent, p2i, str_p).ok();
         TypedRegister {
-            name: p2i,
-            ty: Type::int(),
+            name: str_p,
+            ty: Type::string(),
         }
     }
 

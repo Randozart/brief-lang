@@ -182,6 +182,17 @@ impl TypeUniverse {
         // graph resolves String → category "String" → Fixed("{ i64, i64 }").
         // Previously the property was absent, so a bare primordial universe
         // resolved String → "Bit" → i64 (wrong).
+        // 2026-08-01: Bits model (B0) — a String value is a `ptr` to
+        // [len][bytes]. String is now a FLEXIBLE-width primordial exactly like
+        // Int/UInt: (bytes=0, min_bits=0, max_bits=0) = "not yet resolved". Its
+        // width derives from the target machine word (`int_bits`, i.e. the
+        // data-layout pointer width) at codegen time — a String is one machine
+        // word on every target, so on x86-64 it is 64 bits, on wasm32 it is 32.
+        // The old `{ i64, i64 }` fat-pointer fields (data/len) were the last
+        // source of a `%String = type { i64, i64 }` named decl in emitted IR,
+        // violating B0 acceptance. The LLVM type still resolves via the casting
+        // graph (#String → ptr); this entry provides no width of its own, and
+        // `type_size` (types.rs) falls back to 8 (pointer word) for it.
         {
             let mut p = std::collections::HashMap::new();
             p.insert("alignment".into(), crate::ast::PropertyValue::Int(8));
@@ -189,15 +200,12 @@ impl TypeUniverse {
             self.types.insert("String".to_string(), ResolvedType {
                 name: "String".to_string(),
                 base: "Bit".to_string(),
-                bytes: 16,
-                min_bits: 128,
-                max_bits: 128,
+                bytes: 0,
+                min_bits: 0,
+                max_bits: 0,
                 alignment: 8,
                 properties: p,
-                fields: vec![
-                    ("data".into(), crate::ast::Type::int()),
-                    ("len".into(), crate::ast::Type::int()),
-                ],
+                fields: vec![],
             });
         }
     }

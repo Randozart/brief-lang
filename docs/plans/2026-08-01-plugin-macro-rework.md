@@ -369,12 +369,19 @@ the runtime's `int64_t`-handle contract, and it **removes** conversion churn
    stores, FFI args are the address. Ops/casts on `#String` operands deref
    through **one central helper**, read the header for region bounds, and
    operate on `bytes[0..len)`. The header is bookkeeping, never part of the bits.
-4. **`#String → #Bit`** = the buffer pointer (content view; zero instructions —
-   the value already is the pointer). **`#Bit → #String`** is the encoding
-   door: default = wrap raw bytes as UTF8 (the bytes already *are* UTF8;
-   wrapping is the only act). Sub-protocols override via the existing
-   `CastFrom(#Bit)` machinery (`graph.rs:97`, `mod.rs:1020`,
-   `emit_expr.rs:2927`).
+4. **Casts change interpretation, never memory.** **`#String → #Bit`** = the
+   buffer pointer (content view; zero instructions — the value already is the
+   pointer). **`#Bit → #String`** is the encoding door: default = wrap raw
+   bytes as UTF8 (the bytes already *are* UTF8; wrapping is the only act).
+   Sub-protocols override via the existing `CastFrom(#Bit)` machinery
+   (`graph.rs:97`, `mod.rs:1020`, `emit_expr.rs:2927`).
+   **The header is never part of the bits.** In both directions the cast moves
+   the address unchanged; a `#Bit → #String` wrap does NOT inherit a header
+   from the bits — it *materializes* one by construction (C-side length scan,
+   as `brief_cstr_to_brief` does). If the source already was a `#String`, the
+   address still points at a header-prefixed buffer, so the header stays
+   *reachable* for region ops — but it is carried by the buffer's layout, not
+   by the value, and never included in the bits the cast interprets.
 5. **Length is an op** (`prop Size` / `prop Bytes`): `Bytes` default = header
    read (O(1)); `Size` default = UTF8 char count (runtime). Overloadable by
    subtypes. This is the same category of knowledge as `#Int` hardcoding `add`
@@ -384,6 +391,20 @@ the runtime's `int64_t`-handle contract, and it **removes** conversion churn
    killer that pushed the industry to length-prefixing.
 7. **`Slice<T>` stays a `{ ptr, i64 }` fat pointer for now** — it is a sequence
    view, a separate concern from String. Deferred (not in this plan).
+8. **Flexible vs fixed width (the width rule).** `Int`, `UInt`, `String`, and
+   all types without explicit `!> bits`/`maxbits`/`minbits` metadata are
+   **one machine word** (`int_bits`, derived from the target data-layout
+   pointer width or `--int-bits`); `Int32` is always 32 bits and `Int64` always
+   64 (fixed types are absolute). `Int` carries no bits metadata and has a
+   *derived* width. String is flexible for the same reason its value is a
+   pointer: its storage width must follow the machine word on every target, so
+   its primordial is `(bytes=0, min_bits=0, max_bits=0)` exactly like Int/UInt
+   (`type_universe/mod.rs`), and `type_size` returns the pointer word (8) as
+   the conservative default for `Cast.#String` (`backend/llvm/types.rs`). This
+   is the *uniform* rule — String gets no special-cased width, and a fixed
+   `bytes: 8`/`max_bits: 64` primordial would be a cross-target lie on 32-bit
+   targets. Documented in `docs/architecture/backend-type-dispatch.md`
+   (Flexible vs Fixed Width) and `spec/SPEC.md`.
 
 ### 5.3 Current-state findings (verified 2026-08-01)
 
@@ -446,6 +467,14 @@ the runtime's `int64_t`-handle contract, and it **removes** conversion churn
 - **B-D4 (encoding door):** `#Bit → #String` default = UTF8 wrap via the
   existing `CastFrom(#Bit)` machinery; sub-protocols override the lane. Remove
   `!> encoding` (already unread). UTF8 exists nowhere as a symbol.
+  **Header-in-cast rule (explicit):** the cast is a pure re-interpretation of
+  the address — it never copies, drops, or inherits a header. When the source
+  is a raw `#Bit` buffer, the wrap introduces a header *by construction*
+  (length derived from the bytes, C-side scan), never by adopting one; when
+  the source is already a `#String`, the address still points at its
+  header-prefixed buffer, so `Bytes`/`Size` keep reading `[0]` = len from it.
+  In every case the header is bookkeeping reachable through the address, never
+  payload carried by the value.
 - **B-D5 (length ops):** `Bytes` = header read (O(1)); `Size` = UTF8 char count
   (runtime default). Protocol defaults for `#String`, overloadable by subtypes.
 - **B-D6 (scope):** **B0** (representation coherence) + **B1** (deref operands +

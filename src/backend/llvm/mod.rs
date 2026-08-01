@@ -380,7 +380,13 @@ pub fn protocol_llvm_type(ty: &Type, universe: Option<&crate::type_universe::Typ
         .map_or(false, |rt| rt.properties.contains_key("Cast.#String"));
     let is_string_shaped = universe.map_or(false, |u| u.is_string_like(ty));
     if is_string_protocol || is_string_shaped {
-        return "{ i64, i64 }".to_string();
+        // 2026-08-01 (B0): A String value is a ptr to a length-prefixed
+        // [len][bytes] buffer. protocol_llvm_type previously claimed
+        // { i64, i64 } here, which made frgn declares disagree with the
+        // i64-typed call sites and i64 state slots (the split-brain). Every
+        // type-claiming site now says ptr; state slots keep the i64 machine
+        // word and convert via adapt_to_i64/ensure_typed_value.
+        return "ptr".to_string();
     }
     if let Some(ref u) = universe {
         if let Some(rt) = ty.universe_key().and_then(|k| u.get(k)) {
@@ -2239,7 +2245,13 @@ impl LlvmBackend {
         writeln!(out, "declare i64 @brief_futex(i64, i64, i64, i64, i64, i64) #1").ok();
         writeln!(out, "declare i64 @__ioctl__(i64, i64, i64) #1").ok();
         writeln!(out, "declare i64 @__isatty__(i64) #1").ok();
-        writeln!(out, "declare i64 @__print(i64) #1").ok();
+        writeln!(out, "declare i64 @__print(ptr) #1").ok();
+        // 2026-08-01 (B0): PrintStr# intrinsic runtime symbol. The dead frgn
+        // declaration in lib/std/ffi/io.bv was removed (it declared a wrong
+        // symbol and a { i64, i64 } String type); the intrinsic owns this
+        // call site, so the backend declares the ABI: String = ptr to a
+        // length-prefixed [len][bytes] buffer.
+        writeln!(out, "declare i64 @__print_str(ptr) #1").ok();
         writeln!(out, "declare i64 @brief_getuid() #1").ok();
         writeln!(out, "declare i64 @brief_geteuid() #1").ok();
         writeln!(out, "declare i64 @brief_getgid() #1").ok();

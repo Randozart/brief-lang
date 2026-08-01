@@ -418,6 +418,103 @@ fn test_binop_no_nuw_nsw() {
 }
 
 #[test]
+fn test_range_metadata_suppressed_for_written_field() {
+    // 2026-08-01: Regression test — a contract-derived !range must NOT be
+    // attached to loads of a field the node body writes. The range comes from
+    // the precondition ([x < 1]) but the dispatch-loop guard re-reads the field
+    // each tick; once the body writes x = 1 the value leaves the range, which is
+    // LLVM UB and made clang fold the guard to always-true (reactor never
+    // converges — observed as an infinite loop in the B0 format demo).
+    let mut backend = LlvmBackend::new();
+    let program = vec![
+        TopLevel::StateDecl(StateDecl {
+            name: "x".to_string(),
+            ty: Type::int(),
+            span: None,
+        }),
+        TopLevel::Transaction(Transaction {
+            name: "t".to_string(),
+            is_reactive: true,
+            is_async: false,
+            type_params: vec![],
+            parameters: vec![],
+            output_type: None,
+            outputs: vec![],
+            contract: Contract {
+                pre_condition: Expr::BinaryOp(BinaryOpKind::Lt,
+                    Box::new(Expr::Identifier("x".to_string())), Box::new(Expr::Decimal(1))),
+                post_condition: Expr::Bool(true),
+                is_entry: false,
+                watchdog: None,
+                explicit: false,
+                span: None,
+            },
+            body: vec![
+                Statement::Assign(Expr::Identifier("x".to_string()), Expr::Decimal(1)),
+                Statement::Term(None),
+            ],
+            metadata: HashMap::new(),
+            derivation: None,
+            modifiers: vec![],
+            span: None,
+            doc: None,
+        }),
+    ];
+    let output = backend.generate(&program, None);
+    // The write_set = {x}, so no module-level !range node may reference x's
+    // field loads. The inline `!range !{0, bound}` reload emitted by
+    // emit_precondition_check is sound (fresh read inside the guard's safe path)
+    // and is allowed to remain.
+    let module_level_range_on_x_load = output.contains("!range !50")
+        || output.contains("!range !51");
+    assert!(!module_level_range_on_x_load,
+        "precondition-derived !range must not attach to loads of a written field\n{output}");
+    assert!(!output.contains("!5 = !{ i64 -9223372036854775808, i64 1 }"),
+        "the module-level range node for the written field must not be emitted\n{output}");
+}
+
+#[test]
+fn test_range_metadata_kept_for_read_only_field() {
+    // 2026-08-01: Control test for the above — a field NO node writes keeps its
+    // precondition-derived !range (it is loop-invariant and therefore sound).
+    let mut backend = LlvmBackend::new();
+    let program = vec![
+        TopLevel::StateDecl(StateDecl {
+            name: "x".to_string(),
+            ty: Type::int(),
+            span: None,
+        }),
+        TopLevel::Transaction(Transaction {
+            name: "t".to_string(),
+            is_reactive: true,
+            is_async: false,
+            type_params: vec![],
+            parameters: vec![],
+            output_type: None,
+            outputs: vec![],
+            contract: Contract {
+                pre_condition: Expr::BinaryOp(BinaryOpKind::Lt,
+                    Box::new(Expr::Identifier("x".to_string())), Box::new(Expr::Decimal(100))),
+                post_condition: Expr::Bool(true),
+                is_entry: false,
+                watchdog: None,
+                explicit: false,
+                span: None,
+            },
+            body: vec![Statement::Term(None)],
+            metadata: HashMap::new(),
+            derivation: None,
+            modifiers: vec![],
+            span: None,
+            doc: None,
+        }),
+    ];
+    let output = backend.generate(&program, None);
+    assert!(output.contains("!range !") || output.contains("!range !{"),
+        "read-only field should keep precondition-derived range metadata\n{output}");
+}
+
+#[test]
 fn test_float_binary_add() {
     let tu = crate::type_universe::TypeUniverse::new();
     let mut backend = LlvmBackend::new().with_type_universe(tu);
@@ -3305,6 +3402,48 @@ fn test_println_out_of_range_placeholder_errors() {
     assert!(
         err.contains("out of range"),
         "expected out-of-range message, got: {err}"
+    );
+}
+
+/// 2026-08-01: B0 acceptance — a String value is a `ptr` to [len][bytes] with
+/// no fat-pointer `{ i64, i64 }` or `i128` claim anywhere in emitted IR. The
+/// test exercises the full String path: literal → state store → load → print
+/// via __print_str with a pointer argument.
+#[test]
+fn test_string_is_ptr_no_fat_pointer_in_ir() {
+    let src = r#"
+        let name: String = "world";
+        let x: Int = 42;
+        node report [true] {
+            print!("hello, {}! x={1}", name, x);
+            term;
+        };
+    "#;
+    let mut items = parse_bv_source(src);
+    let mut universe = crate::type_universe::TypeUniverse::new();
+    let mut pm = crate::plugin::PluginManager::new();
+    pm.register(Box::new(crate::plugin::print_plugin::PrintPlugin));
+    pm.run_ast(crate::ast::StageKind::Parsed, &mut items, &mut universe)
+        .expect("print plugin stage failed");
+
+    let mut backend = LlvmBackend::new();
+    let ir = backend.generate(&items, None);
+    // String values must be pointer-sized machine words in state and registers.
+    assert!(
+        ir.contains("call i64 @__print_str(ptr "),
+        "format literal must print via __print_str(ptr); got:\n{ir}"
+    );
+    // The named %String struct type must not be declared (String is ptr now),
+    // and no i128 state load/claim may remain for String slots. (The LLVM
+    // datalayout string always contains i128:128 for the target — that is
+    // target ABI info, not a String claim, so it is excluded.)
+    assert!(
+        !ir.contains("%String = type { i64, i64 }")
+            && !ir.contains("load i128")
+            && !ir.contains("type { i128")
+            && !ir.contains("type { i64, i64, i128")
+            && !ir.contains("extractvalue"),
+        "no {{ i64, i64 }}/i128 String claim may remain in emitted IR (B0); got:\n{ir}"
     );
 }
 

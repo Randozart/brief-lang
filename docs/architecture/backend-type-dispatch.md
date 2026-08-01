@@ -27,7 +27,7 @@ Every type is `Bits(N)` at minimum:
 ```brief
 type Int : Bits { maxbits <~ 64; ctd <~ Int; alu <~ Int; op Add ~> "int.add"; }
 type Float : Bits { maxbits <~ 32; ctd <~ Float; alu <~ Float; op Add ~> "float.add"; }
-type String { data: Int; len: Int; encoding <~ "UTF-8"; tbaa <~ "String"; };
+type String : #String { prop Size: chars(#L); prop Bytes: byte_len(#L); };
 ```
 
 - **`maxbits <~ N`** — Every backend reads this. `maxbits=64` = 64-bit storage. For struct types with `fields`, maxbits is derived from field type sizes (summed). Explicit `maxbits <~ N` overrides the derivation.
@@ -37,6 +37,39 @@ type String { data: Int; len: Int; encoding <~ "UTF-8"; tbaa <~ "String"; };
 - **`op Add ~> "int.add"`** — Operator binding to a generic backend-agnostic identifier. The typechecker reads this via `get_operator_intrinsic(universe, "+", &Int)`, which returns `OpBinding::Function("int.add")`. The backend then looks up `("Add", "Int", 8)` in `config/llvm-ops.toml` for the LLVM IR template.
 - **`encoding <~ "UTF-8"`** — String encoding, resolved through `config/encodings.toml`. All encoding names are quoted strings — no PascalCase hardcoded table. The config specifies `char_width` (for Index# GEP eligibility) and optional `ops.index_at`/`char_len` (stdlib functions for runtime dispatch).
 - **Other metadata** — Any backend is free to use any metadata it needs. Unrecognized metadata is silently ignored.
+
+## Flexible vs Fixed Width
+
+**A type is one machine word unless a bit width is explicitly given as metadata.**
+This is the single rule that decides how wide a value is stored and how its LLVM
+type resolves. It applies uniformly to every protocol category — integer,
+float, and String alike.
+
+- **Flexible-width types** (`Int`, `UInt`, `String`, and any type declared
+  without `!> bits`, `maxbits <~`, or `minbits <~` metadata) are **exactly one
+  machine word**: `int_bits` wide, where `int_bits` is derived from the target's
+  data-layout pointer width (or `--int-bits`, one of 8/16/32/64). On x86-64 that
+  is 64 bits; on wasm32 it is 32 bits. Their primordials carry `(bytes=0,
+  min_bits=0, max_bits=0)` = "not yet resolved"; the normalizer leaves them
+  flexible and the casting graph derives the width at codegen time
+  (`resolve_llvm_type`, priority `!> bits → maxbits → minbits → int_bits`).
+  `Int` has no bits metadata and has a *derived* width. `String` is flexible for
+  the same reason: its value *is* a pointer to `[len][bytes]`, so its storage
+  width must follow the machine word, not a hardcoded constant.
+- **Fixed-width types** are **absolute** and never follow the machine word:
+  `Int32` is always 32 bits, `Int64` always 64, `Float` always 32, `Float64`
+  always 64. They carry `!> bits: N` (or a fixed primordial) and their width does
+  not change between targets.
+- **Explicit metadata always wins.** `!> bits: N` fixes the exact width;
+  `maxbits <~ N` sets a ceiling; `minbits <~ N` sets a floor. Without any of
+  them the type is flexible and derives to the machine word.
+
+Why this is the rule: a flexible type must be able to hold a pointer (String) or
+the native register width (Int) on whatever target it lands on. Hardcoding a
+width (e.g. String = 64) is a cross-target lie. `type_size` mirrors this: it
+returns the machine word (8) as the conservative default for flexible
+`Cast.#Int`/`Cast.#UInt`/`Cast.#String` when the universe entry has no baked-in
+bytes (`src/backend/llvm/types.rs`).
 
 ## Frontend/Backend Detachment
 

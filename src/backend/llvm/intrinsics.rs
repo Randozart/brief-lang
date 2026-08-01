@@ -85,21 +85,16 @@ pub fn emit_intrinsic_call(
         }
         "PrintStr#" => {
             let a = backend.emit_expr(out, &args[0], indent);
-            // 2026-07-31: __print_str takes the i64 bstr handle (matches
-            // __print(int64_t) / brief_str_to_c(int64_t) in brief_rt.c). The
-            // String value register is already that handle for non-SSO literals
-            // and %State slots (see push_field_type); SSO values are
-            // {i64,i64} structs, so extract field 0.
-            let handle = if backend.feature_sso_strings
-                && backend.ctx.type_universe.as_ref().map_or(false, |u| u.is_string_like(&a.ty))
-            {
-                let ex = backend.fun.gen_reg();
-                writeln!(out, "{}{} = extractvalue {{ i64, i64 }} {}, 0", indent, ex, a.name).ok();
-                ex
-            } else {
-                a.name
-            };
-            writeln!(out, "{}{} = call i64 @__print_str(i64 {})", indent, v, handle).ok();
+            // 2026-08-01 (B0): A Brief String value IS the ptr to a
+            // length-prefixed [len][bytes] buffer, and __print_str takes
+            // that pointer (the runtime's int64_t msg_bstr is the address,
+            // typed as const char* in brief_rt.c to match this ABI). The
+            // value register is already that ptr (literals emit it directly,
+            // state loads inttoptr it via the state adapter, frgns return it).
+            // Undo: if the ptr representation is ever reverted to an i64
+            // handle, restore the ptrtoint boxing here and in
+            // emit_legacy_string_literal.
+            writeln!(out, "{}{} = call i64 @__print_str(ptr {})", indent, v, a.name).ok();
             return BTypedRegister { name: v.to_string(), ty: Type::int() };
         }
         // 2026-07-18: Pointer operations — special-case because they need

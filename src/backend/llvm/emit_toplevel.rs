@@ -2,6 +2,7 @@ use crate::ast::{BinaryOpKind, Expr, OutputType, Statement, TopLevel, Type};
 use crate::backend::llvm::emit_stmt::emit_statement;
 use crate::backend::llvm::{float_to_llvm_hex, float64_to_llvm_hex, LlvmBackend, TypedRegister};
 use crate::type_universe::{ResolvedType, TypeUniverse};
+use std::collections::HashSet;
 use std::fmt::Write;
 use std::sync::LazyLock;
 
@@ -140,10 +141,14 @@ impl LlvmBackend {
         // importing benchmark doesn't reference them directly.
         //
         // Hardcoded stdlib struct types (always emitted for ABI consistency):
+        // 2026-08-01: `%String` removed — under the bits model a String value is a
+        // `ptr` to `[len][bytes]`, so a named `{ i64, i64 }` decl would be a false
+        // ABI claim (B0 acceptance: no `{ i64, i64 }` for String in emitted IR).
+        // Nothing references it anymore. StaticString/UTF8View/SmallString64 remain
+        // until their legacy retirement (Phase B4).
         for (name, field_tys) in &[
             ("SmallString64", "i64, i64, i64, i64, i64, i64, i64, i64, i64"),
             ("StaticString", "i64, i64"),
-            ("String", "i64, i64"),
             ("UTF8View", "i64, i64"),
         ] {
             writeln!(out, "%{} = type {{ {} }}", name, field_tys).ok();
@@ -152,7 +157,7 @@ impl LlvmBackend {
         // 2026-07-30: Skip types already hardcoded above — prevents duplicate
         // %String = type { i64, i64 } declarations that clang rejects.
         let mut emitted: std::collections::HashSet<String> = [
-            "SmallString64", "StaticString", "String", "UTF8View",
+            "SmallString64", "StaticString", "UTF8View",
         ].iter().map(|s| s.to_string()).collect();
         if let Some(u) = &self.ctx.type_universe {
             let mut universe_fields: Vec<(String, Vec<String>)> = Vec::new();
@@ -1396,8 +1401,23 @@ impl LlvmBackend {
         for (name, &idx) in &self.ctx.field_index_map {
             self.ctx.idx_to_field_name.insert(idx, name.clone());
         }
+        // 2026-08-01: A contract-derived !range is only sound for fields that
+        // no node body writes. The range is extracted from the *precondition*
+        // (e.g. [tick < 1] ⇒ tick ∈ [MIN, 1)), but emit_state_load attaches it
+        // to EVERY load of the field — including the dispatch-loop guard that
+        // re-reads state each tick. If the node body writes tick = 1, the value
+        // leaves the range on the next iteration, which is UB in LLVM semantics;
+        // clang then assumes the guard always fires and the reactor never
+        // converges (observed: format-demo infinite loop). The write_set (computed
+        // once in the transition graph) is the exact guard: if no node writes the
+        // field, the precondition range is loop-invariant and sound. Type-driven
+        // ranges below are still emitted for written fields — a UInt8 field holds
+        // [0, 256) by type construction regardless of writes.
+        let written_fields = self.ctx.transition_graph.as_ref()
+            .map(|g| g.nodes.iter().flat_map(|n| n.write_set.iter().cloned()).collect::<HashSet<String>>())
+            .unwrap_or_default();
         for (f, &(lo, hi)) in &self.ctx.range_bounds {
-            if hi < i64::MAX {
+            if hi < i64::MAX && !written_fields.contains(f) {
                 // 2026-07-18: Offset by 50 to avoid collision with TBAA metadata nodes
                 // (!0 through ~!20). LLVM metadata IDs must be unique across the module.
                 let mi = range_meta.len() + 50;

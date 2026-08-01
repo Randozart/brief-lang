@@ -343,6 +343,23 @@ dimension ::= identifier ":" integer  // Named dimension, e.g., width:50
 output_types ::= type ("," type)*  // Multi-output: (A, B, C)
 ```
 
+**Flexible vs fixed bit width.** A type is **one machine word** — `int_bits`
+wide, derived from the target's data-layout pointer width (`--int-bits`, one of
+8/16/32/64) — unless a bit width is explicitly given as metadata. This applies
+uniformly to integer, float, and String types:
+
+- **Flexible-width types** (`Int`, `UInt`, `String`, and any type declared
+  without `!> bits`, `maxbits <~`, or `minbits <~`): one machine word on every
+  target. `Int` carries no bits metadata and has a *derived* width; `String` is
+  a pointer to `[len][bytes]`, so it too follows the machine word (64 bits on
+  x86-64, 32 on wasm32).
+- **Fixed-width types** are absolute and never follow the machine word:
+  `Int32` is always 32 bits, `Int64` always 64, `Float` always 32, `Float64`
+  always 64.
+- **Explicit metadata always wins**: `!> bits: N` fixes the exact width;
+  `maxbits <~ N` sets a ceiling; `minbits <~ N` sets a floor. Absent all three,
+  the type is flexible and derives to the machine word.
+
 ### 2.3 Statements
 
 ```bnf

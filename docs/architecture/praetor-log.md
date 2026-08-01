@@ -6,6 +6,32 @@ Format: `YYYY-MM-DD | file:line | rule | root cause | resolution`
 
 ---
 
+## 2026-08-01 — Corrected Praetor Invocation (was silently no-op)
+
+**Root cause:** `praetor validate --target <file>` was the documented per-change
+invocation (AGENTS.md, praetor-log.md history, the June 2026 pre-commit hook).
+But **`--target` is a DIRECTORY, not a file.** Passing a file prints
+`target is not a directory: ./src/foo.rs` and exits 0 *without analyzing
+anything* — so every historical "Praetor on changed files" check was a silent
+no-op. Diagnostics only surface with a directory target:
+
+```bash
+praetor validate --warn --target src/backend/llvm   # directory; fails on any diagnostic
+mkdir -p /tmp/pt && cp src/foo.rs /tmp/pt/ && praetor validate --warn --target /tmp/pt  # single file
+```
+
+**Resolution:** AGENTS.md Commands section updated with the directory-target
+rule and the single-file workaround. `scripts/verify.sh`'s baseline comparison
+is stale (June schema `{total_diagnostics}` vs current `{failures,passed,
+total_diagnostics}`) and should be treated as informational until rewritten.
+
+**Verified on this commit's changes:** `praetor validate --warn --target
+src/backend/llvm` reports only pre-existing diagnostics (e.g. `type_size`
+cognitive complexity 27→30, pre-existing; `emit_store_tbaa` 6 params,
+pre-existing). No NEW diagnostics introduced by the B0/width-rule changes.
+
+---
+
 ## 2026-06-09 — Baseline
 
 **233 pre-existing diagnostics** across the codebase at start of Pattern B refactor.

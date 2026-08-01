@@ -270,7 +270,12 @@ impl CastingGraph {
         self.set_llvm_type("Float", "",  LlvmTypeResolver::Fixed("float"));
         self.set_llvm_type("Bool", "",   LlvmTypeResolver::Fixed("i8"));
         self.set_llvm_type("Char", "",   LlvmTypeResolver::Fixed("i32"));
-        self.set_llvm_type("String", "", LlvmTypeResolver::Fixed("{ i64, i64 }"));
+        // 2026-08-01 (B0): A Brief String value IS a pointer to a
+        // length-prefixed [len: i64][bytes] buffer, in every type-claiming
+        // site. The old { i64, i64 } fat-pointer claim caused the 4-way
+        // representation split-brain (ptr vs i64 vs {i64,i64} vs i128). The
+        // casting graph is the single source of truth, so it now says ptr.
+        self.set_llvm_type("String", "", LlvmTypeResolver::Fixed("ptr"));
         self.set_llvm_type("Data", "",   LlvmTypeResolver::Fixed("ptr"));
 
         // Float protocol variants (hardcoded — no disamb hack)
@@ -281,9 +286,11 @@ impl CastingGraph {
         self.set_llvm_type("Float", "FP128",    LlvmTypeResolver::Fixed("fp128"));
         self.set_llvm_type("Float", "X86_FP80", LlvmTypeResolver::Fixed("x86_fp80"));
 
-        // String protocol variants
-        self.set_llvm_type("String", "UTF8",  LlvmTypeResolver::Fixed("{ i64, i64 }"));
-        self.set_llvm_type("String", "ASCII", LlvmTypeResolver::Fixed("{ i64, i64 }"));
+        // String protocol variants — all encode as ptr to [len][bytes] (B0).
+        // The default #String variant is UTF8 (seed_defaults); ASCII and any
+        // future sub-protocols keep the same pointer representation.
+        self.set_llvm_type("String", "UTF8",  LlvmTypeResolver::Fixed("ptr"));
+        self.set_llvm_type("String", "ASCII", LlvmTypeResolver::Fixed("ptr"));
     }
 
     /// Insert a protocol (category, variant) → LLVM type resolver entry.

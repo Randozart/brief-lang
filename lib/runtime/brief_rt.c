@@ -45,22 +45,22 @@ typedef int32_t brief_int;
 #endif
 
 // ── String conversion helpers (internal) ──────────────────────────────
-// 2026-07-19: Convert a Brief handle or C string pointer to a C string.
-// With SSO, the argument may be an SSO handle (bit 0 = 1), a Brief heap
-// handle (pointer to [length][data]), or a raw C string pointer (null-term).
-// Detects C strings by checking if the value looks like a valid pointer
-// (not SSO, not a small integer, starts with printable ASCII).
-// Returns a heap-allocated string; caller must free(). NULL on error.
-char* brief_str_to_c(int64_t handle) {
+// 2026-08-01 (B0): A Brief String value is a ptr to a length-prefixed
+// [len][bytes] buffer. The old int64_t "handle" params were the address in
+// disguise; they are now typed as pointers so clang's IR (ptr) matches the
+// compiler's `ptr`-based frgn declares (String ABI = ptr). int64_t and
+// pointers are ABI-identical on x86-64 — this is a typing change only.
+char* brief_str_to_c(const char* handle) {
     // 2026-07-22: Strip tag bits (bottom 2 bits) — they mark temporary
     // flags (bit 0 = SSO inline, bit 1 = temporary concat result).
     // After stripping, we have the raw data pointer.
-    int64_t ptr = handle & ~3ULL;
-    if (handle & 1) {
+    uintptr_t u = (uintptr_t)handle;
+    uintptr_t ptr = u & ~3ULL;
+    if (u & 1) {
         // SSO string — inline data packed at bits >= 3
         // The LLVM SSO encoding: handle0 = (raw_data << 3) | 1
         // where raw_data has bytes packed in LE order.
-        uint64_t raw_data = ((uint64_t)handle) >> 3;
+        uint64_t raw_data = ((uint64_t)u) >> 3;
         int64_t len = 0;
         for (int i = 0; i < 6; i++) {
             if ((raw_data >> (i * 8)) & 0xFF) len = i + 1;
@@ -77,14 +77,14 @@ char* brief_str_to_c(int64_t handle) {
     // Check for C string pointer: ptr looks like a valid pointer
     // (not zero, not a small integer, first byte is printable ASCII).
     if (ptr > 4096 && ptr < 0x800000000000) {
-        uint8_t first = *(uint8_t*)(uintptr_t)ptr;
+        uint8_t first = *(uint8_t*)ptr;
         if (first >= 32 && first < 127) {
             // Looks like a C string — strlen it
-            int64_t len = (int64_t)strlen((const char*)(uintptr_t)ptr);
+            int64_t len = (int64_t)strlen((const char*)ptr);
             if (len > 0 && len < 4096) {
                 char* c_str = malloc((size_t)(len + 1));
                 if (!c_str) return NULL;
-                memcpy(c_str, (void*)(uintptr_t)ptr, (size_t)len);
+                memcpy(c_str, (void*)ptr, (size_t)len);
                 c_str[len] = '\0';
                 return c_str;
             }
@@ -92,19 +92,19 @@ char* brief_str_to_c(int64_t handle) {
     }
     // Heap Brief string: ptr is a pointer to [8-byte length][data].
     if (ptr == 0) return NULL;
-    int64_t len = *(int64_t*)(uintptr_t)ptr;
+    int64_t len = *(int64_t*)ptr;
     if (len < 0 || len > 1024 * 1024 * 1024) return NULL;
     char* c_str = malloc((size_t)(len + 1));
     if (!c_str) return NULL;
-    if (len > 0) memcpy(c_str, (void*)(uintptr_t)(ptr + 8), (size_t)len);
+    if (len > 0) memcpy(c_str, (void*)(ptr + 8), (size_t)len);
     c_str[len] = '\0';
     return c_str;
 }
 
-/// Convert a C string (null-terminated) to a Brief string handle.
+/// Convert a C string (null-terminated) to a Brief string.
 /// Returns a heap-allocated Brief string (8-byte length prefix + data).
 /// Caller should free via brief_free_brief_str().
-int64_t brief_cstr_to_brief(const char* c_str) {
+char* brief_cstr_to_brief(const char* c_str) {
     if (!c_str) return 0;
     int64_t len = (int64_t)strlen(c_str);
     if (len > 1024 * 1024 * 1024) return 0; // sanity check
@@ -114,12 +114,12 @@ int64_t brief_cstr_to_brief(const char* c_str) {
     *(int64_t*)buf = len;               // write length prefix
     if (len > 0) memcpy(buf + 8, c_str, (size_t)len);
     buf[8 + len] = '\0';                // null terminator for C compatibility
-    return (int64_t)(uintptr_t)buf;
+    return buf;
 }
 
 /// Free a Brief string allocated by brief_cstr_to_brief or similar.
-void brief_free_brief_str(int64_t handle) {
-    if (handle) free((void*)(uintptr_t)handle);
+void brief_free_brief_str(void* handle) {
+    if (handle) free(handle);
 }
 
 // ── Core intrinsics (kept) ────────────────────────────────────────────
@@ -134,23 +134,25 @@ int64_t __get_environ(void) {
 // 2026-07-19: Returns the value of an env var as a heap-allocated Brief string
 // (null-terminated UTF-8 data preceded by 8-byte length header).
 // Caller takes ownership of the returned pointer.
-int64_t __getenv_brief(int64_t key_bstr) {
+// 2026-08-01 (B0): key_bstr is a ptr to a Brief [len][bytes] buffer; returns
+// a ptr to the same layout (String ABI = ptr, matching the compiler declares).
+char* __getenv_brief(const char* key_bstr) {
     char* c_key = brief_str_to_c(key_bstr);
     if (!c_key) return 0;
     char* val = getenv(c_key);
     free(c_key);
     if (!val) return 0;
     int64_t len = (int64_t)strlen(val);
-    int64_t* bstr = (int64_t*)malloc((size_t)(len + 8 + 1));
+    char* bstr = (char*)malloc((size_t)(len + 8 + 1));
     if (!bstr) return 0;
-    bstr[0] = len;
-    memcpy((char*)(bstr + 1), val, (size_t)len);
-    ((char*)(bstr + 1))[len] = '\0';
-    return (int64_t)(uintptr_t)bstr;
+    *(int64_t*)bstr = len;
+    memcpy(bstr + 8, val, (size_t)len);
+    bstr[8 + len] = '\0';
+    return bstr;
 }
 
 // 2026-07-19: Returns the value of an env var parsed as Int.
-int64_t __getenv_int(int64_t key_bstr) {
+int64_t __getenv_int(const char* key_bstr) {
     char* c_key = brief_str_to_c(key_bstr);
     if (!c_key) return 0;
     char* val = getenv(c_key);
@@ -169,7 +171,7 @@ int64_t brief_sysconf(int64_t name) {
 
 // ── Print / Exit runtime (used by LLVM codegen) ───────────────────────
 
-int64_t __print(int64_t msg_bstr) {
+int64_t __print(const char* msg_bstr) {
     char* c_msg = brief_str_to_c(msg_bstr);
     if (c_msg) { fputs(c_msg, stdout); free(c_msg); }
     return 0;
@@ -200,10 +202,10 @@ __attribute__((always_inline)) int64_t __print_char(int64_t c) {
 
 // 2026-08-01: String printer for the PrintStr# intrinsic — the target of
 // format-string literal segments in print!/println!. Mirrors __print: takes
-// a length-prefixed bstr handle (or SSO inlined bytes via brief_str_to_c),
-// prints it without a trailing newline, and frees the C copy. Defined here
+// a ptr to a length-prefixed [len][bytes] buffer (String ABI = ptr), prints
+// it without a trailing newline, and frees the C copy. Defined here
 // because the print plugin expands literal segments to PrintStr# calls.
-int64_t __print_str(int64_t msg_bstr) {
+int64_t __print_str(const char* msg_bstr) {
     char* c_msg = brief_str_to_c(msg_bstr);
     if (c_msg) { fputs(c_msg, stdout); free(c_msg); }
     return 0;
@@ -348,8 +350,10 @@ void __wait_for_trigger__(void) {
 }
 
 // ── File I/O (used by stdlib) ─────────────────────────────────────────
+// 2026-08-01 (B0): path_bstr/data_bstr are ptrs to Brief [len][bytes] buffers
+// (String ABI = ptr).
 
-int64_t __read_file__(int64_t path_bstr) {
+int64_t __read_file__(const char* path_bstr) {
     char* c_path = brief_str_to_c(path_bstr);
     if (!c_path) return -1;
     FILE* f = fopen(c_path, "r");
@@ -366,7 +370,7 @@ int64_t __read_file__(int64_t path_bstr) {
     return (int64_t)(uintptr_t)buf;
 }
 
-int64_t __write_file__(int64_t path_bstr, int64_t data_bstr) {
+int64_t __write_file__(const char* path_bstr, const char* data_bstr) {
     char* c_path = brief_str_to_c(path_bstr);
     char* c_data = brief_str_to_c(data_bstr);
     if (!c_path || !c_data) { free(c_path); free(c_data); return -1; }
