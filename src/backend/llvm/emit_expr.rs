@@ -157,6 +157,14 @@ impl LlvmBackend {
                             writeln!(out, "{}{} = load {}, ptr {}", indent, val, llvm_ty, gep).ok();
                             return TypedRegister { name: val, ty: slot_ty };
                         }
+                        // 2026-08-01 (A10): a self-slot ARRAY name (`data` in
+                        // `data[i]`) is consumed by the Index arm's self-slot
+                        // GEP path, so its identifier read is dead. Return the
+                        // self pointer as a placeholder — falling through to
+                        // the global lookup emitted an undefined `@data` global
+                        // (the scalar self-slot read above deliberately skips
+                        // Vector slots).
+                        return TypedRegister { name: self_ptr.clone(), ty: slot_ty };
                     }
                 }
                 // 2026-07-17: Remaining paths: local binding,

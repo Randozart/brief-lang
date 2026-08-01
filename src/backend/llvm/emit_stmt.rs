@@ -221,11 +221,17 @@ pub fn emit_statement(backend: &mut LlvmBackend, out: &mut String, stmt: &Statem
             // 2026-07-17: Discard: `<- &queue` → Expression(AddrOf(source)).
             // Pop from collection and discard the result.
             // 2026-07-20: Uses find_extract_strategy (reads OperatorDef from context).
+            // 2026-08-01 (A10): member-bound ExtractFrom (op ExtractFrom: pop(#R))
+            // dispatches to the self-bound member call first — the free-function
+            // dispatch only applies to convention-based fn bindings.
             if let Expr::AddrOf(source) = expr {
                 let strat = backend.find_extract_strategy(source)
                     .or_else(|| backend.find_extract_strategy(expr));
                 if let Some(op_def) = strat {
-                    emit_strategy_fn_call(backend, out, indent, source, &op_def.clone(), None);
+                    let op = op_def.clone();
+                    if !emit_strategy_member_call(backend, out, indent, source, &op, None) {
+                        emit_strategy_fn_call(backend, out, indent, source, &op, None);
+                    }
                 }
                 TypedRegister { name: backend.fun.gen_reg(), ty: Type::void() }
             } else {
@@ -585,7 +591,13 @@ pub(super) fn emit_strategy_member_call(
         arg_regs.push((vreg.to_string(), Type::int()));
     }
     let out_tmp = backend.fun.gen_reg();
-    backend.emit_member_body(out, &out_tmp, &recv_reg, &type_name, &member, &arg_regs, indent);
+    // 2026-08-01 (A10): resolve the mono key for a generic receiver
+    // (`Stack<Int, 256>`) — the generic base layout (`data: T[N]`) computes
+    // degenerate self-slot offsets (len at 0). The Init path already resolves
+    // the mono key; the member-call path must too, or the push's self-slot
+    // GEPs (data[len], len = len + 1) write to the wrong offsets.
+    let self_key = backend.resolve_obj_key(&recv_reg.ty).unwrap_or_else(|| type_name.clone());
+    backend.emit_member_body(out, &out_tmp, &recv_reg, &self_key, &member, &arg_regs, indent);
     true
 }
 

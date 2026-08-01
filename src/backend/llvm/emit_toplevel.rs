@@ -100,10 +100,14 @@ impl LlvmBackend {
     /// variable's type in the operator_defs map (populated from AST).
     /// Returns None when the type has no ExtractFrom operator definition.
     pub(super) fn find_extract_strategy(&self, target: &crate::ast::Expr) -> Option<&crate::ast::top::OperatorDef> {
-        let var_name = match target {
-            crate::ast::Expr::Identifier(n) => n,
-            _ => target.as_var_name()?,
-        };
+        // 2026-08-01 (A10): peel AddrOf layers — `<- &st` lowers to
+        // Expression(AddrOf(AddrOf(Identifier))) and the plain `<- st` to
+        // AddrOf(Identifier); the strategy lookup must reach the identifier.
+        let mut t = target;
+        while let crate::ast::Expr::AddrOf(inner) = t {
+            t = inner;
+        }
+        let var_name = t.as_var_name()?;
         let type_name = self.lookup_strategy_type_name(var_name)?;
         self.ctx.operator_defs.get(&type_name)?
             .iter().find(|d| d.op == "ExtractFrom")

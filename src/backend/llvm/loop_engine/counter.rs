@@ -1489,7 +1489,22 @@ impl LlvmBackend {
                     self.emit_countable_body(out, stmts, write_set, hoisted);
                 }
                 Statement::Expression(e) => {
-                    self.emit_expr(out, e, "  ");
+                    // 2026-08-01 (A10): `<- &collection` discard — dispatch the
+                    // ExtractFrom member call (self-bound pop), not just emit the
+                    // address. Without it the pop never runs: a Stack's len never
+                    // decrements and the next push overflows the buffer.
+                    if let Expr::AddrOf(source) = e {
+                        let strat = self.find_extract_strategy(source)
+                            .or_else(|| self.find_extract_strategy(e)).cloned();
+                        if let Some(op_def) = &strat {
+                            if !super::emit_stmt::emit_strategy_member_call(self, out, "  ", source, op_def, None) {
+                                super::emit_stmt::emit_strategy_fn_call(self, out, "  ", source, op_def, None);
+                            }
+                        }
+                        let _ = self.fun.gen_reg();
+                    } else {
+                        self.emit_expr(out, e, "  ");
+                    }
                 }
                 Statement::Return(Some(e)) => {
                     let val = self.emit_expr(out, e, "  ");

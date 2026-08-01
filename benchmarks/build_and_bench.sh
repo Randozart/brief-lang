@@ -87,6 +87,7 @@ TAG[bit_clear]=runtime
 TAG[queue_drain]=runtime
 TAG[queue_drain_sym]=runtime
 TAG[queue_drain_idio]=runtime
+TAG[stack_push_pop]=runtime
 TAG[interval_step]=runtime
 TAG[gpu/saxpy]=runtime
 TAG[iir_filter_runtime]=runtime
@@ -130,6 +131,7 @@ BENCHMARKS=(
     "queue_drain"       # generic obj (RingBuffer<Int>) via std/collections.bv + countdown
     # "queue_drain_sym"   # depends on std/collections.bv (generic obj instantiation — D4 follow-up)
     # "queue_drain_idio"  # depends on std/collections.bv (generic obj instantiation — D4 follow-up)
+    "stack_push_pop"    # generic obj (Stack<Int, 256>) push/pop cycle via <- ops
     "interval_step"
     # 2026-07-31: Real-program periodic-guard benchmarks (countdown dispatch A/B).
     "telemetry_stream"
