@@ -78,6 +78,81 @@ pub struct ImportResolver {
     registry: HashMap<String, String>,
 }
 
+/// The name of a top-level item, if it carries one.
+fn item_name(item: &TopLevel) -> Option<&str> {
+    match item {
+        TopLevel::Definition(d) => Some(d.name.as_str()),
+        TopLevel::Signature(s) => Some(s.name.as_str()),
+        TopLevel::ForeignBinding(fb) => Some(fb.effective_brief_name()),
+        TopLevel::Transaction(t) => Some(t.name.as_str()),
+        TopLevel::Constant(c) => Some(c.name.as_str()),
+        TopLevel::Obj(s) => Some(s.name.as_str()),
+        TopLevel::RStruct(r) => Some(r.name.as_str()),
+        TopLevel::TypeDef(t) => Some(t.name.as_str()),
+        TopLevel::StaticStruct(s) => Some(s.name.as_str()),
+        TopLevel::StateDecl(s) => Some(s.name.as_str()),
+        TopLevel::Trigger(trg) => Some(trg.name.as_str()),
+        TopLevel::TriggerBinding { name, .. } => Some(name.as_str()),
+        TopLevel::Cell(c) => Some(c.name.as_str()),
+        _ => None,
+    }
+}
+
+/// The item's name as an owned String (for HashSet membership).
+fn top_level_name(item: &TopLevel) -> Option<String> {
+    item_name(item).map(|s| s.to_string())
+}
+
+/// The Custom/Applied type names referenced by an item's slots/fields.
+/// 2026-08-01 (D3): used by the named-import dependency closure — `List`
+/// references `ListBuffer<T>` in its slots, which must be imported too.
+fn referenced_type_names(item: &TopLevel) -> Vec<String> {
+    fn type_names(ty: &crate::ast::Type, acc: &mut Vec<String>) {
+        match ty {
+            crate::ast::Type::Custom(n) => acc.push(n.clone()),
+            crate::ast::Type::Applied(n, args) => {
+                acc.push(n.clone());
+                for a in args {
+                    type_names(a, acc);
+                }
+            }
+            crate::ast::Type::Ptr(i) | crate::ast::Type::PtrConst(i) => type_names(i, acc),
+            crate::ast::Type::Vector(i, _) => type_names(i, acc),
+            crate::ast::Type::Tuple(elems) => {
+                for e in elems {
+                    type_names(e, acc);
+                }
+            }
+            _ => {}
+        }
+    }
+    let mut out = Vec::new();
+    match item {
+        TopLevel::TypeDef(td) => {
+            for s in &td.body.slots {
+                type_names(&s.ty, &mut out);
+            }
+            for m in &td.body.members {
+                let params: Vec<&(String, crate::ast::Type)> = match m {
+                    TopLevel::Transaction(t) => t.parameters.iter().collect(),
+                    TopLevel::Definition(t) => t.parameters.iter().collect(),
+                    _ => Vec::new(),
+                };
+                for (_, ty) in params {
+                    type_names(ty, &mut out);
+                }
+            }
+        }
+        TopLevel::StaticStruct(sd) => {
+            for (_, ty) in &sd.fields {
+                type_names(ty, &mut out);
+            }
+        }
+        _ => {}
+    }
+    out
+}
+
 impl ImportResolver {
     pub fn new() -> Self {
         ImportResolver {
@@ -650,6 +725,11 @@ impl ImportResolver {
                     TopLevel::Cell(c) => Some(c.name.as_str()),
                     TopLevel::StateDecl(s) => Some(s.name.as_str()),
                     TopLevel::TypeDef(t) => Some(t.name.as_str()),
+                    // 2026-08-01 (D3): a generic `struct ListBuffer<T>` is a
+                    // StaticStruct — without an arm here it was DROPPED from
+                    // every import, so `List<T>.inner: ListBuffer<T>` lost its
+                    // slot type (field access failed on imported collections).
+                    TopLevel::StaticStruct(s) => Some(s.name.as_str()),
                     _ => None,
                 };
                 let name: &str = match name {
@@ -668,8 +748,46 @@ impl ImportResolver {
                 }
             })
             .cloned()
-            .collect();
-
+            .collect::<Vec<_>>();
+        // 2026-08-01 (D3): a named import (`{ List }`) must ALSO bring the
+        // requested item's dependencies — `List` slots reference
+        // `ListBuffer<T>`, which the name filter would otherwise drop. Collect
+        // the transitive referenced-type closure of the kept items.
+        if !symbols.is_empty() {
+            let mut keep: std::collections::HashSet<String> = filtered
+                .iter()
+                .filter_map(top_level_name)
+                .collect();
+            let mut changed = true;
+            while changed {
+                changed = false;
+                // The DEPENDENCY direction: a kept item (List) REFERENCES a
+                // candidate (ListBuffer) — so collect every referenced name
+                // from the kept items and add items bearing those names.
+                let mut refs: std::collections::HashSet<String> = std::collections::HashSet::new();
+                for item in items {
+                    if item_name(item).map_or(false, |n| keep.contains(n)) {
+                        for r in referenced_type_names(item) {
+                            refs.insert(r);
+                        }
+                    }
+                }
+                for item in items {
+                    if item_name(item).map_or(false, |n| keep.contains(n)) {
+                        continue;
+                    }
+                    if item_name(item).map_or(false, |n| refs.contains(n)) {
+                        if let Some(n) = item_name(item) {
+                            keep.insert(n.to_string());
+                            changed = true;
+                        }
+                    }
+                }
+            }
+            return Ok(items.iter().cloned().filter(|i| {
+                item_name(i).map_or(false, |n| keep.contains(n))
+            }).collect());
+        }
         Ok(filtered)
     }
 

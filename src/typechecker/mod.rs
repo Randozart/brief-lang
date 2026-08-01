@@ -440,6 +440,7 @@ pub fn infer_expression(
             let (_, idx_prov) = infer_expression(index, ctx)?;
             let elem_ty = match &obj_ty {
                 Type::Vector(inner, _) => (**inner).clone(),
+                Type::Ptr(inner) | Type::PtrConst(inner) => (**inner).clone(),
                 Type::Custom(n) if n == "String" => Type::int(),
                 _ => Type::int(),
             };

@@ -83,6 +83,13 @@ obj List<T> {
     op CopyFrom: get(#R);
     op Init: init(#L, #R);
 
+    txn init(val: T) [true][len == 1] {
+        inner.data = Malloc#(16) as Ptr<T>;
+        inner.cap = 16;
+        inner.data[0] = val;
+        len = 1;
+    };
+
     txn push(val: T) [len < inner.cap][len <= inner.cap] {
         inner.data[len] = val;
         len = len + 1;
