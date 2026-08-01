@@ -1651,7 +1651,7 @@ fn obj_type_params(ctx: &TypecheckContext, type_name: &str) -> Vec<String> {
 
 /// 2026-07-31: Substitute a type's generic parameters. `Type::Custom("T")`
 /// names matching a substitution key become the mapped concrete type.
-fn substitute_type(ty: &Type, subst: &HashMap<String, Type>) -> Type {
+pub(crate) fn substitute_type(ty: &Type, subst: &HashMap<String, Type>) -> Type {
     match ty {
         Type::Custom(n) => subst.get(n).cloned().unwrap_or_else(|| ty.clone()),
         Type::Applied(n, args) => {
@@ -1660,7 +1660,18 @@ fn substitute_type(ty: &Type, subst: &HashMap<String, Type>) -> Type {
         }
         Type::Vector(inner, dims) => Type::Vector(
             Box::new(substitute_type(inner, subst)),
-            dims.clone(),
+            dims.iter().map(|d| match d {
+                // 2026-07-31 (A8): a Named dimension whose name maps to a
+                // size arg becomes an Anonymous dimension (`T[N]` with N=8 →
+                // `Int[8]`).
+                crate::ast::Dimension::Named(n, _) => {
+                    match subst.get(n) {
+                        Some(Type::Number(sz)) => crate::ast::Dimension::Anonymous(*sz as usize),
+                        _ => d.clone(),
+                    }
+                }
+                _ => d.clone(),
+            }).collect(),
         ),
         Type::Tuple(elems) => Type::Tuple(elems.iter().map(|e| substitute_type(e, subst)).collect()),
         _ => ty.clone(),

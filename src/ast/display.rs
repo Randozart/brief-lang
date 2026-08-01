@@ -168,6 +168,7 @@ impl fmt::Display for Type {
         match self {
             Type::Bits(n) => write!(f, "Bits<{}>", n * 8),
             Type::Void => write!(f, "void"),
+            Type::Number(n) => write!(f, "{}", n),
             Type::Custom(name) => write!(f, "{}", name),
             Type::HashWord(name) => write!(f, "{}", name),
             Type::HashWordVariant(name, var) => write!(f, "{}<{}>", name, var),

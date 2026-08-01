@@ -152,6 +152,7 @@ impl MemorySpec {
 
 fn format_type(ty: &Type) -> String {
     match ty {
+        Type::Number(n) => n.to_string(),
         Type::Custom(__t) if __t == "Int" => "Int".to_string(),
         Type::Custom(__t) if __t == "Int8" => "Int8".to_string(),
         Type::Custom(__t) if __t == "Int16" => "Int16".to_string(),
@@ -219,6 +220,7 @@ fn format_bit_range(br: &BitRange) -> String {
 
 fn estimate_type_size(ty: &Type) -> usize {
     match ty {
+        Type::Number(n) => (*n).max(0) as usize,
         Type::Custom(__t) if __t == "Int" || __t == "UInt" => 8,
         Type::Custom(__t) if __t == "Int8" || __t == "UInt8" => 1,
         Type::Custom(__t) if __t == "Int16" || __t == "UInt16" => 2,

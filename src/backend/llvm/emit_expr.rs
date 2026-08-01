@@ -1373,9 +1373,9 @@ impl LlvmBackend {
         let _ = v;
         let recv_tmp = self.fun.gen_reg();
         let recv_reg = self.emit_expr_inner(out, &recv_tmp, recv, indent);
-        let type_name = match &recv_reg.ty {
-            Type::Custom(n) => n.clone(),
-            _ => panic!(
+        let type_name = match self.resolve_obj_key(&recv_reg.ty) {
+            Some(n) => n,
+            None => panic!(
                 "field access '.{}' on non-struct type '{}' reached codegen",
                 name, recv_reg.ty
             ),
@@ -1424,10 +1424,9 @@ impl LlvmBackend {
         let recv_reg = self.emit_expr_inner(out, &recv_tmp, recv, indent);
         // 2026-07-31: a struct-typed state field loads as i64 (its address);
         // recover the struct type from field_brief_types for member lookup.
-        let mut type_name = match &recv_reg.ty {
-            Type::Custom(n) => n.clone(),
-            Type::Applied(n, _) => n.clone(),
-            _ => String::new(),
+        let mut type_name = match self.resolve_obj_key(&recv_reg.ty) {
+            Some(n) => n,
+            None => String::new(),
         };
         if type_name.is_empty() {
             if let Expr::Identifier(rname) = recv {

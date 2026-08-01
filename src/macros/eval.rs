@@ -2133,6 +2133,7 @@ fn resolve_dollar_refs_in_stmt(stmt: &mut Statement, scope: &Scope) -> Result<()
 /// Custom name lookup from Str scope values).
 fn resolve_dollar_refs_in_type(ty: &mut Type, scope: &Scope) -> Result<(), String> {
     match ty {
+        Type::Number(_) => Ok(()),
         Type::Custom(name) => {
             if let Some(var_name) = name.strip_prefix('$') {
                 if let Some(val) = scope.get(var_name) {

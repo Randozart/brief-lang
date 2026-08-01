@@ -107,10 +107,14 @@ pub struct CompilerContext {
 
     // Type info
     pub struct_types: HashMap<String, Vec<(String, Type)>>,
-    /// 2026-07-31 (A5): obj member declarations (txn/defn/node bodies), keyed
+    /// 2026-07-31 (A8): obj member declarations (txn/defn/node bodies), keyed
     /// by type name. Used by MethodCall codegen to emit the member body with
     /// `self` bound to the receiver instance.
     pub obj_members: HashMap<String, Vec<crate::ast::TopLevel>>,
+    /// 2026-07-31 (A8): obj declared type-parameter names, keyed by type name
+    /// (`obj Stack<T, N>` → ["T", "N"]). Used to substitute a receiver's
+    /// concrete type args into the generic slots/members (monomorphization).
+    pub obj_type_params: HashMap<String, Vec<String>>,
     pub enum_types: HashMap<String, EnumDefinition>,
     pub cell_defs: HashMap<String, CellDef>,
     pub cell_state_types: HashMap<String, (HashMap<String, usize>, Vec<String>)>,
@@ -288,6 +292,7 @@ impl CompilerContext {
             constants: HashMap::new(),
             struct_types: HashMap::new(),
             obj_members: HashMap::new(),
+            obj_type_params: HashMap::new(),
             enum_types: HashMap::new(),
             cell_defs: HashMap::new(),
             cell_state_types: HashMap::new(),

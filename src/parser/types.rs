@@ -155,7 +155,19 @@ impl<'a> Parser<'a> {
         if self.eat(&Token::Lt) {
             let mut args = Vec::new();
             loop {
-                args.push(self.parse_type()?);
+                // 2026-07-31 (A8): a numeric generic argument is a compile-time
+                // SIZE parameter (`Stack<Int, 8>`).
+                let next_is_int = matches!(self.peek(), Some(Token::Integer(_)));
+                if next_is_int {
+                    let n = match self.peek() {
+                        Some(Token::Integer(n)) => *n,
+                        _ => 0,
+                    };
+                    self.pos += 1;
+                    args.push(Type::Number(n));
+                } else {
+                    args.push(self.parse_type()?);
+                }
                 if !self.eat(&Token::Comma) {
                     break;
                 }

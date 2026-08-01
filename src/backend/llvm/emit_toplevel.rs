@@ -764,6 +764,13 @@ impl LlvmBackend {
             Some(Type::Applied(n, _)) => n.clone(),
             _ => return false,
         };
+        // 2026-07-31 (A8): a generic field (`let q: RingBuffer<Int> = 0`)
+        // monomorphizes to the applied key.
+        let field_ty_clone = self.ctx.field_brief_types.get(idx).cloned();
+        let type_key = match field_ty_clone.as_ref() {
+            Some(ty) => self.resolve_obj_key(ty),
+            None => None,
+        }.unwrap_or_else(|| brief_ty.clone());
         let defs = self.ctx.operator_defs.get(&brief_ty).cloned().unwrap_or_default();
         let init_def = match defs.iter().find(|d| d.op == "Init") {
             Some(d) => d.clone(),
@@ -777,18 +784,18 @@ impl LlvmBackend {
             },
             _ => return false,
         };
-        let members = self.ctx.obj_members.get(&brief_ty).cloned().unwrap_or_default();
+        let members = self.ctx.obj_members.get(&type_key).cloned().unwrap_or_default();
         let member = members.iter().find(|m| super::emit_expr::member_brief_name(m) == fn_name).cloned();
         let Some(member) = member else { return false; };
         // Allocate the instance storage and pass its address as `self`.
-        let size = self.struct_type_size(&brief_ty);
+        let size = self.struct_type_size(&type_key);
         let inst = self.fun.gen_reg();
         writeln!(out, "{}{} = alloca i8, i64 {}", indent, inst, size).ok();
         let addr = self.fun.gen_reg();
         writeln!(out, "{}{} = ptrtoint ptr {} to i64", indent, addr, inst).ok();
         let recv_reg = crate::backend::llvm::TypedRegister {
             name: addr.clone(),
-            ty: Type::Custom(brief_ty.clone()),
+            ty: Type::Custom(type_key.clone()),
         };
         let mut arg_regs: Vec<(String, Type)> = Vec::new();
         if let Some(e) = init_expr {
@@ -797,7 +804,7 @@ impl LlvmBackend {
             arg_regs.push((vr.name, vr.ty));
         }
         let out_tmp = self.fun.gen_reg();
-        self.emit_member_body(out, &out_tmp, &recv_reg, &brief_ty, &member, &arg_regs, indent);
+        self.emit_member_body(out, &out_tmp, &recv_reg, &type_key, &member, &arg_regs, indent);
         // Store the instance address into the field slot.
         let gep = self.fun.gen_reg();
         writeln!(out, "{}{} = getelementptr inbounds %State, ptr %state, i32 0, i32 {}", indent, gep, idx).ok();
@@ -805,6 +812,51 @@ impl LlvmBackend {
         writeln!(out, "{}store i64 {}, ptr {}", indent, addr, gep).ok();
         let _ = field_name;
         true
+    }
+
+    /// 2026-07-31 (A8): monomorphize an applied obj type (`Stack<Int, 8>`):
+    /// register the substituted slots + member bodies under a mono key
+    /// (`Stack<Int, 8>`), so layout, self-slot offsets, and member dispatch
+    /// use the concrete instance. Returns the mono key.
+    pub(crate) fn ensure_mono(&mut self, base: &str, args: &[crate::ast::Type]) -> String {
+        let key = format!(
+            "{}<{}>",
+            base,
+            args.iter().map(|t| format!("{}", t)).collect::<Vec<_>>().join(", ")
+        );
+        if !self.ctx.struct_types.contains_key(&key) {
+            let subst = self.mono_subst(base, args);
+            let slots = self.ctx.struct_types.get(base).cloned().unwrap_or_default()
+                .into_iter()
+                .map(|(n, ty)| (n, crate::typechecker::substitute_type(&ty, &subst)))
+                .collect::<Vec<_>>();
+            self.ctx.struct_types.insert(key.clone(), slots);
+            if let Some(members) = self.ctx.obj_members.get(base).cloned() {
+                self.ctx.obj_members.insert(key.clone(), members);
+            }
+        }
+        key
+    }
+
+    /// 2026-07-31 (A8): the substitution map for an applied obj type —
+    /// declared type params zipped with the concrete args.
+    fn mono_subst(&self, base: &str, args: &[crate::ast::Type]) -> std::collections::HashMap<String, crate::ast::Type> {
+        let params = self.ctx.obj_type_params.get(base).cloned().unwrap_or_default();
+        params.into_iter().zip(args.iter().cloned()).collect()
+    }
+
+    /// 2026-07-31 (A8): resolve an obj type name (Custom or Applied) to its
+    /// registered struct key, monomorphizing on first use.
+    pub(crate) fn resolve_obj_key(&mut self, ty: &crate::ast::Type) -> Option<String> {
+        match ty {
+            crate::ast::Type::Custom(n) if self.ctx.struct_types.contains_key(n) => Some(n.clone()),
+            crate::ast::Type::Applied(n, args) if self.ctx.struct_types.contains_key(n) => {
+                let n = n.clone();
+                let args = args.clone();
+                Some(self.ensure_mono(&n, &args))
+            }
+            _ => None,
+        }
     }
 
     fn emit_field_init_value(&mut self, out: &mut String, indent: &str,

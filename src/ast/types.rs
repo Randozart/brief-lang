@@ -34,6 +34,10 @@ pub enum Type {
     Function(Vec<Type>, Box<Type>),
     /// Type-level width: Width(8)
     Width(u64),
+    /// 2026-07-31 (A8): compile-time integer type argument — a SIZE parameter
+    /// in a generic application (`Stack<Int, 8>`). Substitutes into a Named
+    /// vector dimension (`T[N]` → `Int[8]`).
+    Number(i64),
     /// Vector type with dimensions
     Vector(Box<Type>, Vec<Dimension>),
     /// Constrained type: Constrained(Bits(8), Range(0, 255))

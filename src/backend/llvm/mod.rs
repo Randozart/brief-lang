@@ -1955,6 +1955,14 @@ impl LlvmBackend {
                     if !td.body.members.is_empty() {
                         self.ctx.obj_members.insert(td.name.clone(), td.body.members.clone());
                     }
+                    // 2026-07-31 (A8): register obj type parameters for
+                    // monomorphization (`Stack<T, N>` → ["T", "N"]).
+                    if !td.type_params.is_empty() {
+                        self.ctx.obj_type_params.insert(
+                            td.name.clone(),
+                            td.type_params.iter().map(|p| p.name.clone()).collect(),
+                        );
+                    }
                     if let Some(ref mut universe) = self.ctx.type_universe {
                         if !universe.types.contains_key(&td.name) {
                             let bytes: u64 = fields.iter().map(|(_, ty)| {
@@ -3723,7 +3731,7 @@ impl LlvmBackend {
             // can evaluate and store the runtime value at startup.
             } else if let TopLevel::Statement(stmt) = item {
                 if let crate::ast::Statement::Let { name, ty, expr, .. } = stmt.as_ref() {
-                    let field_ty = ty.clone().unwrap_or(crate::ast::Type::int());
+                                let field_ty = ty.clone().unwrap_or(crate::ast::Type::int());
                     self.ctx.field_index_map
                         .insert(name.clone(), self.ctx.field_types.len());
                     self.push_field_type(&field_ty);

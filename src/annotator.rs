@@ -222,6 +222,7 @@ impl Annotator {
 
     fn type_to_string(&self, ty: &Type) -> String {
         match ty {
+            Type::Number(n) => n.to_string(),
             Type::Custom(__t) if __t == "Int" => "Int".to_string(),
             Type::Custom(__t) if __t == "Int8" => "Int8".to_string(),
             Type::Custom(__t) if __t == "Int16" => "Int16".to_string(),
