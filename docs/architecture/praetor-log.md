@@ -25,10 +25,19 @@ rule and the single-file workaround. `scripts/verify.sh`'s baseline comparison
 is stale (June schema `{total_diagnostics}` vs current `{failures,passed,
 total_diagnostics}`) and should be treated as informational until rewritten.
 
+**Pre-commit hook removed (2026-08-01):** the shared `pre-commit` hook
+(`../brief-compiler/.git/hooks/pre-commit`, June 2026, runs on this worktree)
+was **broken the same way** — it built a comma-separated list of changed files
+and passed it to `--target`, which is directory-only, so it silently passed
+without analyzing anything. Per the no-hook decision, the hook was **deleted**,
+not fixed. Praetor runs manually on changed files per the AGENTS.md policy.
+
 **Verified on this commit's changes:** `praetor validate --warn --target
 src/backend/llvm` reports only pre-existing diagnostics (e.g. `type_size`
 cognitive complexity 27→30, pre-existing; `emit_store_tbaa` 6 params,
 pre-existing). No NEW diagnostics introduced by the B0/width-rule changes.
+A line-shift-tolerant comparison (42 diagnostics before vs 42 after) confirms
+zero new diagnostic functions.
 
 ---
 
