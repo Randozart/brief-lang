@@ -546,6 +546,12 @@ pub struct FunctionContext {
     // alloca register name.
     pub last_val_temps: HashMap<String, String>,
 
+    // 2026-08-01 (B): the label of the block the emitter is currently writing
+    // into. The countdown's guard body can end in a `when`, whose next_label
+    // becomes the live block — the latch edge (br .cdl_) and the latch phis'
+    // guard predecessor must use it, not `.cdg_`.
+    pub cur_block: Option<String>,
+
     // 2026-07-17: Type of each last_val_temp entry. Parallel map so the
     // Identifier handler in emit_expr can return the correct Type when
     // reading a variable that was written earlier in the same body iteration.
@@ -660,6 +666,7 @@ impl FunctionContext {
             parallel_safe_exempt_fields: HashSet::new(),
             done_needs_fields: HashSet::new(),
             last_val_temps: HashMap::new(),
+            cur_block: None,
             last_val_types: HashMap::new(),
             rotation_fields: HashSet::new(),
             active_vector_groups: Vec::new(),

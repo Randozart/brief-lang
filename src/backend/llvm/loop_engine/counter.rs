@@ -854,6 +854,7 @@ impl LlvmBackend {
         // phis (post-compute state); let-bindings referenced by the guard are
         // remapped to their stored state fields.
         writeln!(out, ".cdg_{}:", c0).ok();
+        self.fun.cur_block = Some(format!(".cdg_{}", c0));
         let mut let_to_field: HashMap<String, String> = HashMap::new();
         for stmt in &batch.inner_body {
             if let Statement::Assign(lhs, Expr::Identifier(let_name)) = stmt {
@@ -882,19 +883,29 @@ impl LlvmBackend {
         // body's assigns, defined in .cdb which dominates .cdg). Clearing it
         // would make the guard print the previous iteration's state — the
         // 5M+1-compute bug (kalman printed 8.188e12 instead of 8.139e12).
-        let mut empty2 = Vec::new();
-        self.emit_countable_body(out, &guard_body, write_set, &mut empty2);
+        // 2026-08-01 (B): the rem reset is emitted BEFORE the guard body so it
+        // is defined in .cdg_ and dominates the guard's control flow. A guard
+        // body that ends in a `when` leaves the emitter in the when's
+        // next_label; the latch br below lands there, and the latch phis use
+        // cur_block (the final block) as the guard predecessor — hardcoding
+        // .cdg_ broke the phi's predecessor set for when-ended guards.
         let rem_reset = self.fun.next_reg_with_prefix("cdz");
         writeln!(out, "  {} = add i64 0, {}", rem_reset, batch_size).ok();
+        let mut empty2 = Vec::new();
+        self.emit_countable_body(out, &guard_body, write_set, &mut empty2);
         writeln!(out, "  br label %.cdl_{}", c0).ok();
 
         // ── Latch ──────────────────────────────────────────────
         // %rem_latch = phi [remaining-1, body], [N, guard]. All phis (rem +
         // guard-written fields) are grouped at the TOP of the block per LLVM
-        // rules; non-phi backedges follow.
+        // rules; non-phi backedges follow. The guard predecessor is the
+        // guard's FINAL block (cur_block) — a when-ended guard branches to
+        // .cdl_ from its next_label, not from .cdg_ itself.
+        let guard_pred = self.fun.cur_block.clone()
+            .unwrap_or_else(|| format!(".cdg_{}", c0));
         writeln!(out, ".cdl_{}:", c0).ok();
-        writeln!(out, "  {} = phi i64 [ {}, %.cdb_{} ], [ {}, %.cdg_{} ]",
-            c_rem_latch, c_rem_next, c0, rem_reset, c0).ok();
+        writeln!(out, "  {} = phi i64 [ {}, %.cdb_{} ], [ {}, %{} ]",
+            c_rem_latch, c_rem_next, c0, rem_reset, guard_pred).ok();
         for fname in sorted_fields.iter().filter(|f| {
             f.as_str() != counter_var && guard_writes.contains(f.as_str())
         }) {
@@ -909,8 +920,8 @@ impl LlvmBackend {
                     });
                 let guard_val = self.fun.pending_phi_backedge.get(fname.as_str())
                     .cloned().unwrap_or_else(|| body_val.clone());
-                writeln!(out, "  {} = phi {} [ {}, %.cdb_{} ], [ {}, %.cdg_{} ]",
-                    be_f, field_ty, body_val, c0, guard_val, c0).ok();
+                writeln!(out, "  {} = phi {} [ {}, %.cdb_{} ], [ {}, %{} ]",
+                    be_f, field_ty, body_val, c0, guard_val, guard_pred).ok();
             }
         }
         // Counter increment (native width) — the counter's backedge.
@@ -1472,6 +1483,7 @@ impl LlvmBackend {
                     self.emit_countable_body(out, else_b, write_set, hoisted);
                     writeln!(out, "  br label %{}", merge_label).ok();
                     writeln!(out, "{}:", merge_label).ok();
+                    self.fun.cur_block = Some(merge_label);
                 }
                 Statement::Guarded(cond, stmts) => {
                     let cond_reg = self.emit_expr(out, cond, "  ");
@@ -1484,6 +1496,7 @@ impl LlvmBackend {
                     self.emit_countable_body(out, stmts, write_set, hoisted);
                     writeln!(out, "  br label %{}", next_label).ok();
                     writeln!(out, "{}:", next_label).ok();
+                    self.fun.cur_block = Some(next_label);
                 }
                 Statement::Block(stmts) => {
                     self.emit_countable_body(out, stmts, write_set, hoisted);
