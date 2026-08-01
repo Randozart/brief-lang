@@ -555,6 +555,9 @@ pub struct FunctionContext {
     /// emit `load volatile` so an MMIO address read is never cached or
     /// eliminated. Reset after the let.
     pub volatile_read: bool,
+    /// 2026-08-01 (E): locals bound via `vol let x` — stores THROUGH them
+    /// (`x[i] = v`, `*x = v`) emit `store volatile` (MMIO register writes).
+    pub volatile_locals: std::collections::HashSet<String>,
 
     // 2026-07-17: Type of each last_val_temp entry. Parallel map so the
     // Identifier handler in emit_expr can return the correct Type when
@@ -672,6 +675,7 @@ impl FunctionContext {
             last_val_temps: HashMap::new(),
             cur_block: None,
             volatile_read: false,
+            volatile_locals: std::collections::HashSet::new(),
             last_val_types: HashMap::new(),
             rotation_fields: HashSet::new(),
             active_vector_groups: Vec::new(),

@@ -55,6 +55,11 @@ pub fn emit_statement(backend: &mut LlvmBackend, out: &mut String, stmt: &Statem
                 backend.fun.struct_literal_allocas.insert(name.clone(), alloca);
             }
             backend.fun.let_bindings.insert(name.clone(), val.name.clone());
+            // 2026-08-01 (E): a `vol let` binds a volatile local — stores
+            // THROUGH it (`x[i] = v`, `*x = v`) emit `store volatile`.
+            if is_vol {
+                backend.fun.volatile_locals.insert(name.clone());
+            }
             // 2026-07-31 (A5): a declared type wins over the emitted register's
             // type — a `let st: Stack = Stack()` local must bind as `Stack`
             // (the emitted struct address is i64/Int), so method calls and
@@ -222,7 +227,15 @@ pub fn emit_statement(backend: &mut LlvmBackend, out: &mut String, stmt: &Statem
                             writeln!(out, "{}{} = add i64 {}, 0", indent, offset, idx_reg.name).ok();
                         }
                         writeln!(out, "{}{} = getelementptr i64, ptr {}, i64 {}", indent, gep, ptr, offset).ok();
-                        writeln!(out, "{}store i64 {}, ptr {}", indent, val.name, gep).ok();
+                        // 2026-08-01 (E): `vol let p` — stores through the
+                        // local (`p[i] = v`) emit `store volatile` (MMIO
+                        // register arrays).
+                        let vol_obj = match obj.as_ref() {
+                            Expr::Identifier(n) => backend.fun.volatile_locals.contains(n),
+                            _ => false,
+                        };
+                        writeln!(out, "{}store {}i64 {}, ptr {}", indent,
+                            if vol_obj { "volatile " } else { "" }, val.name, gep).ok();
                     }
                 }
                 _ => {}
