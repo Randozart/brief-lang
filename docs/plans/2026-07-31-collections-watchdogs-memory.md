@@ -164,6 +164,28 @@ Index fix + `%State` emitting `[16 x float]` with indexed GEP loads. If the
 array form closes the 40→34 gap, ship `_sym`/`_idio` variants; only then a
 first-class cyclic-shift pass with its own baseline.
 
+**B status (mid-phase):** array-state codegen was emitting INVALID IR in loops
+and is now fixed and llc-verified:
+- reads: GEP into %State + scalar load (was `extractelement i64` on a loaded
+  `[16 x float]` aggregate — invalid).
+- writes: `emit_array_state_store` (flat guard clauses) — GEP + scalar store
+  with `ensure_typed_value`.
+- init: `store [N x T] zeroinitializer` (was invalid `store [N x T] 0`).
+- loop-carried phis: aggregate fields are memory-resident — excluded from the
+  countdown's phi set (`is_aggregate_field`).
+- FFI-guard cold-function outlining: aggregates are not outlined as scalar
+  params (`can_outline_all` fails) — the guard stays inline.
+
+**Remaining B blocker (precise):** with an aggregate field written, the
+countdown's guard block (`.cdg_`) leaves the guard-body `when`'s end block
+(`guard.end`) WITHOUT a terminator — `expected instruction opcode` at the
+closing `}`. The scalar path terminates `guard.end` with the `br .cdl_` latch
+edge; the aggregate path must emit that latch br after the guard's `when`
+`next_label`. This is a block-pointer / emission-order bug in
+`emit_countable_countdown_main` around `emit_countable_body` + the latch
+branch. Local array variables (`let n: Float[16]`) are also unsupported (a
+local is allocated as i64) — the experiment uses state arrays for now.
+
 ### Phase C — Watchdogs
 1. Parse `-> handler(val)` into `WatchdogSpec.on_fire`.
 2. Liveliness per-iteration check; fuel via the countdown budget; time via
