@@ -87,29 +87,10 @@ type String: #String {
     prop Bytes: byte_len(#L);
 };
 
-type UTF8View {
-    data: Int;
-    len: Int;
-    !> alignment: 8;
-};
-
-type StaticString {
-    data: Int;
-    len: Int;
-};
-
-type SmallString64 {
-    slot0: Int;
-    slot1: Int;
-    slot2: Int;
-    slot3: Int;
-    slot4: Int;
-    slot5: Int;
-    slot6: Int;
-    slot7: Int;
-    len: Int;
-    !> alignment: 8;
-};
+// 2026-08-01 (B4): the legacy String types (UTF8View, StaticString,
+// SmallString64) were retired — a String is a bare #String protocol member
+// (ptr to [len][bytes]) with no fields. Their modules (utf8view.bv,
+// small_string.bv) were deleted.
 
 type Data: Int { !> bits: 64; };
 

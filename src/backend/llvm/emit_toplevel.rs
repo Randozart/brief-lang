@@ -140,25 +140,10 @@ impl LlvmBackend {
         // Also hardcode common stdlib types that may not have universe entries if the
         // importing benchmark doesn't reference them directly.
         //
-        // Hardcoded stdlib struct types (always emitted for ABI consistency):
-        // 2026-08-01: `%String` removed — under the bits model a String value is a
-        // `ptr` to `[len][bytes]`, so a named `{ i64, i64 }` decl would be a false
-        // ABI claim (B0 acceptance: no `{ i64, i64 }` for String in emitted IR).
-        // Nothing references it anymore. StaticString/UTF8View/SmallString64 remain
-        // until their legacy retirement (Phase B4).
-        for (name, field_tys) in &[
-            ("SmallString64", "i64, i64, i64, i64, i64, i64, i64, i64, i64"),
-            ("StaticString", "i64, i64"),
-            ("UTF8View", "i64, i64"),
-        ] {
-            writeln!(out, "%{} = type {{ {} }}", name, field_tys).ok();
-        }
-        // Universe-registered struct types (from type declarations with slots):
-        // 2026-07-30: Skip types already hardcoded above — prevents duplicate
-        // %String = type { i64, i64 } declarations that clang rejects.
-        let mut emitted: std::collections::HashSet<String> = [
-            "SmallString64", "StaticString", "UTF8View",
-        ].iter().map(|s| s.to_string()).collect();
+        // 2026-08-01 (B4): the legacy struct-type declarations (SmallString64,
+        // StaticString, UTF8View) were retired with their types — nothing
+        // references them under the bits model (String is a bare #String ptr).
+        let mut emitted: std::collections::HashSet<String> = std::collections::HashSet::new();
         if let Some(u) = &self.ctx.type_universe {
             let mut universe_fields: Vec<(String, Vec<String>)> = Vec::new();
             for rt in u.types.values() {
@@ -278,14 +263,11 @@ impl LlvmBackend {
         if matches!(ty, Type::Ptr(_)) {
             return "ptr".to_string();
         }
-        // 2026-07-18: UTF8View/Slice always use {ptr, i64} or {i64, i64} (fat pointer),
-        // regardless of SSO. Must be checked BEFORE the general struct_types check
-        // because they are also registered as struct types but should be passed by value.
-        // 2026-07-30: Slice<T> replaces UTF8View. UTF8View kept for backward compat.
+        // 2026-07-30: Slice<T> always uses { ptr, i64 } (fat pointer). Must be
+        // checked BEFORE the general struct_types check because Slice is also
+        // registered as a struct type but should be passed by value.
+        // 2026-08-01 (B4): UTF8View removed (legacy type retired).
         if let Type::Custom(name) = ty {
-            if name == "UTF8View" {
-                return "{ i64, i64 }".to_string();
-            }
             if name == "Slice" {
                 return "{ ptr, i64 }".to_string();
             }
