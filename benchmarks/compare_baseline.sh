@@ -31,7 +31,10 @@ echo ""
 if [ ! -f "$BASELINE_DIR/benchmarks/$NAME" ]; then
     echo "Building baseline binary..."
     cd "$BASELINE_DIR"
-    BOUND=50000000 ./target/release/brief-compiler build "benchmarks/${NAME}.bv" --out benchmarks 2>&1 | tail -1
+    # 2026-08-01: binary renamed brief-compiler -> briefc long ago; the stale
+    # name made baseline builds fail silently and the comparison compare only
+    # the current binary (or error). Must match the harness's briefc binary.
+    BOUND=50000000 ./target/release/briefc build "benchmarks/${NAME}.bv" --out benchmarks 2>&1 | tail -1
     cd "$CURRENT_DIR"
 fi
 if [ ! -f "benchmarks/$NAME" ]; then

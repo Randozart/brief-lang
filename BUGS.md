@@ -2749,3 +2749,27 @@ outlined guard param that is a FLOAT state field (e.g. accumulator_flush's
 `store i64 %__cp_sum` on a float param (type error).
 **Fix:** the alloca uses the binding's Brief type (`let_binding_types` →
 `llvm_type`).
+
+---
+
+## frgn String declares disagree with call sites when SSO is off — OPEN
+
+**Date:** 2026-08-01
+**Status:** Open (latent — no current impact; logged from plugin-rework FFI audit)
+**Root cause:** The frgn `declare` emission uses `protocol_llvm_type`
+(`src/backend/llvm/mod.rs:366`), which returns `{ i64, i64 }` for String-shaped
+types unconditionally. The frgn **call-site** uses `llvm_type`
+(`src/backend/llvm/emit_toplevel.rs:269`), which respects `feature_sso_strings`
+(default **off** → `ptr`). With SSO off, generated IR contains:
+`declare { i64, i64 } @__getenv_int({ i64, i64 })` alongside
+`call i64 @__getenv_int(ptr %key)`. LLVM treats these as two distinct functions;
+the call resolves to the C symbol with the correct ABI, and the wrong declare is
+GC-section-dropped — so it is harmless today.
+**Risk:** any path that calls through the declared `{i64,i64}` prototype (e.g. a
+future bridge or an SSO-enabled run that misses the extractvalue shim) breaks
+the ABI silently.
+**Fix (proposed):** make `protocol_llvm_type` honor the `feature_sso_strings`
+gate so the declare agrees with the call in both configurations. Additive, no
+semantic change; deferred out of the plugin/macro rework phase scope.
+**Evidence:** `benchmarks/float_math.ll:43-44` (declares) vs `:166,174` (calls);
+see `benchmarks/results/2026-08-01-plugin-rework-baseline.md` §2.3.

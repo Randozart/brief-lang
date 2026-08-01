@@ -3192,3 +3192,50 @@ fn test_batch_loop_rejects_pre_increment() {
     let output = LlvmBackend::new().generate(&program, None);
     assert!(!output.contains(".cd_"), "pre-increment guard must NOT use the countdown loop");
 }
+
+// ── FFI regression guard (2026-08-01, Phase 0 of the plugin/macro rework) ──
+// PrintLn!/Print! rewrite to direct C-runtime intrinsic calls (PrintInt# etc.),
+// which the backend emits as `call i64 @__print_*`. The syntax renames in the
+// plugin/macro rework (PrintLn! -> println!, GetEnvInt! -> get_env_int!) must
+// never introduce an indirection layer (GLUE bridge shims, protocol chains)
+// between the macro and the C runtime call. This test pins that contract:
+// if a future rewrite stops emitting the direct call, it fails here.
+
+/// Lex + parse a .bv source string into an AST (test helper).
+fn parse_bv_source(src: &str) -> Vec<TopLevel> {
+    let tokens = crate::lexer::tokenize(src).expect("tokenize failed");
+    let mut parser = crate::parser::Parser::new(tokens, src);
+    parser.parse_program().expect("parse failed")
+}
+
+#[test]
+fn test_print_plugin_emits_direct_ffi_calls() {
+    let src = r#"
+        let x: Int = 5;
+        defn show(v: Int) -> Int {
+            PrintLn!(v);
+            term v;
+        };
+    "#;
+    let mut items = parse_bv_source(src);
+    let mut universe = crate::type_universe::TypeUniverse::new();
+    let mut pm = crate::plugin::PluginManager::new();
+    pm.register(Box::new(crate::plugin::print_plugin::PrintPlugin));
+    pm.run_ast(crate::ast::StageKind::Parsed, &mut items, &mut universe)
+        .expect("print plugin stage failed");
+
+    let mut backend = LlvmBackend::new();
+    let ir = backend.generate(&items, None);
+    assert!(
+        ir.contains("call i64 @__print_int("),
+        "expected direct @__print_int call after plugin rewrite; got:\n{ir}"
+    );
+    assert!(
+        ir.contains("call i64 @__print_char("),
+        "expected direct @__print_char newline call after plugin rewrite; got:\n{ir}"
+    );
+    assert!(
+        !ir.contains("bridge_"),
+        "print rewrite must not route through the GLUE bridge; got:\n{ir}"
+    );
+}
