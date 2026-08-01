@@ -517,13 +517,23 @@ pub fn compile_source(file_path: &str, source: &str, opts: &BuildOptions) -> Res
     emit_beast_snapshot(file_path, BeastStage::Alloc, BeastPosition::After, &items, &universe, opts)?;
 
     // ── Dangling pointer detection ────────────────────────────────────
+    // 2026-07-31: provenance warning → HARD compile error (memory-by-proof,
+    // Phase D). The type system already rejects `&local` → Ptr<Int> escapes
+    // (PtrConst), but this layer is the defense-in-depth: if a provenance gap
+    // appears (a future pointer form that slips past PtrConst inference), the
+    // program is denied at compile time instead of dereferencing a dead stack
+    // address.
     use brief_compiler::analysis::provenance::{check_dangling_ptrs, collect_local_names};
     for item in &items {
         if let brief_compiler::ast::TopLevel::Transaction(txn) = item {
             let local_names = collect_local_names(&txn.body, &txn.parameters);
             let warnings = check_dangling_ptrs(&txn.body, &local_names);
-            for w in &warnings {
-                eprintln!("{}", w);
+            if !warnings.is_empty() {
+                return Err(format!(
+                    "dangling pointer error in '{}':\n{}",
+                    txn.name,
+                    warnings.join("\n")
+                ));
             }
         }
     }

@@ -36,6 +36,11 @@ pub fn infer_provenance(expr: &Expr) -> Provenance {
             base: Box::new(infer_provenance(base)),
             index: Box::new(Provenance::Unknown),
         },
+        // 2026-08-01 (D1): `&x` / `*p` — the provenance of the operand. The
+        // dangling-pointer detector (`p = &local`) was silently missing every
+        // case because AddrOf/Deref fell through to Unknown.
+        Expr::AddrOf(inner) | Expr::Deref(inner) => infer_provenance(inner),
+        Expr::Cast(inner, _) => infer_provenance(inner),
         _ => Provenance::Unknown,
     }
 }
@@ -259,6 +264,38 @@ mod tests {
     fn test_provenance_identifier() {
         let prov = infer_provenance(&Expr::Identifier("x".to_string()));
         assert_eq!(prov, Provenance::Known("x".to_string()));
+    }
+
+    #[test]
+    fn test_check_dangling_ptrs_detects_local_escape() {
+        // 2026-08-01 (D1): `state_ptr = &local` is a dangling-pointer escape —
+        // the provenance layer must flag it (the type system rejects it via
+        // PtrConst; this is the defense-in-depth hard error).
+        let body = vec![
+            Statement::Assign(
+                Expr::Identifier("p".to_string()),
+                Expr::AddrOf(Box::new(Expr::Identifier("x".to_string()))),
+            ),
+        ];
+        let locals: HashSet<String> = ["x".to_string()].into_iter().collect();
+        let warnings = check_dangling_ptrs(&body, &locals);
+        assert_eq!(warnings.len(), 1, "&local escape must be flagged");
+        assert!(warnings[0].contains("p"), "warning names the target field");
+    }
+
+    #[test]
+    fn test_check_dangling_ptrs_ignores_state_field() {
+        // A pointer to a STATE field is not dangling (state lives for the
+        // program duration).
+        let body = vec![
+            Statement::Assign(
+                Expr::Identifier("q".to_string()),
+                Expr::AddrOf(Box::new(Expr::Identifier("other".to_string()))),
+            ),
+        ];
+        let locals: HashSet<String> = ["x".to_string()].into_iter().collect();
+        let warnings = check_dangling_ptrs(&body, &locals);
+        assert_eq!(warnings.len(), 0, "&state-field must not be flagged");
     }
 
     #[test]
