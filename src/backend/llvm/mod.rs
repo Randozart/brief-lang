@@ -378,19 +378,16 @@ pub fn protocol_llvm_type(ty: &Type, universe: Option<&crate::type_universe::Typ
     if matches!(ty, Type::Ptr(_) | Type::Vector(_, _)) {
         return "ptr".to_string();
     }
-    // 2026-07-30: String/UTF8View use { i64, i64 } fat-pointer representation.
-    // Check BEFORE the bytes-based fallback to avoid i128 (16 bytes
-    // → i128) which changes FFI ABI and triggers clang 18.1.3 LICM crashes.
+    // 2026-07-30: String uses the ptr representation (bits model).
     // 2026-07-31: Phase 3 (§8.4-D7) — String detection via the Cast.#String
-    // protocol property; legacy string-like types (UTF8View, and any type with
-    // the {Int, Int} shape) via the structural is_string_like check. This
-    // replaces the hardcoded "String"/"UTF8View" type names and also fixes the
-    // i128 mis-derivation for any 2-int-field struct.
+    // protocol property.
+    // 2026-08-01 (B4): the structural is_string_like (2-int-field) check was
+    // retired — protocol membership is the sole String test (rule #18; a
+    // String has no fields under B0, so the structural check was false anyway).
     let is_string_protocol = universe
         .and_then(|u| ty.universe_key().and_then(|k| u.get(k)))
         .map_or(false, |rt| rt.properties.contains_key("Cast.#String"));
-    let is_string_shaped = universe.map_or(false, |u| u.is_string_like(ty));
-    if is_string_protocol || is_string_shaped {
+    if is_string_protocol {
         // 2026-08-01 (B0): A String value is a ptr to a length-prefixed
         // [len][bytes] buffer. protocol_llvm_type previously claimed
         // { i64, i64 } here, which made frgn declares disagree with the
@@ -681,13 +678,6 @@ pub struct LlvmBackend {
     // Keyed by analysis_id on Expr::Call("Alloc#", ..., Some(id)).
     pub analysis_alloc_strategies: Option<std::collections::HashMap<usize, AllocStrategy>>,
 
-    // ── SSO String Optimization ──────────────────────────────
-    // 2026-07-18: Phase B — When enabled, String is a {i64, i64} struct with
-    // inline storage for ≤6 bytes (SSO tag in lower 3 bits) and heap pointer
-    // for longer strings. When disabled (default), String is a single i64
-    // (ptrtoint of heap/stack pointer, legacy 16-byte header format).
-    pub feature_sso_strings: bool,
-
     // ── SVO List Optimization ────────────────────────────────
     // 2026-07-18: Small Vector Optimization — List<T> becomes a
     // multi-slot struct with inline storage for ≤N elements (N from
@@ -792,7 +782,6 @@ impl LlvmBackend {
             arena_end_idx: None,
             arena_base_idx: None,
             analysis_alloc_strategies: None,
-            feature_sso_strings: false,
             feature_svo: false,
             resolved_frgns: None,
         }
@@ -817,12 +806,8 @@ impl LlvmBackend {
         self
     }
 
-    // 2026-07-18: Enable SSO (Short String Optimization) for String types.
-    // When ON, String is a {i64, i64} struct with inline storage for ≤6 bytes.
-    pub fn with_sso_strings(mut self, enabled: bool) -> Self {
-        self.feature_sso_strings = enabled;
-        self
-    }
+    // 2026-08-01 (B4): with_sso_strings removed — SSO (Short String
+    // Optimization) retired. A String is always a ptr to [len][bytes].
 
     // 2026-07-18: Set the stack allocation threshold for runtime fallback.
     pub fn with_stack_threshold(mut self, threshold: u64) -> Self {
@@ -858,35 +843,11 @@ impl LlvmBackend {
         // to always return "i64" for state fields — this keeps %State struct
         // layout uniform and avoids type mismatches in codegen paths that
         // assume i64 (load i64, store i64, add i64, icmp i64, etc.).
-        // 2026-07-18: SSO String / String-like fields occupy 2 consecutive i64 slots.
-        if self.feature_sso_strings
-            && self.ctx.type_universe.as_ref().map_or(false, |u| u.is_string_like(ty))
-        {
-            self.ctx.field_types.push("i64".to_string());
-            self.ctx.field_brief_types.push(ty.clone());
-            self.ctx.field_types.push("i64".to_string());
-            self.ctx.field_brief_types.push(ty.clone());
-            return;
-        }
-        // 2026-07-31: Non-SSO String / String-like values occupy ONE i64 slot
-        // — the handle. The i128 branch below (min_bits == max_bits == 128 for
-        // the String primordial) would claim a 128-bit field, but nothing
-        // stores 128 bits: the value is a single ptrtoint blob/struct handle
-        // (emit_legacy_string_literal, __print(int64_t), brief_str_to_c(int64_t)
-        // in brief_rt.c), and consumers (emit_len's `inttoptr i64`, the
-        // String→i64 cast identity at emit_expr.rs:686-694) all treat the
-        // register as one i64. An i128 slot makes load/store widths disagree
-        // with those consumers and produced `load i128` → `inttoptr i128` /
-        // `call i64 @... (i128)` clang type errors. Keep the slot i64 to match
-        // the i64-handle encoding. Undo: this arm exists only while SSO is off;
-        // the SSO branch above already reserves two i64 slots.
-        if !self.feature_sso_strings
-            && self.ctx.type_universe.as_ref().map_or(false, |u| u.is_string_like(ty))
-        {
-            self.ctx.field_types.push("i64".to_string());
-            self.ctx.field_brief_types.push(ty.clone());
-            return;
-        }
+        // 2026-08-01 (B4): the SSO String branches were retired. A String is a
+        // ptr to [len][bytes] under the bits model and stores as ONE i64 slot
+        // (the address) via the generic protocol-derived path below — the old
+        // 2-slot SSO claim and the is_string_like (2-field structural) check
+        // no longer apply (String has no fields under B0).
         // 2026-07-18: SVO List — push N+1 slots (N inline data + 1 len+cap).
         if self.feature_svo
             && self.ctx.type_universe.as_ref().map_or(false, |u| u.is_vector_like(ty))
@@ -1551,11 +1512,12 @@ impl LlvmBackend {
     }
 
     fn type_is_heap_allocated(&self, ty: &Type) -> bool {
-        // 2026-07-26: Protocol-driven. String-like types (SSO/non-SSO) are tracked
-        // by is_string_like in the universe. Heap-allocated types declare
-        // Cast.#HeapAllocated in their type properties. UTF8View, StaticString,
-        // SmallString64 are stack-allocated (no Cast.#HeapAllocated).
-        if self.ctx.type_universe.as_ref().map_or(false, |u| u.is_string_like(ty)) {
+        // 2026-08-01 (B4): is_string_like (2-field structural) retired —
+        // protocol membership only. A #String value is a ptr to a
+        // heap-allocated [len][bytes] buffer (allocated at init/FFI time).
+        // #Data values are also pointers. UTF8View/StaticString/SmallString64
+        // (legacy stack types) are retired.
+        if self.is_protocol_member(ty, "#String") {
             return true;
         }
         if self.is_protocol_member(ty, "#Data") {

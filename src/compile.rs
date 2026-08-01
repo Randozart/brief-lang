@@ -148,10 +148,6 @@ pub struct BuildOptions {
     pub extra_objects: Vec<PathBuf>,
     /// 2026-07-18: Build a shared library (.so) instead of an executable.
     pub shared: bool,
-    /// 2026-07-18: Phase B — Enable SSO (Short String Optimization) for String types.
-    /// When ON, String is a 2-field \`{ i64, i64 }\` struct with inline storage for ≤6
-    /// bytes, heap for longer. When OFF (default), String is passed as \`i8*\` (legacy).
-    pub feature_sso_strings: bool,
     /// 2026-07-18: SVO (Small Vector Optimization) — inline storage for
     /// small List<T> elements (≤ N where N is from svo <~ N metadata).
     pub feature_svo: bool,
@@ -830,7 +826,6 @@ pub fn check_source(file_path: &str, source: &str) -> Result<(), String> {
         extra_objects: vec![],
         shared: false,
         int_bits: 64,
-        feature_sso_strings: false,
         feature_svo: false,
         glue_config: None,
         stack_threshold: 4096,
@@ -996,7 +991,6 @@ fn codegen(
                 .with_int_bits(opts.int_bits)
                 .with_alloc_strategies(alloc_strategies)
                 .with_needs_arena(needs_arena.clone())
-                .with_sso_strings(opts.feature_sso_strings)
                 .with_svo(opts.feature_svo)
                 .with_shared_lib(opts.shared)
                 .with_stack_threshold(opts.stack_threshold)
@@ -1150,7 +1144,6 @@ fn codegen(
             let mut b = LlvmBackend::new()
                 .with_int_bits(opts.int_bits)
                 .with_alloc_strategies(alloc_strategies)
-                .with_sso_strings(opts.feature_sso_strings)
                 .with_svo(opts.feature_svo)
                 .with_shared_lib(opts.shared)
                 .with_stack_threshold(opts.stack_threshold)

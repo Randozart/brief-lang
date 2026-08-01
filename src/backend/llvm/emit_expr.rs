@@ -1157,125 +1157,10 @@ impl LlvmBackend {
         bytes: &[u8],
         indent: &str,
     ) -> TypedRegister {
-        // 2026-07-18: Phase B — SSO string path when feature is enabled.
-        // 2026-07-31: Phase 3 (§8.2) — the payload cap comes from
-        // config/ir-lowering.toml `sso_max_bytes`; its derivation is align 8
-        // − 2 tag bits = 6, documented at the config key.
-        if self.feature_sso_strings {
-            if bytes.len() <= crate::config_tuning::ir_lowering().sso_max_bytes {
-                return self.emit_sso_literal(out, v, bytes, indent);
-            }
-            return self.emit_sso_heap_literal(out, v, bytes, indent);
-        }
+        // 2026-08-01 (B4): the SSO string-literal path was retired (the
+        // feature flag is always off under the bits model — a String is a ptr
+        // to [len][bytes]). All literals emit via the ptr representation.
         self.emit_legacy_string_literal(out, v, bytes, indent)
-    }
-
-    // 2026-07-18: SSO string literal — pack ≤6 bytes inline into handle[0] with
-    // SSO tag (0b001), store length in handle[1]. Returns {i64, i64} struct.
-    // No heap allocation, no 16-byte header, no null terminator needed for SSO.
-    fn emit_sso_literal(
-        &mut self,
-        out: &mut String,
-        v: &str,
-        bytes: &[u8],
-        indent: &str,
-    ) -> TypedRegister {
-        let len = bytes.len() as u64;
-        // Pack bytes into u64 (little-endian), shift left 3 for tag bits, set bit 0 (SSO tag)
-        let packed = bytes
-            .iter()
-            .enumerate()
-            .fold(0u64, |acc, (i, &b)| acc | ((b as u64) << (i * 8)));
-        let shifted = packed << 3;
-        let t0 = self.fun.gen_reg();
-        writeln!(out, "{}{} = or i64 {}, 1", indent, t0, shifted).ok();
-        // Build {i64, i64} struct
-        let t1 = self.fun.gen_reg();
-        writeln!(
-            out,
-            "{}{} = insertvalue {{ i64, i64 }} undef, i64 {}, 0",
-            indent, t1, t0
-        )
-        .ok();
-        let t2 = self.fun.gen_reg();
-        writeln!(
-            out,
-            "{}{} = insertvalue {{ i64, i64 }} %{}, i64 {}, 1",
-            indent, t2, t1, len
-        )
-        .ok();
-        TypedRegister {
-            name: t2,
-            ty: Type::string(),
-        }
-    }
-
-    // 2026-07-18: SSO heap string literal — allocate raw bytes + null terminator
-    // on stack (no 16-byte header, no capacity slot). Handle[0] = ptrtoint with
-    // tag 0b000 (heap), handle[1] = length. Returns {i64, i64} struct.
-    fn emit_sso_heap_literal(
-        &mut self,
-        out: &mut String,
-        v: &str,
-        bytes: &[u8],
-        indent: &str,
-    ) -> TypedRegister {
-        let len = bytes.len() as u64;
-        let alloc_size = len + 1;
-        let alloca_reg = self.fun.gen_reg();
-        writeln!(
-            out,
-            "{}{} = alloca [{} x i8], align 1",
-            indent, alloca_reg, alloc_size
-        )
-        .ok();
-        for (i, &b) in bytes.iter().enumerate() {
-            let ptr = self.fun.gen_reg();
-            writeln!(
-                out,
-                "{}{} = getelementptr inbounds [{} x i8], ptr {}, i32 0, i32 {}",
-                indent, ptr, alloc_size, alloca_reg, i
-            )
-            .ok();
-            writeln!(out, "{}store i8 {}, ptr {}", indent, b, ptr).ok();
-        }
-        let last = self.fun.gen_reg();
-        writeln!(
-            out,
-            "{}{} = getelementptr inbounds [{} x i8], ptr {}, i32 0, i32 {}",
-            indent,
-            last,
-            alloc_size,
-            alloca_reg,
-            bytes.len()
-        )
-        .ok();
-        writeln!(out, "{}store i8 0, ptr {}", indent, last).ok();
-        let p2i = self.fun.gen_reg();
-        writeln!(
-            out,
-            "{}{} = ptrtoint ptr {} to i64",
-            indent, p2i, alloca_reg
-        )
-        .ok();
-        let t1 = self.fun.gen_reg();
-        writeln!(
-            out,
-            "{}{} = insertvalue {{ i64, i64 }} undef, i64 {}, 0",
-            indent, t1, p2i
-        )
-        .ok();
-        let t2 = self.fun.gen_reg();
-        writeln!(
-            out,
-            "{}{} = insertvalue {{ i64, i64 }} %{}, i64 {}, 1",
-            indent, t2, t1, len
-        )
-        .ok();
-        TypedRegister {
-            name: t2,
-            ty: Type::string(),
-        }
     }
 
     // 2026-07-22: Legacy string literal emission (SSO OFF).
@@ -1895,39 +1780,10 @@ impl LlvmBackend {
                         crate::ast::Type::Custom(name) => name.as_str(),
                         _ => return arg.clone(),
                     };
-                    // 2026-07-18: SSO String → C i8* shim. When SSO is ON, the String
-                    // handle is {i64, i64} but C expects i8*. Extract handle[0] and
-                    // inttoptr to i8*.
-                    // 2026-07-31: Phase 3 (§8.4-D8) — String/Data detection via
-                    // protocol membership instead of the type name.
-                    if self.feature_sso_strings
-                        && (self.is_protocol_member(param_ty, "#String")
-                            || self.is_protocol_member(param_ty, "#Data"))
-                        && self
-                            .ctx
-                            .type_universe
-                            .as_ref()
-                            .map_or(false, |u| u.is_string_like(&arg.ty))
-                    {
-                        let extracted = self.fun.gen_reg();
-                        writeln!(
-                            out,
-                            "{}  {} = extractvalue {{ i64, i64 }} {}, 0",
-                            indent, extracted, arg.name
-                        )
-                        .ok();
-                        let ptr_reg = self.fun.gen_reg();
-                        writeln!(
-                            out,
-                            "{}  {} = inttoptr i64 {} to ptr",
-                            indent, ptr_reg, extracted
-                        )
-                        .ok();
-                        return TypedRegister {
-                            name: ptr_reg,
-                            ty: arg.ty.clone(),
-                        };
-                    }
+                    // 2026-08-01 (B4): the SSO String→C i8* shim was retired —
+                    // a String IS a ptr to [len][bytes] under the bits model,
+                    // so the arg is already pointer-typed and needs no handle
+                    // extraction.
                     if self
                         .ctx
                         .type_universe

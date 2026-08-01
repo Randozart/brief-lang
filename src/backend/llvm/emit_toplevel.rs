@@ -311,26 +311,14 @@ impl LlvmBackend {
                 }
             }
         }
-        if self.feature_sso_strings {
-            // 2026-07-31: Phase 3 (§8.4-D7) — String detection via protocol
-            // membership (#String) instead of the type name.
-            if self.is_protocol_member(ty, "#String") {
-                return "{ i64, i64 }".to_string();
-            }
-            if self.ctx.type_universe.as_ref().map_or(false, |u| u.is_string_like(ty)) {
-                return "{ i64, i64 }".to_string();
-            }
-        }
-        // 2026-07-22: Non-SSO strings use ptr (opaque pointer), even if the
-        // universe declares them as {i64, i64}. The SSO code path converts
-        // between {i64, i64} and ptr internally; without SSO, the parameter
-        // is treated as a raw pointer.
-        if !self.feature_sso_strings {
-            // 2026-07-31: Phase 3 (§8.4-D7) — #String/#Data membership instead
-            // of the type-name match.
-            if self.is_protocol_member(ty, "#String") || self.is_protocol_member(ty, "#Data") {
-                return "ptr".to_string();
-            }
+        // 2026-07-22: Strings use ptr (opaque pointer) — a Brief String value
+        // is a ptr to a length-prefixed [len][bytes] buffer (B0 bits model).
+        // 2026-07-31: Phase 3 (§8.4-D7) — #String/#Data membership instead
+        // of the type-name match.
+        // 2026-08-01 (B4): the SSO `{ i64, i64 }` branches were retired — a
+        // String is never a fat pointer under the bits model.
+        if self.is_protocol_member(ty, "#String") || self.is_protocol_member(ty, "#Data") {
+            return "ptr".to_string();
         }
         // 2026-07-30: Struct-like types derive LLVM type from field shapes.
         // This handles Slice<T> (fields: { Ptr<T>, Int } → { ptr, i64 }),
@@ -747,13 +735,12 @@ impl LlvmBackend {
     /// 2026-07-03: Shared field initializer value emitter. Handles the
     /// match-on-init_expr dispatch for field initialization, shared by
     /// emit_init_state and emit_inline_init_stores. Arguments:
-    ///   - tag_strings: when true, OR 1 onto string pointers to mark as
-    ///     static (not heap-allocated). Used by inline init but not by
-    ///     @init_state (which runs at first access, before heap is live).
     ///   - reg_suffix: suffix for intermediate register names (e.g. "s", "b").
     ///     Use format!("%ip_{}{}", idx, suffix) to generate stable names.
+    /// 2026-08-01 (B4): tag_strings removed — a String is an untagged ptr to
+    /// [len][bytes] under the bits model; no static-tag bit is ever set.
     fn emit_field_init_value(&mut self, out: &mut String, indent: &str,
-        init_clone: Option<Expr>, ty: &str, gep: &str, idx: usize, tag_strings: bool)
+        init_clone: Option<Expr>, ty: &str, gep: &str, idx: usize)
     {
         let mut field_reg = |suffix: &str| -> String { format!("%ip_{}{}", idx, suffix) };
                 // 2026-06-20: Handle LiteralExpr::Float directly, matching Expr::Float arm above.
@@ -818,36 +805,15 @@ impl LlvmBackend {
             }
             Some(Expr::Quoted(s)) => {
                 // 2026-07-14: Store string constant pointer (Quoted replaces LiteralExpr::String).
+                // 2026-08-01 (B4): always the UNTAGGED store — a String value is
+                // an untagged ptr to [len][bytes] (bits model); the SSO static-tag
+                // (OR 1) path was retired (it misaligned the header for brief_str_eq).
                 let s_str = String::from_utf8_lossy(&s);
                 let si = self.ctx.string_constants.iter().position(|x| x.as_str() == s_str).unwrap_or(0);
                 let g = format!("@str.{}", si);
                 let str_p = field_reg("s");
                 writeln!(out, "{}{} = bitcast <{{ i64, [{} x i8] }}>* {} to ptr", indent, str_p, s.len() + 1, g).ok();
-                if tag_strings && self.feature_sso_strings {
-                    // Tag with bit 0 = 1 to mark as static (not heap-allocated).
-                    // 2026-08-01 (B1): ONLY under SSO. Under the bits model a
-                    // String value is an UNTAGGED ptr to a length-prefixed
-                    // [len][bytes] buffer — OR-ing 1 onto the address makes
-                    // brief_str_eq read a misaligned length header and
-                    // compare garbage (observed: equal-content strings at
-                    // heap vs literal addresses compared unequal). The
-                    // untagged path below is the bits-model store.
-                    let tag_p = field_reg("t");
-                    writeln!(out, "{}{} = ptrtoint ptr {} to i64", indent, tag_p, str_p).ok();
-                    let tag_o = field_reg("o");
-                    writeln!(out, "{}{} = or i64 {}, 1", indent, tag_o, tag_p).ok();
-                    let tag_b = field_reg("b");
-                    self.emit_inttoptr(out, indent, &tag_b, &tag_o);
-                    writeln!(out, "{}store i8* {}, ptr {}, align {}", indent, tag_b, gep, self.align_of("i8*")).ok();
-                } else {
-                    // 2026-07-14: No tagging for @init_state path — the init_state
-                    // function runs at first field access, before heap is live.
-                    // String constants in init_state are stored as raw untagged i8*.
-                    // 2026-08-01 (B1): the untagged store is also the bits-model
-                    // store for inline init (feature_sso_strings off) — the tag
-                    // bit belongs to the SSO encoding only.
-                    writeln!(out, "{}store i8* {}, ptr {}, align {}", indent, str_p, gep, self.align_of("i8*")).ok();
-                }
+                writeln!(out, "{}store i8* {}, ptr {}, align {}", indent, str_p, gep, self.align_of("i8*")).ok();
             }
             Some(expr) => {
                 let val_reg = self.emit_expr(out, &expr, indent);
@@ -906,7 +872,7 @@ impl LlvmBackend {
             // (always-false stub after insert_at removal) is deleted. RingBuffer
             // state fields are expanded inline via ringbuf_inline; a bracket-list
             // initializer falls through to emit_field_init_value as before.
-            self.emit_field_init_value(out, "  ", init_clone, &ty, &p, idx, false);
+            self.emit_field_init_value(out, "  ", init_clone, &ty, &p, idx);
         }
         let mmio_inits: Vec<(u64, Expr)> = {
             let mut v = Vec::new();
@@ -958,7 +924,7 @@ impl LlvmBackend {
             let ty = self.ctx.field_types[*idx].clone();
             // 2026-07-31: Phase 3 (§8.5-E4) — always-false ringbuf-init branch
             // deleted; bracket-list initializers go through emit_field_init_value.
-            self.emit_field_init_value(out, indent, init_clone, &ty, &gep_reg, *idx, true);
+            self.emit_field_init_value(out, indent, init_clone, &ty, &gep_reg, *idx);
         }
         // Initialize cache slots for LazyCached fields: cache_value = 0, valid_flag = 0
         // 2026-07-19: Sorted for deterministic IR.
@@ -1203,11 +1169,9 @@ impl LlvmBackend {
                 reg = conv;
             } else if param_llvm_ty == "i64" {
                 reg = raw;
-            } else if self.feature_sso_strings
-                && self.ctx.type_universe.as_ref().map_or(false, |u| u.is_string_like(t))
-            {
-                // 2026-07-18: SSO String params are {i64, i64} — no boxing needed.
-                reg = raw;
+                // 2026-08-01 (B4): the SSO String-param {i64,i64} branch was
+                // retired — a String param is a ptr (handled above) or an i64
+                // address, never a fat pointer under the bits model.
             } else if self.is_boxed_type(t) {
                 // 2026-07-12: box_op removed from ResolvedType — use hardcoded fallback.
                 // 2026-07-31: Phase 3 (§8.4-D1) — boxed-type detection via

@@ -890,6 +890,22 @@ before/after benchmark A/B.
 **Tests:** full suite green; `--no-stdlib` still type-checks
 `let x: Int = 5`; no legacy-type callers regress (verified none exist).
 
+**Status (2026-08-01): B4a (SSO + is_string_like retirement) IMPLEMENTED.**
+`feature_sso_strings` (flag, setter, plumbing in main.rs/compile.rs/mod.rs) and
+`is_string_like` (the 2-int-field structural heuristic) deleted; `grep` over
+`src/` returns zero for both. The dead SSO branches were removed:
+`emit_sso_literal`/`emit_sso_heap_literal`/`emit_sso_concat`/the SSO String→C
+shim/the `{i64,i64}` string-type claims. `is_string_like` call sites migrated
+to `#String`/`#Data` protocol membership (`protocol_llvm_type`,
+`type_is_heap_allocated`, `is_string_identifier`, trigger adapters,
+`push_field_type`). Bug fixed (BUGS.md): `emit_box_concat_result` tagged the
+concat result with the legacy OR-2 temp bit and returned i64 — a String is an
+UNTAGGED ptr under B0, so consumers expecting `ptr` (`__print_str`) failed;
+it now returns the untagged ptr as a String-typed register (concat demo prints
+"foobar"). 1359 tests green.
+
+### Phase B4 (cont.) — B4b: legacy types + B4c: docs/benchmarks
+
 ---
 
 ## 7. Commit order (continuous commits, rule "Continuous commits")

@@ -292,19 +292,6 @@ impl TypeUniverse {
     /// A type with `{ data: Int; len: Int; }` structure is string-like
     /// regardless of encoding or CTD. Hashword op signatures provide the
     /// backend with the specific encoding variant.
-    /// 2026-07-20: Removed CTD property check and encoding property check.
-    /// Structure alone determines layout — protocol ops determine behavior.
-    pub fn is_string_like(&self, ty: &Type) -> bool {
-        let name = match ty {
-            Type::Custom(n) | Type::Applied(n, _) => n,
-            _ => return false,
-        };
-        let Some(rt) = self.types.get(name) else { return false; };
-        rt.fields.len() == 2
-            && rt.fields[0].1 == Type::int()
-            && rt.fields[1].1 == Type::int()
-    }
-
     /// 2026-07-18: Check if a type is a vector-like type eligible for SVO.
     /// Detects types with `op.SVO <~ N` metadata (typically List<T>).
     /// N specifies the inline capacity in elements (e.g. N=3 means 3 elements

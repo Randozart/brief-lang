@@ -2880,3 +2880,22 @@ the value alive).
 **Lesson:** every expression construct that reads a state value must be listed
 in the liveness identifier collector; a missing arm silently eliminates the
 field and surfaces as an undefined global / wrong register type at codegen.
+
+---
+
+## Concat Result Tagged as i64 (Temp Bit) Breaks ptr Consumers — FIXED
+
+**Date:** 2026-08-01
+**Status:** Fixed (Phase B4a)
+**Root cause:** `emit_box_concat_result` OR-ed the legacy temp bit (2) onto the
+concat result and returned an i64 register. Under the bits model a String
+value is an UNTAGGED ptr to [len][bytes]; consumers expecting `ptr` (e.g.
+`__print_str(ptr)`) failed with "defined with type i64 but expected ptr".
+Exposed when the SSO layer was retired (the boxing was an SSO-era artifact).
+**Fix:** `emit_box_concat_result` returns the untagged buffer ptr as a
+String-typed register (bitcast ptr to ptr).
+**Impact:** `a ++ b` concat now works — `.smoke/concat_demo.bv` prints
+"foobar".
+**Lesson:** any pointer-typed value must be returned as a ptr under the bits
+model; tag-bit/boxing artifacts from the SSO era corrupt the type and must be
+audited when the SSO layer is retired.
