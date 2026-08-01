@@ -547,7 +547,7 @@ fn emit_array_state_store(
 /// (`op InsertAt: push(#L, #R)` on an obj). Emits a self-bound member call
 /// (receiver + value register) instead of the free-function marker dispatch.
 /// Flat guard clauses; returns false when the pattern does not apply.
-fn emit_strategy_member_call(
+pub(super) fn emit_strategy_member_call(
     backend: &mut LlvmBackend,
     out: &mut String,
     indent: &str,
@@ -599,7 +599,7 @@ fn emit_strategy_member_call(
 /// Supports: PropertyValue::Identifier("ring_push") for convention-based dispatch,
 ///   and PropertyValue::List([Identifier("ring_push"), HashL, HashR]) for
 ///   explicit marker-based dispatch like InsertAt <~ ring_push(#L, #R).
-fn emit_strategy_fn_call(backend: &mut LlvmBackend, out: &mut String, indent: &str,
+pub(super) fn emit_strategy_fn_call(backend: &mut LlvmBackend, out: &mut String, indent: &str,
     target: &Expr, op_def: &crate::ast::top::OperatorDef, value: Option<&str>) -> Option<String> {
     let pv = op_def.impl_args.as_ref()?;
     let (fn_name, markers): (&str, &[crate::ast::PropertyValue]) = match pv {

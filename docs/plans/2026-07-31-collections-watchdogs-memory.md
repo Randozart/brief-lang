@@ -317,18 +317,25 @@ grammar, `learn-brief` collections + watchdog chapters, `docs/architecture`).
      Expression paths in `emit_countable_body` must reach the `<-` member-call
      dispatch (emit_strategy_member_call).
   queue_drain stays OUT of the harness until both are fixed.
-  **Deeper investigation (2026-08-01):** the guard's counter read was traced —
-  the `.cdg_` print resolves `count` through `phi_field_regs` to the header phi
-  (`%cdc21`, pre-increment) even though `last_val_temps["count"]` holds the
-  post-increment register (`%t33`) at that point, and even after explicitly
-  overwriting `phi_field_regs["count"]` with `%t33` before the guard body
-  emission. Suspect: the multi-pass reactor re-emits the txn (the countdown ran
-  once per the guard-path trace, but `emit_member_body`'s save/restore of
-  `last_val_temps`/bindings interacts with a later emission). Next session:
-  trace the `%cdc21` source at the `.cdg_` print site across the final .ll
-  emission pass, and consider routing the guard's counter read to
-  `pending_phi_backedge[counter_var]` directly in the print's FFI arg emission
-  rather than through the identifier maps.
+  **FIXED (2026-08-01, A9b):** all three root causes addressed —
+  1. The guard off-by-one was NOT the phi/`last_val_temps` read order: the
+     countdown's `let_to_field` alias map misread the `<-` push
+     (`Assign(Identifier("queue"), Identifier("count"))`) as a `field = local`
+     let-alias and remapped the guard's `count` reads to `queue`. Fixed in
+     `counter.rs` by excluding field-to-field assignments (both operands in
+     `field_index_map`) from the alias map — only a genuine non-field local
+     creates an alias.
+  2. The dropped push: `emit_countable_body`'s `Assign` arm treated `<-` as a
+     scalar backedge. Added the `find_insert_strategy` + `emit_strategy_member_call`
+     dispatch (matching the normal `emit_stmt.rs` path) so the push member call
+     emits (`data[write % 256] = val` visible in `.cdb_`).
+  3. Two more: collections.bv declared `op Init: init(#L, #R)` without defining
+     the `init` member (added to Stack/RingBuffer — a stdlib gap, rule #13),
+     and the countdown's `emit_inline_init_stores` didn't run the A7 Init-op
+     construction (mirrored `emit_init_state`'s dispatch), so the queue slot
+     stored 0 and the push dereferenced null.
+  queue_drain is re-enabled in `benchmarks/build_and_bench.sh` — output MATCHES
+  C at real bounds, and it WINS (0.56x, 0.0357s vs C 0.0631s).
 - Phase B: …
 - Phase C: …
 - Phase D: …

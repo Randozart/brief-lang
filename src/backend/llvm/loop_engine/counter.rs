@@ -613,7 +613,14 @@ impl LlvmBackend {
         for stmt in &batch.inner_body {
             if let Statement::Assign(lhs, Expr::Identifier(let_name)) = stmt {
                 if let Some(field_name) = lhs.as_var_name() {
-                    if self.ctx.field_index_map.contains_key(field_name) {
+                    // 2026-08-01 (A9b): a field-to-field assignment (`queue = count`,
+                    // the `<-` push's lowered AST) is NOT a let-alias — `count` is a
+                    // field, so the guard must keep reading the count field, not the
+                    // queue. Only a genuine non-field local (`field = local`, the
+                    // `sum = acc` hoist pattern) creates an alias.
+                    if self.ctx.field_index_map.contains_key(field_name)
+                        && !self.ctx.field_index_map.contains_key(let_name)
+                    {
                         let_to_field.insert(let_name.clone(), field_name.to_string());
                     }
                 }
@@ -851,7 +858,14 @@ impl LlvmBackend {
         for stmt in &batch.inner_body {
             if let Statement::Assign(lhs, Expr::Identifier(let_name)) = stmt {
                 if let Some(field_name) = lhs.as_var_name() {
-                    if self.ctx.field_index_map.contains_key(field_name) {
+                    // 2026-08-01 (A9b): a field-to-field assignment (`queue = count`,
+                    // the `<-` push's lowered AST) is NOT a let-alias — `count` is a
+                    // field, so the guard must keep reading the count field, not the
+                    // queue. Only a genuine non-field local (`field = local`, the
+                    // `sum = acc` hoist pattern) creates an alias.
+                    if self.ctx.field_index_map.contains_key(field_name)
+                        && !self.ctx.field_index_map.contains_key(let_name)
+                    {
                         let_to_field.insert(let_name.clone(), field_name.to_string());
                     }
                 }
@@ -861,6 +875,7 @@ impl LlvmBackend {
         for s in &mut guard_body {
             crate::analysis::swan_song::remap_stmt_identifiers(s, &let_to_field);
         }
+
         // 2026-07-31: Do NOT clear last_val_temps here. The guard fires mid-loop
         // (before the latch), so the header phis still hold the PRE-body values;
         // the current iteration's computed state lives in last_val_temps (the
@@ -1326,7 +1341,20 @@ impl LlvmBackend {
                 Statement::Assign(lhs, expr) => {
                     let lhs_name = Self::assign_target_name(lhs);
                      let val = self.emit_expr(out, expr, "  ");
-                      if let Some(ref n) = lhs_name {
+                      // 2026-08-01 (A9b): `<-` op dispatch — when the LHS is a
+                      // collection with an InsertAt op binding (`queue <- count`),
+                      // emit the self-bound member call (push) instead of a scalar
+                      // field backedge. The collection field is aggregate (excluded
+                      // from the phis); its data write is memory-resident in %State.
+                      let insert_strat = self.find_insert_strategy(lhs).cloned();
+                      if let Some(op_def) = &insert_strat {
+                          if !super::emit_stmt::emit_strategy_member_call(self, out, "  ", lhs, op_def, Some(&val.name)) {
+                              super::emit_stmt::emit_strategy_fn_call(self, out, "  ", lhs, op_def, Some(&val.name));
+                          }
+                          i += 1;
+                          continue;
+                      }
+                       if let Some(ref n) = lhs_name {
                          if write_set.contains(n) {
                               // 2026-07-29: Vector phi routing — if field belongs to
                               // a vector group, record_field_update instead of scalar backedge.

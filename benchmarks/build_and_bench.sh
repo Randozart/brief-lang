@@ -127,7 +127,7 @@ BENCHMARKS=(
     "knucleotide"
     "cancel_math"
     "bit_clear"
-    # "queue_drain"       # depends on std/collections.bv (generic obj instantiation — D4 follow-up)
+    "queue_drain"       # generic obj (RingBuffer<Int>) via std/collections.bv + countdown
     # "queue_drain_sym"   # depends on std/collections.bv (generic obj instantiation — D4 follow-up)
     # "queue_drain_idio"  # depends on std/collections.bv (generic obj instantiation — D4 follow-up)
     "interval_step"

@@ -1059,6 +1059,14 @@ impl LlvmBackend {
             let gep_reg = self.emit_state_gep(out, indent, "ip", "%state", *idx);
             let init_clone = self.ctx.field_initializers.get(name).and_then(|e| e.clone());
             let ty = self.ctx.field_types[*idx].clone();
+            // 2026-08-01 (A9b): the `op Init` construction must also run for the
+            // countdown's inline init stores — otherwise a struct-typed field
+            // (`let queue: RingBuffer<Int> = 0`) stores 0 instead of the
+            // instance address, and the countdown's member-call body dereferences
+            // a null handle. Mirrors emit_init_state's A7 dispatch.
+            if self.emit_init_op_construction(out, indent, name, *idx, init_clone.as_ref()) {
+                continue;
+            }
             // 2026-07-31: Phase 3 (§8.5-E4) — always-false ringbuf-init branch
             // deleted; bracket-list initializers go through emit_field_init_value.
             self.emit_field_init_value(out, indent, init_clone, &ty, &gep_reg, *idx, true);

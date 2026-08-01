@@ -14,6 +14,11 @@ obj Stack<T, N> {
     op ExtractFrom: pop(#R);
     op Init: init(#L, #R);
 
+    txn init(val: T) [true][len == 1] {
+        data[0] = val;
+        len = 1;
+    };
+
     txn push(val: T) [len < N][len <= N] {
         data[len] = val;
         len = len + 1;
@@ -36,6 +41,11 @@ obj RingBuffer<T> {
     op ExtractFrom: pop(#R);
     op CopyFrom: read(#R);
     op Init: init(#L, #R);
+
+    txn init(val: T) [true][write == 1] {
+        data[0] = val;
+        write = 1;
+    };
 
     txn push(val: T) [write - read < 256][write - read <= 256] {
         data[write % 256] = val;
