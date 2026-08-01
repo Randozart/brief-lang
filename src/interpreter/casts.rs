@@ -29,6 +29,12 @@ pub fn eval_cast(val: Value, target: &Type) -> Result<Value, RuntimeError> {
             let s = bits_to_string(&val);
             Ok(Value::Bits(s.into_bytes()))
         }
+        // 2026-08-01 (B2): `#Bit` hashword target — the content view. In the
+        // interpreter a String IS its content bytes, so casting to #Bit yields
+        // the bytes unchanged (the backend's ptrtoint content-view cast is the
+        // address of those same bytes — the interpreter stores them directly).
+        Type::HashWord(name) if name == "#Bit" => Ok(val),
+        Type::HashWordVariant(name, _) if name == "#Bit" => Ok(val),
         Type::Custom(name) if name == "Char" => {
             let code = val.as_i64().unwrap_or(0) as u32;
             let ch = char::from_u32(code).unwrap_or('\0');

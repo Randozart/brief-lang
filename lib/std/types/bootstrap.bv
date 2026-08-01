@@ -91,7 +91,6 @@ type UTF8View {
     data: Int;
     len: Int;
     !> alignment: 8;
-    !> encoding: "UTF-8";
 };
 
 type StaticString {
@@ -110,7 +109,6 @@ type SmallString64 {
     slot7: Int;
     len: Int;
     !> alignment: 8;
-    !> encoding: "UTF-8";
 };
 
 type Data: Int { !> bits: 64; };

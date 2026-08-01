@@ -122,6 +122,26 @@ void brief_free_brief_str(void* handle) {
     if (handle) free(handle);
 }
 
+// 2026-08-01 (B2): The #Bit → #String ENCODING DOOR default. The bits are a
+// Brief `[len: i64][bytes]` buffer (the content view of a String — see
+// #String→#Bit). This re-materializes a String from those bits by copying the
+// length header + payload into a fresh heap buffer. This is NOT brief_cstr_to_brief
+// (which reads a null-terminated C string) — the bits carry their own length.
+// The header is created by construction (copied from the bits), never inherited
+// by aliasing. Returns a heap [len][bytes] String; caller frees via
+// brief_free_brief_str. Sub-protocols override the lane via CastFrom(#Bit).
+char* brief_bits_to_str(const char* bits) {
+    if (!bits) return 0;
+    int64_t len = *(const int64_t*)bits;
+    if (len < 0 || len > 1024 * 1024 * 1024) return 0; // sanity
+    char* buf = (char*)malloc((size_t)(len + 9));
+    if (!buf) return 0;
+    *(int64_t*)buf = len;
+    if (len > 0) memcpy(buf + 8, bits + 8, (size_t)len);
+    buf[8 + len] = '\0';
+    return buf;
+}
+
 // 2026-08-01 (B1): Content equality for Brief String values (String ABI = ptr
 // to a length-prefixed [len: i64][bytes] buffer). Compares lengths first, then
 // payload bytes. Returns 1 if equal, 0 otherwise. This is the runtime half of

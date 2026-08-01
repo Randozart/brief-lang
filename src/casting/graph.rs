@@ -137,10 +137,16 @@ impl CastingGraph {
         self.set_lane("Bit", "Float", LaneKind::Bitcast);
         self.set_lane("Float", "Bit", LaneKind::Bitcast);
         // ── Bit ⇄ String ───────────────────────────────────────────
-        // #Bit→#String: CastFrom(#Bit) callback by default; fallback is bitcast i64→{i64,i64}
-        self.set_lane("Bit", "String", LaneKind::Bitcast);
-        // #String→#Bit: always extractvalue 0 (never overridable)
-        self.set_lane("String", "Bit", LaneKind::ExtractData);
+        // 2026-08-01 (B2): #Bit→#String is the ENCODING DOOR — a CastFrom(#Bit)
+        // callback (UTF8 wrap default, materializing the [len][bytes] header by
+        // construction; sub-protocols override via register_cast_from_bit). It
+        // is NOT a bitcast: wrapping must produce a header-prefixed buffer.
+        self.set_lane("Bit", "String", LaneKind::CastFromBitCallback);
+        // #String→#Bit: the CONTENT VIEW — a String value IS a ptr to
+        // [len][bytes], so the cast yields the buffer address (ptrtoint, one
+        // instruction). Zero-length/identity at the register level; never
+        // overridable (the representation is compiler-guaranteed).
+        self.set_lane("String", "Bit", LaneKind::PtrToInt);
         // ── Bit ⇄ Bool ─────────────────────────────────────────────
         self.set_lane("Bit", "Bool", LaneKind::Trunc);    // i64 → i8
         self.set_lane("Bool", "Bit", LaneKind::ZExt);     // i8 → i64
@@ -507,8 +513,22 @@ impl CastingGraph {
             // (stored as i64 in %State) to NOT undergo ptrtoint conversion.
             // resolve_llvm_type() handles Ptr directly before calling this.
             // Type::Ptr(_) => ("Data", ...) moved to resolve_llvm_type only.
-            Type::HashWord(name) => return (name.clone(), String::new()),
-            Type::HashWordVariant(name, variant) => return (name.clone(), variant.clone()),
+            Type::HashWord(name) => {
+                // 2026-08-01 (B2): strip the `#` prefix so the category key
+                // matches the graph's bare base-lane keys ("Bit", "String").
+                // Without this, find_path(HashWord("#Bit"), ...) looked up
+                // category "#Bit" which has no lanes — casts to/from #Bit
+                // silently fell through to LLVM coercion (e.g. `s as #Bit`
+                // emitted `bitcast i64 ptr` — invalid). is_protocol_member
+                // already strips the target's `#` before comparing, so the
+                // bare category is the consistent representation.
+                let bare = name.strip_prefix('#').unwrap_or(name);
+                return (bare.to_string(), String::new());
+            }
+            Type::HashWordVariant(name, variant) => {
+                let bare = name.strip_prefix('#').unwrap_or(name);
+                return (bare.to_string(), variant.clone());
+            }
             Type::Custom(..) | Type::Applied(..) => {} // fall through to universe lookup
             _ => return ("Bit".to_string(), String::new()),
         }
@@ -537,8 +557,24 @@ impl CastingGraph {
         } else if rt.properties.contains_key("Cast.#Data") {
             ("Data".to_string(), String::new())
         } else {
-            // Every type is a member of #Bit via Cast.#Bit injection in normalizer.
-            ("Bit".to_string(), String::new())
+            // 2026-08-01 (B2): no Cast.# property (the normalizer no longer
+            // injects them) — follow the type's declared `base` parent
+            // (`type Latin1String: #String` ⇒ base "String"). This makes
+            // subtypes resolve to their protocol category so the casting
+            // graph's lanes (e.g. #Bit → #String encoding door with a
+            // CastFrom(#Bit) override) apply to them. General: walks the
+            // base chain, never matches specific type names (rule #18).
+            let base = rt.base.trim_start_matches('#');
+            match base {
+                "Float" => ("Float".to_string(), String::new()),
+                "UInt" => ("UInt".to_string(), String::new()),
+                "Int" => ("Int".to_string(), String::new()),
+                "String" => ("String".to_string(), String::new()),
+                "Bool" => ("Bool".to_string(), String::new()),
+                "Char" => ("Char".to_string(), String::new()),
+                "Data" => ("Data".to_string(), String::new()),
+                _ => ("Bit".to_string(), String::new()),
+            }
         }
     }
 
@@ -650,19 +686,42 @@ mod tests {
 
     #[test]
     fn test_string_to_bit() {
+        // 2026-08-01 (B2): #String → #Bit is the CONTENT VIEW — a String value
+        // is a ptr to [len][bytes], so the cast yields the buffer address
+        // (PtrToInt). Never overridable.
         let graph = CastingGraph::new();
         let path = graph.find_path("String", "", "Bit", "");
         assert!(path.is_some());
-        assert_eq!(path.unwrap()[0].lane, LaneKind::ExtractData);
+        assert_eq!(path.unwrap()[0].lane, LaneKind::PtrToInt);
     }
 
     #[test]
     fn test_bit_to_string() {
+        // 2026-08-01 (B2): #Bit → #String is the ENCODING DOOR — a
+        // CastFrom(#Bit) callback (UTF8 wrap default materializing the
+        // [len][bytes] header by construction). Not a bitcast.
         let graph = CastingGraph::new();
         let path = graph.find_path("Bit", "", "String", "");
         assert!(path.is_some());
-        // Default bit→string is bitcast
-        assert_eq!(path.unwrap()[0].lane, LaneKind::Bitcast);
+        assert_eq!(path.unwrap()[0].lane, LaneKind::CastFromBitCallback);
+    }
+
+    #[test]
+    fn test_hashword_category_strip() {
+        // 2026-08-01 (B2): a `#Bit` HashWord type must resolve to the bare
+        // "Bit" category so find_path finds the base lanes. Previously the
+        // category kept the `#` ("#Bit") and every cast to/from #Bit silently
+        // fell through to LLVM coercion.
+        let graph = CastingGraph::new();
+        let u = crate::type_universe::TypeUniverse::new();
+        let b_ty = crate::ast::Type::HashWord("#Bit".to_string());
+        let (cat, var) = graph.type_to_protocol(&u, &b_ty);
+        assert_eq!(cat, "Bit");
+        assert_eq!(var, "");
+        // And the String → Bit path (via hashword target) resolves to PtrToInt.
+        let path = graph.find_path("String", "", &cat, &var);
+        assert!(path.is_some());
+        assert_eq!(path.unwrap()[0].lane, LaneKind::PtrToInt);
     }
 
     #[test]

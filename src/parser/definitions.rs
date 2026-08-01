@@ -1537,8 +1537,17 @@ impl<'a> Parser<'a> {
         let name = self.expect_identifier()?;
         // Optional protocol variant: (#Proto) or (ConcreteType)
         let protocol_variant = if self.eat(&Token::LParen) {
-            // Parse the protocol variant or concrete type
-            let variant = self.expect_identifier()?;
+            // 2026-08-01 (B2): parse the variant as a TYPE so hashwords work
+            // (`op CastFrom(#Bit) = fn`). Previously expect_identifier rejected
+            // the `#` — type-level CastFrom(#Bit) overrides were unparseable.
+            // Store the bare category (strip `#`) — compile.rs matches
+            // protocol_variant == "#Bit"/"Bit".
+            let variant = match self.parse_type()? {
+                crate::ast::Type::HashWord(cat) | crate::ast::Type::HashWordVariant(cat, _) => {
+                    cat.strip_prefix('#').unwrap_or(&cat).to_string()
+                }
+                other => format!("{}", other),
+            };
             // Check for discriminator key-value pairs: pre:"0x", suf:"f", reg:"..."
             let mut pre: Option<String> = None;
             let mut suf: Option<String> = None;
@@ -1602,7 +1611,11 @@ impl<'a> Parser<'a> {
         reg: Option<String>,
         op_bindings: &mut Vec<OperatorBinding>,
     ) -> Result<(), SyntaxError> {
-        self.expect(Token::Colon)?;
+        // 2026-08-01 (B2): `op CastFrom(#Bit) = fn` uses `=` (like the proto
+        // CastFrom form); other discriminated ops use `:`. Accept either.
+        if !self.eat(&Token::Eq) {
+            self.expect(Token::Colon)?;
+        }
         let fn_name = self.expect_identifier()?;
         self.expect(Token::LParen)?;
         let mut args = Vec::new();
@@ -2206,10 +2219,13 @@ mod tests {
 
     #[test]
     fn test_op_declarative_protocol_variant() {
+        // 2026-08-01 (B2): the variant parses as a TYPE, so the stored value
+        // is the BARE category ("Int") — hashwords (`op Add(#Int)`) and
+        // CastFrom(#Bit) overrides both go through parse_type now.
         let ops = parse_op_from_type_def("type T { op Add(#Int): int_add(#L, #R); };");
         assert_eq!(ops.len(), 1);
         assert_eq!(ops[0].name, "Add");
-        assert_eq!(ops[0].protocol_variant.as_deref(), Some("#Int"));
+        assert_eq!(ops[0].protocol_variant.as_deref(), Some("Int"));
     }
 
     #[test]
@@ -2797,3 +2813,4 @@ mod tests {
         }
     }
 }
+

@@ -3620,6 +3620,74 @@ fn test_bool_field_no_malformed_i8_range() {
     );
 }
 
+/// 2026-08-01 (B2): `#String → #Bit` is the CONTENT VIEW — a String value is a
+/// ptr to [len][bytes], so the cast yields the buffer ADDRESS (ptrtoint), not
+/// the old `extractvalue {i64,i64}, 0` fat-pointer extraction. This pins the
+/// content-view lane under the bits model.
+#[test]
+fn test_string_to_bit_content_view() {
+    let src = r#"
+        let s: String = "hello";
+        let tick: Int = 0;
+        node report [tick < 1][tick == 1] {
+            let b: #Bit = s as #Bit;
+            term;
+        };
+    "#;
+    let mut items = parse_bv_source(src);
+    let mut universe = crate::type_universe::TypeUniverse::new();
+    let mut pm = crate::plugin::PluginManager::new();
+    pm.run_ast(crate::ast::StageKind::Parsed, &mut items, &mut universe)
+        .expect("plugin stage failed");
+
+    let mut backend = LlvmBackend::new().with_type_universe(universe);
+    let ir = backend.generate(&items, None);
+    assert!(
+        ir.contains("ptrtoint ptr"),
+        "#String → #Bit must emit ptrtoint (content view = buffer address); got:\n{ir}"
+    );
+    assert!(
+        !ir.contains("extractvalue"),
+        "#String → #Bit must not extractvalue (String is a ptr under B0); got:\n{ir}"
+    );
+}
+
+/// 2026-08-01 (B2): `#Bit → #String` is the ENCODING DOOR — wraps the bits
+/// (a [len][bytes] buffer) back into a String by materializing the header via
+/// brief_bits_to_str. Not a bitcast.
+#[test]
+fn test_bit_to_string_encoding_door() {
+    let src = r#"
+        let s: String = "hello";
+        let tick: Int = 0;
+        node report [tick < 1][tick == 1] {
+            let b: #Bit = s as #Bit;
+            let r: String = b as String;
+            term;
+        };
+    "#;
+    let mut items = parse_bv_source(src);
+    let mut universe = crate::type_universe::TypeUniverse::new();
+    let mut pm = crate::plugin::PluginManager::new();
+    pm.run_ast(crate::ast::StageKind::Parsed, &mut items, &mut universe)
+        .expect("plugin stage failed");
+
+    let mut backend = LlvmBackend::new().with_type_universe(universe);
+    let ir = backend.generate(&items, None);
+    assert!(
+        ir.contains("call ptr @brief_bits_to_str(ptr "),
+        "#Bit → #String must emit brief_bits_to_str (UTF8 wrap); got:\n{ir}"
+    );
+    assert!(
+        !ir.contains("extractvalue"),
+        "the encoding door must not extractvalue; got:\n{ir}"
+    );
+}
+
+
+
+
+
 
 
 

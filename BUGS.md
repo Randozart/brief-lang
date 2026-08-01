@@ -2835,3 +2835,27 @@ explicitly-async nodes were never classified, so valid async pairs were denied.
 **Lesson:** when a parser entry point pre-consumes a token that a shared parser
 also consumes, the shared parser's state becomes wrong — the wrapper must
 restore/forward the consumed flag.
+
+---
+
+## HashWord Categories Kept the `#` Prefix — Casts to/from #Bit Silently Fell Through — FIXED
+
+**Date:** 2026-08-01
+**Status:** Fixed (Phase B2)
+**Root cause:** `type_to_protocol` returned the HashWord name verbatim as the
+category (`Type::HashWord("#Bit")` → category `"#Bit"`), but the casting
+graph's base lanes are keyed on bare categories (`"Bit"`, `"String"`). So
+`find_path("String", "", "#Bit", "")` found no lanes and every cast to/from
+`#Bit` silently fell through to LLVM coercion — `s as #Bit` emitted
+`bitcast i64 %ptr to i64` (invalid). `is_protocol_member` masked this by
+stripping the `#` from its target.
+**Fix:** `type_to_protocol` strips the `#` prefix from HashWord categories
+(matching base-lane keys); `type_to_protocol` also follows a type's declared
+`base` parent (`type Latin1String: #String` ⇒ "String") since the normalizer
+no longer injects `Cast.#` properties.
+**Impact:** `s as #Bit` now emits `ptrtoint` (content view); `b as String`
+emits `brief_bits_to_str` (encoding door). Verified in `.smoke/bit_let.bv`,
+`.smoke/bit_to_str.bv`, and `test_hashword_category_strip`.
+**Lesson:** a type's protocol category is derived from the universe's Cast.#
+properties OR its declared base — never from the raw HashWord text — and the
+graph keys must be normalized consistently.

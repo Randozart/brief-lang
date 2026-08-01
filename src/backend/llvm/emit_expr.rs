@@ -3022,8 +3022,30 @@ impl LlvmBackend {
                     self.emit_single_cast_lane(out, &dst, b, &temp, &temp_ll, indent);
                 }
                 crate::casting::graph::LaneKind::CastFromBitCallback => {
-                    // CastFrom(#Bit) overrides — requires lookup; fall through for now
-                    return None;
+                    // 2026-08-01 (B2): the ENCODING DOOR — `#Bit → <type>`.
+                    // A registered CastFrom(#Bit) override for the target type
+                    // calls the override function; otherwise the #String default
+                    // is the UTF8 wrap: inttoptr the address, then
+                    // brief_cstr_to_brief materializes the [len][bytes] header
+                    // by construction (length derived from the bytes). The
+                    // header is never inherited from the bits — it is created.
+                    let override_fn = match target.universe_key() {
+                        Some(key) => self
+                            .ctx
+                            .casting_graph
+                            .as_ref()
+                            .and_then(|g| g.get_cast_from_bit(key)),
+                        None => None,
+                    };
+                    if let Some(fn_name) = override_fn {
+                        writeln!(out, "{}{} = call {} @{}(i64 {})",
+                            indent, dst, dst_ll, fn_name, cur).ok();
+                    } else {
+                        let p = self.fun.gen_reg();
+                        writeln!(out, "{}{} = inttoptr i64 {} to ptr", indent, p, cur).ok();
+                        writeln!(out, "{}{} = call ptr @brief_bits_to_str(ptr {})",
+                            indent, dst, p).ok();
+                    }
                 }
             }
             cur = dst;

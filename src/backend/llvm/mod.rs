@@ -2275,6 +2275,12 @@ impl LlvmBackend {
         writeln!(out, "declare ptr @brief_str_bor(ptr, ptr) #1").ok();
         writeln!(out, "declare ptr @brief_str_bxor(ptr, ptr) #1").ok();
         writeln!(out, "declare ptr @brief_str_bnot(ptr) #1").ok();
+        // 2026-08-01 (B2): the #Bit → #String ENCODING DOOR default. The bits
+        // are a Brief [len][bytes] buffer (a String's content view); wrapping
+        // re-materializes the header by construction (the bits carry their own
+        // length — not a null-terminated C string). Sub-protocols override via
+        // CastFrom(#Bit).
+        writeln!(out, "declare ptr @brief_bits_to_str(ptr) #1").ok();
         // 2026-08-01 (Phase 3): CLI argv capture. The emitted main stores
         // its argc/argv into these globals; the runtime argv helpers
         // (brief_rt.c) read them as externs. The compiler OWNS the globals

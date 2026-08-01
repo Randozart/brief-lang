@@ -805,6 +805,25 @@ machinery; `!> encoding` metadata removed.
 default wrap; subtype override path; no `encoding` metadata remains in the
 universe or emitted IR.
 
+**Status (2026-08-01): IMPLEMENTED.** `#String → #Bit` is the CONTENT VIEW
+(`PtrToInt` — a String value is a ptr to `[len][bytes]`, so the cast yields the
+buffer address; was `ExtractData` on the dead `{i64,i64}`). `#Bit → #String` is
+the ENCODING DOOR (`CastFromBitCallback` — default UTF8 wrap via
+`brief_bits_to_str`, which re-materializes the `[len][bytes]` header by
+construction from the bits; registered `CastFrom(#Bit)` overrides are called).
+`!> encoding` removed from bootstrap.bv (unread). Two supporting fixes: (1)
+`type_to_protocol` strips the `#` from HashWord categories so casts to/from
+`#Bit` resolve base lanes (was `"#Bit"` → no lanes → silent LLVM-coercion
+fallthrough); (2) `type_to_protocol` follows a type's declared `base` parent so
+`type Latin1String: #String` resolves to the String category (subtypes get the
+protocol lanes). Parser now accepts `op CastFrom(#Bit) = fn` (variant parsed as
+a type; `=` accepted like proto CastFrom). Verified: `.smoke/bit_let.bv`
+(content view → buffer address), `.smoke/bit_to_str.bv` (encoding door
+round-trip "hello"). 3 new tests. Note: a `let r: Latin1String = <String
+literal>` still requires an implicit subtype cast (typechecker does not coerce
+String literals to #String subtypes) — the override path fires on explicit
+casts; literal coercion is a separate concern not in B2 scope.
+
 ### Phase B3 — Bits model: length-op dispatch (gated — B-D6)
 
 **Goal:** wire `prop Size` / `prop Bytes` to real dispatch; `#String` default =
