@@ -839,6 +839,16 @@ by subtypes.
 **Tests:** default `Bytes` O(1); `Size` UTF8 correctness (ASCII + multibyte);
 subtype override (the B2 example); no `Length#` regression for lists.
 
+**Status (2026-08-01): IMPLEMENTED.** `x.^Len` on a #String → the `Size` prop
+default = UTF8 char count via `brief_char_len` (runtime counts codepoints);
+`x.^^Bytes` → the `Bytes` prop default = O(1) header read (the `[0]` length
+prefix). Interpreter parity in `eval.rs` Reflect (Len = char count, Bytes =
+byte length). Bug fixed (BUGS.md): `collect_identifiers` did not handle
+`Expr::Reflect`, so a String `let` used ONLY via reflection was eliminated as a
+dead state field — `s.^Len` emitted `load i64, ptr @s` with `@s` undefined.
+Reflect now keeps its receiver live. Verified: `.smoke/len_demo.bv` prints
+`chars=5 bytes=6` for "héllo". 2 new tests.
+
 ### Phase 5 — Docs, SPEC, highlighter, full-suite verification
 
 | File | Change |

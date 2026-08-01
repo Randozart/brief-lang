@@ -142,6 +142,25 @@ char* brief_bits_to_str(const char* bits) {
     return buf;
 }
 
+// 2026-08-01 (B3): UTF8 character count of a Brief String value (String ABI =
+// ptr to [len: i64][bytes]). Bytes are valid UTF8, so the count is the number
+// of codepoints (skip continuation bytes 0b10xxxxxx). This is the `#String`
+// `Size` prop default (the O(1) byte-length header read is the `Bytes` prop).
+// Sub-protocols override the lane via their own prop bindings.
+int64_t brief_char_len(const char* str) {
+    if (!str) return 0;
+    int64_t len = *(const int64_t*)str;
+    if (len < 0) return 0;
+    const unsigned char* p = (const unsigned char*)(str + 8);
+    int64_t chars = 0;
+    for (int64_t i = 0; i < len; i++) {
+        // A UTF8 continuation byte is 0b10xxxxxx (0x80–0xBF). Count only
+        // lead bytes (including ASCII 0x00–0x7F).
+        if ((p[i] & 0xC0) != 0x80) chars++;
+    }
+    return chars;
+}
+
 // 2026-08-01 (B1): Content equality for Brief String values (String ABI = ptr
 // to a length-prefixed [len: i64][bytes] buffer). Compares lengths first, then
 // payload bytes. Returns 1 if equal, 0 otherwise. This is the runtime half of

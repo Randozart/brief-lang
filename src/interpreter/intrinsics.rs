@@ -874,4 +874,30 @@ mod tests {
         let r = execute_intrinsic("AddressOf#", &[dev_str], &mut heap).unwrap();
         assert_eq!(r.as_i64(), Some(0xFE000000i64));
     }
+
+    #[test]
+    fn test_reflect_len_and_bytes() {
+        // 2026-08-01 (B3): `x.^Len` = UTF8 char count, `x.^^Bytes` = byte
+        // length (interpreter parity with the backend's brief_char_len /
+        // header read). 'héllo' is 5 chars / 6 bytes.
+        use crate::ast::{Expr, ReflectKind};
+        use crate::interpreter::eval_expr;
+        let mut heap = VirtualHeap::new();
+        let mut bindings = std::collections::HashMap::new();
+        bindings.insert("s".into(), Value::bits("héllo".as_bytes().to_vec()));
+        let len_expr = Expr::Reflect(
+            Box::new(Expr::Identifier("s".into())),
+            "Len".into(),
+            ReflectKind::Runtime,
+        );
+        let len = eval_expr(&len_expr, &mut heap, &mut bindings).unwrap();
+        assert_eq!(len.as_i64(), Some(5), "héllo has 5 UTF8 chars");
+        let bytes_expr = Expr::Reflect(
+            Box::new(Expr::Identifier("s".into())),
+            "Bytes".into(),
+            ReflectKind::CompileTime,
+        );
+        let bytes = eval_expr(&bytes_expr, &mut heap, &mut bindings).unwrap();
+        assert_eq!(bytes.as_i64(), Some(6), "héllo is 6 bytes");
+    }
 }

@@ -117,8 +117,31 @@ pub fn eval_expr(
             Ok(Value::Void)
         }
         Expr::Reflect(recv, name, _kind) => {
-            let _ = (recv, name);
-            Ok(Value::Void)
+            // 2026-08-01 (B3): reflection on String values — `Len` (Size prop)
+            // = UTF8 character count, `Bytes` = byte length. A String is
+            // `Value::Bits(bytes)` (direct) or a heap handle `Value::Int(addr)`
+            // (`[len: i64][bytes]`). Mirrors the backend's brief_char_len /
+            // header-read emission (rule #4: interpreter is the reference).
+            let val = eval_expr(recv, heap, bindings)?;
+            match name.as_str() {
+                "Len" => {
+                    let bytes = val
+                        .string_bytes(heap)
+                        .unwrap_or_default();
+                    let chars = bytes
+                        .iter()
+                        .filter(|b| (**b & 0xC0) != 0x80)
+                        .count();
+                    Ok(i64_to_bits(chars as i64))
+                }
+                "Bytes" => {
+                    let bytes = val
+                        .string_bytes(heap)
+                        .unwrap_or_default();
+                    Ok(i64_to_bits(bytes.len() as i64))
+                }
+                _ => Ok(Value::Void),
+            }
         }
         Expr::MethodCall(recv, _name, args, _) => {
             eval_expr(recv, heap, bindings)?;

@@ -2859,3 +2859,24 @@ emits `brief_bits_to_str` (encoding door). Verified in `.smoke/bit_let.bv`,
 **Lesson:** a type's protocol category is derived from the universe's Cast.#
 properties OR its declared base — never from the raw HashWord text — and the
 graph keys must be normalized consistently.
+
+---
+
+## Reflect-Read String Field Eliminated as Dead — FIXED
+
+**Date:** 2026-08-01
+**Status:** Fixed (Phase B3)
+**Root cause:** `compute_live_fields`'s `collect_identifiers` did not handle
+`Expr::Reflect`, so a String `let` used ONLY via reflection (`s.^Len`,
+`s.^^Bytes`, `s.^Ptr`) was treated as a dead state field and eliminated from
+%State. At emission, `s.^Len` hit the identifier fallback and emitted
+`load i64, ptr @s` with `@s` undefined (clang link error), or the runtime
+`Len` arm panicked on the Int-typed register.
+**Fix:** `collect_identifiers` gained an `Expr::Reflect(recv, _, _)` arm that
+collects the receiver (the same liveness rule as FFI args: an observation keeps
+the value alive).
+**Impact:** `.smoke/len_demo.bv` now emits `brief_char_len` for `s.^Len`
+(chars=5) and a header load for `s.^^Bytes` (bytes=6) on "héllo".
+**Lesson:** every expression construct that reads a state value must be listed
+in the liveness identifier collector; a missing arm silently eliminates the
+field and surfaces as an undefined global / wrong register type at codegen.

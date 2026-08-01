@@ -3684,6 +3684,47 @@ fn test_bit_to_string_encoding_door() {
     );
 }
 
+/// 2026-08-01 (B3): `x.^Len` on a String → the `Size` prop default = UTF8
+/// char count (brief_char_len); `x.^^Bytes` → the `Bytes` prop default = O(1)
+/// header read (byte length). Also verifies a String `let` used only via
+/// reflection stays live (not eliminated as a dead state field).
+#[test]
+fn test_string_len_and_bytes_reflect() {
+    let src = r#"
+        let s: String = "hello";
+        let tick: Int = 0;
+        node report [tick < 1][tick == 1] {
+            let c: Int = s.^Len;
+            let b: Int = s.^^Bytes;
+            term;
+        };
+    "#;
+    let mut items = parse_bv_source(src);
+    let mut universe = crate::type_universe::TypeUniverse::new();
+    let mut pm = crate::plugin::PluginManager::new();
+    pm.run_ast(crate::ast::StageKind::Parsed, &mut items, &mut universe)
+        .expect("plugin stage failed");
+
+    let mut backend = LlvmBackend::new().with_type_universe(universe);
+    let ir = backend.generate(&items, None);
+    assert!(
+        ir.contains("call i64 @brief_char_len(ptr "),
+        "String .^Len must emit brief_char_len (UTF8 char count); got:\n{ir}"
+    );
+    assert!(
+        ir.contains("load i64, ptr ") || ir.contains("load i64, ptr %"),
+        "String .^^Bytes must emit an O(1) header load; got:\n{ir}"
+    );
+    // The String field must stay live (not eliminated as dead — it's only
+    // read via reflection). Verify the state has a String slot.
+    assert!(
+        ir.contains("%State = type { i64,"),
+        "the reflect-read String field must stay in %State; got:\n{ir}"
+    );
+}
+
+
+
 
 
 

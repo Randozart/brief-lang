@@ -290,6 +290,17 @@ impl LlvmBackend {
                             name: v.to_string(),
                             ty: Type::float64(),
                         }
+                    } else if self.is_string_operand(ty) {
+                        // 2026-08-01 (B3): a String constant's @s global holds
+                        // the [len][bytes] pointer; load it as a ptr and type it
+                        // String so reflection/ops see the right protocol. Was
+                        // load i64 typed Int, which broke `s.^Len` on an
+                        // unwritten literal (const-folded to a global).
+                        writeln!(out, "{}{} = load ptr, ptr @{}", indent, v, name).ok();
+                        TypedRegister {
+                            name: v.to_string(),
+                            ty: Type::string(),
+                        }
                     } else {
                         writeln!(out, "{}{} = load i64, ptr @{}", indent, v, name).ok();
                         TypedRegister {
@@ -1497,6 +1508,15 @@ impl LlvmBackend {
                 TypedRegister { name: r, ty: Type::int() }
             }
             ("Bytes", ReflectKind::CompileTime) => {
+                // 2026-08-01 (B3): `x.^^Bytes` on a #String → the `Bytes` prop
+                // default = O(1) header read (byte length is the [0] length
+                // prefix of the [len][bytes] buffer). For non-strings, the
+                // compile-time type size.
+                if self.is_string_operand(&recv_reg.ty) {
+                    let r = self.fun.gen_reg();
+                    writeln!(out, "{}{} = load i64, ptr {}", indent, r, recv_reg.name).ok();
+                    return TypedRegister { name: r, ty: Type::int() };
+                }
                 let sz = types::type_size(&recv_reg.ty, self.ctx.type_universe.as_ref());
                 let r = self.fun.gen_reg();
                 writeln!(out, "{}{} = add i64 0, {}", indent, r, sz).ok();
@@ -1520,9 +1540,18 @@ impl LlvmBackend {
                     writeln!(out, "{}{} = add i64 0, {}", indent, r, count).ok();
                     TypedRegister { name: r, ty: Type::int() }
                 }
-                _ => panic!(
-                    "runtime reflection target 'Len' on '{}' has no codegen yet (Phase-1b boundary)",
-                    recv_reg.ty
+                // 2026-08-01 (B3): `x.^Len` on a #String → the `Size` prop
+                // default = UTF8 character count (runtime helper reads the
+                // [len][bytes] buffer and counts codepoints). The O(1) byte
+                // length (header) is `x.^^Bytes` below.
+                ty if self.is_string_operand(ty) => {
+                    let r = self.fun.gen_reg();
+                    writeln!(out, "{}{} = call i64 @brief_char_len(ptr {})", indent, r, recv_reg.name).ok();
+                    TypedRegister { name: r, ty: Type::int() }
+                }
+                other => panic!(
+                    "runtime reflection target 'Len' on '{:?}' (reg ty {:?}) has no codegen yet (Phase-1b boundary)",
+                    recv, recv_reg.ty
                 ),
             },
             _ => panic!(

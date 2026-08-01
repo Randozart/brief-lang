@@ -2281,6 +2281,9 @@ impl LlvmBackend {
         // length — not a null-terminated C string). Sub-protocols override via
         // CastFrom(#Bit).
         writeln!(out, "declare ptr @brief_bits_to_str(ptr) #1").ok();
+        // 2026-08-01 (B3): UTF8 character count for the #String `Size` prop
+        // default (the O(1) byte-length header read is the `Bytes` prop).
+        writeln!(out, "declare i64 @brief_char_len(ptr) #1").ok();
         // 2026-08-01 (Phase 3): CLI argv capture. The emitted main stores
         // its argc/argv into these globals; the runtime argv helpers
         // (brief_rt.c) read them as externs. The compiler OWNS the globals
