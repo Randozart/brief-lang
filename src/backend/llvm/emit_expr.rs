@@ -152,6 +152,23 @@ impl LlvmBackend {
                             let offset = self.lookup_field_offset(self_type, name);
                             let gep = self.fun.gen_reg();
                             writeln!(out, "{}{} = getelementptr i8, ptr {}, i64 {}", indent, gep, self_ptr, offset).ok();
+                            // 2026-08-01 (D3): a STRUCT-typed self-slot
+                            // (`inner: ListBuffer<T>`) — its value is its
+                            // ADDRESS (the instance lives in the obj's
+                            // storage), like state-slots/struct-literals. Field
+                            // access on it (`inner.data`) GEPs the address;
+                            // loading the aggregate would break
+                            // emit_field_access's inttoptr base.
+                            let is_struct_slot = match &slot_ty {
+                                Type::Custom(n) => self.ctx.struct_types.contains_key(n),
+                                Type::Applied(n, _) => self.ctx.struct_types.contains_key(n),
+                                _ => false,
+                            };
+                            if is_struct_slot {
+                                let addr = self.fun.gen_reg();
+                                writeln!(out, "{}{} = ptrtoint ptr {} to i64", indent, addr, gep).ok();
+                                return TypedRegister { name: addr, ty: slot_ty };
+                            }
                             let llvm_ty = self.llvm_type(&slot_ty);
                             let val = self.fun.gen_reg();
                             writeln!(out, "{}{} = load {}, ptr {}", indent, val, llvm_ty, gep).ok();
@@ -1328,7 +1345,14 @@ impl LlvmBackend {
         writeln!(out, "{}  {} = inttoptr i64 {} to ptr", indent, ptr, recv_reg.name).ok();
         let gep = self.fun.gen_reg();
         writeln!(out, "{}  {} = getelementptr i8, ptr {}, i64 {}", indent, gep, ptr, offset).ok();
-        let llvm_ty = self.llvm_type(&field_ty);
+        // 2026-08-01 (D3): a Ptr-typed struct field stores the i64 HANDLE
+        // (ptrtoint at store) — load i64, not `ptr`, so the downstream
+        // inttoptr consumers (inner.data[len]) work unchanged.
+        let llvm_ty = if matches!(field_ty, Type::Ptr(_)) {
+            "i64".to_string()
+        } else {
+            self.llvm_type(&field_ty)
+        };
         let val = self.fun.gen_reg();
         writeln!(out, "{}  {} = load {}, ptr {}", indent, val, llvm_ty, gep).ok();
         TypedRegister { name: val, ty: field_ty }
