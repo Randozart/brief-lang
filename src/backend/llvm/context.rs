@@ -107,6 +107,10 @@ pub struct CompilerContext {
 
     // Type info
     pub struct_types: HashMap<String, Vec<(String, Type)>>,
+    /// 2026-07-31 (A5): obj member declarations (txn/defn/node bodies), keyed
+    /// by type name. Used by MethodCall codegen to emit the member body with
+    /// `self` bound to the receiver instance.
+    pub obj_members: HashMap<String, Vec<crate::ast::TopLevel>>,
     pub enum_types: HashMap<String, EnumDefinition>,
     pub cell_defs: HashMap<String, CellDef>,
     pub cell_state_types: HashMap<String, (HashMap<String, usize>, Vec<String>)>,
@@ -283,6 +287,7 @@ impl CompilerContext {
             string_constants: Vec::new(),
             constants: HashMap::new(),
             struct_types: HashMap::new(),
+            obj_members: HashMap::new(),
             enum_types: HashMap::new(),
             cell_defs: HashMap::new(),
             cell_state_types: HashMap::new(),
@@ -369,6 +374,13 @@ pub struct FunctionContext {
     /// Keyed by variable name. When &x is taken on a struct-typed let binding,
     /// this map provides the stack alloca pointer instead of the ptrtoint result.
     pub struct_literal_allocas: HashMap<String, String>,
+
+    /// 2026-07-31 (A5): active obj-member `self` binding — (struct type name,
+    /// self pointer register). While set, a bare identifier naming a slot of
+    /// the struct resolves to `getelementptr self + offset` + load (read) or
+    /// store (write), so `txn push(val) { data[len] = val; len = len + 1; }`
+    /// mutates the receiver instance.
+    pub self_binding: Option<(String, String)>,
 
     // Register type caches
     pub reg_float_cache: HashMap<String, String>,
@@ -604,6 +616,7 @@ impl FunctionContext {
             let_original_types: HashMap::new(),
             let_binding_allocas: HashSet::new(),
             struct_literal_allocas: HashMap::new(),
+            self_binding: None,
             reg_float_cache: HashMap::new(),
             reg_type_cache: HashMap::new(),
             ssa_old_int_regs: HashMap::new(),

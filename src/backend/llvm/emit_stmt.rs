@@ -10,8 +10,19 @@ use crate::backend::llvm::{LlvmBackend, TypedRegister};
 use std::fmt::Write;
 
 /// Emit LLVM IR for a statement. Returns the last expression's register.
-pub fn emit_statement(backend: &mut LlvmBackend, out: &mut String, stmt: &Statement, indent: &str) -> TypedRegister {
-    match stmt {
+/// 2026-07-31 (A5): emit a sequence of statements (an obj member body).
+pub fn emit_statement_sequence(
+    backend: &mut LlvmBackend,
+    out: &mut String,
+    stmts: &[Statement],
+    indent: &str,
+) {
+    for stmt in stmts {
+        emit_statement(backend, out, stmt, indent);
+    }
+}
+
+pub fn emit_statement(backend: &mut LlvmBackend, out: &mut String, stmt: &Statement, indent: &str) -> TypedRegister {    match stmt {
         Statement::Let { name, ty, expr, .. } => {
             let val = match expr {
                 Some(e) => backend.emit_expr(out, e, indent),
@@ -32,7 +43,13 @@ pub fn emit_statement(backend: &mut LlvmBackend, out: &mut String, stmt: &Statem
                 backend.fun.struct_literal_allocas.insert(name.clone(), alloca);
             }
             backend.fun.let_bindings.insert(name.clone(), val.name.clone());
-            backend.fun.let_binding_types.insert(name.clone(), val.ty.clone());
+            // 2026-07-31 (A5): a declared type wins over the emitted register's
+            // type — a `let st: Stack = Stack()` local must bind as `Stack`
+            // (the emitted struct address is i64/Int), so method calls and
+            // field access on it resolve the struct.
+            let bind_ty = ty.clone().unwrap_or_else(|| val.ty.clone());
+            backend.fun.let_binding_types.insert(name.clone(), bind_ty.clone());
+            backend.fun.let_original_types.insert(name.clone(), bind_ty);
             TypedRegister { name: val.name, ty: Type::void() }
         }
         Statement::Assign(lhs, rhs) => {
@@ -65,6 +82,28 @@ pub fn emit_statement(backend: &mut LlvmBackend, out: &mut String, stmt: &Statem
             let val = backend.emit_expr(out, rhs, indent);
             match lhs {
                 Expr::Identifier(name) => {
+                    // 2026-07-31 (A5): obj member `self` slot write — a bare
+                    // slot name in a member body stores to self+offset.
+                    let self_binding = backend.fun.self_binding.clone();
+                    if let Some((self_type, self_ptr)) = &self_binding {
+                        let is_self_slot = backend.ctx.struct_types.get(self_type)
+                            .map_or(false, |f| f.iter().any(|(n, _)| n == name));
+                        if is_self_slot {
+                            let offset = backend.lookup_field_offset(self_type, name);
+                            let gep = backend.fun.gen_reg();
+                            writeln!(out, "{}{} = getelementptr i8, ptr {}, i64 {}", indent, gep, self_ptr, offset).ok();
+                            let (slot_ty, _) = backend.ctx.struct_types.get(self_type)
+                                .and_then(|f| f.iter().find(|(n, _)| n == name))
+                                .map(|(_, ty)| (ty.clone(), ()))
+                                .unwrap_or((Type::int(), ()));
+                            let llvm_ty = backend.llvm_type(&slot_ty);
+                            let store_val = backend.ensure_typed_value(out, indent, &llvm_ty, &val.name, Some(val.ty.clone()), backend.ctx.type_universe.clone().as_ref());
+                            writeln!(out, "{}store {} {}, ptr {}", indent, llvm_ty, store_val, gep).ok();
+                            backend.fun.last_val_temps.insert(name.clone(), val.name.clone());
+                            backend.fun.last_val_types.insert(name.clone(), val.ty.clone());
+                            return TypedRegister { name: val.name, ty: Type::void() };
+                        }
+                    }
                     // 2026-07-18: Push — emit call @fn_name(handle, val).
                     // 2026-07-20: Uses find_insert_strategy (reads OperatorDef from context).
                     let insert_strat = backend.find_insert_strategy(lhs).cloned();

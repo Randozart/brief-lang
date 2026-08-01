@@ -151,14 +151,14 @@ impl LlvmBackend {
         // Universe-registered struct types (from type declarations with slots):
         // 2026-07-30: Skip types already hardcoded above — prevents duplicate
         // %String = type { i64, i64 } declarations that clang rejects.
-        let hardcoded: std::collections::HashSet<&str> = [
+        let mut emitted: std::collections::HashSet<String> = [
             "SmallString64", "StaticString", "String", "UTF8View",
-        ].iter().cloned().collect();
+        ].iter().map(|s| s.to_string()).collect();
         if let Some(u) = &self.ctx.type_universe {
             let mut universe_fields: Vec<(String, Vec<String>)> = Vec::new();
             for rt in u.types.values() {
                 if rt.fields.is_empty() { continue; }
-                if hardcoded.contains(rt.name.as_str()) { continue; }
+                if emitted.contains(&rt.name) { continue; }
                 let field_tys: Vec<String> = rt.fields.iter()
                     .map(|(_, fty)| self.llvm_type(fty))
                     .collect();
@@ -167,6 +167,7 @@ impl LlvmBackend {
             universe_fields.sort_by_key(|(k, _)| k.clone());
             for (name, field_tys) in &universe_fields {
                 writeln!(out, "%{} = type {{ {} }}", name, field_tys.join(", ")).ok();
+                emitted.insert(name.clone());
             }
         }
         if self.ctx.struct_types.is_empty() {
@@ -178,6 +179,8 @@ impl LlvmBackend {
             .collect();
         sorted.sort_by_key(|(k, _)| k.clone());
         for (name, fields) in &sorted {
+            // 2026-07-31: skip if the universe already declared this type.
+            if emitted.contains(name.as_str()) { continue; }
             if fields.is_empty() {
                 writeln!(out, "%{} = type {{}}", name).ok();
             } else {

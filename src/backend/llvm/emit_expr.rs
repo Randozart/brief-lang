@@ -135,6 +135,26 @@ impl LlvmBackend {
                         return TypedRegister { name: lane_reg, ty: brief_ty };
                     }
                 }
+                // 2026-07-31 (A5): obj member `self` slot read — a bare slot
+                // name in a member body resolves to self+offset (GEP + load).
+                let self_binding = self.fun.self_binding.clone();
+                if let Some((self_type, self_ptr)) = &self_binding {
+                    let is_self_slot = self.ctx.struct_types.get(self_type)
+                        .map_or(false, |f| f.iter().any(|(n, _)| n == name));
+                    if is_self_slot {
+                        let offset = self.lookup_field_offset(self_type, name);
+                        let gep = self.fun.gen_reg();
+                        writeln!(out, "{}{} = getelementptr i8, ptr {}, i64 {}", indent, gep, self_ptr, offset).ok();
+                        let (slot_ty, _) = self.ctx.struct_types.get(self_type)
+                            .and_then(|f| f.iter().find(|(n, _)| n == name))
+                            .map(|(_, ty)| (ty.clone(), ()))
+                            .unwrap_or((Type::int(), ()));
+                        let llvm_ty = self.llvm_type(&slot_ty);
+                        let val = self.fun.gen_reg();
+                        writeln!(out, "{}{} = load {}, ptr {}", indent, val, llvm_ty, gep).ok();
+                        return TypedRegister { name: val, ty: slot_ty };
+                    }
+                }
                 // 2026-07-17: Remaining paths: local binding,
                 // phi register, state field, global constant.
                 if let Some(reg) = self.get_local(name) {
@@ -277,6 +297,27 @@ impl LlvmBackend {
             Expr::Call(name, args, analysis_id) => {
                 if name.ends_with('#') {
                     self.emit_intrinsic_call_dispatch(out, v, name, args, *analysis_id, indent)
+                } else if self.ctx.struct_types.contains_key(name) {
+                    // 2026-07-31 (A5): struct constructor call — `Stack()` /
+                    // `Person("Alice", 30)` — emits a struct literal with the
+                    // args as positional fields.
+                    let fields: Vec<(String, Expr)> = self
+                        .ctx
+                        .struct_types
+                        .get(name)
+                        .cloned()
+                        .unwrap_or_default()
+                        .iter()
+                        .enumerate()
+                        .map(|(i, (fname, _))| {
+                            let value = args
+                                .get(i)
+                                .cloned()
+                                .unwrap_or_else(|| Expr::Decimal(0));
+                            (fname.clone(), value)
+                        })
+                        .collect();
+                    self.emit_struct_literal(out, v, name, &fields, indent)
                 } else {
                     self.emit_user_call(out, v, name, args, indent)
                 }
@@ -805,14 +846,11 @@ impl LlvmBackend {
             Expr::Reflect(recv, target, kind) => {
                 return self.emit_reflection(out, v, recv, target, *kind, indent);
             }
-            Expr::MethodCall(recv, name, _args, _) => {
-                // 2026-07-31: MethodCall typechecks fully (member lookup, arg
-                // validation) but self-bound member emission is the Phase-1b
-                // boundary. A clear error here beats silent garbage.
-                panic!(
-                    "method call '.{}()' on '{}' reached codegen without self-bound emission (Phase-1b boundary)",
-                    name, recv
-                );
+            Expr::MethodCall(recv, name, args, _) => {
+                // 2026-07-31 (A5): self-bound member emission. Emit the
+                // receiver's struct address, bind `self`, bind the params,
+                // emit the member body inline, restore the previous binding.
+                return self.emit_method_call(out, v, recv, name, args, indent);
             }
             Expr::DerivationBlock(_) | Expr::FormattingAnnotation(_) => {
                 writeln!(out, "{}{} = add i64 0, 0", indent, v).ok();
@@ -1349,6 +1387,78 @@ impl LlvmBackend {
     /// Compile-time targets emit constants (foldable); `Ptr` reuses the
     /// address-of path; `Len` emits a constant for fixed-size vectors and a
     /// clear error for dynamic receivers (Phase-1b boundary).
+    /// 2026-07-31 (A5): `recv.name(args)` — inline the obj member body with
+    /// `self` bound to the receiver instance's storage.
+    fn emit_method_call(
+        &mut self,
+        out: &mut String,
+        v: &str,
+        recv: &Expr,
+        name: &str,
+        args: &[Expr],
+        indent: &str,
+    ) -> TypedRegister {
+        let recv_tmp = self.fun.gen_reg();
+        let recv_reg = self.emit_expr_inner(out, &recv_tmp, recv, indent);
+        // 2026-07-31: a struct-typed state field loads as i64 (its address);
+        // recover the struct type from field_brief_types for member lookup.
+        let mut type_name = match &recv_reg.ty {
+            Type::Custom(n) => n.clone(),
+            Type::Applied(n, _) => n.clone(),
+            _ => String::new(),
+        };
+        if type_name.is_empty() {
+            if let Expr::Identifier(rname) = recv {
+                if let Some(&ridx) = self.ctx.field_index_map.get(rname) {
+                    if let Some(Type::Custom(n)) = self.ctx.field_brief_types.get(ridx) {
+                        type_name = n.clone();
+                    }
+                }
+            }
+        }
+        let members = self.ctx.obj_members.get(&type_name).cloned().unwrap_or_default();
+        let member = members.iter().find(|m| member_brief_name(m) == name).cloned();
+        let Some(member) = member else {
+            panic!("method call '.{}()': no member '{}' on '{}'", name, name, type_name);
+        };
+        // self = the receiver's struct address (struct literals emit ptrtoint;
+        // a struct-typed local's alloca is alive in this function).
+        let self_ptr = self.fun.gen_reg();
+        writeln!(out, "{}{} = inttoptr i64 {} to ptr", indent, self_ptr, recv_reg.name).ok();
+        let saved = self.fun.self_binding.clone();
+        self.fun.self_binding = Some((type_name.clone(), self_ptr.clone()));
+        let saved_bindings = self.fun.let_bindings.clone();
+        let saved_types = self.fun.let_binding_types.clone();
+        let saved_orig = self.fun.let_original_types.clone();
+        let (params, body): (Vec<(String, Type)>, Vec<crate::ast::Statement>) = match &member {
+            crate::ast::TopLevel::Transaction(t) => (
+                t.parameters.iter().map(|(n, ty)| (n.clone(), ty.clone())).collect(),
+                t.body.clone(),
+            ),
+            crate::ast::TopLevel::Definition(d) => (
+                d.parameters.iter().map(|(n, ty)| (n.clone(), ty.clone())).collect(),
+                d.body.clone(),
+            ),
+            _ => (Vec::new(), Vec::new()),
+        };
+        for (i, arg) in args.iter().enumerate() {
+            let arg_tmp = self.fun.gen_reg();
+            let arg_reg = self.emit_expr_inner(out, &arg_tmp, arg, indent);
+            if let Some((pname, pty)) = params.get(i) {
+                self.fun.let_bindings.insert(pname.clone(), arg_reg.name.clone());
+                self.fun.let_binding_types.insert(pname.clone(), pty.clone());
+                self.fun.let_original_types.insert(pname.clone(), pty.clone());
+            }
+        }
+        crate::backend::llvm::emit_stmt::emit_statement_sequence(self, out, &body, indent);
+        self.fun.self_binding = saved;
+        self.fun.let_bindings = saved_bindings;
+        self.fun.let_binding_types = saved_types;
+        self.fun.let_original_types = saved_orig;
+        let _ = v;
+        TypedRegister { name: self.fun.gen_reg(), ty: Type::void() }
+    }
+
     fn emit_reflection(
         &mut self,
         out: &mut String,
@@ -1552,7 +1662,7 @@ impl LlvmBackend {
 
     /// 2026-07-24: Computes offsets from field types using type_size (pack=1).
     /// Previously used simplified i*8 which was wrong for mixed-size fields.
-    fn lookup_field_offset(&self, type_name: &str, field_name: &str) -> u64 {
+    pub(crate) fn lookup_field_offset(&self, type_name: &str, field_name: &str) -> u64 {
         if let Some(fields) = self.get_struct_fields(type_name) {
             let mut offset = 0u64;
             for (fname, ftype) in fields {
@@ -2908,5 +3018,16 @@ mod tests {
             "different lens with the same cap must differ");
         assert_ne!(pack_svo_header(1, 1), pack_svo_header(1, 2),
             "different caps with the same len must differ");
+    }
+
+
+}
+
+/// 2026-07-31 (A5): the brief name of a member declaration (txn/defn/node).
+pub(crate) fn member_brief_name(m: &crate::ast::TopLevel) -> &str {
+    match m {
+        crate::ast::TopLevel::Transaction(t) => &t.name,
+        crate::ast::TopLevel::Definition(d) => &d.name,
+        _ => "",
     }
 }

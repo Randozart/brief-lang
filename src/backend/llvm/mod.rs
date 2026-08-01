@@ -321,7 +321,7 @@ fn collect_strings_expr(expr: &Expr, seen: &mut std::collections::HashSet<String
             collect_strings_expr(recv, seen, out);
             for a in args { collect_strings_expr(a, seen, out); }
         }
-        Expr::Exists(_) => { unreachable!("fn? only in stage eval") },
+        Expr::Exists(name) => { panic!("compile-time existence check '{}' reached LLVM codegen", name) },
             Expr::Slice { array, start, end, stride } => {
                 collect_strings_expr(array, seen, out);
                 if let Some(e) = start.as_deref() { collect_strings_expr(e, seen, out); }
@@ -1951,6 +1951,10 @@ impl LlvmBackend {
                         .collect();
                     // 2026-07-24: Register struct type in both struct_types and universe
                     self.ctx.struct_types.insert(td.name.clone(), fields.clone());
+                    // 2026-07-31 (A5): register obj members for MethodCall codegen.
+                    if !td.body.members.is_empty() {
+                        self.ctx.obj_members.insert(td.name.clone(), td.body.members.clone());
+                    }
                     if let Some(ref mut universe) = self.ctx.type_universe {
                         if !universe.types.contains_key(&td.name) {
                             let bytes: u64 = fields.iter().map(|(_, ty)| {
