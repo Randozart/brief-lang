@@ -2264,6 +2264,14 @@ impl LlvmBackend {
         writeln!(out, "declare ptr @brief_str_bor(ptr, ptr) #1").ok();
         writeln!(out, "declare ptr @brief_str_bxor(ptr, ptr) #1").ok();
         writeln!(out, "declare ptr @brief_str_bnot(ptr) #1").ok();
+        // 2026-08-01 (Phase 3): CLI argv capture. The emitted main stores
+        // its argc/argv into these globals; the runtime argv helpers
+        // (brief_rt.c) read them as externs. The compiler OWNS the globals
+        // (it stores to them), so they are external (non-internal) for the
+        // C runtime to link against. Helper FUNCTION signatures are declared
+        // by lib/std/cli.bv's frgns (Int→i64, String→ptr).
+        writeln!(out, "@__brief_argc = global i32 0").ok();
+        writeln!(out, "@__brief_argv = global ptr null").ok();
         writeln!(out, "declare i64 @brief_getuid() #1").ok();
         writeln!(out, "declare i64 @brief_geteuid() #1").ok();
         writeln!(out, "declare i64 @brief_getgid() #1").ok();
@@ -3484,8 +3492,7 @@ impl LlvmBackend {
             if let Some(tv) = total_val {
                 // 2026-07-14: Wrap in define i32 @main() so emitted IR is valid.
                 self.warnings.push(format!("info: txn '{}' dispatched via pure counter fold ({} iterations, O(1) store)", node.name, tv));
-                writeln!(out, "define i32 @main() local_unnamed_addr #9 {{").ok();
-                writeln!(out, "entry:").ok();
+                self.emit_main_header(out, "#9", true);
                 writeln!(out, "  %state = alloca %State, align 8").ok();
                 self.emit_inline_init_stores(out, "%state");
                 self.emit_folded_pure_counter(out, counter_idx, tv);

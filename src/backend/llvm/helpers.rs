@@ -315,6 +315,35 @@ impl LlvmBackend {
         }
     }
 
+    /// Emit the `main` function header with CLI argv capture.
+    ///
+    /// 2026-08-01 (Phase 3): every loop-engine main is emitted as
+    /// `define i32 @main(i32 %argc, ptr %argv)` and stores argc/argv into the
+    /// module globals `@__brief_argc` / `@__brief_argv`, which the runtime
+    /// argv helpers (brief_rt.c) read. The `entry:` label is emitted here
+    /// (with the captures inside it) so callers do not write it again.
+    /// `capture` is false for the precomputed main (pure-compile-time fold,
+    /// no runtime argv needed — it still takes argv params for a uniform
+    /// signature so the runtime can link).
+    pub(crate) fn emit_main_header(
+        &mut self,
+        out: &mut String,
+        attrs: &str,
+        capture: bool,
+    ) {
+        writeln!(
+            out,
+            "define i32 @main(i32 %argc, ptr %argv) local_unnamed_addr {} {{",
+            attrs
+        )
+        .ok();
+        writeln!(out, "entry:").ok();
+        if capture {
+            writeln!(out, "  store i32 %argc, ptr @__brief_argc").ok();
+            writeln!(out, "  store ptr %argv, ptr @__brief_argv").ok();
+        }
+    }
+
     /// Emit a `main()` that stores final precomputed values and returns.
     /// EmitPureCounterFold: no runtime loop, no iteration. The region analyzer simulated
     /// all transactions within `--optimize-budget` and produced final values.
@@ -324,13 +353,7 @@ impl LlvmBackend {
         out: &mut String,
         final_values: &[(Vec<String>, HashMap<String, i64>)],
     ) {
-        writeln!(
-            out,
-            "define i32 @main() local_unnamed_addr {} {{",
-            "#0"
-        )
-        .ok();
-        writeln!(out, "  entry:").ok();
+        self.emit_main_header(out, "#0", false);
         writeln!(out, "  %state = alloca %State, align 8").ok();
         self.emit_inline_init_stores(out, "%state");
         let mut seen: std::collections::HashSet<&str> = std::collections::HashSet::new();

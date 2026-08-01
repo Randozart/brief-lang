@@ -1,0 +1,25 @@
+// 2026-08-01 (Phase 3): CLI argv access. Backed by the argv globals the
+// compiler captures in emitted main (see emit_main_header) and the runtime
+// helpers in brief_rt.c.
+//
+// Usage:
+//   entry_cmd()            // first non-flag argv[1..] token (the subcommand)
+//   arg_present("--flag")  // whether any argv[1..] token equals "--flag"
+//
+// The entry!/args! plugin (Phase 3) expands `entry!("cmd")` to
+// `entry_cmd() == "cmd" && !__entry_cmd_done` and `args!("--flag")` to a
+// snapshot state field bound from `__argv_has("--flag")`.
+
+frgn __argv_count() -> Int from "lib/runtime/brief_rt.c" fallback 0;
+frgn __argv_get(i: Int) -> String from "lib/runtime/brief_rt.c" fallback "";
+frgn __argv_has(flag: String) -> Bool from "lib/runtime/brief_rt.c" fallback false;
+frgn __argv_value(flag: String) -> String from "lib/runtime/brief_rt.c" fallback "";
+frgn __argv_command() -> String from "lib/runtime/brief_rt.c" fallback "";
+
+defn entry_cmd() -> String {
+    term __argv_command();
+};
+
+defn arg_present(flag: String) -> Bool {
+    term __argv_has(flag);
+};

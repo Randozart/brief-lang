@@ -152,8 +152,7 @@ impl LlvmBackend {
         use_phi: bool,
         body: Option<&[Statement]>,
     ) {
-        writeln!(out, "define i32 @main() local_unnamed_addr {} {{", "#0").ok();
-        writeln!(out, "entry:").ok();
+        self.emit_main_header(out, "#0", true);
         writeln!(out, "  %state = alloca %State, align 8").ok();
         self.emit_inline_init_stores(out, "%state");
         self.emit_folded_loop(out, txn_name, counter_idx, total_idx, total_const_name,
@@ -210,8 +209,7 @@ impl LlvmBackend {
         is_decreasing: bool,
         counter_var: Option<&str>,
     ) {
-        writeln!(out, "define i32 @main() local_unnamed_addr {} {{", "#0").ok();
-        writeln!(out, "entry:").ok();
+        self.emit_main_header(out, "#0", true);
         writeln!(out, "  %state = alloca %State, align 8").ok();
         self.emit_inline_init_stores(out, "%state");
         let c0 = self.fun.txn_counter;
@@ -444,8 +442,7 @@ impl LlvmBackend {
         batch: &crate::analysis::batch_shape::BatchShape,
     ) {
         let batch_size = batch.batch_size as i64;
-        writeln!(out, "define i32 @main() local_unnamed_addr {} {{", "#0").ok();
-        writeln!(out, "entry:").ok();
+        self.emit_main_header(out, "#0", true);
         writeln!(out, "  %state = alloca %State, align 8").ok();
         self.emit_inline_init_stores(out, "%state");
         let c0 = self.fun.txn_counter;
@@ -731,8 +728,7 @@ impl LlvmBackend {
         batch: &crate::analysis::batch_shape::BatchShape,
     ) {
         let batch_size = batch.batch_size as i64;
-        writeln!(out, "define i32 @main() local_unnamed_addr {} {{", "#0").ok();
-        writeln!(out, "entry:").ok();
+        self.emit_main_header(out, "#0", true);
         writeln!(out, "  %state = alloca %State, align 8").ok();
         self.emit_inline_init_stores(out, "%state");
         let c0 = self.fun.txn_counter;
@@ -1031,8 +1027,7 @@ impl LlvmBackend {
         let present_label = format!(".{}_present", vd_prefix);
         let end_label = format!(".{}_end", vd_prefix);
 
-        writeln!(out, "define i32 @main() local_unnamed_addr {} {{", "#0").ok();
-        writeln!(out, "entry:").ok();
+        self.emit_main_header(out, "#0", true);
         writeln!(out, "  %state = alloca %State, align 8").ok();
         self.emit_inline_init_stores(out, "%state");
         let bound_reg = self.fun.next_reg_with_prefix("vdb");

@@ -3559,4 +3559,41 @@ fn test_string_bitwise_emits_content_ops() {
     );
 }
 
+/// 2026-08-01 (Phase 3a): emitted main is `main(i32 %argc, ptr %argv)` and
+/// captures argc/argv into the runtime globals for the CLI argv helpers.
+#[test]
+fn test_main_signature_and_argv_capture() {
+    let src = r#"
+        let x: Int = 5;
+        defn run() -> Int {
+            term x;
+        };
+    "#;
+    let mut items = parse_bv_source(src);
+    let mut universe = crate::type_universe::TypeUniverse::new();
+    let mut pm = crate::plugin::PluginManager::new();
+    pm.run_ast(crate::ast::StageKind::Parsed, &mut items, &mut universe)
+        .expect("plugin stage failed");
+
+    let mut backend = LlvmBackend::new().with_type_universe(universe);
+    let ir = backend.generate(&items, None);
+    assert!(
+        ir.contains("define i32 @main(i32 %argc, ptr %argv)"),
+        "main must take (i32 %argc, ptr %argv); got:\n{ir}"
+    );
+    assert!(
+        ir.contains("store i32 %argc, ptr @__brief_argc"),
+        "main must store argc into @__brief_argc; got:\n{ir}"
+    );
+    assert!(
+        ir.contains("store ptr %argv, ptr @__brief_argv"),
+        "main must store argv into @__brief_argv; got:\n{ir}"
+    );
+    assert!(
+        !ir.contains("define i32 @main()"),
+        "main() without args must not be emitted; got:\n{ir}"
+    );
+}
+
+
 

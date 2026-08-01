@@ -710,6 +710,17 @@ is what rejects `[#]`.
 gate deny/allow matrix (UNSAT, XOR-overlap, async, sync<group>, unclassified);
 `entry!`-vs-`entry!` subcommand dispatch.
 
+**Status (2026-08-01): 3a (CLI runtime capture) IMPLEMENTED.** Every loop-engine
+main is now `define i32 @main(i32 %argc, ptr %argv)` via a central
+`emit_main_header` helper (helpers.rs) that stores argc/argv into
+`@__brief_argc`/`@__brief_argv` (external globals the runtime links against).
+`lib/runtime/brief_rt.c` gains `__argv_count/__argv_get/__argv_has/__argv_value/
+__argv_command` (command = first non-flag argv[1..], honoring `$BRIEF_ENTRY_CMD`).
+`lib/std/cli.bv` declares the frgns + `entry_cmd`/`arg_present`. Verified
+end-to-end in `.smoke/cli_demo.bv` (build/run/flag/env fallback) and a backend
+IR test (`test_main_signature_and_argv_capture`). Remaining: 3b (`entry!`/
+`args!` plugin), 3c (concurrency gate).
+
 ### Phase 4 — Flat-scripting plugin (one-shot opening node)
 
 | File | Change |

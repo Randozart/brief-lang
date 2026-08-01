@@ -173,6 +173,88 @@ char* brief_str_bor(const char* a, const char* b)  { return brief_str_bitop(a, b
 char* brief_str_bxor(const char* a, const char* b) { return brief_str_bitop(a, b, 2); }
 char* brief_str_bnot(const char* a)                { return brief_str_bitop(a, 0, 3); }
 
+// ── CLI argv capture (Phase 3, 2026-08-01) ────────────────────────────
+// The compiler's emitted `main(i32 %argc, ptr %argv)` stores its arguments
+// into these module globals (see emit_main_header); the helpers below read
+// them. String results follow the String ABI = ptr to [len: i64][bytes]
+// (heap-allocated; caller frees via brief_free_brief_str).
+// The compiler's emitted `main(i32 %argc, ptr %argv)` stores its arguments
+// into these globals (see emit_main_header) — the compiler OWNS them, so the
+// runtime declares them extern (not defines them). String results follow the
+// String ABI = ptr to [len: i64][bytes] (heap-allocated; caller frees via
+// brief_free_brief_str).
+extern int32_t __brief_argc;
+extern void* __brief_argv;
+
+int64_t __argv_count(void) {
+    return (int64_t)__brief_argc;
+}
+
+// argv[i] as a Brief string (empty for out-of-range i).
+char* __argv_get(int64_t i) {
+    if (!__brief_argv || i < 0 || i >= __brief_argc) {
+        return brief_cstr_to_brief("");
+    }
+    char* s = ((char**)__brief_argv)[i];
+    return brief_cstr_to_brief(s);
+}
+
+// Whether any argv token equals `flag` (a Brief string). Returns 1/0.
+// Skips argv[0] (the program name) — flags/commands live in argv[1..].
+int64_t __argv_has(const char* flag_bstr) {
+    char* c_flag = brief_str_to_c(flag_bstr);
+    if (!c_flag) return 0;
+    int64_t found = 0;
+    if (__brief_argv) {
+        for (int64_t i = 1; i < __brief_argc; i++) {
+            if (strcmp(((char**)__brief_argv)[i], c_flag) == 0) {
+                found = 1;
+                break;
+            }
+        }
+    }
+    free(c_flag);
+    return found;
+}
+
+// The value following `flag` (e.g. `--out file` → "file"), or "" if absent.
+char* __argv_value(const char* flag_bstr) {
+    char* c_flag = brief_str_to_c(flag_bstr);
+    if (!c_flag) return brief_cstr_to_brief("");
+    char* result = NULL;
+    if (__brief_argv) {
+        for (int64_t i = 1; i + 1 < __brief_argc; i++) {
+            if (strcmp(((char**)__brief_argv)[i], c_flag) == 0) {
+                result = ((char**)__brief_argv)[i + 1];
+                break;
+            }
+        }
+    }
+    free(c_flag);
+    if (!result) return brief_cstr_to_brief("");
+    return brief_cstr_to_brief(result);
+}
+
+// The first non-flag token in argv[1..] — the subcommand. `<prog> --verbose
+// build` → "build"; "" if none. Honors $BRIEF_ENTRY_CMD (test/embedded path
+// without argv) as the sole environment fallback.
+char* __argv_command(void) {
+    const char* env_cmd = getenv("BRIEF_ENTRY_CMD");
+    if (env_cmd && env_cmd[0]) {
+        return brief_cstr_to_brief(env_cmd);
+    }
+    if (__brief_argv) {
+        for (int64_t i = 1; i < __brief_argc; i++) {
+            const char* tok = ((char**)__brief_argv)[i];
+            if (tok[0] != '-') {
+                return brief_cstr_to_brief(tok);
+            }
+        }
+    }
+    return brief_cstr_to_brief("");
+}
+
+
 // ── Core intrinsics (kept) ────────────────────────────────────────────
 
 // 2026-07-19: Returns the environ pointer (char **environ) as an Int.
