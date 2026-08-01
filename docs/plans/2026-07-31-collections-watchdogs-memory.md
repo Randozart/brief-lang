@@ -218,6 +218,28 @@ recorded.
 4. Wire `analysis::watchdog::analyze` into the pipeline.
 5. Benchmark: `series_converge` (`?[|next−last| > ε] -> print_best(val)`).
 
+**C status (2026-08-01, DONE):**
+- **C1/C2** — `-> handler(val)` parses into `WatchdogOnFire { handler, arg }`
+  (`val` names the value passed on the fire path; `()` = no arg). Committed
+  `444ed2d3` + `7a2610e2`.
+- **C4** — `watchdog::analyze` runs on BOTH the check path (parse_and_check)
+  and build path; `check_on_fire_handlers` validates the handler names a
+  declared txn/defn/node. Committed `9487918f`.
+- **C2/C3** — liveliness emission in the countdown (`.cdw_`/`.wdf_`) AND the
+  memory-counter emitter (`.cmwd_`/`.cmwdf_`): continue while `?[cond]`
+  holds; on false, call `handler(arg)` with the last computed value + exit;
+  required-without-handler calls `__watchdog_fail`. The handler's Float param
+  surfaced a PRE-EXISTING defn-param bug (boxed i64 handle passed as float in
+  frgn calls/returns) — fixed via `reg_float_cache` unboxing in
+  `coerce_to_param_type`, `PrintFloat#`, and the Term return path.
+- **C5** — `series_converge`: `?[(x-last)^2 > eps] -> print_best(x)` fires on
+  convergence. Brief and C both print 0.500050008 (MATCH, 1.00x). Registered
+  in the harness.
+- **Deferred**: fuel (`?[N cyc]` — cycles_bound) and time (`?[N ms]` — `Now#`
+  clock_gettime) — the parse consumes the units but the bounds aren't wired to
+  emission yet (the liveliness predicate covers the benchmark; time/fuel need
+  the `Now#` intrinsic + deadline compare).
+
 ### Phase D — Memory-by-proof
 Stress benchmarks + fixes as §5; global-lifetime design plan written.
 
