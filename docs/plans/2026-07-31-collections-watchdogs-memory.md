@@ -334,8 +334,23 @@ grammar, `learn-brief` collections + watchdog chapters, `docs/architecture`).
      and the countdown's `emit_inline_init_stores` didn't run the A7 Init-op
      construction (mirrored `emit_init_state`'s dispatch), so the queue slot
      stored 0 and the push dereferenced null.
-  queue_drain is re-enabled in `benchmarks/build_and_bench.sh` — output MATCHES
-  C at real bounds, and it WINS (0.56x, 0.0357s vs C 0.0631s).
+   queue_drain is re-enabled in `benchmarks/build_and_bench.sh` — output MATCHES
+   C at real bounds, and it WINS (0.56x, 0.0357s vs C 0.0631s).
+- **Phase A10 (partial)** — committed (`1ef18bac`). `stack_push_pop`
+  (Stack<Int, 256> push/pop cycle via `<-` ops) registered in the harness —
+  wins 0.50x vs C (0.0296s vs 0.0590s), MATCH. Four fixes to get the generic
+  Stack push/pop correct: (a) `emit_strategy_member_call` resolves the mono
+  key so member bodies GEP correct self-slot offsets (the generic base layout
+  `data: T[N]` computed degenerate offsets — len at 0 instead of 2048); (b)
+  the countdown Expression arm dispatches `<- &collection` (the ExtractFrom
+  member call) — the pop must run or `len` never decrements and the next push
+  overflows; (c) `find_extract_strategy` peels AddrOf layers (`<- &st` lowers
+  to `Expression(AddrOf(AddrOf(Identifier))))` — the lookup never reached the
+  identifier); (d) the Identifier arm returns the self pointer for self-slot
+  ARRAY names (`data` in `data[i]`) instead of falling through to the global
+  lookup, which emitted an undefined `@data` global. `ring_buffer_drain` is
+  subsumed by queue_drain (same RingBuffer machinery); `hash_ops`/`enemy_swarm`
+  defer to the D phase (HashMap heap + SoA desugar).
 - Phase B: …
 - Phase C: …
 - Phase D: …
