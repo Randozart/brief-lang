@@ -762,6 +762,7 @@ impl LlvmBackend {
         counter_var: &str,
         batch: &crate::analysis::batch_shape::BatchShape,
         watchdog: Option<&crate::ast::top::WatchdogSpec>,
+        free_after: &[String],
     ) {
         let batch_size = batch.batch_size as i64;
         self.emit_main_header(out, "#0", true);
@@ -1029,6 +1030,19 @@ impl LlvmBackend {
                 let mut empty3 = Vec::new();
                 self.emit_countable_body(out, group, &HashSet::new(), &mut empty3);
             }
+        }
+        // 2026-08-01 (D2): garbage scheduling — emit the `Free#` for each
+        // heap-backed state field whose reactor-ordered last consumer is this
+        // countdown transaction. The free fires exactly once, after the whole
+        // loop completes (a per-iteration free would be a use-after-free). The
+        // handle is the field's STORED value (the ptrtoint of the allocation),
+        // loaded from %State — re-evaluating the initializer would re-malloc.
+        for f in free_after {
+            let Some(&fidx) = self.ctx.field_index_map.get(f) else { continue; };
+            let (handle, _) = self.emit_state_load_i64_by_idx(out, "  ", fidx);
+            let ptr = self.fun.gen_reg();
+            writeln!(out, "  {} = inttoptr i64 {} to ptr", ptr, handle).ok();
+            writeln!(out, "  call void @free(ptr {})", ptr).ok();
         }
         writeln!(out, "  ret i32 0").ok();
         writeln!(out, "}}").ok();

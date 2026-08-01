@@ -1116,6 +1116,63 @@ fn collect_state_identifiers(expr: &Expr, state_fields: &HashSet<String>, out: &
     }
 }
 
+/// Collect the state-field identifiers a STATEMENT touches (reads or writes).
+/// 2026-08-01 (D2): used by garbage scheduling (global_lifetime) to compute a
+/// transaction's touch set — a write after a scheduled free is a use-after-free
+/// too, so the scheduler frees after the LAST touch.
+pub(crate) fn collect_statement_identifiers(
+    stmt: &crate::ast::Statement,
+    state_fields: &HashSet<String>,
+    out: &mut HashSet<String>,
+) {
+    use crate::ast::Statement;
+    match stmt {
+        Statement::Assign(lhs, rhs) => {
+            collect_state_identifiers(lhs, state_fields, out);
+            collect_state_identifiers(rhs, state_fields, out);
+        }
+        Statement::Let { expr, .. } => {
+            if let Some(e) = expr {
+                collect_state_identifiers(e, state_fields, out);
+            }
+        }
+        Statement::Expression(e) => {
+            collect_state_identifiers(e, state_fields, out);
+        }
+        Statement::Guarded(cond, body) => {
+            collect_state_identifiers(cond, state_fields, out);
+            for s in body {
+                collect_statement_identifiers(s, state_fields, out);
+            }
+        }
+        Statement::If(cond, then_b, else_b) => {
+            collect_state_identifiers(cond, state_fields, out);
+            for s in then_b {
+                collect_statement_identifiers(s, state_fields, out);
+            }
+            for s in else_b {
+                collect_statement_identifiers(s, state_fields, out);
+            }
+        }
+        Statement::Term(val) | Statement::TermBang(val) => {
+            if let Some(v) = val {
+                collect_state_identifiers(v, state_fields, out);
+            }
+        }
+        Statement::Return(val) => {
+            if let Some(v) = val {
+                collect_state_identifiers(v, state_fields, out);
+            }
+        }
+        Statement::Block(stmts) => {
+            for s in stmts {
+                collect_statement_identifiers(s, state_fields, out);
+            }
+        }
+        _ => {}
+    }
+}
+
 pub fn assign_field_modes(
     all_state_fields: &HashSet<String>,
     referenced_fields: &HashSet<String>,

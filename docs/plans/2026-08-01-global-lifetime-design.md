@@ -1,9 +1,36 @@
-# Global-Lifetime Inference — Design Plan
+# Garbage Scheduling — Global-Lifetime Design Plan
 
 **Date:** 2026-08-01
-**Status:** Design (Phase D2 of `2026-07-31-collections-watchdogs-memory.md`). The
-`global_lifetime` stress benchmark in the same phase pins this end-state.
+**Status:** Design → implementation (Phase D2 of
+`2026-07-31-collections-watchdogs-memory.md`). The `global_lifetime` stress
+benchmark pins this end-state.
 **Worktree:** `brief-compiler-cwm` (`feat/collections-watchdogs-memory`)
+
+## 0. The framing: a garbage SCHEDULER, not a garbage collector
+
+This design is a **garbage scheduler** (proof-directed deallocation), not a
+garbage collector:
+
+| | Garbage collector | Garbage scheduler (this design) |
+|---|---|---|
+| Liveness established | at runtime (trace / refcount) | at **compile time** (a proof of each field's last reader) |
+| Free fires | at an arbitrary point (GC pause) | at a **deterministic program point** — right after the proven last consumer |
+| Cost | mark/sweep/copy + pauses | an O(1) `free` at a scheduled point |
+| Correctness | runtime discovery | a **soundness proof** — a field freed but read later is a compile error |
+
+The closest academic analogs are **region inference** (Tofte–Talpin) and
+**static reference counting**: compile-time lifetime assignment, not runtime
+collection. What makes it possible here is the **deterministic reactor firing
+order** — the transition graph says *which* transaction fires when, so "the
+last transaction that reads field `f`" is a well-defined, provable notion that
+C-style arbitrary control flow cannot soundly answer.
+
+The scheduler is **partial and conservative**: when the proof cannot establish
+the last use (an unordered reader, an escaping pointer, an FFI alias), the
+field falls back to "lives for the program" — it leaks by design rather than
+risk a premature free. The contract is *sound (never premature) but not
+complete (may not reclaim)*, matching the never-faster principle: a scheduled
+free must never be beaten by a manual one, and a wrong free is a compiler bug.
 
 ## 1. Goal
 
@@ -12,8 +39,8 @@ field is never read again. Today **all state lives for the program's duration**:
 `analysis/allocation.rs` builds a producer→consumer DAG per transaction and
 chooses Arena (in-txn) / Alloca (bounded) / Malloc (top-level), and the arena
 bumps + realloc-grows — but a top-level Malloc-backed state field is never freed.
-Global-lifetime inference closes that gap: a heap-backed field provably dead
-after its last consumer is freed exactly once, after that consumer.
+Garbage scheduling closes that gap: a heap-backed field provably dead after its
+last consumer is freed exactly once, at the scheduled point after that consumer.
 
 Correctness is the contract: **no premature free, no leak**. A field is freed
 only when the last read is proven; anything else (a read after the free) is a

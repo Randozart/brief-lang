@@ -52,6 +52,11 @@ pub struct AnalysisResults {
     // math-parity §5, Fix 2) — the io boundary interval derived from the guard
     // precondition, consumed by the backend's emit_countable_batched_main.
     pub batch_shape: Option<crate::analysis::batch_shape::BatchShape>,
+    // 2026-08-01 (D2): garbage scheduling — the frontend-computed proof of
+    // each heap-backed state field's reactor-ordered last consumer, consumed
+    // by the backend to emit a `Free#` exactly after that transaction's body.
+    // See docs/plans/2026-08-01-global-lifetime-design.md.
+    pub global_lifetime: crate::analysis::global_lifetime::GlobalLifetime,
 }
 
 /// Intent: Run shared program analysis for backend code generation.
@@ -92,6 +97,24 @@ pub fn analyze_program(items: &[TopLevel], optimize: bool, min_width: usize) -> 
     // bodies (what the backend emits). The io boundary is the guard's
     // `count % N == 0` precondition interval.
     let batch_shape = crate::analysis::batch_shape::detect_batch_shape(&swan_songs);
+    // 2026-08-01 (D2): garbage scheduling — prove each heap-backed field's
+    // reactor-ordered last consumer. Field initializers come from StateDecl +
+    // top-level `let f: T = expr` (mirrors build_field_index); the node order
+    // is the transition graph's deterministic firing order.
+    let mut field_inits: HashMap<String, crate::ast::Expr> = HashMap::new();
+    for item in items {
+        if let TopLevel::StateDecl(s) = item {
+            field_inits.entry(s.name.clone()).or_insert(crate::ast::Expr::Decimal(0));
+        } else if let TopLevel::Statement(stmt) = item {
+            if let crate::ast::Statement::Let { name, expr, .. } = stmt.as_ref() {
+                if let Some(e) = expr {
+                    field_inits.entry(name.clone()).or_insert_with(|| e.clone());
+                }
+            }
+        }
+    }
+    let node_order: Vec<String> = transition_graph.nodes.iter().map(|n| n.name.clone()).collect();
+    let global_lifetime = crate::analysis::global_lifetime::analyze(items, &field_inits, &node_order);
     AnalysisResults {
         call_graph: CallGraph::new(),
         param_ranges: ParameterRanges::new(),
@@ -108,6 +131,7 @@ pub fn analyze_program(items: &[TopLevel], optimize: bool, min_width: usize) -> 
         has_unguarded_ffi,
         inline_decisions,
         batch_shape,
+        global_lifetime,
     }
 }
 

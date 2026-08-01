@@ -3536,6 +3536,8 @@ impl LlvmBackend {
                         out, &node.name, counter_idx, total_idx, total_const_name,
                         &node.write_set, &bp.var, batch,
                         watchdog,
+                        analysis.global_lifetime.free_after.get(&node.name)
+                            .map(|v| v.as_slice()).unwrap_or(&[]),
                     );
                     return true;
                 }
