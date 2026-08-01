@@ -238,6 +238,37 @@ pub fn emit_statement(backend: &mut LlvmBackend, out: &mut String, stmt: &Statem
                             if vol_obj { "volatile " } else { "" }, val.name, gep).ok();
                     }
                 }
+                // 2026-08-01 (D3): field store — `obj.name = val`. The receiver
+                // register holds the struct ADDRESS (struct self-slot, local
+                // struct, or a nested Field returning the sub-struct address);
+                // GEP the field offset and store. Ptr-typed fields store the
+                // i64 handle. Previously this fell to `_ => {}` and the store
+                // was silently dropped (List's `inner.data = Malloc#(...)`).
+                Expr::Field(obj, name) => {
+                    let obj_reg = backend.emit_expr(out, obj, indent);
+                    let Some(obj_key) = backend.resolve_obj_key(&obj_reg.ty) else {
+                        return TypedRegister { name: val.name, ty: Type::void() };
+                    };
+                    let offset = backend.lookup_field_offset(&obj_key, name);
+                    let ptr = backend.fun.gen_reg();
+                    writeln!(out, "{}{} = inttoptr i64 {} to ptr", indent, ptr, obj_reg.name).ok();
+                    let gep = backend.fun.gen_reg();
+                    writeln!(out, "{}{} = getelementptr i8, ptr {}, i64 {}", indent, gep, ptr, offset).ok();
+                    let field_ty = backend.ctx.struct_types.get(&obj_key)
+                        .and_then(|f| f.iter().find(|(n, _)| n == name))
+                        .map(|(_, ty)| ty.clone())
+                        .unwrap_or_else(|| Type::int());
+                    let llvm_ty = if matches!(field_ty, Type::Ptr(_)) {
+                        "i64".to_string()
+                    } else {
+                        backend.llvm_type(&field_ty)
+                    };
+                    let store_val = backend.ensure_typed_value(
+                        out, indent, &llvm_ty, &val.name, Some(val.ty.clone()),
+                        backend.ctx.type_universe.clone().as_ref(),
+                    );
+                    writeln!(out, "{}store {} {}, ptr {}", indent, llvm_ty, store_val, gep).ok();
+                }
                 _ => {}
             }
             TypedRegister { name: val.name, ty: Type::void() }
