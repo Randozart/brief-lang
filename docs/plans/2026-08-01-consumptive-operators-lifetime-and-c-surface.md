@@ -291,10 +291,10 @@ dead `~?` (temporal-fallback) token is removed.
 
    *Known gaps (documented in BUGS.md): `~op` on a top-level const-let inside a
    txn body emits an undefined `@b` global (field-registration walk does not
-   descend into `Expr::Consume`); `queue_drain_idio` stays broken by the
-   pre-existing imported-type strategy-dispatch gap (items lack imported
-   TypeDefs, so `push_element_type`/`extract_element_type` return None for
-   `List`).*
+   descend into `Expr::Consume`); `queue_drain_idio` is FIXED
+   (2026-08-01: it was a MISSING `import { List }` in the benchmark — the
+   typechecker had no InsertAt binding for an unimported List; adding the
+   import makes it compile and match the queue_drain_sym C reference).*
 | **3.7 Docs + migration** | Highlighter (the `~op`/`!/`/`!/!` tokens; drop `~?`/`~/` rules), SPEC grammar, the tutorial (the move/consume concept + the `!/` contract), migrate the 4 arrow files (`queue_drain`, `queue_drain_idio`, `stack_push_pop`, `lib/std/hashmap.bv`) |
 
 **Migration scope (small):** bitwise `~` is unused in source; the arrow `&` is
