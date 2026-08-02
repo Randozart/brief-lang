@@ -11,6 +11,8 @@
 // against the symmetric variant's C reference.
 
 
+import { List } from "std/collections.bv";
+
 let N: Int = get_env_int!("BOUND");
 let count: Int = 0;
 let queue: List<Int> = [0];

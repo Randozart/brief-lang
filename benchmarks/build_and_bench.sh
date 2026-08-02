@@ -138,8 +138,8 @@ BENCHMARKS=(
     "cancel_math"
     "bit_clear"
     "queue_drain"       # generic obj (RingBuffer<Int>) via std/collections.bv + countdown
-    # "queue_drain_sym"   # depends on std/collections.bv (generic obj instantiation — D4 follow-up)
-    # "queue_drain_idio"  # depends on std/collections.bv (generic obj instantiation — D4 follow-up)
+    "queue_drain_sym"    # mirrors C step-for-step (enabled 2026-08-01: the missing import is fixed)
+    "queue_drain_idio"   # Brief-native drain (enabled 2026-08-01: import { List } added; matches queue_drain_sym)
     "stack_push_pop"    # generic obj (Stack<Int, 256>) push/pop cycle via <- ops
     "interval_step"
     # 2026-07-31: Real-program periodic-guard benchmarks (countdown dispatch A/B).
