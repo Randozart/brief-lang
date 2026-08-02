@@ -1505,7 +1505,9 @@ fn make_float_intrinsic_program(intrinsic: Expr) -> Vec<TopLevel> {
 
 #[test]
 fn test_emit_cast_int_to_string() {
-    let mut backend = LlvmBackend::new();
+    // The direct-cast path resolves #String membership via the universe (the
+    // real pipeline always has one), so the bare-backend test must set it.
+    let mut backend = LlvmBackend::new().with_type_universe(crate::type_universe::TypeUniverse::new());
     let program = vec![
         TopLevel::Transaction(Transaction {
             name: "main".to_string(),
@@ -1533,8 +1535,11 @@ fn test_emit_cast_int_to_string() {
         }),
     ];
     let output = backend.generate(&program, None);
-    assert!(output.contains("call ptr @__int_to_str__(i64"),
-        "Cast Int -> String should call __int_to_str__ (a String is a ptr to [len][bytes]). Got:\n{}", output);
+    // With a universe the cast resolves through the casting graph's Int->String
+    // lane (int_to_str) — the direct __int_to_str__ path is the fallback.
+    assert!(output.contains("call ptr @int_to_str(i64")
+        || output.contains("call ptr @__int_to_str__(i64"),
+        "Cast Int -> String should call a ptr-returning int-to-str (a String is a ptr to [len][bytes]). Got:\n{}", output);
 }
 
 #[test]

@@ -349,13 +349,15 @@ impl LlvmBackend {
                     } else if self.is_string_operand(ty) {
                         // 2026-08-01 (B3): a String constant's @s global holds
                         // the [len][bytes] pointer; load it as a ptr and type it
-                        // String so reflection/ops see the right protocol. Was
-                        // load i64 typed Int, which broke `s.^Len` on an
-                        // unwritten literal (const-folded to a global).
+                        // with the DECLARED constant type (a #String member, not
+                        // a hardcoded Type::string()) so reflection/ops see the
+                        // right protocol. Was load i64 typed Int, which broke
+                        // `s.^Len` on an unwritten literal (const-folded to a
+                        // global).
                         writeln!(out, "{}{} = load ptr, ptr @{}", indent, v, name).ok();
                         TypedRegister {
                             name: v.to_string(),
-                            ty: Type::string(),
+                            ty: ty.clone(),
                         }
                     } else {
                         writeln!(out, "{}{} = load i64, ptr @{}", indent, v, name).ok();
@@ -762,7 +764,7 @@ impl LlvmBackend {
                         writeln!(out, "{}{} = ptrtoint ptr {} to i64", indent, v, src.name).ok();
                         writeln!(out, "{}{} = inttoptr i64 {} to ptr", indent, v, v).ok();
                     }
-                } else if *target == Type::string() || *target == Type::data() {
+                } else if self.is_protocol_member(target, "#String") || self.is_protocol_member(target, "#Data") {
                     if src_ll == "i64" {
                         // 2026-08-01: __int_to_str__ returns a String (a ptr to
                         // [len][bytes]); the old `call i64` mismatched the

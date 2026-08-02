@@ -534,16 +534,32 @@ impl TypeConverter {
         builder: &mut LLVMBuilder,
         val: &str,
         ty: &BriefType,
-        _universe: Option<&TypeUniverse>,
+        universe: Option<&TypeUniverse>,
     ) -> String {
+        // 2026-08-01: resolve the #String/#Data protocol membership from the
+        // universe (Cast.# properties — never type names) and box a pointer
+        // value via ptrtoint. Falls back to the constructor-based fallback
+        // only when no universe is available (builder tests).
+        if let Some(u) = universe {
+            if let Some(key) = ty.universe_key() {
+                if let Some(rt) = u.get(key) {
+                    if rt.properties.contains_key("Cast.#String")
+                        || rt.properties.contains_key("Cast.#Data")
+                    {
+                        return builder.emit_ptrtoint(val, LlvmType::I64);
+                    }
+                }
+            }
+        }
         Self::box_to_i64_fallback(builder, val, ty)
     }
 
-    /// Fallback boxing when universe is not available.
-    /// 2026-06-29: Will be removed once all tests go through the full pipeline.
-    /// 2026-07-31: Phase 3 (§8.4-D2) — arms matched against the canonical
-    /// bootstrap Type constructors (bool_/string()/float()/...) instead of
-    /// type-name strings.
+    /// Fallback boxing when universe is not available (builder tests only).
+    /// The real path is `box_to_i64` (above), which resolves #String/#Data by
+    /// their Cast.# universe properties. 2026-06-29: Will be removed once all
+    /// tests go through the full pipeline. 2026-07-31: Phase 3 (§8.4-D2) —
+    /// arms matched against the canonical bootstrap Type constructors
+    /// (bool_/string()/float()/...) instead of type-name strings.
     fn box_to_i64_fallback(builder: &mut LLVMBuilder, val: &str, ty: &BriefType) -> String {
         if *ty == BriefType::bool_() {
             builder.emit_zext(LlvmType::I1, LlvmType::I64, val)
