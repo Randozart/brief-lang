@@ -1044,6 +1044,11 @@ fn codegen(
                 }
             }
             output = b.generate(items, None);
+            // 2026-08-01: surface the backend's warnings (redundant-keep hints,
+            // GPU-info, target-triple notes) — they were test-only.
+            for w in b.warnings() {
+                eprintln!("{}", w);
+            }
             ".ll"
         }
         BackendKind::Webstack => {
@@ -1082,6 +1087,11 @@ fn codegen(
                 }
             }
             output = b.generate(items, None);
+            // 2026-08-01: surface the backend's warnings (redundant-keep hints,
+            // GPU-info, target-triple notes) — they were test-only.
+            for w in b.warnings() {
+                eprintln!("{}", w);
+            }
             ".ll"
         }
         BackendKind::Webstack => {
@@ -1123,6 +1133,11 @@ fn codegen(
                 }
             }
             output = b.generate(items, None);
+            // 2026-08-01: surface the backend's warnings (redundant-keep hints,
+            // GPU-info, target-triple notes) — they were test-only.
+            for w in b.warnings() {
+                eprintln!("{}", w);
+            }
             ".ll"
         }
         BackendKind::Circt => {
@@ -1157,6 +1172,11 @@ fn codegen(
                 }
             }
             output = b.generate(items, None);
+            // 2026-08-01: surface the backend's warnings (redundant-keep hints,
+            // GPU-info, target-triple notes) — they were test-only.
+            for w in b.warnings() {
+                eprintln!("{}", w);
+            }
             ".ll"
         }
         BackendKind::Gpu => {
@@ -1193,6 +1213,11 @@ fn codegen(
                 }
             }
             output = b.generate(items, None);
+            // 2026-08-01: surface the backend's warnings (redundant-keep hints,
+            // GPU-info, target-triple notes) — they were test-only.
+            for w in b.warnings() {
+                eprintln!("{}", w);
+            }
             ".ll"
         }
         BackendKind::Spirv => {
