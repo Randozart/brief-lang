@@ -243,6 +243,29 @@ recorded.
 ### Phase D — Memory-by-proof
 Stress benchmarks + fixes as §5; global-lifetime design plan written.
 
+**D status (2026-08-01, substantially complete):**
+- **Garbage scheduler** (the global-lifetime inference, `analysis/global_lifetime.rs`):
+  proves each heap-backed field's reactor-ordered last consumer and emits a
+  `Free#` (via `__brief_free`) exactly after that txn's body (countdown exit
+  AND non-loop body). Manually-freed fields are excluded (no double-free).
+  The `global_lifetime` benchmark is now the SCHEDULER version (no manual
+  free in the file) — matches C. `__brief_free_count` calibrates frees ==
+  allocs. Design doc reframed as "Garbage Scheduling".
+- **Stress family**: dangling_pointer (hard error + AddrOf provenance fix),
+  arena_churn (realloc-grow cur_block fix), linked_list (Malloc#/Store#/Load#),
+  deep_recursion (runtime-depth recursion, `[n >= 0][n == 0]` termination
+  proof) — all match C.
+- **Watchdog fuel/time**: the `within N <unit>` deadline (`ms`/`cyc`/
+  `seconds`/`minute`) + the `Now#` monotonic clock + the deadline compare in
+  both loop engines. `?[cond] within 1000 cyc` fires at cycle N; `within 10 ms`
+  fires at ~10 ms.
+- **List<T> / HashMap<K,V> (collections.bv)**: the heap-backed List push/get
+  fully works (import dependency closure, Ptr-index element typing, struct
+  self-slot address, Ptr field loads/stores, defn-member term propagation);
+  the HashMap type-checks/builds/llc-verifies but the chained-bucket runtime
+  initialization is a follow-up (`hash_ops` flat table remains the working hash
+  benchmark).
+
 ### Phase E — Modifiers, the concurrency gate, and the principle reframing
 
 **Principle reframing (docs):** AGENTS.md rule #2 becomes "NO OBFUSCATION OF
