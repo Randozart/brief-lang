@@ -112,6 +112,7 @@ TAG[deep_recursion]=runtime
 TAG[arena_churn]=runtime
 TAG[linked_list]=runtime
 TAG[hash_ops]=runtime
+TAG[hash_ops_idio]=runtime
 TAG[enemy_swarm]=runtime
 
 BENCHMARKS=(
@@ -156,6 +157,7 @@ BENCHMARKS=(
     "arena_churn"       # bump-arena exhaustion + realloc-grow
     "linked_list"       # Malloc# heap nodes + pointer chasing
     "hash_ops"          # hash-indexed flat table ops
+    "hash_ops_idio"     # idiomatic HashMap<K,V> via std/collections.bv
     "enemy_swarm"       # SoA reactive swarm (array-state)
     "bridge_glue"
     "bridge_multi"

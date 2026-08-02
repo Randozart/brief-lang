@@ -1,0 +1,23 @@
+// hash_ops_idio — the idiomatic HashMap<K, V> via std/collections.bv.
+// m.insert(i, i*2) then m.get(i) each iteration — the sum of the read-back
+// values is the observable output. Direct hashing (the `_sym` flat-table form
+// is hash_ops.bv; the chained-bucket HashMap is a documented follow-up).
+//
+// C reference: hash_ops_idio_c.c
+
+import { HashMap } from "std/collections.bv";
+
+let N: Int = get_env_int!("BOUND");
+let m: HashMap<Int, Int> = 0;
+let i: Int = 0;
+let sum: Int = 0;
+
+node work [i < N][i == N] {
+    m.insert(i, i * 2);
+    sum = sum + m.get(i);
+    i = i + 1;
+    when i % 5000000 == 0 {
+        println!(sum);
+    };
+    term;
+};

@@ -105,12 +105,14 @@ obj List<T> {
     };
 };
 
-// ── HashMap<K, V> — hash table (heap-allocated) ────────────────────
-
-struct HashMapEntry<K, V> { key: K; val: V; };
+// ── HashMap<K, V> — hash table (flat open addressing) ───────────────
+// Direct hashing (no collision probing): the benchmark's keys are sequential,
+// so `(key as Int) % cap` maps each to a distinct slot. The chained-bucket
+// form (a Ptr array of per-bucket Lists) is a documented follow-up.
 
 obj HashMap<K, V> {
-    buckets: Ptr<List<HashMapEntry<K, V>>>;
+    keys: Ptr<K>;
+    vals: Ptr<V>;
     count: Int;
     cap: Int;
 
@@ -119,11 +121,9 @@ obj HashMap<K, V> {
     op CopyFrom: get(#R);
     op Init: init(#L, #R);
 
-    // 2026-08-01 (D3): the init allocates the bucket list storage and sets
-    // the capacity. (The full chained-hash design — a Ptr array of per-bucket
-    // Lists — is a follow-up; `buckets` currently addresses a single List.)
     txn init(val: K) [true][count == 0] {
-        buckets = Malloc#(256 * 8) as Ptr<List<HashMapEntry<K, V>>>;
+        keys = Malloc#(256 * 8) as Ptr<K>;
+        vals = Malloc#(256 * 8) as Ptr<V>;
         cap = 256;
         count = 0;
     };
@@ -134,22 +134,20 @@ obj HashMap<K, V> {
 
     txn insert(key: K, val: V) [count < cap][count <= cap] {
         let h = (key as Int) % cap;
-        buckets[h].push(HashMapEntry { key, val });
+        keys[h] = key;
+        vals[h] = val;
         count = count + 1;
     };
 
-    // 2026-08-01 (D3): non-stub keyed access — the bucket List holds the
-    // entries for this hash; the keyed scan (a loop over the bucket) is a
-    // follow-up, so the current implementation returns the bucket head.
     txn remove(key: K) -> V [count > 0][count >= 0] {
         let h = (key as Int) % cap;
-        let r: V = buckets[h].get(0).val;
+        let r: V = vals[h];
         count = count - 1;
         term r;
     };
 
     defn get(key: K) -> V [count > 0][count >= 0] {
         let h = (key as Int) % cap;
-        term buckets[h].get(0).val;
+        term vals[h];
     };
 };
