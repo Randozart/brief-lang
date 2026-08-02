@@ -277,3 +277,13 @@ benchmarks/deep_recursion
 benchmarks/deep_recursion_c
 benchmarks/enemy_swarm
 benchmarks/enemy_swarm_c
+benchmarks/sweep_arr
+benchmarks/sweep_arr_c
+benchmarks/queue_drain
+benchmarks/queue_drain_idio
+benchmarks/stack_push_pop
+benchmarks/global_lifetime
+benchmarks/series_converge
+benchmarks/hash_ops
+benchmarks/hash_ops_idio
+benchmarks/linked_list
