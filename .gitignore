@@ -269,3 +269,11 @@ benchmarks/sweep_mid
 benchmarks/sweep_mid_c
 benchmarks/sweep_dense
 benchmarks/sweep_dense_c
+
+# Harness-built benchmark binaries
+benchmarks/arena_churn
+benchmarks/arena_churn_c
+benchmarks/deep_recursion
+benchmarks/deep_recursion_c
+benchmarks/enemy_swarm
+benchmarks/enemy_swarm_c
