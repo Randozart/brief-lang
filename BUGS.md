@@ -2948,10 +2948,10 @@ default to the narrowest protocol variant.
 
 ---
 
-## `~op` Consuming a Top-Level Const-Let in a Txn Emits an Undefined `@b` Global — OPEN
+## `~op` Consuming a Top-Level Const-Let in a Txn Emits an Undefined `@b` Global — FIXED
 
 **Date:** 2026-08-01
-**Status:** Open (Phase 3 arrow work exposed it)
+**Status:** Fixed (2026-08-01)
 **Root cause:** `a ~+ b;` in a txn body where `b: Int = 3` is a top-level
 const-initialized `let`. The identifier emission falls to the `@<name>` global
 path (`load i64, ptr @b`) even though `b` is registered as a %State field —
@@ -2964,9 +2964,16 @@ path. Reading a const-let in a txn without `~op` works at main (verified).
 txn body fails to link. `~=`/`~+` on defn PARAMS work (verified end-to-end:
 move=3 add=8). The arrow forms (`<-`, `~<-`, discards) and the destructive
 extract are unaffected.
-**Fix (when the field-registration gap is fixed):** ensure the field-registration
-walk descends into `Expr::Consume` so a consumed operand's identifier is
-registered as a state field (or emitted via the state GEP) like a normal read.
+**Fix:** the field-LIVENESS walk `collect_state_identifiers`
+(`src/analysis/transition_graph.rs`) + `infer_provenance`
+(`src/analysis/provenance.rs`) + `collect_expr_idents`
+(`src/backend/llvm/emit_toplevel.rs`) did not descend into `Expr::Consume`, so
+a consumed-only field (`b` read only inside `a ~+ b`) was marked DEAD and
+eliminated from `%State`, leaving the identifier emission to fall back to an
+undefined `@b` global. All three walks now recurse into `Expr::Consume`. The
+field is registered normally and loads via the state GEP. Regression test:
+`backend::llvm::tests::test_consumptive_op_on_const_let_in_txn` (asserts no
+`load i64, ptr @b`).
 **Lesson:** a new Expr wrapper (Consume) must be walked by every field/usage
 collection pass — the compiler's passes must treat `Consume(inner)` as a read
 of `inner` everywhere.

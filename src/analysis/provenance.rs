@@ -39,7 +39,7 @@ pub fn infer_provenance(expr: &Expr) -> Provenance {
         // 2026-08-01 (D1): `&x` / `*p` — the provenance of the operand. The
         // dangling-pointer detector (`p = &local`) was silently missing every
         // case because AddrOf/Deref fell through to Unknown.
-        Expr::AddrOf(inner) | Expr::Deref(inner) => infer_provenance(inner),
+        Expr::AddrOf(inner) | Expr::Deref(inner) | Expr::Consume(inner) => infer_provenance(inner),
         Expr::Cast(inner, _) => infer_provenance(inner),
         _ => Provenance::Unknown,
     }

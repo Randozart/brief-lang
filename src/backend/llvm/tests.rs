@@ -3900,3 +3900,34 @@ fn test_redundant_keep_warns() {
         backend.warnings()
     );
 }
+
+/// A `~op` on a top-level const-let inside a txn must resolve the operand as a
+/// state field (regression: the liveness/reference walks dropped `Expr::Consume`,
+/// so a consumed-only field was eliminated and emitted an undefined `@b` global).
+#[test]
+fn test_consumptive_op_on_const_let_in_txn() {
+    let src = r#"
+        let a: Int = 5;
+        let b: Int = 3;
+        let c: Int = 0;
+        node report [c < 3][c == 3] {
+            c = a ~+ b;
+            term;
+        };
+    "#;
+    let mut items = parse_bv_source(src);
+    let mut universe = crate::type_universe::TypeUniverse::new();
+    let mut pm = crate::plugin::PluginManager::new();
+    pm.run_ast(crate::ast::StageKind::Parsed, &mut items, &mut universe)
+        .expect("plugin stage failed");
+    let mut backend = LlvmBackend::new().with_type_universe(universe);
+    let ir = backend.generate(&items, None);
+    assert!(
+        !ir.contains("load i64, ptr @b"),
+        "a consumed const-let must resolve as a %State field, not an undefined @b global; got:\n{ir}"
+    );
+    assert!(
+        ir.contains("add nsw i64") || ir.contains("add i64"),
+        "the consumptive add must be emitted; got:\n{ir}"
+    );
+}

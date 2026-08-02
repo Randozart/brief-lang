@@ -1737,7 +1737,7 @@ impl LlvmBackend {
                 Expr::Index(obj, idx) => { collect_expr_idents(obj, names); collect_expr_idents(idx, names); }
                 Expr::Block(stmts) => { for s in stmts { collect_idents(s, names); } }
                 Expr::List(elems) | Expr::Tuple(elems) => { for e in elems { collect_expr_idents(e, names); } }
-                Expr::Deref(inner) | Expr::AddrOf(inner) | Expr::IsType(inner, _) => collect_expr_idents(inner, names),
+                Expr::Deref(inner) | Expr::AddrOf(inner) | Expr::IsType(inner, _) | Expr::Consume(inner) => collect_expr_idents(inner, names),
                 _ => {}
             }
         }
