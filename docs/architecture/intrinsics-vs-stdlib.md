@@ -72,7 +72,7 @@ let v: Int = *p;
 // This is stdlib — compiler doesn't know about it:
 let rb: RingBuffer<Int> = init_ring_buf(1024);
 rb <- 42;              // Works because InsertAt property resolves
-let v <- &rb;           // Works because ExtractFrom property resolves
+let v: Int = rb.pop();  // ExtractFrom resolves via the arrow (dest <- rb)
 ```
 
 ## Why Not Make Everything Stdlib?

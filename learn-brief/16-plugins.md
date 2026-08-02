@@ -173,7 +173,7 @@ Rules:
 - `$const name = expr;` — immutable, cannot be reassigned
 - Evaluated during stage block execution (before codegen)
 - Accessible by bare name (no `$` prefix) inside stage blocks
-- Available to regular `const X = name;` declarations and `trg @ name.#port` bindings
+- Available to regular `const X = name;` declarations and `trg name @ instance;` bindings
 
 ## Compile-Time Functions (`$defn` / `$txn`)
 

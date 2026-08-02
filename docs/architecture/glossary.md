@@ -14,7 +14,7 @@
 | **Derivation Operator (`<:`)** | Defines a type as a structural subset of another: `type Email : String`. Constrains the value space — only valid bit patterns are accepted. A Lens Operator. |
 | **Projection Operator (`:>`)** | Extracts compile-time-known metadata or applies a type-defined lens: `list .#Size`. Reveals meaning from a bit layout. A Lens Operator. |
 | **Partition Operator** | Bracket syntax `[]` and bit-anchor `@/` that partition a memory layout into addressable sub-ranges. `list[3]` selects the 4th element; `bits @/0..3` selects bits 0-3. |
-| **Transfer Operator** | The arrow syntax `<-` for directional data movement — pushes, pops, and transfers values across layout boundaries. `&list <- x` pushes x into list. |
+| **Transfer Operator** | The arrow syntax `<-` for directional data movement — pushes, pops, and transfers values across layout boundaries. `list <- x` inserts x into list; `dest ~<- list` destructively extracts. |
 | **Anchor (`@`)** | The universal symbol of spatial/temporal location. Anchors a value to a position: `@"..."` (string literal to memory slot), `@/N..M` (field to bit position), `@ link` (timer to hardware resource), `@x` (prior-state reference). |
 | **Praetor** | LSP enforcing complexity limits (cyclomatic ≤ 15, cognitive ≤ 15, lines ≤ 100, params ≤ 6, nesting ≤ 6). |
 | **Feature struct** | Rust struct in a feature file representing one AST construct. Implements the relevant traits. |

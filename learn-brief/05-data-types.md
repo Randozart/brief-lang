@@ -119,8 +119,15 @@ stack <- 1;
 stack <- 2;
 stack <- 3;
 
-// Pop (discard the value) — `<- &` dispatches op ExtractFrom → pop
-<- &stack;
+// Pop (discard the value) — `<-` dispatches op ExtractFrom → pop
+<- stack;
+
+// Destructive discard — pop and destroy the source's backing
+~<- stack;
+
+// Destructive extract into a binding (2026-08-01, Phase 3)
+let v2: Int = 0;
+v2 ~<- stack;
 
 // Pop into a binding reads the member's returned value
 let v: Int = stack.pop();

@@ -1,10 +1,17 @@
-# Temporal Fallback (`~?`)
+# Temporal Fallback (`~?`) — REMOVED (2026-08-01)
 
-The `~?` operator provides compile-time-proven timeouts for any expression.
-It integrates with the existing watchdog system (`?[cycles <= N]`) and the
-proof oracle (`?#`) to guarantee that programs never hang.
+**Status: removed.** The `~?` operator (and its `~/` term-until sibling) were
+dead tokens — lexed but never parsed, with no AST or codegen support. Phase 3
+removed them from the lexer. "Until this holds" contracts use the `[!/X]` /
+`[!/!X]` invert-contract form instead (see `learn-brief/02-contracts.md`); time
+bounds use `within <bound> <unit>` on a watchdog. This page is preserved for
+historical context.
 
-## Syntax
+The removed operator was designed to provide compile-time-proven timeouts for
+any expression, integrating with the watchdog system and the proof oracle to
+guarantee programs never hang:
+
+## Historical syntax
 
 ```
 expr within <bound> <unit> [retry <N> | (<N>)] ~? <fallback_expr>

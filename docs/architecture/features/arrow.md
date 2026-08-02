@@ -1,7 +1,10 @@
 # Arrow (`<-`) — Collection Mutation & Consumption Syntax
 
 **Date:** 2026-06-24
-**Status:** Fully implemented in interpreter; LLVM backend is a stub
+**Status:** Implemented. The `&` fake-pointer marker is REMOVED (2026-08-01,
+Phase 3) — the dispatch finds the collection by the op binding on each side
+(InsertAt on the lhs; ExtractFrom/CopyFrom on the rhs), and the arrow is
+`Statement::ArrowAssign { target, value, consume }`. Destructive forms use `~<-`.
 
 ## Overview
 
@@ -15,7 +18,7 @@ Appends a value to the collection. Dispatch by type:
 
 | Type | Behavior |
 |------|----------|
-| `List<T>` | Append to end (or insert at index with `&list[idx] <- val`) |
+| `List<T>` | Append to end (or insert at index with `list[idx] <- val`) |
 | `HashMap<K,V>` | Insert key-value pair: `map <- ("key", value)` |
 | `HashSet<T>` | Insert element: `set <- "element"` |
 | `Stack<T>` | Push onto top |
@@ -29,9 +32,10 @@ stack <- 100;
 queue <- 7;
 ```
 
-### Pop (`let val = collection <-`)
+### Pop (`dest <- collection` / `<- collection`)
 
-Removes and returns an element. Dispatch by type:
+Removes and returns an element (read/destructive forms; see §1.2 of
+`agent-reference.md`). Dispatch by type:
 
 | Type | Behavior |
 |------|----------|
@@ -59,16 +63,13 @@ set <- "elem" !;    // discard element
 stack <- !;      // discard top
 ```
 
-### Transfer (`dest <- &source`)
+### Transfer (`dest ~<- source`)
 
-Moves all elements from source to destination:
+Moves all elements from source to destination (the destructive form):
 
 ```brief
-dest <- &source;     // transfer all (& on RHS = consumption)
-dest <- &source { FILTER(active); }; // transfer with filter
+dest ~<- source;     // destructive extract — copy, then destroy the source's backing
 ```
-
-The transfer with filter uses a subtype projection (`<:` syntax) as the filter — only matching elements are moved.
 
 ## Insert/Extract Strategies
 

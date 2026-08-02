@@ -149,7 +149,7 @@ that touches each heap-backed state field, and emits a `Free#` (routed through
 `docs/plans/2026-08-01-global-lifetime-design.md`.
 
 - **The pass** (`analysis/global_lifetime.rs`): for each field whose
-  initializer is a `Malloc#`/`Alloc#`/`AllocArena#`, computes the touch set
+  initializer is a `Malloc#`/`Alloc#`, computes the touch set
   (new `collect_statement_identifiers`) and the last ordered consumer in the
   transition graph's deterministic firing order. Conservative: a field with no
   provable last consumer is NOT freed (lives for the program).
@@ -159,7 +159,8 @@ that touches each heap-backed state field, and emits a `Free#` (routed through
   (re-evaluating the initializer would re-malloc).
 - **Soundness**: a field freed but touched later is structurally impossible
   (the scheduler only frees after the last ordered touch); **manually-freed
-  fields are excluded** (a manual `Free#` + a scheduled free = double-free).
+  fields are excluded** (a manual `Free#`, a `free x;`, or a `keep x;` + a
+  scheduled free = double-free).
 - **Calibration**: scheduled frees route through `__brief_free` (a runtime
   counter + `free`) so a test can assert frees == allocs via
   `__brief_free_count()`. `@__brief_free` is declared `argmemonly` (it only
@@ -168,6 +169,33 @@ that touches each heap-backed state field, and emits a `Free#` (routed through
   memory OBSERVABLE — dead table writes that a C compiler would eliminate stay
   alive in Brief. Benchmarks must be honest on BOTH sides (a read-modify-write
   whose RHS reads a previously-written slot keeps the C reference honest too).
+
+### 0.6 The Free-Check — `free`/`keep` hints + consume destroys (Phase 5)
+
+2026-08-01 (Phase 5): the garbage scheduler is extended with developer-facing
+lifetime control and the consumptive-operators' runtime destroy. Design:
+`docs/plans/2026-08-01-free-check.md`.
+
+- **`free x;`** (`Statement::FreeHint`) — a VERIFIED contract: the backing of
+  `x` is freed here. The typechecker marks `x` dead (a later read is a
+  use-after-free error); the codegen emits the strategy-aware free
+  (`emit_destroy_register`: only tracked Malloc/Custom backings are `@free`d;
+  inline/arena/scalar backings are no-ops); the scheduler excludes `x` from its
+  auto-free.
+- **`keep x;`** (`Statement::KeepHint`) — SUPPRESS the scheduler's auto-free of
+  `x` (it escapes). A `keep` on a field the scheduler would not free anyway is
+  a redundant-keep warning (analysis → backend `warnings()`).
+- **Consumptive destroys** (`Expr::Consume`) — `a ~= b`, `a ~+ b`,
+  `dest ~<- src`, `~<- src;` record the consumed register in
+  `pending_consumes`; `emit_statement_sequence` drains it at the statement
+  boundary via `emit_destroy_register`. Scalars/unknown strategies are never
+  freed (a scalar's value is not a pointer).
+- **`briefc memcheck <file.bv>`** — the diagnostics subcommand: per heap-backed
+  field, whether the scheduler proved a last use (and after which txn) or the
+  field lives for the program, plus redundant keeps.
+- **Refcount (not implemented)**: a per-fire decrement refcount is UNSOUND for
+  multi-fire transactions (over-counts → premature free); the sound fallback is
+  the developer-verified `free x;`.
 
 ## 1. Foundation: Stack-Allocated State
 

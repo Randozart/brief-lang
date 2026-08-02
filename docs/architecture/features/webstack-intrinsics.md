@@ -106,9 +106,7 @@ the implementation.
 
 | Intrinsic | LLVM emission | JS shim implementation |
 |-----------|---------------|----------------------|
-| `PrintInt#` | `call @PrintInt` | `(n) => console.log(n)` |
-| `PrintFloat#` | `call @PrintFloat` | `(n) => console.log(n)` |
-| `PrintChar#` | `call @PrintChar` | `(c) => console.log(String.fromCharCode(c))` |
+| `Print#` (generic; type-dispatched) | `call @PrintInt` / `@PrintStr` / `@PrintFloat` / `@PrintChar` / `@PrintBool` | `(n) => console.log(n)` — the 2026-08-01 audit folded the four special-cased print intrinsics into one `Print#` |
 | `Time#` | `call @Time` | `() => Date.now()` |
 | `CpuCount#` | `call @CpuCount` | `() => navigator.hardwareConcurrency || 4` |
 | `Hostname#` | `call @Hostname` | `() => window.location.hostname` |

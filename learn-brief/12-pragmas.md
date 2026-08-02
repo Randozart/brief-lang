@@ -211,7 +211,7 @@ txn compute [count < N][count == N] {
 
 ## `!> observable: true` — Dead Code Elimination Guard
 
-Side-effecting intrinsics (like `PrintInt#`, `Malloc#`, `Memcpy#`) must
+Side-effecting intrinsics (like `Print#`, `Malloc#`, `Memcpy#`) must
 not be eliminated by the compiler's dead code elimination pass. Use the
 `!> observable: true` metadata to mark a function or intrinsic as having
 external side effects:
@@ -219,7 +219,7 @@ external side effects:
 ```brief
 defn print_hello() {
     !> observable: true;
-    PrintInt#(42);
+    Print#(42);
 };
 ```
 

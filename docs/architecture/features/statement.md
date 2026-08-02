@@ -195,7 +195,7 @@ module rather than containing the loop IR inline.
 **Before** (manual `txn` convergence loop — 5 lines of scaffolding):
 ```
 txn filter_fluff(tokens, result, i) [i < tokens:>Size][i == tokens:>Size] -> List<String> {
-    [not_fluff(tokens[i])] { &result <- tokens[i]; };
+    [not_fluff(tokens[i])] { result <- tokens[i]; };
     &i = i + 1;
     term result;
 };
@@ -204,7 +204,7 @@ txn filter_fluff(tokens, result, i) [i < tokens:>Size][i == tokens:>Size] -> Lis
 **After** (`foreach` — 1 line of scaffolding):
 ```
 foreach (tok in tokens) {
-    [not_fluff(tok)] { &result <- tok; };
+    [not_fluff(tok)] { result <- tok; };
 };
 ```
 

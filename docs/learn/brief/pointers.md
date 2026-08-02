@@ -28,15 +28,15 @@ let p = &field;     // creates a persistent Ptr<T> — the pointer lives
 let v = *p;         // reads through p — genuine pointer load
 ```
 
-For collection arrow operations, `&` on the RHS of `<-` marks **consumption**
-(take elements, don't copy). On the LHS of `<-`, `&` is still required by the
-parser for now (it's a syntactic requirement, not a semantic one):
+The collection arrow (2026-08-01, Phase 3) is `&`-free — the dispatch finds
+the collection by the op binding on each side:
 
 ```brief
-&list <- value;     // push — parser requires & on LHS
-value <- &list;     // pop — & on RHS means consumption (remove from list)
-value <- list;      // peek — no & means no consumption (future)
-<- &list;           // drain — & on target means consumption
+list <- value;     // insert (push) — InsertAt binding on the lhs
+dest <- list;      // read (copy) an element out — ExtractFrom/CopyFrom binding on the rhs
+dest ~<- list;     // destructive extract — copy, then destroy the source's backing
+<- list;           // read discard
+~<- list;          // destructive discard
 ```
 
 ## Dereferencing

@@ -67,7 +67,7 @@ function call when imported by name:
 let r = sadd#(x, y);
 let n = write_buf#(ptr, len);
 let sl: SkipList<Int> = [];
-&sl <- 42;        // dispatches via Custom strategy to sl_insert#
+sl <- 42;        // dispatches via Custom strategy to sl_insert#
 ```
 
 Direct calls (`sl_insert(list, val)`) work when the inop is imported by name.

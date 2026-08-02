@@ -46,7 +46,7 @@ variant — never a metadata key that codegen must check.
 ### 1.1 Naming convention
 
 - **PascalCase**: protocol identifiers, hashwords, intrinsics
-  (`#String<UTF8>`, `#Float<IEEE754>`, `Sqrt#`, `PrintInt#`, `#Int`, `#Bits`,
+  (`#String<UTF8>`, `#Float<IEEE754>`, `Sqrt#`, `Print#`, `#Int`, `#Bits`,
   `Posit32`, `CastTo(#String<UTF8>)`).
 - **snake_case**: user functions in `.bv` files and Rust stdlib calls
   (`ascii_to_utf8()`, `from_utf8_lossy()`, `array_map()`).
@@ -54,25 +54,62 @@ variant — never a metadata key that codegen must check.
   registry, protocol hashwords) it is PascalCase; if a user could rename it and
   the compiler still works it is snake_case.
 
-### 1.2 `<-` arrow operator
+### 1.2 `<-` arrow operator (2026-08-01, Phase 3)
 
-Statement-level only (breaks the expression parser — cannot write
-`let x = &list <- val`):
+Statement-level only. The arrow has no `&` marker — the dispatch finds the
+collection by the **op binding on each side** (InsertAt on the lhs = insert;
+ExtractFrom/CopyFrom on the rhs = read or destructive extract):
 
-- `&list <- val;` — push val onto list (destructive insert)
-- `x <- &list;` — pop from list into x (destructive extract)
-- `x <- list;` — read from list without removing (non-destructive copy)
+- `collection <- value;` — **insert** (push) into the collection
+- `dest <- collection;` — **read** (copy) an element out of the collection
+- `dest ~<- collection;` — **destructive extract**: copy, then destroy the
+  source's backing (`Expr::Consume` on the source)
+- `<- value;` / `~<- value;` — **read discard** / **destructive discard**
+  (target None)
 
-### 1.3 `&` — pointer ref on LHS, move/copy discriminator on RHS
+All arrows are `Statement::ArrowAssign { target, value, consume }`. The element
+type of InsertAt/ExtractFrom is generic-substituted (`List<Int>` push's `T` →
+`Int`). See `src/typechecker/mod.rs` (`push_element_type` /
+`extract_element_type`) and `src/backend/llvm/emit_stmt.rs`.
 
-`&` never appears on the LHS of assignment/arrow syntax. Use plain
-`i = i + 1;` / `i += 1;`. On the RHS of `<-`:
+### 1.3 `&` — address-of (pointer ref)
 
-- `target <- &source;` — **consume/move**: source left empty/undefined
-- `target <- source;` — **copy**: source retains the value
-- `<- &source;` — **discard**: pop into void
+`&expr` is genuine address-of (`Ptr<T>`, or `Ptr<const T>` for an immutable
+local). It never appears in arrow syntax — the old `&` fake-pointer marker is
+gone.
 
-Pointer references on the LHS use `Ptr<T>` and `.` dereference.
+### 1.3.1 Consumptive operators (`~op`, Phase 3)
+
+`~` prepended to a binary operator consumes the RHS after the op:
+`a ~= b` (move-assign), `a ~+ b`, `a ~- b`, `a ~* b`, `a ~/ b`, and the arrow's
+`dest ~<- src` / `~<- src;`. Unary `~x` stays bitwise NOT. Only a **mutable
+lvalue** can be consumed (`~op` on a constant is a compile error); reading a
+consumed local is a **use-after-move compile error** (the move pass); a
+reassignment revives it. The consumed backing is freed at the statement boundary
+via a strategy-aware free (`emit_destroy_register`). The dead `~?`
+(temporal-fallback) token is removed; `~/` (term-until) is now the consumptive
+divide. "Until this holds" contracts use the `[!/X]` / `[!/!X]` invert form.
+
+### 1.3.2 Stream symbols (Phase 4)
+
+`#StdOut` / `#StdErr` / `#StdIn` are compiler-known stream symbols:
+- `#StdOut <- value` — writes any value (lowered to the generic `Print#`).
+- `#StdErr <- <String>` — writes a String to stderr (`__eprint_str`).
+- `#StdIn` — a `Ptr<Int>` stream-handle value (the trg read composition).
+
+### 1.3.3 Lifetime hints (Phase 5)
+
+`free x;` — a VERIFIED contract: `x`'s backing is freed here; a later read is a
+use-after-free compile error; the garbage scheduler excludes `x` from its
+auto-free. `keep x;` — SUPPRESS the scheduler's auto-free of `x`; a `keep` on a
+field the scheduler would not free anyway is a redundant-keep warning.
+`briefc memcheck <file.bv>` reports the scheduler's per-field decisions.
+See `docs/plans/2026-08-01-free-check.md`.
+
+### 1.3.4 Triggers (Phase 4)
+
+A trigger is the whole-target form `trg name @ instance;` — the `.port` suffix
+is removed. `@ link sym` binds an external runtime symbol.
 
 ### 1.4 `frgn` is an import
 

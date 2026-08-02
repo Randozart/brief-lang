@@ -398,7 +398,7 @@ $const name = expr;   // immutable compile-time constant
 `$let` and `$const` variables are stored in `PluginManager.comptime_vars`
 (a `HashMap<String, NavValue>`). Runtime rebinding is explicit via `= expr;`
 in a stage block (without `$let`/`$const` prefix). The `resolve_comptime_refs()`
-pass resolves bare-name references in `const X = name;` and `trg @ name.#port`
+pass resolves bare-name references in `const X = name;` and `trg name @ instance;`
 declarations by looking up `comptime_vars`.
 
 ### Example

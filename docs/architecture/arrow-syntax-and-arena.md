@@ -2,22 +2,27 @@
 
 ## Arrow Syntax
 
-The `<-` operator provides push/pop/discard operations on collections:
+The `<-` operator provides push/pop/discard operations on collections. The
+`&` fake-pointer marker is REMOVED (2026-08-01, Phase 3) — the dispatch finds
+the collection by the op binding on each side, and the arrow is the unified
+`Statement::ArrowAssign { target, value, consume }`:
 
 | Pattern | Operation | AST |
 |---------|-----------|-----|
-| `queue <- value` | Push `value` into `queue` | `Statement::Assign(Ident("queue"), value)` |
-| `&queue <- value` | Explicit push (same as above) | `Statement::Assign(AddrOf("queue"), value)` |
-| `x <- &queue` | Pop from `queue` into `x` | `Statement::Assign(Ident("x"), AddrOf("queue"))` |
-| `<- &queue` | Pop from `queue`, discard result | `Statement::Expression(AddrOf("queue"))` |
+| `queue <- value` | Insert (push) into `queue` | `ArrowAssign { target: Some(queue), value, consume: false }` |
+| `dest <- queue` | Read (copy) an element out | `ArrowAssign { target: Some(dest), value: queue, consume: false }` |
+| `dest ~<- queue` | Destructive extract | `ArrowAssign { target: Some(dest), value: queue, consume: true }` |
+| `<- queue` | Pop, discard result | `ArrowAssign { target: None, value: queue, consume: false }` |
+| `~<- queue` | Pop, discard + destroy | `ArrowAssign { target: None, value: queue, consume: true }` |
 
-The LHS is always the target. For push, the target is a collection; for pop, the
-target is a plain variable receiving the popped value. The `&` prefix on the RHS
-marks the source as a collection to extract from.
+The target is the collection for an insert (InsertAt binding on the lhs); the
+value is the collection for a read/extract (ExtractFrom/CopyFrom binding on the
+rhs). The element/return types are generic-substituted (`List<Int>` push's `T`
+→ `Int`).
 
 ### Type-Based Dispatch
 
-The codegen uses `check_insert_strategy` / `check_extract_strategy` to determine
+The codegen uses `find_insert_strategy` / `find_extract_strategy` to determine
 whether a variable is a collection type (RingBuffer, List, etc.):
 
 - **RingBuffer with inline fields** — Direct `%State` GEP+load+store via the
@@ -27,8 +32,10 @@ whether a variable is a collection type (RingBuffer, List, etc.):
 
 ### Implementation
 
-- **AST**: `Expr::AddrOf(Box<Expr>)` in `src/ast/expr.rs`
-- **Parser**: `Token::ArrowLeft` handling in `src/parser/statements.rs`
+- **AST**: `Statement::ArrowAssign` in `src/ast/top.rs`; `Expr::Consume` in
+  `src/ast/expr.rs` (the destructive marker).
+- **Parser**: `Token::ArrowLeft` / `Token::TildeArrowLeft` handling in
+  `src/parser/statements.rs`.
 - **Codegen**: Strategy dispatch via property values (`#L`, `#R`, `#T`) in
   `src/backend/llvm/emit_stmt.rs`. Emits `call @strategy_fn(handle, value)`
   which LLVM -O3 inlines. See `docs/architecture/hash-words.md`.

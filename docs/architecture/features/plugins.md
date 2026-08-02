@@ -219,7 +219,7 @@ and `.ReplaceWith$()`.  They are only valid inside `$(Stage)` blocks.
 | `Let$(name, ty?, expr?)` | `Statement::Let` | `Let$("x", Type$("Int"), Expr$(42))` |
 | `Assign$(target, expr)` | `Statement::Assign` | `Assign$(Ident$("x"), Expr$(5))` |
 | `Term$(expr?)` | `Statement::Term` | `Term$(Ident$("result"))` |
-| `Call$(fn, args...)` | `Expr::Call` | `Call$("PrintInt#", Ident$("x"))` |
+| `Call$(fn, args...)` | `Expr::Call` | `Call$("Print#", Ident$("x"))` |
 | `Ident$(name)` | `Expr::Identifier` | `Ident$("x")` |
 | `Expr$(lit)` | Literal expression | `Expr$(42)`, `Expr$("hello")` |
 | `BinOp$(kind, lhs, rhs)` | `Expr::BinaryOp` | `BinOp$("Add", a, b)` |
@@ -356,7 +356,7 @@ $(Parsed) {
         let args = intercept.Children$();
         intercept.ReplaceWith$(Block$(
             Call$("PrintString#", Expr$("\n")),
-            Call$("PrintInt#", args.Nth$(0))
+            Call$("Print#", args.Nth$(0))
         ));
     };
 };

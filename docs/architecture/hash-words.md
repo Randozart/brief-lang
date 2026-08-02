@@ -83,6 +83,7 @@ type Int {
 | `#L` | Left operand of `<-` | Strategy op bindings: `op InsertAt: fn(#L, #R)` |
 | `#R` | Right operand of `<-` | Strategy op bindings: `op ExtractFrom: fn(#R)` |
 | `#T` | Type parameter of generic collection | Strategy op bindings: `pop as #T` |
+| `#StdIn` / `#StdOut` / `#StdErr` | Stream symbols (Phase 4) | `#StdOut <- value` writes (→ `Print#`); `#StdErr <- <String>` writes to stderr (→ `__eprint_str`); `#StdIn` is a `Ptr<Int>` stream-handle value |
 
 ## Semantics
 
@@ -90,16 +91,27 @@ type Int {
 
 Resolved at codegen time by substituting the concrete operand:
 
-| Marker | `queue <- value` (InsertAt) | `x <- &queue` (ExtractFrom) | `<- &queue` (Discard) |
-|--------|-----------------------------|-----------------------------|----------------------|
-| `#L` | handle register for `queue` | pop target register for `x` | void (no target) |
-| `#R` | value register for `value` | handle register for `queue` | handle register for `queue` |
+| Marker | `collection <- value` (InsertAt) | `dest <- collection` (ExtractFrom) | `<- collection` (Discard) |
+|--------|----------------------------------|------------------------------------|---------------------------|
+| `#L` | handle register for `collection` | pop target register for `dest` | void (no target) |
+| `#R` | value register for `value` | handle register for `collection` | handle register for `collection` |
 | `#T` | element type of collection | element type of collection | element type of collection |
 
 The handle register is computed via `emit_addr_of` on the collection variable,
 which produces a GEP into `%State` (for state fields) or an alloca address
 (for let bindings). The `#R`/`#L` substitution is a register name pass-through
 — the compiler resolves the expression to a register first, then substitutes.
+
+### Stream symbols (`#StdIn`/`#StdOut`/`#StdErr`, Phase 4)
+
+These are compiler-known intrinsic-pointer symbols, not protocol hashwords.
+They lex as ordinary identifiers (`#` is an identifier character) and are
+recognized by name in the arrow typechecker and codegen:
+
+- `#StdOut <- value` — any value; lowered to the generic `Print#` intrinsic.
+- `#StdErr <- <String>` — a String only; lowered to `__eprint_str` (stderr).
+- `#StdIn` — usable as a value (`let h: Ptr<Int> = #StdIn;`); a stream handle
+  for the trg read composition.
 
 ### Rule
 

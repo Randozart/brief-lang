@@ -16,7 +16,7 @@ Date: 2026-07-29
 
 | # | Optimization | Impact | Effort | Status |
 |---|-------------|--------|--------|--------|
-| **P** | **`<-` for assignment** — many benchmarks use `&i = i + 1` but `i <- i + 1` is the correct Brief arrow syntax | Consistency | Low | Not started |
+| ~~P~~ | **`<-` for assignment** — DROPPED (2026-08-01): `&i = i + 1` was never valid (`&` is genuine address-of); plain `i = i + 1` / `i += 1;` are the correct forms. | — | — | Done |
 | **A** | **Expression hashing** — deduplicate equivalent sub-expressions | ~2× | Low | Not needed (symmetry breaking handles commutativity) |
 
 ## Depth 4+ Feasibility

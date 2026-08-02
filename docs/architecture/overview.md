@@ -194,8 +194,14 @@ Brief distinguishes between two kinds of compiler-known operations:
 | Kind | Syntax | Dispatch | Configurable |
 |------|--------|----------|--------------|
 | **Operation** | `+`, `==`, `++`, `list[i]` | Config file: `(op, primitive, bytes)` → IR template | Yes — any backend provides its own `ops.toml` |
-| **Intrinsic** | `Sqrt#(x)`, `Malloc#(64)` | Normalizer validates against backend's supported list; backend chooses how to emit | Backend declares support in config |
+| **Intrinsic** | `Sqrt#(x)`, `Malloc#(64)`, `Print#(x)` | Normalizer validates against backend's supported list; backend chooses how to emit | Backend declares support in config |
 | **Override** | `op Add <~ custom_fn(#L, #R)` | Normalizer registers type-level override in dispatch table | Per-type in source |
+
+Newer compiler-known behaviors (2026-08-01): the **consumptive operators**
+(`a ~= b`, `a ~+ b`, `dest ~<- src` — the RHS's backing is destroyed after the
+op; the move pass rejects a later read) and the **stream symbols**
+(`#StdOut <- value` writes, `#StdErr <- <String>` writes to stderr, `#StdIn`
+is a stream handle). See `docs/architecture/agent-reference.md` §1.3.
 
 Example:
 ```brief

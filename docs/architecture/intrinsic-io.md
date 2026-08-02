@@ -1,6 +1,15 @@
-# Intrinsic I/O — C-Independent PrintInt#, PrintFloat#, ReadInt#
+# Intrinsic I/O — Print family + stream symbols
 
-## Motivation
+**2026-08-01 status:** this page's "C-independent inline I/O" design was
+SUPERSEDED. The actual implementation (Phase 2 audit + Phase 4) consolidated the
+four special-cased print intrinsics into ONE generic `Print#` that dispatches by
+the argument's protocol category (String/Char/Bool/Float/else Int) and routes
+through the runtime `__print_*` family (`brief_rt.c`), and added the stream
+symbols `#StdOut <- value` / `#StdErr <- <String>` / `#StdIn`. The C-surface
+reduction is now the `.bv`/`.ebv` split (`docs/architecture/c-surface-inventory.md`),
+not inline IR. The sections below are the archived pre-2026-08-01 design.
+
+## Motivation (archived)
 
 `PrintInt#` currently routes through `brief_rt.c`:
 
@@ -113,28 +122,13 @@ PrintFloat#(3.14):
 
 **Implement after PrintInt#.** Float-to-decimal is a separate concern; the I/O path is shared.
 
-### StdOut#<T> / StdIn#<T> (Future)
+### StdOut#<T> / StdIn#<T> — REALIZED as stream symbols (Phase 4, 2026-08-01)
 
-The architected design supports polymorphic read/write:
-
-```
-StdOut#<T>(x: T):
-  ┌─ Type dispatch: PrintInt# for Int, PrintFloat# for Float, PrintChar# for Char, ...
-  │
-  └─ I/O: deferred to the per-backend call (same as above)
-
-StdIn#<T>() -> T:
-  ┌─ I/O: read(0, buf, N) syscall
-  │
-  └─ Type dispatch: parse buf as Int, Float, etc.
-```
-
-These are NOT yet specified. They require:
-- Backend type-dispatch for the `#` intrinsic (which C function/asm to call per type)
-- Return type inference (`let x: Int = StdIn#()`)
-- Error handling (EOF, parse failure)
-
-Deferred to a separate plan document.
+The polymorphic write is realized as the `#StdOut` / `#StdErr` stream symbols
+(not a generic `StdOut#<T>` intrinsic): `#StdOut <- value` lowers to the generic
+`Print#` (type-dispatched by protocol category), `#StdErr <- <String>` lowers to
+`__eprint_str` (stderr), and `#StdIn` is a `Ptr<Int>` stream-handle value.
+Read-side parsing (stdin → Int/Float) is still future work.
 
 ## Backend Contract
 

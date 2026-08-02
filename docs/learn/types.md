@@ -226,13 +226,9 @@ operator dispatches to that function instead of using the default behavior:
 
 ```brief
 type SkipList<T> : List<T> {
-    InsertAt = sl_insert;     // &sl <- val → sl_insert#(sl, val)
-    ExtractFrom = sl_remove;  // val <- &sl → sl_remove#(sl)
+    InsertAt = sl_insert;     // sl <- val → sl_insert#(sl, val)
+    ExtractFrom = sl_remove;  // dest <- sl → sl_remove#(sl)
 };
-
-inop sl_insert<T>(list: SkipList<T>, val: T) -> SkipList<T> {
-    ... BILD (malloc/memcpy/free) ...
-} fallback sl_append(list, val);
 ```
 
 The function is resolved first as an `inop` (uses fallback for interpreter,

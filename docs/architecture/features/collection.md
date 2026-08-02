@@ -35,7 +35,7 @@ val["pattern"]                  // Desugars to val[; @"pattern"]
 
 // Arrow operations
 &x[; == '5'] = '7'             // Replace matching chars -> Int
-<- &x[; == '5']                 // Remove matching chars -> Int
+<- x[; == '5']                 // Remove matching chars -> Int
 ```
 
 ## Fragment Decomposition

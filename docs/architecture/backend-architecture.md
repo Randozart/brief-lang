@@ -360,7 +360,7 @@ br label %.cm_header, !llvm.loop !100
 !101 = !{!"llvm.loop.vectorize.enable", i1 true}
 ```
 
-To force vectorization, add metadata here. Note that LLVM's loop vectorizer cannot if-convert branches containing opaque function calls (`call @PrintInt#`, etc.). Only pure-compute loops (no function calls in the body) can be vectorized.
+To force vectorization, add metadata here. Note that LLVM's loop vectorizer cannot if-convert branches containing opaque function calls (`call @Print#`, etc.). Only pure-compute loops (no function calls in the body) can be vectorized.
 
 ## 6. Pointer Handling
 

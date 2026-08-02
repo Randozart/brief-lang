@@ -334,9 +334,9 @@ Run with `cargo test --lib`.
 
 ### Phase 3 — `trg @ cell!` Binding (implemented 2026-06-23)
 
-The `trg name: Type @ cell(args).port` syntax is now implemented through the full pipeline:
+The `trg name @ cell(args)` whole-target binding is implemented through the full pipeline (the `.port` suffix was removed in 2026-08-01, Phase 4):
 
-**Parser** (`src/parser.rs` line 5651): When `trg` appears at statement level without `!`, checks for `@` token. If present, parses as trigger binding: `trg name: Type @ expr.port`. The `.port` suffix is handled by parsing the full expression then checking if it's an `Expr::FieldAccess(expr, name)` — if so, extracts the field name as the port.
+**Parser** (`src/parser/definitions.rs` `parse_top_level_trg`): `trg` at the top level parses `trg name @ instance;` — the whole-target form.
 
 **Interpreter** (`src/interpreter.rs` line 1862): Evaluates the instance expression. If it's `Expr::Call(name, args)` where `name` matches a registered `CellDef`, calls `call_cell()` to create/execute the cell instance and stores the result in state under the trigger name.
 
@@ -455,11 +455,11 @@ Planned but not started. See `docs/plans/2026-06-23-cell-primitive.md` section 8
 The `trg @` binding syntax supports an optional `@Hz` suffix:
 
 ```brief
-trg X: Int @ counter() @1kHz;
-trg Y: Int @ filter(raw).out @10MHz;
+trg X: Int @ counter();
+trg Y: Int @ filter(raw);
 ```
 
-**Parser** (`src/parser.rs` line 5673): After parsing the instance expression and optional `.port`, checks for `Token::At`. If found, parses an integer + unit suffix (`Hz`, `kHz`, `MHz`). Stores the Hz value as a `Hashtag { name: "hz", value: Some("1000") }` in the `modifiers` list.
+**Parser** (`src/parser/definitions.rs` `parse_top_level_trg`): parses the instance expression; the `.port` suffix and the `@1kHz` rate suffix are removed (the `.port` was removed in Phase 4; the Hz rate limiting was never wired to a main-loop timer).
 
 **Interpreter** (`src/interpreter.rs` line 2067): Extracts the `hz` modifier value from `Statement::TrgBinding.modifiers`, passes it to `register_persistent_cell` as `tick_hz: Option<u64>`. Currently all Hz values map to `tick_interval: 0` (every tick) — real rate limiting requires a main-loop timing mechanism.
 
