@@ -20,3 +20,5 @@ frgn __print_char(c: Int) -> Int as frgn__print_char from "lib/runtime/brief_rt.
 // the backend-declared B0 exception).
 frgn __print_bool(b: Int) -> Int as frgn__print_bool from "lib/runtime/brief_rt.c" fallback 0;
 frgn __print_float64(f: Float64) -> Int as frgn__print_float64 from "lib/runtime/brief_rt.c" fallback 0;
+// 2026-08-01 (Phase 4): the `#StdErr <- <String>` stream write.
+frgn __eprint_str(msg: String) -> Int as frgn__eprint_str from "lib/runtime/brief_rt.c" fallback 0;

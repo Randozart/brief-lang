@@ -1852,7 +1852,7 @@ impl LlvmBackend {
                         stages: vec![],
                         condition: None,
                         // 2026-07-14: Triggers whose name starts with __wake are wake triggers
-                        is_wake: trg.name.starts_with("__wake") || trg.port == "__wake",
+                        is_wake: trg.name.starts_with("__wake"),
                         is_const: false,
                         span: trg.span.clone(),
                         annotations: vec![],

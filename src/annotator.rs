@@ -488,8 +488,8 @@ impl Annotator {
             Statement::MetadataAssignment(key, val) => {
                 format!("{}{} <~ {:?};\n", spaces, key, val)
             }
-            Statement::TrgBinding { name, instance, port } => {
-                format!("{}trg {} @ {}.{};\n", spaces, name, self.format_expr(instance), port)
+            Statement::TrgBinding { name, instance } => {
+                format!("{}trg {} @ {};\n", spaces, name, self.format_expr(instance))
             }
             Statement::InlineAsm { asm_string, .. } => {
                 format!("{}asm \"{}\";\n", spaces, asm_string)

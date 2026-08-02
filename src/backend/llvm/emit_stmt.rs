@@ -348,12 +348,31 @@ pub fn emit_statement(backend: &mut LlvmBackend, out: &mut String, stmt: &Statem
         Statement::ArrowAssign { target, value, consume } => {
             // 2026-08-01 (Phase 3): the arrow — find the collection by the op
             // binding on each side:
+            //   - the TARGET is a stream symbol (#StdOut/#StdErr) → a write;
             //   - the TARGET has an InsertAt binding → INSERT (push): emit the
             //     member/fn insert call with the value;
             //   - the VALUE has an ExtractFrom/CopyFrom binding → READ/EXTRACT
             //     (pop): emit the extract and store the result into the target
             //     (or discard it when target is None);
             //   - otherwise → a plain copy store into the target.
+            if let Some(t) = target.as_ref() {
+                if let Expr::Identifier(name) = t.as_ref() {
+                    if name == "#StdOut" || name == "#StdErr" {
+                        // 2026-08-01 (Phase 4): a stream write. `#StdOut` lowers
+                        // to the generic Print# (any type); `#StdErr` writes a
+                        // String via the stderr printer.
+                        if name == "#StdOut" {
+                            let call = Expr::Call("Print#".to_string(), vec![(**value).clone()], None);
+                            backend.emit_expr(out, &call, indent);
+                        } else {
+                            let v = backend.emit_expr(out, value, indent);
+                            let reg = backend.fun.gen_reg();
+                            writeln!(out, "{}{} = call i64 @__eprint_str(ptr {})", indent, reg, v.name).ok();
+                        }
+                        return TypedRegister { name: backend.fun.gen_reg(), ty: Type::void() };
+                    }
+                }
+            }
             if let Some(t) = target.as_ref() {
                 if let Some(op_def) = backend.find_insert_strategy(t).cloned() {
                     let val = backend.emit_expr(out, value, indent);

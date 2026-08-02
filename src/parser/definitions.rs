@@ -854,23 +854,12 @@ impl<'a> Parser<'a> {
         let name = self.expect_identifier()?;
         self.expect(Token::At)?;
         let instance = self.parse_expression()?;
-        self.expect(Token::Dot)?;
-        // Require # prefix for layout port access
-        let port = self.expect_identifier()?;
-        if !port.starts_with('#') {
-            return Err(SyntaxError::InvalidExpression {
-                reason: format!(
-                    "trigger port '{}' must use # prefix for layout access: .#{}",
-                    port, port
-                ),
-                span: crate::errors::Span::dummy(),
-            });
-        }
+        // 2026-08-01 (Phase 4): the `.port` is removed — a trigger is the
+        // whole-target form `trg name @ instance;`.
         self.expect(Token::Semicolon)?;
         Ok(Trigger {
             name,
             instance,
-            port,
             span: None,
         })
     }

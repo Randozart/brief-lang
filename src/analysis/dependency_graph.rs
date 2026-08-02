@@ -344,7 +344,6 @@ mod tests {
         TopLevel::Trigger(Trigger {
             name: name.to_string(),
             instance: Expr::Identifier("__io".to_string()),
-            port: name.to_string(),
             span: None,
         })
     }

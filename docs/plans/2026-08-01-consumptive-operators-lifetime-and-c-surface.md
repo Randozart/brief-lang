@@ -305,13 +305,17 @@ used in 4 files (`queue_drain.bv`, `queue_drain_idio.bv`, `stack_push_pop.bv`,
 
 1. **Stream hashword symbols** — `#StdIn`/`#StdOut`/`#StdErr` as compiler-known
    intrinsic-pointer symbols. The compiler resolves them to a stream handle
-   (backend-agnostic). `#StdOut <- value` lowers to `Print#(value)`. The trg
-   system composes through the shared system-pointer-address path
-   (`trg read @ #StdIn`).
-2. **Trigger port removal** — `parse_top_level_trg` + `parse_trg_binding`: drop
-   the `expect(Token::Dot)` + port (the `#`-prefix validation too). mod.rs:
-   remove the `port == "__wake"` sentinel (keep the name check). Rewrite the
-   trigger tutorial + the SPEC grammar line to the whole-target form.
+   (backend-agnostic). `#StdOut <- value` lowers to `Print#(value)` (any type);
+   `#StdErr <- <String>` lowers to `__eprint_str` (stderr); `#StdIn` is a
+   `Ptr<Int>` stream-handle value. **DONE** — verified end-to-end (`hello 0` on
+   stdout, `err ` on stderr). The loop-engine body emitters now delegate
+   `Statement::ArrowAssign` to the standard emitter (previously the hand-rolled
+   walkers silently dropped stream writes / arrows).
+2. **Trigger port removal** — `parse_top_level_trg` + `parse_trg_binding`: the
+   `expect(Token::Dot)` + port (and the `#`-prefix validation) dropped; the
+   `Trigger.port`/`TrgBinding.port` AST fields removed; the `port == "__wake"`
+   sentinel removed (name check kept); the trigger tutorial rewritten to the
+   whole-target form `trg name @ instance;`. **DONE**.
 3. **`briefc memcheck`** (or in Phase 5) — report the unprovable fields + hints.
 
 ### Phase 5 — The free-check

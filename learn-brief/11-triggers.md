@@ -11,14 +11,20 @@ Unlike regular variables, triggers are **volatile** - the compiler cannot assume
 Top-level triggers are declared in the global scope and represent events that can wake up your reactive transaction loop:
 
 ```brief
-// Hardware trigger (Embedded Brief)
-trg button: Bool @ 0x1000A000;
+// Hardware trigger (Embedded Brief) — whole-target form
+trg button @ 0x1000A000;
 
 // System trigger — linked to a runtime symbol (LLVM backend)
-trg sigint: Bool @ link __sigint_flag;
-trg stdin_ready: Bool @ link __stdin_ready;
-trg clock_tick_1hz: Int @ link __timer_1hz;
+trg sigint @ link __sigint_flag;
+trg stdin_ready @ link __stdin_ready;
+trg clock_tick_1hz @ link __timer_1hz;
 ```
+
+> **2026-08-01 (Phase 4)**: the trigger **`.port`** is removed. A trigger is the
+> whole-target form `trg name @ instance;` — there is no `.port` suffix and no
+> `.#` layout-port validation. The trigger's value type comes from the runtime
+> symbol (`@ link sym`) or the address width, not from a `: Type` annotation.
+> The `: Type` annotation form shown in older docs never parsed and is gone.
 
 ### `@ link` — Binding to External Symbols
 
@@ -46,10 +52,10 @@ Brief accepts multiple forms for trigger declarations:
 - `trg` / `TRG` / `trigger` / `TRIGGER` - all equivalent for top-level triggers
 
 ```brief
-trg button: Bool;       // lowercase
-TRG button: Bool;       // uppercase
-trigger button: Bool;   // full word
-TRIGGER button: Bool;   // uppercase full word
+trg button @ 0x1000A000;  // lowercase
+TRG button @ 0x1000A000;  // uppercase
+trigger button @ 0x1000A000;   // full word
+TRIGGER button @ 0x1000A000;   // uppercase full word
 ```
 
 ## Event Model: `node` + `@ link`

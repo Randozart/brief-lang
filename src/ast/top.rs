@@ -234,11 +234,10 @@ pub enum Statement {
         list: Box<Expr>,
         body: Vec<Statement>,
     },
-    /// trg name @ instance.port;
+    /// trg name @ instance; — whole-target form (the .port is removed).
     TrgBinding {
         name: String,
         instance: Expr,
-        port: String,
     },
     /// asm "instruction" { clobbers }
     InlineAsm {
@@ -309,8 +308,8 @@ impl PartialEq for Statement {
             (Statement::Escape(e1), Statement::Escape(e2)) => e1 == e2,
             (Statement::Foreach { item: i1, list: l1, body: b1 },
              Statement::Foreach { item: i2, list: l2, body: b2 }) => i1 == i2 && l1 == l2 && b1 == b2,
-            (Statement::TrgBinding { name: n1, instance: i1, port: p1 },
-             Statement::TrgBinding { name: n2, instance: i2, port: p2 }) => n1 == n2 && i1 == i2 && p1 == p2,
+            (Statement::TrgBinding { name: n1, instance: i1 },
+             Statement::TrgBinding { name: n2, instance: i2 }) => n1 == n2 && i1 == i2,
             (Statement::InlineAsm { asm_string: a1, clobbers: c1, span: s1 },
              Statement::InlineAsm { asm_string: a2, clobbers: c2, span: s2 }) => a1 == a2 && c1 == c2 && s1 == s2,
             (Statement::SyncBlock(b1), Statement::SyncBlock(b2)) => b1 == b2,
@@ -535,7 +534,6 @@ pub struct MeldDeclaration {
 pub struct Trigger {
     pub name: String,
     pub instance: Expr,
-    pub port: String,
     pub span: Option<Span>,
 }
 

@@ -999,7 +999,6 @@ fn make_exit_program(exit_expr: Option<Expr>, is_wake: bool) -> Vec<TopLevel> {
         items.push(TopLevel::Trigger(Trigger {
             name: "__wake_trg".to_string(),
             instance: Expr::Identifier("".to_string()),
-            port: "__wake".to_string(),
             span: None,
         }));
     }
@@ -2631,7 +2630,6 @@ fn test_trg_deref_error_flag() {
             name: "dyn_trg".to_string(),
             // @ *ptr — Expr::Deref wraps the pointer expression
             instance: Expr::Deref(Box::new(Expr::Identifier("my_ptr".to_string()))),
-            port: "data".to_string(),
             span: None,
         }),
         TopLevel::Transaction(Transaction {
@@ -2676,7 +2674,6 @@ fn test_trg_deref_warn_default_no_null_check() {
         TopLevel::Trigger(Trigger {
             name: "dyn_trg".to_string(),
             instance: Expr::Deref(Box::new(Expr::Identifier("my_ptr".to_string()))),
-            port: "data".to_string(),
             span: None,
         }),
         TopLevel::Transaction(Transaction {
@@ -3831,4 +3828,49 @@ fn test_arrow_statements_emit_without_broken_globals() {
         ir.contains("define i64 @f("),
         "the defn must be emitted; got:\n{ir}"
     );
+}
+
+// ── Phase 4: stream symbols + trigger port removal (2026-08-01) ─────────
+
+/// `#StdOut <- value` lowers to the print family; `#StdErr <- <String>` to the
+/// stderr printer. Both survive the loop-engine body emission.
+#[test]
+fn test_stream_writes_emit_print_family() {
+    let src = r#"
+        defn f(count: Int) -> Int {
+            #StdOut <- count;
+            #StdErr <- "err";
+            term count;
+        };
+    "#;
+    let mut items = parse_bv_source(src);
+    let mut universe = crate::type_universe::TypeUniverse::new();
+    let mut pm = crate::plugin::PluginManager::new();
+    pm.register(Box::new(crate::plugin::print_plugin::PrintPlugin));
+    pm.run_ast(crate::ast::StageKind::Parsed, &mut items, &mut universe)
+        .expect("plugin stage failed");
+    let mut backend = LlvmBackend::new().with_type_universe(universe);
+    let ir = backend.generate(&items, None);
+    assert!(
+        ir.contains("call i64 @__print_int("),
+        "#StdOut <- count must lower to __print_int; got:\n{ir}"
+    );
+    assert!(
+        ir.contains("call i64 @__eprint_str(ptr "),
+        "#StdErr <- \"err\" must lower to __eprint_str; got:\n{ir}"
+    );
+}
+
+/// A trigger parses as the whole-target form — no `.port` may appear.
+#[test]
+fn test_trigger_is_whole_target() {
+    let src = "trg btn @ 0x1000A000;\n";
+    let items = parse_bv_source(src);
+    assert_eq!(items.len(), 1, "one trigger");
+    match &items[0] {
+        TopLevel::Trigger(t) => {
+            assert_eq!(t.name, "btn");
+        }
+        other => panic!("expected Trigger, got {:?}", other),
+    }
 }

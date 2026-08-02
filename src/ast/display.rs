@@ -341,12 +341,8 @@ impl fmt::Display for Statement {
                 }
                 write!(f, "}}")
             }
-            Statement::TrgBinding {
-                name,
-                instance,
-                port,
-            } => {
-                write!(f, "trg {} @ {}.{};", name, instance, port)
+            Statement::TrgBinding { name, instance } => {
+                write!(f, "trg {} @ {};", name, instance)
             }
             Statement::InlineAsm { asm_string, .. } => {
                 write!(f, "asm \"{}\";", asm_string)
@@ -438,7 +434,7 @@ impl fmt::Display for TopLevel {
                 write!(f, "meld {} -> {};", meld.name, meld.target)
             }
             TopLevel::Trigger(trg) => {
-                write!(f, "trg {} @ {}.{};", trg.name, trg.instance, trg.port)
+                write!(f, "trg {} @ {};", trg.name, trg.instance)
             }
             TopLevel::CompileTimeLet(name, expr) => {
                 write!(f, "$let {} = {};", name, expr)

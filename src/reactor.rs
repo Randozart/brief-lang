@@ -598,7 +598,6 @@ mod tests {
         let trg = TopLevel::Trigger(Trigger {
             name: "keypress".to_string(),
             instance: Expr::Decimal(0),
-            port: "default".to_string(),
             span: None,
         });
         let reactor = build_reactor(&simple_program(vec![trg]));

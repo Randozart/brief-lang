@@ -399,6 +399,14 @@ int64_t __print_str(const char* msg_bstr) {
     return 0;
 }
 
+// 2026-08-01 (Phase 4): the `#StdErr <- <String>` stream write. Mirrors
+// __print_str but writes to stderr (no buffering assumptions).
+__attribute__((always_inline)) int64_t __eprint_str(const char* msg_bstr) {
+    char* c_msg = brief_str_to_c(msg_bstr);
+    if (c_msg) { fputs(c_msg, stderr); free(c_msg); }
+    return 0;
+}
+
 void __exit(int64_t code) {
     exit((int)code);
 }

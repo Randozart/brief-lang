@@ -293,9 +293,9 @@ fn parse_trigger(parts: &[SExpr]) -> Result<TopLevel, String> {
     let mut i = 2;
     while i < parts.len() {
         let key = tag(parts, i)?;
-        if key == "port" { port = tag(parts, i + 1)?.to_string(); i += 2; } else { i += 1; }
+        i += 1;
     }
-    Ok(TopLevel::Trigger(Trigger { name, instance: Expr::Identifier("".into()), port, span: None }))
+    Ok(TopLevel::Trigger(Trigger { name, instance: Expr::Identifier("".into()), span: None }))
 }
 
 fn parse_constant(parts: &[SExpr]) -> Result<TopLevel, String> {

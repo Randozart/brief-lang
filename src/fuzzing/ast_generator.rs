@@ -60,7 +60,6 @@ pub fn arb_trigger_decl(_max_depth: usize) -> impl Strategy<Value = TopLevel> {
         TopLevel::Trigger(Trigger {
             name,
             instance: Expr::Decimal(0),
-            port: "default".to_string(),
             span: None,
         })
     })

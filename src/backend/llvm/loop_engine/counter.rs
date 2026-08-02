@@ -1693,6 +1693,12 @@ impl LlvmBackend {
                     let val = self.emit_expr(out, e, "  ");
                     writeln!(out, "  ret i64 {}", val.name).ok();
                 }
+                Statement::ArrowAssign { .. } => {
+                    // 2026-08-01 (Phase 4): the arrow (stream write, collection
+                    // insert/extract, discard) — delegate to the standard emitter;
+                    // the loop engine's hand-rolled body walker must not drop it.
+                    super::emit_stmt::emit_statement(self, out, stmt, "  ");
+                }
                 _ => {}
             }
             i += 1;
@@ -1721,6 +1727,9 @@ impl LlvmBackend {
             Statement::Term(Some(e)) | Statement::Expression(e) | Statement::TermBang(Some(e)) => {
                 self.emit_expr(out, e, indent);
             }
+            Statement::ArrowAssign { .. } => {
+                super::emit_stmt::emit_statement(self, out, stmt, indent);
+            }
             _ => {}
         }
     }
@@ -1728,6 +1737,11 @@ impl LlvmBackend {
     /// Emit a single statement inside a guard body (Let → compute, Expression → call).
     fn emit_guard_body_stmt(&mut self, out: &mut String, stmt: &Statement, indent: &str) {
         match stmt {
+            Statement::ArrowAssign { .. } => {
+                // 2026-08-01 (Phase 4): the arrow — delegate to the standard
+                // emitter so guard-body stream writes / collection ops survive.
+                super::emit_stmt::emit_statement(self, out, stmt, indent);
+            }
             Statement::Let { name, expr: Some(e), .. } => {
                 let reg = self.emit_expr(out, e, indent);
                 self.fun.last_val_temps.insert(name.clone(), reg.name.clone());

@@ -200,13 +200,11 @@ impl<'a> Parser<'a> {
         let name = self.expect_identifier()?;
         self.expect(Token::At)?;
         let instance = self.parse_expression()?;
-        self.expect(Token::Dot)?;
-        let port = self.expect_identifier()?;
+        // 2026-08-01 (Phase 4): the `.port` is removed — whole-target form.
         self.expect(Token::Semicolon)?;
         Ok(Statement::TrgBinding {
             name,
             instance,
-            port,
         })
     }
 

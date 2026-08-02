@@ -385,6 +385,11 @@ pub fn infer_expression(
 
         // ── References ──────────────────────────────────────────
         Expr::Identifier(name) => {
+            // 2026-08-01 (Phase 4): a stream symbol is a compiler-known value
+            // (e.g. `#StdIn` as a stream handle); it is never a user variable.
+            if let Some(stream_ty) = stream_symbol_type(name) {
+                return Ok((stream_ty, Provenance::Unknown));
+            }
             // 2026-08-01 (Phase 3): use-after-move — a local consumed by a
             // `~op` is dead until reassigned.
             if ctx.consumed_locals.contains(name) {
@@ -1167,9 +1172,26 @@ pub fn infer_statement(stmt: &Statement, ctx: &mut TypecheckContext) -> Result<(
             //     must match the element type;
             //   - the VALUE has an ExtractFrom/CopyFrom binding → READ/EXTRACT
             //     (pop): the target must match the member's return type;
+            //   - the TARGET is a stream symbol (`#StdOut`/`#StdErr`) → a write;
             //   - otherwise a plain assignment (no implicit coercion).
             let value_ty = infer_type_only(value, ctx)?;
             if let Some(t) = target {
+                // 2026-08-01 (Phase 4): a stream write — the target is a
+                // compiler-known stream symbol. `#StdOut` accepts any value
+                // (lowered to Print#); `#StdErr` accepts a String (lowered to
+                // the stderr string printer).
+                if let Expr::Identifier(name) = t.as_ref() {
+                    if is_stream_symbol(name) {
+                        if name == "#StdErr" && value_ty != Type::string() {
+                            return Err(TypeError::TypeMismatch {
+                                expected: "String".into(),
+                                found: format!("{}", value_ty),
+                                context: "stderr stream write ('#StdErr <- value')".into(),
+                            });
+                        }
+                        return Ok(());
+                    }
+                }
                 // A write to the target revives a consumed name.
                 if let Expr::Identifier(target_name) = t.as_ref() {
                     ctx.consumed_locals.remove(target_name);
@@ -1873,6 +1895,24 @@ fn member_output(m: &TopLevel) -> Option<Type> {
     }
 }
 
+/// 2026-08-01 (Phase 4): the compiler-known stream symbols. `#StdOut <- value`
+/// and `#StdErr <- value` are stream WRITES (lowered to the print family);
+/// `#StdIn` is a stream handle value (the trg read composition).
+fn is_stream_symbol(name: &str) -> bool {
+    matches!(name, "#StdOut" | "#StdErr" | "#StdIn")
+}
+
+/// Resolve a stream symbol's type — a system pointer handle (`#StdIn`), or
+/// void for the write-only streams (`#StdOut`/`#StdErr` are only valid as
+/// arrow targets, never read as values).
+fn stream_symbol_type(name: &str) -> Option<Type> {
+    match name {
+        "#StdIn" => Some(Type::ptr(Type::int())),
+        "#StdOut" | "#StdErr" => None,
+        _ => None,
+    }
+}
+
 /// 2026-08-01 (Phase 3): substitute a generic application's concrete type args
 /// into a member signature's type-param references (`List<Int>` push's `T` →
 /// `Int`). Leaves non-param types untouched; unsubstituted params stay as-is
@@ -2369,6 +2409,55 @@ mod phase3_tests {
             defn f(a: Int) -> Int {
                 <- a;
                 term a;
+            };
+        "#;
+        assert!(check(src).is_ok());
+    }
+}
+
+#[cfg(test)]
+mod phase4_tests {
+    use super::*;
+
+    fn check(src: &str) -> Result<(), Vec<TypeError>> {
+        let tokens = crate::lexer::tokenize(src).unwrap();
+        let mut p = crate::parser::Parser::new(tokens, src);
+        let items = p.parse_program().unwrap();
+        let universe = crate::type_universe::TypeUniverse::new();
+        check_program(&items, &universe)
+    }
+
+    // 2026-08-01 (Phase 4): the stream symbols — `#StdOut` accepts any value,
+    // `#StdErr` requires a String.
+
+    #[test]
+    fn stdout_stream_accepts_any_value() {
+        let src = r#"
+            defn f(a: Int) -> Int {
+                #StdOut <- a;
+                term a;
+            };
+        "#;
+        assert!(check(src).is_ok());
+    }
+
+    #[test]
+    fn stderr_stream_requires_string() {
+        let src = r#"
+            defn f(a: Int) -> Int {
+                #StdErr <- a;
+                term a;
+            };
+        "#;
+        assert!(check(src).is_err(), "#StdErr <- Int must be rejected (String only)");
+    }
+
+    #[test]
+    fn std_in_is_a_stream_handle_value() {
+        let src = r#"
+            defn f() -> Int {
+                let h: Ptr<Int> = #StdIn;
+                term 0;
             };
         "#;
         assert!(check(src).is_ok());

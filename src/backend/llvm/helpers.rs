@@ -277,14 +277,9 @@ impl LlvmBackend {
                     .collect(),
             ),
             Statement::InlineAsm { .. } => stmt.clone(),
-            Statement::TrgBinding {
-                name,
-                instance,
-                port,
-            } => Statement::TrgBinding {
+            Statement::TrgBinding { name, instance } => Statement::TrgBinding {
                 name: name.clone(),
                 instance: Self::rewrite_cell_identifiers(instance, cell_name),
-                port: port.clone(),
             },
             Statement::Foreach { item, list, body } => Statement::Foreach {
                 item: item.clone(),

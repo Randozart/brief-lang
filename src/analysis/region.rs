@@ -1729,7 +1729,6 @@ mod tests {
         TopLevel::Trigger(Trigger {
             name: name.to_string(),
             instance: Expr::Decimal(0),
-            port: "default".to_string(),
             span: None,
         })
     }

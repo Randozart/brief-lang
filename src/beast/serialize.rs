@@ -91,7 +91,7 @@ fn emit_statedecl(s: &StateDecl) -> SExpr {
 
 fn emit_trigger(t: &Trigger) -> SExpr {
     let mut children: Vec<SExpr> = vec![atom("trigger"), atom(&t.name)];
-    children.push(list(&[atom("port"), atom(&t.port)]));
+
     SExpr::List(children)
 }
 

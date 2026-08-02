@@ -91,7 +91,7 @@ impl CirctBackend {
                     self.var_exprs.insert(decl.name.clone(), None);
                 }
                 TopLevel::Trigger(trg) => {
-                    let port_name = trg.port.clone();
+                    let port_name = trg.name.clone();
                     self.trg_ports.push(TriggerPort {
                         port_name: port_name.clone(),
                         trg_name: trg.name.clone(),
@@ -779,8 +779,7 @@ mod tests {
         TopLevel::Trigger(Trigger {
             name: name.to_string(),
             instance: Expr::Identifier("env".to_string()),
-            port: port.to_string(),
-            span: None,
+                        span: None,
         })
     }
 
