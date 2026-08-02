@@ -379,6 +379,13 @@ pub struct FunctionContext {
     pub let_original_types: HashMap<String, Type>,
     /// 2026-07-18: Tracks which let-bindings point to allocas (vs SSA registers).
     pub let_binding_allocas: HashSet<String>,
+    /// 2026-08-01 (audit): regs produced by boxing a Bool/Char/Data param
+    /// (zext from the native width to i64) at defn entry. The Print#
+    /// convenience intrinsic dispatches on the declared protocol category
+    /// (Bool → __print_bool, Char → __print_char) — a boxed Bool reg is
+    /// already i64 0/1, so it must be passed directly; a native i8 Bool
+    /// (literal/let/field) needs a zext first.
+    pub boxed_scalar_regs: HashSet<String>,
     /// 2026-07-24: Tracks the original alloca register for struct literal values.
     /// Keyed by variable name. When &x is taken on a struct-typed let binding,
     /// this map provides the stack alloca pointer instead of the ptrtoint result.
@@ -642,6 +649,7 @@ impl FunctionContext {
             let_binding_types: HashMap::new(),
             let_original_types: HashMap::new(),
             let_binding_allocas: HashSet::new(),
+            boxed_scalar_regs: HashSet::new(),
             struct_literal_allocas: HashMap::new(),
             self_binding: None,
             reg_float_cache: HashMap::new(),
@@ -729,6 +737,7 @@ impl FunctionContext {
         self.let_bindings.clear();
         self.let_binding_types.clear();
         self.let_original_types.clear();
+        self.boxed_scalar_regs.clear();
         self.let_binding_allocas.clear();
         self.struct_literal_allocas.clear();
         self.reg_float_cache.clear();

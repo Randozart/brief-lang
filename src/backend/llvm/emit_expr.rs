@@ -64,6 +64,17 @@ impl LlvmBackend {
             Expr::Decimal(n) => {
                 self.emit_int(out, v, *n, indent)
             }
+            Expr::Char(c) => {
+                // 2026-08-01 (audit): a Char literal emits at its NATIVE i32
+                // width (the universe declares Char = 32-bit), matching Char
+                // state fields and cast results. Boxed Char params are the
+                // sole i64 exception (zext at defn entry). The Print#
+                // dispatch and adapt_to_i64 widen i32 → i64 for the runtime
+                // ABI; the register's ty carries `#Char` so the generic
+                // Print# routes it to __print_char (not __print_int).
+                writeln!(out, "{}{} = add i32 0, {}", indent, v, *c as i64).ok();
+                TypedRegister { name: v.to_string(), ty: Type::char_() }
+            }
             Expr::TaggedLiteral(n, _) => {
                 self.emit_int(out, v, *n, indent)
             }
@@ -1261,7 +1272,7 @@ impl LlvmBackend {
         // 2026-08-01 (B0): the value register IS the pointer (a Brief String
         // value is a ptr to [len][bytes] in every type-claiming site). The
         // old ptrtoint→i64 boxing here was one arm of the split-brain; the
-        // ptr is passed straight to consumers (PrintStr#, frgn calls, state
+        // ptr is passed straight to consumers (Print#, frgn calls, state
         // adapt_to_i64 which does the ptrtoint for the i64 slot).
         let str_p = self.fun.gen_reg();
         writeln!(out, "{}{} = bitcast <{{ i64, [{} x i8] }}>* {} to ptr",

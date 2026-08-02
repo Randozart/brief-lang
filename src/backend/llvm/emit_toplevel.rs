@@ -1185,7 +1185,7 @@ impl LlvmBackend {
             Expr::Call(name, _, _) => {
                 matches!(name.as_str(),
                     "Malloc#" | "Memcpy#" | "Memmove#" | "Memset#"
-                    | "PrintInt#" | "PrintChar#" | "PrintFloat#" | "Print#"
+                    | "Print#"
                     | "FileRead#" | "FileWrite#" | "ShellCmd#"
                     | "SysQuery#" | "EnvGet#" | "HttpFetch#"
                     | "AllocArray#" | "AllocInitArray#" | "StringNew#"
@@ -1303,6 +1303,11 @@ impl LlvmBackend {
                 self.emit_box_value_to_i64(out, "  ", t, &raw, &conv, &format!("%ai{}", i));
                 if self.is_protocol_member(t, "#Float") {
                     self.fun.reg_float_cache.insert(conv.clone(), raw.to_string());
+                } else {
+                    // 2026-08-01 (audit): a boxed Bool/Char/Data param reg is
+                    // already i64 in SSA; Print# needs to know it's boxed so it
+                    // passes it directly (no zext) to __print_bool/__print_char.
+                    self.fun.boxed_scalar_regs.insert(conv.clone());
                 }
                 reg = conv;
             } else {
@@ -1698,7 +1703,7 @@ impl LlvmBackend {
             match expr {
                 Expr::Call(name, _, _) => {
                     !name.ends_with('#')
-                    // 2026-07-28: Observable intrinsics (PrintInt#, Malloc#, etc.)
+                    // 2026-07-28: Observable intrinsics (Print#, Malloc#, etc.)
                     // also need outlining — they create memory barriers in guard
                     // bodies even though they're not FFI calls. Check the intrinsic
                     // signature's observable flag to distinguish from inert intrinsics

@@ -206,7 +206,7 @@ pub fn count_calls(expr: &Expr, intrinsics: &mut u64, includes_io: &mut bool) {
         Expr::Call(name, args, _) => {
             if name.ends_with('#') {
                 *intrinsics += 1;
-                if name == "PrintInt#" || name == "PrintFloat#" || name == "PrintString#" {
+                if name == "Print#" {
                     *includes_io = true;
                 }
             }

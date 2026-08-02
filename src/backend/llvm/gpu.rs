@@ -512,7 +512,7 @@ fn is_float_context(expr: &Expr, field_types: &HashMap<String, String>) -> bool 
         Expr::UnaryOp(UnaryOpKind::Neg, e) => is_float_context(e, field_types),
         Expr::Call(name, _, _) if name.ends_with('#') => matches!(name.as_str(),
             "Sin#" | "Cos#" | "Pow#" | "Sqrt#" | "Fabs#"
-            | "Ceil#" | "Floor#" | "PrintFloat#"
+            | "Ceil#" | "Floor#" | "Print#"
         ),
         _ => false,
     }

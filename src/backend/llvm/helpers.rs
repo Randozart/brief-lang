@@ -37,6 +37,7 @@ impl LlvmBackend {
         match expr {
             // Leaves — no identifiers to rewrite
             Expr::Decimal(_)
+            | Expr::Char(_)
             | Expr::Bool(_)
             | Expr::Float(_)
             | Expr::Quoted(_) | Expr::TaggedQuotedLiteral(_, _)
@@ -2306,6 +2307,14 @@ impl LlvmBackend {
         if self.is_protocol_member(ty, "#Bool") {
             let tr = self.fun.gen_reg();
             writeln!(out, "{}{} = zext i8 {} to i64", indent, tr, reg.name).ok();
+            return tr;
+        }
+        // #Char protocol: a Char reg is native i32 (literal/let/field/cast);
+        // boxed Char params are i64 and typed Int in SSA, so they never reach
+        // this arm (they hit the `llvm_type == i64` early return above).
+        if self.is_protocol_member(ty, "#Char") {
+            let tr = self.fun.gen_reg();
+            writeln!(out, "{}{} = zext i32 {} to i64", indent, tr, reg.name).ok();
             return tr;
         }
         // #String / #Data protocol: a String is a ptr to [len][bytes] (B0),

@@ -238,6 +238,15 @@ pub enum Value {
     Int(i64),
     Float(f64),
 
+    /// 2026-08-01 (audit): first-class `#Char`/`#Bool` values. The codegen
+    /// dispatches the generic `Print#` by the arg's protocol category, so the
+    /// interpreter (which dispatches by value) must carry char/bool-ness to
+    /// match: Char prints a character, Bool prints true/false. Both promote to
+    /// their code point / 0|1 via as_i64/as_f64 (C-style), so arithmetic and
+    /// comparisons work unchanged.
+    Char(char),
+    Bool(bool),
+
     // Compiler-internal meta-objects (never reach user code):
     Defn(String),
     Void,
@@ -281,6 +290,8 @@ impl Value {
     pub fn as_i64(&self) -> Option<i64> {
         match self {
             Value::Int(n) => Some(*n),
+            Value::Bool(b) => Some(if *b { 1 } else { 0 }),
+            Value::Char(c) => Some(*c as i64),
             Value::Bits(bytes) => {
                 let mut arr = [0u8; 8];
                 let copy_len = bytes.len().min(8);
@@ -295,6 +306,8 @@ impl Value {
     pub fn as_f64(&self) -> Option<f64> {
         match self {
             Value::Float(f) => Some(*f),
+            Value::Bool(b) => Some(if *b { 1.0 } else { 0.0 }),
+            Value::Char(c) => Some(*c as i64 as f64),
             Value::Bits(bytes) if bytes.len() >= 8 => {
                 let arr: [u8; 8] = bytes[..8].try_into().ok()?;
                 Some(f64::from_le_bytes(arr))
@@ -306,6 +319,8 @@ impl Value {
     /// Extract first byte as bool.
     pub fn as_bool(&self) -> Option<bool> {
         match self {
+            Value::Bool(b) => Some(*b),
+            Value::Char(c) => Some(*c != '\0'),
             Value::Bits(bytes) => bytes.first().map(|b| *b != 0),
             _ => None,
         }

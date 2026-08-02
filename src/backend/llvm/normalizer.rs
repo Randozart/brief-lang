@@ -485,7 +485,7 @@ fn build_supported_ops() -> HashSet<String> {
                     // this validator because the old PrintLn! always wrapped
                     // them in an Expr::Block, which the validator does not
                     // descend into; the bare println!() form exposes them.
-                    "PrintInt#", "PrintChar#", "PrintFloat#", "PrintStr#"] {
+                    "Print#"] {
         set.insert(name.to_string());
     }
     set

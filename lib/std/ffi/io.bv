@@ -14,3 +14,9 @@ frgn __print_int(n: Int) -> Int as frgn__print_int from "lib/runtime/brief_rt.c"
 // call site. Undo: re-add the frgn only if stdlib ever needs a named wrapper.
 frgn __print_float(f: Float) -> Int as frgn__print_float from "lib/runtime/brief_rt.c" fallback 0;
 frgn __print_char(c: Int) -> Int as frgn__print_char from "lib/runtime/brief_rt.c" fallback 0;
+// 2026-08-01 (audit): the generic Print# convenience intrinsic routes
+// #Bool → __print_bool (true/false, not 1/0) and #Float64 → __print_float64.
+// Declared here (the stdlib declares the print runtime family; __print_str is
+// the backend-declared B0 exception).
+frgn __print_bool(b: Int) -> Int as frgn__print_bool from "lib/runtime/brief_rt.c" fallback 0;
+frgn __print_float64(f: Float64) -> Int as frgn__print_float64 from "lib/runtime/brief_rt.c" fallback 0;

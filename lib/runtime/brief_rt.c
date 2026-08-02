@@ -354,11 +354,27 @@ int64_t __print_int(int64_t n) {
     return 0;
 }
 
+// 2026-08-01: Bool printer for the generic Print# convenience intrinsic — a
+// Bool's natural representation is true/false, not 1/0. 1/0 requires an
+// explicit `(b as Int)` cast, which routes to __print_int instead.
+__attribute__((always_inline)) int64_t __print_bool(int64_t b) {
+    fputs(b ? "true" : "false", stdout);
+    return 0;
+}
+
 // 2026-07-31: %.9g — round-trips any float32 uniquely (~7 sig decimal digits).
 // The prior %g (6 sig digits) truncated precision, making Brief's float output
 // differ from C references that print %.9f even for identical values.
 int64_t __print_float(float f) {
     printf("%.9g", (double)f);
+    return 0;
+}
+
+// 2026-08-01 (audit): the Print# convenience intrinsic routes Float64 (double)
+// values here — %.9g round-trips any double uniquely (~17 sig digits for the
+// mantissa+exponent range, more than enough for a canonical print).
+__attribute__((always_inline)) int64_t __print_float64(double f) {
+    printf("%.9g", f);
     return 0;
 }
 

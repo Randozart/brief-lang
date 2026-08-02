@@ -103,7 +103,7 @@ pub fn analyze(
 fn contains_heap_alloc(expr: &Expr) -> bool {
     match expr {
         Expr::Call(name, args, _) => {
-            if name == "Malloc#" || name == "Alloc#" || name == "AllocArena#" {
+            if name == "Malloc#" || name == "Alloc#" {
                 return true;
             }
             args.iter().any(contains_heap_alloc)

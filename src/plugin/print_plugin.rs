@@ -266,120 +266,15 @@ fn walk_expr(
     }
 }
 
-#[derive(Clone, Copy, PartialEq)]
-enum PrintKind {
-    Int,
-    Float,
-    Str,
+fn print_call(value: &Expr) -> Expr {
+    Expr::Call("Print#".to_string(), vec![value.clone()], None)
 }
 
-/// Determine an expression's print category for dispatch.
-fn kind_from_expr(
-    expr: &Expr,
-    known_types: &HashMap<String, Type>,
-    universe: &TypeUniverse,
-) -> PrintKind {
-    match expr {
-        Expr::Quoted(_) => PrintKind::Str,
-        Expr::Decimal(_) => PrintKind::Int,
-        Expr::Float(_) => PrintKind::Float,
-        Expr::Identifier(name) => {
-            match known_types.get(name) {
-                Some(t) => kind_from_type(t, universe),
-                None => PrintKind::Int, // default fallback
-            }
-        }
-        // 2026-07-27: For complex expressions (BinaryOp, UnaryOp, Call, Cast,
-        // etc.), recurse into the expression tree to find leaf-type information.
-        // Previously defaulted all non-trivial exprs to "Int", causing __print_int
-        // to be called on float values — an ABI mismatch.
-        _ => kind_from_expr_deep(expr, known_types, universe),
-    }
-}
-
-/// 2026-07-27: Recursive expression type inference for print dispatch.
-/// Walks BinaryOp/UnaryOp/Call trees to find leaf types. If any operand
-/// is a float literal or float-typed variable, the result is float.
-/// Conservative: errs on the side of Float (call __print_float instead of
-/// __print_int) because __print_float will still print the value correctly.
-fn kind_from_expr_deep(
-    expr: &Expr,
-    known_types: &HashMap<String, Type>,
-    universe: &TypeUniverse,
-) -> PrintKind {
-    match expr {
-        Expr::Float(_) => PrintKind::Float,
-        Expr::Decimal(_) => PrintKind::Int,
-        Expr::Quoted(_) => PrintKind::Str,
-        Expr::Identifier(name) => {
-            match known_types.get(name) {
-                Some(t) => kind_from_type(t, universe),
-                None => PrintKind::Int,
-            }
-        }
-        Expr::BinaryOp(_, lhs, rhs) => {
-            let lk = kind_from_expr_deep(lhs, known_types, universe);
-            let rk = kind_from_expr_deep(rhs, known_types, universe);
-            // If either side is float, result is float (float arithmetic propagates).
-            if lk == PrintKind::Float || rk == PrintKind::Float {
-                PrintKind::Float
-            } else {
-                PrintKind::Int
-            }
-        }
-        Expr::UnaryOp(_, e) => kind_from_expr_deep(e, known_types, universe),
-        Expr::Call(_, args, _) => {
-            // Heuristic: check argument types. If any arg is float, result may be float.
-            // This is conservative — some functions take float and return Int, but
-            // for the print plugin, being wrong on the side of Float is safe (we'll
-            // call __print_float instead of __print_int, which still prints the value).
-            for arg in args {
-                let ak = kind_from_expr_deep(arg, known_types, universe);
-                if ak == PrintKind::Float {
-                    return PrintKind::Float;
-                }
-            }
-            PrintKind::Int
-        }
-        Expr::Cast(_, target) => kind_from_type(target, universe),
-        Expr::Field(_, _) | Expr::Index(_, _) => {
-            // Conservative: field access may return float, but we can't
-            // determine the type without deeper analysis.
-            PrintKind::Int
-        }
-        _ => PrintKind::Int,
-    }
-}
-
-/// 2026-08-01: Determine print dispatch kind from a Type annotation.
-/// Derived from the type's protocol category (Cast.#String / Cast.#Float)
-/// in the TypeUniverse rather than matching type names (rule #18). A type
-/// carrying neither protocol category prints as Int (the numerical default).
-fn kind_from_type(t: &Type, universe: &TypeUniverse) -> PrintKind {
-    let Some(key) = t.universe_key() else { return PrintKind::Int; };
-    let Some(rt) = universe.get(key) else { return PrintKind::Int; };
-    if rt.properties.contains_key("Cast.#String") {
-        PrintKind::Str
-    } else if rt.properties.contains_key("Cast.#Float") {
-        PrintKind::Float
-    } else {
-        PrintKind::Int
-    }
-}
-
-/// Build the runtime call for one value of a given print kind.
-fn print_call(kind: PrintKind, value: &Expr) -> Expr {
-    let fn_name = match kind {
-        PrintKind::Str => "PrintStr#",
-        PrintKind::Float => "PrintFloat#",
-        PrintKind::Int => "PrintInt#",
-    };
-    Expr::Call(fn_name.to_string(), vec![value.clone()], None)
-}
-
-/// A newline-printing call (Char 10).
+/// A newline-printing call — `Print#('\n')`, a Char literal routed through the
+/// generic Print# convenience intrinsic (line termination is the macro's job;
+/// the printing is the intrinsic's).
 fn newline_call() -> Expr {
-    Expr::Call("PrintChar#".to_string(), vec![Expr::Decimal(10)], None)
+    Expr::Call("Print#".to_string(), vec![Expr::Char('\n')], None)
 }
 
 /// 2026-08-01: Expand a format string against its value arguments into a
@@ -400,7 +295,7 @@ fn expand_format(
             FmtPart::Literal(seg) => {
                 if !seg.is_empty() {
                     stmts.push(Statement::Expression(Expr::Call(
-                        "PrintStr#".to_string(),
+                        "Print#".to_string(),
                         vec![Expr::Quoted(seg.clone())],
                         None,
                     )));
@@ -414,10 +309,7 @@ fn expand_format(
                         args.len()
                     ));
                 }
-                stmts.push(Statement::Expression(print_call(
-                    kind_from_expr(&args[next], known_types, universe),
-                    &args[next],
-                )));
+                stmts.push(Statement::Expression(print_call(&args[next])));
                 next += 1;
             }
             FmtPart::Position(n) => {
@@ -428,10 +320,7 @@ fn expand_format(
                         args.len()
                     ));
                 }
-                stmts.push(Statement::Expression(print_call(
-                    kind_from_expr(&args[*n], known_types, universe),
-                    &args[*n],
-                )));
+                stmts.push(Statement::Expression(print_call(&args[*n])));
                 max_used = max_used.max(*n + 1);
             }
         }
@@ -476,8 +365,7 @@ fn resolve_print(
         stmts.append(&mut parts);
     } else {
         // Legacy value form: a single non-literal argument printed directly.
-        let kind = kind_from_expr(&args[0], known_types, universe);
-        stmts.push(Statement::Expression(print_call(kind, &args[0])));
+        stmts.push(Statement::Expression(print_call(&args[0])));
     }
 
     if is_println {
@@ -560,34 +448,34 @@ mod tests {
         let universe = TypeUniverse::new();
         let known = HashMap::new();
         let (stmts, used) = expand_format(b"{}, {1}, {0}", &[Expr::Decimal(7), Expr::Float(1.5)], &known, &universe).unwrap();
-        // {} -> PrintInt#(7), ", " -> literal, {1} -> PrintFloat#(1.5),
-        // ", " -> literal, {0} -> PrintFloat#(1.5).
+        // {} -> Print#(7), ", " -> literal, {1} -> Print#(1.5),
+        // ", " -> literal, {0} -> Print#(1.5).
         assert_eq!(stmts.len(), 5);
         assert_eq!(used, 2);
         match &stmts[0] {
             Statement::Expression(Expr::Call(name, args, _)) => {
-                assert_eq!(name, "PrintInt#");
+                assert_eq!(name, "Print#");
                 assert_eq!(args[0], Expr::Decimal(7));
             }
             other => panic!("expected call, got {other:?}"),
         }
         match &stmts[1] {
             Statement::Expression(Expr::Call(name, args, _)) => {
-                assert_eq!(name, "PrintStr#");
+                assert_eq!(name, "Print#");
                 assert_eq!(args[0], Expr::Quoted(b", ".to_vec()));
             }
             other => panic!("expected call, got {other:?}"),
         }
         match &stmts[2] {
             Statement::Expression(Expr::Call(name, args, _)) => {
-                assert_eq!(name, "PrintFloat#");
+                assert_eq!(name, "Print#");
                 assert_eq!(args[0], Expr::Float(1.5));
             }
             other => panic!("expected call, got {other:?}"),
         }
         match &stmts[4] {
             Statement::Expression(Expr::Call(name, args, _)) => {
-                assert_eq!(name, "PrintInt#");
+                assert_eq!(name, "Print#");
                 assert_eq!(args[0], Expr::Decimal(7));
             }
             other => panic!("expected call, got {other:?}"),

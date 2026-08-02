@@ -277,7 +277,7 @@ impl Selector for TagSelector {
     }
 }
 
-/// Select by name field (e.g. "main", "PrintInt#").
+/// Select by name field (e.g. "main", "Print#").
 #[derive(Debug)]
 pub struct NamedSelector {
     pub name: String,

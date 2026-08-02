@@ -271,8 +271,7 @@ pub fn build_let_field_refs(
 /// Check if an expression is an output-related FFI call.
 pub fn is_output_call(expr: &Expr) -> bool {
     match expr {
-        Expr::Call(name, _, _) if name == "PrintInt#" || name == "PrintFloat#"
-            || name == "Println#" => true,
+        Expr::Call(name, _, _) if name == "Print#" || name == "Println#" => true,
         // 2026-07-19: Stdlib print functions (replaced Print#/PutChar# intrinsics)
         Expr::Call(name, _, _) if name == "__print_int" || name == "__print_float"
             || name == "__print_str" || name == "__print_char" => true,

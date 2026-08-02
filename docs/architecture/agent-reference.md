@@ -140,12 +140,35 @@ frgn XXH64(data_ptr: Int, len: Int, seed: Int) -> Int as frgn__xxh64 from "link/
 
 ### Intrinsic conventions
 
-- PascalCase + `#` suffix: `Sqrt#`, `Malloc#`, `PrintInt#`, `GetEnvInt#`. The
+- PascalCase + `#` suffix: `Sqrt#`, `Malloc#`, `Print#`, `GetEnvInt#`. The
   `#` is part of the identifier lexically. No `_` prefix convention.
 - No `inop` keyword — all compiler-known ops are `#` intrinsics with entries in
   `get_intrinsic_signature()` and `execute_intrinsic()`.
-- Side-effecting intrinsics MUST declare `!> observable: true` (`PrintInt#`,
+- Side-effecting intrinsics MUST declare `!> observable: true` (`Print#`,
   `Malloc#`, `Memcpy#`, …) so DCE cannot eliminate the call.
+
+### The `Print#` convenience intrinsic and the `println!` macro (2026-08-01)
+
+`Print#` is a single generic intrinsic that dispatches the emission by the
+argument's **protocol category** (resolved via `type_to_protocol`, the `Cast.#`
+universe properties — never type names): `#String` → `__print_str(ptr)`,
+`#Float` → `__print_float`/`__print_float64`, `#Char` → `__print_char`,
+`#Bool` → `__print_bool` (prints `true`/`false` — a Bool's natural
+representation; an explicit `(b as Int)` cast yields `1`/`0`), else
+`__print_int`. It replaces the four special-cased `PrintInt#`/`PrintFloat#`/
+`PrintStr#`/`PrintChar#` intrinsics.
+
+`print!`/`println!` are **macros** (`print_plugin.rs`): their added value is
+format-string argument insertion and (for `println!`) line termination, not
+printing. The newline is a Char literal `Print#('\n')`. `PrintChar#` was folded
+away.
+
+`#Char` is a first-class protocol (`Cast.#Char`): char literals are a distinct
+`Expr::Char`, typed `Char`, emitted at their native i32 width (state fields
+and cast results match); the interpreter carries `Value::Char`/`Value::Bool`.
+`#Bool` values are `Value::Bool` in the interpreter (comparisons and `Expr::Bool`
+produce them) so `Print#(a < b)` prints `true`, matching the backend.
+
 
 ---
 

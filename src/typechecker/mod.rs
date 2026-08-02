@@ -340,6 +340,7 @@ pub fn infer_expression(
     match expr {
         // ── Literals ────────────────────────────────────────────
         Expr::Decimal(_) | Expr::TaggedLiteral(_, _) => Ok((Type::int(), Provenance::Unknown)),
+        Expr::Char(_) => Ok((Type::Custom("Char".to_string()), Provenance::Unknown)),
         Expr::Float(_) => Ok((Type::float(), Provenance::Unknown)),
         Expr::Bool(_) => Ok((Type::bool_(), Provenance::Unknown)),
         Expr::Quoted(_) | Expr::TaggedQuotedLiteral(_, _) => Ok((Type::string(), Provenance::Unknown)),

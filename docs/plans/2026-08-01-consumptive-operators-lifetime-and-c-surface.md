@@ -181,18 +181,52 @@ must go. **The port is removed:** the trigger form becomes `trg name @ instance;
 
 ### Phase 2 — Intrinsic audit + bug fixes (in progress)
 
-1. **Generic `Print#`** — merge `PrintInt#`/`PrintFloat#`/`PrintStr#` into one
-   `Print#`; the emission dispatches by the argument's protocol category
-   (`#String` → `__print_str`, `#Float` → `__print_float` + the float-cache
-   unbox, else `__print_int`). `PrintChar#` stays internal (the newline).
-   Update `intrinsic_signatures.rs`, `intrinsics.rs`, `print_plugin.rs`, the
-   interpreter, and every test/comment reference.
-2. **Dead vestige removal** — the `AllocArena#`/`Realloc#` name-match arm in
-   `allocation.rs`; `AllocArena#` in `global_lifetime.rs`; `PutChar#` in
-   `lib/std/ffi/out.bv`.
-3. **BUGS.md** — mark the two OPEN items FIXED (verified).
-4. **Native-LLVM mapping** — already-done `Copy#`→memcpy, `Fill#`→memset,
+1. **Generic `Print#` — the convenience intrinsic.** Merge `PrintInt#`/
+   `PrintFloat#`/`PrintStr#`/`PrintChar#` into one `Print#`; the emission
+   dispatches by the argument's **protocol category** (`protocol_category()` in
+   `src/casting/graph.rs`, queried via the `Cast.#` universe properties — never
+   by type name):
+   - `#String` → `__print_str(ptr)`
+   - `#Float` → `__print_float`/`__print_float64` (+ the float-cache unbox)
+   - `#Char` → `__print_char(i64)` — prints a character
+   - `#Bool` → `__print_bool(i64)` — prints `true`/`false` (new runtime fn;
+     zext to the ABI width if Bool regs are i1/i8)
+   - else → `__print_int`
+   `Print#` casts what it needs to print; the natural representation wins
+   (Bool → `true`/`false`, never `1`/`0` — that requires an explicit
+   `(b as Int)`). `PrintChar#` is FOLDED AWAY (see §Char below).
+2. **`println!`/`print!` remain MACROS** (`print_plugin.rs`): their added value
+   is format-string argument insertion + line termination, not printing. The
+   newline is a Char literal `Print#('\n')`; the macro never emits
+   `PrintChar#`. `print!` keeps the newline-free behavior.
+3. **The `#Char` protocol becomes real.** `Cast.#Char` already exists in the
+   universe (`("Char", 4, 32, 32, 4, &[("Cast.#Char", ...), ("Cast.#Bit", ...)])`)
+   but was dormant:
+   - new `Expr::Char(char)` AST variant (char literals were `Expr::Decimal`);
+     the parser maps `Token::Char` → `Expr::Char`; the typechecker infers the
+     `Char` type; codegen emits the code point (i64, boxed like Decimal).
+   - the interpreter gets `Value::Char(char)`; `as_i64`/`as_f64` promote the
+     code point (C-style, so `'A' + 1` works); `Print#` prints the character.
+   - `lib/std/ffi/out.bv`: `putchar(c: Char)` → `term Print#(c)` (fixes the
+     dead unregistered `PutChar#` vestige — a latent compile failure).
+4. **`#Bool` prints as `true`/`false`.** The interpreter gets `Value::Bool(bool)`;
+   `Expr::Bool`, comparisons, and `IsType` produce `Value::Bool` (type-faithful,
+   so `Print#(a < b)` → `true`). `Print#` on a Bool prints `true`/`false`.
+   Explicit `(b as Int)` casts to `Value::Int` → `1`/`0`. The interpreter's
+   `Expr::Cast` (currently identity) converts the value category (Bool/Char →
+   Int/Float via structural equality with the bootstrap primitive `Type`s; the
+   interpreter has no universe, so `#Int`-subtype cast targets stay identity —
+   documented edge). `(n as Char)` (Int → Char) is included so chars can be
+   built from code points.
+5. **Dead vestige removal** — the `AllocArena#`/`Realloc#` name-match arm in
+   `allocation.rs`; `AllocArena#` in `global_lifetime.rs`; the `PrintChar#`
+   arm/signature/`bindings.dbvl` line once the fold lands.
+6. **BUGS.md** — mark the two OPEN items FIXED (verified).
+7. **Native-LLVM mapping** — already-done `Copy#`→memcpy, `Fill#`→memset,
    math→`llvm.*` stay; `Length#`/`Concat#` move in Phase 6.
+
+   *Consolidation verified at `c86d9286`; `Print#`/Char/Bool work lands in the
+   Phase 2 commit (was in-flight at the 2026-08-01 session).*
 
 ### Phase 3 — Consumptive operators (`~op`), move semantics, the arrow rewrite
 

@@ -323,7 +323,7 @@ fn collect_strings_expr(expr: &Expr, seen: &mut std::collections::HashSet<String
             for a in args { collect_strings_expr(a, seen, out); }
         }
         // Leaves — no sub-expressions
-        Expr::Decimal(_) | Expr::TaggedLiteral(_, _) | Expr::Bool(_) | Expr::Float(_) | Expr::Identifier(_)
+        Expr::Decimal(_) | Expr::TaggedLiteral(_, _) | Expr::Char(_) | Expr::Bool(_) | Expr::Float(_) | Expr::Identifier(_)
         | Expr::FormattingAnnotation(_) | Expr::StructLiteral { .. } => {}
         Expr::Field(recv, _) | Expr::Reflect(recv, _, _) => {
             collect_strings_expr(recv, seen, out);
@@ -2244,7 +2244,7 @@ impl LlvmBackend {
         writeln!(out, "declare i64 @__ioctl__(i64, i64, i64) #1").ok();
         writeln!(out, "declare i64 @__isatty__(i64) #1").ok();
         writeln!(out, "declare i64 @__print(ptr) #1").ok();
-        // 2026-08-01 (B0): PrintStr# intrinsic runtime symbol. The dead frgn
+        // 2026-08-01 (B0): Print# intrinsic runtime symbol. The dead frgn
         // declaration in lib/std/ffi/io.bv was removed (it declared a wrong
         // symbol and a { i64, i64 } String type); the intrinsic owns this
         // call site, so the backend declares the ABI: String = ptr to a

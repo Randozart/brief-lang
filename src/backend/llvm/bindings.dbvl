@@ -14,8 +14,10 @@ FSubF64#   -> fsub double %0, %1
 FMulF64#   -> fmul double %0, %1
 FDivF64#   -> fdiv double %0, %1
 Sqrt#      -> call double @llvm.sqrt.f64(double %0)
-PrintInt#  -> call i32 (ptr, ...) @printf(ptr @.fmt_int, i64 %0)
-PrintString# -> call i32 (ptr, ...) @printf(ptr @.fmt_str, ptr %0)
+// 2026-08-01 (audit): Print#/PrintChar# removed — the generic Print#
+// convenience intrinsic emits the __print_int/__print_str/__print_float/
+// __print_char/__print_bool family directly (protocol-category dispatch), not
+// printf. See src/backend/llvm/intrinsics.rs.
 Malloc#    -> call ptr @malloc(i64 %0)
 Free#      -> call void @free(ptr %0)
 Memcpy#    -> call ptr @memcpy(ptr %0, ptr %1, i64 %2)

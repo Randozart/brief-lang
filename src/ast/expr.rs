@@ -11,6 +11,11 @@ pub enum Expr {
     // ── Literals ────────────────────────────────────────────────
     Quoted(Vec<u8>), // "..." raw bytes
     Decimal(i64),    // 42, 16711680
+    /// 2026-08-01: a character literal `'a'` — a `#Char` protocol value (the
+    /// code point). The `Cast.#Char` universe property makes it type-distinct
+    /// from Int, so `Print#` dispatches it to `__print_char`. The code point is
+    /// stored as i64 (boxed, like Decimal).
+    Char(char),
     /// 2026-07-20: Tagged literal with discriminator prefix/suffix.
     /// Second field is the discriminator tag: "0x", "h", "bf", etc.
     /// Used by op Parse(Decimal, pre: "0x") for routing.

@@ -2727,16 +2727,20 @@ Float` cast produced a `double` register that fed a `fadd float` — type error
 **Fix:** the lane now emits `sitofp {src} to {dst_ll}` (float for a Float
 target, double for Float64/Double).
 
-## Implicit Int × Float coercion silently bitcasts the int — OPEN
+## Implicit Int × Float coercion silently bitcasts the int — FIXED
 
 **Date:** 2026-07-31
-**Status:** Open (benchmark worked around with explicit `as Float`)
+**Status:** Fixed (verified 2026-08-01)
 **Root cause:** `(count % 101) * 0.5` (Int * Float) compiles WITHOUT error and
 coerces the Int via `bitcast i32 to float` (reinterpreting the bits), producing
 garbage (accumulator_flush printed 0). AGENTS.md forbids implicit coercions —
 this should be a compile error (or a semantic `sitofp`). The correct pattern is
-an explicit `as Float` cast. Needs the typechecker to reject implicit
-Int↔Float arithmetic or coerce via sitofp.
+an explicit `as Float` cast.
+**Fix:** the typechecker now rejects implicit Int↔Float arithmetic in binary
+ops (`typechecker/mod.rs` infer_binary_op) — `Int * Float` is a type error
+unless the type declares a cross-type `op` overload. Verified:
+`(count % 101) * 0.5` errors with a clear message; `((count % 101) as Float) *
+0.5` type-checks.
 
 ## Outlined guard float params allocated as i64 — FIXED
 
@@ -2776,27 +2780,20 @@ re-enabled; matches C (5M/10M) and wins 0.58x.
 
 ---
 
-## frgn String declares disagree with call sites when SSO is off — OPEN
+## frgn String declares disagree with call sites when SSO is off — FIXED
 
 **Date:** 2026-08-01
-**Status:** Open (latent — no current impact; logged from plugin-rework FFI audit)
-**Root cause:** The frgn `declare` emission uses `protocol_llvm_type`
-(`src/backend/llvm/mod.rs:366`), which returns `{ i64, i64 }` for String-shaped
-types unconditionally. The frgn **call-site** uses `llvm_type`
-(`src/backend/llvm/emit_toplevel.rs:269`), which respects `feature_sso_strings`
-(default **off** → `ptr`). With SSO off, generated IR contains:
-`declare { i64, i64 } @__getenv_int({ i64, i64 })` alongside
-`call i64 @__getenv_int(ptr %key)`. LLVM treats these as two distinct functions;
-the call resolves to the C symbol with the correct ABI, and the wrong declare is
-GC-section-dropped — so it is harmless today.
-**Risk:** any path that calls through the declared `{i64,i64}` prototype (e.g. a
-future bridge or an SSO-enabled run that misses the extractvalue shim) breaks
-the ABI silently.
-**Fix (proposed):** make `protocol_llvm_type` honor the `feature_sso_strings`
-gate so the declare agrees with the call in both configurations. Additive, no
-semantic change; deferred out of the plugin/macro rework phase scope.
-**Evidence:** `benchmarks/float_math.ll:43-44` (declares) vs `:166,174` (calls);
-see `benchmarks/results/2026-08-01-plugin-rework-baseline.md` §2.3.
+**Status:** Fixed (the B0 bits model resolved it; verified 2026-08-01)
+**Root cause:** The frgn `declare` emission used `protocol_llvm_type`, which
+returned `{ i64, i64 }` for String-shaped types, while the call site used `ptr`
+with SSO off — a declare/call split-brain that was harmless only because the
+wrong declare was GC-dropped.
+**Fix:** B0 retired the structural `{i64,i64}` claim — `protocol_llvm_type` now
+returns `ptr` for every `#String` value (a String is a pointer to a
+length-prefixed `[len][bytes]` buffer; state slots keep the i64 machine word
+and convert via adapt_to_i64/ensure_typed_value). Verified:
+`declare i64 @__getenv_int(ptr)` agrees with `call i64 @__getenv_int(ptr %t2)`
+in `float_math.ll`.
 
 ---
 
@@ -2923,3 +2920,28 @@ String-typed register (bitcast ptr to ptr).
 **Lesson:** any pointer-typed value must be returned as a ptr under the bits
 model; tag-bit/boxing artifacts from the SSO era corrupt the type and must be
 audited when the SSO layer is retired.
+
+---
+
+## Float64 Literal Emitted as Float32 — Latent State Corruption — OPEN
+
+**Date:** 2026-08-01
+**Status:** Open (latent — no program uses Float64)
+**Root cause:** `Expr::Float(f)` always emits a float32 bitcast
+(`float_to_llvm_hex` → `bitcast i32 ... to float`). A `let d: Float64 = 3.25`
+state field (a `double` slot) is initialized by boxing that float32 into an i64
+and storing it — the double gets the 4 low bytes of the float32 pattern plus 4
+garbage bytes. Verified: `%State = type { float, double, ... }`, `init_state`
+stores `store i64 (zext (bitcast i32 1078984704 to float) ...)` into the double
+slot.
+**Impact:** `Float64` values are garbage from initialization onward. The Print#
+convenience intrinsic's `__print_float64` path is now correct (the IR loads a
+proper `double` and calls `__print_float64(double)`), but the VALUE is the
+corrupted double. No benchmark, stdlib file, or test uses Float64 today.
+**Fix (when Float64 becomes used):** the state-init path must store the literal
+at the field's declared width — emit a double bitcast (`f64` hex) for Float64
+fields and `store double`, or convert the float32 initializer to double before
+the store. The `Expr::Float` literal needs its expected width (from the binding
+or field type), not an unconditional float32.
+**Lesson:** literal emission must follow the binding/field's declared type, not
+default to the narrowest protocol variant.

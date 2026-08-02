@@ -66,50 +66,10 @@ pub fn emit_intrinsic_call(
         "DlClose#" => return emit_dl_close(backend, out, v, args, indent),
         // 2026-07-15: Debugging intrinsics
         "Backtrace#" => return emit_backtrace(backend, out, v, args, indent),
-        // 2026-07-28: Print intrinsics — emit correct LLVM call types directly
-        // (not through emit_external_call, which lacks type coercion for floats).
-        "PrintInt#" => {
-            let a = backend.emit_expr(out, &args[0], indent);
-            let llvm_ty = backend.llvm_type(&a.ty);
-            writeln!(out, "{}{} = call i64 @__print_int({} {})", indent, v, llvm_ty, a.name).ok();
-            return BTypedRegister { name: v.to_string(), ty: Type::int() };
-        }
-        "PrintFloat#" => {
-            let a = backend.emit_expr(out, &args[0], indent);
-            // 2026-08-01 (C3): a boxed Float param (i64 handle boxed at defn
-            // entry) must be unboxed through the float cache before the call —
-            // llvm_type() reports "float" from the brief type, but the register
-            // is really i64, and passing the handle to __print_float is an ABI
-            // mismatch (`float %ac0` where %ac0 is i64).
-            let unboxed = backend.fun.reg_float_cache.get(&a.name).cloned()
-                .unwrap_or_else(|| a.name.clone());
-            let (arg_llvm, fn_name) = if a.ty == Type::float64() {
-                ("double", "__print_float64")
-            } else {
-                ("float", "__print_float")
-            };
-            writeln!(out, "{}{} = call i64 @{}({} {})", indent, v, fn_name, arg_llvm, unboxed).ok();
-            return BTypedRegister { name: v.to_string(), ty: Type::int() };
-        }
-        "PrintChar#" => {
-            let a = backend.emit_expr(out, &args[0], indent);
-            writeln!(out, "{}{} = call i64 @__print_char(i64 {})", indent, v, a.name).ok();
-            return BTypedRegister { name: v.to_string(), ty: Type::int() };
-        }
-        "PrintStr#" => {
-            let a = backend.emit_expr(out, &args[0], indent);
-            // 2026-08-01 (B0): A Brief String value IS the ptr to a
-            // length-prefixed [len][bytes] buffer, and __print_str takes
-            // that pointer (the runtime's int64_t msg_bstr is the address,
-            // typed as const char* in brief_rt.c to match this ABI). The
-            // value register is already that ptr (literals emit it directly,
-            // state loads inttoptr it via the state adapter, frgns return it).
-            // Undo: if the ptr representation is ever reverted to an i64
-            // handle, restore the ptrtoint boxing here and in
-            // emit_legacy_string_literal.
-            writeln!(out, "{}{} = call i64 @__print_str(ptr {})", indent, v, a.name).ok();
-            return BTypedRegister { name: v.to_string(), ty: Type::int() };
-        }
+        // 2026-08-01 (audit): one generic `Print#` — dispatch the emission by
+        // the argument's protocol category. The four special-cased print
+        // intrinsics collapsed into this single type-dispatched intrinsic.
+        "Print#" => return emit_intrinsic_print(backend, out, v, args, indent),
         // 2026-07-18: Pointer operations — special-case because they need
         // type-dependent codegen (Deref# needs pointee type, Index# needs
         // element type, Cast# needs target type). Ptr# is a simple inttoptr.
@@ -1071,5 +1031,94 @@ fn emit_external_call(
     }).collect();
     let clean_name = name.trim_end_matches('#');
     writeln!(out, "{}{} = call i64 @{}({})", indent, v, clean_name, arg_strs.join(", ")).ok();
+    BTypedRegister { name: v.to_string(), ty: Type::int() }
+}
+
+/// 2026-08-01 (audit): the generic `Print#` convenience intrinsic — dispatch
+/// the emission by the argument's protocol category, resolved via the casting
+/// graph's type_to_protocol (Cast.# universe properties, never type names).
+/// `#String` → `__print_str(ptr)`, `#Char` → `__print_char`, `#Bool` →
+/// `__print_bool` (true/false — an explicit cast to Int is what yields 1/0),
+/// `#Float` → `__print_float`/`__print_float64`, else `__print_int`.
+///
+/// A boxed Bool/Char param is registered as `Type::int()` in SSA (its reg is
+/// the boxed i64), so the category must come from the DECLARED type
+/// (`let_original_types`) for identifier args — that is what carries the
+/// `#Bool`/`#Char` protocol. Boxed scalar regs are already i64 and are passed
+/// directly; native regs (i8 Bool, i32 Char) are widened to the i64 ABI.
+fn emit_intrinsic_print(
+    backend: &mut LlvmBackend,
+    out: &mut String,
+    v: &str,
+    args: &[Expr],
+    indent: &str,
+) -> BTypedRegister {
+    let a = backend.emit_expr(out, &args[0], indent);
+    let dispatch_ty = match &args[0] {
+        Expr::Identifier(name) => backend
+            .fun
+            .let_original_types
+            .get(name)
+            .cloned()
+            .unwrap_or_else(|| a.ty.clone()),
+        _ => a.ty.clone(),
+    };
+    let (category, _variant) = match backend.ctx.type_universe.as_ref() {
+        Some(u) => backend
+            .ctx
+            .casting_graph
+            .as_ref()
+            .map(|g| g.type_to_protocol(u, &dispatch_ty))
+            .unwrap_or_else(|| ("Bit".to_string(), String::new())),
+        None => ("Bit".to_string(), String::new()),
+    };
+    match category.as_str() {
+        "String" => {
+            // A Brief String value IS the ptr to a length-prefixed
+            // [len][bytes] buffer; __print_str takes that pointer.
+            writeln!(out, "{}{} = call i64 @__print_str(ptr {})", indent, v, a.name).ok();
+        }
+        "Char" => {
+            if backend.fun.boxed_scalar_regs.contains(&a.name) {
+                // A boxed Char param is already i64 — pass directly.
+                writeln!(out, "{}{} = call i64 @__print_char(i64 {})", indent, v, a.name).ok();
+            } else {
+                // Native Char regs are i32 (literal/let/field/cast) —
+                // widen to the i64 ABI before the call.
+                let wide = backend.fun.gen_reg();
+                writeln!(out, "{}{} = zext i32 {} to i64", indent, wide, a.name).ok();
+                writeln!(out, "{}{} = call i64 @__print_char(i64 {})", indent, v, wide).ok();
+            }
+        }
+        "Bool" => {
+            if backend.fun.boxed_scalar_regs.contains(&a.name) {
+                // A boxed Bool param is already i64 0/1 — pass directly.
+                writeln!(out, "{}{} = call i64 @__print_bool(i64 {})", indent, v, a.name).ok();
+            } else {
+                // Bool regs are i8 (Expr::Bool emits `add i8 0, 1/0`);
+                // widen to the i64 ABI before the call.
+                let wide = backend.fun.gen_reg();
+                writeln!(out, "{}{} = zext i8 {} to i64", indent, wide, a.name).ok();
+                writeln!(out, "{}{} = call i64 @__print_bool(i64 {})", indent, v, wide).ok();
+            }
+        }
+        "Float" => {
+            // A boxed Float param (i64 handle boxed at defn entry) must be
+            // unboxed through the float cache before the call (the
+            // 2026-08-01 C3 fix).
+            let unboxed = backend.fun.reg_float_cache.get(&a.name).cloned()
+                .unwrap_or_else(|| a.name.clone());
+            let (arg_llvm, fn_name) = if a.ty == Type::float64() {
+                ("double", "__print_float64")
+            } else {
+                ("float", "__print_float")
+            };
+            writeln!(out, "{}{} = call i64 @{}({} {})", indent, v, fn_name, arg_llvm, unboxed).ok();
+        }
+        _ => {
+            let llvm_ty = backend.llvm_type(&a.ty);
+            writeln!(out, "{}{} = call i64 @__print_int({} {})", indent, v, llvm_ty, a.name).ok();
+        }
+    }
     BTypedRegister { name: v.to_string(), ty: Type::int() }
 }

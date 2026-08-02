@@ -271,7 +271,7 @@ fn collect_expr_ids_inner(expr: &Expr, ids: &mut Vec<String>) {
             collect_expr_ids_inner(inner, ids);
         }
         // Literal leaves — no identifiers
-        Expr::Decimal(_) | Expr::TaggedLiteral(_, _) | Expr::Float(_) | Expr::Quoted(_) | Expr::TaggedQuotedLiteral(_, _) | Expr::Bool(_) => {}
+        Expr::Decimal(_) | Expr::TaggedLiteral(_, _) | Expr::Char(_) | Expr::Float(_) | Expr::Quoted(_) | Expr::TaggedQuotedLiteral(_, _) | Expr::Bool(_) => {}
         Expr::Deref(inner) | Expr::AddrOf(inner) => {
             collect_expr_ids_inner(inner, ids);
         }

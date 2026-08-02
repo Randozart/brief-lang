@@ -302,6 +302,7 @@ pub fn validate_hashtags_in_program(items: &[TopLevel], backend: &str, strict: b
 /// Intent: Collect all identifiers referenced by an expression.
 pub fn collect_expr_identifiers(expr: &Expr, ids: &mut std::collections::HashSet<String>) {
     match expr {
+        Expr::Char(_) => {}
         Expr::Identifier(n) => {
             ids.insert(n.clone());
         }

@@ -22,7 +22,12 @@ pub fn eval_expr(
         Expr::Decimal(n) => Ok(i64_to_bits(*n)),
         Expr::TaggedLiteral(n, _) => Ok(i64_to_bits(*n)),
         Expr::Float(f) => Ok(f64_to_bits(*f)),
-        Expr::Bool(b) => Ok(bool_to_bits(*b)),
+        // 2026-08-01 (audit): first-class Bool/Char values — the codegen
+        // dispatches Print# by protocol category, so the interpreter must carry
+        // char/bool-ness to print characters / true-false. as_i64/as_f64
+        // promote both (C-style), so arithmetic/comparisons are unchanged.
+        Expr::Bool(b) => Ok(Value::Bool(*b)),
+        Expr::Char(c) => Ok(Value::Char(*c)),
         Expr::Quoted(bytes) | Expr::TaggedQuotedLiteral(bytes, _) => Ok(Value::bits(bytes.clone())),
 
         // ── References ──────────────────────────────────────────
@@ -72,10 +77,38 @@ pub fn eval_expr(
         }
 
         // ── Cast ─────────────────────────────────────────────────
-        Expr::Cast(expr, _ty) => eval_expr(expr, heap, bindings),
+        // 2026-08-01 (audit): the codegen emits a real conversion when the
+        // protocol category changes (Bool→Int yields 1/0, Char→Int the code
+        // point, Int→Char builds a character), so the interpreter must convert
+        // the VALUE, not just reinterpret bits — otherwise `Print#((b as Int))`
+        // would print "true" here but "1" in the backend. The target category
+        // is resolved through the casting graph (Cast.# universe properties,
+        // the same source as codegen) — never by type name. Custom types
+        // resolve to "Bit" (identity reinterpretation, matching codegen's
+        // fallback).
+        Expr::Cast(expr, ty) => {
+            let v = eval_expr(expr, heap, bindings)?;
+            match target_protocol_category(ty).as_str() {
+                "Int" => match v {
+                    Value::Bool(b) => Ok(Value::Int(if b { 1 } else { 0 })),
+                    Value::Char(c) => Ok(Value::Int(c as i64)),
+                    _ => Ok(v),
+                },
+                "Float" => match v {
+                    Value::Bool(b) => Ok(Value::Float(if b { 1.0 } else { 0.0 })),
+                    Value::Char(c) => Ok(Value::Float(c as i64 as f64)),
+                    _ => Ok(v),
+                },
+                "Char" => match v {
+                    Value::Int(n) => Ok(Value::Char(char::from_u32(n as u32).unwrap_or('?'))),
+                    _ => Ok(v),
+                },
+                _ => Ok(v),
+            }
+        }
 
         // ── IsType ───────────────────────────────────────────────
-        Expr::IsType(_, _) => Ok(bool_to_bits(true)),
+        Expr::IsType(_, _) => Ok(Value::Bool(true)),
 
         // ── Within ───────────────────────────────────────────────
         Expr::Within(expr, _scope) => eval_expr(expr, heap, bindings),
@@ -242,7 +275,10 @@ fn eval_print_macro(
     let is_println = name == "println";
     if args.is_empty() {
         if is_println {
-            return execute_intrinsic("PrintChar#", &[i64_to_bits(10)], heap);
+            // 2026-08-01 (audit): the newline is a Char literal printed through
+            // the generic Print# path (line termination is the macro's job).
+            print_value(&Value::Char('\n'), heap)?;
+            return Ok(Value::Void);
         }
         return Err(RuntimeError::UnsupportedIntrinsic(
             "print! requires a value or a format-string argument".to_string(),
@@ -276,13 +312,15 @@ fn eval_print_macro(
     }
 
     if is_println {
-        execute_intrinsic("PrintChar#", &[i64_to_bits(10)], heap)?;
+        print_value(&Value::Char('\n'), heap)?;
     }
     Ok(Value::Void)
 }
 
-/// Print a runtime value by its representation: Float, integer, or string
-/// bits — mirroring the PrintFloat#/PrintInt#/PrintStr# dispatch in codegen.
+/// Print a runtime value by its representation: Float, integer, character,
+/// boolean, or string bits — mirroring the generic `Print#` dispatch in
+/// codegen. Bool prints true/false (its natural representation; an explicit
+/// cast to Int is what yields 1/0), matching `__print_bool`.
 fn print_value(value: &Value, heap: &mut VirtualHeap) -> Result<(), RuntimeError> {
     match value {
         Value::Float(f) => {
@@ -291,12 +329,38 @@ fn print_value(value: &Value, heap: &mut VirtualHeap) -> Result<(), RuntimeError
         Value::Int(n) => {
             print!("{}", n);
         }
+        Value::Bool(b) => {
+            print!("{}", if *b { "true" } else { "false" });
+        }
+        Value::Char(c) => {
+            print!("{}", c);
+        }
         Value::Bits(bytes) => {
-            execute_intrinsic("PrintStr#", &[Value::bits(bytes.clone())], heap)?;
+            execute_intrinsic("Print#", &[Value::bits(bytes.clone())], heap)?;
         }
         _ => {}
     }
     Ok(())
+}
+
+/// Resolve a cast target type's protocol category through the casting graph
+/// (Cast.# universe properties) — the same source the LLVM backend uses, so
+/// the interpreter's value conversion matches codegen. Never type-name
+/// matching. The lazily-built default universe covers the bootstrap
+/// primitives; custom types resolve to "Bit" (identity reinterpretation).
+fn target_protocol_category(ty: &Type) -> String {
+    use std::sync::OnceLock;
+    static CTX: OnceLock<(
+        crate::casting::graph::CastingGraph,
+        crate::type_universe::TypeUniverse,
+    )> = OnceLock::new();
+    let (graph, universe) = CTX.get_or_init(|| {
+        (
+            crate::casting::graph::CastingGraph::new(),
+            crate::type_universe::TypeUniverse::new(),
+        )
+    });
+    graph.type_to_protocol(universe, ty).0
 }
 
 /// Evaluate args[0] and decode it as a string (Bits) for env-var keys.
@@ -361,59 +425,59 @@ fn eval_binary_op(
             // floats, bools). This is the interpreter-first half of B1 (rule
             // #4); the LLVM backend mirrors it in emit_expr.rs.
             match (lv.string_bytes(heap), rv.string_bytes(heap)) {
-                (Some(a), Some(b)) => Ok(bool_to_bits(a == b)),
-                _ => Ok(bool_to_bits(lv.as_i64() == rv.as_i64())),
+                (Some(a), Some(b)) => Ok(Value::Bool(a == b)),
+                _ => Ok(Value::Bool(lv.as_i64() == rv.as_i64())),
             }
         }
         BinaryOpKind::Lt => {
             let la = lv.as_i64();
             let ra = rv.as_i64();
             match (la, ra) {
-                (Some(a), Some(b)) => Ok(bool_to_bits(a < b)),
-                _ => Ok(bool_to_bits(false)),
+                (Some(a), Some(b)) => Ok(Value::Bool(a < b)),
+                _ => Ok(Value::Bool(false)),
             }
         }
         BinaryOpKind::Gt => {
             let la = lv.as_i64();
             let ra = rv.as_i64();
             match (la, ra) {
-                (Some(a), Some(b)) => Ok(bool_to_bits(a > b)),
-                _ => Ok(bool_to_bits(false)),
+                (Some(a), Some(b)) => Ok(Value::Bool(a > b)),
+                _ => Ok(Value::Bool(false)),
             }
         }
         BinaryOpKind::Le => {
             let la = lv.as_i64();
             let ra = rv.as_i64();
             match (la, ra) {
-                (Some(a), Some(b)) => Ok(bool_to_bits(a <= b)),
-                _ => Ok(bool_to_bits(false)),
+                (Some(a), Some(b)) => Ok(Value::Bool(a <= b)),
+                _ => Ok(Value::Bool(false)),
             }
         }
         BinaryOpKind::Ge => {
             let la = lv.as_i64();
             let ra = rv.as_i64();
             match (la, ra) {
-                (Some(a), Some(b)) => Ok(bool_to_bits(a >= b)),
-                _ => Ok(bool_to_bits(false)),
+                (Some(a), Some(b)) => Ok(Value::Bool(a >= b)),
+                _ => Ok(Value::Bool(false)),
             }
         }
         BinaryOpKind::Neq => {
             // 2026-08-01 (B1): content inequality — mirrors the Eq arm above
             // (deref both Strings, compare payload bytes).
             match (lv.string_bytes(heap), rv.string_bytes(heap)) {
-                (Some(a), Some(b)) => Ok(bool_to_bits(a != b)),
-                _ => Ok(bool_to_bits(lv.as_i64() != rv.as_i64())),
+                (Some(a), Some(b)) => Ok(Value::Bool(a != b)),
+                _ => Ok(Value::Bool(lv.as_i64() != rv.as_i64())),
             }
         }
         BinaryOpKind::And => {
-            let lb = matches!(lv, Value::Bits(ref b) if b.iter().any(|x| *x > 0));
-            let rb = matches!(rv, Value::Bits(ref b) if b.iter().any(|x| *x > 0));
-            Ok(bool_to_bits(lb && rb))
+            let lb = lv.is_true();
+            let rb = rv.is_true();
+            Ok(Value::Bool(lb && rb))
         }
         BinaryOpKind::Or => {
-            let lb = matches!(lv, Value::Bits(ref b) if b.iter().any(|x| *x > 0));
-            let rb = matches!(rv, Value::Bits(ref b) if b.iter().any(|x| *x > 0));
-            Ok(bool_to_bits(lb || rb))
+            let lb = lv.is_true();
+            let rb = rv.is_true();
+            Ok(Value::Bool(lb || rb))
         }
         BinaryOpKind::BitAnd | BinaryOpKind::BitOr | BinaryOpKind::BitXor => {
             // 2026-08-01 (B1): #String bitwise defaults — operate on content
@@ -615,5 +679,91 @@ pub fn eval_statement(
         Statement::Foreach { .. } => Ok(Value::Void),
         Statement::TrgBinding { .. } => Ok(Value::Void),
         Statement::Match { .. } => unreachable!("match only in $defn"),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn eval1(expr: &Expr) -> Value {
+        eval_expr(expr, &mut VirtualHeap::new(), &mut HashMap::new()).unwrap()
+    }
+
+    // 2026-08-01 (audit): #Char/#Bool are first-class values — literals
+    // produce Value::Char/Value::Bool, and casts convert across categories
+    // (mirroring codegen, so Print# prints the same thing on both backends).
+
+    #[test]
+    fn test_char_literal_is_char_value() {
+        assert_eq!(eval1(&Expr::Char('A')), Value::Char('A'));
+        assert_eq!(eval1(&Expr::Char('A')).as_i64(), Some(65));
+    }
+
+    #[test]
+    fn test_bool_literal_is_bool_value() {
+        assert_eq!(eval1(&Expr::Bool(true)), Value::Bool(true));
+        assert_eq!(eval1(&Expr::Bool(true)).as_i64(), Some(1));
+        assert!(eval1(&Expr::Bool(false)).is_true() == false);
+    }
+
+    #[test]
+    fn test_cast_bool_to_int_is_0_or_1() {
+        assert_eq!(
+            eval1(&Expr::Cast(Box::new(Expr::Bool(true)), Type::int())),
+            Value::Int(1)
+        );
+        assert_eq!(
+            eval1(&Expr::Cast(Box::new(Expr::Bool(false)), Type::int())),
+            Value::Int(0)
+        );
+    }
+
+    #[test]
+    fn test_cast_char_to_int_is_code_point() {
+        assert_eq!(
+            eval1(&Expr::Cast(Box::new(Expr::Char('A')), Type::int())),
+            Value::Int(65)
+        );
+    }
+
+    #[test]
+    fn test_cast_int_to_char_builds_character() {
+        assert_eq!(
+            eval1(&Expr::Cast(Box::new(Expr::Decimal(65)), Type::char_())),
+            Value::Char('A')
+        );
+    }
+
+    #[test]
+    fn test_char_promotes_in_arithmetic() {
+        let add = Expr::BinaryOp(
+            BinaryOpKind::Add,
+            Box::new(Expr::Char('A')),
+            Box::new(Expr::Decimal(1)),
+        );
+        assert_eq!(eval1(&add).as_i64(), Some(66));
+    }
+
+    #[test]
+    fn test_comparison_returns_bool_value() {
+        let eq = Expr::BinaryOp(
+            BinaryOpKind::Eq,
+            Box::new(Expr::Decimal(42)),
+            Box::new(Expr::Decimal(42)),
+        );
+        assert_eq!(eval1(&eq), Value::Bool(true));
+        assert!(eval1(&eq).is_true());
+    }
+
+    #[test]
+    fn test_print_dispatches_bool_and_char() {
+        // Print# is the convenience intrinsic: Bool prints true/false, Char
+        // prints the character. Both must dispatch without error.
+        let mut heap = VirtualHeap::new();
+        let r = execute_intrinsic("Print#", &[Value::Bool(true)], &mut heap).unwrap();
+        assert_eq!(r.as_i64(), Some(0));
+        let r = execute_intrinsic("Print#", &[Value::Char('A')], &mut heap).unwrap();
+        assert_eq!(r.as_i64(), Some(0));
     }
 }

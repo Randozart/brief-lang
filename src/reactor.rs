@@ -94,7 +94,7 @@ impl Reactor {
             Statement::Guarded(condition, statements) => {
                 // Check if this guard's condition is currently true
                 if let Ok(cond_val) = interp.eval_expr(condition) {
-                    if cond_val == Value::Bits(vec![1u8]) {
+                    if cond_val .is_true() {
                         // Check if any statement in the guard body is an escape
                         for s in statements {
                             if self.contains_escape(s) {
@@ -140,7 +140,7 @@ impl Reactor {
                     // Run this single transaction
                     if let Some(txn) = self.transactions.get(idx) {
                         let pre_val = interp.eval_expr(&txn.contract.pre_condition)?;
-                        if pre_val == Value::Bits(vec![1u8]) {
+                        if pre_val .is_true() {
                             interp.prior_state = interp.state.clone();
                             for stmt in &txn.body {
                                 if let Err(e) = interp.exec_stmt(stmt) {
@@ -178,7 +178,7 @@ impl Reactor {
         for &txn_idx in self.get_dirty_transactions().iter() {
             if let Some(txn) = self.transactions.get(txn_idx) {
                 let pre_val = interp.eval_expr(&txn.contract.pre_condition)?;
-                if pre_val == Value::Bits(vec![1u8]) {
+                if pre_val .is_true() {
                     // PRE-EVALUATION GUARD: Check if any escape conditions are provably true
                     // before running the transaction. If so, skip entirely to avoid FFI side effects.
                     if self.will_escape(txn, interp) {
@@ -203,7 +203,7 @@ impl Reactor {
                                 Ok(StmtResult::TermSuccess) => {
                                     let post_val =
                                         interp.eval_expr(&txn.contract.post_condition)?;
-                                    if post_val == Value::Bits(vec![1u8]) {
+                                    if post_val .is_true() {
                                         term_executed = true;
                                         any_executed = true;
                                         break;
@@ -282,7 +282,7 @@ impl Reactor {
             }
             Statement::Term(Some(expr)) | Statement::TermBang(Some(expr)) => {
                 let value = interp.eval_expr(expr)?;
-                if value == Value::Bits(vec![1u8]) {
+                if value .is_true() {
                     Ok(StmtResult::TermSuccess)
                 } else {
                     Ok(StmtResult::TermFailed)
@@ -294,7 +294,7 @@ impl Reactor {
             Statement::Escape(_) => Ok(StmtResult::Escaped),
             Statement::Guarded(condition, statements) => {
                 let cond_val = interp.eval_expr(condition)?;
-                if cond_val == Value::Bits(vec![1u8]) {
+                if cond_val .is_true() {
                     for stmt in statements {
                         let result = self.execute_statement(interp, stmt)?;
                         match result {
@@ -341,7 +341,7 @@ impl Reactor {
             }
             Statement::If(cond, then, else_) => {
                 let cv = interp.eval_expr(cond)?;
-                if cv == Value::Bits(vec![1u8]) {
+                if cv .is_true() {
                     for stmt in then {
                         let result = self.execute_statement(interp, stmt)?;
                         if !matches!(result, StmtResult::Continue) {

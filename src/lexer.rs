@@ -553,7 +553,7 @@ ExclaimArrow,
 
     // ── Identifiers (including PascalCase# intrinsics) ────────
     // 2026-07-12: # is a valid identifier character.
-    // This allows Sqrt#, AddI64#, PrintInt# as single tokens.
+    // This allows Sqrt#, AddI64#, Print# as single tokens.
     // 2026-07-15: $ is also a valid identifier character.
     // This allows InsertRegistryImport$ as a single token.
     // $(Front) parses as Dollar LParen Identifier("Front") RParen

@@ -19,9 +19,10 @@ defn print_int(n: Int) -> Bool {
     term Print#(n);
 };
 
-/// Print a character to stdout.
+/// Print a character to stdout. The arg is a `#Char` value, so the generic
+/// `Print#` convenience intrinsic routes it to `__print_char` (2026-08-01).
 defn putchar(c: Char) -> Int {
-    term PutChar#(c);
+    term Print#(c);
 };
 
 /// Print a string to stdout (no newline).

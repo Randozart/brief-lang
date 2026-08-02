@@ -14,6 +14,7 @@ impl fmt::Display for Expr {
         match self {
             Expr::Quoted(bytes) | Expr::TaggedQuotedLiteral(bytes, _) => write!(f, "\"{}\"", String::from_utf8_lossy(bytes)),
             Expr::Decimal(n) | Expr::TaggedLiteral(n, _) => write!(f, "{}", n),
+            Expr::Char(c) => write!(f, "'{}'", c),
             Expr::Bool(b) => write!(f, "{}", if *b { "true" } else { "false" }),
             Expr::Float(n) => write!(f, "{}", n),
             Expr::Identifier(name) => write!(f, "{}", name),

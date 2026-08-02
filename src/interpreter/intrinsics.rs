@@ -482,46 +482,34 @@ pub fn execute_intrinsic(
         }
 
         // ── Print intrinsics (observable) ──────────────────────────────
-        "PrintInt#" => {
-            let val = arg_as_i64(args, 0)?;
-            print!("{}", val);
-            Ok(i64_to_bits(val))
-        }
-        "PrintFloat#" => {
-            let val = arg_as_f64(args, 0)?;
-            print!("{}", val);
-            // Return the float bits as the result
-            Ok(i64_to_bits(val.to_bits() as i64))
-        }
-        "PrintChar#" => {
-            let val = arg_as_i64(args, 0)?;
-            let ch = char::from_u32(val as u32).unwrap_or('?');
-            print!("{}", ch);
-            Ok(i64_to_bits(val))
-        }
-        "PrintStr#" => {
-            let val = args.get(0).cloned().unwrap_or(Value::Void);
-            match val {
-                // 2026-08-01: Direct string bytes (Expr::Quoted) print as text.
+        // 2026-08-01 (audit): one generic `Print#` — dispatch by the RUNTIME
+        // value's representation (Float / integer / string bits), mirroring
+        // the codegen's universe-category dispatch. PrintChar# remains the
+        // internal newline/char primitive.
+        "Print#" => {
+            // 2026-08-01 (audit): the convenience intrinsic — dispatch by the
+            // VALUE's category, mirroring the codegen's protocol-category
+            // dispatch. Bool prints true/false (natural); Char prints the
+            // character; an explicit cast to Int is what yields 1/0.
+            match args.get(0).cloned().unwrap_or(Value::Void) {
+                Value::Float(f) => {
+                    print!("{}", f);
+                }
                 Value::Bits(bytes) => {
                     print!("{}", String::from_utf8_lossy(&bytes));
                 }
-                // Heap string handle: 8-byte LE length header followed by the
-                // payload, as produced by the FFI string marshaller.
-                Value::Int(addr) if addr > 0 => {
-                    let len = heap
-                        .read(addr as u64, 8)
-                        .map(|b| i64::from_le_bytes(b.try_into().unwrap_or([0u8; 8])))
-                        .unwrap_or(0);
-                    if len > 0 {
-                        if let Some(payload) = heap.read(addr as u64 + 8, len as usize) {
-                            print!("{}", String::from_utf8_lossy(payload));
-                        }
-                    }
+                Value::Int(n) => {
+                    print!("{}", n);
                 }
+                Value::Bool(b) => {
+                    print!("{}", if b { "true" } else { "false" });
+                }
+                Value::Char(c) => {
+                    print!("{}", c);
+                }
+                Value::Void => {}
                 _ => {}
             }
-            // PrintStr# returns number of bytes printed
             Ok(i64_to_bits(0))
         }
         _ => Err(RuntimeError::UnsupportedIntrinsic(name.to_string())),

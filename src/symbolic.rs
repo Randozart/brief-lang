@@ -128,6 +128,7 @@ impl SymbolicState {
 pub fn eval_symbolic(expr: &Expr, state: &SymbolicState) -> SymbolicValue {
     match expr {
         // Literal values
+        Expr::Char(c) => SymbolicValue::Literal(*c as i64, "int".to_string()),
         Expr::Decimal(n) | Expr::TaggedLiteral(n, _) => SymbolicValue::Literal(*n, "int".to_string()),
         Expr::Float(_) => SymbolicValue::Unknown,
         Expr::Bool(b) => SymbolicValue::bool_literal(*b),

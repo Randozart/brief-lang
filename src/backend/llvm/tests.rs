@@ -3277,8 +3277,8 @@ fn test_batch_loop_rejects_pre_increment() {
 }
 
 // ── FFI regression guard (2026-08-01, Phase 0-1 of the plugin/macro rework) ──
-// print!/println! rewrite to direct C-runtime intrinsic calls (PrintInt#,
-// PrintStr#, PrintChar# etc.), which the backend emits as `call i64 @__print_*`.
+// print!/println! rewrite to the generic Print# intrinsic, which the
+// backend emits as `call i64 @__print_*` (dispatch by the argument's type).
 // The syntax renames in the plugin/macro rework (PrintLn! -> println!,
 // GetEnvInt! -> get_env_int!) must never introduce an indirection layer (GLUE
 // bridge shims, protocol chains) between the macro and the C runtime call.
@@ -3308,7 +3308,7 @@ fn test_print_plugin_emits_direct_ffi_calls() {
     pm.run_ast(crate::ast::StageKind::Parsed, &mut items, &mut universe)
         .expect("print plugin stage failed");
 
-    let mut backend = LlvmBackend::new();
+    let mut backend = LlvmBackend::new().with_type_universe(universe);
     let ir = backend.generate(&items, None);
     assert!(
         ir.contains("call i64 @__print_int("),
@@ -3344,7 +3344,7 @@ fn test_println_format_string_emits_direct_ffi_calls() {
     pm.run_ast(crate::ast::StageKind::Parsed, &mut items, &mut universe)
         .expect("print plugin stage failed");
 
-    let mut backend = LlvmBackend::new();
+    let mut backend = LlvmBackend::new().with_type_universe(universe);
     let ir = backend.generate(&items, None);
     assert!(
         ir.contains("call i64 @__print_str("),
@@ -3368,6 +3368,48 @@ fn test_println_format_string_emits_direct_ffi_calls() {
     );
 }
 
+/// 2026-08-01 (audit): the generic `Print#` convenience intrinsic dispatches
+/// by protocol category — Bool → __print_bool (true/false), Char →
+/// __print_char, and an explicit `(b as Int)` cast → __print_int (1/0).
+/// This pins the natural-representation contract on the LLVM backend.
+#[test]
+fn test_print_dispatch_by_protocol_category() {
+    let src = r#"
+        let b: Bool = true;
+        let c: Char = 'A';
+        defn show(b: Bool, c: Char) -> Int {
+            println!(b);
+            println!(c);
+            println!((b as Int));
+            term 0;
+        };
+    "#;
+    let mut items = parse_bv_source(src);
+    let mut universe = crate::type_universe::TypeUniverse::new();
+    let mut pm = crate::plugin::PluginManager::new();
+    pm.register(Box::new(crate::plugin::print_plugin::PrintPlugin));
+    pm.run_ast(crate::ast::StageKind::Parsed, &mut items, &mut universe)
+        .expect("print plugin stage failed");
+
+    let mut backend = LlvmBackend::new().with_type_universe(universe);
+    let ir = backend.generate(&items, None);
+    assert!(
+        ir.contains("call i64 @__print_bool("),
+        "a Bool must print via __print_bool (true/false); got:\n{ir}"
+    );
+    assert!(
+        ir.contains("call i64 @__print_char("),
+        "a Char must print via __print_char; got:\n{ir}"
+    );
+    assert!(
+        ir.contains("call i64 @__print_int("),
+        "a Bool explicitly cast to Int must print via __print_int (1/0); got:\n{ir}"
+    );
+    assert!(
+        !ir.contains("__print_bool_placeholder"),
+        "no placeholder emission may remain; got:\n{ir}"
+    );
+}
 /// 2026-08-01: An out-of-range positional placeholder is a compile error
 /// surfaced by the plugin stage, not a silent runtime truncation.
 #[test]
@@ -3412,7 +3454,7 @@ fn test_string_is_ptr_no_fat_pointer_in_ir() {
     pm.run_ast(crate::ast::StageKind::Parsed, &mut items, &mut universe)
         .expect("print plugin stage failed");
 
-    let mut backend = LlvmBackend::new();
+    let mut backend = LlvmBackend::new().with_type_universe(universe);
     let ir = backend.generate(&items, None);
     // String values must be pointer-sized machine words in state and registers.
     assert!(

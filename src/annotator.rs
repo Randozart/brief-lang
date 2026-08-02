@@ -184,7 +184,7 @@ impl Annotator {
             }
             Expr::FormattingAnnotation(..)
             | Expr::Quoted(..) | Expr::TaggedQuotedLiteral(..)
-            | Expr::Decimal(..) | Expr::TaggedLiteral(..)
+            | Expr::Decimal(..) | Expr::TaggedLiteral(..) | Expr::Char(..)
             | Expr::Bool(..)
             | Expr::Float(..)
             | Expr::Identifier(..) => {}
@@ -496,6 +496,7 @@ impl Annotator {
 
     fn format_expr(&self, expr: &Expr) -> String {
         match expr {
+            Expr::Char(c) => format!("'{}'", c),
             Expr::Decimal(n) | Expr::TaggedLiteral(n, _) => n.to_string(),
             Expr::Float(f) => f.to_string(),
             Expr::Quoted(s) | Expr::TaggedQuotedLiteral(s, _) => format!("\"{}\"", String::from_utf8_lossy(s)),

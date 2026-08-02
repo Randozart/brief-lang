@@ -423,6 +423,7 @@ pub fn eval_nav_chain(
                 Err(format!("undefined compile-time variable '{}'", name))
             }
         }
+        Expr::Char(c) => Ok(NavValue::Int(*c as i64)),
         Expr::Decimal(n) => Ok(NavValue::Int(*n)),
         Expr::Float(n) => Ok(NavValue::Int(*n as i64)),
         Expr::Bool(b) => Ok(NavValue::Bool(*b)),
@@ -2051,7 +2052,7 @@ fn resolve_dollar_refs_in_expr(expr: &mut Expr, scope: &Scope) -> Result<(), Str
             Ok(())
         }
         // Literals and simple values — no nested identifiers
-        Expr::Quoted(_) | Expr::TaggedQuotedLiteral(_, _) | Expr::Decimal(_) | Expr::Float(_) | Expr::Bool(_)
+        Expr::Quoted(_) | Expr::TaggedQuotedLiteral(_, _) | Expr::Decimal(_) | Expr::Char(_) | Expr::Float(_) | Expr::Bool(_)
         | Expr::TaggedLiteral(_, _)
         | Expr::FormattingAnnotation(_) | Expr::StructLiteral { .. } | Expr::Slice { .. } => Ok(()),
         Expr::Field(recv, _) | Expr::Reflect(recv, _, _) => resolve_dollar_refs_in_expr(recv, scope),
