@@ -67,7 +67,6 @@ txn withdraw(amount: Int)
 - This must be true for ALL execution paths
 
 ### Common Postcondition Patterns
-
 **State changes:**
 ```brief
 [counter == @counter + 1]      // Counter incremented
@@ -88,19 +87,33 @@ txn withdraw(amount: Int)
 [count >= @count]              // Count didn't decrease
 ```
 
-## 3. The `@` Prior State Operator
+## 2.5 The `[!/X]` Invert Form
 
-`@` gives you the value **before** the transaction started:
+A bracket that begins with `!/` **inverts the contract** — one bracket expands
+to both the precondition and the postcondition:
+
+| Form | Precondition | Postcondition |
+|---|---|---|
+| `[!/X]` | `!X` | `X` |
+| `[!/!X]` | `X` | `!X` |
 
 ```brief
-txn increment() [true][counter == @counter + 1] {
-    &counter = counter + 1;
+// The node fires only while the queue is NOT full, and leaves it full.
+node refill [!/ queue.^Len < capacity] {
+    queue <- item;
     term;
 };
 ```
 
-**Without `@`:**
+This is the successor of the old `~/` term-until token (removed) — a contract
+bracket is the honest place for "until this holds", since it carries both sides
+of the condition.
+
+## 3. The `@` Prior State Operator
+`@` gives you the value **before** the transaction started:
+
 ```brief
+
 [counter == counter + 1]  // Always false!
 ```
 

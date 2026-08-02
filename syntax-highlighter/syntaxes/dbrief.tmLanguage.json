@@ -205,12 +205,8 @@
           "match": "\\+|\\-|\\*|/"
         },
         {
-          "name": "keyword.operator.temporal-fallback.brief",
-          "match": "~\\?"
-        },
-        {
-          "name": "keyword.operator.term-until.brief",
-          "match": "~/"
+          "name": "keyword.operator.consumptive.brief",
+          "match": "~<-|~=|~\\+|~\\-|~\\*|~/"
         },
         {
           "name": "keyword.operator.bitwise.brief",

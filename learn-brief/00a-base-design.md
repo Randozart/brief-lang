@@ -227,15 +227,29 @@ This explicit marker exists because mutations are verification-critical. The com
 
 ---
 
-### `~` - Boolean Toggle
+### `~` — Consumptive Operators (and unary bitwise NOT)
 
-`~` is shorthand for flipping a boolean:
+`~` has two honest meanings (2026-08-01, Phase 3):
+
+1. **Unary `~x`** is bitwise NOT — unchanged.
+2. **`~` prepended to a binary operator** makes it **consumptive**: the RHS is
+   consumed (its backing destroyed) after the op. Only a mutable lvalue can be
+   consumed; reading it afterward is a use-after-move compile error.
 
 ```brief
-// These are equivalent:
-[~/ready]                // Shorthand
-[~ready][ready]          // Full form
-// Means: "fire when ready is false, ensure ready becomes true"
+a ~= b;      // move-assign: a = b, then b is dead
+a ~+ b;      // a = a + b, then b is dead
+dest ~<- src;  // destructive extract: copy src's element into dest, then src is dead
+~<- src;     // destructive discard
+```
+
+The old `~?` (temporal fallback) is removed; the old `~/` term-until token is
+now the consumptive divide. "Until this holds" contracts use the `[!/X]` invert
+form instead (see 02-contracts.md).
+
+```brief
+// Until-ready contracts, the modern form:
+[!/ready]                  // pre !ready, post ready (was: [~/ready])
 ```
 
 ---

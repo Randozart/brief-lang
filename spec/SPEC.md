@@ -522,12 +522,18 @@ reflect_target ::= "Len" | "Ptr" | "Size" | "Bytes" | "Alignment" | "Type"
                    // PascalCase compiler-known targets; any other name is an error.
                     | "AsStack" | "AsQueue"
 
-arrow_mut ::= expression "<-" expression           // Push: list <- x (no & needed)
-            | expression "<-" addr_of              // Pop: x <- &list (& on RHS = consumption)
+arrow_mut ::= expression "<-" expression           // dest <- value: copy into lhs (or InsertAt on the collection)
+            | expression "~<-" expression          // dest ~<- src: destructive extract (copy, then destroy rhs)
             | expression "[" expression "]" "<-" expression  // Indexed write
-arrow_discard ::= "<-" addr_of                     // Drain: <- &list (& = consumption)
-                | "<-" addr_of "[" expression "]"  // Indexed remove: <- &list[i]
-                | "<-" expression                    // Discard expression result: <- syscall! @ 1 (...)
+arrow_discard ::= "<-" expression                  // <- value: read discard
+               | "~<-" expression                  // ~<- value: destructive discard
+               | "<-" expression "[" expression "]"  // Indexed remove: <- list[i]
+
+consumptive_op ::= "~=" | "~+" | "~-" | "~*" | "~/"   // op with the RHS consumed after
+                                                   // (~ unary bitwise NOT is unchanged)
+
+contract_invert ::= "[!/" expression "]"            // [!/X] → pre !X, post X
+                  | "[!/!" expression "]"           // [!/!X] → pre X, post !X
 
 tuple ::= "(" (expression ("," expression)*)? ")"
 
