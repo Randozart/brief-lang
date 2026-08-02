@@ -867,6 +867,14 @@ impl LlvmBackend {
                     let bits_reg = field_reg("b");
                     writeln!(out, "{}{} = bitcast i32 {} to float", indent, bits_reg, h).ok();
                     writeln!(out, "{}store float {}, ptr {}, align 4", indent, bits_reg, gep).ok();
+                } else if ty == "double" {
+                    // 2026-08-01: a Float64 field's slot is `double` — emit the
+                    // literal at double width. The old else-branch boxed the
+                    // FLOAT32 into the double slot (4 garbage low bytes →
+                    // corrupted values, e.g. 3.25 → 5.33e-315).
+                    let bits_reg = field_reg("b");
+                    writeln!(out, "{}{} = bitcast i64 {} to double", indent, bits_reg, float64_to_llvm_hex(f)).ok();
+                    writeln!(out, "{}store double {}, ptr {}, align 8", indent, bits_reg, gep).ok();
                 } else {
                     let bits_reg = field_reg("b");
                     writeln!(out, "{}{} = bitcast i32 {} to float", indent, bits_reg, h).ok();
@@ -889,6 +897,12 @@ impl LlvmBackend {
                             let bits_reg = field_reg("b");
                             writeln!(out, "{}{} = bitcast i32 {} to float", indent, bits_reg, h).ok();
                             writeln!(out, "{}store float {}, ptr {}, align 4", indent, bits_reg, gep).ok();
+                        } else if ty == "double" {
+                            // 2026-08-01: Float64 field — emit at double width
+                            // (mirrors the Expr::Float arm above).
+                            let bits_reg = field_reg("b");
+                            writeln!(out, "{}{} = bitcast i64 {} to double", indent, bits_reg, float64_to_llvm_hex(-*f)).ok();
+                            writeln!(out, "{}store double {}, ptr {}, align 8", indent, bits_reg, gep).ok();
                         } else {
                             let bits_reg = field_reg("b");
                             writeln!(out, "{}{} = bitcast i32 {} to float", indent, bits_reg, h).ok();

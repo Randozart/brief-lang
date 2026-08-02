@@ -2923,10 +2923,10 @@ audited when the SSO layer is retired.
 
 ---
 
-## Float64 Literal Emitted as Float32 — Latent State Corruption — OPEN
+## Float64 Literal Emitted as Float32 — Latent State Corruption — FIXED
 
 **Date:** 2026-08-01
-**Status:** Open (latent — no program uses Float64)
+**Status:** Fixed (2026-08-01)
 **Root cause:** `Expr::Float(f)` always emits a float32 bitcast
 (`float_to_llvm_hex` → `bitcast i32 ... to float`). A `let d: Float64 = 3.25`
 state field (a `double` slot) is initialized by boxing that float32 into an i64
@@ -2938,11 +2938,12 @@ slot.
 convenience intrinsic's `__print_float64` path is now correct (the IR loads a
 proper `double` and calls `__print_float64(double)`), but the VALUE is the
 corrupted double. No benchmark, stdlib file, or test uses Float64 today.
-**Fix (when Float64 becomes used):** the state-init path must store the literal
-at the field's declared width — emit a double bitcast (`f64` hex) for Float64
-fields and `store double`, or convert the float32 initializer to double before
-the store. The `Expr::Float` literal needs its expected width (from the binding
-or field type), not an unconditional float32.
+**Fix:** `emit_field_init_value` (emit_toplevel.rs) now has a `double` case for
+both the plain `Expr::Float` and the `Neg(Float)` arms — a Float64 field stores
+`bitcast i64 <f64 hex> to double` (via `float64_to_llvm_hex`) instead of boxing
+the float32. Also: `try_coerce_via_parse` now treats `Neg(Float)`/`Neg(Decimal)`
+as a "Decimal" form, so `let d: Float64 = -3.25` typechecks (before it errored
+as Float). Verified: `d=3.25` and `d=-3.25` print correctly.
 **Lesson:** literal emission must follow the binding/field's declared type, not
 default to the narrowest protocol variant.
 

@@ -740,6 +740,15 @@ fn try_coerce_via_parse(
         Expr::Quoted(_) => ("Quoted", None),
         Expr::TaggedQuotedLiteral(_, prefix) => ("Quoted", Some(prefix.as_str())),
         Expr::Identifier(_) => ("Bare", None),
+        // 2026-08-01: `-3.25` is `Neg(Float)` — a negative numeric literal, so
+        // it is a "Decimal" form and can coerce (e.g. to Float64) like a
+        // positive literal. Without this, `let d: Float64 = -3.25` errored.
+        Expr::UnaryOp(crate::ast::UnaryOpKind::Neg, inner) => {
+            match inner.as_ref() {
+                Expr::Float(_) | Expr::Decimal(_) | Expr::TaggedLiteral(_, _) => ("Decimal", None),
+                _ => return false,
+            }
+        }
         _ => return (false),
     };
     let target_name = match target_ty {
