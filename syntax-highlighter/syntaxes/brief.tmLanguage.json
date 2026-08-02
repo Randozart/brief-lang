@@ -23,9 +23,6 @@
       "include": "#intrinsics"
     },
     {
-      "include": "#macros"
-    },
-    {
       "include": "#hash-words"
     },
     {
@@ -51,9 +48,6 @@
     },
     {
       "include": "#constants"
-    },
-    {
-      "include": "#macro-words"
     },
     {
       "include": "#stage-blocks"
@@ -127,6 +121,10 @@
         {
           "name": "keyword.control.async.brief",
           "match": "\\b(async|ASYNC)\\b"
+        },
+        {
+          "name": "keyword.control.modifier.brief",
+          "match": "\\b(seq|vol|sync)\\b"
         },
         {
           "name": "keyword.control.flow.brief",
@@ -215,6 +213,14 @@
         {
           "name": "storage.modifier.ownership.brief",
           "match": "@"
+        },
+        {
+          "name": "storage.modifier.ownership.brief",
+          "match": "\\?"
+        },
+        {
+          "name": "storage.modifier.ownership.brief",
+          "match": "!"
         },
         {
           "name": "keyword.operator.comparison.brief",
@@ -339,14 +345,6 @@
         {
           "name": "support.constant.property-value.intrinsic.brief",
           "match": "\\b[a-zA-Z_][a-zA-Z0-9_]*#"
-        }
-      ]
-    },
-    "macros": {
-      "patterns": [
-        {
-          "name": "keyword.control.macro.brief",
-          "match": "\\b(entry|args|print|println|get_env|get_env_int)!"
         }
       ]
     },
@@ -538,14 +536,6 @@
         {
           "name": "support.constant.property-value.target.brief",
           "match": "\\b(Source|Ir|Bin|Stage)\\$"
-        }
-      ]
-    },
-    "macro-words": {
-      "patterns": [
-        {
-          "name": "entity.name.tag.macro-call.brief",
-          "match": "\\b[a-zA-Z_][a-zA-Z0-9_]*!"
         }
       ]
     },

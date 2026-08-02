@@ -554,14 +554,21 @@ match_pattern ::= "_" | identifier ("(" identifier ("," identifier)* ")")?
 contract ::= "[" expression? "]" "[" expression? "]" watchdog?
 
 watchdog ::= ("?" | "!") "[" expression "]"
+             ("within" integer unit)?
+             ("->" identifier "(" identifier? ")")?
+unit      ::= "ms" | "seconds" | "minute" | "cyc"
 ```
 
 * **Precondition**: First bracket `[pre]` - what must hold before the
   function/transaction runs.
 * **Postcondition**: Second bracket `[post]` - what the function guarantees
   will be true after execution.
-* **Watchdog**: Optional timeout/condition `?[timeout]` (optional) or
-  `![timeout]` (required).
+* **Watchdog**: A **liveliness** contract. `?[...]` (optional) or `![...]`
+  (required). The loop continues while the condition holds and **fires** the
+  moment it stops holding. The `-> handler(val)` on-fire callback receives the
+  last computed value. The `within N <unit>` clause adds a deadline — the fire
+  happens even if the condition never stops holding, after `N` milliseconds/
+  seconds/minutes (via the `Now#` monotonic clock) or `N` loop cycles (`cyc`).
 * **Entry points**: The `[#]` entry marker is **removed** (2026-08-01, Phase
   2). CLI-addressable entry points are expressed with the `entry!` / `args!`
   macros instead (see the entry-point plugin). Writing `[#]` is a syntax

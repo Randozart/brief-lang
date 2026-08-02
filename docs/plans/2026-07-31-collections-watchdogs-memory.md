@@ -235,10 +235,12 @@ recorded.
 - **C5** — `series_converge`: `?[(x-last)^2 > eps] -> print_best(x)` fires on
   convergence. Brief and C both print 0.500050008 (MATCH, 1.00x). Registered
   in the harness.
-- **Deferred**: fuel (`?[N cyc]` — cycles_bound) and time (`?[N ms]` — `Now#`
-  clock_gettime) — the parse consumes the units but the bounds aren't wired to
-  emission yet (the liveliness predicate covers the benchmark; time/fuel need
-  the `Now#` intrinsic + deadline compare).
+- **Fuel/time DONE (2026-08-01)**: the `within N <unit>` deadline (`ms`/`cyc`/
+  `seconds`/`minute`) + the `Now#` monotonic clock + the deadline compare in
+  both loop engines (the countdown and the memory-counter). The `within` clause
+  comes before `-> handler`; the deadline is stored in nanoseconds
+  (`WatchdogSpec.deadline_ns`). See
+  `docs/plans/2026-08-01-lifetime-hints-and-intrinsic-audit.md` Phase 1.
 
 ### Phase D — Memory-by-proof
 Stress benchmarks + fixes as §5; global-lifetime design plan written.

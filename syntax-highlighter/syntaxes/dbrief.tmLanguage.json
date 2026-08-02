@@ -97,6 +97,10 @@
           "match": "\\b(async|ASYNC)\\b"
         },
         {
+          "name": "keyword.control.modifier.brief",
+          "match": "\\b(seq|vol|sync)\\b"
+        },
+        {
           "name": "keyword.control.flow.brief",
           "match": "\\b(term|escape|TERM|ESCAPE)\\b"
         },
@@ -175,6 +179,14 @@
         {
           "name": "variable.language.prior-state.brief",
           "match": "@"
+        },
+        {
+          "name": "storage.modifier.ownership.brief",
+          "match": "\\?"
+        },
+        {
+          "name": "storage.modifier.ownership.brief",
+          "match": "!"
         },
         {
           "name": "keyword.operator.comparison.brief",
