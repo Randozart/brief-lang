@@ -117,6 +117,20 @@ char* brief_cstr_to_brief(const char* c_str) {
     return buf;
 }
 
+// 2026-08-01: the `Int → #String` casting-graph lane — format an integer into
+// a Brief string. The lane emission calls `ptr @int_to_str(i64)` (a String IS
+// a ptr to [len][bytes]); previously this symbol was undefined (a latent link
+// error whenever `(n as String)` was used). `__int_to_str__` is the alias the
+// direct-cast path emits.
+char* int_to_str(int64_t n) {
+    char tmp[32];
+    snprintf(tmp, sizeof(tmp), "%lld", (long long)n);
+    return brief_cstr_to_brief(tmp);
+}
+char* __int_to_str__(int64_t n) {
+    return int_to_str(n);
+}
+
 /// Free a Brief string allocated by brief_cstr_to_brief or similar.
 void brief_free_brief_str(void* handle) {
     if (handle) free(handle);

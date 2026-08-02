@@ -3017,3 +3017,22 @@ benchmarks are unaffected (they never print/push the guard field mid-loop).
 field's body reads to the loop-counter phi register (or store the body's writes
 to the field back to `%State` when the body reads it). No file has been
 modified for this yet.
+
+## `(n as String)` — Latent Link Error + Type Mismatch — FIXED
+
+**Date:** 2026-08-01
+**Status:** Fixed
+**Root cause:** the `Int → #String` casting-graph lane (`ExtCall("int_to_str")`,
+`src/casting/graph.rs:167`) emitted `call i64 @int_to_str(...)` (a hardcoded
+`i64` return), but a String IS a `ptr` to `[len][bytes]` — so the String target
+then `ptrtoint`'d an i64 (a type mismatch), AND `int_to_str` was undefined in
+the runtime (a latent link error). The direct-cast path emitted
+`call i64 @__int_to_str__` — also undefined.
+**Fix:** (a) `int_to_str`/`__int_to_str__` defined in `brief_rt.c` (format the
+int via snprintf + wrap as a `[len][bytes]` String); (b) the ExtCall lane
+emission uses `dst_ll` for the return type (`call ptr @int_to_str(i64)`) —
+the same pattern the `CastFromBitCallback` case already used; (c) the direct
+path emits `call ptr @__int_to_str__`; (d) the declares are `ptr`-returning.
+Verified end-to-end: `s = (n as String); println!("s={}", s)` prints `s=42`.
+Regression tests: `test_cast_int_to_string_lane_emits_ptr_call` (lane path) +
+`test_emit_cast_int_to_string` (direct path).

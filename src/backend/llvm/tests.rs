@@ -1533,8 +1533,8 @@ fn test_emit_cast_int_to_string() {
         }),
     ];
     let output = backend.generate(&program, None);
-    assert!(output.contains("call i64 @__int_to_str__(i64"),
-        "Cast Int -> String should call __int_to_str__. Got:\n{}", output);
+    assert!(output.contains("call ptr @__int_to_str__(i64"),
+        "Cast Int -> String should call __int_to_str__ (a String is a ptr to [len][bytes]). Got:\n{}", output);
 }
 
 #[test]
@@ -3965,5 +3965,29 @@ fn test_arrow_only_collection_is_kept_in_state() {
     assert!(
         !ir.contains("load i64, ptr @st"),
         "the collection must resolve as a %State field, not an undefined @st global; got:\n{ir}"
+    );
+}
+
+/// `(n as String)` routes through the `Int → #String` casting-graph lane
+/// (`ExtCall int_to_str`), which must emit `call ptr @int_to_str(i64)` — the
+/// String IS a ptr to [len][bytes]. Regression: the ExtCall hardcoded `i64`
+/// (type mismatch) and `int_to_str` was undefined (a latent link error).
+#[test]
+fn test_cast_int_to_string_lane_emits_ptr_call() {
+    let src = r#"
+        defn f(n: Int) -> String {
+            term (n as String);
+        };
+    "#;
+    let mut items = parse_bv_source(src);
+    let mut universe = crate::type_universe::TypeUniverse::new();
+    let mut pm = crate::plugin::PluginManager::new();
+    pm.run_ast(crate::ast::StageKind::Parsed, &mut items, &mut universe)
+        .expect("plugin stage failed");
+    let mut backend = LlvmBackend::new().with_type_universe(universe);
+    let ir = backend.generate(&items, None);
+    assert!(
+        ir.contains("call ptr @int_to_str(i64"),
+        "the Int->String lane must emit call ptr @int_to_str; got:\n{ir}"
     );
 }

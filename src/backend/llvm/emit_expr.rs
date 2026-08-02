@@ -764,9 +764,12 @@ impl LlvmBackend {
                     }
                 } else if *target == Type::string() || *target == Type::data() {
                     if src_ll == "i64" {
+                        // 2026-08-01: __int_to_str__ returns a String (a ptr to
+                        // [len][bytes]); the old `call i64` mismatched the
+                        // char* return type at LTO.
                         writeln!(
                             out,
-                            "{}{} = call i64 @__int_to_str__(i64 {})",
+                            "{}{} = call ptr @__int_to_str__(i64 {})",
                             indent, v, src.name
                         )
                         .ok();
@@ -3019,8 +3022,14 @@ impl LlvmBackend {
                         indent, dst, cur_ll, cur).ok();
                 }
                 crate::casting::graph::LaneKind::ExtCall(fn_name) => {
-                    writeln!(out, "{}{} = call i64 @{}({} {})",
-                        indent, dst, fn_name, cur_ll, cur).ok();
+                    // 2026-08-01: the ExtCall's return type must match the
+                    // lane's destination LLVM type — `Int → #String` emits
+                    // `call ptr @int_to_str(...)` (a String IS a ptr), while
+                    // `#String → Int` emits `call i64 @str_to_int(...)`. The
+                    // old hardcoded `i64` made int_to_str return an i64 that
+                    // the String target then ptrtoint'd (a type mismatch).
+                    writeln!(out, "{}{} = call {} @{}({} {})",
+                        indent, dst, dst_ll, fn_name, cur_ll, cur).ok();
                 }
                 crate::casting::graph::LaneKind::ExtractData => {
                     writeln!(out, "{}{} = extractvalue {} {}, 0",
