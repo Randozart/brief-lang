@@ -7,6 +7,14 @@
 Phases 0–5 delivered the object layer, type validation, reflection `.^`/`.^^`,
 watchdog parsing, tautology detection).
 
+**Plan map:** this plan delivered Phases A–E (collections, sweep arrays,
+watchdogs, memory-by-proof). Phase 3 of the master plan —
+[2026-08-01-consumptive-operators-lifetime-and-c-surface.md](2026-08-01-consumptive-operators-lifetime-and-c-surface.md) —
+**changes the `<-`-op syntax this plan uses** (`~<-` replaces `<- &` for the
+destructive extract; the arrow no longer uses `&`), and the free-check (Phase 5)
+extends the garbage-scheduler design recorded in
+[2026-08-01-global-lifetime-design.md](2026-08-01-global-lifetime-design.md).
+
 ---
 
 ## 1. Goal

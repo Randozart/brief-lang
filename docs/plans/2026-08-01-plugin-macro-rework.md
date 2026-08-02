@@ -2,9 +2,15 @@
 
 **Date:** 2026-08-01
 **Status:** Approved. Part A (macro rework) approved at start; Part B (the bits
-model — String as `#String` protocol) added and approved 2026-08-01.
+model — String as `#String` protocol) added and approved 2026-08-01. **Merged**
+(see `docs/2026-08-01-plugin-macro-rework-completion.md`).
 **Worktree:** `../brief-compiler-plugin-rework` (new, from `main` `d6c6c818`)
 **Baseline worktree:** `../brief-compiler-baseline` — synced to `d6c6c818` on 2026-08-01
+
+**Plan map:** merged. The master plan —
+[2026-08-01-consumptive-operators-lifetime-and-c-surface.md](2026-08-01-consumptive-operators-lifetime-and-c-surface.md) —
+builds on this merged base (the `Print#` consolidation, the consumptive `~op`
+operators, the stream symbols, the free-check).
 **Part B is in the queue NOW:** Phase B0 is a hard prerequisite for completing
 Part A Phase 1 (the format-demo clang error) and for Part A Phases 3-4.
 Phase B1 is a hard prerequisite for Part A Phase 3 (`entry_cmd() == "cmd"`

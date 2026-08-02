@@ -6,6 +6,15 @@
 benchmark pins this end-state.
 **Worktree:** `brief-compiler-cwm` (`feat/collections-watchdogs-memory`)
 
+**Plan map:** the garbage-scheduler design. It is extended by the free-check
+(Phase 5 of the master plan —
+[2026-08-01-consumptive-operators-lifetime-and-c-surface.md](2026-08-01-consumptive-operators-lifetime-and-c-surface.md)),
+which adds the runtime refcount, the `free`/`keep` body annotations, and
+`briefc memcheck` on top of the compile-time proof recorded here. Related:
+[2026-08-01-lifetime-hints-and-intrinsic-audit.md](2026-08-01-lifetime-hints-and-intrinsic-audit.md)
+(Phases 1–4) and
+[2026-07-31-collections-watchdogs-memory.md](2026-07-31-collections-watchdogs-memory.md).
+
 ## 0. The framing: a garbage SCHEDULER, not a garbage collector
 
 This design is a **garbage scheduler** (proof-directed deallocation), not a

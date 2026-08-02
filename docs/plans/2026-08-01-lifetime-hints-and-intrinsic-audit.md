@@ -1,11 +1,20 @@
 # Lifetime Hints, Intrinsic Audit, and C-Surface Reduction
 
 **Date:** 2026-08-01
-**Status:** Planned → executing
+**Status:** Superseded by the master plan —
+[2026-08-01-consumptive-operators-lifetime-and-c-surface.md](2026-08-01-consumptive-operators-lifetime-and-c-surface.md).
 **Worktree:** `brief-compiler-cwm` (`feat/collections-watchdogs-memory`)
-**Relationship:** completes Phase D2's garbage-scheduler design
-(`docs/plans/2026-08-01-global-lifetime-design.md`) and sweeps the
-plugin-rework's remaining dust.
+
+**Relationship (plan map):** the original Phases 1–4. Phase 1 (docs/highlighter)
+is DONE. Phases 2–6 (intrinsic audit, consumptive operators, stream symbols,
+free-check, C-surface) are folded into the master plan, which records the design
+research (C independence, the intrinsic criteria, the garbage-scheduler
+free-check, `#StdIn`/`#StdOut`/`#StdErr` stream symbols, the trigger-port
+removal) with the full rationale. Also related:
+[2026-08-01-global-lifetime-design.md](2026-08-01-global-lifetime-design.md)
+(garbage scheduling) and
+[2026-07-31-collections-watchdogs-memory.md](2026-07-31-collections-watchdogs-memory.md)
+(the `<-`-op syntax that Phase 3's arrow rewrite changes).
 
 ## Goals
 

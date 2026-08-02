@@ -3,15 +3,21 @@
 **Date:** 2026-08-01
 **Status:** Planned → executing
 **Worktree:** `brief-compiler-cwm` (`feat/collections-watchdogs-memory`)
-**Supersedes / consolidates:**
-- `docs/plans/2026-08-01-lifetime-hints-and-intrinsic-audit.md` (the original Phases 1–4)
-- `docs/plans/2026-08-01-global-lifetime-design.md` (garbage scheduling)
-- `docs/plans/2026-07-31-collections-watchdogs-memory.md` (Phase D)
 
-This document is the **authoritative record of the design decisions, the research
-behind them, and the implementation plan.** The token shuffling, the arrow
-rewrite, the stream symbols, and the trigger-port removal all have rationale
-recorded here so nothing is ambiguous.
+**This is the AUTHORITATIVE plan.** It supersedes/consolidates the original
+Phases 1–4 and records the design research (C independence, the intrinsic
+audit, the garbage scheduler + free-check, stream symbols, the trigger-port
+removal) so the token/arrow shuffling is unambiguous.
+
+## Plan map (how the plans relate)
+
+| Plan | Role | Status |
+|---|---|---|
+| **[This plan](2026-08-01-consumptive-operators-lifetime-and-c-surface.md)** | The authoritative record — the consumptive `~op` operators, the arrow rewrite, the `!/` contract sugar, the intrinsic audit, the stream symbols, the free-check, and the `.bv`/`.ebv` C-surface reduction. All design research lives here. | Active |
+| [2026-08-01-lifetime-hints-and-intrinsic-audit.md](2026-08-01-lifetime-hints-and-intrinsic-audit.md) | The original Phases 1–4 (docs/highlighter, intrinsic audit, free-check, C-surface). Phase 1 is done; the rest is folded into this master plan's Phases 2–6. | Superseded by this plan |
+| [2026-08-01-global-lifetime-design.md](2026-08-01-global-lifetime-design.md) | The garbage-scheduler design (the compile-time proof of each field's last consumer + the `__brief_free` calibration). The free-check (Phase 5) extends it with the runtime refcount + `free`/`keep` + `memcheck`. | Design → extended |
+| [2026-07-31-collections-watchdogs-memory.md](2026-07-31-collections-watchdogs-memory.md) | The collections/watchdogs/memory phase — the obj model, the `<-` ops, the watchdogs (incl. `within`), and the memory-by-proof stress family. The `~<-` arrow rewrite (Phase 3) changes the `<-`-op syntax this plan uses. | Complete → superseded syntax |
+| [2026-08-01-plugin-macro-rework.md](2026-08-01-plugin-macro-rework.md) | The merged plugin/macro rework + the String bits model (B0–B3). Fully merged. The `~op`/arrow work is orthogonal but builds on the merged base. | Merged |
 
 ---
 
