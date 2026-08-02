@@ -140,6 +140,35 @@ template = "call ptr @pool_alloc(i64 {size})"
 free = "none"  # pool reuse — no per-element free
 ```
 
+### 0.5 Garbage Scheduling (Global-Lifetime)
+
+2026-08-01 (Phase D2): this is a garbage **scheduler**, not a collector —
+the compiler PROVES, at compile time, the reactor-ordered last transaction
+that touches each heap-backed state field, and emits a `Free#` (routed through
+`@__brief_free`) exactly after that transaction's body. Design:
+`docs/plans/2026-08-01-global-lifetime-design.md`.
+
+- **The pass** (`analysis/global_lifetime.rs`): for each field whose
+  initializer is a `Malloc#`/`Alloc#`/`AllocArena#`, computes the touch set
+  (new `collect_statement_identifiers`) and the last ordered consumer in the
+  transition graph's deterministic firing order. Conservative: a field with no
+  provable last consumer is NOT freed (lives for the program).
+- **Emission**: the countdown emits the scheduled frees in its exit block
+  (`.cde_`, before `ret`), after the whole loop; the non-loop path emits them
+  after the body. The handle is the field's STORED value loaded from `%State`
+  (re-evaluating the initializer would re-malloc).
+- **Soundness**: a field freed but touched later is structurally impossible
+  (the scheduler only frees after the last ordered touch); **manually-freed
+  fields are excluded** (a manual `Free#` + a scheduled free = double-free).
+- **Calibration**: scheduled frees route through `__brief_free` (a runtime
+  counter + `free`) so a test can assert frees == allocs via
+  `__brief_free_count()`. `@__brief_free` is declared `argmemonly` (it only
+  touches the pointer's memory) so a scheduled free doesn't clobber the module.
+- **Observability as liveness**: the scheduled free makes the freed field's
+  memory OBSERVABLE — dead table writes that a C compiler would eliminate stay
+  alive in Brief. Benchmarks must be honest on BOTH sides (a read-modify-write
+  whose RHS reads a previously-written slot keeps the C reference honest too).
+
 ## 1. Foundation: Stack-Allocated State
 
 Every `main()` entry allocates `%State` via `alloca`:

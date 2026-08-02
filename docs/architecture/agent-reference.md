@@ -130,6 +130,13 @@ frgn XXH64(data_ptr: Int, len: Int, seed: Int) -> Int as frgn__xxh64 from "link/
 7. **`[true][term == true || term == false]` is a useless tautology** — write a
    contract that constrains behavior.
 8. **Never weaken contracts** — never change `[product > 0]` to `[true]`.
+9. **Watchdogs** (`?[...]`/`![...]` after the postcondition) are liveliness
+   contracts: the loop continues while the condition holds and fires when it
+   stops. The `-> handler(val)` callback receives the last computed value.
+   The `within N <unit>` clause (`ms`/`seconds`/`minute`/`cyc`) adds a deadline
+   — the fire happens even if the condition never stops holding (via the `Now#`
+   monotonic clock or a cycle counter). See
+   `learn-brief/02-contracts.md` §7.
 
 ### Intrinsic conventions
 

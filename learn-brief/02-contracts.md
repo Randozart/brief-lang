@@ -173,23 +173,34 @@ txn safe_divide(a: Int, b: Int)
 
 ## 7. Watchdog Timers
 
-Optional or required timeouts:
+A watchdog is a **liveliness** contract: the loop continues while the
+condition holds, and **fires** the moment it stops — or when a deadline
+expires. `?[...]` is optional (the fire is graceful); `![...]` is required
+(firing is an error exit).
 
 ```brief
-// Optional timeout (warns if exceeded)
-txn slow_operation() [true][done] ?[5000ms] {
-    do_work();
-    &done = true;
+// Optional liveliness: fires when `x` reaches 5 (the condition stops holding)
+txn converge() [true][done] ?[x < 5] {
+    x = x + 1;
     term;
 };
 
-// Required timeout (error if exceeded)
-txn critical_operation() [true][done] ![1000ms] {
-    do_critical_work();
-    &done = true;
+// The `-> handler(val)` on-fire callback receives the LAST COMPUTED VALUE
+defn report(v: Int) -> Int { println!(v); term v; };
+txn converge() [true][done] ?[x < 5] -> report(x) {
+    x = x + 1;
     term;
 };
+
+// The `within N <unit>` deadline fires even if the condition never stops
+// holding — after N milliseconds or N loop cycles:
+txn poll() [true][done] ?[ready] within 10 ms -> report(x) { ... };
+txn sweep() [true][done] ?[done]   within 1000 cyc { ... };
 ```
+
+Units: `ms` / `seconds` / `minute` (a time deadline via the `Now#` monotonic
+clock) and `cyc` (a cycle/fuel deadline). The `within` clause comes before the
+`-> handler`.
 
 ## 8. Complete Example
 

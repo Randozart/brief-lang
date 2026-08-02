@@ -4,25 +4,25 @@ Brief provides powerful built-in data types with O(1) operations.
 
 ## 1. HashMap<K, V>
 
-Hash-based key-value storage with O(1) lookup.
+Hash-based key-value storage with O(1) lookup. The current `std/collections.bv`
+HashMap is a **flat open-addressing** obj (keys/vals Ptr arrays) constructed via
+`op Init` and mutated through method calls:
 
 ```brief
-// Construction - use a transaction to modify state
-let map: HashMap<String, Int> = new_map();
+import { HashMap } from "std/collections.bv";
 
-txn add_to_map [true][map.contains_key("age")] {
-    map = map.insert("age", 42);
-    map = map.insert("count", 100);
+// Construction via op Init
+let map: HashMap<Int, Int> = 0;
+
+txn fill [true][map.count > 0] {
+    map.insert(1, 42);
+    map.insert(2, 100);
     term;
 };
 
-// Lookup (use in transactions or functions)
-defn get_age(m: HashMap<String, Int>) -> Int {
-    let val = m.get("age");
-    when val.is_some() {
-        term val.unwrap();
-    };
-    term 0;
+// Lookup — the member returns the value for the key's hash slot
+defn get_age(m: HashMap<Int, Int>) -> Int {
+    term m.get(1);
 };
 ```
 
@@ -102,38 +102,34 @@ defn unique_items(list: List<String>) -> List<String> {
 };
 ```
 
-## 3. Stack<T>
+## 3. Stack<T, N>
 
-LIFO (Last-In-First-Out) structure.
+LIFO (Last-In-First-Out) structure. The current collections (`std/collections.bv`)
+are **obj instances** driven by the `<-` operators: `op InsertAt` (push),
+`op ExtractFrom` (pop), `op Init` (`let s: Stack<T, N> = 0` constructs).
 
 ```brief
-// Construction
-let stack: Stack<Int> = new_stack();
+import { Stack } from "std/collections.bv";
 
-// Push
-stack = stack.push(1);
-stack = stack.push(2);
-stack = stack.push(3);
+// Construction via op Init — allocates the instance + its data buffer
+let stack: Stack<Int, 64> = 0;
 
-// Pop (returns Option<(T, Stack<T>)>)
-let result = stack.pop();
-[result.is_some()] {
-    let (value, new_stack) = result.unwrap();
-    // value = 3, new_stack has [1, 2]
-};
+// Push — `<-` dispatches op InsertAt → the self-bound push member
+stack <- 1;
+stack <- 2;
+stack <- 3;
 
-// Peek (returns Option<T>)
-let top = stack.peek();
+// Pop (discard the value) — `<- &` dispatches op ExtractFrom → pop
+<- &stack;
 
-// Metadata
-let len = stack .^Len;
-[stack.is_empty()] {
-    println("Stack is empty");
-};
-
-// Clear
-stack = stack.clear();
+// Pop into a binding reads the member's returned value
+let v: Int = stack.pop();
 ```
+
+`obj Stack<T, N> { data: T[N]; len: Int; ... }` — a fixed-size, array-backed
+stack (no heap in the hot path). `List<T>` is the heap-backed growable form
+(`inner: ListBuffer<T>` with a `Malloc#`-allocated buffer); `RingBuffer<T>`
+is the fixed-size circular buffer.
 
 ### Example: Expression Evaluator
 
