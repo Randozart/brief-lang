@@ -21,6 +21,14 @@ impl<'a> Parser<'a> {
         if self.eat(&Token::Eq) {
             let value = self.parse_assignment()?;
             expr = Expr::BinaryOp(BinaryOpKind::Eq, Box::new(expr), Box::new(value));
+        } else if self.eat(&Token::TildeEq) {
+            // 2026-08-01 (Phase 3): `a ~= b` — assign, then consume b.
+            let value = self.parse_assignment()?;
+            expr = Expr::BinaryOp(
+                BinaryOpKind::Eq,
+                Box::new(expr),
+                Box::new(Expr::Consume(Box::new(value))),
+            );
         }
         Ok(expr)
     }
@@ -146,6 +154,14 @@ impl<'a> Parser<'a> {
             } else if self.eat(&Token::PlusPlus) {
                 let rhs = self.parse_factor()?;
                 expr = Expr::BinaryOp(BinaryOpKind::Concat, Box::new(expr), Box::new(rhs));
+            } else if self.eat(&Token::TildePlus) {
+                // 2026-08-01 (Phase 3): `a ~+ b` — add, then consume b.
+                let rhs = self.parse_factor()?;
+                expr = Expr::BinaryOp(BinaryOpKind::Add, Box::new(expr), Box::new(Expr::Consume(Box::new(rhs))));
+            } else if self.eat(&Token::TildeMinus) {
+                // 2026-08-01 (Phase 3): `a ~- b` — subtract, then consume b.
+                let rhs = self.parse_factor()?;
+                expr = Expr::BinaryOp(BinaryOpKind::Sub, Box::new(expr), Box::new(Expr::Consume(Box::new(rhs))));
             } else {
                 break;
             }
@@ -166,6 +182,15 @@ impl<'a> Parser<'a> {
             } else if self.eat(&Token::Percent) {
                 let rhs = self.parse_unary()?;
                 expr = Expr::BinaryOp(BinaryOpKind::Mod, Box::new(expr), Box::new(rhs));
+            } else if self.eat(&Token::TildeStar) {
+                // 2026-08-01 (Phase 3): `a ~* b` — multiply, then consume b.
+                let rhs = self.parse_unary()?;
+                expr = Expr::BinaryOp(BinaryOpKind::Mul, Box::new(expr), Box::new(Expr::Consume(Box::new(rhs))));
+            } else if self.eat(&Token::TildeSlash) {
+                // 2026-08-01 (Phase 3): `a ~/ b` — divide, then consume b.
+                // (TildeSlash was the dead term-until token; now consumptive /.)
+                let rhs = self.parse_unary()?;
+                expr = Expr::BinaryOp(BinaryOpKind::Div, Box::new(expr), Box::new(Expr::Consume(Box::new(rhs))));
             } else {
                 break;
             }

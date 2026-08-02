@@ -139,6 +139,7 @@ pub fn eval_expr(
         }
         // ── Address-of ───────────────────────────────────────────
         // 2026-07-18: Wrap the inner value in Value::Ref to represent a pointer.
+        Expr::Consume(inner) => eval_expr(inner, heap, bindings),
         Expr::AddrOf(inner) => {
             let val = eval_expr(inner, heap, bindings)?;
             Ok(Value::Ref(Box::new(val)))
@@ -589,6 +590,22 @@ pub fn eval_statement(
             let val = eval_expr(rhs, heap, bindings)?;
             if let Expr::Identifier(name) = lhs {
                 bindings.insert(name.clone(), val);
+            }
+            Ok(Value::Void)
+        }
+        Statement::ArrowAssign { target, value, consume } => {
+            let val = eval_expr(value, heap, bindings)?;
+            if let Some(t) = target.as_ref() {
+                if let Expr::Identifier(name) = t.as_ref() {
+                    bindings.insert(name.clone(), val);
+                }
+            }
+            if *consume {
+                // 2026-08-01 (Phase 3): a consumed value's local is dead after
+                // the statement — remove it so a later read errors.
+                if let Expr::Identifier(name) = value.as_ref() {
+                    bindings.remove(name);
+                }
             }
             Ok(Value::Void)
         }

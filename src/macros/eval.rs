@@ -2038,7 +2038,8 @@ fn resolve_dollar_refs_in_expr(expr: &mut Expr, scope: &Scope) -> Result<(), Str
         | Expr::Within(inner, _)
         | Expr::IsType(inner, _)
         | Expr::Deref(inner)
-        | Expr::AddrOf(inner) => resolve_dollar_refs_in_expr(inner, scope),
+        | Expr::AddrOf(inner)
+        | Expr::Consume(inner) => resolve_dollar_refs_in_expr(inner, scope),
         Expr::PluginIntercept { args: pargs, .. } => {
             for arg in pargs.iter_mut() {
                 resolve_dollar_refs_in_expr(arg, scope)?;
@@ -2079,6 +2080,12 @@ fn resolve_dollar_refs_in_stmt(stmt: &mut Statement, scope: &Scope) -> Result<()
         }
         Statement::Assign(target, value) => {
             resolve_dollar_refs_in_expr(target, scope)?;
+            resolve_dollar_refs_in_expr(value, scope)
+        }
+        Statement::ArrowAssign { target, value, .. } => {
+            if let Some(t) = target {
+                resolve_dollar_refs_in_expr(t, scope)?;
+            }
             resolve_dollar_refs_in_expr(value, scope)
         }
         Statement::Term(expr) | Statement::TermBang(expr)

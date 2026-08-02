@@ -82,6 +82,13 @@ pub enum Expr {
     Deref(Box<Expr>),
     AddrOf(Box<Expr>),
 
+    /// 2026-08-01 (Phase 3): a consumptive operand — the value is used by the
+    /// enclosing op (`a ~= b`, `a ~+ b`, `dest ~<- src`, `~<- src;`), then its
+    /// backing storage is destroyed. Use-after-move of the consumed local is a
+    /// compile error (the move pass tracks it). Only a mutable lvalue can be
+    /// consumed — `~op` on a constant is a compile error.
+    Consume(Box<Expr>),
+
     // ── Plugin intercept ────────────────────────────────────────
     // 2026-07-19: name!(args). Resolved by Front or Mid stage plugins.
     PluginIntercept {
@@ -290,7 +297,7 @@ impl Expr {
                     }
                 }
             }
-            Expr::Deref(inner) | Expr::AddrOf(inner) => inner.collect_vars_into(acc),
+            Expr::Deref(inner) | Expr::AddrOf(inner) | Expr::Consume(inner) => inner.collect_vars_into(acc),
             _ => {}
         }
     }

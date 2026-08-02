@@ -41,8 +41,9 @@ impl<'a> Parser<'a> {
                 self.pos += 1;
                 Ok(Statement::Expression(crate::ast::Expr::Decimal(0)))
             }
-            // 2026-07-17: Discard: `<- &queue;` — pop and discard the value.
-            Some(Token::ArrowLeft) => self.parse_arrow_discard_statement(),
+            // 2026-08-01 (Phase 3): Discard — `<- queue;` (read discard) /
+            // `~<- queue;` (destructive discard). The `&` marker is removed.
+            Some(Token::ArrowLeft) | Some(Token::TildeArrowLeft) => self.parse_arrow_discard_statement(),
             _ => {
                 // 2026-07-24: Skip doc comments inside blocks too
                 if let Some(&Token::DocComment(_) | &Token::DocCommentBang(_)) = self.peek() {
@@ -335,25 +336,51 @@ impl<'a> Parser<'a> {
     }
 
     /// Discard: `<- &queue;` — pop from collection, discard result.
+    /// 2026-08-01 (Phase 3): leading arrow discard — `<- value;` (read
+    /// discard) or `~<- value;` (destructive discard). The old `&` fake-pointer
+    /// marker is removed: `<- &queue;` is now `<- queue;`.
     fn parse_arrow_discard_statement(&mut self) -> Result<Statement, SyntaxError> {
-        self.pos += 1; // consume '<-'
+        let consume = if self.eat(&Token::TildeArrowLeft) {
+            true
+        } else {
+            self.pos += 1; // consume '<-'
+            false
+        };
         let target = self.parse_expression()?;
         self.expect(Token::Semicolon)?;
-        Ok(Statement::Expression(Expr::AddrOf(Box::new(target))))
+        Ok(Statement::ArrowAssign {
+            target: None,
+            value: Box::new(target),
+            consume,
+        })
     }
 
     /// Fallback: parse as expression statement: expr;
     /// Also handles infix `<-` for push/pop: `&queue <- value` or `x <- &queue`.
     fn parse_expression_statement(&mut self) -> Result<Statement, SyntaxError> {
         let lhs = self.parse_expression()?;
-        // 2026-07-17: Infix `<-` — push/pop. `&queue <- x` → push,
-        // `x <- &queue` → pop. The codegen distinguishes by which side
-        // has Expr::AddrOf.
-        if self.eat(&Token::ArrowLeft) {
-            let rhs = self.parse_expression()?;
-            self.expect(Token::Semicolon)?;
-            return Ok(Statement::Assign(lhs, rhs));
-        }
+            // 2026-08-01 (Phase 3): Arrow — `dest <- value` (copy into lhs),
+            // `dest ~<- value` (destructive extract). The dispatch to
+            // insert/read/extract is by the op binding on each side (done in
+            // the typechecker/codegen); the parser records the ArrowAssign.
+            if self.eat(&Token::ArrowLeft) {
+                let rhs = self.parse_expression()?;
+                self.expect(Token::Semicolon)?;
+                return Ok(Statement::ArrowAssign {
+                    target: Some(Box::new(lhs)),
+                    value: Box::new(rhs),
+                    consume: false,
+                });
+            }
+            if self.eat(&Token::TildeArrowLeft) {
+                let rhs = self.parse_expression()?;
+                self.expect(Token::Semicolon)?;
+                return Ok(Statement::ArrowAssign {
+                    target: Some(Box::new(lhs)),
+                    value: Box::new(rhs),
+                    consume: true,
+                });
+            }
         // 2026-07-24: Compound assignment += and -=.
         // x += 1 → Statement::Assign(id("x"), BinaryOp(Add, id("x"), 1))
         let compound_kind = if self.eat(&Token::PlusEq) {

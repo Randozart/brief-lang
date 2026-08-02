@@ -57,6 +57,12 @@ impl Annotator {
                     self.collect_calls_from_expr(lhs, calls);
                     self.collect_calls_from_expr(expr, calls);
                 }
+                Statement::ArrowAssign { target, value, .. } => {
+                    if let Some(t) = target {
+                        self.collect_calls_from_expr(t, calls);
+                    }
+                    self.collect_calls_from_expr(value, calls);
+                }
                 Statement::Guarded(condition, statements) => {
                     self.collect_calls_from_expr(condition, calls);
                     self.collect_calls_from_body(statements, calls);
@@ -139,7 +145,7 @@ impl Annotator {
                 self.collect_calls_from_expr(list, calls);
                 self.collect_calls_from_expr(index, calls);
             }
-            Expr::Deref(inner) | Expr::AddrOf(inner) => self.collect_calls_from_expr(inner, calls),
+            Expr::Deref(inner) | Expr::AddrOf(inner) | Expr::Consume(inner) => self.collect_calls_from_expr(inner, calls),
             Expr::Field(obj, _) => self.collect_calls_from_expr(obj, calls),
             Expr::Tuple(elems) => {
                 for e in elems {
@@ -390,6 +396,12 @@ impl Annotator {
                     self.format_expr(expr),
                 )
             }
+            Statement::ArrowAssign { target, value, consume } => {
+                match target {
+                    Some(t) => format!("{}{} {} {}{};\n", spaces, self.format_expr(t), if *consume { "~<-" } else { "<-" }, self.format_expr(value), ""),
+                    None => format!("{}{} {};\n", spaces, if *consume { "~<-" } else { "<-" }, self.format_expr(value)),
+                }
+            }
             Statement::Guarded(condition, statements) => {
                 let mut output = format!("{}when {} {{\n", spaces, self.format_expr(condition));
                 for s in statements {
@@ -497,6 +509,7 @@ impl Annotator {
     fn format_expr(&self, expr: &Expr) -> String {
         match expr {
             Expr::Char(c) => format!("'{}'", c),
+            Expr::Consume(inner) => format!("~{}", self.format_expr(inner)),
             Expr::Decimal(n) | Expr::TaggedLiteral(n, _) => n.to_string(),
             Expr::Float(f) => f.to_string(),
             Expr::Quoted(s) | Expr::TaggedQuotedLiteral(s, _) => format!("\"{}\"", String::from_utf8_lossy(s)),

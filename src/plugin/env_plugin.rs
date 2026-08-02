@@ -114,6 +114,7 @@ fn walk_expr(expr: &mut Expr) {
             walk_expr(rhs);
         }
         Expr::UnaryOp(_, inner) => walk_expr(inner),
+        Expr::Consume(inner) => walk_expr(inner),
         Expr::Char(_) => {}
         Expr::Decimal(_) | Expr::Bool(_) | Expr::Float(_) => {}
         Expr::Call(_, args, _) => {

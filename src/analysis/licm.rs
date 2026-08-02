@@ -118,7 +118,7 @@ fn is_invariant_expression(
         Expr::Slice { .. } => false,
         Expr::Tuple(items) => items.iter().all(|i| is_invariant_expression(i, write_set, invariant_names, state_fields)),
         Expr::Block(_) | Expr::If(_, _, _) | Expr::Match(_, _) | Expr::Lambda(_, _) => false,
-        Expr::Deref(_) | Expr::AddrOf(_) => false,
+        Expr::Deref(_) | Expr::AddrOf(_) | Expr::Consume(_) => false,
         Expr::Within(_, _) | Expr::IsType(_, _) | Expr::Exists(_) => false,
         Expr::StructLiteral { .. } => false,
         Expr::Field(_, _) | Expr::Reflect(_, _, _) | Expr::MethodCall(..) | Expr::FormattingAnnotation(_) => false,

@@ -954,13 +954,20 @@ impl<'a> Parser<'a> {
                 });
             }
         }
-        // Parse: [pre] if present
+        // Parse: [pre] if present — including the [!/X] / [!/!X] two-in-one
+        // invert form (one bracket that expands to both pre and post).
+        let mut saw_invert = false;
         if self.check(&Token::LBracket) {
             contract_saw_bracket = true;
-            pre = self.parse_single_contract_condition()?;
+            if self.contract_is_invert() {
+                (pre, post) = self.parse_contract_invert()?;
+                saw_invert = true;
+            } else {
+                pre = self.parse_single_contract_condition()?;
+            }
         }
-        // Parse: [post] if present
-        if self.check(&Token::LBracket) {
+        // Parse: [post] if present (skipped for the two-in-one invert form)
+        if !saw_invert && self.check(&Token::LBracket) {
             contract_saw_bracket = true;
             post = self.parse_single_contract_condition()?;
         }
@@ -1088,6 +1095,30 @@ impl<'a> Parser<'a> {
         let expr = self.parse_expression()?;
         self.expect(Token::RBracket)?;
         Ok(expr)
+    }
+
+    /// 2026-08-01 (Phase 3): `[!/X]` / `[!/!X]` — a bracket whose content
+    /// begins with `!/` (invert the contract). One bracket expands to the
+    /// pre/post pair:
+    ///   `[!/X]`  → pre `!X`, post `X`
+    ///   `[!/!X]` → pre `X`,  post `!X`
+    fn contract_is_invert(&self) -> bool {
+        if !self.check(&Token::LBracket) {
+            return false;
+        }
+        self.tokens.get(self.pos + 1).map_or(false, |(t, _)| matches!(t, Token::Not))
+            && self.tokens.get(self.pos + 2).map_or(false, |(t, _)| matches!(t, Token::Slash))
+    }
+
+    fn parse_contract_invert(&mut self) -> Result<(Expr, Expr), SyntaxError> {
+        self.pos += 3; // consume '[', '!', '/'
+        let inner = self.parse_expression()?;
+        self.expect(Token::RBracket)?;
+        if let Expr::UnaryOp(UnaryOpKind::Not, y) = &inner {
+            Ok(((**y).clone(), Expr::UnaryOp(UnaryOpKind::Not, y.clone())))
+        } else {
+            Ok((Expr::UnaryOp(UnaryOpKind::Not, Box::new(inner.clone())), inner))
+        }
     }
 
     /// Parse optional derivation block: := { ... } := ref_fn
@@ -3002,3 +3033,93 @@ mod tests {
     }
 }
 
+
+#[cfg(test)]
+mod phase3_tests {
+    use crate::lexer::tokenize;
+    use crate::parser::Parser;
+
+    fn parse_prog(src: &str) -> Vec<crate::ast::TopLevel> {
+        let tokens = tokenize(src).unwrap();
+        let mut p = Parser::new(tokens, src);
+        p.parse_program().expect("parse failed")
+    }
+
+    fn body_of(tl: &crate::ast::TopLevel) -> Vec<crate::ast::Statement> {
+        match tl {
+            crate::ast::TopLevel::Definition(d) => d.body.clone(),
+            _ => vec![],
+        }
+    }
+
+    #[test]
+    fn test_consumptive_ops_wrap_rhs_in_consume() {
+        // a ~= b; a ~+ b; a ~- b; a ~* b; a ~/ b
+        let prog = parse_prog(
+            "defn f(a: Int, b: Int) -> Int {\n term a ~+ b;\n };\n\
+             defn g(a: Int, b: Int) -> Int {\n a ~= b; term a;\n };\n",
+        );
+        // g: Statement::Assign(a, Consume(b))
+        let defns: Vec<_> = prog
+            .iter()
+            .filter_map(|t| match t {
+                crate::ast::TopLevel::Definition(d) => Some(d.name.clone()),
+                _ => None,
+            })
+            .collect();
+        assert!(defns.contains(&"g".to_string()));
+        // f: term (a ~+ b) — BinaryOp(Add, a, Consume(b))
+        let f = prog
+            .iter()
+            .find_map(|t| match t {
+                crate::ast::TopLevel::Definition(d) if d.name == "f" => Some(d.body.clone()),
+                _ => None,
+            })
+            .unwrap();
+        let has_consume = f.iter().any(|s| match s {
+            crate::ast::Statement::Term(Some(crate::ast::Expr::BinaryOp(_, _, r))) => {
+                matches!(r.as_ref(), crate::ast::Expr::Consume(_))
+            }
+            _ => false,
+        });
+        assert!(has_consume, "~+ must wrap the RHS in Expr::Consume");
+    }
+
+    #[test]
+    fn test_arrow_parses_as_arrow_assign() {
+        // dest <- src; dest ~<- src; <- src; ~<- src;
+        let prog = parse_prog(
+            "defn f(a: Int, b: Int) -> Int {\n a <- b;\n a ~<- b;\n <- b;\n ~<- b;\n term a;\n };\n",
+        );
+        let body = body_of(&prog[0]);
+        let kinds: Vec<String> = body
+            .iter()
+            .filter_map(|s| match s {
+                crate::ast::Statement::ArrowAssign { target, consume, .. } => Some(format!(
+                    "arrow:{}-{}",
+                    consume,
+                    target.is_some()
+                )),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(kinds, vec!["arrow:false-true", "arrow:true-true", "arrow:false-false", "arrow:true-false"]);
+    }
+
+    #[test]
+    fn test_invert_contract_expands_pair() {
+        // [!/X] → pre !X, post X ; [!/!X] → pre X, post !X
+        let prog = parse_prog(
+            "node n [!/ a > 0] { term; };\nnode m [!/! (b == 0)] { term; };\n",
+        );
+        // node n: pre = !(a > 0), post = a > 0
+        let n = prog.iter().find_map(|t| match t {
+            crate::ast::TopLevel::Transaction(tr) if tr.name == "n" => Some(tr.contract.clone()),
+            _ => None,
+        });
+        let n = n.expect("node n");
+        let pre_not = matches!(n.pre_condition, crate::ast::Expr::UnaryOp(crate::ast::UnaryOpKind::Not, _));
+        assert!(pre_not, "node n pre must be !(a > 0)");
+        assert!(!matches!(n.post_condition, crate::ast::Expr::UnaryOp(crate::ast::UnaryOpKind::Not, _)));
+    }
+}

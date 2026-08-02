@@ -255,7 +255,7 @@ impl Reactor {
         stmt: &Statement,
     ) -> Result<StmtResult, crate::interpreter::RuntimeError> {
         match stmt {
-            Statement::Assign(_, _) => {
+            Statement::Assign(_, _) | Statement::ArrowAssign { .. } => {
                 interp.exec_stmt(stmt)?;
                 Ok(StmtResult::Continue)
             }

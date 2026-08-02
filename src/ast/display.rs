@@ -102,6 +102,7 @@ impl fmt::Display for Expr {
             Expr::DerivationBlock(block) => fmt::Display::fmt(block, f),
             Expr::Deref(inner) => write!(f, "*{}", inner),
             Expr::AddrOf(inner) => write!(f, "&{}", inner),
+            Expr::Consume(inner) => write!(f, "~{}", inner),
             Expr::PluginIntercept { name, args, type_args: _ } => {
                 write!(f, "{}!(", name)?;
                 for (i, arg) in args.iter().enumerate() {
@@ -265,6 +266,12 @@ impl fmt::Display for Statement {
                 }
             }
             Statement::Assign(lhs, rhs) => write!(f, "{} = {};", lhs, rhs),
+            Statement::ArrowAssign { target, value, consume } => {
+                match target {
+                    Some(t) => write!(f, "{} {} {}", t, if *consume { "~<-" } else { "<-" }, value),
+                    None => write!(f, "{} {}", if *consume { "~<-" } else { "<-" }, value),
+                }
+            }
             Statement::Term(val) => {
                 if let Some(val) = val {
                     write!(f, "term {};", val)

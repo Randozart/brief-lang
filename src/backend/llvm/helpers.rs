@@ -137,6 +137,9 @@ impl LlvmBackend {
             Expr::AddrOf(inner) => {
                 Expr::AddrOf(Box::new(Self::rewrite_cell_identifiers(inner, cell_name)))
             }
+            Expr::Consume(inner) => {
+                Expr::Consume(Box::new(Self::rewrite_cell_identifiers(inner, cell_name)))
+            }
             Expr::PluginIntercept { name, args, .. } => Expr::PluginIntercept {
                 name: name.clone(),
                 args: args
@@ -209,6 +212,11 @@ impl LlvmBackend {
                 Self::rewrite_cell_identifiers(lhs, cell_name),
                 Self::rewrite_cell_identifiers(expr, cell_name),
             ),
+            Statement::ArrowAssign { target, value, consume } => Statement::ArrowAssign {
+                target: target.as_ref().map(|t| Box::new(Self::rewrite_cell_identifiers(t, cell_name))),
+                value: Box::new(Self::rewrite_cell_identifiers(value, cell_name)),
+                consume: *consume,
+            },
             Statement::Guarded(cond, stmts) => Statement::Guarded(
                 Self::rewrite_cell_identifiers(cond, cell_name),
                 stmts

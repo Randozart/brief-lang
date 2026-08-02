@@ -238,6 +238,10 @@ fn collect_strings_stmt(stmt: &Statement, seen: &mut std::collections::HashSet<S
     match stmt {
         Statement::Let { expr, .. } => { if let Some(e) = expr { collect_strings_expr(e, seen, out); } }
         Statement::Assign(_, expr) => { collect_strings_expr(expr, seen, out); }
+        Statement::ArrowAssign { target, value, .. } => {
+            if let Some(t) = target { collect_strings_expr(t, seen, out); }
+            collect_strings_expr(value, seen, out);
+        }
         Statement::Expression(e) => { collect_strings_expr(e, seen, out); }
         Statement::Term(Some(e)) | Statement::TermBang(Some(e)) | Statement::Return(Some(e)) => { collect_strings_expr(e, seen, out); }
         Statement::Term(None) | Statement::TermBang(None) | Statement::Return(None) => {}
@@ -265,6 +269,7 @@ fn collect_strings_stmt(stmt: &Statement, seen: &mut std::collections::HashSet<S
 
 fn collect_strings_expr(expr: &Expr, seen: &mut std::collections::HashSet<String>, out: &mut Vec<String>) {
     match expr {
+        Expr::Consume(inner) => { collect_strings_expr(inner, seen, out); }
         Expr::Quoted(s) | Expr::TaggedQuotedLiteral(s, _) => {
             let s_str = String::from_utf8_lossy(s).into_owned();
             if !seen.contains(&s_str) {

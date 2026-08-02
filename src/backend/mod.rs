@@ -303,6 +303,9 @@ pub fn validate_hashtags_in_program(items: &[TopLevel], backend: &str, strict: b
 pub fn collect_expr_identifiers(expr: &Expr, ids: &mut std::collections::HashSet<String>) {
     match expr {
         Expr::Char(_) => {}
+        Expr::Consume(inner) => {
+            collect_expr_identifiers(inner, ids);
+        }
         Expr::Identifier(n) => {
             ids.insert(n.clone());
         }
@@ -368,6 +371,9 @@ pub fn collect_expr_identifiers(expr: &Expr, ids: &mut std::collections::HashSet
             collect_expr_identifiers(inner, ids);
         }
         Expr::AddrOf(inner) => {
+            collect_expr_identifiers(inner, ids);
+        }
+        Expr::Consume(inner) => {
             collect_expr_identifiers(inner, ids);
         }
         Expr::Field(recv, _) | Expr::Reflect(recv, _, _) => {

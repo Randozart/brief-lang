@@ -560,6 +560,9 @@ pub fn infer_expression(
             };
             Ok((ptr_ty, inner_prov))
         }
+        // 2026-08-01 (Phase 3): a consumed operand is read-then-destroyed —
+        // its type is the inner expression's type.
+        Expr::Consume(inner) => infer_expression(inner, ctx),
         // 2026-07-15: Dereference: *ptr returns the pointee type (strip outer Ptr).
         Expr::Deref(inner) => {
             let (inner_ty, inner_prov) = infer_expression(inner, ctx)?;
@@ -1064,6 +1067,41 @@ pub fn infer_statement(stmt: &Statement, ctx: &mut TypecheckContext) -> Result<(
                         found: format!("{}", rhs_ty),
                         context: "assignment".into(),
                     });
+                }
+            }
+            Ok(())
+        }
+        Statement::ArrowAssign { target, value, .. } => {
+            // 2026-08-01 (Phase 3): the arrow — `target <- value` (copy into
+            // lhs) / `target ~<- value` (destructive). Insert (the target is a
+            // collection with an InsertAt binding): the value must match the
+            // element type. Otherwise infer both sides; the read/extract
+            // dispatch + move/const-consumption checks land in Phase 3.4.
+            let value_ty = infer_type_only(value, ctx)?;
+            if let Some(t) = target {
+                if let Some(elem_ty) = ctx.push_element_type(t) {
+                    if value_ty != elem_ty {
+                        let coercible = try_coerce_via_parse(value, &value_ty, &elem_ty, ctx);
+                        if !coercible {
+                            return Err(TypeError::TypeMismatch {
+                                expected: format!("{}", elem_ty),
+                                found: format!("{}", value_ty),
+                                context: "arrow '<- value' into collection".into(),
+                            });
+                        }
+                    }
+                } else {
+                    let lhs_ty = infer_type_only(t, ctx)?;
+                    if lhs_ty != value_ty {
+                        let coercible = try_coerce_via_parse(value, &value_ty, &lhs_ty, ctx);
+                        if !coercible {
+                            return Err(TypeError::TypeMismatch {
+                                expected: format!("{}", lhs_ty),
+                                found: format!("{}", value_ty),
+                                context: "arrow assignment".into(),
+                            });
+                        }
+                    }
                 }
             }
             Ok(())

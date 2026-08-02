@@ -61,6 +61,7 @@ impl LlvmBackend {
     ) -> TypedRegister {
         match expr {
             // ── Literals ─────────────────────────────────────────────
+            Expr::Consume(inner) => self.emit_expr(out, inner, indent),
             Expr::Decimal(n) => {
                 self.emit_int(out, v, *n, indent)
             }

@@ -443,6 +443,7 @@ pub fn stmt_tag(stmt: &Statement) -> &str {
     match stmt {
         Statement::Let { .. } => "let",
         Statement::Assign(_, _) => "assign",
+        Statement::ArrowAssign { .. } => "arrow",
         Statement::Term(_) => "term",
         Statement::TermBang(_) => "term!",
         Statement::Return(_) => "return",

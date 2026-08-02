@@ -125,7 +125,7 @@ impl<'a> DagBuilder<'a> {
             Expr::UnaryOp(_, e) => self.collect_var_names_rec(e, vars),
             Expr::Field(e, _) => self.collect_var_names_rec(e, vars),
             Expr::Index(e, i) => { self.collect_var_names_rec(e, vars); self.collect_var_names_rec(i, vars); }
-            Expr::Cast(e, _) | Expr::IsType(e, _) | Expr::Deref(e) | Expr::AddrOf(e) => self.collect_var_names_rec(e, vars),
+            Expr::Cast(e, _) | Expr::IsType(e, _) | Expr::Deref(e) | Expr::AddrOf(e) | Expr::Consume(e) => self.collect_var_names_rec(e, vars),
             Expr::Call(_, args, _) => { for a in args { self.collect_var_names_rec(a, vars); } }
             Expr::Tuple(elems) | Expr::List(elems) => { for e in elems { self.collect_var_names_rec(e, vars); } }
             Expr::If(cond, then, else_) => {
@@ -265,6 +265,9 @@ impl<'a> DagBuilder<'a> {
 
     fn walk_expr(&mut self, expr: &mut Expr) {
         match expr {
+            Expr::Consume(inner) => {
+                self.walk_expr(inner);
+            }
             Expr::Call(name, args, id) if name == "Alloc#" => {
                 let analysis_id = *self.counter;
                 *self.counter += 1;

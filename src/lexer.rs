@@ -306,11 +306,22 @@ pub enum Token {
     #[token("-")]
     Minus,
 
-    #[token("~?")]
-    TildeQuestion,
-
+    // ── Consumptive operators (Phase 3, 2026-08-01) ─────────────────
+    // `~` prepends to a binary operator to consume/destroy the RHS after the
+    // op. `~` ALONE stays unary bitwise NOT (the multi-char tokens win longest
+    // match). `~?` (temporal fallback) was removed as dead.
+    #[token("~<-")]
+    TildeArrowLeft,
+    #[token("~=")]
+    TildeEq,
     #[token("~/")]
     TildeSlash,
+    #[token("~*")]
+    TildeStar,
+    #[token("~-")]
+    TildeMinus,
+    #[token("~+")]
+    TildePlus,
 
     #[token("~")]
     Tilde,
@@ -649,8 +660,12 @@ impl std::fmt::Display for Token {
             Token::Question => write!(f, "?"),
             Token::Minus => write!(f, "-"),
             Token::MinusEq => write!(f, "-="),
-            Token::TildeQuestion => write!(f, "~?"),
+            Token::TildeArrowLeft => write!(f, "~<-"),
+            Token::TildeEq => write!(f, "~="),
             Token::TildeSlash => write!(f, "~/"),
+            Token::TildeStar => write!(f, "~*"),
+            Token::TildeMinus => write!(f, "~-"),
+            Token::TildePlus => write!(f, "~+"),
             Token::Tilde => write!(f, "~"),
             Token::PlusPlus => write!(f, "++"),
             Token::PlusEq => write!(f, "+="),
@@ -1002,4 +1017,27 @@ pub fn tokenize(source: &str) -> Result<Vec<(Token, std::ops::Range<usize>)>, St
         tokens.push((token, span));
     }
     Ok(tokens)
+}
+
+#[cfg(test)]
+mod consumptive_tests {
+    use super::*;
+
+    #[test]
+    fn test_consumptive_tokens_lex_longest_match() {
+        // `~<-` wins over `~` + `<-`; `~=` over `~`; `~+` over `~`.
+        let toks: Vec<_> = Token::lexer("a ~<- b ~= c ~+ d ~- e ~* f ~/ g ~ h ~? i")
+            .map(|r| r.unwrap())
+            .collect();
+        let names: Vec<String> = toks.iter().map(|t| format!("{:?}", t)).collect();
+        let joined = names.join(" ");
+        assert!(joined.contains("TildeArrowLeft"), "~<-: {joined}");
+        assert!(joined.contains("TildeEq"), "~=: {joined}");
+        assert!(joined.contains("TildePlus"), "~+: {joined}");
+        assert!(joined.contains("TildeMinus"), "~-: {joined}");
+        assert!(joined.contains("TildeStar"), "~*: {joined}");
+        assert!(joined.contains("TildeSlash"), "~/: {joined}");
+        assert!(joined.contains("Tilde"), "bare ~: {joined}");
+        assert!(!joined.contains("TildeQuestion"), "~? removed: {joined}");
+    }
 }

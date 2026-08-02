@@ -109,7 +109,7 @@ impl<'a> DataflowAnalyzer<'a> {
                 self.extract_ids_recursive(list, ids);
                 self.extract_ids_recursive(idx, ids);
             }
-            Expr::Deref(inner) | Expr::AddrOf(inner) => {
+            Expr::Deref(inner) | Expr::AddrOf(inner) | Expr::Consume(inner) => {
                 self.extract_ids_recursive(inner, ids);
             }
             Expr::Field(obj, _) => {
@@ -169,6 +169,12 @@ impl<'a> DataflowAnalyzer<'a> {
             Statement::Assign(lhs, expr) => {
                 self.extract_ids_recursive(lhs, ids);
                 self.extract_ids_recursive(expr, ids);
+            }
+            Statement::ArrowAssign { target, value, .. } => {
+                if let Some(t) = target {
+                    self.extract_ids_recursive(t, ids);
+                }
+                self.extract_ids_recursive(value, ids);
             }
             Statement::Let { expr, .. } => {
                 if let Some(e) = expr { self.extract_ids_recursive(e, ids); }

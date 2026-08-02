@@ -197,6 +197,17 @@ pub enum Statement {
     },
     /// dest = expr;
     Assign(Expr, Expr),
+    /// 2026-08-01 (Phase 3): the arrow — `dest <- value;` (copy into lhs),
+    /// `dest ~<- value;` (copy into lhs then destroy/remove the rhs — the
+    /// destructive extract), and `<- value;` / `~<- value;` discards (target
+    /// None). The dispatch finds the collection by the op binding on each side
+    /// (InsertAt on the lhs = insert; ExtractFrom/CopyFrom on the rhs = read
+    /// or destructive extract) — the old `&` fake-pointer marker is removed.
+    ArrowAssign {
+        target: Option<Box<Expr>>,
+        value: Box<Expr>,
+        consume: bool,
+    },
     /// term; or term expr;
     Term(Option<Expr>),
     /// term! expr;
