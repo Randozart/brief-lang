@@ -326,8 +326,12 @@ used in 4 files (`queue_drain.bv`, `queue_drain_idio.bv`, `stack_push_pop.bv`,
    freed) and emits the strategy-aware free; `keep x;` excludes the field from
    the scheduler's auto-free, and a `keep` on a field it would not free anyway
    is a **redundant-keep warning**.
-2. **Refcount free-check** — for unprovable heap fields, the scheduler inserts a
-   refcount at the edge-of-use checkpoint; a zero count → `__brief_free`.
+2. **Refcount free-check** — **NOT IMPLEMENTED (unsound)**: a per-fire
+   decrement over-counts multi-fire transactions (premature free). A sound
+   refcount requires the firing-count proof, which is the provable case the
+   scheduler already handles via `free_after`. The sound fallback for
+   unprovable fields is the developer-verified `free x;` (Phase 5a). See
+   `docs/plans/2026-08-01-free-check.md`.
 3. **`briefc memcheck`** — **DONE**: reports per heap-backed field whether the
    scheduler proved a last use (freed after which txn) or the field lives for
    the program, plus the redundant `keep` hints (`src/macros/memcheck.rs`).
@@ -335,12 +339,18 @@ used in 4 files (`queue_drain.bv`, `queue_drain_idio.bv`, `stack_push_pop.bv`,
 
 ### Phase 6 — C-surface reduction (`.bv`/`.ebv`)
 
-1. **Runtime inventory** — classify every `brief_rt.c` function as *syscall
-   shim* (stays C) vs *logic* (moves to `.ebv`).
+1. **Runtime inventory** — **DONE**: `docs/architecture/c-surface-inventory.md`
+   classifies every `brief_rt.c` function as *syscall shim* (stays C: the
+   syscall/getenv/argv/trigger/tty/threading boundary) or *logic* (movable to
+   `.ebv`: string marshalling, formatting, equality, bitwise, list ops). The
+   import resolver already searches `.bv` then `.ebv` and errors on ambiguity.
 2. **`.ebv` variants** — formatting/strings/allocator logic in pure Brief; the
    `.bv` variants keep the OS/libc calls; the import resolver prefers `.bv` on
    OS targets, `.ebv` on freestanding.
-3. **No-libc target sketch** — raw syscalls + `_start` documented.
+3. **No-libc target sketch** — **DONE (design)**: `_start` calls `brief_main`
+   then `_exit`; `brief_syscall` is the only C shim; the `.ebv` stdlib
+   implements string/formatting/collections in pure Brief over a `write`
+   syscall; a `brk` bump allocator. See the inventory doc.
 
 ---
 

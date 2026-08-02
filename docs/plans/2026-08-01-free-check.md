@@ -47,15 +47,26 @@ garbage-scheduler analysis and reports, per heap-backed state field:
   potential leak),
 - the effect of every `free`/`keep` hint (applied, or redundant).
 
-## Refcount free-check (edge-of-use)
+## Refcount free-check — SOUNDNESS ANALYSIS (2026-08-01)
 
-For an unprovable heap field, the developer may opt into a runtime refcount:
-the scheduler inserts a counter at the edge-of-use checkpoint (the last
-transaction that *might* use the field, when the static proof is ambiguous);
-each use decrements; a zero count triggers `__brief_free`. The counter is
-backend-emitted alongside the field; the correctness contract is *no premature
-free* (a zero count means no further use is possible on the analyzed path) and
-*no double-free* (the `free`/`keep` exclusions still apply).
+The plan's item 2 ("insert a refcount at the edge-of-use checkpoint; each use
+decrements; zero → `__brief_free`") is **UNSOUND for multi-fire transactions**,
+so it is NOT implemented. The scheduler's `txn_touches` is a per-transaction
+SET — a transaction may fire multiple times, and a per-fire decrement would
+over-decrement (a zero count while a later fire still uses the field →
+premature free, violating the soundness contract). A sound refcount requires
+the firing-count proof — which is exactly the proof the scheduler performs for
+the provable (`free_after`) case. When that proof fails, the field's users are
+genuinely unknown, and no counter can bound them.
+
+**The sound path is the developer-verified `free x;` annotation** (Phase 5a):
+the typechecker enforces no later read, and the scheduler excludes the field
+from its auto-free. `briefc memcheck` reports the unprovable fields so the
+developer can add the verified `free` or an explicit `keep`.
+
+If a refcount is ever wanted, it must be scoped to provably-single-fire
+transactions (a firing-count proof already handled by the scheduler) and is
+then redundant with `free_after`. The honest mechanism is the annotation.
 
 ## Correctness contract
 
