@@ -10,7 +10,7 @@ int main(void) {
     long i = 0, found = 0;
     for (; i < N; ) {
         long h = (i * 2654435761UL) % CAP;
-        table[h] = i + 1;
+        table[h] = table[h] + i + 1;
         found += table[h];
         i++;
         if (i % 5000000 == 0)

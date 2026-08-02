@@ -220,8 +220,12 @@ impl LlvmBackend {
         writeln!(out, "declare noalias ptr @malloc(i64) nounwind").ok();
         writeln!(out, "declare void @free(ptr) nounwind").ok();
         // 2026-08-01 (D2): garbage scheduling — scheduled frees route through
-        // __brief_free so a benchmark can assert frees == allocs.
-        writeln!(out, "declare void @__brief_free(ptr) nounwind").ok();
+        // __brief_free so a benchmark can assert frees == allocs. argmemonly:
+        // the call only touches memory via its pointer arg, so a scheduled
+        // free after a loop must not make LLVM treat the whole function's
+        // memory as clobbered (without it, hash_ops' loop ran 23x slower —
+        // LLVM could not promote the state slots to registers).
+        writeln!(out, "declare void @__brief_free(ptr) nounwind argmemonly").ok();
         // 2026-08-01 (D2): `Now#` — monotonic clock for the watchdog
         // `within N ms` deadline compare.
         writeln!(out, "declare i64 @__brief_now() nounwind").ok();

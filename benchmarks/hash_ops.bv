@@ -16,7 +16,12 @@ let found: Int = 0;
 
 node hash [i < N][i == N] {
     let h: Int = (i * 2654435761) % CAP;
-    table[h] = i + 1;
+    // read-modify-write: table[h] was last written at a PREVIOUS iteration
+    // (the hash maps each i to a distinct slot), so the RHS read is a genuine
+    // memory dependency neither compiler can forward-propagate away. This keeps
+    // the benchmark honest — the scheduler's free would otherwise leave only
+    // Brief's writes observable while C's dead-code elimination ran free.
+    table[h] = table[h] + i + 1;
     found = found + table[h];
     i = i + 1;
     when i % 5000000 == 0 {
