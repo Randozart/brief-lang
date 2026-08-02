@@ -1,5 +1,5 @@
 // queue_drain_idio — Idiomatic Brief-native version of queue_drain.
-// Reactive transaction with collection drain (`<- &queue` + `&queue <- count`).
+// Reactive transaction with collection drain (`<- queue` + `queue <- count`).
 // Exercises the collection drain analysis (detect_collection_drain) in the
 // compiler, while the symmetric variant (queue_drain_sym) mirrors C.
 //
@@ -16,8 +16,8 @@ let count: Int = 0;
 let queue: List<Int> = [0];
 
 node work [count < N][count == N] {
-    <- &queue;
-    &queue <- count;
+    <- queue;
+    queue <- count;
 count = count + 1;
 
     when count % 5000000 == 0 {

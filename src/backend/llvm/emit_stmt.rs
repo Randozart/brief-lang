@@ -19,6 +19,50 @@ pub fn emit_statement_sequence(
 ) {
     for stmt in stmts {
         emit_statement(backend, out, stmt, indent);
+        // 2026-08-01 (Phase 3): a `~op` consumed its operand during this
+        // statement — destroy the backing at the statement boundary (after the
+        // consuming op has used the value).
+        drain_pending_consumes(backend, out, indent);
+    }
+}
+
+/// 2026-08-01 (Phase 3): emit strategy-aware frees for every register recorded
+/// by an `Expr::Consume` since the last boundary. Inline/arena/alloca/ring-buffer
+/// backings need no free; heap-backed values are @free'd.
+fn drain_pending_consumes(backend: &mut LlvmBackend, out: &mut String, indent: &str) {
+    let pending = std::mem::take(&mut backend.fun.pending_consumes);
+    for reg in pending {
+        emit_destroy_register(backend, out, indent, &reg);
+    }
+}
+
+/// Destroy a consumed register's backing storage — an allocation-strategy-aware
+/// free (mirrors the Free# intrinsic). The register is a handle (stored as an
+/// i64), widened via inttoptr for the @free call.
+pub(super) fn emit_destroy_register(
+    backend: &mut LlvmBackend,
+    out: &mut String,
+    indent: &str,
+    reg: &str,
+) {
+    match backend.fun.alloc_strategies.get(reg) {
+        Some(crate::backend::llvm::AllocStrategy::Arena)
+        | Some(crate::backend::llvm::AllocStrategy::Alloca)
+        | Some(crate::backend::llvm::AllocStrategy::Inline)
+        | Some(crate::backend::llvm::AllocStrategy::RingBuffer) => {}
+        Some(crate::backend::llvm::AllocStrategy::Malloc)
+        | Some(crate::backend::llvm::AllocStrategy::Custom(_)) => {
+            // Heap-backed — free the backing pointer.
+            let p = backend.fun.gen_reg();
+            writeln!(out, "{}  {} = inttoptr i64 {} to ptr", indent, p, reg).ok();
+            writeln!(out, "{}call void @free(ptr {})", indent, p).ok();
+        }
+        Some(crate::backend::llvm::AllocStrategy::Config(_)) | None => {
+            // No tracked heap allocation (scalars, inline values, or an
+            // unknown strategy) — the consume destroy is a no-op. Frees only
+            // what the allocator explicitly recorded; never free a scalar's
+            // value as a pointer.
+        }
     }
 }
 
@@ -301,11 +345,67 @@ pub fn emit_statement(backend: &mut LlvmBackend, out: &mut String, stmt: &Statem
                 backend.emit_expr(out, expr, indent)
             }
         }
+        Statement::ArrowAssign { target, value, consume } => {
+            // 2026-08-01 (Phase 3): the arrow — find the collection by the op
+            // binding on each side:
+            //   - the TARGET has an InsertAt binding → INSERT (push): emit the
+            //     member/fn insert call with the value;
+            //   - the VALUE has an ExtractFrom/CopyFrom binding → READ/EXTRACT
+            //     (pop): emit the extract and store the result into the target
+            //     (or discard it when target is None);
+            //   - otherwise → a plain copy store into the target.
+            if let Some(t) = target.as_ref() {
+                if let Some(op_def) = backend.find_insert_strategy(t).cloned() {
+                    let val = backend.emit_expr(out, value, indent);
+                    if !emit_strategy_member_call(backend, out, indent, t, &op_def, Some(&val.name)) {
+                        emit_strategy_fn_call(backend, out, indent, t, &op_def, Some(&val.name));
+                    }
+                    return TypedRegister { name: backend.fun.gen_reg(), ty: Type::void() };
+                }
+            }
+            if let Some(op_def) = backend.find_extract_strategy(value).cloned() {
+                // EXTRACT — the value is the collection. Member-bound
+                // ExtractFrom dispatches to the self-bound member call; the
+                // free-function convention is the fallback. The popped result
+                // is stored into the target (or discarded).
+                let Some(result) = emit_strategy_fn_call(backend, out, indent, value, &op_def, None) else {
+                    return TypedRegister { name: backend.fun.gen_reg(), ty: Type::void() };
+                };
+                if let Some(t) = target.as_ref() {
+                    emit_arrow_store(backend, out, indent, t, &result);
+                }
+                if *consume {
+                    // 2026-08-01 (Phase 3): a destructive extract also destroys
+                    // the consumed collection's backing (strategy-aware free).
+                    emit_destroy_consumed(backend, out, indent, value);
+                }
+                return TypedRegister { name: result, ty: Type::int() };
+            }
+            // Plain copy — the arrow as a normal assignment, emitted only when
+            // the target is a resolvable local/state field. When nothing
+            // resolves (e.g. a ringbuf-inline collection registered only in
+            // `ringbuf_inline`, not `field_index_map`), the statement is a
+            // no-op — matching the pre-Phase-3 behavior where the unresolvable
+            // `<-` fell through silently.
+            if let Some(t) = target.as_ref() {
+                if let Expr::Identifier(name) = t.as_ref() {
+                    let resolvable = backend.fun.let_bindings.contains_key(name)
+                        || backend.ctx.field_index_map.contains_key(name);
+                    if resolvable {
+                        let val = backend.emit_expr(out, value, indent);
+                        emit_arrow_store_local(backend, out, indent, name, &val);
+                    }
+                }
+            }
+            if *consume {
+                emit_destroy_consumed(backend, out, indent, value);
+            }
+            TypedRegister { name: backend.fun.gen_reg(), ty: Type::void() }
+        }
         Statement::Term(val) | Statement::TermBang(val) => {
             // 2026-07-26: Phase 4 — webstack flush at term.
             // Emit __web_flush_state call before the return/branch so the
-            // JS shim applies DOM updates before the transaction completes.
-            // Phase 6 will wire the actual flush buffer with modified fields.
+            // JS shim applies DOM updates before the transaction completes.            // Phase 6 will wire the actual flush buffer with modified fields.
             if backend.ctx.webstack_enabled {
                 writeln!(out, "{}call void @__web_flush_state(i32 0, i32 0)", indent).ok();
             }
@@ -750,4 +850,61 @@ pub(super) fn emit_strategy_fn_call(backend: &mut LlvmBackend, out: &mut String,
     let result = backend.fun.gen_reg();
     writeln!(out, "{}{} = call i64 @{}({})", indent, result, fn_name, args_str).ok();
     Some(result)
+}
+
+/// 2026-08-01 (Phase 3): store an extracted/popped arrow result into the target
+/// — a local binding (alloca) or a state field. Mirrors the Assign-arm pop store.
+fn emit_arrow_store(
+    backend: &mut LlvmBackend,
+    out: &mut String,
+    indent: &str,
+    target: &crate::ast::Expr,
+    result: &str,
+) {
+    let crate::ast::Expr::Identifier(name) = target else { return };
+    if let Some(reg) = backend.fun.let_bindings.get(name) {
+        writeln!(out, "{}store i64 {}, ptr {}", indent, result, reg).ok();
+    } else if backend.ctx.field_index_map.contains_key(name) {
+        backend.emit_state_store_i64(out, indent, name, result);
+    }
+}
+
+/// 2026-08-01 (Phase 3): the plain-copy arrow (`dest <- src` when neither side
+/// has a collection op binding) — store the value into the local/field.
+fn emit_arrow_store_local(
+    backend: &mut LlvmBackend,
+    out: &mut String,
+    indent: &str,
+    name: &str,
+    val: &TypedRegister,
+) {
+    if let Some(reg) = backend.fun.let_bindings.get(name) {
+        let store_ty = backend.llvm_type(&val.ty);
+        writeln!(out, "{}store {} {}, ptr {}", indent, store_ty, val.name, reg).ok();
+    } else if backend.ctx.field_index_map.contains_key(name) {
+        backend.emit_state_store_i64(out, indent, name, &val.name);
+    }
+}
+
+/// 2026-08-01 (Phase 3): destroy a consumed operand's backing storage. The
+/// value is emitted once (its register is the collection's handle) and freed
+/// via the allocation-strategy-aware `emit_destroy_register`. A value whose
+/// identifier is not resolvable (a ringbuf-inline collection registered only in
+/// `ringbuf_inline`) is a no-op — inline backings need no free anyway.
+fn emit_destroy_consumed(
+    backend: &mut LlvmBackend,
+    out: &mut String,
+    indent: &str,
+    value: &crate::ast::Expr,
+) {
+    if let crate::ast::Expr::Identifier(name) = value {
+        let resolvable = backend.fun.let_bindings.contains_key(name)
+            || backend.ctx.field_index_map.contains_key(name)
+            || backend.fun.param_slots.values().any(|s| s == name);
+        if !resolvable {
+            return;
+        }
+    }
+    let reg = backend.emit_expr(out, value, indent);
+    emit_destroy_register(backend, out, indent, &reg.name);
 }

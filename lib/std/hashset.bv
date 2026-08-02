@@ -7,7 +7,7 @@ defn insert<T>(set: HashSet<T>, item: T) -> HashSet<T> {
 defn remove<T>(set: HashSet<T>, item: T)
     [set :> Contains(item)][!term :> Contains(item)] -> HashSet<T>
 {
-    <- &set[item];
+    <- set[item];
     term set;
 };
 defn contains<T>(set: HashSet<T>, item: T) -> Bool {

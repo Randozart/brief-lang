@@ -7,7 +7,7 @@ defn with_capacity<K,V>(capacity: Int) -> HashMap<K,V> [capacity > 0][term .^Len
 defn insert<K,V>(map: HashMap<K,V>, key: K, value: V)
     [true][term :> Contains(key) && term :> Get(key) == Some(value)] -> HashMap<K,V>
 {
-    term &map <- (key, value);
+    term map <- (key, value);
 };
 defn get<K,V>(map: HashMap<K,V>, key: K)
     [true][term.is_some() == map :> Contains(key)] -> Option<V>
@@ -21,7 +21,7 @@ defn remove<K,V>(map: HashMap<K,V>, key: K)
     [map :> Contains(key)][!(term :> 1) :> Contains(key)] -> (Option<V>, HashMap<K,V>)
 {
     let v = map :> Get(key);
-    <- &map[key];
+    <- map[key];
     term (v, map);
 };
 defn len<K,V>(map: HashMap<K,V>) -> Int {
@@ -52,7 +52,7 @@ defn iter<K,V>(map: HashMap<K,V>) -> List<(K,V)> {
 txn merge_loop<K,V>(bk: List<K>, bv: List<V>, result: HashMap<K,V>, i: Int)
     [i < bk .^Len][i == bk .^Len] -> HashMap<K,V>
 {
-    &result <- (bk[i], bv[i]);
+    result <- (bk[i], bv[i]);
     i = i + 1;
     term result;
 };

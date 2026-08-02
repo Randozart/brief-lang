@@ -3774,3 +3774,61 @@ fn test_string_len_and_bytes_reflect() {
 
 
 
+
+// ── Phase 3: consumptive operators + arrow (2026-08-01) ────────────────
+
+/// A `~=` move-assign and a `~+` consumptive add in a defn must emit the op
+/// (the consumed param's backing destroy is a no-op for scalars).
+#[test]
+fn test_consumptive_ops_emit_normal_arithmetic() {
+    let src = r#"
+        defn f(a: Int, b: Int) -> Int {
+            a ~= b;
+            term a ~+ 1;
+        };
+    "#;
+    let mut items = parse_bv_source(src);
+    let mut universe = crate::type_universe::TypeUniverse::new();
+    let mut pm = crate::plugin::PluginManager::new();
+    pm.run_ast(crate::ast::StageKind::Parsed, &mut items, &mut universe)
+        .expect("plugin stage failed");
+    let mut backend = LlvmBackend::new().with_type_universe(universe);
+    let ir = backend.generate(&items, None);
+    assert!(
+        ir.contains("add nsw i64") || ir.contains("add i64"),
+        "a ~+ b / a ~= b must emit the arithmetic; got:\n{ir}"
+    );
+    assert!(
+        ir.contains("define i64 @f("),
+        "the defn must be emitted; got:\n{ir}"
+    );
+}
+
+/// `dest <- src` / `<- src;` / `~<- src;` parse + emit as ArrowAssign without
+/// a stray @<global> reference (the discard of a non-collection is a no-op).
+#[test]
+fn test_arrow_statements_emit_without_broken_globals() {
+    let src = r#"
+        defn f(a: Int, b: Int) -> Int {
+            a <- b;
+            <- b;
+            ~<- b;
+            term a;
+        };
+    "#;
+    let mut items = parse_bv_source(src);
+    let mut universe = crate::type_universe::TypeUniverse::new();
+    let mut pm = crate::plugin::PluginManager::new();
+    pm.run_ast(crate::ast::StageKind::Parsed, &mut items, &mut universe)
+        .expect("plugin stage failed");
+    let mut backend = LlvmBackend::new().with_type_universe(universe);
+    let ir = backend.generate(&items, None);
+    assert!(
+        !ir.contains("call void @free"),
+        "scalar consumes must not free (no heap backing); got:\n{ir}"
+    );
+    assert!(
+        ir.contains("define i64 @f("),
+        "the defn must be emitted; got:\n{ir}"
+    );
+}

@@ -24,7 +24,7 @@ let count: Int = 0;
 
 node work [count < N][count == N] {
     queue <- count;                 // op InsertAt: push(#L, #R)
-    <- &queue;                       // op ExtractFrom: pop(#R) — discard
+    <- queue;                       // op ExtractFrom: pop(#R) — discard
 count = count + 1;
 
     when count % 5000000 == 0 {

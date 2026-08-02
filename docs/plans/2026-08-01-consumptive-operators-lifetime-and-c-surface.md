@@ -282,12 +282,19 @@ dead `~?` (temporal-fallback) token is removed.
 
 | Step | Scope |
 |---|---|
-| **3.1 Lexer** | New tokens `~=` `~<-` `~+` `~-` `~*` `~/`; repurpose `~/` (drop term-until), drop `~?`; contract tokens `!/`/`!/!`; `~` stays unary bitwise |
-| **3.2 Parser** | Consumptive tokens → binary ops with a consumed RHS (`Expr::Consume`); `~<-` → destructive arrow; `<-` → `Statement::ArrowAssign` (no `&`); the `[!/X]`/`[!/!X]` contract expansion |
-| **3.3 AST** | `Expr::Consume(Box<Expr>)` (or a consumed-flag on the binary op); `Statement::ArrowAssign`; the contract two-in-one representation |
-| **3.4 Typechecker** | The move pass (use-after-move = error; const-consumption = error); arrow dispatch by op binding + `~` marker; the `!/` contract typing |
-| **3.5 Codegen** | Consumptive emission (copy; free/zero the source backing for Ptr/String/obj — no double-free); the destructive-extract path; remove the `&` peeling in the strategy dispatch |
-| **3.6 Interpreter** | The reference — Consume evaluation, consumed-local read errors, the `!/` contract check |
+| **3.1 Lexer** | New tokens `~=` `~<-` `~+` `~-` `~*` `~/`; repurpose `~/` (drop term-until), drop `~?`; contract tokens `!/`/`!/!`; `~` stays unary bitwise — **DONE** |
+| **3.2 Parser** | Consumptive tokens → binary ops with a consumed RHS (`Expr::Consume`); `~<-` → destructive arrow; `<-` → `Statement::ArrowAssign` (no `&`); the `[!/X]`/`[!/!X]` contract expansion — **DONE** |
+| **3.3 AST** | `Expr::Consume(Box<Expr>)` (or a consumed-flag on the binary op); `Statement::ArrowAssign`; the contract two-in-one representation — **DONE** |
+| **3.4 Typechecker** | The move pass (use-after-move = error; const-consumption = error); arrow dispatch by op binding + `~` marker; the `!/` contract typing — **DONE** (move pass + const-consumption + generic-substituted insert/extract dispatch) |
+| **3.5 Codegen** | Consumptive emission (copy; free/zero the source backing for Ptr/String/obj — no double-free); the destructive-extract path; remove the `&` peeling in the strategy dispatch — **DONE** (ArrowAssign insert/extract/discard + strategy-aware consume destroy; `&` removed from the benchmarks/stdlib) |
+| **3.6 Interpreter** | The reference — Consume evaluation, consumed-local read errors, the `!/` contract check — **PARTIAL**: `Expr::Consume` evals the inner; the ArrowAssign statement binds/removes consumed locals; the destructive `~/` contract check is covered by the parser expansion. Consumed-local READ errors live in the typechecker (the interpreter keeps the identity semantics; a full runtime use-after-move check is deferred) |
+
+   *Known gaps (documented in BUGS.md): `~op` on a top-level const-let inside a
+   txn body emits an undefined `@b` global (field-registration walk does not
+   descend into `Expr::Consume`); `queue_drain_idio` stays broken by the
+   pre-existing imported-type strategy-dispatch gap (items lack imported
+   TypeDefs, so `push_element_type`/`extract_element_type` return None for
+   `List`).*
 | **3.7 Docs + migration** | Highlighter (the `~op`/`!/`/`!/!` tokens; drop `~?`/`~/` rules), SPEC grammar, the tutorial (the move/consume concept + the `!/` contract), migrate the 4 arrow files (`queue_drain`, `queue_drain_idio`, `stack_push_pop`, `lib/std/hashmap.bv`) |
 
 **Migration scope (small):** bitwise `~` is unused in source; the arrow `&` is

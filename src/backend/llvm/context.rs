@@ -386,6 +386,11 @@ pub struct FunctionContext {
     /// already i64 0/1, so it must be passed directly; a native i8 Bool
     /// (literal/let/field) needs a zext first.
     pub boxed_scalar_regs: HashSet<String>,
+    /// 2026-08-01 (Phase 3): registers consumed by an `Expr::Consume` since the
+    /// last statement boundary. The backing is destroyed (strategy-aware free)
+    /// after the consuming op has used the value — drained by
+    /// `emit_statement_sequence`.
+    pub pending_consumes: Vec<String>,
     /// 2026-07-24: Tracks the original alloca register for struct literal values.
     /// Keyed by variable name. When &x is taken on a struct-typed let binding,
     /// this map provides the stack alloca pointer instead of the ptrtoint result.
@@ -650,6 +655,7 @@ impl FunctionContext {
             let_original_types: HashMap::new(),
             let_binding_allocas: HashSet::new(),
             boxed_scalar_regs: HashSet::new(),
+            pending_consumes: Vec::new(),
             struct_literal_allocas: HashMap::new(),
             self_binding: None,
             reg_float_cache: HashMap::new(),
@@ -738,6 +744,7 @@ impl FunctionContext {
         self.let_binding_types.clear();
         self.let_original_types.clear();
         self.boxed_scalar_regs.clear();
+        self.pending_consumes.clear();
         self.let_binding_allocas.clear();
         self.struct_literal_allocas.clear();
         self.reg_float_cache.clear();

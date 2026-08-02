@@ -26,6 +26,10 @@ pub struct TypecheckContext<'a> {
     /// txn parameters). Used by is_mutable_location to distinguish mutable
     /// state fields from immutable let-bindings for PtrConst inference.
     pub state_keys: std::collections::HashSet<String>,
+    /// 2026-08-01 (Phase 3): locals consumed by a `~op` (`a ~= b`, `dest ~<-
+    /// src`, `~<- src;`). Reading a consumed local afterward is a use-after-move
+    /// compile error; reassigning it (via `=` or `let`) clears the mark.
+    pub consumed_locals: std::collections::HashSet<String>,
     pub universe: &'a TypeUniverse,
     /// 2026-07-20: Parse ops per type, for literal construction resolution.
     /// Populated from AST TypeDef bodies in check_program.
@@ -78,6 +82,7 @@ impl<'a> TypecheckContext<'a> {
         TypecheckContext {
             bindings: HashMap::new(),
             state_keys: std::collections::HashSet::new(),
+            consumed_locals: std::collections::HashSet::new(),
             universe,
             parse_ops: HashMap::new(),
             type_parents: HashMap::new(),
@@ -174,9 +179,9 @@ impl<'a> TypecheckContext<'a> {
     /// InsertAt op binding's member first-parameter type (the element type).
     pub fn push_element_type(&self, collection: &Expr) -> Option<Type> {
         let Expr::Identifier(name) = collection else { return None; };
-        let type_name = match self.bindings.get(name)? {
-            Type::Custom(n) => n.clone(),
-            Type::Applied(n, _) => n.clone(),
+        let (type_name, args) = match self.bindings.get(name)? {
+            Type::Custom(n) => (n.clone(), Vec::new()),
+            Type::Applied(n, a) => (n.clone(), a.clone()),
             _ => return None,
         };
         let bindings = self.regular_bindings.get(&type_name)?;
@@ -187,7 +192,40 @@ impl<'a> TypecheckContext<'a> {
         };
         let members = self.type_members.get(&type_name)?;
         let member = members.iter().find(|m| member_name(m) == fn_name)?;
-        member_params(member).into_iter().next()
+        let elem = member_params(member).into_iter().next()?;
+        // 2026-08-01 (Phase 3): substitute the collection's concrete type args
+        // into the generic member param (`List<Int>` InsertAt's `T` → `Int`),
+        // so `queue <- count` on a List<Int> checks Int, not the bare `T`.
+        let params = self.type_params.get(&type_name).cloned().unwrap_or_default();
+        Some(substitute_type_params(&elem, &params, &args))
+    }
+
+    /// 2026-08-01 (Phase 3): the arrow READ/EXTRACT dispatch — a `dest <- src`
+    /// where `src` is a collection with an `ExtractFrom`/`CopyFrom` op binding.
+    /// Returns the member's RETURN type (what reading/extracting from the
+    /// collection produces), mirroring `push_element_type` (InsertAt → param).
+    pub fn extract_element_type(&self, collection: &Expr) -> Option<Type> {
+        let Expr::Identifier(name) = collection else { return None; };
+        let (type_name, args) = match self.bindings.get(name)? {
+            Type::Custom(n) => (n.clone(), Vec::new()),
+            Type::Applied(n, a) => (n.clone(), a.clone()),
+            _ => return None,
+        };
+        let bindings = self.regular_bindings.get(&type_name)?;
+        let binding = bindings
+            .iter()
+            .find(|b| b.name == "ExtractFrom" || b.name == "CopyFrom")?;
+        let fn_name = match &binding.expr {
+            Expr::Call(name, _, _) => name.clone(),
+            _ => return None,
+        };
+        let members = self.type_members.get(&type_name)?;
+        let member = members.iter().find(|m| member_name(m) == fn_name)?;
+        let out = member_output(member)?;
+        // 2026-08-01 (Phase 3): substitute concrete args into the generic
+        // return (`Stack<Int>` pop → `T` → `Int`).
+        let params = self.type_params.get(&type_name).cloned().unwrap_or_default();
+        Some(substitute_type_params(&out, &params, &args))
     }
 
     /// 2026-07-20: Find a Parse op on a type that could accept a literal form.
@@ -347,6 +385,14 @@ pub fn infer_expression(
 
         // ── References ──────────────────────────────────────────
         Expr::Identifier(name) => {
+            // 2026-08-01 (Phase 3): use-after-move — a local consumed by a
+            // `~op` is dead until reassigned.
+            if ctx.consumed_locals.contains(name) {
+                return Err(TypeError::InvalidOperation {
+                    operation: "read of a consumed value".into(),
+                    type_name: name.clone(),
+                });
+            }
             let ty =
                 ctx.bindings
                     .get(name)
@@ -560,9 +606,43 @@ pub fn infer_expression(
             };
             Ok((ptr_ty, inner_prov))
         }
-        // 2026-08-01 (Phase 3): a consumed operand is read-then-destroyed —
-        // its type is the inner expression's type.
-        Expr::Consume(inner) => infer_expression(inner, ctx),
+        // 2026-08-01 (Phase 3): a consumed operand is read-then-destroyed.
+        // Only a mutable lvalue (a variable, state field, or collection) can
+        // be consumed — a literal/constant is a compile error — and consuming
+        // marks the local dead (use-after-move is caught by the Identifier arm).
+        Expr::Consume(inner) => {
+            match inner.as_ref() {
+                Expr::Decimal(_) | Expr::TaggedLiteral(_, _) | Expr::Float(_)
+                | Expr::Bool(_) | Expr::Char(_)
+                | Expr::Quoted(_) | Expr::TaggedQuotedLiteral(_, _) => {
+                    return Err(TypeError::InvalidOperation {
+                        operation: "cannot consume a constant".into(),
+                        type_name: format!("{}", inner),
+                    });
+                }
+                Expr::Identifier(name) => {
+                    if !ctx.is_mutable_location(name) {
+                        return Err(TypeError::InvalidOperation {
+                            operation: "cannot consume a constant".into(),
+                            type_name: name.clone(),
+                        });
+                    }
+                    if ctx.consumed_locals.contains(name) {
+                        return Err(TypeError::InvalidOperation {
+                            operation: "consume of an already-consumed value".into(),
+                            type_name: name.clone(),
+                        });
+                    }
+                    // Infer the inner value FIRST (it must not already be
+                    // consumed), then mark the local dead.
+                    let ty = infer_expression(inner, ctx)?;
+                    ctx.consumed_locals.insert(name.clone());
+                    return Ok(ty);
+                }
+                _ => {}
+            }
+            infer_expression(inner, ctx)
+        }
         // 2026-07-15: Dereference: *ptr returns the pointee type (strip outer Ptr).
         Expr::Deref(inner) => {
             let (inner_ty, inner_prov) = infer_expression(inner, ctx)?;
@@ -981,6 +1061,10 @@ pub fn infer_statement(stmt: &Statement, ctx: &mut TypecheckContext) -> Result<(
                 return Ok(());
             }
             // 2026-07-25: Single-name let: bind name or handle discard (_).
+            // 2026-08-01 (Phase 3): a `let` rebinding revives a consumed name.
+            if names.len() == 1 {
+                ctx.consumed_locals.remove(&names[0]);
+            }
             let inferred = match expr {
                 Some(e) => infer_type_only(e, ctx)?,
                 None => ty.clone().unwrap_or(Type::int()),
@@ -1024,6 +1108,10 @@ pub fn infer_statement(stmt: &Statement, ctx: &mut TypecheckContext) -> Result<(
             Ok(())
         }
         Statement::Assign(lhs, rhs) => {
+            // 2026-08-01 (Phase 3): assigning to a target revives a consumed name.
+            if let Expr::Identifier(target_name) = lhs {
+                ctx.consumed_locals.remove(target_name);
+            }
             // 2026-07-18: Write-through guard — reject *p = val when p is Ptr<const T>.
             if let Expr::Deref(ptr) = lhs {
                 if let Ok((ptr_ty, _)) = infer_expression(ptr, ctx) {
@@ -1073,33 +1161,59 @@ pub fn infer_statement(stmt: &Statement, ctx: &mut TypecheckContext) -> Result<(
         }
         Statement::ArrowAssign { target, value, .. } => {
             // 2026-08-01 (Phase 3): the arrow — `target <- value` (copy into
-            // lhs) / `target ~<- value` (destructive). Insert (the target is a
-            // collection with an InsertAt binding): the value must match the
-            // element type. Otherwise infer both sides; the read/extract
-            // dispatch + move/const-consumption checks land in Phase 3.4.
+            // lhs) / `target ~<- value` (destructive). The dispatch finds the
+            // collection by the op binding on each side:
+            //   - the TARGET has an InsertAt binding → INSERT (push): the value
+            //     must match the element type;
+            //   - the VALUE has an ExtractFrom/CopyFrom binding → READ/EXTRACT
+            //     (pop): the target must match the member's return type;
+            //   - otherwise a plain assignment (no implicit coercion).
             let value_ty = infer_type_only(value, ctx)?;
             if let Some(t) = target {
+                // A write to the target revives a consumed name.
+                if let Expr::Identifier(target_name) = t.as_ref() {
+                    ctx.consumed_locals.remove(target_name);
+                }
+                // INSERT: the value matches the InsertAt element type (or a
+                // Parse coerce). When push_element_type is unresolved (a bare
+                // generic like `T`), or the value doesn't match, fall through
+                // to the extract/plain checks — matching the pre-arrow behavior
+                // (the old `<-` was typechecked as a plain assignment, which
+                // passed RingBuffer/List via their Parse ops).
+                let mut arrow_ok = false;
                 if let Some(elem_ty) = ctx.push_element_type(t) {
-                    if value_ty != elem_ty {
-                        let coercible = try_coerce_via_parse(value, &value_ty, &elem_ty, ctx);
-                        if !coercible {
-                            return Err(TypeError::TypeMismatch {
-                                expected: format!("{}", elem_ty),
-                                found: format!("{}", value_ty),
-                                context: "arrow '<- value' into collection".into(),
-                            });
-                        }
+                    if value_ty == elem_ty || try_coerce_via_parse(value, &value_ty, &elem_ty, ctx) {
+                        arrow_ok = true;
                     }
-                } else {
-                    let lhs_ty = infer_type_only(t, ctx)?;
-                    if lhs_ty != value_ty {
-                        let coercible = try_coerce_via_parse(value, &value_ty, &lhs_ty, ctx);
-                        if !coercible {
-                            return Err(TypeError::TypeMismatch {
-                                expected: format!("{}", lhs_ty),
-                                found: format!("{}", value_ty),
-                                context: "arrow assignment".into(),
-                            });
+                }
+                if !arrow_ok {
+                    if let Some(elem_ty) = ctx.extract_element_type(value) {
+                        // READ/EXTRACT: `dest <- queue` / `dest ~<- queue`.
+                        // The value IS the collection (value_ty = Stack<T>); the
+                        // target must accept the ExtractFrom/CopyFrom return type.
+                        let target_ty = infer_type_only(t, ctx)?;
+                        if target_ty != elem_ty {
+                            let coercible = try_coerce_via_parse(value, &value_ty, &target_ty, ctx);
+                            if !coercible {
+                                return Err(TypeError::TypeMismatch {
+                                    expected: format!("{}", target_ty),
+                                    found: format!("{}", elem_ty),
+                                    context: "arrow '<-' read into target".into(),
+                                });
+                            }
+                        }
+                    } else {
+                        // Plain assignment — no implicit coercion.
+                        let lhs_ty = infer_type_only(t, ctx)?;
+                        if lhs_ty != value_ty {
+                            let coercible = try_coerce_via_parse(value, &value_ty, &lhs_ty, ctx);
+                            if !coercible {
+                                return Err(TypeError::TypeMismatch {
+                                    expected: format!("{}", lhs_ty),
+                                    found: format!("{}", value_ty),
+                                    context: "arrow assignment".into(),
+                                });
+                            }
                         }
                     }
                 }
@@ -1504,6 +1618,13 @@ fn check_top_level(
             ctx.state_keys.insert(name.clone());
         }
     }
+    // 2026-08-01 (Phase 3): defn/obj-member parameters are mutable locations
+    // too (reassignable within the body) — a `~op` can consume them.
+    if let TopLevel::Definition(defn) = item {
+        for (name, _) in &defn.parameters {
+            ctx.state_keys.insert(name.clone());
+        }
+    }
     match item {
         TopLevel::Definition(defn) => {
             for (name, ty) in &defn.parameters {
@@ -1749,6 +1870,34 @@ fn member_output(m: &TopLevel) -> Option<Type> {
         TopLevel::Transaction(t) => t.output_type.as_ref().and_then(|o| o.all_types().into_iter().next()),
         TopLevel::Definition(d) => d.output_type.as_ref().and_then(|o| o.all_types().into_iter().next()),
         _ => None,
+    }
+}
+
+/// 2026-08-01 (Phase 3): substitute a generic application's concrete type args
+/// into a member signature's type-param references (`List<Int>` push's `T` →
+/// `Int`). Leaves non-param types untouched; unsubstituted params stay as-is
+/// (a bare `T`), which the arrow typecheck treats leniently.
+fn substitute_type_params(ty: &Type, params: &[String], args: &[Type]) -> Type {
+    match ty {
+        Type::Custom(n) => params
+            .iter()
+            .position(|p| p == n)
+            .and_then(|i| args.get(i).cloned())
+            .unwrap_or_else(|| ty.clone()),
+        Type::Ptr(i) => Type::Ptr(Box::new(substitute_type_params(i, params, args))),
+        Type::PtrConst(i) => Type::PtrConst(Box::new(substitute_type_params(i, params, args))),
+        Type::Vector(i, dims) => Type::Vector(Box::new(substitute_type_params(i, params, args)), dims.clone()),
+        Type::Applied(n, inner) => Type::Applied(
+            n.clone(),
+            inner.iter().map(|a| substitute_type_params(a, params, args)).collect(),
+        ),
+        Type::Tuple(elems) => Type::Tuple(
+            elems.iter().map(|e| substitute_type_params(e, params, args)).collect(),
+        ),
+        Type::Union(members) => Type::Union(
+            members.iter().map(|m| substitute_type_params(m, params, args)).collect(),
+        ),
+        _ => ty.clone(),
     }
 }
 
@@ -2132,5 +2281,96 @@ node probe [true][true] { st.push(5); term; };
 "#;
         let e = check(src);
         assert!(e.is_ok(), "expected OK, got: {:?}", e);
+    }
+}
+
+#[cfg(test)]
+mod phase3_tests {
+    use super::*;
+
+    fn check(src: &str) -> Result<(), Vec<TypeError>> {
+        let tokens = crate::lexer::tokenize(src).unwrap();
+        let mut p = crate::parser::Parser::new(tokens, src);
+        let items = p.parse_program().unwrap();
+        let universe = crate::type_universe::TypeUniverse::new();
+        check_program(&items, &universe)
+    }
+
+    fn err_is(src: &str, needle: &str) -> bool {
+        match check(src) {
+            Err(errs) => errs.iter().any(|e| format!("{}", e).contains(needle)),
+            Ok(()) => false,
+        }
+    }
+
+    // 2026-08-01 (Phase 3): the move pass — reading a consumed local is a
+    // use-after-move compile error.
+
+    #[test]
+    fn use_after_move_is_an_error() {
+        let src = r#"
+            defn f(a: Int, b: Int) -> Int {
+                a ~= b;
+                term a + b;
+            };
+        "#;
+        assert!(err_is(src, "consumed"), "reading b after a ~= b must error");
+    }
+
+    #[test]
+    fn reassignment_revives_a_consumed_local() {
+        let src = r#"
+            defn f(a: Int, b: Int) -> Int {
+                a ~= b;
+                b = 7;
+                term a + b;
+            };
+        "#;
+        assert!(check(src).is_ok(), "reassigning b revives it");
+    }
+
+    #[test]
+    fn cannot_consume_a_constant() {
+        let src = r#"
+            defn f(a: Int) -> Int {
+                term a ~+ 5;
+            };
+        "#;
+        assert!(err_is(src, "cannot consume a constant"));
+    }
+
+    #[test]
+    fn cannot_consume_a_literal_lvalue() {
+        let src = r#"
+            defn f() -> Int {
+                let x: Int = 5;
+                term x ~= 3;
+            };
+        "#;
+        // `x ~= 3` consumes the literal 3 — a compile error.
+        assert!(err_is(src, "cannot consume a constant"));
+    }
+
+    #[test]
+    fn arrow_insert_typechecks() {
+        // A plain-copy arrow on scalars typechecks like an assignment.
+        let src = r#"
+            defn f(a: Int, b: Int) -> Int {
+                a <- b;
+                term a;
+            };
+        "#;
+        assert!(check(src).is_ok());
+    }
+
+    #[test]
+    fn arrow_discard_typechecks() {
+        let src = r#"
+            defn f(a: Int) -> Int {
+                <- a;
+                term a;
+            };
+        "#;
+        assert!(check(src).is_ok());
     }
 }

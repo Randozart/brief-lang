@@ -61,7 +61,14 @@ impl LlvmBackend {
     ) -> TypedRegister {
         match expr {
             // ── Literals ─────────────────────────────────────────────
-            Expr::Consume(inner) => self.emit_expr(out, inner, indent),
+            Expr::Consume(inner) => {
+                // 2026-08-01 (Phase 3): the consumed operand's value is used
+                // normally; its backing is destroyed after the enclosing op —
+                // recorded here and freed at the statement boundary.
+                let reg = self.emit_expr(out, inner, indent);
+                self.fun.pending_consumes.push(reg.name.clone());
+                reg
+            }
             Expr::Decimal(n) => {
                 self.emit_int(out, v, *n, indent)
             }

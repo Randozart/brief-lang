@@ -2945,3 +2945,28 @@ the store. The `Expr::Float` literal needs its expected width (from the binding
 or field type), not an unconditional float32.
 **Lesson:** literal emission must follow the binding/field's declared type, not
 default to the narrowest protocol variant.
+
+---
+
+## `~op` Consuming a Top-Level Const-Let in a Txn Emits an Undefined `@b` Global — OPEN
+
+**Date:** 2026-08-01
+**Status:** Open (Phase 3 arrow work exposed it)
+**Root cause:** `a ~+ b;` in a txn body where `b: Int = 3` is a top-level
+const-initialized `let`. The identifier emission falls to the `@<name>` global
+path (`load i64, ptr @b`) even though `b` is registered as a %State field —
+`field_index_map` lacks `b` at emission time for the consumed operand. The
+`@b` global is never emitted (undefined symbol at clang). A non-consumed read
+of the same const-let in the same body resolves via the state GEP (works), so
+the `Expr::Consume` wrapper interacts badly with the field registration/phi
+path. Reading a const-let in a txn without `~op` works at main (verified).
+**Impact:** `a ~+ b` (consumptive arithmetic) on a top-level const-let inside a
+txn body fails to link. `~=`/`~+` on defn PARAMS work (verified end-to-end:
+move=3 add=8). The arrow forms (`<-`, `~<-`, discards) and the destructive
+extract are unaffected.
+**Fix (when the field-registration gap is fixed):** ensure the field-registration
+walk descends into `Expr::Consume` so a consumed operand's identifier is
+registered as a state field (or emitted via the state GEP) like a normal read.
+**Lesson:** a new Expr wrapper (Consume) must be walked by every field/usage
+collection pass — the compiler's passes must treat `Consume(inner)` as a read
+of `inner` everywhere.

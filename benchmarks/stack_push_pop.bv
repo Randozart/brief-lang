@@ -14,7 +14,7 @@ let count: Int = 0;
 
 node work [count < N][count == N] {
     st <- count;
-    <- &st;
+    <- st;
     count = count + 1;
 
     when count % 5000000 == 0 {
