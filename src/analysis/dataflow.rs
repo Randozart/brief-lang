@@ -176,6 +176,9 @@ impl<'a> DataflowAnalyzer<'a> {
                 }
                 self.extract_ids_recursive(value, ids);
             }
+            Statement::FreeHint(name) | Statement::KeepHint(name) => {
+                ids.insert(name.clone());
+            }
             Statement::Let { expr, .. } => {
                 if let Some(e) = expr { self.extract_ids_recursive(e, ids); }
             }

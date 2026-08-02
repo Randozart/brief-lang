@@ -320,15 +320,18 @@ used in 4 files (`queue_drain.bv`, `queue_drain_idio.bv`, `stack_push_pop.bv`,
 
 ### Phase 5 — The free-check
 
-1. **`free`/`keep` body annotations** — the parser (`free x;` / `keep x;`), the
-   AST (`Statement::FreeHint`/`KeepHint`), the scheduler semantics (free =
-   verified contract → error on a later read; keep = suppress → warn on
-   redundancy).
+1. **`free`/`keep` body annotations** — **DONE**: parser + AST
+   (`Statement::FreeHint`/`KeepHint`); `free x;` joins the move pass (a later
+   read is a use-after-free error, reassignment revives, a constant cannot be
+   freed) and emits the strategy-aware free; `keep x;` excludes the field from
+   the scheduler's auto-free, and a `keep` on a field it would not free anyway
+   is a **redundant-keep warning**.
 2. **Refcount free-check** — for unprovable heap fields, the scheduler inserts a
    refcount at the edge-of-use checkpoint; a zero count → `__brief_free`.
-3. **`briefc memcheck`** — the diagnostics subcommand.
-4. **Design doc** — `docs/plans/2026-08-01-free-check.md` (the mechanism, the
-   annotation semantics, the memcheck UX, the correctness contract).
+3. **`briefc memcheck`** — **DONE**: reports per heap-backed field whether the
+   scheduler proved a last use (freed after which txn) or the field lives for
+   the program, plus the redundant `keep` hints (`src/macros/memcheck.rs`).
+4. **Design doc** — **DONE**: `docs/plans/2026-08-01-free-check.md`.
 
 ### Phase 6 — C-surface reduction (`.bv`/`.ebv`)
 

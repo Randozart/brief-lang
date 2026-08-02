@@ -217,6 +217,8 @@ impl LlvmBackend {
                 value: Box::new(Self::rewrite_cell_identifiers(value, cell_name)),
                 consume: *consume,
             },
+            Statement::FreeHint(name) => Statement::FreeHint(name.clone()),
+            Statement::KeepHint(name) => Statement::KeepHint(name.clone()),
             Statement::Guarded(cond, stmts) => Statement::Guarded(
                 Self::rewrite_cell_identifiers(cond, cell_name),
                 stmts

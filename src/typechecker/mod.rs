@@ -1113,7 +1113,12 @@ pub fn infer_statement(stmt: &Statement, ctx: &mut TypecheckContext) -> Result<(
             Ok(())
         }
         Statement::Assign(lhs, rhs) => {
-            // 2026-08-01 (Phase 3): assigning to a target revives a consumed name.
+            // 2026-08-01 (Phase 3): the rhs reads the OLD value (a
+            // use-after-free/use-after-move is caught here), then the target
+            // is REVIVED so the lhs (a reassignment) is legal — `b = 5` makes
+            // a later `b` usable, while `b = b + 1` after a consume of b is an
+            // error (the rhs reads a dead local).
+            let rhs_ty = infer_type_only(rhs, ctx)?;
             if let Expr::Identifier(target_name) = lhs {
                 ctx.consumed_locals.remove(target_name);
             }
@@ -1130,7 +1135,6 @@ pub fn infer_statement(stmt: &Statement, ctx: &mut TypecheckContext) -> Result<(
             }
             infer_type_only(lhs, ctx)?;
             let lhs_ty = infer_expression(lhs, ctx).map(|(t, _)| t)?;
-            let rhs_ty = infer_type_only(rhs, ctx)?;
             // 2026-07-31 (A6): `&collection <- value` — the `<-` PUSH. The
             // LHS is an AddrOf of a collection with an InsertAt op binding;
             // the RHS must match the member's first parameter type (not the
@@ -1239,6 +1243,41 @@ pub fn infer_statement(stmt: &Statement, ctx: &mut TypecheckContext) -> Result<(
                         }
                     }
                 }
+            }
+            Ok(())
+        }
+        Statement::FreeHint(name) => {
+            // 2026-08-01 (Phase 5): `free x;` — the backing of `x` is freed
+            // here (a VERIFIED contract). The local must exist, must be
+            // mutable (a constant cannot be freed), and must not already be
+            // dead; afterward a read of `x` is a use-after-free compile error.
+            let _ty = ctx.bindings.get(name).cloned().ok_or_else(|| TypeError::UndefinedVariable {
+                name: name.clone(),
+                available: ctx.bindings.keys().cloned().collect(),
+            })?;
+            if !ctx.is_mutable_location(name) {
+                return Err(TypeError::InvalidOperation {
+                    operation: "cannot free a constant".into(),
+                    type_name: name.clone(),
+                });
+            }
+            if ctx.consumed_locals.contains(name) {
+                return Err(TypeError::InvalidOperation {
+                    operation: "free of an already-freed value".into(),
+                    type_name: name.clone(),
+                });
+            }
+            ctx.consumed_locals.insert(name.clone());
+            Ok(())
+        }
+        Statement::KeepHint(name) => {
+            // 2026-08-01 (Phase 5): `keep x;` — suppress the scheduler's
+            // auto-free. No type-level effect; the field must exist.
+            if !ctx.bindings.contains_key(name) {
+                return Err(TypeError::UndefinedVariable {
+                    name: name.clone(),
+                    available: ctx.bindings.keys().cloned().collect(),
+                });
             }
             Ok(())
         }
@@ -2461,5 +2500,75 @@ mod phase4_tests {
             };
         "#;
         assert!(check(src).is_ok());
+    }
+}
+
+#[cfg(test)]
+mod phase5_tests {
+    use super::*;
+
+    fn check(src: &str) -> Result<(), Vec<TypeError>> {
+        let tokens = crate::lexer::tokenize(src).unwrap();
+        let mut p = crate::parser::Parser::new(tokens, src);
+        let items = p.parse_program().unwrap();
+        let universe = crate::type_universe::TypeUniverse::new();
+        check_program(&items, &universe)
+    }
+
+    fn err_is(src: &str, needle: &str) -> bool {
+        match check(src) {
+            Err(errs) => errs.iter().any(|e| format!("{}", e).contains(needle)),
+            Ok(()) => false,
+        }
+    }
+
+    // 2026-08-01 (Phase 5): `free x;` is a verified contract — a later read
+    // is a use-after-free error; reassignment revives x.
+
+    #[test]
+    fn free_then_read_is_an_error() {
+        let src = r#"
+            defn f(a: Int) -> Int {
+                free a;
+                term a;
+            };
+        "#;
+        assert!(err_is(src, "consumed"), "reading a after free a must error");
+    }
+
+    #[test]
+    fn free_then_reassign_revives() {
+        let src = r#"
+            defn f(a: Int) -> Int {
+                free a;
+                a = 7;
+                term a;
+            };
+        "#;
+        assert!(check(src).is_ok());
+    }
+
+    #[test]
+    fn cannot_free_an_immutable_local() {
+        let src = r#"
+            defn f() -> Int {
+                let x: Int = 5;
+                free x;
+                term 0;
+            };
+        "#;
+        // `free x` on an immutable defn-local — not a mutable location.
+        assert!(err_is(src, "cannot free a constant"));
+    }
+
+    #[test]
+    fn keep_on_unknown_name_errors() {
+        let src = r#"
+            defn f() -> Int {
+                keep nope;
+                term 0;
+            };
+        "#;
+        assert!(check(src).is_err(), "keep of an unknown name must error");
     }
 }

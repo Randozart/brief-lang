@@ -2088,6 +2088,7 @@ fn resolve_dollar_refs_in_stmt(stmt: &mut Statement, scope: &Scope) -> Result<()
             }
             resolve_dollar_refs_in_expr(value, scope)
         }
+        Statement::FreeHint(_) | Statement::KeepHint(_) => Ok(()),
         Statement::Term(expr) | Statement::TermBang(expr)
         | Statement::Return(expr) | Statement::Escape(expr) => {
             if let Some(e) = expr {

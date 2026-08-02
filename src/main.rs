@@ -31,6 +31,7 @@ fn main() {
         "doc" => run_doc(&args[2..]),
         "link" => run_link(&args[2..]),
         "audit" => run_audit_cmd(&args[2..]),
+        "memcheck" => run_memcheck_cmd(&args[2..]),
         "config" => run_config(&args[2..]),
         "init" => run_init(args.get(2).map(|s| s.as_str())),
         "bounty" => run_bounty(&args[2..]),
@@ -565,6 +566,19 @@ fn run_check(args: &[String]) -> Result<(), String> {
         }
     };
     compile::check_source(file_path, &source)
+}
+
+fn run_memcheck_cmd(args: &[String]) -> Result<(), String> {
+    let file_path = args.first().ok_or("usage: briefc memcheck <file.bv>")?;
+    let source = std::fs::read_to_string(file_path)
+        .map_err(|e| format!("cannot read '{}': {}", file_path, e))?;
+    let tokens = brief_compiler::lexer::tokenize(&source)
+        .map_err(|e| format!("lex failed: {}", e))?;
+    let mut parser = brief_compiler::parser::Parser::new(tokens, &source);
+    let items = parser.parse_program().map_err(|e| format!("parse failed: {}", e))?;
+    let report = brief_compiler::macros::memcheck::run_memcheck(&items);
+    brief_compiler::macros::memcheck::print_memcheck(&report);
+    Ok(())
 }
 
 fn run_audit_cmd(args: &[String]) -> Result<(), String> {

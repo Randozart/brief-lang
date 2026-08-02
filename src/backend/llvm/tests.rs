@@ -3874,3 +3874,29 @@ fn test_trigger_is_whole_target() {
         other => panic!("expected Trigger, got {:?}", other),
     }
 }
+
+/// A `keep x;` on a field the garbage scheduler would not auto-free is a
+/// redundant-keep warning in the backend report.
+#[test]
+fn test_redundant_keep_warns() {
+    let src = r#"
+        let count: Int = 0;
+        node report [count < 3][count == 3] {
+            keep count;
+            count = count + 1;
+            term;
+        };
+    "#;
+    let mut items = parse_bv_source(src);
+    let mut universe = crate::type_universe::TypeUniverse::new();
+    let mut pm = crate::plugin::PluginManager::new();
+    pm.run_ast(crate::ast::StageKind::Parsed, &mut items, &mut universe)
+        .expect("plugin stage failed");
+    let mut backend = LlvmBackend::new().with_type_universe(universe);
+    let _ir = backend.generate(&items, None);
+    assert!(
+        backend.warnings().iter().any(|w| w.contains("redundant") && w.contains("count")),
+        "keep on a non-schedulable field must warn; warnings: {:?}",
+        backend.warnings()
+    );
+}

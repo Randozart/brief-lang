@@ -593,6 +593,12 @@ pub fn eval_statement(
             }
             Ok(Value::Void)
         }
+        Statement::FreeHint(name) => {
+            // 2026-08-01 (Phase 5): `free x;` — the local is dead; a later read errors.
+            bindings.remove(name);
+            Ok(Value::Void)
+        }
+        Statement::KeepHint(_) => Ok(Value::Void),
         Statement::ArrowAssign { target, value, consume } => {
             let val = eval_expr(value, heap, bindings)?;
             if let Some(t) = target.as_ref() {

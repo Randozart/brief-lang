@@ -63,6 +63,7 @@ impl Annotator {
                     }
                     self.collect_calls_from_expr(value, calls);
                 }
+                Statement::FreeHint(_) | Statement::KeepHint(_) => {}
                 Statement::Guarded(condition, statements) => {
                     self.collect_calls_from_expr(condition, calls);
                     self.collect_calls_from_body(statements, calls);
@@ -402,6 +403,8 @@ impl Annotator {
                     None => format!("{}{} {};\n", spaces, if *consume { "~<-" } else { "<-" }, self.format_expr(value)),
                 }
             }
+            Statement::FreeHint(name) => format!("{}free {};\n", spaces, name),
+            Statement::KeepHint(name) => format!("{}keep {};\n", spaces, name),
             Statement::Guarded(condition, statements) => {
                 let mut output = format!("{}when {} {{\n", spaces, self.format_expr(condition));
                 for s in statements {

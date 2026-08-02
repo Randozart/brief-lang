@@ -266,6 +266,8 @@ impl fmt::Display for Statement {
                 }
             }
             Statement::Assign(lhs, rhs) => write!(f, "{} = {};", lhs, rhs),
+            Statement::FreeHint(name) => write!(f, "free {};", name),
+            Statement::KeepHint(name) => write!(f, "keep {};", name),
             Statement::ArrowAssign { target, value, consume } => {
                 match target {
                     Some(t) => write!(f, "{} {} {}", t, if *consume { "~<-" } else { "<-" }, value),

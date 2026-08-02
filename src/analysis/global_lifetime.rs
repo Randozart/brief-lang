@@ -20,6 +20,9 @@ use std::collections::{HashMap, HashSet};
 #[derive(Debug, Clone, Default)]
 pub struct GlobalLifetime {
     pub free_after: HashMap<String, Vec<String>>,
+    /// 2026-08-01 (Phase 5): fields with a `keep x;` hint that the scheduler
+    /// would NOT have auto-freed anyway — the hint is redundant (a warning).
+    pub redundant_keeps: Vec<String>,
 }
 
 /// Compute the scheduled frees. `field_initializers` maps a state field to its
@@ -50,8 +53,26 @@ pub fn analyze(
         .filter(|(name, _)| !manually_freed.contains(name.as_str()))
         .map(|(name, _)| name.clone())
         .collect();
+    // 2026-08-01 (Phase 5): redundant-`keep` detection runs even when nothing
+    // is schedulable — a `keep x;` on a field the scheduler would never
+    // auto-free (e.g. a scalar) is a warning.
+    let kept: HashSet<String> = items
+        .iter()
+        .filter_map(|i| match i {
+            TopLevel::Transaction(t) => Some(t.body.as_slice()),
+            _ => None,
+        })
+        .flat_map(|body| body.iter())
+        .filter_map(|stmt| match stmt {
+            crate::ast::Statement::KeepHint(name) => Some(name.clone()),
+            _ => None,
+        })
+        .collect();
     if heap_backed.is_empty() {
-        return GlobalLifetime::default();
+        return GlobalLifetime {
+            free_after: HashMap::new(),
+            redundant_keeps: kept.into_iter().collect(),
+        };
     }
 
     // Per-txn touch set (read OR write — a write after the free is a
@@ -96,11 +117,21 @@ pub fn analyze(
     for v in free_after.values_mut() {
         v.sort();
     }
-    GlobalLifetime { free_after }
+    // 2026-08-01 (Phase 5): redundant-`keep` — a kept field the scheduler
+    // does not schedule is a warning (the existing `kept` set above).
+    let scheduled: HashSet<String> = free_after.values().flatten().cloned().collect();
+    let redundant_keeps: Vec<String> = kept
+        .into_iter()
+        .filter(|k| !scheduled.contains(k))
+        .collect();
+    GlobalLifetime {
+        free_after,
+        redundant_keeps,
+    }
 }
 
 /// Does the expression allocate heap memory (a `Malloc#`/`Alloc#` intrinsic)?
-fn contains_heap_alloc(expr: &Expr) -> bool {
+pub fn contains_heap_alloc(expr: &Expr) -> bool {
     match expr {
         Expr::Call(name, args, _) => {
             if name == "Malloc#" || name == "Alloc#" {
@@ -154,6 +185,24 @@ fn manual_free_target(stmt: &crate::ast::Statement, state_fields: &HashSet<Strin
         }
         crate::ast::Statement::Block(stmts) => {
             stmts.iter().find_map(|s| manual_free_target(s, state_fields))
+        }
+        crate::ast::Statement::FreeHint(name) => {
+            // 2026-08-01 (Phase 5): `free x;` is a manual free — the scheduler
+            // must not ALSO free x (a double-free).
+            if state_fields.contains(name) {
+                Some(name.clone())
+            } else {
+                None
+            }
+        }
+        crate::ast::Statement::KeepHint(name) => {
+            // 2026-08-01 (Phase 5): `keep x;` — the field ESCAPES (freed
+            // elsewhere or owned by the caller); the scheduler must not free it.
+            if state_fields.contains(name) {
+                Some(name.clone())
+            } else {
+                None
+            }
         }
         _ => None,
     }

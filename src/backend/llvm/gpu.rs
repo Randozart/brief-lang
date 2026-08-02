@@ -242,6 +242,7 @@ fn collect_unsafe_ffi_stmt(stmt: &Statement, reasons: &mut Vec<String>) {
             }
             collect_unsafe_ffi(value, reasons);
         }
+        Statement::FreeHint(_) | Statement::KeepHint(_) => {}
         Statement::Let { expr: Some(e), .. } => collect_unsafe_ffi(e, reasons),
         Statement::Let { expr: None, .. } => {}
         Statement::Guarded(cond, stmts) => {

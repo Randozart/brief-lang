@@ -345,6 +345,24 @@ pub fn emit_statement(backend: &mut LlvmBackend, out: &mut String, stmt: &Statem
                 backend.emit_expr(out, expr, indent)
             }
         }
+        Statement::FreeHint(name) => {
+            // 2026-08-01 (Phase 5): `free x;` — emit the strategy-aware free
+            // of x's backing. The field/local must be heap-backed for the free
+            // to be meaningful; emit_destroy_consumed no-ops for inline/arena/
+            // scalar backings.
+            emit_destroy_consumed(
+                backend,
+                out,
+                indent,
+                &crate::ast::Expr::Identifier(name.clone()),
+            );
+            TypedRegister { name: backend.fun.gen_reg(), ty: Type::void() }
+        }
+        Statement::KeepHint(_) => {
+            // 2026-08-01 (Phase 5): `keep x;` is a scheduler directive — no
+            // runtime emission (it suppresses the auto-free at analysis time).
+            TypedRegister { name: backend.fun.gen_reg(), ty: Type::void() }
+        }
         Statement::ArrowAssign { target, value, consume } => {
             // 2026-08-01 (Phase 3): the arrow — find the collection by the op
             // binding on each side:

@@ -228,6 +228,14 @@ pub enum Statement {
     MetadataAssignment(String, PropertyValue),
     /// escape expr;
     Escape(Option<Expr>),
+    /// 2026-08-01 (Phase 5): `free x;` — a VERIFIED lifetime hint: the backing
+    /// of the local/field `x` is freed here; a later read of `x` is a compile
+    /// error. The scheduler excludes a manually-freed field from its auto-free.
+    FreeHint(String),
+    /// 2026-08-01 (Phase 5): `keep x;` — a SUPPRESS hint: the scheduler must
+    /// NOT auto-free `x` (it escapes or is freed elsewhere). A `keep` on a
+    /// field the scheduler would not free anyway is redundant (a warning).
+    KeepHint(String),
     /// foreach(item in list) { ... }
     Foreach {
         item: String,

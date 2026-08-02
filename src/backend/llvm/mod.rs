@@ -242,6 +242,7 @@ fn collect_strings_stmt(stmt: &Statement, seen: &mut std::collections::HashSet<S
             if let Some(t) = target { collect_strings_expr(t, seen, out); }
             collect_strings_expr(value, seen, out);
         }
+        Statement::FreeHint(_) | Statement::KeepHint(_) => {}
         Statement::Expression(e) => { collect_strings_expr(e, seen, out); }
         Statement::Term(Some(e)) | Statement::TermBang(Some(e)) | Statement::Return(Some(e)) => { collect_strings_expr(e, seen, out); }
         Statement::Term(None) | Statement::TermBang(None) | Statement::Return(None) => {}
@@ -1688,6 +1689,14 @@ impl LlvmBackend {
         );
         self.ctx.dep_graph = analysis.dependency_graph.clone();
         self.ctx.global_free_after = analysis.global_lifetime.free_after.clone();
+        // 2026-08-01 (Phase 5): a `keep x;` on a field the scheduler would not
+        // auto-free anyway is redundant — surface it as a warning.
+        for k in &analysis.global_lifetime.redundant_keeps {
+            self.warnings.push(format!(
+                "warning: 'keep {};' is redundant — the scheduler would not auto-free '{}'",
+                k, k
+            ));
+        }
 
         analysis.region_analyzer.compose_chains();
         analysis.region_analyzer.build_budget_plan(self.ctx.optimize_budget);

@@ -8,6 +8,7 @@ pub mod compile_time;
 pub mod diff;
 pub mod eval;
 pub mod lockfile;
+pub mod memcheck;
 pub mod pattern_live;
 pub mod selection;
 pub mod stage_target;

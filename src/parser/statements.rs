@@ -61,6 +61,10 @@ impl<'a> Parser<'a> {
                     self.parse_inline_txn()
                 } else if self.check(&Token::ExclaimArrow) {
                     self.parse_metadata_statement()
+                } else if self.check_identifier("free") {
+                    self.parse_lifetime_hint(true)
+                } else if self.check_identifier("keep") {
+                    self.parse_lifetime_hint(false)
                 } else {
                     self.parse_expression_statement()
                 }
@@ -206,6 +210,19 @@ impl<'a> Parser<'a> {
             name,
             instance,
         })
+    }
+
+    /// `free x;` (free_hint = true) / `keep x;` (free_hint = false) — a
+    /// lifetime-hint statement (2026-08-01, Phase 5).
+    fn parse_lifetime_hint(&mut self, free_hint: bool) -> Result<Statement, SyntaxError> {
+        self.pos += 1; // consume 'free' / 'keep'
+        let name = self.expect_identifier()?;
+        self.expect(Token::Semicolon)?;
+        if free_hint {
+            Ok(Statement::FreeHint(name))
+        } else {
+            Ok(Statement::KeepHint(name))
+        }
     }
 
     /// sync { ... }
