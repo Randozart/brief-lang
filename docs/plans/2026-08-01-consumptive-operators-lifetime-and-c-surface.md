@@ -347,8 +347,9 @@ used in 4 files (`queue_drain.bv`, `queue_drain_idio.bv`, `stack_push_pop.bv`,
 2. **`.ebv` variants** — formatting/strings/allocator logic in pure Brief; the
    `.bv` variants keep the OS/libc calls; the import resolver prefers `.bv` on
    OS targets, `.ebv` on freestanding. **Status: designed (inventory doc);
-   the pure-Brief `.ebv` string/formatting modules + the no-libc build flow are
-   the remaining implementation — a substantial stdlib effort.**
+   BLOCKED on the string-construction (`bytes → String`) + write-syscall
+   primitives + a freestanding build flow (`_start`, target config). See
+   `docs/architecture/c-surface-inventory.md` §Next steps.**
 3. **No-libc target sketch** — **DONE (design)**: `_start` calls `brief_main`
    then `_exit`; `brief_syscall` is the only C shim; the `.ebv` stdlib
    implements string/formatting/collections in pure Brief over a `write`

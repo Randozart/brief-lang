@@ -67,9 +67,23 @@ import resolver prefers `.bv` on OS targets and `.ebv` on freestanding.
 4. The allocator: a bump/`brk` allocator in `.ebv` (or C), with
    `__brief_free` counting removed (no free on freestanding).
 
-## Next steps
+## Next steps — blocking prerequisites (2026-08-01 audit)
 
-1. Extract the `.ebv` string/formatting/collections modules from the `.bv`
-   equivalents (shared logic, `import` resolver prefers `.bv` on OS).
-2. The `_start` + minimal shim for a no-libc target.
-3. Verify the `.ebv` build produces a runnable binary on a freestanding target.
+The `.ebv` string/formatting modules cannot be written and verified yet:
+
+1. **String construction from bytes** — pure-Brief int→string formatting needs a
+   `bytes → String` primitive (build a `[len][bytes]` buffer). Today the buffer
+   is only READ via `StrBytes#` (String → List<Int>); the inverse does not exist
+   (the C runtime does all formatting). A `CharStr#`/`StrFromBytes#` intrinsic
+   (or a stdlib op) is the prerequisite.
+2. **A verified write-syscall shim** — `brief_syscall` exists (the raw
+   `syscall(2)`), but there is no Brief-level `write(fd, ptr, len)` wrapper that
+   the `.ebv` print family can call. The `.bv` print path uses `fputs`/`printf`
+   (libc); the `.ebv` path needs the raw-syscall write.
+3. **The no-libc build flow** — a freestanding target in `config/targets.toml` +
+   `_start` (assembly) + the import-resolver `.ebv` preference wiring. Without a
+   build flow, `.ebv` modules cannot be compiled to a runnable binary, and
+   unverified stdlib code violates the operating contract.
+
+Until these land, the `.ebv` split remains DESIGNED (this inventory + the
+master plan) with the C surface unchanged.
