@@ -287,3 +287,12 @@ benchmarks/series_converge
 benchmarks/hash_ops
 benchmarks/hash_ops_idio
 benchmarks/linked_list
+benchmarks/stack_push_pop
+benchmarks/stack_push_pop_c
+benchmarks/queue_drain
+benchmarks/queue_drain_idio
+benchmarks/global_lifetime
+benchmarks/series_converge
+benchmarks/hash_ops
+benchmarks/hash_ops_idio
+benchmarks/linked_list
