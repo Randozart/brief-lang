@@ -29,6 +29,12 @@ pub fn emit_intrinsic_call(
         "Malloc#" => return emit_malloc(backend, out, v, args, indent),
         "Alloc#" => return emit_alloc(backend, out, v, args, indent, analysis_id),
         "Free#" => return emit_free(backend, out, v, args, indent),
+        "Now#" => {
+            // 2026-08-01 (D2): `Now#` — monotonic clock in ns for the
+            // watchdog `within N ms` deadline compare.
+            writeln!(out, "{}{} = call i64 @__brief_now()", indent, v).ok();
+            return BTypedRegister { name: v.to_string(), ty: Type::int() };
+        }
         "Load#" => return emit_load(backend, out, v, args, indent),
         "Store#" => return emit_store(backend, out, v, args, indent),
         "Copy#" => return emit_copy(backend, out, v, args, indent),

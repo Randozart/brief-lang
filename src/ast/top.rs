@@ -350,6 +350,11 @@ pub struct WatchdogSpec {
     pub is_required: bool,
     pub cycles_bound: Option<u64>,
     pub seconds_bound: Option<u64>,
+    /// 2026-08-01 (D2): the `within N ms/seconds/minute` deadline in
+    /// NANOSECONDS (10 ms = 10_000_000). Integer `seconds_bound` truncates
+    /// sub-second deadlines to 0; the emission compares Now#() - start against
+    /// this directly.
+    pub deadline_ns: Option<u64>,
     pub is_proven: bool,
     pub retries: u64,
     pub fallback: Option<Box<Expr>>,

@@ -253,6 +253,20 @@ impl LlvmBackend {
 
         let exit_label = format!(".cm_end_{}", self.fun.txn_counter);
         self.fun.txn_counter += 1;
+        // 2026-08-01 (D2): a `within N ms` deadline captures the monotonic
+        // clock at loop entry; the .cmwd_ check fires when the elapsed time
+        // exceeds the deadline even if the liveliness condition still holds.
+        let cm_start = if let Some(wd) = watchdog {
+            if wd.deadline_ns.is_some() {
+                let s = self.fun.gen_reg();
+                writeln!(out, "  {} = call i64 @__brief_now()", s).ok();
+                Some(s)
+            } else {
+                None
+            }
+        } else {
+            None
+        };
         writeln!(out, "  br label %.cm_header").ok();
         writeln!(out, ".cm_header:").ok();
         let counter_name = self.fun.next_reg_with_prefix("cmc");
@@ -328,7 +342,32 @@ impl LlvmBackend {
             self.fun.cur_block = Some(format!(".cmwd_{}", wd_c0));
             let cond_reg = self.emit_expr(out, &wd.condition, "  ");
             let bool_reg = self.as_bool_reg(out, "  ", &cond_reg);
-            writeln!(out, "  br i1 {}, label %.cm_body, label %.cmwdf_{}", bool_reg, wd_c0).ok();
+            // 2026-08-01 (D2): the `within N` deadline (mirrors the countdown
+            // path). Continue = cond AND counter < N AND Now#() - start < N.
+            let mut continue_cond = bool_reg;
+            if let Some(cyc) = wd.cycles_bound {
+                let exp = self.fun.gen_reg();
+                writeln!(out, "  {} = icmp slt i64 {}, {}", exp, counter_name, cyc as i64).ok();
+                let andr = self.fun.gen_reg();
+                writeln!(out, "  {} = and i1 {}, {}", andr, continue_cond, exp).ok();
+                continue_cond = andr;
+            }
+            if let Some(secs) = wd.deadline_ns {
+                if let Some(start) = &cm_start {
+                    let now = self.fun.gen_reg();
+                    writeln!(out, "  {} = call i64 @__brief_now()", now).ok();
+                    let el = self.fun.gen_reg();
+                    writeln!(out, "  {} = sub i64 {}, {}", el, now, start).ok();
+                    let db = self.fun.gen_reg();
+                    writeln!(out, "  {} = add i64 0, {}", db, secs as i64).ok();
+                    let exp = self.fun.gen_reg();
+                    writeln!(out, "  {} = icmp slt i64 {}, {}", exp, el, db).ok();
+                    let andr = self.fun.gen_reg();
+                    writeln!(out, "  {} = and i1 {}, {}", andr, continue_cond, exp).ok();
+                    continue_cond = andr;
+                }
+            }
+            writeln!(out, "  br i1 {}, label %.cm_body, label %.cmwdf_{}", continue_cond, wd_c0).ok();
             writeln!(out, ".cmwdf_{}:", wd_c0).ok();
             self.fun.cur_block = Some(format!(".cmwdf_{}", wd_c0));
             if let Some(on_fire) = &wd.on_fire {
@@ -792,6 +831,21 @@ impl LlvmBackend {
             .cloned().unwrap_or_else(|| "0".to_string());
         let counter_ty = self.ctx.field_types.get(counter_idx)
             .cloned().unwrap_or_else(|| "i64".to_string());
+        // 2026-08-01 (D2): a `within N ms` watchdog deadline captures the
+        // monotonic clock at loop entry; the .cdw_ check fires when the
+        // elapsed time exceeds the deadline even if the liveliness condition
+        // still holds.
+        let wd_start = if let Some(wd) = watchdog {
+            if wd.deadline_ns.is_some() {
+                let s = self.fun.gen_reg();
+                writeln!(out, "  {} = call i64 @__brief_now()", s).ok();
+                Some(s)
+            } else {
+                None
+            }
+        } else {
+            None
+        };
         writeln!(out, "  br label %.cd_{}", c0).ok();
 
         // ── Header ──────────────────────────────────────────────
@@ -846,7 +900,38 @@ impl LlvmBackend {
             self.fun.cur_block = Some(format!(".cdw_{}", c0));
             let cond_reg = self.emit_expr(out, &wd.condition, "  ");
             let bool_reg = self.as_bool_reg(out, "  ", &cond_reg);
-            writeln!(out, "  br i1 {}, label %.cdb_{}, label %.wdf_{}", bool_reg, c0, c0).ok();
+            // 2026-08-01 (D2): the `within N` deadline. The loop CONTINUES
+            // while the liveliness condition holds AND no deadline has expired;
+            // it FIRES when the condition stops holding OR a deadline expires:
+            //   continue = cond AND counter < N  (cycles_bound)
+            //             AND Now#() - start < N  (seconds_bound)
+            //   cycles_bound: the loop counter reaching N.
+            //   seconds_bound: Now#() - start >= N seconds (N * 1e9 ns).
+            let mut continue_cond = bool_reg;
+            if let Some(cyc) = wd.cycles_bound {
+                // !(counter >= N) = counter < N.
+                let exp = self.fun.gen_reg();
+                writeln!(out, "  {} = icmp slt i64 {}, {}", exp, c_counter, cyc as i64).ok();
+                let andr = self.fun.gen_reg();
+                writeln!(out, "  {} = and i1 {}, {}", andr, continue_cond, exp).ok();
+                continue_cond = andr;
+            }
+            if let Some(secs) = wd.deadline_ns {
+                if let Some(start) = &wd_start {
+                    let now = self.fun.gen_reg();
+                    writeln!(out, "  {} = call i64 @__brief_now()", now).ok();
+                    let el = self.fun.gen_reg();
+                    writeln!(out, "  {} = sub i64 {}, {}", el, now, start).ok();
+                    let db = self.fun.gen_reg();
+                    writeln!(out, "  {} = add i64 0, {}", db, secs as i64).ok();
+                    let exp = self.fun.gen_reg();
+                    writeln!(out, "  {} = icmp slt i64 {}, {}", exp, el, db).ok();
+                    let andr = self.fun.gen_reg();
+                    writeln!(out, "  {} = and i1 {}, {}", andr, continue_cond, exp).ok();
+                    continue_cond = andr;
+                }
+            }
+            writeln!(out, "  br i1 {}, label %.cdb_{}, label %.wdf_{}", continue_cond, c0, c0).ok();
             // ── Watchdog fired (COLD) ──────────────────────────
             writeln!(out, ".wdf_{}:", c0).ok();
             self.fun.cur_block = Some(format!(".wdf_{}", c0));

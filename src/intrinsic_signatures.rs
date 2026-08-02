@@ -95,6 +95,9 @@ pub fn get_intrinsic_signature(name: &str) -> Option<Signature> {
         // 2026-07-18: Variadic — first arg is size (Int), optional second is
         // strategy (Identifier or Quoted). Codegen handles both cases.
         "Alloc#"   => Some(Signature { name: "Alloc#",   parameters: vec![], return_kind: ReturnKind::Exact(Type::ptr(Type::bits(1))), observable: true, variadic: false }),
+        // 2026-08-01 (D2): `Now#` — monotonic clock in nanoseconds, for the
+        // watchdog `within N ms` deadline compare.
+        "Now#"     => Some(Signature { name: "Now#",   parameters: vec![], return_kind: ReturnKind::Native("Int"), observable: true, variadic: false }),
         "Free#"    => Some(Signature { name: "Free#",    parameters: vec![("ptr", Type::ptr(Type::bits(1)))], return_kind: ReturnKind::Exact(Type::void()), observable: true, variadic: false }),
         "Load#"    => Some(Signature { name: "Load#",    parameters: vec![], return_kind: ReturnKind::Native("Int"), observable: true, variadic: false }),
         "Store#"   => Some(Signature { name: "Store#",   parameters: vec![], return_kind: ReturnKind::Exact(Type::void()), observable: true, variadic: false }),

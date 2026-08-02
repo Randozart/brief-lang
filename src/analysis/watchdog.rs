@@ -492,6 +492,7 @@ mod tests {
             fallback: None,
             cycles_bound: None,
             seconds_bound: None,
+            deadline_ns: None,
             is_proven: false,
             condition: Expr::Identifier(trigger.to_string()),
             is_required,
@@ -625,6 +626,7 @@ mod tests {
         let spec_non_trigger = WatchdogSpec {
             cycles_bound: None,
             seconds_bound: None,
+            deadline_ns: None,
             is_proven: false,
             condition: Expr::Bool(false),
             is_required: true,
@@ -636,6 +638,7 @@ mod tests {
         let spec_var = WatchdogSpec {
             cycles_bound: None,
             seconds_bound: None,
+            deadline_ns: None,
             is_proven: false,
             condition: Expr::Identifier("timeout".to_string()),
             is_required: true,
@@ -759,6 +762,7 @@ mod tests {
                 Some(WatchdogSpec {
                     cycles_bound: None,
                     seconds_bound: None,
+                    deadline_ns: None,
                     is_proven: false,
                     retries: 0,
                     fallback: None,

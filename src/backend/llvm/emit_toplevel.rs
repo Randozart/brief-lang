@@ -222,6 +222,9 @@ impl LlvmBackend {
         // 2026-08-01 (D2): garbage scheduling — scheduled frees route through
         // __brief_free so a benchmark can assert frees == allocs.
         writeln!(out, "declare void @__brief_free(ptr) nounwind").ok();
+        // 2026-08-01 (D2): `Now#` — monotonic clock for the watchdog
+        // `within N ms` deadline compare.
+        writeln!(out, "declare i64 @__brief_now() nounwind").ok();
         // 2026-06-26: realloc used by the arena allocator grow path when
         // the bump-allocated buffer is exhausted (emit_arena_alloc in mod.rs).
         writeln!(out, "declare ptr @realloc(ptr, i64) nounwind").ok();

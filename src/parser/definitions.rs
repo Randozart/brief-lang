@@ -983,6 +983,51 @@ impl<'a> Parser<'a> {
                 _ => {}
             }
             self.expect(Token::RBracket)?;
+            // 2026-08-01 (D2): optional `within N <unit>` deadline — the
+            // watchdog must fire within a time/cycle budget even if the
+            // liveliness condition never stops holding:
+            //   ?[cond] within 10 ms     -> deadline_ns = 10 * 1e6
+            //   ?[cond] within 1000 cyc  -> cycles_bound = 1000
+            //   ?[cond] within 2 seconds -> deadline_ns = 2 * 1e9
+            //   ?[cond] within 1 minute  -> deadline_ns = 60 * 1e9
+            let (mut cycles_bound, mut deadline_ns) = (None, None);
+            if self.eat(&Token::Within) {
+                let bound = match self.peek() {
+                    Some(Token::Integer(n)) => {
+                        let n = *n;
+                        self.pos += 1;
+                        n as u64
+                    }
+                    _ => {
+                        return self.error_at_current(
+                            "expected a numeric bound after 'within'",
+                        );
+                    }
+                };
+                match self.peek() {
+                    Some(Token::Cyc) => {
+                        self.pos += 1;
+                        cycles_bound = Some(bound);
+                    }
+                    Some(Token::Ms) => {
+                        self.pos += 1;
+                        deadline_ns = Some(bound.saturating_mul(1_000_000));
+                    }
+                    Some(Token::Seconds) => {
+                        self.pos += 1;
+                        deadline_ns = Some(bound.saturating_mul(1_000_000_000));
+                    }
+                    Some(Token::Minute) => {
+                        self.pos += 1;
+                        deadline_ns = Some(bound.saturating_mul(60_000_000_000));
+                    }
+                    _ => {
+                        return self.error_at_current(
+                            "expected a unit (ms, cyc, seconds, minute) after the 'within' bound",
+                        );
+                    }
+                }
+            }
             // 2026-08-01 (C1): optional `-> handler(val)` on-fire callback.
             // The handler is called with the LAST COMPUTED VALUE on the fire
             // path; the parens are the call marker (`()` or a `(val)` arg-name
@@ -1016,8 +1061,9 @@ impl<'a> Parser<'a> {
             Some(WatchdogSpec {
                 condition: cond,
                 is_required,
-                cycles_bound: None,
+                cycles_bound,
                 seconds_bound: None,
+                deadline_ns,
                 is_proven: false,
                 retries: 0,
                 fallback: None,
@@ -2814,6 +2860,42 @@ mod tests {
     fn test_contract_without_watchdog() {
         let t = parse_txn("txn f() [true][done] { term; };").unwrap();
         assert!(t.contract.watchdog.is_none());
+    }
+
+    #[test]
+    fn test_watchdog_within_ms_deadline_ns() {
+        // 2026-08-01 (D2): `?[cond] within 10 ms` → deadline_ns = 10 * 1e6.
+        let t = parse_txn(
+            "txn f() [true][done] ?[x < 5] within 10 ms { term; };",
+        )
+        .unwrap();
+        let w = t.contract.watchdog.expect("watchdog must parse");
+        assert_eq!(w.deadline_ns, Some(10_000_000));
+        assert!(w.cycles_bound.is_none());
+    }
+
+    #[test]
+    fn test_watchdog_within_cyc_cycles_bound() {
+        // 2026-08-01 (D2): `?[cond] within 1000 cyc` → cycles_bound = 1000.
+        let t = parse_txn(
+            "txn f() [true][done] ?[x < 5] within 1000 cyc { term; };",
+        )
+        .unwrap();
+        let w = t.contract.watchdog.expect("watchdog must parse");
+        assert_eq!(w.cycles_bound, Some(1000));
+        assert!(w.deadline_ns.is_none());
+    }
+
+    #[test]
+    fn test_watchdog_within_then_handler() {
+        // `within` comes before `-> handler`.
+        let t = parse_txn(
+            "txn f() [true][done] ?[x < 5] within 10 ms -> report(val) { term; };",
+        )
+        .unwrap();
+        let w = t.contract.watchdog.expect("watchdog must parse");
+        assert_eq!(w.deadline_ns, Some(10_000_000));
+        assert_eq!(w.on_fire.as_ref().map(|f| f.handler.as_str()), Some("report"));
     }
 
     // ── 2026-08-01 (Phase 2): `[#]` entry marker removal ──────────────

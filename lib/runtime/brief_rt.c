@@ -675,3 +675,12 @@ void __brief_free(void* p) {
 long __brief_free_count(void) {
     return __brief_free_total;
 }
+
+// 2026-08-01 (D2): `Now#` — monotonic clock in nanoseconds, for the watchdog
+// `within N ms` deadline compare (the deadline is `now - start >= N ms`).
+#include <time.h>
+int64_t __brief_now(void) {
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    return (int64_t)ts.tv_sec * 1000000000LL + (int64_t)ts.tv_nsec;
+}
