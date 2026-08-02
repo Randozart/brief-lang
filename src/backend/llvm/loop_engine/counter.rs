@@ -1519,7 +1519,7 @@ impl LlvmBackend {
                       // from the phis); its data write is memory-resident in %State.
                       let insert_strat = self.find_insert_strategy(lhs).cloned();
                       if let Some(op_def) = &insert_strat {
-                          if !super::emit_stmt::emit_strategy_member_call(self, out, "  ", lhs, op_def, Some(&val.name)) {
+                          if super::emit_stmt::emit_strategy_member_call(self, out, "  ", lhs, op_def, Some(&val.name)).is_none() {
                               super::emit_stmt::emit_strategy_fn_call(self, out, "  ", lhs, op_def, Some(&val.name));
                           }
                           i += 1;
@@ -1680,7 +1680,7 @@ impl LlvmBackend {
                         let strat = self.find_extract_strategy(source)
                             .or_else(|| self.find_extract_strategy(e)).cloned();
                         if let Some(op_def) = &strat {
-                            if !super::emit_stmt::emit_strategy_member_call(self, out, "  ", source, op_def, None) {
+                            if super::emit_stmt::emit_strategy_member_call(self, out, "  ", source, op_def, None).is_none() {
                                 super::emit_stmt::emit_strategy_fn_call(self, out, "  ", source, op_def, None);
                             }
                         }

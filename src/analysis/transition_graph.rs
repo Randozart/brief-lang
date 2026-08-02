@@ -1030,6 +1030,19 @@ fn scan_for_state_identifiers(stmts: &[Statement], state_fields: &HashSet<String
             Statement::SyncBlock(body) => {
                 scan_for_state_identifiers(body, state_fields, out);
             }
+            Statement::ArrowAssign { target, value, .. } => {
+                // 2026-08-01: the arrow references BOTH the target (insert /
+                // store destination) and the value (the collection being
+                // inserted into or extracted from). Without this arm, a
+                // collection referenced ONLY through `<-`/`~<-` was eliminated
+                // by field-liveness, silently disabling the push/pop (the
+                // queue_drain / stack_push_pop regression — the harness matched
+                // only because their output was the counter, not the collection).
+                if let Some(t) = target {
+                    collect_state_identifiers(t, state_fields, out);
+                }
+                collect_state_identifiers(value, state_fields, out);
+            }
             _ => {}
         }
     }
@@ -1138,6 +1151,17 @@ pub(crate) fn collect_statement_identifiers(
         }
         Statement::Expression(e) => {
             collect_state_identifiers(e, state_fields, out);
+        }
+        Statement::ArrowAssign { target, value, .. } => {
+            // 2026-08-01: the arrow references the collection (the value for an
+            // extract/discard, or the target for an insert) — see
+            // scan_for_state_identifiers. Without this arm the garbage
+            // scheduler's touch-set missed arrow-only fields (it never freed
+            // them) and the field-liveness elimination hid them entirely.
+            if let Some(t) = target {
+                collect_state_identifiers(t, state_fields, out);
+            }
+            collect_state_identifiers(value, state_fields, out);
         }
         Statement::Guarded(cond, body) => {
             collect_state_identifiers(cond, state_fields, out);

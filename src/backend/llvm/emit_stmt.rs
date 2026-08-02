@@ -179,7 +179,7 @@ pub fn emit_statement(backend: &mut LlvmBackend, out: &mut String, stmt: &Statem
                     // member call instead of the free-function marker dispatch.
                     let insert_strat = backend.find_insert_strategy(lhs).cloned();
                     if let Some(op_def) = &insert_strat {
-                        if !emit_strategy_member_call(backend, out, indent, lhs, op_def, Some(&val.name)) {
+                        if emit_strategy_member_call(backend, out, indent, lhs, op_def, Some(&val.name)).is_none() {
                             emit_strategy_fn_call(backend, out, indent, lhs, op_def, Some(&val.name));
                         }
                     } else if let Some(reg) = backend.fun.let_bindings.get(name).cloned() {
@@ -336,7 +336,7 @@ pub fn emit_statement(backend: &mut LlvmBackend, out: &mut String, stmt: &Statem
                     .or_else(|| backend.find_extract_strategy(expr));
                 if let Some(op_def) = strat {
                     let op = op_def.clone();
-                    if !emit_strategy_member_call(backend, out, indent, source, &op, None) {
+                    if emit_strategy_member_call(backend, out, indent, source, &op, None).is_none() {
                         emit_strategy_fn_call(backend, out, indent, source, &op, None);
                     }
                 }
@@ -394,7 +394,7 @@ pub fn emit_statement(backend: &mut LlvmBackend, out: &mut String, stmt: &Statem
             if let Some(t) = target.as_ref() {
                 if let Some(op_def) = backend.find_insert_strategy(t).cloned() {
                     let val = backend.emit_expr(out, value, indent);
-                    if !emit_strategy_member_call(backend, out, indent, t, &op_def, Some(&val.name)) {
+                    if emit_strategy_member_call(backend, out, indent, t, &op_def, Some(&val.name)).is_none() {
                         emit_strategy_fn_call(backend, out, indent, t, &op_def, Some(&val.name));
                     }
                     return TypedRegister { name: backend.fun.gen_reg(), ty: Type::void() };
@@ -402,11 +402,16 @@ pub fn emit_statement(backend: &mut LlvmBackend, out: &mut String, stmt: &Statem
             }
             if let Some(op_def) = backend.find_extract_strategy(value).cloned() {
                 // EXTRACT — the value is the collection. Member-bound
-                // ExtractFrom dispatches to the self-bound member call; the
-                // free-function convention is the fallback. The popped result
-                // is stored into the target (or discarded).
-                let Some(result) = emit_strategy_fn_call(backend, out, indent, value, &op_def, None) else {
-                    return TypedRegister { name: backend.fun.gen_reg(), ty: Type::void() };
+                // ExtractFrom (e.g. the Stack's self-bound `pop`) dispatches to
+                // the member call, which returns the popped value; the
+                // free-function convention is the fallback. The result is
+                // stored into the target (or discarded).
+                let result = match emit_strategy_member_call(backend, out, indent, value, &op_def, None) {
+                    Some(r) => r,
+                    None => match emit_strategy_fn_call(backend, out, indent, value, &op_def, None) {
+                        Some(r) => r,
+                        None => return TypedRegister { name: backend.fun.gen_reg(), ty: Type::void() },
+                    },
                 };
                 if let Some(t) = target.as_ref() {
                     emit_arrow_store(backend, out, indent, t, &result);
@@ -772,29 +777,29 @@ pub(super) fn emit_strategy_member_call(
     target: &Expr,
     op_def: &crate::ast::top::OperatorDef,
     value: Option<&str>,
-) -> bool {
+) -> Option<String> {
     let fn_name = match op_def.impl_args.as_ref() {
         Some(crate::ast::PropertyValue::Identifier(s)) => s.clone(),
         Some(crate::ast::PropertyValue::List(items)) => match items.first() {
             Some(crate::ast::PropertyValue::Identifier(f)) => f.clone(),
-            _ => return false,
+            _ => return None,
         },
-        _ => return false,
+        _ => return None,
     };
     let recv = match target {
         Expr::AddrOf(inner) => (**inner).clone(),
         _ => target.clone(),
     };
-    let Expr::Identifier(recv_name) = &recv else { return false; };
-    let Some(&ridx) = backend.ctx.field_index_map.get(recv_name) else { return false; };
+    let Expr::Identifier(recv_name) = &recv else { return None; };
+    let Some(&ridx) = backend.ctx.field_index_map.get(recv_name) else { return None; };
     let type_name = match backend.ctx.field_brief_types.get(ridx) {
         Some(Type::Custom(n)) => n.clone(),
         Some(Type::Applied(n, _)) => n.clone(),
-        _ => return false,
+        _ => return None,
     };
     let members = backend.ctx.obj_members.get(&type_name).cloned().unwrap_or_default();
     let member = members.iter().find(|m| member_brief_name(m) == fn_name.as_str()).cloned();
-    let Some(member) = member else { return false; };
+    let Some(member) = member else { return None; };
     // Emit the receiver (the struct address) and pass the value register.
     let recv_tmp = backend.fun.gen_reg();
     let recv_reg = backend.emit_expr_inner(out, &recv_tmp, &recv, indent);
@@ -809,8 +814,12 @@ pub(super) fn emit_strategy_member_call(
     // the mono key; the member-call path must too, or the push's self-slot
     // GEPs (data[len], len = len + 1) write to the wrong offsets.
     let self_key = backend.resolve_obj_key(&recv_reg.ty).unwrap_or_else(|| type_name.clone());
-    backend.emit_member_body(out, &out_tmp, &recv_reg, &self_key, &member, &arg_regs, indent);
-    true
+    // 2026-08-01: the member body's RETURNED register is the result (a defn/
+    // txn member's `term` value); emit_member_body ignores `out_tmp` and
+    // returns member_result. Side-effect members (push/pop without a term
+    // result) return a fresh void register — fine for discards.
+    let result_reg = backend.emit_member_body(out, &out_tmp, &recv_reg, &self_key, &member, &arg_regs, indent);
+    Some(result_reg.name)
 }
 
 /// Resolve a strategy property value to a function name and argument markers,
@@ -883,7 +892,12 @@ pub(super) fn emit_strategy_fn_call(backend: &mut LlvmBackend, out: &mut String,
         }).collect()
     };
 
-    let args_str = args.join(", ");
+    // 2026-08-01: the free-function convention boxes every argument to i64
+    // (the handle is a ptrtoint'd address; the pushed value is the boxed
+    // register). Each arg must carry its LLVM type or the call is malformed
+    // (`call i64 @pop(%t39)` — LLVM requires `i64 %t39`).
+    let typed_args: Vec<String> = args.iter().map(|a| format!("i64 {}", a)).collect();
+    let args_str = typed_args.join(", ");
     let result = backend.fun.gen_reg();
     writeln!(out, "{}{} = call i64 @{}({})", indent, result, fn_name, args_str).ok();
     Some(result)

@@ -3931,3 +3931,39 @@ fn test_consumptive_op_on_const_let_in_txn() {
         "the consumptive add must be emitted; got:\n{ir}"
     );
 }
+
+/// A collection referenced ONLY through arrow statements must be kept in
+/// %State (regression: the field-liveness walk dropped ArrowAssign, so
+/// arrow-only collections were eliminated and the push/pop silently no-op'd —
+/// queue_drain/stack_push_pop matched the C reference only because their
+/// output was the counter, not the collection).
+#[test]
+fn test_arrow_only_collection_is_kept_in_state() {
+    let src = r#"
+        import { Stack } from "std/collections.bv";
+        let st: Stack<Int, 8> = 0;
+        let v: Int = 0;
+        node report [v < 3][v == 3] {
+            st <- v;
+            <- st;
+            v = v + 1;
+            term;
+        };
+    "#;
+    let mut items = parse_bv_source(src);
+    let mut universe = crate::type_universe::TypeUniverse::new();
+    let mut pm = crate::plugin::PluginManager::new();
+    pm.run_ast(crate::ast::StageKind::Parsed, &mut items, &mut universe)
+        .expect("plugin stage failed");
+    let mut backend = LlvmBackend::new().with_type_universe(universe);
+    let ir = backend.generate(&items, None);
+    // The stack must get a %State slot (a GEP on slot 0 for `st`).
+    assert!(
+        ir.contains("getelementptr inbounds %State, ptr %state, i32 0, i32 0"),
+        "the arrow-only collection must be kept in %State; got:\n{ir}"
+    );
+    assert!(
+        !ir.contains("load i64, ptr @st"),
+        "the collection must resolve as a %State field, not an undefined @st global; got:\n{ir}"
+    );
+}

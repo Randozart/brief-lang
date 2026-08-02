@@ -2977,3 +2977,43 @@ field is registered normally and loads via the state GEP. Regression test:
 **Lesson:** a new Expr wrapper (Consume) must be walked by every field/usage
 collection pass — the compiler's passes must treat `Consume(inner)` as a read
 of `inner` everywhere.
+
+---
+
+## Arrow-Referenced Collections Eliminated by Field-Liveness — Silent Push/Pop No-Op — FIXED
+
+**Date:** 2026-08-01
+**Status:** Fixed
+**Root cause:** `scan_for_state_identifiers` (and the garbage-scheduler's
+`collect_statement_identifiers`) in `src/analysis/transition_graph.rs` walked
+every statement form EXCEPT `Statement::ArrowAssign`. A collection referenced
+ONLY through `<-`/`~<-` was therefore never marked referenced → the field-mode
+analysis eliminated it from `%State` → the arrow dispatch silently no-op'd (or
+emitted an undefined `@st` global). queue_drain/stack_push_pop matched the C
+reference ONLY because their output is the counter, not the collection — the
+push/pop never actually ran.
+**Fix:** both walkers now descend into `ArrowAssign { target, value }`. The
+collection is kept in `%State` and the strategy calls are emitted.
+**Also fixed en route:** (a) `emit_strategy_member_call` returned only `bool`,
+hiding the member-body result register — the caller used an undefined `out_tmp`;
+it now returns the member's result register, so the extract-into-target
+(`v ~<- st`) stores the popped value; (b) `emit_strategy_fn_call` emitted call
+args without their LLVM types (`call i64 @pop(%t39)`), now `call i64 @pop(i64 %t39)`.
+**Regression test:** `backend::llvm::tests::test_arrow_only_collection_is_kept_in_state`.
+
+## Loop-Guard Variable's State Store Dropped — Stale Body Reads — OPEN
+
+**Date:** 2026-08-01
+**Status:** Open (pre-existing, deep loop-emitter issue)
+**Root cause:** in the `.fmain` runtime loop (`emit_folded_loop`/
+`emit_countable_body`), a state field used as the loop GUARD (`[count < N]` +
+`count = count + 1`) has its per-iteration `%State` store dropped — the loop is
+driven by an internal counter phi, and the body's `count = count + 1` is not
+stored back. A body READ of the guard field (e.g. `println!(count)`) then sees
+the stale field value (0) every iteration instead of 1,2,3. Verified: a
+counter-only reactive program prints `count=1` ×N instead of 1..N. The
+benchmarks are unaffected (they never print/push the guard field mid-loop).
+**Fix (when the loop-emitter field routing is revisited):** remap the guard
+field's body reads to the loop-counter phi register (or store the body's writes
+to the field back to `%State` when the body reads it). No file has been
+modified for this yet.
