@@ -130,7 +130,7 @@ fn expr_is_string(
 /// Is a type a #String/#Data-category value? Mirrors the casting graph's
 /// base-chain walk (no graph needed — checks the universe's Cast.# properties
 /// and the declared base), plus the bootstrap String/Data names.
-fn is_string_category(ty: &Type, universe: &TypeUniverse) -> bool {
+pub fn is_string_category(ty: &Type, universe: &TypeUniverse) -> bool {
     match ty {
         Type::Custom(name) => {
             if name == "String" || name == "Data" {

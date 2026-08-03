@@ -297,13 +297,13 @@ fn serialize_ctypes_dbvl(c_type_map: &HashMap<String, String>) -> String {
 /// from the body-dependent ABI (needs_state) and the target's config-driven
 /// state representation. Boundary conversions come from target.conversions
 /// (config), never hardcoded in Rust.
-fn export_template_vars(export: &ExportDecl, target: &GlueTarget) -> HashMap<String, String> {
+fn export_template_vars(export: &ExportDecl, target: &GlueTarget, type_protocols: &HashMap<String, String>) -> HashMap<String, String> {
     let mut fn_vars: HashMap<String, String> = HashMap::new();
     fn_vars.insert("name".to_string(), export.name.clone());
 
     let params: Vec<String> = export.params.iter()
         .map(|(name, ty)| {
-            let (native, _) = resolve_protocol(ty, &target.protocols);
+            let (native, _) = resolve_protocol(ty, &target.protocols, type_protocols);
             format!("{}: {}", name, native)
         })
         .collect();
@@ -312,13 +312,13 @@ fn export_template_vars(export: &ExportDecl, target: &GlueTarget) -> HashMap<Str
             // 2026-08-03: function-pointer (callback) params use the target's
             // fn_param_decl (C embeds the name: `int64_t (*cb)(int64_t)`).
             if ty.starts_with("fn(") {
-                let (ret, params) = fn_pointer_parts(ty, &target.protocols);
+                let (ret, params) = fn_pointer_parts(ty, &target.protocols, type_protocols);
                 return target.fn_param_decl
                     .replace("{ret}", &ret)
                     .replace("{name}", name)
                     .replace("{params}", &params);
             }
-            let (_, c_abi) = resolve_protocol(ty, &target.protocols);
+            let (_, c_abi) = resolve_protocol(ty, &target.protocols, type_protocols);
             // Config-driven param decl format (C uses `type name`,
             // python/rust use `name: type`).
             target.param_decl.replace("{name}", name).replace("{type}", &c_abi)
@@ -329,7 +329,7 @@ fn export_template_vars(export: &ExportDecl, target: &GlueTarget) -> HashMap<Str
         .collect();
     let c_types: Vec<String> = export.params.iter()
         .map(|(_, ty)| {
-            let (_, c_abi) = resolve_protocol(ty, &target.protocols);
+            let (_, c_abi) = resolve_protocol(ty, &target.protocols, type_protocols);
             c_abi
         })
         .collect();
@@ -342,7 +342,7 @@ fn export_template_vars(export: &ExportDecl, target: &GlueTarget) -> HashMap<Str
     fn_vars.insert("s_param".to_string(), state_arg);
     fn_vars.insert("s_ffi_param".to_string(), state_ffi_param);
     fn_vars.insert("s_ffi_type".to_string(), state_ffi_type);
-    let (native_ret, c_ret) = resolve_protocol(&export.return_type, &target.protocols);
+    let (native_ret, c_ret) = resolve_protocol(&export.return_type, &target.protocols, type_protocols);
     fn_vars.insert("return".to_string(), native_ret.clone());
     fn_vars.insert("c_return".to_string(), c_ret.clone());
 
@@ -411,11 +411,12 @@ fn render_ffi_decls(
     target: &GlueTarget,
     template_vars: &HashMap<String, String>,
     ffi_template: &str,
+    type_protocols: &HashMap<String, String>,
 ) -> String {
     let mut ffi_buf = String::new();
     for (i, export) in exports.iter().enumerate() {
         if i > 0 { ffi_buf.push('\n'); }
-        let fn_vars = export_template_vars(export, target);
+        let fn_vars = export_template_vars(export, target, type_protocols);
         let mut merged = template_vars.clone();
         merged.extend(fn_vars);
         ffi_buf.push_str(&render_template(ffi_template, &merged));
@@ -445,6 +446,11 @@ pub fn run_bindings_cli(file_path: &str, language: &str, out_dir: &str) -> Resul
             glue_targets.keys().cloned().collect::<Vec<_>>().join(", "))
     })?;
     let info = extract_bridge_info(&items, bridge_name);
+    // 2026-08-03 (P3): type → declared protocol (`type CStr: #String<C_String>`)
+    // so boundary types resolve to their category's ABI names in the header/
+    // wrapper. The export runs before codegen's normalizer, so the universe
+    // isn't populated — resolve from the type declarations.
+    let type_protocols = build_type_protocols(&items);
 
     let mut template_vars: HashMap<String, String> = HashMap::new();
     template_vars.insert("bridge_name".to_string(), bridge_name.to_string());
@@ -452,7 +458,7 @@ pub fn run_bindings_cli(file_path: &str, language: &str, out_dir: &str) -> Resul
     let bindings_ffi = target.templates.get("bindings.ffi_template")
         .or_else(|| target.templates.get("ffi_template"))
         .ok_or_else(|| format!("target '{}' has no bindings.ffi_template in config/glue.dbvl", language))?;
-    let ffi_decls = render_ffi_decls(&info.exports, target, &template_vars, bindings_ffi);
+    let ffi_decls = render_ffi_decls(&info.exports, target, &template_vars, bindings_ffi, &type_protocols);
     template_vars.insert("ffi_decls".to_string(), ffi_decls);
 
     let output_dir = std::path::Path::new(out_dir).join(format!("{}-bindings", bridge_name));
@@ -516,6 +522,7 @@ pub fn run_export_cli(file_path: &str, language: &str, out_dir: &str) -> Result<
             language, glue_targets.keys().cloned().collect::<Vec<_>>().join(", "))
     })?;
     let info = extract_bridge_info(&items, bridge_name);
+    let type_protocols = build_type_protocols(&items);
     println!("  Bridge '{}': {} exports, {} frgns, {} melds",
         info.name, info.exports.len(), info.frgns.len(), info.melds.len());
     println!("  Target: {} (types: {}, bridge: {})",
@@ -595,7 +602,7 @@ pub fn run_export_cli(file_path: &str, language: &str, out_dir: &str) -> Result<
         if i > 0 { exports_buf.push('\n'); }
         if i > 0 { ffi_buf.push('\n'); }
 
-        let fn_vars = export_template_vars(export, target);
+        let fn_vars = export_template_vars(export, target, &type_protocols);
 
         if let Some(ft) = fn_template {
             // 2026-08-03: per-function render sees both fn_vars and the
@@ -673,15 +680,23 @@ pub fn run_export_cli(file_path: &str, language: &str, out_dir: &str) -> Result<
 fn resolve_protocol(
     brief_type_name: &str,
     protocols: &HashMap<String, crate::glue::config::ProtocolEntry>,
+    type_protocols: &HashMap<String, String>,
 ) -> (String, String) {
     // 2026-08-03: fn(P)->R — a function pointer IS the ABI. Both the native
     // and C forms are the C function-pointer type built from the inner
     // protocols (e.g. `fn(Int)->Int` → `i64 (*)(i64)`).
     if brief_type_name.starts_with("fn(") {
-        let abi = fn_pointer_abi(brief_type_name, protocols);
+        let abi = fn_pointer_abi(brief_type_name, protocols, type_protocols);
         return (abi.clone(), abi);
     }
-    let protocol_key = format!("#{}", brief_type_name);
+    // 2026-08-03 (P3): a boundary type (`CStr`, `CDouble`) resolves to its
+    // protocol CATEGORY so the config's category-keyed c_abi applies. The
+    // protocol string may carry a variant (`#String<C_String>`) — the ABI
+    // name comes from the category entry.
+    let category = type_protocols.get(brief_type_name)
+        .map(|p| protocol_category(p).to_string())
+        .unwrap_or_else(|| brief_type_name.to_string());
+    let protocol_key = format!("#{}", category);
     if let Some(entry) = protocols.get(&protocol_key) {
         let abi = entry.c_abi.clone()
             .or_else(|| entry.wasm_abi.clone())
@@ -692,23 +707,49 @@ fn resolve_protocol(
     }
 }
 
+/// Type name → declared protocol (`type CStr: #String<C_String>` → CStr →
+/// "#String<C_String>"). 2026-08-03 (P3): lets the wrapper/header resolve a
+/// boundary type to its category's ABI names.
+fn build_type_protocols(items: &[TopLevel]) -> HashMap<String, String> {
+    let mut map = HashMap::new();
+    for item in items {
+        if let TopLevel::TypeDef(td) = item {
+            if let Some(p) = td.protocol.as_ref() {
+                map.insert(td.name.clone(), p.clone());
+            }
+        }
+    }
+    map
+}
+
+/// The bare category of a declared protocol string — `#String<C_String>` →
+/// `"String"`, `#String` → `"String"`.
+fn protocol_category(proto: &str) -> &str {
+    let b = proto.trim_start_matches('#');
+    match b.find('<') {
+        Some(lt) => &b[..lt],
+        None => b,
+    }
+}
+
 /// Decompose a `fn(P1,P2)->R` text form into `(ret_c, params_c)` using each
 /// inner type's c_abi mapping. `fn(Int)->Int` → `("i64", "i64")`.
 fn fn_pointer_parts(
     fn_str: &str,
     protocols: &HashMap<String, crate::glue::config::ProtocolEntry>,
+    type_protocols: &HashMap<String, String>,
 ) -> (String, String) {
     let inner = fn_str.strip_prefix("fn(").unwrap_or(fn_str);
     let (params_part, ret) = inner.split_once("->").unwrap_or((inner, ""));
     let params_part = params_part.trim_end_matches(')');
     let params: Vec<String> = params_part.split(',')
         .filter(|p| !p.trim().is_empty())
-        .map(|p| resolve_protocol(p.trim(), protocols).1)
+        .map(|p| resolve_protocol(p.trim(), protocols, type_protocols).1)
         .collect();
     let ret_c = if ret.trim().is_empty() {
         "void".to_string()
     } else {
-        resolve_protocol(ret.trim(), protocols).1
+        resolve_protocol(ret.trim(), protocols, type_protocols).1
     };
     (ret_c, params.join(", "))
 }
@@ -718,8 +759,9 @@ fn fn_pointer_parts(
 fn fn_pointer_abi(
     fn_str: &str,
     protocols: &HashMap<String, crate::glue::config::ProtocolEntry>,
+    type_protocols: &HashMap<String, String>,
 ) -> String {
-    let (ret, params) = fn_pointer_parts(fn_str, protocols);
+    let (ret, params) = fn_pointer_parts(fn_str, protocols, type_protocols);
     format!("{} (*)({})", ret, params)
 }
 

@@ -655,7 +655,7 @@ impl CastingGraph {
     /// into `(category, variant)`. Returns None for empty/unparseable strings.
     /// 2026-08-03: `#String<C_String>` → `("String", "CString")`; `#String` →
     /// `("String", "")`.
-    fn parse_protocol_base(base: &str) -> Option<(String, String)> {
+    pub fn parse_protocol_base(base: &str) -> Option<(String, String)> {
         let b = base.trim_start_matches('#');
         if let Some(lt) = b.find('<') {
             let cat = b[..lt].to_string();

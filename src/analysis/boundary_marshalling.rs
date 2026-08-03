@@ -1,0 +1,336 @@
+// ── Boundary Marshalling (`CStr ⇄ String` casts → binding calls) ───────
+// 2026-08-03 (plan 2026-08-03-protocol-driven-glue-boundary): the casting
+// graph resolves the minimal path between a boundary representation and the
+// base protocol; codegen must emit the DELTA (the binding call), not a chain.
+// But Brief's boxing turns String/CStr values into i64 registers, losing the
+// type at codegen — `emit_cast_path` sees `Int` and picks the Int→String lane.
+//
+// This pass runs AFTER typechecking (like string_concat.rs) and rewrites a
+// same-category representation cast (`CStr as String`, `s as CStr`) into the
+// graph-resolved binding call (`cstr_to_brief`, `str_to_c`) on the typed AST,
+// so the backend emits the marshalling directly. The protocol decision stays
+// in the frontend (the graph's minimal path), not hardcoded per type.
+//
+// Undo: if values ever stop being boxed (registers keep their Brief type),
+// delete this pass and let emit_cast_path handle representation casts.
+
+use crate::ast::{Expr, Statement, TopLevel, Type};
+use crate::casting::graph::{CastingGraph, LaneKind};
+use crate::type_universe::TypeUniverse;
+
+/// Rewrite same-category representation casts into their binding calls.
+pub fn rewrite_boundary_marshalling(items: &mut [TopLevel], universe: &TypeUniverse) {
+    // Build a casting graph from the program's proto declarations so the
+    // marshalling decision (minimal path → binding fn) is protocol-driven.
+    let mut graph = CastingGraph::new();
+    // Type → declared protocol (`type CStr: #String<C_String>` → CStr →
+    // "#String<C_String>"). The universe is not populated until codegen, so
+    // the pass resolves custom boundary types from their declarations.
+    let mut type_protocols: std::collections::HashMap<String, String> = std::collections::HashMap::new();
+    for item in items.iter() {
+        match item {
+            TopLevel::ProtocolDef(pd) => {
+                graph.register_protocol_def(pd);
+            }
+            TopLevel::TypeDef(td) => {
+                if let Some(p) = td.protocol.as_ref() {
+                    type_protocols.insert(td.name.clone(), p.clone());
+                }
+            }
+            _ => {}
+        }
+    }
+    for item in items.iter_mut() {
+        match item {
+            TopLevel::Definition(d) => {
+                let mut env = param_env(&d.parameters);
+                rewrite_body(&mut d.body, &mut env, universe, &graph, &type_protocols);
+            }
+            TopLevel::Transaction(t) => {
+                let mut env = param_env(&t.parameters);
+                rewrite_body(&mut t.body, &mut env, universe, &graph, &type_protocols);
+            }
+            TopLevel::Export(e) => {
+                if let TopLevel::Definition(d) = e.inner.as_mut() {
+                    let mut env = param_env(&d.parameters);
+                    rewrite_body(&mut d.body, &mut env, universe, &graph, &type_protocols);
+                }
+            }
+            _ => {}
+        }
+    }
+}
+
+fn param_env(params: &[(String, Type)]) -> std::collections::HashMap<String, Type> {
+    params.iter().cloned().collect()
+}
+
+fn rewrite_body(
+    body: &mut [Statement],
+    env: &mut std::collections::HashMap<String, Type>,
+    universe: &TypeUniverse,
+    graph: &CastingGraph,
+    type_protocols: &std::collections::HashMap<String, String>,
+) {
+    for stmt in body {
+        match stmt {
+            Statement::Term(opt)
+            | Statement::TermBang(opt)
+            | Statement::Return(opt)
+            | Statement::Escape(opt) => {
+                if let Some(expr) = opt.as_mut() {
+                    rewrite_expr(expr, env, universe, graph, type_protocols);
+                }
+            }
+            Statement::Expression(expr) => rewrite_expr(expr, env, universe, graph, type_protocols),
+            Statement::Let { name, expr, ty, .. } => {
+                if let Some(e) = expr.as_mut() {
+                    rewrite_expr(e, env, universe, graph, type_protocols);
+                }
+                if let Some(t) = ty.as_ref() {
+                    env.insert(name.clone(), t.clone());
+                }
+            }
+            Statement::Assign(_, expr) => rewrite_expr(expr, env, universe, graph, type_protocols),
+            Statement::Guarded(_, body) => rewrite_body(body, env, universe, graph, type_protocols),
+            Statement::If(_, then, els) => {
+                rewrite_body(then, env, universe, graph, type_protocols);
+                rewrite_body(els, env, universe, graph, type_protocols);
+            }
+            Statement::Foreach { body, .. } => rewrite_body(body, env, universe, graph, type_protocols),
+            Statement::Block(body) => rewrite_body(body, env, universe, graph, type_protocols),
+            _ => {}
+        }
+    }
+}
+
+fn rewrite_expr(
+    expr: &mut Expr,
+    env: &mut std::collections::HashMap<String, Type>,
+    universe: &TypeUniverse,
+    graph: &CastingGraph,
+    type_protocols: &std::collections::HashMap<String, String>,
+) {
+    match expr {
+        Expr::Cast(inner, target) => {
+            rewrite_expr(inner, env, universe, graph, type_protocols);
+            // A same-category representation cast (boundary type ⇄ base) is
+            // the marshalling delta — resolve the graph path and emit the
+            // binding call in its place.
+            let src_ty = expr_type_of(inner, env, universe);
+            if let Some(fn_name) = marshalling_fn(graph, universe, type_protocols, &src_ty, target) {
+                let name = crate::ast::Expr::Call(fn_name, vec![(**inner).clone()], None);
+                *expr = name;
+            }
+        }
+        Expr::BinaryOp(_, l, r) => {
+            rewrite_expr(l, env, universe, graph, type_protocols);
+            rewrite_expr(r, env, universe, graph, type_protocols);
+        }
+        Expr::UnaryOp(_, inner) => rewrite_expr(inner, env, universe, graph, type_protocols),
+        Expr::List(items) => {
+            for item in items {
+                rewrite_expr(item, env, universe, graph, type_protocols);
+            }
+        }
+        _ => {}
+    }
+}
+
+/// Resolve a type's (category, variant) for the marshalling decision.
+/// Custom boundary types resolve from their declared protocol (the universe
+/// isn't populated before codegen); builtins and hashwords fall through to
+/// the casting graph.
+fn resolve_category(
+    graph: &CastingGraph,
+    universe: &TypeUniverse,
+    type_protocols: &std::collections::HashMap<String, String>,
+    ty: &Type,
+) -> (String, String) {
+    match ty {
+        Type::Custom(name) => {
+            if name == "String" {
+                return ("String".to_string(), String::new());
+            }
+            if name == "Data" {
+                return ("Data".to_string(), String::new());
+            }
+            if let Some(proto) = type_protocols.get(name) {
+                if let Some((cat, var)) = CastingGraph::parse_protocol_base(proto) {
+                    return (cat, var);
+                }
+            }
+            graph.type_to_protocol(universe, ty)
+        }
+        _ => graph.type_to_protocol(universe, ty),
+    }
+}
+
+/// Resolve the binding function for a same-category representation cast:
+/// `CStr → String` emits `cstr_to_brief`, `String → CStr` emits `str_to_c`.
+/// Uses the casting graph's minimal path (a single ExtCallDyn binding step).
+fn marshalling_fn(
+    graph: &CastingGraph,
+    universe: &TypeUniverse,
+    type_protocols: &std::collections::HashMap<String, String>,
+    src_ty: &Type,
+    target: &Type,
+) -> Option<String> {
+    let (mut src_cat, mut src_var) = resolve_category(graph, universe, type_protocols, src_ty);
+    let (mut dst_cat, mut dst_var) = resolve_category(graph, universe, type_protocols, target);
+    // A bare base endpoint resolves to its DEFAULT variant (String → UTF8) so
+    // the variant↔base path resolves (C_String → UTF8 via cstr_to_brief).
+    // The casting graph's BFS cannot reach the bare "" node from a variant.
+    if src_var.is_empty() {
+        src_var = graph.default_variant(&src_cat).to_string();
+    }
+    if dst_var.is_empty() {
+        dst_var = graph.default_variant(&dst_cat).to_string();
+    }
+    // Only same-category representation changes (variant ⇄ base) are the
+    // boundary marshalling delta; numeric/protocol-crossing casts (Int→Float)
+    // stay on the codegen path.
+    if src_cat != dst_cat {
+        return None;
+    }
+    if src_var == dst_var {
+        return None; // identity (same representation) — no marshalling.
+    }
+    let path = graph.find_path(&src_cat, &src_var, &dst_cat, &dst_var)?;
+    if path.len() == 1 {
+        match &path[0].lane {
+            LaneKind::ExtCallDyn(name) => return Some(name.clone()),
+            LaneKind::ExtCall(name) => return Some(name.to_string()),
+            _ => return None,
+        }
+    }
+    None
+}
+
+/// The type of a cast's source expression (conservative): bound identifiers,
+/// string literals, and the result of a string-producing binary op.
+fn expr_type_of(
+    expr: &Expr,
+    env: &std::collections::HashMap<String, Type>,
+    universe: &TypeUniverse,
+) -> Type {
+    match expr {
+        Expr::Identifier(name) => env.get(name).cloned().unwrap_or(Type::int()),
+        Expr::Quoted(_) => Type::Custom("String".to_string()),
+        Expr::Cast(_, target) => target.clone(),
+        Expr::BinaryOp(_, l, r) => {
+            let lt = expr_type_of(l, env, universe);
+            let rt = expr_type_of(r, env, universe);
+            if crate::analysis::string_concat::is_string_category(&lt, universe)
+                || crate::analysis::string_concat::is_string_category(&rt, universe)
+            {
+                Type::Custom("String".to_string())
+            } else {
+                lt
+            }
+        }
+        _ => Type::int(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::ast::{BinaryOpKind, CastDirection, Contract, Definition, OutputType, Statement};
+
+    fn cstr_proto() -> TopLevel {
+        TopLevel::ProtocolDef(crate::ast::top::ProtocolDef {
+            name: "C_String".to_string(),
+            category: "String".to_string(),
+            contract: None,
+            cast_edges: vec![
+                crate::ast::top::CastEdge {
+                    direction: CastDirection::CastTo,
+                    target_category: "String".to_string(),
+                    target_variant: "UTF8".to_string(),
+                    binding: Some(crate::ast::top::CastBinding {
+                        fn_name: "cstr_to_brief".to_string(),
+                        param: "#L".to_string(),
+                    }),
+                },
+                crate::ast::top::CastEdge {
+                    direction: CastDirection::CastFrom,
+                    target_category: "String".to_string(),
+                    target_variant: "UTF8".to_string(),
+                    binding: Some(crate::ast::top::CastBinding {
+                        fn_name: "str_to_c".to_string(),
+                        param: "#L".to_string(),
+                    }),
+                },
+            ],
+            cross_ops: vec![],
+            span: None,
+        })
+    }
+
+    fn cstr_type() -> TopLevel {
+        TopLevel::TypeDef(Box::new(crate::ast::top::TypeDef {
+            name: "CStr".to_string(),
+            type_params: vec![],
+            protocol: Some("#String<C_String>".to_string()),
+            parent: None,
+            bit_range: None,
+            body: crate::ast::top::TypeDefBody {
+                slots: vec![],
+                metadata: std::collections::HashMap::new(),
+                projections: vec![],
+                bindings: vec![],
+                operators: vec![],
+                op_bindings: vec![],
+                props: vec![],
+                constraints: vec![],
+                members: vec![],
+                span: None,
+            },
+            span: None,
+        }))
+    }
+
+    #[test]
+    fn cstr_to_string_cast_becomes_binding_call() {
+        let universe = TypeUniverse::new();
+        let mut items = vec![
+            cstr_proto(),
+            cstr_type(),
+            TopLevel::Definition(Definition {
+                name: "marshall".to_string(),
+                type_params: vec![],
+                parameters: vec![("name".to_string(), Type::Custom("CStr".to_string()))],
+                output_type: Some(OutputType::Single(Type::Custom("String".to_string()))),
+                outputs: vec![],
+                contract: Contract {
+                    pre_condition: Expr::Bool(true),
+                    post_condition: Expr::Bool(true),
+                    watchdog: None,
+                    span: None,
+                    explicit: false,
+                },
+                body: vec![Statement::Term(Some(Expr::Cast(
+                    Box::new(Expr::Identifier("name".to_string())),
+                    Type::Custom("String".to_string()),
+                )))],
+                metadata: std::collections::HashMap::new(),
+                derivation: None,
+                modifiers: vec![],
+                annotations: vec![],
+                span: None,
+                doc: None,
+            }),
+        ];
+        rewrite_boundary_marshalling(&mut items, &universe);
+        let TopLevel::Definition(d) = &items[2] else { panic!() };
+        let Statement::Term(Some(expr)) = &d.body[0] else { panic!() };
+        match expr {
+            Expr::Call(name, args, _) => {
+                assert_eq!(name, "cstr_to_brief", "CStr→String must emit cstr_to_brief");
+                assert!(matches!(args[0], Expr::Identifier(ref n) if n == "name"));
+            }
+            other => panic!("expected a binding call, got {:?}", other),
+        }
+    }
+}

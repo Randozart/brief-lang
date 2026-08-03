@@ -26,6 +26,7 @@ pub mod frgn_dispatch;
 pub mod frgn_guard;
 pub mod export_abi;
 pub mod string_concat;
+pub mod boundary_marshalling;
 pub mod slp_isomorphism;
 pub mod soa_reorder;
 pub mod licm;
