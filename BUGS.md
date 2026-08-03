@@ -3107,3 +3107,13 @@ demo (examples/glue-host/rank.bv) uses Int exports only.
 i.e. `f64`) and fix the Float param/op emission (remove the i32 bitcast +
 zext-to-i64 indirection). Worth a dedicated pass on Float end-to-end (interpreter
 already handles f64).
+
+**Status: FIXED 2026-08-03** (plan 2026-08-03-float-protocol-only-rust-speed).
+- The `#Float` category's LLVM resolver is now `FloatWidth` — the width comes
+  from the type's `bits` metadata (32 → float, 64 → double, 16 → half/bfloat via
+  `disamb`, …), so `Float64`/`CDouble` lower to `double` without naming types.
+- Float width casts are a `FloatWidth` lane emitted as `fpext`/`fptrunc` —
+  `2.0 as CDouble` and `2.0 as Float64` emit clean `fpext float to double`.
+- The boundary ABI is correct: `CDouble` → `double` in the generated header and
+  the `.ll`. The remaining `x * 2.0` on a CDouble requires an explicit
+  `(2.0 as CDouble)` cast (no implicit Float coercion — by design).

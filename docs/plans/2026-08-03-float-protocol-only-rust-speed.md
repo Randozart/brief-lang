@@ -93,6 +93,34 @@ native.
 - BUGS.md: narrow/clear the Float literal item.
 - This plan.
 
+## Completion Status (2026-08-03)
+
+- **P-A (Float fix):** DONE. `FloatWidth` resolver (width from `bits` metadata,
+  protocol-owned, no type names) + `FloatWidth` cast lane (`fpext`/`fptrunc`).
+  `Float64` → `double`; `2.0 as CDouble` / `2.0 as Float64` → clean `fpext`;
+  `scale(x: CDouble)` → `fadd/fmul double`. The old bitcast+sitofp corruption
+  is gone. BUGS.md item marked FIXED.
+- **P-B (extensibility):** DONE. Removed the `name == "String"/"Data"`
+  shortcuts from the frontend passes (the bootstrap universe entries carry
+  `Cast.#String`/`Cast.#Data`). Grep gate clean — only protocol categories are
+  hardcoded.
+- **P-C (Rust native speed):** DONE. The `.a` path now runs
+  `opt -passes='default<O3>'` before llc — `llc -O3` alone didn't SROA the txn
+  loop's allocas (2.2× slower). Measured `feature_hash(count=1000, 200k calls)`:
+
+  | path | ns/call | vs native |
+  |------|---------|-----------|
+  | Rust → Brief (GLUE) | 1127 | 2.4% |
+  | native Rust | 1101 | — |
+  | C → Brief (.a) | 1092 | 1% |
+  | native C | 1082 | — |
+
+  The boundary is a single C-ABI call (~26ns), compute-dominated. This is the
+  **compiler-in-Brief** path — near-native without LTO.
+- **P-D (Python parity):** DONE. Python → Brief 2033ns vs Python → C 1927ns
+  (within 5%) — both dominated by the ~1.9µs ctypes marshalling; the Brief
+  compute is native.
+
 ## Cross-Cutting
 
 - Additive match arms only; `cargo test --lib` before each commit; Praetor on

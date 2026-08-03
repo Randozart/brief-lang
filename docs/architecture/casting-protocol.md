@@ -384,6 +384,25 @@ inline defn any_string_to_ASCII(source: #String) -> #String<ASCII> {
 };
 ```
 
+### `#Float` width resolution (FloatWidth)
+
+The `#Float` protocol owns the width semantics: a Float-category type's LLVM
+type is derived from its `bits` metadata, not from any type name.
+
+| `bits` | LLVM type |
+|--------|-----------|
+| 16 | `half` / `bfloat` (via the `disamb` metadata value) |
+| 32 | `float` |
+| 64 | `double` |
+| 80 | `x86_fp80` |
+| 128 | `fp128` |
+| default | `float` |
+
+Casting between any two Float representations (variants or the base) is a
+`FloatWidth` lane — emitted as `fpext`/`fptrunc` (identity when the widths
+match). This is how a boundary type (`CDouble: #Float<C_Double>`) gets
+`double` and how `2.0 as Float64` widens cleanly.
+
 ### `#Float` protocol
 
 ```
