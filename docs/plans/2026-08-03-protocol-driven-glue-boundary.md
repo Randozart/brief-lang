@@ -152,15 +152,13 @@ routes string `+` to the concat emitter, and the interpreter concatenates on
 
 ## Phase 1 status
 
-P1.1 (variant bases), P1.2 (variant LLVM fallback), P1.3 (bindings →
-ExtCallDyn), P1.5 (inverse-delta collapse) are DONE. P1.4 is PARTIAL: variant
-bases + the typechecker's cross-op resolution are wired (a `#String<C_String>`
-value resolves `+` to its own `cstring_concat`), but the cross_ops are not yet
-registered on the casting graph and the backend's Concat arm always emits the
-generic inline concat rather than the variant's cross-op — a `CStr` value
-concat currently treats it as `[len][data]`. Completing P1.4 (graph registry +
-backend emission) is a follow-up; the boundary can otherwise cast `CStr → String`
-first.
+P1 is DONE: variant bases, variant LLVM fallback, bindings → ExtCallDyn,
+inverse-delta collapse, and the cross-variant op overrides (P1.4) — the graph
+registers `variant_cross_ops`, and the boundary_marshalling pass rewrites a
+`CStr + CStr` (or `++`) into the variant's own `cstring_concat` binding call
+(the generic inline concat would treat a nul-terminated C string as
+`[len][data]`, which is wrong). `brief_cstring_concat` was added to the
+runtime. The `+`-for-concat fix rides the same machinery.
 
 ## Phase 2 status — `lib/glue/c.bv` DONE (ABI), marshalling = follow-up
 
@@ -243,6 +241,35 @@ here (they already exist in the runtime). Verify:
 - Docs updated in the same commits: `docs/architecture/casting-protocol.md`
   (boundary variants + the delta/inverse rule), `frgn-export-glue-architecture.md`,
   `features/callbacks.md`, this plan.
+
+## Completion Status (2026-08-03)
+
+- **P1 (protocol machinery):** DONE — variant bases in `type_to_protocol`,
+  variant LLVM-type fallback, bindings → `ExtCallDyn` lanes (real calls),
+  inverse-delta collapse (proven 1-to-1 pairs are zero-cost), cross-variant
+  op overrides.
+- **P2 (boundary module):** DONE — `lib/glue/c.bv` (`proto C_String` +
+  boundary types); `CStr` → `ptr`, `CDouble` → `double` (the Float ABI fix).
+- **P3 (export boundary):** DONE — `resolve_protocol` uses a type→protocol
+  map so the generated header resolves boundary types to C ABI names
+  (`CStr` → `int64_t`, `CDouble` → `double`); `boundary_marshalling` rewrites
+  `CStr ⇄ String` casts into the graph's binding calls (`cstr_to_brief`/
+  `str_to_c`).
+- **P4 (migrate + verify):** DONE — boundary round-trip test
+  (`tests/c_driver_boundary.rs`), Float export in `rank.bv`
+  (`scale(x: CDouble) → fadd double`), all C-driver/roundtrip tests + the
+  benchmark green (0.92× vs C per-call).
+- **`+` is string concat** (author request): end-to-end.
+- Verified end-to-end via C driver: echo/greet/join/identity all correct.
+
+### Known follow-ups
+- Float LITERAL codegen is still corrupted (`2.0 as CDouble` emits a
+  bitcast+sitofp mess — the BUGS.md Float item beyond the boundary ABI). The
+  boundary type gives the correct ABI; literal→Float→CDouble casts need the
+  deeper Float literal fix.
+- `sync<group>` still has no codegen (out of scope).
+- The cancel flag is process-global (per-state would allow concurrent
+  instances).
 
 ## Cross-Cutting
 
