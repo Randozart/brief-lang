@@ -291,6 +291,12 @@ impl CastingGraph {
         self.set_llvm_type("Float", "Double",   LlvmTypeResolver::Fixed("double"));
         self.set_llvm_type("Float", "FP128",    LlvmTypeResolver::Fixed("fp128"));
         self.set_llvm_type("Float", "X86_FP80", LlvmTypeResolver::Fixed("x86_fp80"));
+        // 2026-08-03: C-boundary Float widths (FFI). #Float<C_Float> is the
+        // C `float` (32-bit), #Float<C_Double> the C `double` (64-bit) — the
+        // boundary types in lib/glue/c.bv declare these variants so an export
+        // can request the exact ABI width instead of the default float32.
+        self.set_llvm_type("Float", "C_Float",  LlvmTypeResolver::Fixed("float"));
+        self.set_llvm_type("Float", "C_Double", LlvmTypeResolver::Fixed("double"));
 
         // String protocol variants — all encode as ptr to [len][bytes] (B0).
         // The default #String variant is UTF8 (seed_defaults); ASCII and any
@@ -564,18 +570,37 @@ impl CastingGraph {
             // graph's lanes (e.g. #Bit → #String encoding door with a
             // CastFrom(#Bit) override) apply to them. General: walks the
             // base chain, never matches specific type names (rule #18).
-            let base = rt.base.trim_start_matches('#');
-            match base {
-                "Float" => ("Float".to_string(), String::new()),
-                "UInt" => ("UInt".to_string(), String::new()),
-                "Int" => ("Int".to_string(), String::new()),
-                "String" => ("String".to_string(), String::new()),
-                "Bool" => ("Bool".to_string(), String::new()),
-                "Char" => ("Char".to_string(), String::new()),
-                "Data" => ("Data".to_string(), String::new()),
-                _ => ("Bit".to_string(), String::new()),
+            // 2026-08-03: variant bases (`type CStr: #String<CString>` ⇒
+            // base "#String<CString>") now resolve to (category, variant) —
+            // previously the variant form fell through to (Bit, "").
+            if let Some((cat, var)) = Self::parse_protocol_base(&rt.base) {
+                match cat.as_str() {
+                    "Float" | "UInt" | "Int" | "String" | "Bool" | "Char" | "Data" => {
+                        return (cat, var);
+                    }
+                    _ => return ("Bit".to_string(), String::new()),
+                }
             }
+            ("Bit".to_string(), String::new())
         }
+    }
+
+    /// Parse a protocol base string (`#Cat`, `#Cat<Variant>`, or bare `Cat`)
+    /// into `(category, variant)`. Returns None for empty/unparseable strings.
+    /// 2026-08-03: `#String<CString>` → `("String", "CString")`; `#String` →
+    /// `("String", "")`.
+    fn parse_protocol_base(base: &str) -> Option<(String, String)> {
+        let b = base.trim_start_matches('#');
+        if let Some(lt) = b.find('<') {
+            let cat = b[..lt].to_string();
+            let variant = b[lt + 1..].trim_end_matches('>').to_string();
+            if !cat.is_empty() {
+                return Some((cat, variant));
+            }
+        } else if !b.is_empty() {
+            return Some((b.to_string(), String::new()));
+        }
+        None
     }
 
     // ── LLVM Type Resolution ──────────────────────────────────────────
@@ -601,7 +626,14 @@ impl CastingGraph {
         }
 
         let (category, variant) = self.type_to_protocol(universe, ty);
-        match self.get_llvm_type(&category, &variant) {
+        // 2026-08-03: an unseeded `#Category<Variant>` falls back to the
+        // category's default variant, then the base category — a `#String`
+        // sub-protocol IS a String (ptr); only its encoding differs. Without
+        // this, `type CStr: #String<CString>` resolved to `i64`.
+        let resolver = self.get_llvm_type(&category, &variant)
+            .or_else(|| self.get_llvm_type(&category, self.default_variant(&category)))
+            .or_else(|| self.get_llvm_type(&category, ""));
+        match resolver {
             Some(LlvmTypeResolver::Fixed(ty_str)) => return ty_str.to_string(),
             Some(LlvmTypeResolver::WidthParametric) => {
                 // Check metadata from universe entry
@@ -766,9 +798,7 @@ mod tests {
     #[test]
     fn test_type_to_protocol_primitives() {
         let graph = CastingGraph::new();
-        let universe = crate::type_universe::TypeUniverse::new();
-
-        // Compiler constructs (no universe needed)
+        let universe = crate::type_universe::TypeUniverse::new();        // Compiler constructs (no universe needed)
         assert_eq!(graph.type_to_protocol(&universe, &Type::Bits(42)), ("Bit".to_string(), String::new()));
         // 2026-07-30: Ptr<T> is no longer mapped to Data — it's not in
         // type_to_protocol. resolve_llvm_type handles Ptr directly.
@@ -781,5 +811,46 @@ mod tests {
         assert_eq!(graph.type_to_protocol(&universe, &Type::Custom("Data".to_string())), ("Data".to_string(), String::new()));
         // Fallback — no Cast.# properties for unknown types → Bit
         assert_eq!(graph.type_to_protocol(&universe, &Type::Custom("UnknownType".to_string())), ("Bit".to_string(), String::new()));
+    }
+
+    #[test]
+    fn test_resolve_llvm_type_variant_fallback() {
+        // 2026-08-03: unseeded `#String<CString>` must resolve like any other
+        // String (ptr), not fall through to i64; `#Float<C_Double>` → double.
+        let graph = CastingGraph::new();
+        let universe = crate::type_universe::TypeUniverse::new();
+        assert_eq!(
+            graph.resolve_llvm_type(&universe, &Type::HashWordVariant("#String".into(), "CString".into()), 64),
+            "ptr"
+        );
+        assert_eq!(
+            graph.resolve_llvm_type(&universe, &Type::HashWordVariant("#Float".into(), "C_Double".into()), 64),
+            "double"
+        );
+        assert_eq!(
+            graph.resolve_llvm_type(&universe, &Type::HashWordVariant("#String".into(), "UTF8".into()), 64),
+            "ptr"
+        );
+        assert_eq!(
+            graph.resolve_llvm_type(&universe, &Type::HashWordVariant("#Float".into(), "Double".into()), 64),
+            "double"
+        );
+    }
+
+    #[test]
+    fn test_parse_protocol_base_variants() {        // 2026-08-03: variant bases — the FFI boundary types declare
+        // `type CStr: #String<CString>` ⇒ base "#String<CString>".
+        assert_eq!(CastingGraph::parse_protocol_base("#String<CString>"),
+            Some(("String".to_string(), "CString".to_string())));
+        assert_eq!(CastingGraph::parse_protocol_base("#Float<C_Double>"),
+            Some(("Float".to_string(), "C_Double".to_string())));
+        assert_eq!(CastingGraph::parse_protocol_base("#Int<C_I32>"),
+            Some(("Int".to_string(), "C_I32".to_string())));
+        assert_eq!(CastingGraph::parse_protocol_base("#String"),
+            Some(("String".to_string(), String::new())));
+        assert_eq!(CastingGraph::parse_protocol_base("String"),
+            Some(("String".to_string(), String::new())));
+        assert_eq!(CastingGraph::parse_protocol_base(""), None);
+        assert_eq!(CastingGraph::parse_protocol_base("<"), None);
     }
 }
