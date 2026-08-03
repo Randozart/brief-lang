@@ -4,12 +4,10 @@
 // with the frgn pipeline. Covers static literals, fn calls, and implicit
 // fallbacks.
 
-use brief_compiler::analysis::frgn_dispatch::{
-    resolve_single_frgn, extension_to_language, ResolvedFrgn,
-};
+use brief_compiler::analysis::frgn_dispatch::{resolve_single_frgn, ResolvedFrgn};
 use brief_compiler::ast::top::{Fallback, ForeignBinding, ForeignTarget, FromSpec};
 use brief_compiler::ast::Expr;
-use brief_compiler::glue::config::{load_glue_config, GlueTarget};
+use brief_compiler::glue::config::GlueTarget;
 use std::collections::HashMap;
 
 fn sample_glue_targets() -> HashMap<String, GlueTarget> {
@@ -21,10 +19,9 @@ fn sample_glue_targets() -> HashMap<String, GlueTarget> {
             extension: "py".to_string(),
             bridge_kind: "native_module".to_string(),
             calling_convention: "c_abi".to_string(),
-            c_type_map: HashMap::from([
-                ("Int".to_string(), "int64_t".to_string()),
-                ("Float".to_string(), "double".to_string()),
-            ]),
+            module_init: false,
+            protocols: HashMap::new(),
+            templates: HashMap::new(),
         },
     )])
 }
@@ -82,7 +79,7 @@ fn test_fallback_none_in_bridge_dispatch() {
     let fb = make_frgn("get_val", "py", Fallback::None);
     let targets = sample_glue_targets();
     let result =
-        resolve_single_frgn(&fb, "py", &targets, brief_compiler::target::BackendKind::Llvm)
+        resolve_single_frgn(&fb, "py", &targets, brief_compiler::target::BackendKind::Llvm, None)
             .unwrap();
     match result {
         ResolvedFrgn::Bridge { ref fallback, .. } => {
@@ -97,7 +94,7 @@ fn test_fallback_static_in_bridge_dispatch() {
     let fb = make_frgn("get_val", "py", Fallback::Static(Expr::Decimal(0)));
     let targets = sample_glue_targets();
     let result =
-        resolve_single_frgn(&fb, "py", &targets, brief_compiler::target::BackendKind::Llvm)
+        resolve_single_frgn(&fb, "py", &targets, brief_compiler::target::BackendKind::Llvm, None)
             .unwrap();
     match result {
         ResolvedFrgn::Bridge { ref fallback, .. } => {
@@ -116,7 +113,7 @@ fn test_fallback_fn_call_in_bridge_dispatch() {
     );
     let targets = sample_glue_targets();
     let result =
-        resolve_single_frgn(&fb, "py", &targets, brief_compiler::target::BackendKind::Llvm)
+        resolve_single_frgn(&fb, "py", &targets, brief_compiler::target::BackendKind::Llvm, None)
             .unwrap();
     match result {
         ResolvedFrgn::Bridge { ref fallback, .. } => {
@@ -133,7 +130,7 @@ fn test_fallback_with_inline_frgn() {
     let fb = make_frgn("get_val", "c", Fallback::Static(Expr::Decimal(42)));
     let targets = sample_glue_targets();
     let result =
-        resolve_single_frgn(&fb, "c", &targets, brief_compiler::target::BackendKind::Llvm)
+        resolve_single_frgn(&fb, "c", &targets, brief_compiler::target::BackendKind::Llvm, None)
             .unwrap();
     match result {
         ResolvedFrgn::Inline { symbol, .. } => {
@@ -151,7 +148,7 @@ fn test_extension_mapping_for_fallback_brige() {
     let fb = make_frgn("node_func", "mjs", Fallback::None);
     let targets = sample_glue_targets(); // no node in this sample
     let result =
-        resolve_single_frgn(&fb, "mjs", &targets, brief_compiler::target::BackendKind::Llvm)
+        resolve_single_frgn(&fb, "mjs", &targets, brief_compiler::target::BackendKind::Llvm, None)
             .unwrap();
     assert!(
         matches!(result, ResolvedFrgn::Unsupported(_)),

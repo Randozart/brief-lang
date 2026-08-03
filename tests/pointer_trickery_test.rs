@@ -19,11 +19,11 @@ fn parse_and_init(source: &str) -> (Interpreter, Vec<TopLevel>) {
     (interp, program)
 }
 
-fn bits_is_nonzero(v: &Value) -> bool {
-    match v {
-        Value::Bits(b) => b.iter().any(|&x| x != 0),
-        _ => false,
-    }
+/// Truthiness across the interpreter's current value representations.
+/// 2026-08-03: Comparisons return Value::Bool and bitwise ops return
+/// Value::Bits since the Bits thesis; both must read as truthy/nonzero.
+fn is_truthy(v: &Value) -> bool {
+    v.is_true()
 }
 
 #[test]
@@ -52,7 +52,7 @@ fn test_ptr_arithmetic_e2e() {
         Box::new(Expr::Identifier("UART_DR".into())),
         Box::new(Expr::Identifier("UART_FR".into())),
     )).expect("Ptr == Ptr");
-    assert!(!bits_is_nonzero(&eq_result), "DR != FR");
+    assert!(!is_truthy(&eq_result), "DR != FR");
 
     let addr = interp.eval_expr(&Expr::Cast(
         Box::new(Expr::Identifier("UART_DR".into())),
@@ -108,7 +108,7 @@ fn test_ptr_contract_bounds_e2e() {
         Box::new(cast_addr),
         Box::new(Expr::Decimal(0x40011000)),
     )).expect("Contract GE");
-    assert!(bits_is_nonzero(&check_ge), "ptr addr >= base");
+    assert!(is_truthy(&check_ge), "ptr addr >= base");
 
     let cast_addr2 = Expr::Cast(
         Box::new(Expr::Decimal(ptr_addr)),
@@ -119,7 +119,7 @@ fn test_ptr_contract_bounds_e2e() {
         Box::new(cast_addr2),
         Box::new(Expr::Decimal(0x40011020)),
     )).expect("Contract LT");
-    assert!(bits_is_nonzero(&check_lt), "ptr addr < end");
+    assert!(is_truthy(&check_lt), "ptr addr < end");
 }
 
 #[test]
@@ -134,12 +134,12 @@ fn test_ptr_bitwise_arithmetic_e2e() {
         Box::new(ptr.clone()),
         Box::new(Expr::Decimal(!7i64)),
     )).expect("Ptr align");
-    assert_eq!(aligned, Value::Int(0x40011000), "Ptr & !7 aligns down");
+    assert_eq!(aligned.as_i64(), Some(0x40011000), "Ptr & !7 aligns down");
 
     let toggled = interp.eval_expr(&Expr::BinaryOp(
         BinaryOpKind::BitXor,
         Box::new(ptr),
         Box::new(Expr::Decimal(0xFFF)),
     )).expect("Ptr XOR");
-    assert_eq!(toggled, Value::Int(0x40011FF8), "Ptr ^ 0xFFF toggles low bits");
+    assert_eq!(toggled.as_i64(), Some(0x40011FF8), "Ptr ^ 0xFFF toggles low bits");
 }

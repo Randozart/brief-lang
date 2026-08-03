@@ -13,11 +13,18 @@ use std::process::Command;
 const PROJECT_ROOT: &str = env!("CARGO_MANIFEST_DIR");
 
 fn compiler_path() -> String {
-    format!("{}/target/debug/brief-compiler", PROJECT_ROOT)
+    // 2026-08-03: The binary is `briefc`; cargo exposes its path to
+    // integration tests via CARGO_BIN_EXE_briefc (the old
+    // target/debug/brief-compiler path no longer exists).
+    env!("CARGO_BIN_EXE_briefc").to_string()
 }
 
 fn build_bridge_so() -> String {
-    let out_dir = std::env::temp_dir().join("brief_pp_test");
+    // 2026-08-03: Per-test-thread output dir. The earlier shared
+    // /tmp/brief_pp_test/libpp_types.so raced when parallel tests rebuilt
+    // the same file while another test was dlopening it → Library::new failed.
+    let tag = std::thread::current().name().unwrap_or("roundtrip").replace(':', "_");
+    let out_dir = std::env::temp_dir().join(format!("brief_pp_test_{}", tag));
     let _ = std::fs::create_dir_all(&out_dir);
 
     let bv_path = format!("{}/pp-types.bv", PROJECT_ROOT);
@@ -50,17 +57,22 @@ fn build_bridge_so() -> String {
     so_path.to_string_lossy().to_string()
 }
 
-fn load_bridge() -> (Library, *mut c_void) {
+fn load_bridge() -> Library {
     let so_path = build_bridge_so();
-    let lib = unsafe { Library::new(&so_path).expect("failed to load bridge .so") };
-    // Allocate a state buffer (32 bytes = 4 * i64 fields) and initialize via init_state()
+    unsafe { Library::new(&so_path).expect("failed to load bridge .so") }
+}
+
+/// Allocate + init_state for stateful exports. 2026-08-03: per-export ABI is
+/// body-dependent (export_abi analysis): only exports that call Brief defns
+/// carry `ptr %state` — stateful tests allocate a buffer and pass it.
+fn make_state(lib: &Library) -> *mut c_void {
     let state = unsafe { std::alloc::alloc_zeroed(std::alloc::Layout::from_size_align(32, 8).unwrap()) as *mut c_void };
     unsafe {
         let init: Symbol<unsafe extern "C" fn(*mut c_void)> =
             lib.get(b"init_state").expect("init_state not found");
         init(state);
     }
-    (lib, state)
+    state
 }
 
 // ── IR validation ─────────────────────────────────────────────────────
@@ -95,15 +107,20 @@ fn test_bridge_compiles_to_shared_library() {
 
 #[test]
 fn test_bridge_loads_and_resolves() {
-    let (_lib, state) = load_bridge();
-    assert!(!state.is_null(), "state should be non-null");
+    let lib = load_bridge();
+    // init_state is emitted unconditionally by the backend (state infrastructure).
+    unsafe {
+        let _init: Symbol<unsafe extern "C" fn(*mut c_void)> =
+            lib.get(b"init_state").expect("init_state not found");
+    }
 }
 
 // ── Round-trip FFI tests ──────────────────────────────────────────────
 
 #[test]
 fn test_pp_void_via_ffi() {
-    let (ref lib, state) = load_bridge();
+    let ref lib = load_bridge();
+    let state = make_state(lib);
     unsafe {
         let func: Symbol<unsafe extern "C" fn(*mut c_void) -> i64> =
             lib.get(b"brief_test_type_void").expect("func not found");
@@ -118,12 +135,12 @@ fn test_pp_void_via_ffi() {
 
 #[test]
 fn test_cstr_roundtrip_via_ffi() {
-    let (ref lib, state) = load_bridge();
+    let ref lib = load_bridge();
     unsafe {
-        let func: Symbol<unsafe extern "C" fn(*mut c_void, i64) -> i64> =
+        let func: Symbol<unsafe extern "C" fn(i64) -> i64> =
             lib.get(b"brief_test_cstr_roundtrip").expect("func not found");
         let input = CString::new("42").unwrap();
-        let ptr = func(state, input.as_ptr() as i64);
+        let ptr = func(input.as_ptr() as i64);
         let s = CStr::from_ptr(ptr as *const i8).to_str().unwrap();
         assert_eq!(s, "42");
     }
@@ -132,7 +149,8 @@ fn test_cstr_roundtrip_via_ffi() {
 /// Tests pp_type_custom(s) which returns the input as-is (no concatenation).
 #[test]
 fn test_custom_echo_via_ffi() {
-    let (ref lib, state) = load_bridge();
+    let ref lib = load_bridge();
+    let state = make_state(lib);
     unsafe {
         let func: Symbol<unsafe extern "C" fn(*mut c_void, i64) -> i64> =
             lib.get(b"brief_test_custom_echo").expect("func not found");
@@ -145,11 +163,11 @@ fn test_custom_echo_via_ffi() {
 
 #[test]
 fn test_bits_static_via_ffi() {
-    let (ref lib, state) = load_bridge();
+    let ref lib = load_bridge();
     unsafe {
-        let func: Symbol<unsafe extern "C" fn(*mut c_void) -> i64> =
+        let func: Symbol<unsafe extern "C" fn() -> i64> =
             lib.get(b"brief_test_bits_static").expect("func not found");
-        let ptr = func(state);
+        let ptr = func();
         let s = CStr::from_ptr(ptr as *const i8).to_str().unwrap();
         assert_eq!(s, "Bits(42): test");
     }
@@ -157,7 +175,8 @@ fn test_bits_static_via_ffi() {
 
 #[test]
 fn test_pp_bits_via_ffi() {
-    let (ref lib, state) = load_bridge();
+    let ref lib = load_bridge();
+    let state = make_state(lib);
     unsafe {
         let func: Symbol<unsafe extern "C" fn(*mut c_void, i64) -> i64> =
             lib.get(b"brief_test_type_bits").expect("func not found");

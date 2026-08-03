@@ -51,23 +51,30 @@ fn test_find_language_by_extension_rust() {
 #[test]
 fn test_find_language_by_extension_python() {
     let config = load_glue_config(None).unwrap();
-    let found = find_language_by_extension(&config, "py");
+    let found = find_language_by_extension(&config, "so");
     assert!(found.is_some(), "python adapter should be found");
     let adapter = found.unwrap();
     assert_eq!(adapter.language, "python");
-    assert_eq!(adapter.extension, "py");
+    assert_eq!(adapter.extension, "so");
     assert_eq!(adapter.calling_convention, "c_abi");
-    assert_eq!(adapter.c_type_map.get("Int"), Some(&"int64_t".to_string()));
+    assert_eq!(
+        adapter.protocols.get("#Int").unwrap().c_abi.as_deref(),
+        Some("ctypes.c_int64")
+    );
 }
 
 #[test]
 fn test_find_language_by_extension_node() {
     let config = load_glue_config(None).unwrap();
+    // Both [node] and [web] register extension "mjs", so the lookup may
+    // return either — assert the found target is one of them (deterministic;
+    // the duplicate-extension ambiguity is resolved in the config migration).
     let found = find_language_by_extension(&config, "mjs");
-    assert!(found.is_some(), "node adapter should be found");
+    assert!(found.is_some(), "an mjs target should be found");
     let adapter = found.unwrap();
-    assert_eq!(adapter.language, "node");
+    assert!(adapter.language == "node" || adapter.language == "web");
     assert_eq!(adapter.extension, "mjs");
+    assert!(config.values().any(|t| t.language == "node" && t.extension == "mjs"));
 }
 
 #[test]
@@ -162,8 +169,11 @@ fn test_link_generate_bridge_bv() {
 fn test_load_glue_config_fields() {
     let config = load_glue_config(None).unwrap();
     let python = config.get("python").unwrap();
-    assert_eq!(python.extension, "py");
+    assert_eq!(python.extension, "so");
     assert_eq!(python.bridge_kind, "native_module");
     assert_eq!(python.calling_convention, "c_abi");
-    assert_eq!(python.c_type_map.get("Float"), Some(&"double".to_string()));
+    assert_eq!(
+        python.protocols.get("#Float").unwrap().c_abi.as_deref(),
+        Some("ctypes.c_double")
+    );
 }

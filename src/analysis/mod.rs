@@ -24,6 +24,7 @@ pub mod allocation;
 pub mod meld_validation;
 pub mod frgn_dispatch;
 pub mod frgn_guard;
+pub mod export_abi;
 pub mod slp_isomorphism;
 pub mod soa_reorder;
 pub mod licm;

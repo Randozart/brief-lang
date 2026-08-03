@@ -1154,68 +1154,6 @@ impl LlvmBackend {
         }
     }
 
-    /// Check if a definition's body needs the state pointer.
-    /// Pure arithmetic functions (no function calls, no observable side effects)
-    /// can be exported without the state parameter, matching C ABI exactly.
-    /// 2026-07-23: Used by TopLevel::Export dispatch to skip unnecessary state param.
-    pub(super) fn definition_needs_state(&self, d: &crate::ast::Definition) -> bool {
-        for stmt in &d.body {
-            if Self::stmt_needs_state(stmt) {
-                return true;
-            }
-        }
-        false
-    }
-
-    fn stmt_needs_state(stmt: &Statement) -> bool {
-        match stmt {
-            Statement::Term(opt) | Statement::TermBang(opt) | Statement::Return(opt) | Statement::Escape(opt) => {
-                opt.as_ref().is_some_and(|e| Self::expr_needs_state(e))
-            }
-            Statement::Expression(expr) => Self::expr_needs_state(expr),
-            Statement::Let { expr, .. } => {
-                expr.as_ref().is_some_and(|e| Self::expr_needs_state(e))
-            }
-            Statement::Assign(_, expr) => Self::expr_needs_state(expr),
-            Statement::Guarded(_, body) => body.iter().any(Self::stmt_needs_state),
-            Statement::If(_, then, els) => {
-                then.iter().any(Self::stmt_needs_state) || els.iter().any(Self::stmt_needs_state)
-            }
-            Statement::Foreach { body, .. } => body.iter().any(Self::stmt_needs_state),
-            Statement::Block(body) => body.iter().any(Self::stmt_needs_state),
-            // MetadataAssignment is compile-time only, no state needed
-            Statement::MetadataAssignment(..) => false,
-            // Conservative: non-exhaustive match assumes needs state
-            _ => true,
-        }
-    }
-
-    fn expr_needs_state(expr: &Expr) -> bool {
-        match expr {
-            // Field access always needs state (reads struct metadata)
-            Expr::Field(_, _) => true,
-            // Calls: only observable/stateful intrinsics need state.
-            // Regular function calls pass state through but don't use it.
-            Expr::Call(name, _, _) => {
-                matches!(name.as_str(),
-                    "Malloc#" | "Memcpy#" | "Memmove#" | "Memset#"
-                    | "Print#"
-                    | "FileRead#" | "FileWrite#" | "ShellCmd#"
-                    | "SysQuery#" | "EnvGet#" | "HttpFetch#"
-                    | "AllocArray#" | "AllocInitArray#" | "StringNew#"
-                    | "StringFromPtr#" | "StringConcat#"
-                )
-            }
-            Expr::BinaryOp(_, lhs, rhs) => {
-                Self::expr_needs_state(lhs) || Self::expr_needs_state(rhs)
-            }
-            Expr::UnaryOp(_, inner) => Self::expr_needs_state(inner),
-            Expr::List(items) => items.iter().any(Self::expr_needs_state),
-            // literals, identifiers are pure
-            _ => false,
-        }
-    }
-
     pub(super) fn emit_definition(&mut self, out: &mut String, d: &crate::ast::Definition, needs_state: bool) {
         self.fun.pending_cleanup.clear();
         self.fun.let_bindings.clear(); self.fun.let_binding_types.clear(); self.fun.let_original_types.clear(); self.fun.reg_float_cache.clear(); self.fun.reg_type_cache.clear();

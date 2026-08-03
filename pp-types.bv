@@ -1,8 +1,45 @@
-// pp-types.bv — Bridge test file for GLUE export round-trip
-// 2026-07-27: Simple string pointer echo for bridge_glue benchmark.
-// Python ctypes calls brief_test_cstr_roundtrip(state, input_ptr)
-// and reads the returned pointer as a C string via memmove.
+// pp-types.bv — Bridge test fixture for GLUE export round-trip
+// 2026-08-03: Restored as the round-trip TEST FIXTURE (kept separate from
+// the benchmark workload per plan 2026-08-03-host-callable-glue-export).
+// Exports pure functions that take/return C string pointers as Int, so the
+// round-trip tests (tests/pp_roundtrip_tests.rs) call them via the C ABI
+// without native Brief string construction. Conversion between C strings
+// and Brief strings uses the brief_rt.c runtime helpers.
 
-export defn brief_test_cstr_roundtrip(state: Int, input_ptr: Int) -> Int {
-    term input_ptr;
+import "std/types.bv";
+import "std/string.bv";
+import "pp/types.bv";
+import "pp/exprs.bv";
+
+// C string ↔ Brief string conversion (brief_rt.c). Declared here because
+// no stdlib module wires these yet; the round-trip tests rely on them.
+
+frgn brief_cstr_to_brief(ptr: Int) -> String as cstr_to_brief from "lib/runtime/brief_rt.c" fallback "";
+frgn brief_str_to_c(handle: String) -> Int as str_to_c from "lib/runtime/brief_rt.c" fallback 0;
+
+export defn brief_test_cstr_roundtrip(input_ptr: Int) -> Int {
+    let s: String = cstr_to_brief(input_ptr);
+    term str_to_c(s);
+};
+
+export defn brief_test_custom_echo(input_ptr: Int) -> Int {
+    let s: String = cstr_to_brief(input_ptr);
+    let r: String = pp_type_custom(s);
+    term str_to_c(r);
+};
+
+export defn brief_test_bits_static() -> Int {
+    let r: String = "Bits(42): test";
+    term str_to_c(r);
+};
+
+export defn brief_test_type_bits(input_ptr: Int) -> Int {
+    let s: String = cstr_to_brief(input_ptr);
+    let r: String = pp_type_bits(s);
+    term str_to_c(r);
+};
+
+export defn brief_test_type_void() -> Int {
+    let r: String = pp_type_void();
+    term str_to_c(r);
 };

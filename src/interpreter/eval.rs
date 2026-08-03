@@ -500,7 +500,16 @@ fn eval_binary_op(
                     }).collect();
                     Ok(Value::bits(result))
                 }
-                _ => Ok(bool_to_bits(false)),
+                _ => {
+                    // 2026-08-03: Non-string operands (Int/Ptr) fall through to
+                    // the integer bitwise intrinsics (BitAnd#/BitOr#/BitXor#),
+                    // restoring the pre-B1 path that B1's string-default match
+                    // arm shadowed (ba1d02b4) — it returned bool_to_bits(false)
+                    // for every non-string operand, silently zeroing Int & Int.
+                    // The backends emit real integer bitwise ops (LLVM and/or/xor);
+                    // the interpreter is the reference and must match.
+                    execute_intrinsic(&format!("{:?}#", kind), &[lv, rv], heap)
+                }
             }
         }
         _ => {

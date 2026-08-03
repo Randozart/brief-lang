@@ -7,16 +7,13 @@ use std::collections::HashMap;
 use std::path::Path;
 
 use brief_compiler::analysis::frgn_dispatch::{
-    compute_protocol_path, extension_to_language, resolve_single_frgn, ResolvedFrgn, TransformKind,
+    compute_protocol_path, resolve_single_frgn, ResolvedFrgn, TransformKind,
 };
 use brief_compiler::ast::top::{Fallback, ForeignBinding, ForeignTarget, FromSpec};
 use brief_compiler::ast::Type;
 use brief_compiler::glue::config::{find_language_by_extension, load_glue_config, GlueTarget};
 
 fn sample_glue_targets() -> HashMap<String, GlueTarget> {
-    let mut c_type_map = HashMap::new();
-    c_type_map.insert("Int".to_string(), "int64_t".to_string());
-    c_type_map.insert("Float".to_string(), "double".to_string());
     HashMap::from([
         (
             "python".to_string(),
@@ -26,7 +23,9 @@ fn sample_glue_targets() -> HashMap<String, GlueTarget> {
                 extension: "py".to_string(),
                 bridge_kind: "native_module".to_string(),
                 calling_convention: "c_abi".to_string(),
-                c_type_map: c_type_map.clone(),
+                module_init: false,
+                protocols: HashMap::new(),
+                templates: HashMap::new(),
             },
         ),
         (
@@ -37,7 +36,9 @@ fn sample_glue_targets() -> HashMap<String, GlueTarget> {
                 extension: "rs".to_string(),
                 bridge_kind: "extern_c_crate".to_string(),
                 calling_convention: "lto".to_string(),
-                c_type_map: HashMap::new(),
+                module_init: false,
+                protocols: HashMap::new(),
+                templates: HashMap::new(),
             },
         ),
     ])
@@ -58,7 +59,7 @@ fn make_frgn(name: &str, ext: &str, as_name: Option<&str>, fallback: Fallback) -
 #[test]
 fn test_compute_protocol_path_identity() {
     let int_type = Type::int();
-    let path = compute_protocol_path(&int_type, &int_type).unwrap();
+    let path = compute_protocol_path(&int_type, &int_type, None).unwrap();
     assert_eq!(path.len(), 1, "identity path should have 1 step");
     assert!(matches!(path[0].kind, TransformKind::Identity));
 }
@@ -67,7 +68,7 @@ fn test_compute_protocol_path_identity() {
 fn test_compute_protocol_path_bitcast() {
     let a = Type::Custom("A".to_string());
     let b = Type::Custom("B".to_string());
-    let path = compute_protocol_path(&a, &b).unwrap();
+    let path = compute_protocol_path(&a, &b, None).unwrap();
     assert_eq!(path.len(), 1, "bitcast path should have 1 step");
     assert!(matches!(path[0].kind, TransformKind::Bitcast));
 }
@@ -97,38 +98,6 @@ fn test_find_language_by_extension_unknown() {
     assert!(found.is_none(), ".kt should not be in any language target");
 }
 
-#[test]
-fn test_extension_to_language_llvm_py() {
-    assert_eq!(
-        extension_to_language("py", brief_compiler::target::BackendKind::Llvm),
-        Some("python")
-    );
-}
-
-#[test]
-fn test_extension_to_language_llvm_rs() {
-    assert_eq!(
-        extension_to_language("rs", brief_compiler::target::BackendKind::Llvm),
-        Some("rust")
-    );
-}
-
-#[test]
-fn test_extension_to_language_circt() {
-    assert_eq!(
-        extension_to_language("py", brief_compiler::target::BackendKind::Circt),
-        None
-    );
-}
-
-#[test]
-fn test_extension_to_language_with_dot() {
-    assert_eq!(
-        extension_to_language(".py", brief_compiler::target::BackendKind::Llvm),
-        Some("python")
-    );
-}
-
 // ── Resolve Single Frgn ─────────────────────────────────────────────────
 
 #[test]
@@ -136,10 +105,10 @@ fn test_resolve_single_frgn_inline_c() {
     let fb = make_frgn("my_func", "c", None, Fallback::None);
     let targets = sample_glue_targets();
     let result =
-        resolve_single_frgn(&fb, "c", &targets, brief_compiler::target::BackendKind::Llvm)
+        resolve_single_frgn(&fb, "c", &targets, brief_compiler::target::BackendKind::Llvm, None)
             .unwrap();
     match result {
-        ResolvedFrgn::Inline { symbol, compile_source } => {
+        ResolvedFrgn::Inline { symbol, compile_source, .. } => {
             assert_eq!(symbol, "my_func");
             assert!(compile_source);
         }
@@ -152,7 +121,7 @@ fn test_resolve_single_frgn_bridge_python() {
     let fb = make_frgn("py_func", "py", None, Fallback::None);
     let targets = sample_glue_targets();
     let result =
-        resolve_single_frgn(&fb, "py", &targets, brief_compiler::target::BackendKind::Llvm)
+        resolve_single_frgn(&fb, "py", &targets, brief_compiler::target::BackendKind::Llvm, None)
             .unwrap();
     match result {
         ResolvedFrgn::Bridge { language, .. } => {
@@ -167,7 +136,7 @@ fn test_resolve_single_frgn_unsupported() {
     let fb = make_frgn("kotlin_func", "kt", None, Fallback::None);
     let targets = sample_glue_targets();
     let result =
-        resolve_single_frgn(&fb, "kt", &targets, brief_compiler::target::BackendKind::Llvm)
+        resolve_single_frgn(&fb, "kt", &targets, brief_compiler::target::BackendKind::Llvm, None)
             .unwrap();
     match result {
         ResolvedFrgn::Unsupported(msg) => {
@@ -182,7 +151,7 @@ fn test_resolve_single_frgn_empty_extension() {
     let fb = make_frgn("no_ext", "", None, Fallback::None);
     let targets = sample_glue_targets();
     let result =
-        resolve_single_frgn(&fb, "", &targets, brief_compiler::target::BackendKind::Llvm).unwrap();
+        resolve_single_frgn(&fb, "", &targets, brief_compiler::target::BackendKind::Llvm, None).unwrap();
     match result {
         ResolvedFrgn::Unsupported(msg) => {
             assert!(msg.contains("no file extension"), "msg: {}", msg);
@@ -193,10 +162,12 @@ fn test_resolve_single_frgn_empty_extension() {
 
 #[test]
 fn test_resolve_single_frgn_with_as() {
-    let fb = make_frgn("brief_name", "c", Some("foreign_sym"), Fallback::None);
+    // frgn <foreign_symbol> ... as <brief_name>: foreign_name is the linker
+    // symbol; the `as` clause renames the Brief-side callsite.
+    let fb = make_frgn("foreign_sym", "c", Some("brief_name"), Fallback::None);
     let targets = sample_glue_targets();
     let result =
-        resolve_single_frgn(&fb, "c", &targets, brief_compiler::target::BackendKind::Llvm)
+        resolve_single_frgn(&fb, "c", &targets, brief_compiler::target::BackendKind::Llvm, None)
             .unwrap();
     match result {
         ResolvedFrgn::Inline { symbol, .. } => {
@@ -211,10 +182,10 @@ fn test_resolve_single_frgn_native_so() {
     let fb = make_frgn("native_fn", "so", None, Fallback::None);
     let targets = sample_glue_targets();
     let result =
-        resolve_single_frgn(&fb, "so", &targets, brief_compiler::target::BackendKind::Llvm)
+        resolve_single_frgn(&fb, "so", &targets, brief_compiler::target::BackendKind::Llvm, None)
             .unwrap();
     match result {
-        ResolvedFrgn::Inline { symbol, compile_source } => {
+        ResolvedFrgn::Inline { symbol, compile_source, .. } => {
             assert_eq!(symbol, "native_fn");
             assert!(!compile_source);
         }
@@ -230,11 +201,11 @@ fn test_load_glue_config_shiped() {
     assert!(config.contains_key("python"), "should have python entry");
     assert!(config.contains_key("rust"), "should have rust entry");
     let python = config.get("python").unwrap();
-    assert_eq!(python.extension, "py");
+    assert_eq!(python.extension, "so");
     assert_eq!(python.calling_convention, "c_abi");
     assert_eq!(
-        python.c_type_map.get("Int"),
-        Some(&"int64_t".to_string())
+        python.protocols.get("#Int").unwrap().c_abi.as_deref(),
+        Some("ctypes.c_int64")
     );
 }
 

@@ -1689,6 +1689,10 @@ impl LlvmBackend {
         );
         self.ctx.dep_graph = analysis.dependency_graph.clone();
         self.ctx.global_free_after = analysis.global_lifetime.free_after.clone();
+        // 2026-08-03: Per-export ABI (needs_state) computed once up front by
+        // the export ABI analysis — the backend only consumes the decision.
+        self.ctx.export_needs_state =
+            crate::analysis::export_abi::compute_export_needs_state(items);
         // 2026-08-01 (Phase 5): a `keep x;` on a field the scheduler would not
         // auto-free anyway is redundant — surface it as a warning.
         for k in &analysis.global_lifetime.redundant_keeps {
@@ -2474,7 +2478,12 @@ impl LlvmBackend {
                 }
                 TopLevel::Export(e) => {
                     if let TopLevel::Definition(d) = e.inner.as_ref() {
-                        let needs_state = self.definition_needs_state(d);
+                        // 2026-08-03: needs_state comes from the first-class
+                        // export ABI analysis (transitive call graph). Pure
+                        // exports keep a clean C ABI; exports calling any
+                        // Brief defn carry %state.
+                        let needs_state = self.ctx.export_needs_state.get(&d.name).copied()
+                            .unwrap_or(false);
                         self.emit_definition(&mut out, d, needs_state);
                         writeln!(out).ok();
                     }

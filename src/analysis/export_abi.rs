@@ -1,0 +1,282 @@
+// ── Export ABI Analysis ────────────────────────────────────────────────
+// 2026-08-03: Computes, per exported defn, whether its C-ABI signature
+// carries the leading `ptr %state` parameter (body-dependent, non-fragile
+// ABI — plan 2026-08-03-host-callable-glue-export).
+//
+// The result is the single source of truth for both the LLVM backend
+// (which emits the signature) and GLUE export wrapper generation (which
+// renders the per-function state argument). Wrappers/bindings derive their
+// ABI from the per-export metadata, never by re-analyzing the AST.
+//
+// Rule: a defn needs state if its body (transitively through called Brief
+// defns) uses the runtime state. This fixes the prior non-transitive check
+// in the LLVM backend, which emitted `call @f(ptr %state, ...)` from a
+// "pure" export that had no `%state` parameter → undefined-value IR.
+//
+// Undo: if the state parameter is ever removed from all defn signatures
+// (uniform stateless ABI), delete this module and always emit no state.
+
+use crate::ast::{Definition, Expr, Statement, TopLevel};
+use std::collections::HashMap;
+
+/// Compute `needs_state` for every exported defn in a program.
+///
+/// Indexes regular defns and exports, then runs a memoized DFS over the
+/// call graph. Regular (non-exported) defns are always emitted with a
+/// `%state` parameter today, so any call to one forces the caller to
+/// carry state too.
+pub fn compute_export_needs_state(items: &[TopLevel]) -> HashMap<String, bool> {
+    let mut regular: HashMap<String, &Definition> = HashMap::new();
+    let mut exports: HashMap<String, &Definition> = HashMap::new();
+    for item in items {
+        match item {
+            TopLevel::Definition(d) => {
+                regular.insert(d.name.clone(), d);
+            }
+            TopLevel::Export(e) => {
+                if let TopLevel::Definition(d) = e.inner.as_ref() {
+                    exports.insert(d.name.clone(), d);
+                }
+            }
+            _ => {}
+        }
+    }
+
+    let mut memo: HashMap<String, bool> = HashMap::new();
+    for name in exports.keys() {
+        defn_needs_state(name, &regular, &exports, &mut memo, &mut Vec::new());
+    }
+    memo
+}
+
+/// Memoized transitive needs-state for a defn name.
+/// `visiting` breaks call cycles conservatively (in-progress ⇒ true).
+fn defn_needs_state(
+    name: &str,
+    regular: &HashMap<String, &Definition>,
+    exports: &HashMap<String, &Definition>,
+    memo: &mut HashMap<String, bool>,
+    visiting: &mut Vec<String>,
+) -> bool {
+    if let Some(v) = memo.get(name) {
+        return *v;
+    }
+    if visiting.iter().any(|n| n == name) {
+        return true;
+    }
+    let d = exports.get(name).copied();
+    let Some(d) = d else {
+        // Not an exported Brief defn — no state on its own. (Regular defns
+        // short-circuit to `true` at the call site in expr_needs_state.)
+        memo.insert(name.to_string(), false);
+        return false;
+    };
+    visiting.push(name.to_string());
+    let result = body_needs_state(&d.body, regular, exports, memo, visiting);
+    visiting.pop();
+    memo.insert(name.to_string(), result);
+    result
+}
+
+fn body_needs_state(
+    body: &[Statement],
+    regular: &HashMap<String, &Definition>,
+    exports: &HashMap<String, &Definition>,
+    memo: &mut HashMap<String, bool>,
+    visiting: &mut Vec<String>,
+) -> bool {
+    body.iter().any(|s| stmt_needs_state(s, regular, exports, memo, visiting))
+}
+
+fn stmt_needs_state(
+    stmt: &Statement,
+    regular: &HashMap<String, &Definition>,
+    exports: &HashMap<String, &Definition>,
+    memo: &mut HashMap<String, bool>,
+    visiting: &mut Vec<String>,
+) -> bool {
+    match stmt {
+        Statement::Term(opt)
+        | Statement::TermBang(opt)
+        | Statement::Return(opt)
+        | Statement::Escape(opt) => {
+            opt.as_ref().is_some_and(|e| expr_needs_state(e, regular, exports, memo, visiting))
+        }
+        Statement::Expression(expr) => expr_needs_state(expr, regular, exports, memo, visiting),
+        Statement::Let { expr, .. } => {
+            expr.as_ref().is_some_and(|e| expr_needs_state(e, regular, exports, memo, visiting))
+        }
+        Statement::Assign(_, expr) => expr_needs_state(expr, regular, exports, memo, visiting),
+        Statement::Guarded(_, body) => {
+            body.iter().any(|s| stmt_needs_state(s, regular, exports, memo, visiting))
+        }
+        Statement::If(_, then, els) => {
+            then.iter().any(|s| stmt_needs_state(s, regular, exports, memo, visiting))
+                || els.iter().any(|s| stmt_needs_state(s, regular, exports, memo, visiting))
+        }
+        Statement::Foreach { body, .. } => {
+            body.iter().any(|s| stmt_needs_state(s, regular, exports, memo, visiting))
+        }
+        Statement::Block(body) => {
+            body.iter().any(|s| stmt_needs_state(s, regular, exports, memo, visiting))
+        }
+        // MetadataAssignment is compile-time only, no state needed
+        Statement::MetadataAssignment(..) => false,
+        // Conservative: non-exhaustive match assumes needs state
+        _ => true,
+    }
+}
+
+fn expr_needs_state(
+    expr: &Expr,
+    regular: &HashMap<String, &Definition>,
+    exports: &HashMap<String, &Definition>,
+    memo: &mut HashMap<String, bool>,
+    visiting: &mut Vec<String>,
+) -> bool {
+    match expr {
+        // Field access always needs state (reads struct metadata)
+        Expr::Field(_, _) => true,
+        Expr::Call(name, _, _) => {
+            // Observable/stateful intrinsics need state (unchanged from the
+            // backend's original list).
+            if matches!(name.as_str(),
+                "Malloc#" | "Memcpy#" | "Memmove#" | "Memset#"
+                | "Print#"
+                | "FileRead#" | "FileWrite#" | "ShellCmd#"
+                | "SysQuery#" | "EnvGet#" | "HttpFetch#"
+                | "AllocArray#" | "AllocInitArray#" | "StringNew#"
+                | "StringFromPtr#" | "StringConcat#"
+            ) {
+                return true;
+            }
+            // Regular (non-exported) defns are ALWAYS emitted with a %state
+            // parameter, so a caller must carry state to supply it.
+            if regular.contains_key(name.as_str()) {
+                return true;
+            }
+            // Export-to-export calls: the callee may be pure (no state) or
+            // stateful — resolve transitively.
+            if exports.contains_key(name.as_str()) {
+                return defn_needs_state(name, regular, exports, memo, visiting);
+            }
+            // frgn / other external calls do not need state at the boundary.
+            false
+        }
+        Expr::BinaryOp(_, lhs, rhs) => {
+            expr_needs_state(lhs, regular, exports, memo, visiting)
+                || expr_needs_state(rhs, regular, exports, memo, visiting)
+        }
+        Expr::UnaryOp(_, inner) => expr_needs_state(inner, regular, exports, memo, visiting),
+        Expr::List(items) => {
+            items.iter().any(|e| expr_needs_state(e, regular, exports, memo, visiting))
+        }
+        // literals, identifiers are pure
+        _ => false,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn defn(name: &str, body: Vec<Statement>) -> Definition {
+        use crate::ast::{Contract, OutputType, TypeParam};
+        Definition {
+            name: name.to_string(),
+            type_params: Vec::<TypeParam>::new(),
+            parameters: vec![],
+            output_type: Some(OutputType::Single(crate::ast::Type::Custom("Int".to_string()))),
+            outputs: vec![],
+            contract: Contract {
+                pre_condition: Expr::Bool(true),
+                post_condition: Expr::Bool(true),
+                watchdog: None,
+                span: None,
+                explicit: false,
+            },
+            body,
+            metadata: std::collections::HashMap::new(),
+            derivation: None,
+            modifiers: vec![],
+            annotations: vec![],
+            span: None,
+            doc: None,
+        }
+    }
+
+    fn exported(d: Definition) -> TopLevel {
+        use crate::ast::Export;
+        TopLevel::Export(Export {
+            inner: Box::new(TopLevel::Definition(d)),
+            export_name: None,
+        })
+    }
+
+    #[test]
+    fn pure_export_needs_no_state() {
+        let d = defn("add", vec![Statement::Term(Some(Expr::Decimal(5)))]);
+        let items = vec![exported(d)];
+        let map = compute_export_needs_state(&items);
+        assert_eq!(map.get("add"), Some(&false));
+    }
+
+    #[test]
+    fn export_calling_stateful_intrinsic_needs_state() {
+        let d = defn("f", vec![Statement::Term(Some(
+            Expr::Call("StringNew#".to_string(), vec![], None),
+        ))]);
+        let items = vec![exported(d)];
+        let map = compute_export_needs_state(&items);
+        assert_eq!(map.get("f"), Some(&true));
+    }
+
+    #[test]
+    fn export_calling_regular_defn_needs_state() {
+        // helper is a regular defn (always carries %state) → caller must too.
+        let helper = defn("helper", vec![Statement::Term(Some(Expr::Decimal(1)))]);
+        let caller = defn("f", vec![Statement::Term(Some(
+            Expr::Call("helper".to_string(), vec![], None),
+        ))]);
+        let items = vec![TopLevel::Definition(helper), exported(caller)];
+        let map = compute_export_needs_state(&items);
+        assert_eq!(map.get("f"), Some(&true));
+    }
+
+    #[test]
+    fn pure_export_calling_pure_export_needs_no_state() {
+        let inner = defn("inner", vec![Statement::Term(Some(Expr::Decimal(1)))]);
+        let outer = defn("outer", vec![Statement::Term(Some(
+            Expr::Call("inner".to_string(), vec![], None),
+        ))]);
+        let items = vec![exported(inner), exported(outer)];
+        let map = compute_export_needs_state(&items);
+        assert_eq!(map.get("inner"), Some(&false));
+        assert_eq!(map.get("outer"), Some(&false));
+    }
+
+    #[test]
+    fn export_calling_frgn_needs_no_state() {
+        // cstr_to_brief is a frgn, not a Brief defn → no state.
+        let d = defn("f", vec![Statement::Term(Some(
+            Expr::Call("cstr_to_brief".to_string(), vec![], None),
+        ))]);
+        let items = vec![exported(d)];
+        let map = compute_export_needs_state(&items);
+        assert_eq!(map.get("f"), Some(&false));
+    }
+
+    #[test]
+    fn mutual_recursion_is_conservative() {
+        let a = defn("a", vec![Statement::Term(Some(
+            Expr::Call("b".to_string(), vec![], None),
+        ))]);
+        let b = defn("b", vec![Statement::Term(Some(
+            Expr::Call("a".to_string(), vec![], None),
+        ))]);
+        let items = vec![exported(a), exported(b)];
+        let map = compute_export_needs_state(&items);
+        assert_eq!(map.get("a"), Some(&true));
+        assert_eq!(map.get("b"), Some(&true));
+    }
+}
