@@ -4023,3 +4023,57 @@ fn test_float64_field_init_stores_double() {
     // (d=3.25 / d=-3.25 print correctly); the bare generate here is a smoke
     // test that Float64 literals + the coercion typecheck and emit.
 }
+
+/// Regression (2026-08-03, BUGS.md loop-guard state-store fix): a body READ
+/// of the loop-guard field must resolve to the live counter phi, not a stale
+/// `%State` load. Before the fix, `println!(count)` in a counter-only loop
+/// emitted `load i64, ptr %state` (always 0); after, it emits the counter phi
+/// register directly (0,1,2,…).
+#[test]
+fn test_counter_loop_guard_read_uses_phi_not_state() {
+    let src = r#"
+        let count: Int = 0;
+        node report [count < 3][count == 3] {
+            println!("count={}", count);
+            count = count + 1;
+            term;
+        };
+    "#;
+    let mut items = parse_bv_source(src);
+    let mut universe = crate::type_universe::TypeUniverse::new();
+    let mut pm = crate::plugin::PluginManager::new();
+    pm.register(Box::new(crate::plugin::print_plugin::PrintPlugin));
+    pm.run_ast(crate::ast::StageKind::Parsed, &mut items, &mut universe)
+        .expect("print plugin stage failed");
+    let mut backend = LlvmBackend::new().with_type_universe(universe);
+    let ir = backend.generate(&items, None);
+
+    // The count print in @main's folded loop must feed the counter phi
+    // register (a value defined by a `phi` instruction), not a GEP+load from
+    // %State. The unused always-inline `txn_report` body still carries the
+    // naive state load, but the folded @main is what runs.
+    let body = ir.split(".fmain.body:").nth(1)
+        .unwrap_or("")
+        .split(".fmain.latch:").next()
+        .unwrap_or("");
+    assert!(
+        body.contains("call i64 @__print_int(i64 %flc"),
+        "main's guard-field read must resolve to the counter phi; got:\n{ir}"
+    );
+    assert!(
+        !body.contains("call i64 @__print_int(i64 %t")
+            || body.contains("call i64 @__print_int(i64 %flc"),
+        "main must not print a stale %State load of the counter; got:\n{ir}"
+    );
+    // The counter advances through the phi latch (add on the phi) in the same
+    // main function.
+    let main = ir.split(".fmain.header:").nth(1)
+        .unwrap_or("")
+        .split(".fmain.end:").next()
+        .unwrap_or("");
+    assert!(
+        main.contains("add nuw nsw i64 %flc6, 1"),
+        "counter must increment the phi backedge; got:\n{ir}"
+    );
+}
+
