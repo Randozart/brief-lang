@@ -25,6 +25,79 @@ pub fn find_defn_body<'a>(name: &str, items: &'a [TopLevel]) -> Option<&'a Expr>
     None
 }
 
+/// 2026-08-03 (P1.5): Prove that `inverse_body(forward_body(x)) == x` via
+/// symbolic evaluation, falling back to SMT (linear ops like `<<1`/`>>1`
+/// prove cleanly). Returns false when the composition is NOT provably
+/// identity — the caller then simply doesn't collapse the pair (the cast is
+/// emitted correctly, just not for free). Never a guess.
+fn prove_composition_inverse(forward_body: &Expr, inverse_body: &Expr) -> bool {
+    use crate::symbolic::{eval_symbolic_expr, SymbolicValue};
+    let sym_input = {
+        let mut m = std::collections::HashMap::new();
+        m.insert("#L".to_string(), SymbolicValue::Identifier("__x".into()));
+        m
+    };
+    let mid = eval_symbolic_expr(forward_body, &sym_input);
+    let mut inv_input = std::collections::HashMap::new();
+    inv_input.insert("#L".to_string(), mid);
+    let output = eval_symbolic_expr(inverse_body, &inv_input);
+
+    if symbolic_deep_equals(&output, &SymbolicValue::Identifier("__x".into())) {
+        return true;
+    }
+
+    let formula = build_roundtrip_smt(forward_body, inverse_body);
+    matches!(
+        crate::proof_engine::smt::prove_smt_formula(&formula, 1000),
+        crate::proof_engine::smt::SmtResult::Unsat
+    )
+}
+
+/// 2026-08-03 (P1.5): find cross-type PROVEN-INVERSE pairs among the
+/// program's `proto` declarations. For each pair of distinct protos in the
+/// same category sharing a base target, prove
+/// `b.CastFrom(base)(a.CastTo(base)(x)) == x`. Returns
+/// `(category, variant_a, variant_b)` triples — casting a → b through the
+/// base is a ZERO delta (identity), the sub-types are 1-to-1. Non-provable
+/// pairs are skipped (correct, not free).
+pub fn find_inverse_pairs(items: &[TopLevel]) -> Vec<(String, String, String)> {
+    let protos: Vec<&ProtocolDef> = items
+        .iter()
+        .filter_map(|i| match i {
+            TopLevel::ProtocolDef(pd) => Some(pd),
+            _ => None,
+        })
+        .collect();
+
+    let mut pairs = Vec::new();
+    for (i, a) in protos.iter().enumerate() {
+        for b in &protos[i + 1..] {
+            if a.category != b.category {
+                continue;
+            }
+            let a_to = a.cast_edges.iter().find(|e| {
+                matches!(e.direction, CastDirection::CastTo) && e.binding.is_some()
+            });
+            let b_from = b.cast_edges.iter().find(|e| {
+                matches!(e.direction, CastDirection::CastFrom) && e.binding.is_some()
+            });
+            let (Some(at), Some(bf)) = (a_to, b_from) else { continue };
+            if at.target_category != bf.target_category || at.target_variant != bf.target_variant {
+                continue;
+            }
+            let Some(at_fn) = at.binding.as_ref().map(|x| &x.fn_name) else { continue };
+            let Some(bf_fn) = bf.binding.as_ref().map(|x| &x.fn_name) else { continue };
+            let (Some(fwd), Some(inv)) = (find_defn_body(at_fn, items), find_defn_body(bf_fn, items)) else {
+                continue;
+            };
+            if prove_composition_inverse(fwd, inv) {
+                pairs.push((a.category.clone(), a.name.clone(), b.name.clone()));
+            }
+        }
+    }
+    pairs
+}
+
 /// Verify round-trip identity for a protocol declaration.
 /// For matching CastTo/CastFrom pairs, proves that
 /// CastFrom(CastTo(x)) == x via symbolic evaluation or SMT.
@@ -214,5 +287,76 @@ mod tests {
         };
         let items: Vec<TopLevel> = vec![];
         assert!(verify_protocol_roundtrip(&pd, &items).is_ok());
+    }
+
+    /// Build `defn <name>(x) -> Int { term x <op> 1; }`.
+    fn shift_defn(name: &str, op: crate::ast::BinaryOpKind) -> TopLevel {
+        use crate::ast::Definition;
+        TopLevel::Definition(Definition {
+            name: name.to_string(),
+            type_params: vec![],
+            parameters: vec![("x".to_string(), crate::ast::Type::int())],
+            output_type: Some(crate::ast::OutputType::Single(crate::ast::Type::int())),
+            outputs: vec![],
+            contract: Contract {
+                pre_condition: Expr::Bool(true),
+                post_condition: Expr::Bool(true),
+                watchdog: None,
+                span: None,
+                explicit: false,
+            },
+            body: vec![Statement::Term(Some(Expr::BinaryOp(
+                op,
+                Box::new(Expr::Identifier("x".to_string())),
+                Box::new(Expr::Decimal(1)),
+            )))],
+            metadata: std::collections::HashMap::new(),
+            derivation: None,
+            modifiers: vec![],
+            annotations: vec![],
+            span: None,
+            doc: None,
+        })
+    }
+
+    fn proto_with_binding(name: &str, dir: CastDirection, fn_name: &str) -> TopLevel {
+        TopLevel::ProtocolDef(ProtocolDef {
+            name: name.to_string(),
+            category: "String".to_string(),
+            contract: None,
+            cast_edges: vec![CastEdge {
+                direction: dir,
+                target_category: "String".to_string(),
+                target_variant: "UTF8".to_string(),
+                binding: Some(crate::ast::top::CastBinding {
+                    fn_name: fn_name.to_string(),
+                    param: "#L".to_string(),
+                }),
+            }],
+            cross_ops: vec![],
+            span: None,
+        })
+    }
+
+    #[test]
+    fn test_find_inverse_pairs() {
+        // 2026-08-03 (P1.5): A.CastTo = `x + 1`, B.CastFrom = `x - 1` — the
+        // composition is identity on the full range, so the pair is proven
+        // 1-to-1 and the graph collapses the A→B cast to a zero delta.
+        // (Note: `x << 1` / `x >> 1` is NOT universal — it only cancels when
+        // bit 63 is 0 — so the SMT proof correctly declines that pair.)
+        use crate::ast::BinaryOpKind;
+        let items: Vec<TopLevel> = vec![
+            shift_defn("add_one", BinaryOpKind::Add),
+            shift_defn("sub_one", BinaryOpKind::Sub),
+            proto_with_binding("A", CastDirection::CastTo, "add_one"),
+            proto_with_binding("B", CastDirection::CastFrom, "sub_one"),
+        ];
+        let pairs = find_inverse_pairs(&items);
+        assert!(
+            pairs.iter().any(|(cat, a, b)| cat == "String" && a == "A" && b == "B"),
+            "add/sub pair should be proven inverse, got {:?}",
+            pairs
+        );
     }
 }

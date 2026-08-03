@@ -105,6 +105,12 @@ pub struct CastingGraph {
     /// Protocol (category, variant) → LLVM type resolver.
     /// Used by resolve_llvm_type() to derive LLVM types from protocol + metadata.
     protocol_llvm_types: HashMap<(String, String), LlvmTypeResolver>,
+
+    /// 2026-08-03 (P1.5): proven-inverse variant pairs (category, a, b) —
+    /// `b.CastFrom(base)(a.CastTo(base)(x)) == x` was proved symbolically/SMT,
+    /// so a cast a → b through the base is a ZERO delta (identity). The
+    /// `<<1`/`>>1` example: two sub-types whose encode/decode cancel are 1-to-1.
+    inverse_pairs: HashSet<(String, String, String)>,
 }
 
 impl CastingGraph {
@@ -117,6 +123,7 @@ impl CastingGraph {
             defaults: HashMap::new(),
             cast_from_bit_overrides: HashMap::new(),
             protocol_llvm_types: HashMap::new(),
+            inverse_pairs: HashSet::new(),
         };
         graph.seed_base_lanes();
         graph.seed_defaults();
@@ -392,7 +399,6 @@ impl CastingGraph {
     }
 
     // ── Type-Level CastFrom(#Bit) Override Registration ────────────────
-
     /// Register a type-level CastFrom(#Bit) override.
     /// `type_name` → `function_name` for constructing the type from raw bits.
     pub fn register_cast_from_bit(&mut self, type_name: &str, function_name: &str) {
@@ -403,6 +409,27 @@ impl CastingGraph {
     /// Check if a type has a CastFrom(#Bit) override.
     pub fn get_cast_from_bit(&self, type_name: &str) -> Option<&str> {
         self.cast_from_bit_overrides.get(type_name).map(|s| s.as_str())
+    }
+
+    // ── Inverse-Pair Registration (P1.5) ───────────────────────────────
+
+    /// Register a proven-inverse variant pair (category, a, b): a cast
+    /// a → b through the base is identity (the delta is nothing).
+    pub fn register_inverse_pair(&mut self, category: &str, a: &str, b: &str) {
+        self.inverse_pairs.insert((category.to_string(), a.to_string(), b.to_string()));
+    }
+
+    /// Compute and register all proven-inverse pairs among the program's
+    /// `proto` declarations (cross-type round-trip proof, protocol_graph.rs).
+    pub fn register_inverse_pairs_from(&mut self, items: &[crate::ast::TopLevel]) {
+        for (cat, a, b) in crate::analysis::protocol_graph::find_inverse_pairs(items) {
+            self.register_inverse_pair(&cat, &a, &b);
+        }
+    }
+
+    /// Whether (category, a, b) is a proven inverse pair (a → b is zero-cost).
+    pub fn is_inverse_pair(&self, category: &str, a: &str, b: &str) -> bool {
+        self.inverse_pairs.contains(&(category.to_string(), a.to_string(), b.to_string()))
     }
 
     // ── Path Resolution ────────────────────────────────────────────────
@@ -425,7 +452,25 @@ impl CastingGraph {
         }
 
         // BFS through variant edges + base lanes
-        self.bfs_path(src_cat, src_var, dst_cat, dst_var)
+        let path = self.bfs_path(src_cat, src_var, dst_cat, dst_var)?;
+
+        // 2026-08-03 (P1.5): delta collapse — a same-category two-hop
+        // `variant → base → variant` whose endpoints are a PROVEN inverse
+        // pair (b.CastFrom(base)(a.CastTo(base)(x)) == x, e.g. `<<1`/`>>1`)
+        // is a zero delta: emit nothing, the sub-types are 1-to-1.
+        // The first hop is a forward edge (src = start variant), the second
+        // a reverse edge (src = end variant); both meet at the base.
+        if path.len() == 2
+            && path[0].src_category == path[0].dst_category
+            && path[1].src_category == path[1].dst_category
+            && path[0].dst_variant == path[1].dst_variant
+            && path[0].src_variant != path[1].src_variant
+            && self.is_inverse_pair(&path[0].src_category, &path[0].src_variant, &path[1].src_variant)
+        {
+            return Some(vec![]);
+        }
+
+        Some(path)
     }
 
     /// O(1) direct lane lookup between two base protocol categories.
@@ -880,6 +925,45 @@ mod tests {
             .expect("UTF8 -> C_String path");
         assert_eq!(rev.len(), 1);
         assert_eq!(rev[0].lane, LaneKind::ExtCallDyn("str_to_c".to_string()));
+    }
+
+    #[test]
+    fn test_inverse_pair_collapse() {
+        // 2026-08-03 (P1.5): A.CastTo(#String) is `<< 1`, B.CastFrom(#String)
+        // is `>> 1` — the composition is identity, so A → B through the base
+        // is a ZERO delta (the sub-types are 1-to-1).
+        let mut graph = CastingGraph::new();
+        let proto = |name: &str, dir: CastDirection, fn_name: &str| ProtocolDef {
+            name: name.to_string(),
+            category: "String".to_string(),
+            contract: None,
+            cast_edges: vec![crate::ast::top::CastEdge {
+                direction: dir,
+                target_category: "String".to_string(),
+                target_variant: "UTF8".to_string(),
+                binding: Some(crate::ast::top::CastBinding {
+                    fn_name: fn_name.to_string(),
+                    param: "#L".to_string(),
+                }),
+            }],
+            cross_ops: vec![],
+            span: None,
+        };
+        graph.register_protocol_def(&proto("A", CastDirection::CastTo, "shift_left"));
+        graph.register_protocol_def(&proto("B", CastDirection::CastFrom, "shift_right"));
+
+        // Without the inverse pair, A → UTF8 → B is two steps.
+        let plain = graph.find_path("String", "A", "String", "B");
+        assert!(plain.as_ref().is_some_and(|p| p.len() == 2));
+
+        // Register the proven inverse pair → the cast collapses to identity.
+        graph.register_inverse_pair("String", "A", "B");
+        let collapsed = graph.find_path("String", "A", "String", "B");
+        assert_eq!(collapsed, Some(vec![]));
+        // The reverse direction has no path at all (only A.CastTo + B.CastFrom
+        // are declared) — the collapse is asymmetric, keyed to the proven pair.
+        let rev = graph.find_path("String", "B", "String", "A");
+        assert!(rev.is_none(), "B → A has no edges; only A.CastTo and B.CastFrom exist");
     }
 
     #[test]

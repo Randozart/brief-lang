@@ -1062,6 +1062,10 @@ fn codegen(
                         graph.register_protocol_def(pd);
                     }
                 }
+                // 2026-08-03 (P1.5): prove cross-type inverse pairs
+                // (b.CastFrom(base)(a.CastTo(base)(x)) == x) so the delta
+                // collapse in find_path can make them zero-cost.
+                graph.register_inverse_pairs_from(items);
             }
             output = b.generate(items, None);
             // 2026-08-01: surface the backend's warnings (redundant-keep hints,
@@ -1151,6 +1155,10 @@ fn codegen(
                         graph.register_protocol_def(pd);
                     }
                 }
+                // 2026-08-03 (P1.5): prove cross-type inverse pairs
+                // (b.CastFrom(base)(a.CastTo(base)(x)) == x) so the delta
+                // collapse in find_path can make them zero-cost.
+                graph.register_inverse_pairs_from(items);
             }
             output = b.generate(items, None);
             // 2026-08-01: surface the backend's warnings (redundant-keep hints,
@@ -1190,6 +1198,10 @@ fn codegen(
                         graph.register_protocol_def(pd);
                     }
                 }
+                // 2026-08-03 (P1.5): prove cross-type inverse pairs
+                // (b.CastFrom(base)(a.CastTo(base)(x)) == x) so the delta
+                // collapse in find_path can make them zero-cost.
+                graph.register_inverse_pairs_from(items);
             }
             output = b.generate(items, None);
             // 2026-08-01: surface the backend's warnings (redundant-keep hints,
@@ -1232,6 +1244,10 @@ fn codegen(
                         graph.register_protocol_def(pd);
                     }
                 }
+                // 2026-08-03 (P1.5): prove cross-type inverse pairs
+                // (b.CastFrom(base)(a.CastTo(base)(x)) == x) so the delta
+                // collapse in find_path can make them zero-cost.
+                graph.register_inverse_pairs_from(items);
             }
             output = b.generate(items, None);
             // 2026-08-01: surface the backend's warnings (redundant-keep hints,
