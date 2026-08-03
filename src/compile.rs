@@ -148,6 +148,11 @@ pub struct BuildOptions {
     pub extra_objects: Vec<PathBuf>,
     /// 2026-07-18: Build a shared library (.so) instead of an executable.
     pub shared: bool,
+    /// 2026-08-03: Build a linkable static library (.a) — the `extern "C"`
+    /// on-ramp. Runs the full backend in library_mode (emit_library_shim
+    /// with __brief_init_state/__glue_release), packages .o + runtime into
+    /// `ar rcs lib<name>.a`, and a PIC .so for c_abi hosts.
+    pub library_mode: bool,
     /// 2026-07-18: SVO (Small Vector Optimization) — inline storage for
     /// small List<T> elements (≤ N where N is from svo <~ N metadata).
     pub feature_svo: bool,
@@ -664,6 +669,19 @@ pub fn compile_source(file_path: &str, source: &str, opts: &BuildOptions) -> Res
 
     if !opts.emit_ir_only {
         let binary_base = out_path.strip_suffix(ext).unwrap_or(&out_path);
+        // 2026-08-03: --library — package a static .a (+ PIC .so) instead of
+        // a linked executable. The archive bundles the bridge .o and the
+        // brief_rt runtime so a host links `-l<name>` standalone.
+        if opts.library_mode && opts.backend == BackendKind::Llvm {
+            // Merge CLI-provided extra_objects with ones collected from frgn
+            // declarations (frgn .c/.cpp sources are auto-compiled to .o).
+            let mut all_objects = opts.extra_objects.clone();
+            all_objects.extend(extra_objects);
+            all_objects.sort();
+            all_objects.dedup();
+            compile_ll_to_library(&out_path, binary_base, &all_objects)?;
+            return Ok(());
+        }
         let binary_path = if opts.shared {
             format!("{}.so", binary_base)
         } else {
@@ -847,6 +865,7 @@ pub fn check_source(file_path: &str, source: &str) -> Result<(), String> {
         trg_unresolved_action: TrgUnresolvedAction::Warn,
         extra_objects: vec![],
         shared: false,
+        library_mode: false,
         int_bits: 64,
         feature_svo: false,
         glue_config: None,
@@ -1012,6 +1031,7 @@ fn codegen(
                 .with_needs_arena(needs_arena.clone())
                 .with_svo(opts.feature_svo)
                 .with_shared_lib(opts.shared)
+                .with_library_mode(opts.library_mode)
                 .with_stack_threshold(opts.stack_threshold)
                 .with_optimize_budget(opts.optimize_budget)
                 .with_type_universe(universe.clone())
@@ -1185,6 +1205,7 @@ fn codegen(
                 .with_alloc_strategies(alloc_strategies)
                 .with_svo(opts.feature_svo)
                 .with_shared_lib(opts.shared)
+                .with_library_mode(opts.library_mode)
                 .with_stack_threshold(opts.stack_threshold)
                 .with_optimize_budget(opts.optimize_budget)
                 .with_type_universe(universe.clone())
@@ -1480,7 +1501,81 @@ fn compile_ll_to_binary(ll_path: &str, binary_path: &str, extra_objects: &[PathB
     Ok(())
 }
 
+/// Compile LLVM IR to a linkable static library (`ar rcs lib<name>.a`),
+/// plus a PIC `.so` for c_abi hosts. 2026-08-03: the `--library` on-ramp —
+/// exported defns become C-callable symbols, `__brief_init_state()` returns
+/// a state handle.
+///
+/// The .a is gcc-linkable: it packages the bridge .o (real ELF from llc)
+/// plus a NON-LTO brief_rt.o. frgn-derived objects are LTO bitcode (clang
+/// -flto) and live in the .so; plain C hosts link the .a. Bridges with
+/// custom C frgns use the .so / clang.
+fn compile_ll_to_library(ll_path: &str, base: &str, _extra_objects: &[PathBuf]) -> Result<(), String> {
+    // Step 1: llc → PIC .o
+    let o_path = format!("{}.o", base);
+    let mut llc = Command::new("llc");
+    llc.args(["-filetype=obj", "-relocation-model=pic", "-o", &o_path, ll_path]);
+    let status = llc.status()
+        .map_err(|e| format!("failed to invoke llc: {}", e))?;
+    if !status.success() {
+        return Err(format!("llc failed for '{}'", ll_path));
+    }
+
+    // Step 2: compile brief_rt.c WITHOUT -flto → a real object plain C hosts
+    // can link (frgn-derived objects are LTO bitcode and cannot be read by
+    // gcc). The .ll references the runtime transitively even when the bridge
+    // declares no explicit frgn from brief_rt.c.
+    let manifest = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let rt_c = manifest.join("lib/runtime/brief_rt.c");
+    let rt_o = format!("{}.brief_rt.o", base);
+    let mut cc_rt = Command::new("cc");
+    cc_rt.args(["-c", "-fPIC", "-o", &rt_o]);
+    cc_rt.arg(&rt_c);
+    let status = cc_rt.status()
+        .map_err(|e| format!("failed to invoke cc: {}", e))?;
+    if !status.success() {
+        return Err(format!("cc failed for '{}'", rt_c.display()));
+    }
+
+    // Step 3: ar rcs lib<name>.a <base>.o brief_rt.o
+    let base_path = std::path::Path::new(base);
+    let a_name = match base_path.file_name().and_then(|s| s.to_str()) {
+        Some(stem) => format!("lib{}.a", stem),
+        None => format!("lib{}.a", base),
+    };
+    let a_path = base_path.parent()
+        .map(|p| p.join(&a_name))
+        .unwrap_or_else(|| std::path::PathBuf::from(&a_name));
+    let mut ar = Command::new("ar");
+    ar.arg("rcs").arg(&a_path);
+    ar.arg(&o_path);
+    ar.arg(&rt_o);
+    let status = ar.status()
+        .map_err(|e| format!("failed to invoke ar: {}", e))?;
+    if !status.success() {
+        return Err(format!("ar failed for '{}'", a_path.display()));
+    }
+    println!("wrote {}", a_path.display());
+
+    // Step 4: PIC .so for c_abi hosts (python/node ctypes/ffi-napi).
+    // Links the .ll (LTO) + frgn-derived runtime objects via clang — NOT
+    // the llc .o (that would duplicate every symbol).
+    let so_path = format!("{}.so", base);
+    let mut clang = Command::new("clang");
+    clang.args(["-O3", "-flto", "-shared", "-fPIC", ll_path]);
+    clang.arg(&rt_o);
+    clang.args(["-o", &so_path, "-lm"]);
+    let status = clang.status()
+        .map_err(|e| format!("failed to invoke clang: {}", e))?;
+    if !status.success() {
+        return Err(format!("clang failed to link '{}'", so_path));
+    }
+    println!("wrote {}", so_path);
+    Ok(())
+}
+
 /// Compile LLVM IR (.ll) to WASM binary (.wasm) using llc.
+/// 2026-07-26: Phase 5 — Called for BackendKind::Webstack after codegen.
 /// 2026-07-26: Phase 5 — Called for BackendKind::Webstack after codegen.
 /// The .ll file must have been emitted with wasm32 target triple.
 /// Uses `llc -march=wasm32 -filetype=obj` to produce a .o, then

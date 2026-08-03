@@ -53,6 +53,26 @@ pub struct GlueTarget {
     /// ctypes/ffi-napi/LTO handle typing on their side. No compiler-side
     /// language knowledge.
     pub conversions: Conversions,
+    /// 2026-08-03: How the leading `%state` handle is represented on this
+    /// language's side of the boundary (body-dependent ABI). Pure exports
+    /// omit it entirely.
+    pub state: StateAbi,
+    /// 2026-08-03: Parameter declaration format for FFI signatures.
+    /// `{name}` / `{type}` placeholders; default `{name}: {type}`.
+    /// C-family targets use `{type} {name}`.
+    pub param_decl: String,
+}
+
+/// How the state handle crosses the boundary for one language.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct StateAbi {
+    /// C-ABI parameter declaration (e.g. `BriefState* state`), used in
+    /// prototypes / extern blocks when an export needs state.
+    pub decl: String,
+    /// The state value expression at the call site (e.g. `STATE`, `_STATE`).
+    pub arg: String,
+    /// Host FFI arg-type list entry (e.g. `ctypes.c_void_p`, `'pointer'`).
+    pub ffi_type: String,
 }
 
 /// Boundary conversion expressions per protocol category.
@@ -112,116 +132,147 @@ pub fn load_glue_config(path: Option<&Path>) -> Result<HashMap<String, GlueTarge
 fn parse_glue_dbvl(source: &str) -> Result<HashMap<String, GlueTarget>, String> {
     let db = ConfigDb::from_quoted_str(source)?;
 
-    // Collect positional template lines: "<lang>.templates.<n>" →
-    // (output path, content). Deterministic: index encodes order.
-    let mut templates_by_lang: HashMap<String, HashMap<String, String>> = HashMap::new();
-    let sep = ".templates.";
-    for key in db.keys() {
-        let Some(pos) = key.find(sep) else { continue };
-        let lang = key[..pos].to_string();
-        let path = db.field_string(&key, 0).map(|s| s.to_string());
-        let content = db.field_string(&key, 1).map(|s| s.to_string());
-        if let (Some(path), Some(content)) = (path, content) {
-            templates_by_lang.entry(lang).or_default().insert(path, content);
-        }
-    }
+    let templates_by_lang = collect_templates(&db);
 
     let mut targets: HashMap<String, GlueTarget> = HashMap::new();
     for key in db.keys() {
-        if key.contains(sep) {
+        if key.contains(".templates.") || key.contains(".bindings.") {
             continue;
         }
         let Some(DataValue::Map(entry)) = db.field(&key, 0) else { continue };
-        let str_field = |name: &str| -> Option<String> {
-            entry.get(name).and_then(|v| match v {
-                DataValue::String(s) => Some(s.clone()),
-                _ => None,
-            })
-        };
-        let Some(types_module) = str_field("types_module") else { continue };
-        let Some(extension) = str_field("extension") else { continue };
-        let Some(bridge_kind) = str_field("bridge_kind") else { continue };
-        let Some(calling_convention) = str_field("calling_convention") else { continue };
-        let module_init = matches!(entry.get("module_init"), Some(DataValue::Bool(true)));
-
-        let string_map = |name: &str| -> HashMap<String, String> {
-            match entry.get(name) {
-                Some(DataValue::Map(map)) => map.iter()
-                    .filter_map(|(k, v)| match v {
-                        DataValue::String(s) => Some((k.clone(), s.clone())),
-                        _ => None,
-                    })
-                    .collect(),
-                _ => HashMap::new(),
-            }
-        };
-        let conversions = match entry.get("conversions") {
-            Some(DataValue::Map(conv)) => Conversions {
-                to_abi: match conv.get("to_abi") {
-                    Some(DataValue::Map(m)) => m.iter()
-                        .filter_map(|(k, v)| match v {
-                            DataValue::String(s) => Some((k.clone(), s.clone())),
-                            _ => None,
-                        })
-                        .collect(),
-                    _ => HashMap::new(),
-                },
-                from_abi: match conv.get("from_abi") {
-                    Some(DataValue::Map(m)) => m.iter()
-                        .filter_map(|(k, v)| match v {
-                            DataValue::String(s) => Some((k.clone(), s.clone())),
-                            _ => None,
-                        })
-                        .collect(),
-                    _ => HashMap::new(),
-                },
-            },
-            _ => Conversions::default(),
-        };
-        let templates = string_map("templates");
-
-        let protocols = match entry.get("protocols") {
-            Some(DataValue::Map(map)) => map.iter()
-                .map(|(proto, v)| {
-                    let proto_entry = match v {
-                        DataValue::Map(fields) => {
-                            let native = fields.get("native").and_then(|x| match x {
-                                DataValue::String(s) => Some(s.clone()),
-                                _ => None,
-                            }).unwrap_or_default();
-                            let c_abi = fields.get("c_abi").and_then(|x| match x {
-                                DataValue::String(s) => Some(s.clone()),
-                                _ => None,
-                            });
-                            let wasm_abi = fields.get("wasm_abi").and_then(|x| match x {
-                                DataValue::String(s) => Some(s.clone()),
-                                _ => None,
-                            });
-                            ProtocolEntry { native, c_abi, wasm_abi }
-                        }
-                        _ => ProtocolEntry { native: String::new(), c_abi: None, wasm_abi: None },
-                    };
-                    (proto.clone(), proto_entry)
-                })
-                .collect(),
-            _ => HashMap::new(),
-        };
-
-        targets.insert(key.clone(), GlueTarget {
-            language: key.clone(),
-            types_module: PathBuf::from(types_module),
-            extension,
-            bridge_kind,
-            calling_convention,
-            module_init,
-            protocols,
-            templates: templates_by_lang.get(&key).cloned().unwrap_or_default(),
-            conversions,
-        });
+        let Some(target) = glue_target_from_entry(&key, entry, &templates_by_lang) else { continue };
+        targets.insert(key, target);
     }
     Ok(targets)
 }
 
+/// Collect `<lang>.templates.<n>` (output path, content) and
+/// `<lang>.bindings.<file>` (filename in key, content in field 0) into a
+/// per-language templates map. `bindings.*` keys are prefixed so `brief
+/// bindings` can find them.
+fn collect_templates(db: &ConfigDb) -> HashMap<String, HashMap<String, String>> {
+    let mut templates_by_lang: HashMap<String, HashMap<String, String>> = HashMap::new();
+    for key in db.keys() {
+        if let Some((lang, path, content)) = template_line(db, &key) {
+            templates_by_lang.entry(lang).or_default().insert(path, content);
+        }
+    }
+    templates_by_lang
+}
+
+/// Parse one flat template line into `(lang, template_key, content)`.
+/// Templates: `<lang>.templates.<n>` with field 0 = output path, field 1 =
+/// content. Bindings: `<lang>.bindings.<file>` with the filename in the key
+/// and field 0 = content (stored under `bindings.<file>`).
+fn template_line(db: &ConfigDb, key: &str) -> Option<(String, String, String)> {
+    if let Some(pos) = key.find(".templates.") {
+        let lang = key[..pos].to_string();
+        let path = db.field_string(key, 0)?;
+        let content = db.field_string(key, 1)?;
+        Some((lang, path.to_string(), content.to_string()))
+    } else if let Some(pos) = key.find(".bindings.") {
+        let lang = key[..pos].to_string();
+        let content = db.field_string(key, 0)?;
+        let suffix = &key[pos + ".bindings.".len()..];
+        Some((lang, format!("bindings.{}", suffix), content.to_string()))
+    } else {
+        None
+    }
+}
+
+/// Build one GlueTarget from a `<lang>: { … }` entry map.
+fn glue_target_from_entry(
+    key: &str,
+    entry: &HashMap<String, DataValue>,
+    templates_by_lang: &HashMap<String, HashMap<String, String>>,
+) -> Option<GlueTarget> {
+    let str_field = |name: &str| -> Option<String> {
+        entry.get(name).and_then(|v| match v {
+            DataValue::String(s) => Some(s.clone()),
+            _ => None,
+        })
+    };
+    let string_map = |name: &str| -> HashMap<String, String> {
+        match entry.get(name) {
+            Some(DataValue::Map(map)) => map.iter()
+                .filter_map(|(k, v)| match v {
+                    DataValue::String(s) => Some((k.clone(), s.clone())),
+                    _ => None,
+                })
+                .collect(),
+            _ => HashMap::new(),
+        }
+    };
+    let types_module = str_field("types_module")?;
+    let extension = str_field("extension")?;
+    let bridge_kind = str_field("bridge_kind")?;
+    let calling_convention = str_field("calling_convention")?;
+    let module_init = matches!(entry.get("module_init"), Some(DataValue::Bool(true)));
+    let protocols = match entry.get("protocols") {
+        Some(DataValue::Map(map)) => map.iter()
+            .map(|(proto, v)| {
+                let proto_entry = match v {
+                    DataValue::Map(fields) => ProtocolEntry {
+                        native: str_from(fields.get("native")).unwrap_or_default(),
+                        c_abi: str_from(fields.get("c_abi")),
+                        wasm_abi: str_from(fields.get("wasm_abi")),
+                    },
+                    _ => ProtocolEntry { native: String::new(), c_abi: None, wasm_abi: None },
+                };
+                (proto.clone(), proto_entry)
+            })
+            .collect(),
+        _ => HashMap::new(),
+    };
+    let conversions = match entry.get("conversions") {
+        Some(DataValue::Map(conv)) => Conversions {
+            to_abi: string_map_from(conv.get("to_abi")),
+            from_abi: string_map_from(conv.get("from_abi")),
+        },
+        _ => Conversions::default(),
+    };
+    let state = match entry.get("state") {
+        Some(DataValue::Map(m)) => StateAbi {
+            decl: str_from(m.get("decl")).unwrap_or_default(),
+            arg: str_from(m.get("arg")).unwrap_or_default(),
+            ffi_type: str_from(m.get("ffi_type")).unwrap_or_default(),
+        },
+        _ => StateAbi::default(),
+    };
+    let param_decl = str_field("param_decl").unwrap_or_else(|| "{name}: {type}".to_string());
+    Some(GlueTarget {
+        language: key.to_string(),
+        types_module: PathBuf::from(types_module),
+        extension,
+        bridge_kind,
+        calling_convention,
+        module_init,
+        protocols,
+        templates: templates_by_lang.get(key).cloned().unwrap_or_default(),
+        conversions,
+        state,
+        param_decl,
+    })
+}
+
+fn str_from(v: Option<&DataValue>) -> Option<String> {
+    match v {
+        Some(DataValue::String(s)) => Some(s.clone()),
+        _ => None,
+    }
+}
+
+fn string_map_from(v: Option<&DataValue>) -> HashMap<String, String> {
+    match v {
+        Some(DataValue::Map(map)) => map.iter()
+            .filter_map(|(k, v)| match v {
+                DataValue::String(s) => Some((k.clone(), s.clone())),
+                _ => None,
+            })
+            .collect(),
+        _ => HashMap::new(),
+    }
+}
 /// Find a language target by extension.
 ///
 /// 2026-07-22: Matches the file extension (without dot) against known
@@ -259,6 +310,8 @@ mod tests {
             protocols: HashMap::new(),
             templates: HashMap::new(),
             conversions: Conversions::default(),
+            state: crate::glue::config::StateAbi::default(),
+            param_decl: "{name}: {type}".to_string(),
         });
         targets.insert("rust".to_string(), GlueTarget {
             language: "rust".to_string(),
@@ -270,6 +323,8 @@ mod tests {
             protocols: HashMap::new(),
             templates: HashMap::new(),
             conversions: Conversions::default(),
+            state: crate::glue::config::StateAbi::default(),
+            param_decl: "{name}: {type}".to_string(),
         });
 
         // Should work with or without leading dot
@@ -290,6 +345,8 @@ mod tests {
             protocols: HashMap::new(),
             templates: HashMap::new(),
             conversions: Conversions::default(),
+            state: crate::glue::config::StateAbi::default(),
+            param_decl: "{name}: {type}".to_string(),
         });
 
         // Should work with or without leading dot
@@ -310,6 +367,8 @@ mod tests {
             protocols: HashMap::new(),
             templates: HashMap::new(),
             conversions: Conversions::default(),
+            state: crate::glue::config::StateAbi::default(),
+            param_decl: "{name}: {type}".to_string(),
         });
 
         // Should work with or without leading dot

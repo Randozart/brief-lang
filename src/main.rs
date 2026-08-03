@@ -28,6 +28,7 @@ fn main() {
         "accept" => run_accept(&args[2..]),
         "library" | "lib" => library::run_library_mode(&args[2..]),
         "export" => run_export(&args[2..]),
+        "bindings" => run_bindings(&args[2..]),
         "doc" => run_doc(&args[2..]),
         "link" => run_link(&args[2..]),
         "audit" => run_audit_cmd(&args[2..]),
@@ -125,6 +126,7 @@ fn parse_build_args(args: &[String]) -> Result<compile::BuildOptions, String> {
     let mut optimize_budget = 256u64;
     let mut gpu_offload = false;
     let mut shared = false;
+    let mut library_mode = false;
     let mut emit_beast = Vec::new();
     let mut backend_override: Option<String> = None;
     let mut no_stdlib = false;
@@ -162,6 +164,9 @@ fn parse_build_args(args: &[String]) -> Result<compile::BuildOptions, String> {
             i += 2;
         } else if arg == "--shared" {
             shared = true;
+            i += 1;
+        } else if arg == "--library" {
+            library_mode = true;
             i += 1;
         } else if arg == "--out" {
             let val = args.get(i + 1).ok_or("--out requires a directory argument")?;
@@ -322,6 +327,7 @@ fn parse_build_args(args: &[String]) -> Result<compile::BuildOptions, String> {
         trg_unresolved_action,
         extra_objects: vec![],
         shared,
+        library_mode,
         feature_svo: false,
         glue_config: None,
         stack_threshold: 4096,
@@ -370,6 +376,7 @@ fn run_bounty(args: &[String]) -> Result<(), String> {
         trg_unresolved_action: brief_compiler::backend::llvm::TrgUnresolvedAction::Warn,
         extra_objects: vec![],
         shared: false,
+        library_mode: false,
         feature_svo: false,
         glue_config: None,
         stack_threshold: 4096,
@@ -727,6 +734,24 @@ fn run_export(args: &[String]) -> Result<(), String> {
         }
     }
     brief_compiler::glue::export::run_export_cli(file_path, language, &out_dir)
+}
+
+/// `brief bindings <file.bv> <language> [--out <dir>]` — render only the
+/// language's config-driven bindings templates (e.g. brief_types.h).
+fn run_bindings(args: &[String]) -> Result<(), String> {
+    let file_path = args.first().ok_or("usage: brief bindings <file.bv> <language> [--out <dir>]")?;
+    let language = args.get(1).ok_or("usage: brief bindings <file.bv> <language> [--out <dir>]")?;
+    let mut out_dir = ".".to_string();
+    let mut i = 2;
+    while i < args.len() {
+        if args[i] == "--out" {
+            out_dir = args.get(i + 1).ok_or("--out requires a directory argument")?.clone();
+            i += 2;
+        } else {
+            return Err(format!("unknown flag: {}", args[i]));
+        }
+    }
+    brief_compiler::glue::export::run_bindings_cli(file_path, language, &out_dir)
 }
 
 /// `brief link <library.so/a/o>`

@@ -24,6 +24,7 @@
 //     + meld projections for zero-copy data access.
 
 use crate::ast::{Annotation, OutputType, TopLevel};
+use crate::glue::config::GlueTarget;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::fs;
@@ -284,6 +285,191 @@ fn serialize_ctypes_dbvl(c_type_map: &HashMap<String, String>) -> String {
     lines.join("\n")
 }
 
+/// Per-export template variables for wrapper/bindings rendering.
+///
+/// 2026-08-03: The state handle (s_param/s_ffi_param/s_ffi_type) is computed
+/// from the body-dependent ABI (needs_state) and the target's config-driven
+/// state representation. Boundary conversions come from target.conversions
+/// (config), never hardcoded in Rust.
+fn export_template_vars(export: &ExportDecl, target: &GlueTarget) -> HashMap<String, String> {
+    let mut fn_vars: HashMap<String, String> = HashMap::new();
+    fn_vars.insert("name".to_string(), export.name.clone());
+
+    let params: Vec<String> = export.params.iter()
+        .map(|(name, ty)| {
+            let (native, _) = resolve_protocol(ty, &target.protocols);
+            format!("{}: {}", name, native)
+        })
+        .collect();
+    let ffi_params: Vec<String> = export.params.iter()
+        .map(|(name, ty)| {
+            let (_, c_abi) = resolve_protocol(ty, &target.protocols);
+            // 2026-08-03: Config-driven param decl format (C uses `type name`,
+            // python/rust use `name: type`).
+            target.param_decl.replace("{name}", name).replace("{type}", &c_abi)
+        })
+        .collect();
+    let args: Vec<String> = export.params.iter()
+        .map(|(name, _)| name.clone())
+        .collect();
+    let c_types: Vec<String> = export.params.iter()
+        .map(|(_, ty)| {
+            let (_, c_abi) = resolve_protocol(ty, &target.protocols);
+            c_abi
+        })
+        .collect();
+
+    let args_abi = to_abi_args(export, target);
+    let return_expr = from_abi_return(export, target);
+    let (state_arg, state_ffi_param, state_ffi_type) =
+        state_vars(export, target, !args_abi.is_empty(), !ffi_params.is_empty(), !c_types.is_empty());
+
+    fn_vars.insert("s_param".to_string(), state_arg);
+    fn_vars.insert("s_ffi_param".to_string(), state_ffi_param);
+    fn_vars.insert("s_ffi_type".to_string(), state_ffi_type);
+    let (native_ret, c_ret) = resolve_protocol(&export.return_type, &target.protocols);
+    fn_vars.insert("return".to_string(), native_ret.clone());
+    fn_vars.insert("c_return".to_string(), c_ret.clone());
+
+    fn_vars.insert("params".to_string(), params.join(", "));
+    fn_vars.insert("ffi_params".to_string(), ffi_params.join(", "));
+    fn_vars.insert("c_types".to_string(), c_types.join(", "));
+    fn_vars.insert("args".to_string(), args.join(", "));
+    fn_vars.insert("args_abi".to_string(), args_abi.join(", "));
+    fn_vars.insert("return_expr".to_string(), return_expr);
+    fn_vars
+}
+
+/// `to_abi`: render each argument's boundary form from the config expression
+/// (`{name}` placeholder); identity when the target has no conversion.
+fn to_abi_args(export: &ExportDecl, target: &GlueTarget) -> Vec<String> {
+    export.params.iter()
+        .map(|(name, ty)| {
+            let proto = format!("#{}", ty);
+            target.conversions.to_abi.get(&proto)
+                .map(|expr| expr.replace("{name}", name))
+                .unwrap_or_else(|| name.clone())
+        })
+        .collect()
+}
+
+/// `from_abi`: render the raw boundary `result_abi` back to a native value.
+fn from_abi_return(export: &ExportDecl, target: &GlueTarget) -> String {
+    let proto = format!("#{}", export.return_type);
+    target.conversions.from_abi.get(&proto)
+        .cloned()
+        .unwrap_or_else(|| "result_abi".to_string())
+}
+
+/// Per-export state-handle variables, joined WITHOUT a dangling separator
+/// when there are no user params (C rejects `(BriefState* state, )`).
+fn state_vars(
+    export: &ExportDecl,
+    target: &GlueTarget,
+    has_args: bool,
+    has_ffi_params: bool,
+    has_c_types: bool,
+) -> (String, String, String) {
+    let needs = export.needs_state;
+    (
+        state_fragment(needs, has_args, &target.state.arg),
+        state_fragment(needs, has_ffi_params, &target.state.decl),
+        state_fragment(needs, has_c_types, &target.state.ffi_type),
+    )
+}
+
+/// `needs` && more-fields → `"{s}, "`; `needs` only → `s`; else `""`.
+fn state_fragment(needs: bool, has_more: bool, s: &str) -> String {
+    if needs && has_more {
+        format!("{}, ", s)
+    } else if needs {
+        s.to_string()
+    } else {
+        String::new()
+    }
+}
+
+/// Render the per-export ffi declarations for a template set, joined by a
+/// separator (newline). Shared by wrapper and bindings generation.
+fn render_ffi_decls(
+    exports: &[ExportDecl],
+    target: &GlueTarget,
+    template_vars: &HashMap<String, String>,
+    ffi_template: &str,
+) -> String {
+    let mut ffi_buf = String::new();
+    for (i, export) in exports.iter().enumerate() {
+        if i > 0 { ffi_buf.push('\n'); }
+        let fn_vars = export_template_vars(export, target);
+        let mut merged = template_vars.clone();
+        merged.extend(fn_vars);
+        ffi_buf.push_str(&render_template(ffi_template, &merged));
+    }
+    ffi_buf
+}
+
+/// `brief bindings <bridge.bv> <language> [--out <dir>]` — render only the
+/// language's `bindings.*` templates (e.g. brief_types.h, brief_bindings.rs)
+/// for the exported functions, without the full wrapper crate.
+///
+/// 2026-08-03: Config-driven — the bindings templates and per-export ABI
+/// (state param from needs_state) live in config/glue.dbvl. No compiler-side
+/// language knowledge.
+pub fn run_bindings_cli(file_path: &str, language: &str, out_dir: &str) -> Result<(), String> {
+    let source = std::fs::read_to_string(file_path)
+        .map_err(|e| format!("Cannot read '{}': {}", file_path, e))?;
+    let bridge_name = std::path::Path::new(file_path)
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .unwrap_or("bridge");
+    let (items, universe) = crate::library::parse_and_check(file_path, &source)?;
+
+    let glue_targets = crate::glue::config::load_glue_config(None)?;
+    let target = glue_targets.get(language).ok_or_else(|| {
+        format!("Unknown bindings target '{}'.\n  Add an entry to config/glue.dbvl: {}", language,
+            glue_targets.keys().cloned().collect::<Vec<_>>().join(", "))
+    })?;
+    let info = extract_bridge_info(&items, bridge_name);
+
+    let mut template_vars: HashMap<String, String> = HashMap::new();
+    template_vars.insert("bridge_name".to_string(), bridge_name.to_string());
+
+    let bindings_ffi = target.templates.get("bindings.ffi_template")
+        .or_else(|| target.templates.get("ffi_template"))
+        .ok_or_else(|| format!("target '{}' has no bindings.ffi_template in config/glue.dbvl", language))?;
+    let ffi_decls = render_ffi_decls(&info.exports, target, &template_vars, bindings_ffi);
+    template_vars.insert("ffi_decls".to_string(), ffi_decls);
+
+    let output_dir = std::path::Path::new(out_dir).join(format!("{}-bindings", bridge_name));
+    std::fs::create_dir_all(&output_dir)
+        .map_err(|e| format!("Failed to create output dir '{}': {}", output_dir.display(), e))?;
+
+    let mut written = 0;
+    for (filename, template) in &target.templates {
+        if filename == "bindings.ffi_template" || filename == "ffi_template" || filename == "fn_template" {
+            continue;
+        }
+        if !filename.starts_with("bindings.") {
+            continue;
+        }
+        let rel = &filename["bindings.".len()..];
+        let rendered = render_template(template, &template_vars);
+        let output_path = output_dir.join(rel);
+        if let Some(parent) = output_path.parent() {
+            std::fs::create_dir_all(parent)
+                .map_err(|e| format!("Failed to create dir '{}': {}", parent.display(), e))?;
+        }
+        std::fs::write(&output_path, &rendered)
+            .map_err(|e| format!("Failed to write '{}': {}", output_path.display(), e))?;
+        println!("  Written: {}", output_path.display());
+        written += 1;
+    }
+    if written == 0 {
+        return Err(format!("target '{}' has no bindings.* templates in config/glue.dbvl", language));
+    }
+    Ok(())
+}
+
 /// CLI entry point for `brief export <bridge.bv> <language> [--out <dir>]`.
 ///
 /// 2026-07-22: Reads a Brief bridge file, extracts exports and foreign
@@ -383,7 +569,6 @@ pub fn run_export_cli(file_path: &str, language: &str, out_dir: &str) -> Result<
         // LTO path (Rust): init_state is declared as an FFI function
         template_vars.insert("s_init".to_string(), "    pub fn init_state(state: *mut c_void);\n".to_string());
     }
-    let lto = target.calling_convention != "c_abi";
 
     // Render all exports + FFI declarations
     let fn_template = target.templates.get("fn_template");
@@ -395,90 +580,7 @@ pub fn run_export_cli(file_path: &str, language: &str, out_dir: &str) -> Result<
         if i > 0 { exports_buf.push('\n'); }
         if i > 0 { ffi_buf.push('\n'); }
 
-        // Per-export state handle expression (call argument).
-        // c_abi hosts keep a module-level _STATE; the lto (Rust) crate keeps
-        // a static STATE. Pure exports omit it entirely.
-        let state_arg = if export.needs_state {
-            if lto { "STATE, " } else { "_STATE, " }
-        } else {
-            ""
-        };
-        // Per-export state parameter in the C-ABI/FFI declaration.
-        let state_ffi_param = if export.needs_state {
-            "state: *mut std::ffi::c_void, "
-        } else {
-            ""
-        };
-        // Per-export state ctypes argument-type prefix (c_abi).
-        let state_argtype = if export.needs_state {
-            if lto { "" } else { "ctypes.c_void_p, " }
-        } else {
-            ""
-        };
-        // Per-export state ffi-napi argument TYPE prefix (c_abi / node).
-        let state_ffi_type = if export.needs_state {
-            if lto { "" } else { "'pointer', " }
-        } else {
-            ""
-        };
-
-        // Build per-function variables
-        let mut fn_vars: HashMap<String, String> = HashMap::new();
-        fn_vars.insert("name".to_string(), export.name.clone());
-        fn_vars.insert("s_param".to_string(), state_arg.to_string());
-        fn_vars.insert("s_ffi_param".to_string(), state_ffi_param.to_string());
-        fn_vars.insert("s_argtypes".to_string(), state_argtype.to_string());
-        fn_vars.insert("s_ffi_type".to_string(), state_ffi_type.to_string());
-        let (native_ret, c_ret) = resolve_protocol(&export.return_type, &target.protocols);
-        fn_vars.insert("return".to_string(), native_ret.clone());
-        fn_vars.insert("c_return".to_string(), c_ret.clone());
-
-        // Build parameter lists
-        let params: Vec<String> = export.params.iter()
-            .map(|(name, ty)| {
-                let (native, _) = resolve_protocol(ty, &target.protocols);
-                format!("{}: {}", name, native)
-            })
-            .collect();
-        let ffi_params: Vec<String> = export.params.iter()
-            .map(|(name, ty)| {
-                let (_, c_abi) = resolve_protocol(ty, &target.protocols);
-                format!("{}: {}", name, c_abi)
-            })
-            .collect();
-        let args: Vec<String> = export.params.iter()
-            .map(|(name, _)| name.clone())
-            .collect();
-
-        // Build ABI conversion expressions from target.conversions (config).
-        // to_abi: {{name}} → boundary argument (config expression, `{name}`
-        // placeholder, default identity — the host side types the boundary).
-        let args_abi: Vec<String> = export.params.iter()
-            .map(|(name, ty)| {
-                let proto = format!("#{}", ty);
-                target.conversions.to_abi.get(&proto)
-                    .map(|expr| expr.replace("{name}", name))
-                    .unwrap_or_else(|| name.clone())
-            })
-            .collect();
-        let (_, ret_c_abi) = resolve_protocol(&export.return_type, &target.protocols);
-        // from_abi: raw boundary `result_abi` → native return expression.
-        let ret_proto = format!("#{}", export.return_type);
-        let return_expr = target.conversions.from_abi.get(&ret_proto)
-            .cloned()
-            .unwrap_or_else(|| "result_abi".to_string());
-
-        fn_vars.insert("params".to_string(), params.join(", "));
-        fn_vars.insert("ffi_params".to_string(), ffi_params.join(", "));
-        fn_vars.insert("c_types".to_string(), export.params.iter()
-            .map(|(_, ty)| {
-                let (_, c_abi) = resolve_protocol(ty, &target.protocols);
-                c_abi
-            })
-            .collect::<Vec<_>>().join(", "));
-        fn_vars.insert("args".to_string(), args.join(", "));
-        fn_vars.insert("args_abi".to_string(), args_abi.join(", "));
-        fn_vars.insert("return_expr".to_string(), return_expr);
+        let fn_vars = export_template_vars(export, target);
 
         if let Some(ft) = fn_template {
             // 2026-08-03: per-function render sees both fn_vars and the
