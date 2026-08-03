@@ -5,17 +5,19 @@
 // targets and per-target/per-program knobs can evolve without recompiling.
 //
 // Two files:
-//   - `config/targets.toml` `[target.<triple-prefix>]` tables → TargetSettings
+//   - `config/targets.dbvl` `target.<triple-prefix>` entries → TargetSettings
 //     (per-target: float_registers, dense_compute_density, vector_min_width).
 //     Looked up by matching the compiler's target_triple PREFIX. An unknown
 //     prefix falls back to x86_64 defaults + `warn_unknown_target` so the
 //     fallback is never silent.
-//   - `config/ir-lowering.toml` → IrLoweringSettings (global tuning knobs:
+//   - `config/ir-lowering.dbvl` → IrLoweringSettings (global tuning knobs:
 //     arena budget/size, stack threshold, SROA chunking, SSO/SVO caps, inline
 //     weight). SSO's 6-byte default is derived from the String handle
 //     representation (align 8 − 2 tag bits); the config entry is an override.
 //
-// Both are baked at compile time via include_str! and cached with LazyLock.
+// 2026-08-03 (Phase 3, data-brief-config plan): both files migrated from TOML
+// to the flat .dbvl line-table form, still baked at compile time via include_str!
+// and cached with LazyLock.
 
 use std::collections::HashMap;
 use std::sync::LazyLock;
@@ -134,23 +136,38 @@ fn load_target_settings() -> HashMap<String, TargetSettings> {
     out
 }
 
-/// Parse config/ir-lowering.toml with per-key defaults.
+/// Parse config/ir-lowering.dbvl with per-key defaults.
+///
+/// 2026-08-03 (Phase 3, data-brief-config plan): migrated from ir-lowering.toml
+/// to the flat .dbvl line-table form; still compile-time baked via include_str!.
+/// Absent keys fall back to the hardcoded defaults, matching pre-migration.
 fn load_ir_lowering() -> IrLoweringSettings {
-    let content = include_str!("../config/ir-lowering.toml");
-    let raw: toml::Value = toml::from_str(content).unwrap_or_else(|e| {
-        panic!("config/ir-lowering.toml parse error: {}", e)
-    });
-    let i64_of = |k: &str| -> Option<i64> {
-        raw.get(k).and_then(toml::Value::as_integer)
+    let content = include_str!("../config/ir-lowering.dbvl");
+    let db = match crate::dbrief::config_db::ConfigDb::from_str(content) {
+        Ok(db) => db,
+        Err(e) => panic!("config/ir-lowering.dbvl parse error: {}", e),
     };
     IrLoweringSettings {
-        arena_min_budget: i64_of("arena_min_budget").unwrap_or(DEFAULT_IR_LOWERING.arena_min_budget as i64) as u32,
-        arena_initial_size: i64_of("arena_initial_size").unwrap_or(DEFAULT_IR_LOWERING.arena_initial_size as i64) as u64,
-        stack_threshold: i64_of("stack_threshold").unwrap_or(DEFAULT_IR_LOWERING.stack_threshold as i64) as u64,
-        max_fields_per_alloca: i64_of("max_fields_per_alloca").unwrap_or(DEFAULT_IR_LOWERING.max_fields_per_alloca as i64) as usize,
-        sso_max_bytes: i64_of("sso_max_bytes").unwrap_or(DEFAULT_IR_LOWERING.sso_max_bytes as i64) as usize,
-        svo_max_elements: i64_of("svo_max_elements").unwrap_or(DEFAULT_IR_LOWERING.svo_max_elements as i64) as usize,
-        callable_inline_weight_threshold: i64_of("callable_inline_weight_threshold")
+        arena_min_budget: db
+            .field_int("arena_min_budget", 0)
+            .unwrap_or(DEFAULT_IR_LOWERING.arena_min_budget as i64) as u32,
+        arena_initial_size: db
+            .field_int("arena_initial_size", 0)
+            .unwrap_or(DEFAULT_IR_LOWERING.arena_initial_size as i64) as u64,
+        stack_threshold: db
+            .field_int("stack_threshold", 0)
+            .unwrap_or(DEFAULT_IR_LOWERING.stack_threshold as i64) as u64,
+        max_fields_per_alloca: db
+            .field_int("max_fields_per_alloca", 0)
+            .unwrap_or(DEFAULT_IR_LOWERING.max_fields_per_alloca as i64) as usize,
+        sso_max_bytes: db
+            .field_int("sso_max_bytes", 0)
+            .unwrap_or(DEFAULT_IR_LOWERING.sso_max_bytes as i64) as usize,
+        svo_max_elements: db
+            .field_int("svo_max_elements", 0)
+            .unwrap_or(DEFAULT_IR_LOWERING.svo_max_elements as i64) as usize,
+        callable_inline_weight_threshold: db
+            .field_int("callable_inline_weight_threshold", 0)
             .unwrap_or(DEFAULT_IR_LOWERING.callable_inline_weight_threshold as i64) as u32,
     }
 }
@@ -169,6 +186,25 @@ mod tests {
         assert_eq!(s.sso_max_bytes, 6);
         assert_eq!(s.svo_max_elements, 3);
         assert_eq!(s.callable_inline_weight_threshold, 40);
+    }
+
+    #[test]
+    fn parity_ir_lowering_dbvl_matches_toml() {
+        // Phase 3 migration gate: config/ir-lowering.dbvl must produce exactly
+        // the values the TOML it replaces produces. The .toml is deleted only
+        // after this stays green.
+        let s = ir_lowering();
+        let toml_content =
+            include_str!("../config/ir-lowering.toml");
+        let raw: toml::Value = toml::from_str(toml_content).unwrap();
+        let i64_of = |k: &str| raw.get(k).and_then(toml::Value::as_integer).unwrap();
+        assert_eq!(s.arena_min_budget as i64, i64_of("arena_min_budget"));
+        assert_eq!(s.arena_initial_size as i64, i64_of("arena_initial_size"));
+        assert_eq!(s.stack_threshold as i64, i64_of("stack_threshold"));
+        assert_eq!(s.max_fields_per_alloca as i64, i64_of("max_fields_per_alloca"));
+        assert_eq!(s.sso_max_bytes as i64, i64_of("sso_max_bytes"));
+        assert_eq!(s.svo_max_elements as i64, i64_of("svo_max_elements"));
+        assert_eq!(s.callable_inline_weight_threshold as i64, i64_of("callable_inline_weight_threshold"));
     }
 
     #[test]

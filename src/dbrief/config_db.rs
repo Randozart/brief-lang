@@ -488,4 +488,65 @@ DMA0: 0xFE005000; 0x1000;\n";
         let _ = std::fs::remove_file(dir.join("demo.dbvl"));
         let _ = std::fs::remove_dir(&dir);
     }
+
+    // ── PROBE: flat-config grammar (Phase 3) ─────────────────────────────
+    // 2026-08-03: verify the parser accepts the flattened key forms before
+    // committing config/*.dbvl. REMOVE after migration. These are probes, not
+    // golden tests — the migration parity tests supersede them.
+
+    #[test]
+    fn probe_dotted_and_hyphenated_keys() {
+        let src = "\
+encoding.UTF-8: 0; std.encoding.UTF8.index_at; std.encoding.UTF8.char_count;
+encoding.ASCII: 1;
+target.x86_64: 16; 4.0; 4;
+target.wasm32: 4294967295; 4.0; 4;
+";
+        let db = ConfigDb::from_str(src).unwrap();
+        assert_eq!(db.field_int("encoding.UTF-8", 0), Some(0));
+        assert_eq!(db.field_string("encoding.UTF-8", 1), Some("std.encoding.UTF8.index_at"));
+        assert_eq!(db.field_int("encoding.ASCII", 0), Some(1));
+        assert_eq!(db.field_int("target.x86_64", 0), Some(16));
+        assert_eq!(db.field("target.x86_64", 1), Some(&DataValue::Float(4.0)));
+        assert_eq!(db.field_int("target.wasm32", 0), Some(4294967295));
+    }
+
+    #[test]
+    fn probe_leading_dot_key_and_space_list_field() {
+        let src = "\
+.bv: llvm; --budget 256; prelude env print entry script; none; 50;
+.ebv: llvm; --optimize-size --budget 0; prelude;
+";
+        let db = ConfigDb::from_str(src).unwrap();
+        assert_eq!(db.field_string(".bv", 0), Some("llvm"));
+        // Space-separated list fields round-trip as a single string.
+        assert_eq!(db.field_string(".bv", 1), Some("--budget 256"));
+        assert_eq!(db.field_string(".bv", 2), Some("prelude env print entry script"));
+        assert_eq!(db.field_int(".bv", 4), Some(50));
+        // Optional trailing fields simply absent.
+        assert_eq!(db.field_string(".ebv", 3), None);
+    }
+
+    #[test]
+    fn probe_protocol_map_quoted_names() {
+        // protocols.toml stores #System → "c". # is not an identifier char, so
+        // the map names arrive as quoted strings in quoted mode. peek_has_named_fields
+        // must recognize the opening `"` as a named-field start (fixed 2026-08-03).
+        let src = "\
+x86_64-linux: { \"#System\": \"c\" };
+wasm32-wasi: { \"#System\": \"wasi_snapshot_preview1\"; \"#Web\": \"wasm_runtime\" };
+";
+        let db = ConfigDb::from_quoted_str(src).unwrap();
+        match db.field("x86_64-linux", 0) {
+            Some(DataValue::Map(m)) => assert_eq!(m.get("#System"), Some(&DataValue::String("c".into()))),
+            other => panic!("expected map, got {:?}", other),
+        }
+        match db.field("wasm32-wasi", 0) {
+            Some(DataValue::Map(m)) => {
+                assert_eq!(m.get("#System"), Some(&DataValue::String("wasi_snapshot_preview1".into())));
+                assert_eq!(m.get("#Web"), Some(&DataValue::String("wasm_runtime".into())));
+            }
+            other => panic!("expected map, got {:?}", other),
+        }
+    }
 }

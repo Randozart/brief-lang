@@ -1114,9 +1114,25 @@ impl Parser {
         }
         // Read the first identifier/token
         let mut token = String::new();
-        while ci < chars.len() && (chars[ci].is_alphanumeric() || chars[ci] == '_') {
-            token.push(chars[ci]);
+        // 2026-08-03: in quoted mode a `{ }` block may open with a quoted name
+        // (e.g. protocol hashwords `"#System": "c"`). # is not an identifier
+        // char, so without this the block falls through to positional parsing
+        // and errors on the `:`. Undo: revert to alnum/`_` only.
+        if self.quoted && chars[ci] == '"' {
             ci += 1;
+            while ci < chars.len() && chars[ci] != '"' {
+                token.push(chars[ci]);
+                ci += 1;
+            }
+            if ci >= chars.len() {
+                return false;
+            }
+            ci += 1;
+        } else {
+            while ci < chars.len() && (chars[ci].is_alphanumeric() || chars[ci] == '_') {
+                token.push(chars[ci]);
+                ci += 1;
+            }
         }
         if token.is_empty() {
             return false;
