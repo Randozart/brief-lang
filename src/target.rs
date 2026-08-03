@@ -82,9 +82,28 @@ pub struct ProtocolConfig {
 
 impl ProtocolConfig {
     /// Load the compiled-in protocol config (baked at compile time).
+    ///
+    /// 2026-08-03 (Phase 3, data-brief-config plan): reads config/protocols.dbvl
+    /// (quoted mode — the `#System`/`#Web` map keys are quoted because `#` is
+    /// not an identifier char). Shape is `<triple>: { "<protocol>": "<lib>"; }`.
     pub fn load() -> Self {
-        let content = include_str!("../config/protocols.toml");
-        toml::from_str(content).unwrap_or_else(|e| panic!("config/protocols.toml parse error: {}", e))
+        let content = include_str!("../config/protocols.dbvl");
+        let db = crate::dbrief::config_db::ConfigDb::from_quoted_str(content)
+            .unwrap_or_else(|e| panic!("config/protocols.dbvl parse error: {}", e));
+        let mut per_target = HashMap::new();
+        for key in db.keys() {
+            let mut map = HashMap::new();
+            if let Some(crate::dbrief::v2::DataValue::Map(entries)) = db.field(&key, 0) {
+                for (protocol, lib) in entries {
+                    map.insert(protocol.clone(), match lib {
+                        crate::dbrief::v2::DataValue::String(s) => Some(s.clone()),
+                        _ => None,
+                    });
+                }
+            }
+            per_target.insert(key, map);
+        }
+        ProtocolConfig { per_target }
     }
 
     /// Resolve a protocol name to a library name for the given target.
@@ -250,5 +269,31 @@ mod tests {
         let config = ProtocolConfig::load();
         let result = config.resolve("nonexistent-target", "#System");
         assert!(result.is_err(), "unknown target should error");
+    }
+
+    #[test]
+    fn parity_protocols_dbvl_matches_toml() {
+        // Phase 3 migration gate: config/protocols.dbvl must produce exactly
+        // the target→protocol→library map the .toml it replaces produces. The
+        // .toml is deleted only after this stays green.
+        let db = ProtocolConfig::load();
+        let content = include_str!("../config/protocols.toml");
+        let toml_map: HashMap<String, HashMap<String, Option<String>>> =
+            toml::from_str(content).unwrap();
+
+        assert_eq!(db.per_target.len(), toml_map.len());
+        for (triple, toml_protos) in &toml_map {
+            let db_map = db.per_target.get(triple)
+                .unwrap_or_else(|| panic!("target '{}' missing from protocols.dbvl", triple));
+            assert_eq!(db_map.len(), toml_protos.len());
+            for (protocol, lib) in toml_protos {
+                assert_eq!(
+                    db_map.get(protocol),
+                    Some(lib),
+                    "protocol '{}' on '{}' diverges between .dbvl and .toml",
+                    protocol, triple
+                );
+            }
+        }
     }
 }

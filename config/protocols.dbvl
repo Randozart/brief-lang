@@ -1,0 +1,23 @@
+// Protocol → library/linker-flag mappings per target triple.
+// The map value `{ "#System": lib; ... }` — a missing protocol is unavailable.
+// Baked into the binary via include_str!.
+//
+// 2026-07-26: Phase 1 — #System protocol wire-up. Maps protocol names
+// (from `frgn printf from #System`) to linker flags per target.
+// Use "c" for libc (linked by default with clang), or specific library
+// names for other system libraries.
+//
+// 2026-08-03 (Phase 3, data-brief-config plan): migrated from protocols.toml.
+// Each line is `<target-triple>: { "<Protocol>": "<lib>"; ... };` — the map
+// keys are quoted because `#` is not an identifier char; parsed in quoted mode.
+// A protocol absent from the map is unavailable on that target.
+//
+// #System is the only protocol. It abstracts "the platform's standard
+// system library" — libc on Linux, libSystem on macOS, WASI preview1
+// on wasm. Platform-specific APIs use a direct `from "link/lib.so"` path.
+
+x86_64-linux: { "#System": "c" };
+aarch64-linux: { "#System": "c" };
+x86_64-macos: { "#System": "System" };
+aarch64-macos: { "#System": "System" };
+wasm32-wasi: { "#System": "wasi_snapshot_preview1"; "#Web": "wasm_runtime" };
