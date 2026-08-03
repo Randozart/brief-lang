@@ -449,7 +449,7 @@ fn merge_groups(body: &[Statement], groups: Vec<VectorPhiCandidate>) -> Vec<Vect
 /// justify the insertelement/extractelement overhead.
 ///
 /// 2026-07-31: Phase 3 (§8.1) — `min_width` is config-driven
-/// (config/targets.toml `vector_min_width`, default 4) instead of a literal.
+/// (config/targets.dbvl `vector_min_width`, default 4) instead of a literal.
 pub fn analyze_body(body: &[Statement], min_width: usize) -> Vec<VectorPhiCandidate> {
     let mut groups = Vec::new();
     let mut i = 0;

@@ -7,7 +7,7 @@
 // 2026-07-15: Phase 2 — Wire per-stage plugin dispatch into pipeline.
 //             Front: on_ast after parse, Mid: on_ast after typecheck,
 //             Post/Back: on_ir after codegen. Per-extension plugin selection
-//             from config/targets.toml. System plugin discovery from
+//             from config/targets.dbvl. System plugin discovery from
 //             plugins/{front,mid,post,back}/.
 
 use std::collections::HashMap;
@@ -892,7 +892,7 @@ fn build_plugin_manager(file_path: &str, opts: &BuildOptions) -> PluginManager {
     pm.register(Box::new(brief_compiler::plugin::entry_plugin::EntryPlugin));
     pm.register(Box::new(brief_compiler::plugin::script_plugin::ScriptPlugin));
 
-    // Apply per-extension filtering from config/targets.toml
+    // Apply per-extension filtering from config/targets.dbvl
     let ext = get_extension(file_path);
     let config = load_target_config(opts);
     pm.filter_for_extension(&ext, &config);
@@ -1547,11 +1547,16 @@ fn parse_and_check(file_path: &str, source: &str, opts: &BuildOptions) -> Result
 fn load_target_config(opts: &BuildOptions) -> TargetConfig {
     match &opts.config_dir {
         Some(dir) => {
-            let path = Path::new(dir).join("targets.toml");
-            TargetConfig::load_from(&path).unwrap_or_else(|e| {
-                eprintln!("warning: cannot load '{}': {} — using baked fallback", path.display(), e);
-                TargetConfig::load()
-            })
+            match brief_compiler::dbrief::config_db::resolve_config_file(Path::new(dir), "targets") {
+                Some(path) => TargetConfig::load_from(&path).unwrap_or_else(|e| {
+                    eprintln!("warning: cannot load '{}': {} — using baked fallback", path.display(), e);
+                    TargetConfig::load()
+                }),
+                None => {
+                    eprintln!("warning: no targets config found in '{}' — using baked fallback", dir);
+                    TargetConfig::load()
+                }
+            }
         }
         None => TargetConfig::load(),
     }

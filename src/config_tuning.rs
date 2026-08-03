@@ -96,36 +96,38 @@ pub fn target_settings_for(triple: &str) -> TargetSettings {
     best.map(|(_, s)| *s).unwrap_or(DEFAULT_TARGET_SETTINGS)
 }
 
-/// Is the triple's prefix known to config/targets.toml?
+/// Is the triple's prefix known to config/targets.dbvl?
 pub fn known_target_triple(triple: &str) -> bool {
     TARGET_SETTINGS.keys().any(|p| triple.starts_with(p.as_str()))
 }
 
-/// Walk config/targets.toml's `[target.<prefix>]` tables.
+/// Walk config/targets.dbvl's `target.<prefix>` rows.
+///
+/// 2026-08-03 (Phase 3, data-brief-config plan): migrated from the
+/// `[target.<prefix>]` tables in targets.dbvl. Row shape:
+/// `target.<prefix>: <float_registers>; <dense_compute_density>; <vector_min_width>;`.
 fn load_target_settings() -> HashMap<String, TargetSettings> {
-    let content = include_str!("../config/targets.toml");
-    let raw: toml::Value = toml::from_str(content).unwrap_or_else(|e| {
-        panic!("config/targets.toml parse error: {}", e)
-    });
-    let mut out = HashMap::new();
-    let Some(toml::Value::Table(target_table)) = raw.get("target") else {
-        return out;
+    let content = include_str!("../config/targets.dbvl");
+    let db = match crate::dbrief::config_db::ConfigDb::from_str(content) {
+        Ok(db) => db,
+        Err(e) => panic!("config/targets.dbvl parse error: {}", e),
     };
-    for (prefix, value) in target_table {
-        let toml::Value::Table(t) = value else { continue };
-        let float_registers = t.get("float_registers")
-            .and_then(toml::Value::as_integer)
+    let mut out = HashMap::new();
+    for key in db.keys() {
+        let Some(prefix) = key.strip_prefix("target.") else { continue };
+        let float_registers = db
+            .field_int(&key, 0)
             .map(|v| v as usize)
             .unwrap_or(DEFAULT_TARGET_SETTINGS.float_registers);
-        let dense_compute_density = t.get("dense_compute_density")
-            .and_then(toml::Value::as_float)
+        let dense_compute_density = db
+            .field_float(&key, 1)
             .unwrap_or(DEFAULT_TARGET_SETTINGS.dense_compute_density);
-        let vector_min_width = t.get("vector_min_width")
-            .and_then(toml::Value::as_integer)
+        let vector_min_width = db
+            .field_int(&key, 2)
             .map(|v| v as usize)
             .unwrap_or(DEFAULT_TARGET_SETTINGS.vector_min_width);
         out.insert(
-            prefix.clone(),
+            prefix.to_string(),
             TargetSettings {
                 float_registers,
                 dense_compute_density,
@@ -214,6 +216,35 @@ mod tests {
         assert_eq!(s.dense_compute_density, 4.0);
         assert_eq!(s.vector_min_width, 4);
         assert!(known_target_triple("x86_64-unknown-linux-gnu"));
+    }
+
+    #[test]
+    fn parity_target_settings_dbvl_matches_toml() {
+        // Phase 3 migration gate (targets): config/targets.dbvl's `target.*`
+        // rows must produce exactly the per-prefix tuning the targets.toml
+        // `[target.<prefix>]` tables produce. The .toml is deleted only after
+        // this AND parity_targets_dbvl_matches_toml both stay green.
+        let db_map = load_target_settings();
+        let content = include_str!("../config/targets.toml");
+        let raw: toml::Value = toml::from_str(content).unwrap();
+        let toml_targets = raw.get("target").and_then(toml::Value::as_table).unwrap();
+
+        assert_eq!(db_map.len(), toml_targets.len(),
+            "target-prefix count diverges between .dbvl and .toml");
+        for (prefix, value) in toml_targets {
+            let t = value.as_table().unwrap();
+            let settings = db_map.get(prefix)
+                .unwrap_or_else(|| panic!("prefix '{}' missing from targets.dbvl", prefix));
+            assert_eq!(settings.float_registers as i64,
+                t.get("float_registers").and_then(toml::Value::as_integer).unwrap(),
+                "float_registers for '{}' diverges", prefix);
+            assert_eq!(settings.dense_compute_density,
+                t.get("dense_compute_density").and_then(toml::Value::as_float).unwrap(),
+                "dense_compute_density for '{}' diverges", prefix);
+            assert_eq!(settings.vector_min_width as i64,
+                t.get("vector_min_width").and_then(toml::Value::as_integer).unwrap(),
+                "vector_min_width for '{}' diverges", prefix);
+        }
     }
 
     #[test]

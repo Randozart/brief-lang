@@ -1,7 +1,7 @@
 # Plan: Data Brief as Universal Config + Board-Owned Hardware Map
 
 **Date:** 2026-08-03
-**Status:** Phase 2 (board-owned hardware map) DONE — 2026-08-03; Phase 3 next
+**Status:** Phase 3 in progress (module-registry, ir-lowering, protocols, encodings, targets migrated — `8b52f0ff` `a37923af` `4e07e82d` `7d426e22`; `alloc-strategies.toml` next, then .toml deletion)
 **Branch:** `feat/data-brief-config` (new)
 
 **This is the AUTHORITATIVE record** for two coupled streams that share one
@@ -247,18 +247,68 @@ as `String`). This locks the format **before** any loader dependency, so Phase
 For each, a DB schema + loader + parity test. The TOML files are deleted only
 after the DB path provably produces identical output.
 
-| Config | DB form | Quoted-value risk? |
-|---|---|---|
-| `address-map.toml` | `.dbvl` `KEY: addr;` | none (Phase 2) |
-| `targets.toml` | `.dbv` `[extension] → backend/plugins` | none |
-| `protocols.toml` | `.dbv` `#word → ABI` | none |
-| `module-registry.toml` | `.dbv` `name → path` | none |
-| `encodings.toml` | `.dbv` schemas | none |
-| `ir-lowering.toml` | `.dbv` tunables | none |
-| `alloc-strategies.toml` | `.dbv` with **quoted** LLVM IR templates | **yes** — templates carry `{}`, `;`, `:`. Solved by `parse_document_quoted`: store the template as `template: "call @llvm.memset..."`. Escape `"`/`\`. |
+| Config | DB form | Quoted-value risk? | Status |
+|---|---|---|---|
+| `address-map.toml` | `.dbvl` `KEY: addr;` | none (Phase 2) | ✅ deprecated alias in Phase 2 |
+| `targets.toml` | `.dbvl` `<.ext>: <backend>; <defaults>; <plugins>; [asm]; [samples];` + `target.<prefix>` rows | none | ✅ `targets.dbvl` |
+| `protocols.toml` | `.dbvl` `<triple>: { "#System": "<lib>"; };` quoted-map form | `#`-keys must be quoted | ✅ `protocols.dbvl` |
+| `module-registry.toml` | `.dbvl` `name → path` | none | ✅ `module-registry.dbvl` (8b52f0ff) |
+| `encodings.toml` | `.dbvl` `name: char_width; index_at; char_len;` | none | ✅ `encodings.dbvl` |
+| `ir-lowering.toml` | `.dbvl` tunables | none | ✅ `ir-lowering.dbvl` |
+| `alloc-strategies.toml` | `.dbvl` with **quoted** LLVM IR templates | **yes** — templates carry `{}`, `;`, `:`. Solved by `parse_document_quoted`: store the template as `template: "call @llvm.memset..."`. Escape `"`/`\`. | ⏳ Phase 3-last |
 
 `alloc-strategies` is Phase 3-*last* and gated behind the quoted-string test,
 so the five clean ones are not blocked by the IR one.
+
+#### Phase 3 progress (2026-08-03)
+
+- **`module-registry.toml` → `config/module-registry.dbvl`** (commit `8b52f0ff`):
+  flat `name: std/path.bv;` lines; `ConfigDb::string_map()` +
+  `config_db::load_string_registry()` (DB-preferred, `TomlRegistry` TOML
+  fallback, absent/unparseable → empty map); both consumers
+  (`import_resolver`, `ConfigResolver`) delegate to it; TOML still present as
+  parity fallback.
+- **`ir-lowering.toml` → `config/ir-lowering.dbvl`** (commit `a37923af`): flat
+  `key: value;` tunable lines; `config_tuning::load_ir_lowering()` reads via
+  `ConfigDb::from_str` (include_str!-baked, matching the old TOML bake).
+- **`protocols.toml` → `config/protocols.dbvl`** (commit `4e07e82d`):
+  `<triple>: { "#System": "<lib>"; };` quoted-map form (bare-mode `{ }` map
+  names must be quoted because `#` is not an identifier char). Surfaced the
+  `#`-comment hazard: `#` lines are consumed as bare tokens that silently
+  swallow the next keyed line, so `.dbvl` configs use `//` comments only
+  (locked by `only_double_slash_comments_are_skipped`).
+- **`encodings.toml` → `config/encodings.dbvl`** (commit `7d426e22`): flat
+  `encoding.UTF-8: <char_width>; <index_at>; <char_len>;` lines (key carries
+  the `encoding.` prefix matching the TOML table names); loader strips the
+  prefix; runtime read via CARGO_MANIFEST_DIR (not include_str!).
+- **`targets.toml` → `config/targets.dbvl`**: ONE file, two key families —
+  extension entries `<.ext>: <backend>; <defaults space-sep>; <plugins
+  space-sep>; [assembler]; [cross_verify_samples]; [target_triple];
+  [data_layout];` read by `TargetConfig::load()`/`load_from()` (path callers
+  now go through `resolve_config_file`), and `target.<prefix>` tuning rows read
+  by `config_tuning::load_target_settings()`. The TOML `[target.<prefix>]`
+  tables flatten to a single `target` key (nested table), not `target.*`, so
+  the parity filter excludes both.
+- **Parser fix surfaced by the parity test**: `try_parse_identifier` excluded
+  `-`, silently dropping hyphenated keys (`from-bits`). Now mirrors
+  `parse_identifier`'s charset; locked by
+  `standalone_entry_key_with_hyphen_round_trips`.
+- **`peek_has_named_fields` fix**: quoted-mode `{ }` blocks may open with a
+  quoted name (`"#System"`); this was mis-typed as bare mode and rejected the
+  whole protocols block.
+- **Migration gates**: `parity_module_registry_dbvl_matches_toml`,
+  `parity_ir_lowering_dbvl_matches_toml`, `parity_protocols_dbvl_matches_toml`,
+  `parity_encodings_dbvl_matches_toml`, `parity_targets_dbvl_matches_toml`
+  (target.rs), and `parity_target_settings_dbvl_matches_toml`
+  (config_tuning.rs) each assert the `.dbvl` output equals the `.toml` output
+  exactly; a `.toml` is deleted only after its gate stays green.
+- **`init_profile`** now seeds migrated configs as `.dbvl` (targets,
+  module-registry, ir-lowering, protocols, encodings) so created profiles load
+  through the DB path; the not-yet-migrated TOMLs (ctd-llvm-mappings,
+  llvm-ops, spirv-ops) are copied as-is.
+- **Remaining before the .toml files can be deleted**: `alloc-strategies.toml`
+  (quoted IR templates, Phase 3-last), then remove the migrated `.toml` files
+  and the TOML fallback branches in `load_string_registry`/`resolve_config_file`.
 
 ### Phase 4 — Documentation + `.ebv` runtime hand-off
 

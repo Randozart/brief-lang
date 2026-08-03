@@ -1077,7 +1077,7 @@ impl LlvmBackend {
 
     /// Set the LLVM data layout string (overrides the auto-derived layout).
     /// Also derives int_bits from the data layout's pointer width.
-    /// 2026-07-15: Phase 7 — config-driven from targets.toml.
+    /// 2026-07-15: Phase 7 — config-driven from targets.dbvl.
     /// 2026-07-29: Wire parse_pointer_width to auto-derive int_bits from data layout.
     pub fn with_data_layout(mut self, dl: &str) -> Self {
         self.ctx.data_layout = Some(dl.to_string());
@@ -1663,12 +1663,12 @@ impl LlvmBackend {
 
     pub fn generate(&mut self, items: &[TopLevel], exit_condition: Option<Box<Expr>>) -> String {
         // 2026-07-31: Phase 3 (§8.1) — warn once when the target triple's prefix
-        // is unknown to config/targets.toml, so the x86_64 tuning fallback is
+        // is unknown to config/targets.dbvl, so the x86_64 tuning fallback is
         // never applied silently to a foreign target.
         if !crate::config_tuning::known_target_triple(&self.ctx.target_triple) {
             self.warnings.push(format!(
                 "warning: target triple '{}' has no [target.<prefix>] entry in \
-                 config/targets.toml — using x86_64 tuning defaults",
+                 config/targets.dbvl — using x86_64 tuning defaults",
                 self.ctx.target_triple
             ));
         }
@@ -1684,7 +1684,7 @@ impl LlvmBackend {
             items,
             false,
             // 2026-07-31: Phase 3 (§8.1) — vector-phi promotion gate from
-            // config/targets.toml `vector_min_width` for this target.
+            // config/targets.dbvl `vector_min_width` for this target.
             crate::config_tuning::target_settings_for(&self.ctx.target_triple).vector_min_width,
         );
         self.ctx.dep_graph = analysis.dependency_graph.clone();

@@ -2,7 +2,7 @@
 // 2026-07-29: Compile-time assembly validation trait.
 // Each implementation validates asm text for a target architecture and
 // returns assembled bytes (for verification) or an error.
-// Config-driven: selected via `assembler` key in config/targets.toml.
+// Config-driven: selected via `assembler` key in config/targets.dbvl.
 // Supports three backends: Keystone (default on supported platforms),
 // platform assembler (system as/ml64), and stub (warn-only, no validation).
 
@@ -12,7 +12,7 @@ use std::fmt::Debug;
 ///
 /// Each implementation validates asm instruction text for a target
 /// architecture and returns the assembled bytes or an error.
-/// The selected implementation is determined by `config/targets.toml`'s
+/// The selected implementation is determined by `config/targets.dbvl`'s
 /// `assembler` key. The `:=` verification chain uses this to cross-verify
 /// asm bodies against reference implementations at compile time.
 ///
@@ -44,7 +44,7 @@ pub trait AsmAssembler: Debug {
 // ── Stub Implementation ─────────────────────────────────────────────
 
 /// 2026-07-29: No-op assembler — warns at compile time and passes through
-/// without validation. Selected via `assembler = "none"` in targets.toml.
+/// without validation. Selected via `assembler = "none"` in targets.dbvl.
 /// Safe fallback for platforms where Keystone or system assembler
 /// is not available. Cross-verification in the := chain still catches
 /// semantic errors even without byte-level validation.
@@ -56,7 +56,7 @@ impl AsmAssembler for StubAssembler {
 
     fn assemble(&self, text: &str, arch: &str) -> Result<Vec<u8>, String> {
         eprintln!("  warning: assembly not validated for {}: {}", arch, text);
-        eprintln!("  warning: set assembler = \"keystone\" or assembler = \"platform\" in config/targets.toml");
+        eprintln!("  warning: set assembler = \"keystone\" or assembler = \"platform\" in config/targets.dbvl");
         Ok(vec![])
     }
 

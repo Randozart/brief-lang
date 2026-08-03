@@ -1964,7 +1964,7 @@ impl LlvmBackend {
             // counter arithmetic inflated the count. Only txns with dense cross-field
             // FLOAT computation downgrade.
             // 2026-07-31: Phase 3 (§8.1) — the threshold comes from
-            // config/targets.toml `dense_compute_density` (default 4.0).
+            // config/targets.dbvl `dense_compute_density` (default 4.0).
             if local_txn_attr == "#11" {
                 if let Some(d) = self.ctx.density.get(name) {
                     let threshold = crate::config_tuning::target_settings_for(&self.ctx.target_triple)

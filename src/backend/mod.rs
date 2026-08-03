@@ -69,7 +69,7 @@ pub struct AnalysisResults {
 // swan-song hoists so the LLVM backend consumes structured analysis instead
 // of re-deriving dispatch decisions from body re-walks.
 // 2026-07-31: Phase 3 (§8.1) — `min_width` is the target-config vector-phi
-// promotion gate (config/targets.toml `vector_min_width`), threaded into
+// promotion gate (config/targets.dbvl `vector_min_width`), threaded into
 // loop-shape building.
 pub fn analyze_program(items: &[TopLevel], optimize: bool, min_width: usize) -> AnalysisResults {
     let transition_graph = crate::analysis::transition_graph::ReactorTransitionGraph::build(

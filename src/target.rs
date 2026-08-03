@@ -1,5 +1,5 @@
 // ── Target Config — Backend Selection ─────────────────────────────────
-// 2026-07-14: Reads config/targets.toml at compile time.
+// 2026-07-14: Reads config/targets.dbvl at compile time.
 // Maps file extension → (backend, default CLI flags).
 // --backend flag overrides the config.
 
@@ -16,7 +16,7 @@ pub enum BackendKind {
     Vm,
 }
 
-/// One entry from config/targets.toml.
+/// One entry from config/targets.dbvl.
 ///
 /// 2026-07-31: `backend`/`defaults` are optional so the `[target.<prefix>]`
 /// tuning tables (plan §8.1) coexist in the same file without failing the
@@ -52,7 +52,14 @@ pub struct TargetEntry {
 fn default_assembler() -> String { "none".to_string() }
 fn default_cross_verify_samples() -> u32 { 50 }
 
-/// Loaded config/targets.toml.
+/// Split a whitespace-separated list field into words (parser has no array
+/// grammar — space-separated values round-trip as one String field).
+/// 2026-08-03 (Phase 3, data-brief-config plan).
+fn split_words(s: &str) -> Vec<String> {
+    s.split_whitespace().map(|w| w.to_string()).collect()
+}
+
+/// Loaded config/targets.dbvl.
 #[derive(Debug, Clone, serde::Deserialize)]
 pub struct TargetConfig {
     #[serde(flatten)]
@@ -154,13 +161,65 @@ impl ProtocolConfig {
 
 impl TargetConfig {
     /// Load the compiled-in target config (fallback).
+    ///
+    /// 2026-08-03 (Phase 3, data-brief-config plan): reads config/targets.dbvl.
+    /// Extension entries are `<.ext>: <backend>; <defaults space-sep>;
+    /// <plugins space-sep>; [assembler]; [cross_verify_samples];
+    /// [target_triple]; [data_layout];` — the two overrides are optional and
+    /// never set in the shipped file, so they sit AFTER the common fields.
+    /// The `target.*` tuning rows are consumed by config_tuning, not here.
     pub fn load() -> Self {
-        let content = include_str!("../config/targets.toml");
-        toml::from_str(content).unwrap_or_else(|e| panic!("config/targets.toml parse error: {}", e))
+        let content = include_str!("../config/targets.dbvl");
+        let db = crate::dbrief::config_db::ConfigDb::from_str(content)
+            .unwrap_or_else(|e| panic!("config/targets.dbvl parse error: {}", e));
+        let mut entries = HashMap::new();
+        for key in db.keys() {
+            if key.starts_with("target.") {
+                continue; // tuning rows — config_tuning's table
+            }
+            let entry = TargetEntry {
+                backend: db.field_string(&key, 0).map(|s| s.to_string()),
+                defaults: db.field_string(&key, 1).map(split_words).unwrap_or_default(),
+                plugins: db.field_string(&key, 2).map(split_words),
+                assembler: db.field_string(&key, 3).map(|s| s.to_string()).unwrap_or_else(default_assembler),
+                cross_verify_samples: db.field_int(&key, 4).map(|v| v as u32)
+                    .unwrap_or_else(default_cross_verify_samples),
+                target_triple: db.field_string(&key, 5).map(|s| s.to_string()),
+                data_layout: db.field_string(&key, 6).map(|s| s.to_string()),
+            };
+            entries.insert(key, entry);
+        }
+        TargetConfig { entries }
     }
 
-    /// 2026-07-16: P1 — load from a concrete file path.
+    /// 2026-07-16: P1 — load from a concrete file path (TOML or .dbvl).
     pub fn load_from(path: &std::path::Path) -> Result<Self, String> {
+        let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("");
+        if ext == "dbvl" || ext == "dbv" {
+            let content = std::fs::read_to_string(path)
+                .map_err(|e| format!("cannot read '{}': {}", path.display(), e))?;
+            let db = crate::dbrief::config_db::ConfigDb::from_str(&content)
+                .map_err(|e| format!("parse error in '{}': {}", path.display(), e))?;
+            let mut entries = HashMap::new();
+            for key in db.keys() {
+                if key.starts_with("target.") {
+                    continue;
+                }
+                let entry = TargetEntry {
+                    backend: db.field_string(&key, 0).map(|s| s.to_string()),
+                    defaults: db.field_string(&key, 1).map(split_words).unwrap_or_default(),
+                    plugins: db.field_string(&key, 2).map(split_words),
+                    assembler: db.field_string(&key, 3).map(|s| s.to_string()).unwrap_or_else(default_assembler),
+                    cross_verify_samples: db.field_int(&key, 4).map(|v| v as u32)
+                        .unwrap_or_else(default_cross_verify_samples),
+                    target_triple: db.field_string(&key, 5).map(|s| s.to_string()),
+                    data_layout: db.field_string(&key, 6).map(|s| s.to_string()),
+                };
+                entries.insert(key, entry);
+            }
+            return Ok(TargetConfig { entries });
+        }
+        // Legacy TOML path (pre-migration profiles).
         let content = std::fs::read_to_string(path)
             .map_err(|e| format!("cannot read '{}': {}", path.display(), e))?;
         toml::from_str(&content)
@@ -269,6 +328,46 @@ mod tests {
         let config = ProtocolConfig::load();
         let result = config.resolve("nonexistent-target", "#System");
         assert!(result.is_err(), "unknown target should error");
+    }
+
+    #[test]
+    fn parity_targets_dbvl_matches_toml() {
+        // Phase 3 migration gate: config/targets.dbvl must produce exactly the
+        // extension→TargetEntry map the targets.toml it replaces produces. The
+        // `target.*` tuning rows are skipped here — they feed config_tuning,
+        // whose own parity test covers them. The .toml is deleted only after
+        // both stay green.
+        let db = TargetConfig::load();
+        let content = include_str!("../config/targets.toml");
+        let toml_entries: HashMap<String, TargetEntry> =
+            toml::from_str(content).unwrap();
+
+        let toml_exts: Vec<String> = toml_entries
+            .keys()
+            // The `[target.<prefix>]` tuning tables flatten to a single `target`
+            // key (nested table), not `target.*` — exclude it.
+            .filter(|k| !k.starts_with("target.") && *k != "target")
+            .cloned()
+            .collect();
+        assert!(!toml_exts.is_empty(), "targets.toml should have extension entries");
+
+        assert_eq!(db.entries.len(), toml_exts.len(),
+            "extension-entry count diverges between .dbvl and .toml");
+        for ext in &toml_exts {
+            let db_entry = db.entries.get(ext)
+                .unwrap_or_else(|| panic!("extension '{}' missing from targets.dbvl", ext));
+            let toml_entry = &toml_entries[ext];
+            assert_eq!(db_entry.backend, toml_entry.backend,
+                "backend for '{}' diverges", ext);
+            assert_eq!(db_entry.defaults, toml_entry.defaults,
+                "defaults for '{}' diverge", ext);
+            assert_eq!(db_entry.plugins, toml_entry.plugins,
+                "plugins for '{}' diverge", ext);
+            assert_eq!(db_entry.assembler, toml_entry.assembler,
+                "assembler for '{}' diverges", ext);
+            assert_eq!(db_entry.cross_verify_samples, toml_entry.cross_verify_samples,
+                "cross_verify_samples for '{}' diverges", ext);
+        }
     }
 
     #[test]

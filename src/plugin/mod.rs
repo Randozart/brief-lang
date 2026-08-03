@@ -13,7 +13,7 @@
 //
 // System plugins ship in plugins/{parsed,resolved,typed,...}/ directories.
 // User inline plugins are $(Stage) blocks parsed from source files.
-// Per-extension plugin selection via config/targets.toml [ext].plugins.
+// Per-extension plugin selection via config/targets.dbvl [ext].plugins.
 //
 // 2026-07-21: Old Collect$/MatchIR$/InsertLiteralImport$/InsertRegistryImport$
 // intrinsics removed. Replaced by direct AST navigation DSL (Tag$, Named$,
@@ -258,7 +258,7 @@ impl PluginManager {
     /// extension has no plugin list (None), uses the default set.
     ///
     /// 2026-07-15: Phase 2 — Per-extension plugin selection from
-    /// config/targets.toml [ext].plugins.
+    /// config/targets.dbvl [ext].plugins.
     pub fn filter_for_extension(&mut self, ext: &str, config: &TargetConfig) {
         let allowed = config.lookup(ext)
             .and_then(|entry| entry.plugins.as_ref())

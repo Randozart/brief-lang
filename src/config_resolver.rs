@@ -34,11 +34,16 @@ impl ConfigResolver {
         let target_config = if config_dir.to_string_lossy() == "__baked__" {
             TargetConfig::load()
         } else {
-            let path = config_dir.join("targets.toml");
-            TargetConfig::load_from(&path).unwrap_or_else(|e| {
-                eprintln!("warning: cannot load '{}': {} — using baked fallback", path.display(), e);
-                TargetConfig::load()
-            })
+            match crate::dbrief::config_db::resolve_config_file(&config_dir, "targets") {
+                Some(path) => TargetConfig::load_from(&path).unwrap_or_else(|e| {
+                    eprintln!("warning: cannot load '{}': {} — using baked fallback", path.display(), e);
+                    TargetConfig::load()
+                }),
+                None => {
+                    eprintln!("warning: no targets config found in '{}' — using baked fallback", config_dir.display());
+                    TargetConfig::load()
+                }
+            }
         };
 
         let module_registry = Self::load_module_registry(&config_dir);
@@ -212,7 +217,10 @@ pub fn init_profile(name: &str) -> Result<(), String> {
 
     let baked_dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("config");
     // 2026-07-17: Renamed llvm-primitives.toml to ctd-llvm-mappings.toml
-    for file in &["targets.toml", "ctd-llvm-mappings.toml", "llvm-ops.toml", "spirv-ops.toml"] {
+    // 2026-08-03 (Phase 3): the loaders prefer Data Brief (`.dbvl`/`.dbv`), so
+    // migrated configs are seeded as `.dbvl`; the not-yet-migrated TOML files
+    // (ctd-llvm-mappings/llvm-ops/spirv-ops) are copied as-is.
+    for file in &["targets.dbvl", "ctd-llvm-mappings.toml", "llvm-ops.toml", "spirv-ops.toml"] {
         let src = baked_dir.join(file);
         if src.exists() {
             let content = std::fs::read_to_string(&src)
@@ -224,15 +232,28 @@ pub fn init_profile(name: &str) -> Result<(), String> {
         }
     }
 
-    // Also copy module-registry.toml
-    let registry_src = baked_dir.join("module-registry.toml");
+    // Also copy module-registry (migrated to .dbvl)
+    let registry_src = baked_dir.join("module-registry.dbvl");
     if registry_src.exists() {
         let content = std::fs::read_to_string(&registry_src)
             .map_err(|e| format!("cannot read '{}': {}", registry_src.display(), e))?;
-        let dst = profile_dir.join("module-registry.toml");
+        let dst = profile_dir.join("module-registry.dbvl");
         std::fs::write(&dst, &content)
             .map_err(|e| format!("cannot write '{}': {}", dst.display(), e))?;
         println!("wrote {}", dst.display());
+    }
+
+    // Also copy ir-lowering, protocols, encodings (migrated to .dbvl)
+    for file in &["ir-lowering.dbvl", "protocols.dbvl", "encodings.dbvl"] {
+        let src = baked_dir.join(file);
+        if src.exists() {
+            let content = std::fs::read_to_string(&src)
+                .map_err(|e| format!("cannot read '{}': {}", src.display(), e))?;
+            let dst = profile_dir.join(file);
+            std::fs::write(&dst, &content)
+                .map_err(|e| format!("cannot write '{}': {}", dst.display(), e))?;
+            println!("wrote {}", dst.display());
+        }
     }
 
     // Set as active

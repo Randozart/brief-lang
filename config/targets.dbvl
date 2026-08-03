@@ -1,0 +1,42 @@
+// Extension → backend routing.
+// Baked into the binary via include_str!.
+// --backend CLI flag overrides.
+// plugins: list of system plugin names to enable for this extension.
+//          Defaults to ["prelude"] if not specified.
+//
+// 2026-08-03 (Phase 3, data-brief-config plan): migrated from targets.toml.
+// Two key families in one flat .dbvl file:
+//   - extension entries `<.ext>: <backend>; <defaults space-sep>; <plugins
+//     space-sep>; <assembler>; <cross_verify_samples>;` — read by
+//     TargetConfig::load. Optional trailing fields absent → defaults.
+//   - tuning rows `target.<prefix>: <float_registers>; <dense_compute_density>;
+//     <vector_min_width>;` — read by config_tuning::load_target_settings.
+// The .toml remains until both parity tests prove identical output.
+
+.bv: llvm; --budget 256; prelude env print entry script; none; 50;
+.ebv: llvm; --optimize-size --budget 0; prelude;
+.cbv: circt; ; prelude-hw;
+.rbv: webstack; --target wasm; prelude;
+.abv: spirv; --gpu-offload; prelude;
+
+// ── Per-target tuning (plan §8.1, frontend-driven-dispatch) ──────────
+// Looked up by matching the compiler's target_triple PREFIX. Absent prefix →
+// x86_64 defaults (below) + a compiler warning, so silent x86 assumptions never
+// apply to unknown targets. Loaded by src/config_tuning.rs (TargetSettings).
+//
+//   float_registers      — register-pressure budget for vector-phi promotion
+//                          (wasm = u32::MAX ≈ unlimited; the old code used
+//                          usize::MAX, but TOML ints are i64 so u32::MAX keeps
+//                          the "never fire" semantics).
+//   dense_compute_density — cross-float-ops-per-field threshold for the
+//                          #11 → #0 memory-attribute downgrade.
+//   vector_min_width      — minimum isomorphic-group width for vector-phi
+//                          promotion (below this the scalar-phi +
+//                          extract/insert overhead exceeds the gain).
+
+target.x86_64: 16; 4.0; 4;
+target.aarch64: 32; 4.0; 4;
+target.arm64: 32; 4.0; 4;
+target.wasm32: 4294967295; 4.0; 4;
+target.wasm64: 4294967295; 4.0; 4;
+target.spirv64: 32; 4.0; 4;

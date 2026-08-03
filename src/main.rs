@@ -660,11 +660,16 @@ fn run_accept(args: &[String]) -> Result<(), String> {
 fn load_target_config(config_dir: Option<&str>) -> TargetConfig {
     match config_dir {
         Some(dir) => {
-            let path = std::path::Path::new(dir).join("targets.toml");
-            TargetConfig::load_from(&path).unwrap_or_else(|e| {
-                eprintln!("warning: cannot load '{}': {} — using baked fallback", path.display(), e);
-                TargetConfig::load()
-            })
+            match brief_compiler::dbrief::config_db::resolve_config_file(std::path::Path::new(dir), "targets") {
+                Some(path) => TargetConfig::load_from(&path).unwrap_or_else(|e| {
+                    eprintln!("warning: cannot load '{}': {} — using baked fallback", path.display(), e);
+                    TargetConfig::load()
+                }),
+                None => {
+                    eprintln!("warning: no targets config found in '{}' — using baked fallback", dir);
+                    TargetConfig::load()
+                }
+            }
         }
         None => TargetConfig::load(),
     }

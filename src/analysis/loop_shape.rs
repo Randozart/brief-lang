@@ -101,7 +101,7 @@ pub struct ProgramConvergence {
 /// emitted through the plain function path, not the loop dispatch.
 ///
 /// 2026-07-31: Phase 3 (§8.1) — `min_width` (vector-phi promotion gate) is
-/// config-driven: config/targets.toml `vector_min_width` for the target triple.
+/// config-driven: config/targets.dbvl `vector_min_width` for the target triple.
 pub fn build_loop_shapes(
     graph: &ReactorTransitionGraph,
     items: &[TopLevel],

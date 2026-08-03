@@ -142,6 +142,14 @@ impl ConfigDb {
         }
     }
 
+    /// Float field.
+    pub fn field_float(&self, key: &str, idx: usize) -> Option<f64> {
+        match self.field(key, idx) {
+            Some(DataValue::Float(f)) => Some(*f),
+            _ => None,
+        }
+    }
+
     /// All keyed entries as a `key → first-string-field` map.
     ///
     /// 2026-08-03 (Phase 3): the shape registry-style configs
@@ -345,9 +353,9 @@ TIMER: 0xFE002000; 0x4;\n";
     fn resolve_config_file_prefers_db_over_toml() {
         // Real baked config dir: prefers .dbvl/.dbv, falls back to .toml.
         let baked = Path::new("__baked__");
-        // targets.toml still exists today — resolves to TOML until migrated.
+        // targets migrated to .dbvl (Phase 3) — resolves to .dbvl.
         let t = resolve_config_file(baked, "targets").unwrap();
-        assert_eq!(t.extension().unwrap().to_str(), Some("toml"));
+        assert_eq!(t.extension().unwrap().to_str(), Some("dbvl"));
 
         // A name with no file anywhere resolves to None.
         assert!(resolve_config_file(baked, "no-such-config").is_none());

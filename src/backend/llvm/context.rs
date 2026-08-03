@@ -220,7 +220,7 @@ impl CompilerContext {
     /// See docs/plans/2026-07-29-phi-register-pressure-capping.md.
     pub fn float_register_count(&self) -> usize {
         // 2026-07-31: Phase 3 (§8.1) — the register budget comes from
-        // config/targets.toml `[target.<triple-prefix>]`, replacing the
+        // config/targets.dbvl `[target.<triple-prefix>]`, replacing the
         // hardcoded triple-prefix match. Unknown targets fall back to the
         // x86_64 default and generate() warns (no silent x86 assumptions).
         crate::config_tuning::target_settings_for(&self.target_triple).float_registers
