@@ -61,6 +61,9 @@ pub struct GlueTarget {
     /// `{name}` / `{type}` placeholders; default `{name}: {type}`.
     /// C-family targets use `{type} {name}`.
     pub param_decl: String,
+    /// 2026-08-03: Declaration format for function-pointer (callback) params.
+    /// `{ret}` / `{name}` / `{params}` placeholders. C: `{ret} (*{name})({params})`.
+    pub fn_param_decl: String,
 }
 
 /// How the state handle crosses the boundary for one language.
@@ -240,6 +243,7 @@ fn glue_target_from_entry(
         _ => StateAbi::default(),
     };
     let param_decl = str_field("param_decl").unwrap_or_else(|| "{name}: {type}".to_string());
+    let fn_param_decl = str_field("fn_param_decl").unwrap_or_else(|| "{name}: {type}".to_string());
     Some(GlueTarget {
         language: key.to_string(),
         types_module: PathBuf::from(types_module),
@@ -252,6 +256,7 @@ fn glue_target_from_entry(
         conversions,
         state,
         param_decl,
+        fn_param_decl,
     })
 }
 
@@ -312,6 +317,7 @@ mod tests {
             conversions: Conversions::default(),
             state: crate::glue::config::StateAbi::default(),
             param_decl: "{name}: {type}".to_string(),
+            fn_param_decl: "{name}: {type}".to_string(),
         });
         targets.insert("rust".to_string(), GlueTarget {
             language: "rust".to_string(),
@@ -325,6 +331,7 @@ mod tests {
             conversions: Conversions::default(),
             state: crate::glue::config::StateAbi::default(),
             param_decl: "{name}: {type}".to_string(),
+            fn_param_decl: "{name}: {type}".to_string(),
         });
 
         // Should work with or without leading dot
@@ -347,6 +354,7 @@ mod tests {
             conversions: Conversions::default(),
             state: crate::glue::config::StateAbi::default(),
             param_decl: "{name}: {type}".to_string(),
+            fn_param_decl: "{name}: {type}".to_string(),
         });
 
         // Should work with or without leading dot
@@ -369,6 +377,7 @@ mod tests {
             conversions: Conversions::default(),
             state: crate::glue::config::StateAbi::default(),
             param_decl: "{name}: {type}".to_string(),
+            fn_param_decl: "{name}: {type}".to_string(),
         });
 
         // Should work with or without leading dot

@@ -209,6 +209,12 @@ fn extract_melds(items: &[TopLevel]) -> Vec<MeldDecl> {
 fn format_type(ty: &crate::ast::Type) -> String {
     match ty {
         crate::ast::Type::Custom(name) => name.clone(),
+        // 2026-08-03: fn(P1,P2)->R — stable text form consumed by
+        // resolve_protocol to build the per-language function-pointer ABI.
+        crate::ast::Type::Function(params, ret) => {
+            let ps: Vec<String> = params.iter().map(format_type).collect();
+            format!("fn({})->{}", ps.join(","), format_type(ret))
+        }
         _ => format!("{:?}", ty),
     }
 }
@@ -303,8 +309,17 @@ fn export_template_vars(export: &ExportDecl, target: &GlueTarget) -> HashMap<Str
         .collect();
     let ffi_params: Vec<String> = export.params.iter()
         .map(|(name, ty)| {
+            // 2026-08-03: function-pointer (callback) params use the target's
+            // fn_param_decl (C embeds the name: `int64_t (*cb)(int64_t)`).
+            if ty.starts_with("fn(") {
+                let (ret, params) = fn_pointer_parts(ty, &target.protocols);
+                return target.fn_param_decl
+                    .replace("{ret}", &ret)
+                    .replace("{name}", name)
+                    .replace("{params}", &params);
+            }
             let (_, c_abi) = resolve_protocol(ty, &target.protocols);
-            // 2026-08-03: Config-driven param decl format (C uses `type name`,
+            // Config-driven param decl format (C uses `type name`,
             // python/rust use `name: type`).
             target.param_decl.replace("{name}", name).replace("{type}", &c_abi)
         })
@@ -659,6 +674,13 @@ fn resolve_protocol(
     brief_type_name: &str,
     protocols: &HashMap<String, crate::glue::config::ProtocolEntry>,
 ) -> (String, String) {
+    // 2026-08-03: fn(P)->R — a function pointer IS the ABI. Both the native
+    // and C forms are the C function-pointer type built from the inner
+    // protocols (e.g. `fn(Int)->Int` → `i64 (*)(i64)`).
+    if brief_type_name.starts_with("fn(") {
+        let abi = fn_pointer_abi(brief_type_name, protocols);
+        return (abi.clone(), abi);
+    }
     let protocol_key = format!("#{}", brief_type_name);
     if let Some(entry) = protocols.get(&protocol_key) {
         let abi = entry.c_abi.clone()
@@ -668,6 +690,37 @@ fn resolve_protocol(
     } else {
         (brief_type_name.to_string(), brief_type_name.to_string())
     }
+}
+
+/// Decompose a `fn(P1,P2)->R` text form into `(ret_c, params_c)` using each
+/// inner type's c_abi mapping. `fn(Int)->Int` → `("i64", "i64")`.
+fn fn_pointer_parts(
+    fn_str: &str,
+    protocols: &HashMap<String, crate::glue::config::ProtocolEntry>,
+) -> (String, String) {
+    let inner = fn_str.strip_prefix("fn(").unwrap_or(fn_str);
+    let (params_part, ret) = inner.split_once("->").unwrap_or((inner, ""));
+    let params_part = params_part.trim_end_matches(')');
+    let params: Vec<String> = params_part.split(',')
+        .filter(|p| !p.trim().is_empty())
+        .map(|p| resolve_protocol(p.trim(), protocols).1)
+        .collect();
+    let ret_c = if ret.trim().is_empty() {
+        "void".to_string()
+    } else {
+        resolve_protocol(ret.trim(), protocols).1
+    };
+    (ret_c, params.join(", "))
+}
+
+/// Build the C function-pointer type for a `fn(P1,P2)->R` text form using
+/// each inner type's c_abi mapping. `fn(Int)->Int` → `i64 (*)(i64)`.
+fn fn_pointer_abi(
+    fn_str: &str,
+    protocols: &HashMap<String, crate::glue::config::ProtocolEntry>,
+) -> String {
+    let (ret, params) = fn_pointer_parts(fn_str, protocols);
+    format!("{} (*)({})", ret, params)
 }
 
 

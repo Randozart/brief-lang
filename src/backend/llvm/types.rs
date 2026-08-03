@@ -20,8 +20,12 @@ pub fn lower_type(ty: &Type, universe: Option<&crate::type_universe::TypeUnivers
             format!("{{ {} }}", inner.join(", "))
         }
         Type::Function(params, ret) => {
-            let param_strs: Vec<String> = params.iter().map(|t| lower_type(t, universe)).collect();
-            format!("{} ({})", lower_type(ret, universe), param_strs.join(", "))
+            // 2026-08-03: a function VALUE (callback param / CallPtr#
+            // operand) is a pointer to the function — `ptr` under opaque
+            // pointers. The bare `ret (params)` form is only valid in a
+            // function DECLARATION, never as a parameter/operand type.
+            let _ = (params, ret);
+            "ptr".into()
         }
         _ => "i64".into(),
     }

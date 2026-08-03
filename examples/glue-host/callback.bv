@@ -1,0 +1,3 @@
+export defn apply(cb: fn(Int) -> Int, x: Int) -> Int {
+    term CallPtr#(cb, x);
+};

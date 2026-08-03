@@ -135,6 +135,19 @@ pub fn get_intrinsic_signature(name: &str) -> Option<Signature> {
             variadic: false,
         }),
 
+        // ── Callbacks ────────────────────────────────────────────────
+        // 2026-08-03: call a function-pointer value: CallPtr#(cb, args...).
+        // `cb` is a fn(...) value (opaque pointer across the FFI boundary).
+        // Fully variadic — the typechecker infers the return from cb's fn
+        // type (see ReturnKind::Inferred special-case).
+        "CallPtr#" => Some(Signature {
+            name: "CallPtr#",
+            parameters: vec![],
+            return_kind: ReturnKind::Inferred,
+            observable: false,
+            variadic: true,
+        }),
+
         // ── OS SysCall (observable, variadic) ──────────────────────────
         // 2026-07-15: Returns native Int (result or errno).
         // 2026-07-26: variadic — first arg is syscall number, up to 6 more args.

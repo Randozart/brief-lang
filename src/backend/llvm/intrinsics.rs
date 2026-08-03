@@ -42,6 +42,8 @@ pub fn emit_intrinsic_call(
 
         "GetEnv#" => return emit_get_env(backend, out, v, args, indent),
         "GetEnvInt#" => return emit_get_env_int(backend, out, v, args, indent),
+        // 2026-08-03: call a function-pointer value (host callback).
+        "CallPtr#" => return emit_call_ptr(backend, out, v, args, indent),
         "GetGlobalId#" => return emit_get_global_id(backend, out, v, args, indent),
         "GetGlobalSize#" => return emit_external_call(backend, out, v, name, args, indent),
         "GetLocalId#" => return emit_external_call(backend, out, v, name, args, indent),
@@ -672,6 +674,64 @@ fn emit_address_of(
     let addr_str = addr.to_string();
     backend.emit_inttoptr(out, indent, &v, &addr_str);
     BTypedRegister { name: v.to_string(), ty: Type::ptr(Type::bits(8)) }
+}
+
+/// `CallPtr#(cb, args...)` — call a function-pointer value.
+///
+/// 2026-08-03: `cb` is a `fn(...)` value (an opaque `ptr` under LLVM opaque
+/// pointers) that crossed the FFI boundary as a callback. Emits
+/// `call <ret> ptr %cb(args...)`. The return type is taken from the fn type
+/// (default i64); args are passed as their native LLVM types.
+fn emit_call_ptr(
+    backend: &mut LlvmBackend, out: &mut String, v: &str,
+    args: &[Expr], indent: &str,
+) -> BTypedRegister {
+    let Some(cb_expr) = args.first() else {
+        writeln!(out, "{}{} = add i64 0, 0", indent, v).ok();
+        return BTypedRegister { name: v.to_string(), ty: Type::int() };
+    };
+    let cb_reg = emit_arg(backend, out, cb_expr, indent);
+
+    // Resolve the fn's return type from the callback's declared type.
+    let (ret_ll, ret_brief) = match cb_expr {
+        Expr::Identifier(name) => match backend.fun.let_binding_types.get(name) {
+            Some(Type::Function(_, ret)) => {
+                let ll = backend.llvm_type(ret);
+                let brief = match ll.as_str() {
+                    "float" | "double" => Type::float(),
+                    "ptr" => Type::string(),
+                    "void" => Type::void(),
+                    _ => Type::int(),
+                };
+                (ll, brief)
+            }
+            _ => ("i64".to_string(), Type::int()),
+        },
+        _ => ("i64".to_string(), Type::int()),
+    };
+
+    let mut call_args: Vec<String> = Vec::new();
+    for a in &args[1..] {
+        let reg = emit_arg(backend, out, a, indent);
+        // Int args cross as i64; String as ptr. Resolve identifier types via
+        // the binding map, defaulting to i64.
+        let ll = match a {
+            Expr::Identifier(name) => backend.fun.let_binding_types.get(name)
+                .map(|t| backend.llvm_type(t))
+                .unwrap_or_else(|| "i64".to_string()),
+            _ => "i64".to_string(),
+        };
+        call_args.push(format!("{} {}", ll, reg));
+    }
+    // The callback param was ptrtoint'd to i64 at function entry; cast back
+    // to a pointer so the `call` operand type matches.
+    let cb_ptr = backend.fun.gen_reg();
+    writeln!(out, "{}{} = inttoptr i64 {} to ptr", indent, cb_ptr, cb_reg).ok();
+    writeln!(
+        out, "{}{} = call {} {}({})",
+        indent, v, ret_ll, cb_ptr, call_args.join(", ")
+    ).ok();
+    BTypedRegister { name: v.to_string(), ty: ret_brief }
 }
 
 // ─── Len# / Length# — load list length from 2-slot header ──────────────

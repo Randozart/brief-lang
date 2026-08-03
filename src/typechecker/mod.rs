@@ -900,6 +900,14 @@ fn infer_intrinsic_call(
         ReturnKind::Native("Bool") => Type::bool_(),
         ReturnKind::Inferred => {
             // Infer from first argument's type
+            // 2026-08-03: CallPtr#(cb, args...) returns the cb's fn RETURN
+            // type (e.g. fn(Int) -> Int → Int), not the fn value itself.
+            if sig.name == "CallPtr#" {
+                if let Some(Ok(Type::Function(_, ret))) = args.first().map(|a| infer_type_only(a, ctx)) {
+                    return Ok(*ret);
+                }
+                return Ok(Type::int());
+            }
             args.first()
                 .map(|a| infer_type_only(a, ctx))
                 .unwrap_or(Ok(Type::int()))?

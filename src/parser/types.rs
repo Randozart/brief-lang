@@ -27,6 +27,10 @@ impl<'a> Parser<'a> {
                     "Void" => return Ok(Type::void()),
                     "Char" => ("Char", Type::char_()),
                     "Data" => ("Data", Type::data()),
+                    // 2026-08-03: callback/function-pointer type annotation:
+                    //   fn(Int) -> Int  /  fn(Int)  (void return)
+                    // Crosses an FFI boundary as an opaque function pointer.
+                    "fn" => return self.parse_fn_type(),
                     _ if name.starts_with('#') => {
                         // 2026-07-20: Hashword category: #Int, #Float, #String, etc.
                         // Optional protocol variant: #String<UTF8>, #Float<IEEE754>
@@ -234,6 +238,29 @@ impl<'a> Parser<'a> {
         Ok(Type::Custom(name.to_string()))
     }
 
+    /// Parse a function/callback type: `fn(Int) -> Int` (or `fn(Int)` → void).
+    /// 2026-08-03: crosses an FFI boundary as an opaque function pointer.
+    fn parse_fn_type(&mut self) -> Result<Type, SyntaxError> {
+        self.expect(Token::LParen)?;
+        let mut params = Vec::new();
+        if !self.check(&Token::RParen) {
+            loop {
+                params.push(self.parse_type()?);
+                if !self.eat(&Token::Comma) {
+                    break;
+                }
+            }
+        }
+        self.expect(Token::RParen)?;
+        let ret = if self.check(&Token::Arrow) {
+            self.pos += 1;
+            Box::new(self.parse_type()?)
+        } else {
+            Box::new(Type::void())
+        };
+        Ok(Type::Function(params, ret))
+    }
+
     /// Parse a tuple type: (Int, String)
     fn parse_tuple_type(&mut self) -> Result<Type, SyntaxError> {
         self.pos += 1; // consume LParen
@@ -293,5 +320,38 @@ impl<'a> Parser<'a> {
         } else {
             Ok(Vec::new())
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::lexer::Token;
+    use logos::Logos;
+
+    fn parse_type_str(src: &str) -> Type {
+        let tokens: Vec<(Token, std::ops::Range<usize>)> = Token::lexer(src)
+            .map(|r| (r.unwrap(), 0..0))
+            .collect();
+        let mut p = Parser::new(tokens, src);
+        p.parse_type().expect("type should parse")
+    }
+
+    #[test]
+    fn fn_type_annotation() {
+        let t = parse_type_str("fn(Int) -> Int");
+        assert!(matches!(t, Type::Function(params, ret) if params.len() == 1 && matches!(params[0], Type::Custom(ref n) if n == "Int") && matches!(*ret, Type::Custom(ref n) if n == "Int")));
+    }
+
+    #[test]
+    fn fn_type_void_return_defaults() {
+        let t = parse_type_str("fn(Int)");
+        assert!(matches!(t, Type::Function(params, ret) if params.len() == 1 && matches!(*ret, Type::Void)));
+    }
+
+    #[test]
+    fn fn_type_multi_param() {
+        let t = parse_type_str("fn(Int, Float) -> Bool");
+        assert!(matches!(t, Type::Function(params, ret) if params.len() == 2 && matches!(*ret, Type::Custom(ref n) if n == "Bool")));
     }
 }

@@ -29,6 +29,7 @@ fn sample_glue_targets() -> HashMap<String, GlueTarget> {
             conversions: brief_compiler::glue::config::Conversions::default(),
             state: brief_compiler::glue::config::StateAbi::default(),
             param_decl: "{name}: {type}".to_string(),
+            fn_param_decl: "{name}: {type}".to_string(),
             },
         ),
         (
@@ -45,6 +46,7 @@ fn sample_glue_targets() -> HashMap<String, GlueTarget> {
             conversions: brief_compiler::glue::config::Conversions::default(),
             state: brief_compiler::glue::config::StateAbi::default(),
             param_decl: "{name}: {type}".to_string(),
+            fn_param_decl: "{name}: {type}".to_string(),
             },
         ),
     ])

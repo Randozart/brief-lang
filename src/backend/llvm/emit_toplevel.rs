@@ -277,6 +277,11 @@ impl LlvmBackend {
         if matches!(ty, Type::Ptr(_)) {
             return "ptr".to_string();
         }
+        // 2026-08-03: a fn value (callback param / CallPtr# operand) is a
+        // function pointer — `ptr` under opaque pointers.
+        if matches!(ty, Type::Function(_, _)) {
+            return "ptr".to_string();
+        }
         // 2026-07-30: Slice<T> always uses { ptr, i64 } (fat pointer). Must be
         // checked BEFORE the general struct_types check because Slice is also
         // registered as a struct type but should be passed by value.
