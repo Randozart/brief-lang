@@ -2050,4 +2050,127 @@ as Item {
         let doc = parse_document(input).unwrap();
         assert_eq!(doc.data_groups[0].entries.len(), 2);
     }
+
+    // ---- Board hardware map format tests (2026-08-03) ----
+    //
+    // Golden proof of the board-owned hardware map grammar (see
+    // docs/plans/2026-08-03-data-brief-config-and-board-hardware-map.md §5.1).
+    // Verified by probing the parser: nested { } register blocks do NOT parse;
+    // flat .dbvl line-tables and flat .dbv keyed entries DO. Hex literals parse
+    // as String, not Int.
+    //
+    // TEMP: 2026-08-03: when nested sub-record support lands in the parser,
+    // revisit whether the board format can express register nesting.
+
+    #[test]
+    fn board_map_schemas_only() {
+        // map.dbv is schema-only: Device and Register shapes for the .dbvl tables.
+        let map = r#"
+schema Device {
+    base_addr: String;
+    size: Int;
+};
+
+schema Register {
+    name: String;
+    offset: Int;
+    size: Int;
+    access: String;
+};
+"#;
+        let doc = parse_document(map).unwrap();
+        assert_eq!(doc.schemas.len(), 2);
+        assert_eq!(doc.schemas[0].name, "Device");
+        assert_eq!(doc.schemas[0].fields.len(), 2);
+        assert_eq!(doc.schemas[0].fields[0].name, "base_addr");
+        assert_eq!(doc.schemas[1].name, "Register");
+        assert_eq!(doc.schemas[1].fields.len(), 4);
+        assert_eq!(doc.schemas[1].fields[0].name, "name");
+        // No data in map.dbv — pure schema carrier.
+        assert!(doc.data_groups.is_empty());
+    }
+
+    #[test]
+    fn board_addresses_dbvl_keyed_lines() {
+        // addresses.dbvl: >schema directive + flat CAPITALIZED key → addr; size; lines.
+        // Hex addresses parse as String (probe-verified); size as Int. Each
+        // standalone line parses as its own DataGroup holding one entry.
+        let dbvl = ">schema Device from \"map.dbv\"\nUART0: 0xFFE01000; 0x18;\nUART1: 0x40004400; 0x18;\nTIMER: 0xFE002000; 0x4;\n";
+        let doc = parse_document(dbvl).unwrap();
+
+        // 3 data lines → 3 groups, one entry each.
+        let groups: Vec<&DataEntry> = doc
+            .data_groups
+            .iter()
+            .map(|g| &g.entries[0])
+            .collect();
+        assert_eq!(groups.len(), 3);
+
+        // >schema Name from "path" tags groups with the file stem ("map") —
+        // the resolver keys on the entry key, not the schema tag.
+        assert_eq!(groups[0].key.as_deref(), Some("UART0"));
+        assert_eq!(
+            groups[0].fields,
+            vec![
+                DataField::Positional(DataValue::String("0xFFE01000".to_string())),
+                DataField::Positional(DataValue::String("0x18".to_string())),
+            ]
+        );
+
+        assert_eq!(groups[1].key.as_deref(), Some("UART1"));
+        assert_eq!(groups[2].key.as_deref(), Some("TIMER"));
+        assert_eq!(
+            groups[2].fields[0],
+            DataField::Positional(DataValue::String("0xFE002000".to_string()))
+        );
+        assert_eq!(
+            groups[2].fields[1],
+            DataField::Positional(DataValue::String("0x4".to_string()))
+        );
+    }
+
+    #[test]
+    fn board_registers_dbvl_keyed_lines() {
+        // registers.dbvl: flat keyed lines, one register per entry.
+        let dbvl = ">schema Register from \"map.dbv\"\nUART0_DR: 0x00; 9; rw;\nUART0_SR: 0x01; 9; ro;\n";
+        let doc = parse_document(dbvl).unwrap();
+
+        let entries: Vec<&DataEntry> = doc
+            .data_groups
+            .iter()
+            .map(|g| &g.entries[0])
+            .collect();
+        assert_eq!(entries.len(), 2);
+
+        let dr = entries[0];
+        assert_eq!(dr.key.as_deref(), Some("UART0_DR"));
+        assert_eq!(
+            dr.fields,
+            vec![
+                DataField::Positional(DataValue::String("0x00".to_string())),
+                DataField::Positional(DataValue::Int(9)),
+                DataField::Positional(DataValue::String("rw".to_string())),
+            ]
+        );
+
+        let sr = entries[1];
+        assert_eq!(sr.key.as_deref(), Some("UART0_SR"));
+        assert_eq!(
+            sr.fields[2],
+            DataField::Positional(DataValue::String("ro".to_string()))
+        );
+    }
+
+    #[test]
+    fn board_nested_blocks_rejected() {
+        // Regression guard: the nested { > offset; size; ... } form must keep
+        // failing to parse (it does not parse today). Locks the flat format in.
+        let nested = r#"
+schema Device { base: Int; registers: Register[]; };
+as Device {
+    uart1: 0x40011000; { > 0; 9; rw; > 0x0C; 13; rw; };
+};
+"#;
+        assert!(parse_document(nested).is_err());
+    }
 }
