@@ -175,15 +175,23 @@ The C-ABI boundary module exists (`lib/glue/c.bv`): `proto C_String` with
   generalized from `std/`-only to any `lib/` module.
 - Demo `examples/glue-host/boundary.bv` (echo: CStr→ptr, identity: CDouble→double).
 
-**Marshalling follow-up (cast-path):** `name as String` for a CStr param still
-emits `int_to_str` — Brief's boxing turns String/CStr values into `i64`
-registers (losing the type at codegen), so `emit_cast_path` sees `Int` and
-finds the Int→String lane. The `+`-concat solved the same boxing by rewriting
-the typed AST BEFORE codegen (`string_concat.rs`); boundary casts need the
-same treatment — a `rewrite_boundary_marshalling` pass that turns a
-`CStr → String`/`String → CStr` cast into the graph-resolved binding call
-(`cstr_to_brief`/`str_to_c`), preserving the protocol-driven decision in the
-frontend.
+**Marshalling: DONE.** `name as String` for a CStr param emits `cstr_to_brief`
+(and `s as CStr` emits `str_to_c`) — the graph-resolved binding calls. Brief's
+boxing turns CStr values into i64 registers, so the decision is made on the
+typed AST BEFORE codegen: `src/analysis/boundary_marshalling.rs` builds the
+casting graph from the program's protos + a type→protocol map, and rewrites a
+same-category representation cast into `find_path`'s binding call. (The import
+resolver also had to stop dropping `ProtocolDef`s — they fell to the `_ =>
+None` filter arm — so library boundary modules register their variant edges.)
+
+**P3 (export ABI naming): DONE.** `resolve_protocol` takes a type→protocol map
+so boundary types resolve to their category's ABI names in the generated
+header/wrapper: `CStr` → `int64_t`, `CDouble` → `double`.
+
+Verified end-to-end via a C driver: `echo(CStr)` pass-through (ptr ABI),
+`greet` marshals a C string through `brief_cstr_to_brief`/`brief_str_to_c`,
+and `identity(CDouble)` returns `3.14` as `double` — the Float ABI bug
+(BUGS.md) is fixed by declaring the boundary type.
 
 ## Phase 2 — `lib/glue/c.bv` (the C-ABI boundary module)
 
