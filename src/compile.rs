@@ -151,7 +151,7 @@ pub struct BuildOptions {
     /// 2026-07-18: SVO (Small Vector Optimization) — inline storage for
     /// small List<T> elements (≤ N where N is from svo <~ N metadata).
     pub feature_svo: bool,
-    /// 2026-07-22: Override path for lib/glue.toml. None = use compiler-shipped default.
+    /// 2026-07-22: Override path for the GLUE config (config/glue.dbvl). None = use compiler-shipped default.
     pub glue_config: Option<String>,
     /// 2026-07-18: Maximum size in bytes for stack allocation (alloca).
     /// Allocations exceeding this threshold fall back to heap (malloc).

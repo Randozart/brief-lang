@@ -22,6 +22,7 @@ fn sample_glue_targets() -> HashMap<String, GlueTarget> {
             module_init: false,
             protocols: HashMap::new(),
             templates: HashMap::new(),
+            conversions: brief_compiler::glue::config::Conversions::default(),
         },
     )])
 }

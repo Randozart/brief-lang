@@ -1,7 +1,7 @@
 // GLUE Integration Tests
 //
 // 2026-07-22: Tests the GLUE pipeline using the TOML-based registry
-// (lib/glue.toml). These run as `cargo test --test glue_test` (separate
+// (config/glue.dbvl). These run as `cargo test --test glue_test` (separate
 // binary from lib tests). Only uses `pub` items from the library crate.
 
 use brief_compiler::glue::config::find_language_by_extension;
@@ -16,21 +16,21 @@ use std::path::Path;
 // ============ TOML Registry ============
 
 #[test]
-fn test_glue_toml_parses() {
-    let config = load_glue_config(None).expect("lib/glue.toml should load");
+fn test_glue_dbvl_parses() {
+    let config = load_glue_config(None).expect("config/glue.dbvl should load");
     assert!(
         config.contains_key("python"),
-        "glue.toml should have python entry"
+        "config/glue.dbvl should have python entry"
     );
     assert!(
         config.contains_key("rust"),
-        "glue.toml should have rust entry"
+        "config/glue.dbvl should have rust entry"
     );
 }
 
 #[test]
-fn test_glue_toml_custom_path() {
-    let config = load_glue_config(Some(Path::new("lib/glue.toml")))
+fn test_glue_dbvl_custom_path() {
+    let config = load_glue_config(Some(Path::new("config/glue.dbvl")))
         .expect("custom path should load");
     assert!(config.contains_key("python"));
 }

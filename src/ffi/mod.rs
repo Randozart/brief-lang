@@ -23,7 +23,7 @@
 //! Metropolitan FFI
 //!
 //! Two mechanisms:
-//! - **GLUE** (compile-time bridge generation): `lib/glue.toml` + `src/glue/`
+//! - **GLUE** (compile-time bridge generation): `config/glue.dbvl` + `src/glue/`
 //! - **Metropipe** (runtime shared memory IPC): `src/ffi/metropipe.rs`
 
 pub mod error;

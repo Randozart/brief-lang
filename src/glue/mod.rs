@@ -23,7 +23,6 @@
 
 pub mod bridge;
 pub mod config;
-pub mod dbvl_reader;
 pub mod export;
 pub mod link;
 pub mod web_generator;

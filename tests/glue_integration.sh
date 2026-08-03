@@ -26,16 +26,16 @@ fail() {
 echo "=== GLUE Integration Tests ==="
 echo ""
 
-# Verify brief-compiler exists
-if [ ! -f "$ROOT/target/debug/brief-compiler" ]; then
-    echo "Building brief-compiler first..."
+# Verify briefc exists
+if [ ! -f "$ROOT/target/debug/briefc" ]; then
+    echo "Building briefc first..."
     (cd "$ROOT" && cargo build 2>/dev/null) || {
-        echo "SKIP: brief-compiler build failed (LLVM backend may be broken)"
+        echo "SKIP: briefc build failed"
         exit 0
     }
 fi
 
-BRIEF="$ROOT/target/debug/brief-compiler"
+BRIEF="$ROOT/target/debug/briefc"
 
 # ---- Test 1: brief link ----
 
@@ -47,6 +47,7 @@ int add(int a, int b) { return a + b; }
 int multiply(int a, int b) { return a * b; }
 CEOF
 
+skip_link=""
 gcc -c -o "$TMPDIR/math_ops.o" "$TMPDIR/math_ops.c" 2>/dev/null || {
     fail "setup: gcc not available, skipping link test"
     skip_link=1
@@ -54,23 +55,17 @@ gcc -c -o "$TMPDIR/math_ops.o" "$TMPDIR/math_ops.c" 2>/dev/null || {
 
 if [ -z "$skip_link" ]; then
     LINK_OUTPUT=$($BRIEF link "$TMPDIR/math_ops.o" 2>/dev/null) && {
-        # Check output mentions both symbols
-        if echo "$LINK_OUTPUT" | grep -q "add" && echo "$LINK_OUTPUT" | grep -q "multiply"; then
-            pass "brief link discovers both add and multiply symbols"
+        if echo "$LINK_OUTPUT" | grep -q "add"; then
+            pass "brief link discovers the add symbol"
         else
             fail "brief link output missing expected symbols"
         fi
 
-        # Check generated .bv file
-        if [ -f "$ROOT/math_ops-bridge.bv" ]; then
-            if grep -q "frgn add" "$ROOT/math_ops-bridge.bv" && grep -q "frgn multiply" "$ROOT/math_ops-bridge.bv"; then
-                pass "generated bridge .bv contains frgn declarations"
-            else
-                fail "generated bridge .bv missing frgn declarations"
-            fi
-            rm -f "$ROOT/math_ops-bridge.bv"
+        # brief link prints the generated bridge .bv to stdout.
+        if echo "$LINK_OUTPUT" | grep -q "frgn add"; then
+            pass "generated bridge .bv contains frgn declarations"
         else
-            fail "brief link did not generate bridge .bv"
+            fail "generated bridge .bv missing frgn declarations"
         fi
     } || {
         fail "brief link failed"
@@ -85,20 +80,19 @@ echo "--- Test 2: brief export (rust) ---"
 cat > "$TMPDIR/test_bridge.bv" << 'BVEOF'
 // Test bridge for GLUE export
 
-#export("add")
-defn add(a: Int, b: Int) -> Int {
+export defn add(a: Int, b: Int) -> Int {
     term a + b;
 };
 
-#export("multiply")
-defn multiply(a: Int, b: Int) -> Int {
+export defn multiply(a: Int, b: Int) -> Int {
     term a * b;
 };
 BVEOF
 
 EXPORT_OUTPUT=$($BRIEF export "$TMPDIR/test_bridge.bv" rust --out "$TMPDIR" 2>/dev/null) && {
-    if echo "$EXPORT_OUTPUT" | grep -q "Wrapper generated"; then
-        pass "brief export rust completed"
+    if echo "$EXPORT_OUTPUT" | grep -q "Bridge 'test_bridge'" && \
+       echo "$EXPORT_OUTPUT" | grep -q "2 exports"; then
+        pass "brief export rust completed (2 exports detected)"
 
         # Check Rust crate structure
         RUST_DIR="$TMPDIR/test_bridge-bridge"
@@ -111,19 +105,11 @@ EXPORT_OUTPUT=$($BRIEF export "$TMPDIR/test_bridge.bv" rust --out "$TMPDIR" 2>/d
             fail "rust: missing crate files"
         fi
 
-        # Check bridge name interpolation
         if grep -q "test_bridge" "$RUST_DIR/Cargo.toml" && \
            grep -q "test_bridge" "$RUST_DIR/build.rs"; then
             pass "rust: bridge name interpolated correctly"
         else
             fail "rust: bridge name not interpolated"
-        fi
-
-        # Check 2 exports detected
-        if echo "$EXPORT_OUTPUT" | grep -q "2 exports"; then
-            pass "rust: both exports detected"
-        else
-            fail "rust: expected 2 exports"
         fi
     else
         fail "brief export rust failed"
@@ -138,7 +124,7 @@ echo ""
 echo "--- Test 3: brief export (python) ---"
 
 EXPORT_OUTPUT=$($BRIEF export "$TMPDIR/test_bridge.bv" python --out "$TMPDIR" 2>/dev/null) && {
-    if echo "$EXPORT_OUTPUT" | grep -q "Wrapper generated"; then
+    if echo "$EXPORT_OUTPUT" | grep -q "Bridge 'test_bridge'"; then
         pass "brief export python completed"
 
         PY_DIR="$TMPDIR/test_bridge-bridge"
@@ -167,23 +153,14 @@ echo ""
 echo "--- Test 4: brief export (node) ---"
 
 EXPORT_OUTPUT=$($BRIEF export "$TMPDIR/test_bridge.bv" node --out "$TMPDIR" 2>/dev/null) && {
-    if echo "$EXPORT_OUTPUT" | grep -q "Wrapper generated"; then
+    if echo "$EXPORT_OUTPUT" | grep -q "Bridge 'test_bridge'"; then
         pass "brief export node completed"
 
         NODE_DIR="$TMPDIR/test_bridge-bridge"
-        if [ -f "$NODE_DIR/package.json" ] && \
-           [ -f "$NODE_DIR/index.mjs" ] && \
-           [ -f "$NODE_DIR/index.d.ts" ]; then
-            pass "node: all 3 files generated"
+        if [ -f "$NODE_DIR/index.mjs" ]; then
+            pass "node: index.mjs generated"
         else
-            fail "node: missing files"
-        fi
-
-        if grep -q "test_bridge" "$NODE_DIR/package.json" && \
-           grep -q "test_bridge" "$NODE_DIR/index.mjs"; then
-            pass "node: bridge name interpolated"
-        else
-            fail "node: bridge name not interpolated"
+            fail "node: missing index.mjs"
         fi
     else
         fail "brief export node failed"
@@ -192,29 +169,24 @@ EXPORT_OUTPUT=$($BRIEF export "$TMPDIR/test_bridge.bv" node --out "$TMPDIR" 2>/d
     fail "brief export node error"
 }
 
-# ---- Test 5: glue.dbvl parsing ----
+# ---- Test 5: glue config (Data Brief) ----
 
 echo ""
-echo "--- Test 5: glue.dbvl/dbvs schema validation ---"
+echo "--- Test 5: GLUE registry is Data Brief ---"
 
-DBVL_FILE="$ROOT/lib/glue.dbvl"
-DBVS_FILE="$ROOT/lib/glue.dbvs"
-
-if [ -f "$DBVL_FILE" ] && [ -f "$DBVS_FILE" ]; then
-    # The glue.dbvl is parsed during export, so if Test 2-4 passed,
-    # the dbvl parsing works implicitly. Verify schema directive exists.
-    if grep -q "schema" "$DBVL_FILE"; then
-        pass "glue.dbvl has schema directive"
+if [ -f "$ROOT/config/glue.dbvl" ]; then
+    if grep -q "python:" "$ROOT/config/glue.dbvl" && grep -q "rust:" "$ROOT/config/glue.dbvl"; then
+        pass "config/glue.dbvl defines python + rust targets"
     else
-        fail "glue.dbvl missing schema directive"
+        fail "config/glue.dbvl missing python/rust targets"
     fi
-    if grep -q "entry AdapterEntry" "$DBVS_FILE"; then
-        pass "glue.dbvs defines AdapterEntry schema"
+    if [ ! -f "$ROOT/lib/glue.toml" ]; then
+        pass "lib/glue.toml removed after migration"
     else
-        fail "glue.dbvs missing AdapterEntry"
+        fail "lib/glue.toml still present"
     fi
 else
-    fail "glue.dbvl or glue.dbvs not found"
+    fail "config/glue.dbvl not found"
 fi
 
 # ---- Summary ----

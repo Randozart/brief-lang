@@ -1,12 +1,18 @@
-// ── GLUE Configuration (TOML) ─────────────────────────────────────────
-// 2026-07-22: Reads lib/glue.toml to resolve language targets for frgn
-// dispatch and export generation. Replaces the old dbvl-based registry.
+// ── GLUE Configuration (Data Brief) ───────────────────────────────────
+// 2026-08-03: Reads config/glue.dbvl to resolve language targets for frgn
+// dispatch and export generation (migrated from lib/glue.toml — the FFI
+// must be infinitely extensible, and config is Data Brief). The TOML
+// serde path remains only for the parity golden test; the compiler never
+// parses TOML at runtime.
 //
-// Why TOML over dbvl: TOML is a mature, widely-supported format with
-// existing Rust ecosystem (toml + serde). The dbvl format remains as the
-// output format for bridge-exports metadata (machine consumption), but
-// the compiler's own registry is TOML for maintainability.
+// Format (one entry per language, quoted mode):
+//   <lang>: { types_module: "…"; extension: "…"; bridge_kind: "…";
+//             calling_convention: "…"; module_init: true;
+//             protocols: { "#String": { native: "…"; c_abi: "…"; }; };
+//             templates: { "file": "…\n…"; "fn_template": "…"; }; };
 
+use crate::dbrief::config_db::{resolve_config_file, ConfigDb};
+use crate::dbrief::v2::DataValue;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
@@ -14,9 +20,9 @@ use std::path::{Path, PathBuf};
 ///
 /// 2026-07-22: Each target describes how to bridge with one foreign language.
 /// Protocol mapping replaces old type_map/c_type_map/conversions —
-/// the TOML only knows about protocol categories (#String, #Int, #Float),
+/// the config only knows about protocol categories (#String, #Int, #Float),
 /// not about Brief-internal type names.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct GlueTarget {
     /// Language identifier (e.g., "python", "rust", "node")
     pub language: String,
@@ -40,6 +46,23 @@ pub struct GlueTarget {
     ///   "fn_template" — per-function safe wrapper (rendered into {{exports}})
     ///   "ffi_template" — per-function FFI declaration (rendered into {{ffi_decls}})
     pub templates: HashMap<String, String>,
+    /// 2026-08-03: Per-protocol ABI conversion expressions. `to_abi` renders
+    /// a native argument value to its boundary form (placeholder `{name}`);
+    /// `from_abi` renders the boundary result back to a native value
+    /// (the raw result is `result_abi`). Defaults to identity when absent —
+    /// ctypes/ffi-napi/LTO handle typing on their side. No compiler-side
+    /// language knowledge.
+    pub conversions: Conversions,
+}
+
+/// Boundary conversion expressions per protocol category.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct Conversions {
+    /// Protocol → expression turning `{name}` into the ABI argument form.
+    pub to_abi: HashMap<String, String>,
+    /// Protocol → expression turning the raw `result_abi` into the native
+    /// return value.
+    pub from_abi: HashMap<String, String>,
 }
 
 /// A protocol category mapping for a single language.
@@ -51,7 +74,7 @@ pub struct GlueTarget {
 /// 2026-07-26: Added wasm_abi for the web target (calling_convention = "wasm_import").
 /// When present, the target prefers wasm_abi over c_abi for FFI marshalling.
 /// wasm_abi values are WebAssembly value types: i32, i64, f32, f64.
-#[derive(Debug, Clone, serde::Deserialize)]
+#[derive(Debug, Clone, PartialEq, serde::Deserialize)]
 pub struct ProtocolEntry {
     /// Language-native type name (e.g., "str", "String", "int", "number", "Element")
     pub native: String,
@@ -65,86 +88,137 @@ pub struct ProtocolEntry {
     pub wasm_abi: Option<String>,
 }
 
-// ── Serde helpers ─────────────────────────────────────────────────────
-// 2026-07-22: The TOML structure has inline tables for c_type_map, so we
-// need serde Deserialize for the intermediate representation.
-
-#[derive(serde::Deserialize)]
-struct GlueConfigFile {
-    /// All top-level keys that aren't recognized as special config are
-    /// language targets. Adding a language = adding a [lang] section.
-    #[serde(flatten)]
-    languages: HashMap<String, LanguageEntry>,
-}
-
-#[derive(serde::Deserialize)]
-struct LanguageEntry {
-    types_module: String,
-    extension: String,
-    bridge_kind: String,
-    calling_convention: String,
-    #[serde(default)]
-    module_init: bool,
-    #[serde(default)]
-    protocols: HashMap<String, ProtocolEntry>,
-    #[serde(default)]
-    templates: HashMap<String, String>,
-}
-
-/// A conversion entry for a type at the FFI boundary.
-/// Expresses how to convert between the safe Rust type and the C ABI type.
-#[derive(serde::Deserialize, Debug, Clone)]
-pub struct ConversionEntry {
-    /// Expression to convert a safe value to ABI, with {name} as placeholder.
-    /// E.g., "{name}.as_ptr() as i64"
-    pub to_abi: String,
-    /// Expression to convert an ABI value back to a safe value.
-    /// E.g., "String::from_raw_parts({name} as *mut u8, len)"
-    pub from_abi: String,
-}
-
-/// Load the GLUE registry from a TOML file.
-///
-/// Searches the built-in path (compiler-shipped `lib/glue.toml`) by default,
-/// or a project-level override via `--glue-config`.
-///
-/// Returns a map from language identifier → GlueTarget.
-///
-/// 2026-07-22: The default path is computed at compile time via
-/// `CARGO_MANIFEST_DIR`, so the shipped `lib/glue.toml` is always found
-/// regardless of the user's working directory.
+/// Load the GLUE registry (Data Brief). `None` resolves config/glue.dbvl
+/// from the compiler's baked config dir; `Some(path)` loads that file.
 pub fn load_glue_config(path: Option<&Path>) -> Result<HashMap<String, GlueTarget>, String> {
     let config_path = match path {
         Some(p) => p.to_path_buf(),
-        None => {
-            // 2026-07-22: CARGO_MANIFEST_DIR is the compiler's source root,
-            // so lib/glue.toml ships with the compiler binary.
-            let manifest = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-            manifest.join("lib").join("glue.toml")
-        }
+        None => resolve_config_file(Path::new("__baked__"), "glue")
+            .ok_or_else(|| "config/glue.dbvl not found — was the compiler built before the Data Brief migration?".to_string())?,
     };
 
     let source = std::fs::read_to_string(&config_path)
         .map_err(|e| format!("Failed to read GLUE config '{}': {}", config_path.display(), e))?;
 
-    let parsed: GlueConfigFile = toml::from_str(&source)
-        .map_err(|e| format!("Failed to parse GLUE config '{}': {}", config_path.display(), e))?;
+    parse_glue_dbvl(&source)
+}
 
-    let mut targets: HashMap<String, GlueTarget> = HashMap::new();
+/// Parse Data Brief glue config into GlueTargets.
+///
+/// Layout: one `<lang>: { … }` entry per language (scalars + protocols map),
+/// plus positional template lines `<lang>.templates.<n>: "<output path>"
+/// "<content>";` (flat line form — long `\n`-escaped values and `/` in
+/// output paths trip the nested named-fields-map parser).
+fn parse_glue_dbvl(source: &str) -> Result<HashMap<String, GlueTarget>, String> {
+    let db = ConfigDb::from_quoted_str(source)?;
 
-    for (name, entry) in parsed.languages {
-        targets.insert(name.clone(), GlueTarget {
-            language: name,
-            types_module: PathBuf::from(entry.types_module),
-            extension: entry.extension,
-            bridge_kind: entry.bridge_kind,
-            calling_convention: entry.calling_convention,
-            module_init: entry.module_init,
-            protocols: entry.protocols,
-            templates: entry.templates,
-        });
+    // Collect positional template lines: "<lang>.templates.<n>" →
+    // (output path, content). Deterministic: index encodes order.
+    let mut templates_by_lang: HashMap<String, HashMap<String, String>> = HashMap::new();
+    let sep = ".templates.";
+    for key in db.keys() {
+        let Some(pos) = key.find(sep) else { continue };
+        let lang = key[..pos].to_string();
+        let path = db.field_string(&key, 0).map(|s| s.to_string());
+        let content = db.field_string(&key, 1).map(|s| s.to_string());
+        if let (Some(path), Some(content)) = (path, content) {
+            templates_by_lang.entry(lang).or_default().insert(path, content);
+        }
     }
 
+    let mut targets: HashMap<String, GlueTarget> = HashMap::new();
+    for key in db.keys() {
+        if key.contains(sep) {
+            continue;
+        }
+        let Some(DataValue::Map(entry)) = db.field(&key, 0) else { continue };
+        let str_field = |name: &str| -> Option<String> {
+            entry.get(name).and_then(|v| match v {
+                DataValue::String(s) => Some(s.clone()),
+                _ => None,
+            })
+        };
+        let Some(types_module) = str_field("types_module") else { continue };
+        let Some(extension) = str_field("extension") else { continue };
+        let Some(bridge_kind) = str_field("bridge_kind") else { continue };
+        let Some(calling_convention) = str_field("calling_convention") else { continue };
+        let module_init = matches!(entry.get("module_init"), Some(DataValue::Bool(true)));
+
+        let string_map = |name: &str| -> HashMap<String, String> {
+            match entry.get(name) {
+                Some(DataValue::Map(map)) => map.iter()
+                    .filter_map(|(k, v)| match v {
+                        DataValue::String(s) => Some((k.clone(), s.clone())),
+                        _ => None,
+                    })
+                    .collect(),
+                _ => HashMap::new(),
+            }
+        };
+        let conversions = match entry.get("conversions") {
+            Some(DataValue::Map(conv)) => Conversions {
+                to_abi: match conv.get("to_abi") {
+                    Some(DataValue::Map(m)) => m.iter()
+                        .filter_map(|(k, v)| match v {
+                            DataValue::String(s) => Some((k.clone(), s.clone())),
+                            _ => None,
+                        })
+                        .collect(),
+                    _ => HashMap::new(),
+                },
+                from_abi: match conv.get("from_abi") {
+                    Some(DataValue::Map(m)) => m.iter()
+                        .filter_map(|(k, v)| match v {
+                            DataValue::String(s) => Some((k.clone(), s.clone())),
+                            _ => None,
+                        })
+                        .collect(),
+                    _ => HashMap::new(),
+                },
+            },
+            _ => Conversions::default(),
+        };
+        let templates = string_map("templates");
+
+        let protocols = match entry.get("protocols") {
+            Some(DataValue::Map(map)) => map.iter()
+                .map(|(proto, v)| {
+                    let proto_entry = match v {
+                        DataValue::Map(fields) => {
+                            let native = fields.get("native").and_then(|x| match x {
+                                DataValue::String(s) => Some(s.clone()),
+                                _ => None,
+                            }).unwrap_or_default();
+                            let c_abi = fields.get("c_abi").and_then(|x| match x {
+                                DataValue::String(s) => Some(s.clone()),
+                                _ => None,
+                            });
+                            let wasm_abi = fields.get("wasm_abi").and_then(|x| match x {
+                                DataValue::String(s) => Some(s.clone()),
+                                _ => None,
+                            });
+                            ProtocolEntry { native, c_abi, wasm_abi }
+                        }
+                        _ => ProtocolEntry { native: String::new(), c_abi: None, wasm_abi: None },
+                    };
+                    (proto.clone(), proto_entry)
+                })
+                .collect(),
+            _ => HashMap::new(),
+        };
+
+        targets.insert(key.clone(), GlueTarget {
+            language: key.clone(),
+            types_module: PathBuf::from(types_module),
+            extension,
+            bridge_kind,
+            calling_convention,
+            module_init,
+            protocols,
+            templates: templates_by_lang.get(&key).cloned().unwrap_or_default(),
+            conversions,
+        });
+    }
     Ok(targets)
 }
 
@@ -184,6 +258,7 @@ mod tests {
             module_init: false,
             protocols: HashMap::new(),
             templates: HashMap::new(),
+            conversions: Conversions::default(),
         });
         targets.insert("rust".to_string(), GlueTarget {
             language: "rust".to_string(),
@@ -194,6 +269,7 @@ mod tests {
             module_init: false,
             protocols: HashMap::new(),
             templates: HashMap::new(),
+            conversions: Conversions::default(),
         });
 
         // Should work with or without leading dot
@@ -213,6 +289,7 @@ mod tests {
             module_init: false,
             protocols: HashMap::new(),
             templates: HashMap::new(),
+            conversions: Conversions::default(),
         });
 
         // Should work with or without leading dot
@@ -232,6 +309,7 @@ mod tests {
             module_init: false,
             protocols: HashMap::new(),
             templates: HashMap::new(),
+            conversions: Conversions::default(),
         });
 
         // Should work with or without leading dot
@@ -242,24 +320,10 @@ mod tests {
     #[test]
     fn test_load_glue_config_custom_path() {
         let dir = std::env::temp_dir();
-        let config_path = dir.join("test_glue_config.toml");
-        let content = r##"
-[python]
-types_module = "glue/python/types.bv"
-extension = "py"
-bridge_kind = "native_module"
-calling_convention = "c_abi"
-
-[python.protocols]
-"#String" = { native = "str", c_abi = "ctypes.c_void_p" }
-"#Int" = { native = "int", c_abi = "ctypes.c_int64" }
-
-[rust]
-types_module = "glue/rust/types.bv"
-extension = "rs"
-bridge_kind = "extern_c_crate"
-calling_convention = "lto"
-"##;
+        let config_path = dir.join("test_glue_config.dbvl");
+        let content = r##"python: { types_module: "glue/python/types.bv"; extension: "py"; bridge_kind: "native_module"; calling_convention: "c_abi"; module_init: false; protocols: { "#String": { native: "str"; c_abi: "ctypes.c_void_p" }; "#Int": { native: "int"; c_abi: "ctypes.c_int64" } } };
+python.templates.0: "fn_template" "def {{name}}({{params}}):\n    return {{name}};\n";
+rust: { types_module: "glue/rust/types.bv"; extension: "rs"; bridge_kind: "extern_c_crate"; calling_convention: "lto"; module_init: false };"##;
         std::fs::write(&config_path, content).unwrap();
 
         let result = load_glue_config(Some(&config_path));
@@ -275,6 +339,7 @@ calling_convention = "lto"
         assert!(py.protocols.contains_key("#String"));
         assert_eq!(py.protocols.get("#String").unwrap().native, "str");
         assert_eq!(py.protocols.get("#String").unwrap().c_abi.as_deref(), Some("ctypes.c_void_p"));
+        assert_eq!(py.templates.get("fn_template").unwrap(), "def {{name}}({{params}}):\n    return {{name}};\n");
 
         assert!(targets.contains_key("rust"));
         let rust = &targets["rust"];
@@ -289,15 +354,43 @@ calling_convention = "lto"
     #[test]
     fn test_load_glue_config_not_found() {
         let dir = std::env::temp_dir();
-        let missing = dir.join("nonexistent_glue.toml");
+        let missing = dir.join("nonexistent_glue.dbvl");
         let result = load_glue_config(Some(&missing));
         assert!(result.is_err());
     }
 
     #[test]
     fn test_load_glue_config_default_path_exists() {
-        // The compiler-shipped default should exist at compile time
+        // The compiler-shipped default (config/glue.dbvl) should exist.
         let result = load_glue_config(None);
-        assert!(result.is_ok(), "Default lib/glue.toml not found: {:?}", result.err());
+        assert!(result.is_ok(), "Default config/glue.dbvl not found: {:?}", result.err());
+    }
+
+    /// Baked config golden: the compiler-shipped config/glue.dbvl loads with
+    /// all four languages and the expected protocol/template shape. Replaces
+    /// the TOML parity gate after lib/glue.toml was deleted.
+    #[test]
+    fn baked_glue_dbvl_shape() {
+        let config = load_glue_config(None).expect("config/glue.dbvl should load");
+        for lang in ["python", "rust", "node", "web"] {
+            assert!(config.contains_key(lang), "missing '{}' target", lang);
+        }
+        let python = &config["python"];
+        assert_eq!(python.calling_convention, "c_abi");
+        assert!(python.module_init);
+        assert_eq!(
+            python.protocols.get("#String").unwrap().c_abi.as_deref(),
+            Some("ctypes.c_void_p")
+        );
+        assert!(python.templates.contains_key("__init__.py"), "python __init__.py template");
+        assert!(python.templates.contains_key("fn_template"), "python fn_template template");
+        let rust = &config["rust"];
+        assert_eq!(rust.calling_convention, "lto");
+        assert!(rust.templates.contains_key("src/lib.rs"), "rust src/lib.rs template");
+        let node = &config["node"];
+        assert!(node.templates.contains_key("index.mjs"), "node index.mjs template");
+        let web = &config["web"];
+        assert_eq!(web.calling_convention, "wasm_import");
+        assert!(web.templates.contains_key("dom-shim.mjs"), "web dom-shim.mjs template");
     }
 }

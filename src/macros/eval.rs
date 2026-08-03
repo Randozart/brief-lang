@@ -1241,7 +1241,7 @@ fn eval_nav_call(
             let targets = crate::glue::config::load_glue_config(None)
                 .map_err(|e| format!("ConfigGet$: {}", e))?;
             let target = targets.get(&section)
-                .ok_or_else(|| format!("ConfigGet$: no section '{}' in lib/glue.toml", section))?;
+                .ok_or_else(|| format!("ConfigGet$: no section '{}' in config/glue.dbvl", section))?;
             // Resolve dotted key (e.g., "templates.fn_template" → target.templates["fn_template"])
             if let Some(dot) = key.find('.') {
                 let (sub, field) = key.split_at(dot);

@@ -49,6 +49,10 @@ pub struct ExportDecl {
     pub name: String,
     pub params: Vec<(String, String)>,  // (name, type string)
     pub return_type: String,
+    /// 2026-08-03: Whether the emitted C-ABI signature carries a leading
+    /// `ptr %state` parameter (body-dependent ABI, export_abi analysis).
+    /// Wrappers/bindings must pass/omit the state handle to match.
+    pub needs_state: bool,
 }
 
 /// A foreign function declared via `frgn` in the bridge.
@@ -106,6 +110,9 @@ fn has_export_modifier(modifiers: &[Annotation]) -> bool {
 }
 
 fn extract_exports(items: &[TopLevel]) -> Vec<ExportDecl> {
+    // 2026-08-03: Body-dependent ABI — whether each export carries the
+    // leading state param. Shared with the backend (src/analysis/export_abi.rs).
+    let needs_state = crate::analysis::export_abi::compute_export_needs_state(items);
     let mut exports = Vec::new();
     for item in items {
         match item {
@@ -129,6 +136,7 @@ fn extract_exports(items: &[TopLevel]) -> Vec<ExportDecl> {
                         name: defn.name.clone(),
                         params,
                         return_type,
+                        needs_state: needs_state.get(&defn.name).copied().unwrap_or(false),
                     });
                 }
             }
@@ -151,6 +159,7 @@ fn extract_exports(items: &[TopLevel]) -> Vec<ExportDecl> {
                     name: defn.name.clone(),
                     params,
                     return_type,
+                    needs_state: needs_state.get(&defn.name).copied().unwrap_or(false),
                 });
             }
             _ => {}
@@ -251,7 +260,10 @@ fn serialize_exports_tagged(exports: &[ExportDecl]) -> String {
     let mut lines = Vec::new();
     for e in exports {
         let params: Vec<String> = e.params.iter().map(|(_, t)| t.clone()).collect();
-        lines.push(format!("export,{},{},{}", e.name, params.join("|"), e.return_type));
+        // 2026-08-03: 5th field = needs_state (leading state param in the
+        // emitted C ABI). Consumers use it to pass/omit the state handle.
+        let ns = if e.needs_state { "state" } else { "pure" };
+        lines.push(format!("export,{},{},{},{}", e.name, params.join("|"), e.return_type, ns));
     }
     lines.join("\n")
 }
@@ -270,110 +282,6 @@ fn serialize_ctypes_dbvl(c_type_map: &HashMap<String, String>) -> String {
         .collect();
     lines.sort();
     lines.join("\n")
-}
-
-/// Parse a DBVL type map field like "{Int: i64; Float: f64; Bool: bool;}"
-/// into a HashMap. Delegates to dbvl_reader::parse_map() for consistency.
-/// 2026-07-26: Updated for new syntax (; separator inside {}).
-fn parse_type_map(s: &str) -> HashMap<String, String> {
-    crate::glue::dbvl_reader::parse_map(s)
-}
-
-/// Find a language target entry in glue.dbvl.
-///
-/// 2026-07-10: GLUE v2 field layout — language(0), types_module(1),
-/// file_extension(2), llvm_triple(3), c_type_map(4). Returns an error
-/// if fewer than 4 fields or the language doesn't match.
-pub fn find_adapter(language: &str, dbvl_path: &Path) -> Result<AdapterEntry, String> {
-    let source = fs::read_to_string(dbvl_path)
-        .map_err(|e| format!("Failed to read {}: {}", dbvl_path.display(), e))?;
-
-    let file = crate::glue::dbvl_reader::parse_dbvl(&source);
-    for entry in &file.entries {
-        let fields = &entry.fields;
-        if fields.len() < 4 {
-            continue;
-        }
-        if fields[0] != language {
-            continue;
-        }
-        let c_type_map = if fields.len() > 4 {
-            parse_type_map(&fields[4])
-        } else {
-            HashMap::new()
-        };
-        return Ok(AdapterEntry {
-            language: language.to_string(),
-            types_module: fields[1].clone(),
-            file_extension: fields[2].clone(),
-            llvm_triple: fields[3].clone(),
-            c_type_map,
-        });
-    }
-    Err(format!("Target not found for language '{}' in {}", language, dbvl_path.display()))
-}
-
-/// Run the export pipeline:
-/// 1. Extract bridge info from the program
-/// 2. Find the language target entry in glue.dbvl
-/// 3. Write bridge-exports.dbvl (tagged lines: export/meld/ctype)
-///
-/// 2026-07-10: GLUE v2. Replaced the $!macro adapter invocation with
-/// direct bridge-exports.dbvl output. The foreign build system reads
-/// this .dbvl to generate bindings — no adapter .bv macros needed.
-pub fn run_export(
-    program: &[TopLevel],
-    bridge_name: &str,
-    language: &str,
-    out_dir: &Path,
-    dbvl_path: &Path,
-) -> Result<(), String> {
-    // Step 1: Extract bridge info
-    let info = extract_bridge_info(program, bridge_name);
-    println!("  Bridge '{}': {} exports, {} frgns, {} melds",
-        info.name, info.exports.len(), info.frgns.len(), info.melds.len());
-
-    // Step 2: Find the language target entry
-    let adapter = find_adapter(language, dbvl_path)?;
-    println!("  Target: {} (types: {}, llvm_triple: {})",
-        adapter.language, adapter.types_module, adapter.llvm_triple);
-
-    // Step 3: Create output directory
-    let output_dir = out_dir.join(format!("{}-bridge", bridge_name));
-    fs::create_dir_all(&output_dir)
-        .map_err(|e| format!("Failed to create output dir: {}", e))?;
-
-    // Step 4: Write bridge-exports.dbvl with tagged entries
-    // Each line has a discriminator field so the consumer can dispatch on
-    // entry type: "export, ..." for functions, "meld, ..." for type
-    // compatibility proofs, "ctype, ..." for C ABI type mappings.
-    let mut dbvl_content = String::new();
-
-    let exports_str = serialize_exports_tagged(&info.exports);
-    if !exports_str.is_empty() {
-        dbvl_content.push_str(&exports_str);
-        dbvl_content.push('\n');
-    }
-
-    let melds_str = serialize_melds_tagged(&info.melds);
-    if !melds_str.is_empty() {
-        dbvl_content.push_str(&melds_str);
-        dbvl_content.push('\n');
-    }
-
-    let ctypes_str = serialize_ctypes_dbvl(&adapter.c_type_map);
-    if !ctypes_str.is_empty() {
-        dbvl_content.push_str(&ctypes_str);
-        dbvl_content.push('\n');
-    }
-
-    let dbvl_path = output_dir.join("bridge-exports.dbvl");
-    fs::write(&dbvl_path, dbvl_content.trim_end())
-        .map_err(|e| format!("Failed to write bridge-exports.dbvl: {}", e))?;
-
-    println!("  Metadata: {}", dbvl_path.display());
-    println!("  LLVM IR:  (future) {}/bridge.ll", output_dir.display());
-    Ok(())
 }
 
 /// CLI entry point for `brief export <bridge.bv> <language> [--out <dir>]`.
@@ -403,7 +311,7 @@ pub fn run_export_cli(file_path: &str, language: &str, out_dir: &str) -> Result<
     // 2026-07-22: Step 2 — find language target and extract bridge info
     let glue_targets = crate::glue::config::load_glue_config(None)?;
     let target = glue_targets.get(language).ok_or_else(|| {
-        format!("Unknown export target '{}'.\n  Add an entry to lib/glue.toml or use a supported language: {}",
+        format!("Unknown export target '{}'.\n  Add an entry to config/glue.dbvl or use a supported language: {}",
             language, glue_targets.keys().cloned().collect::<Vec<_>>().join(", "))
     })?;
     let info = extract_bridge_info(&items, bridge_name);
@@ -445,10 +353,14 @@ pub fn run_export_cli(file_path: &str, language: &str, out_dir: &str) -> Result<
         .map_err(|e| format!("Failed to write '{}': {}", ll_path.display(), e))?;
     println!("  LLVM IR: {}", ll_path.display());
 
-    // 2026-07-22: Step 6 — compile to .o via llc
+    // 2026-07-22: Step 6 — compile to .o via llc.
+    // 2026-08-03: -relocation-model=pic — the .o must link into a shared
+    // library for c_abi hosts (python/node); without it the linker rejects
+    // R_X86_64_32 relocations against .rodata.
     let o_path = output_dir.join("bridge.o");
     let llc_status = std::process::Command::new("llc")
         .arg("-filetype=obj")
+        .arg("-relocation-model=pic")
         .arg("-o")
         .arg(&o_path)
         .arg(&ll_path)
@@ -459,18 +371,19 @@ pub fn run_export_cli(file_path: &str, language: &str, out_dir: &str) -> Result<
     }
     println!("  Object: {}", o_path.display());
 
-    // 2026-07-22: Step 7 — generate language wrappers from TOML templates.
+    // 2026-07-22: Step 7 — generate language wrappers from config templates.
     let mut template_vars: HashMap<String, String> = HashMap::new();
     template_vars.insert("bridge_name".to_string(), bridge_name.to_string());
-    // Populate state parameter based on calling convention
+    // 2026-08-03: The global s_init differs by convention; the per-export
+    // s_param/s_ffi_param/s_argtypes are computed per export from its
+    // needs_state (body-dependent ABI) — pure exports get no state handle.
     if target.calling_convention == "c_abi" {
-        template_vars.insert("s_param".to_string(), "_STATE, ".to_string());
         template_vars.insert("s_init".to_string(), String::new());
     } else {
         // LTO path (Rust): init_state is declared as an FFI function
-        template_vars.insert("s_param".to_string(), String::new());
         template_vars.insert("s_init".to_string(), "    pub fn init_state(state: *mut c_void);\n".to_string());
     }
+    let lto = target.calling_convention != "c_abi";
 
     // Render all exports + FFI declarations
     let fn_template = target.templates.get("fn_template");
@@ -482,9 +395,40 @@ pub fn run_export_cli(file_path: &str, language: &str, out_dir: &str) -> Result<
         if i > 0 { exports_buf.push('\n'); }
         if i > 0 { ffi_buf.push('\n'); }
 
+        // Per-export state handle expression (call argument).
+        // c_abi hosts keep a module-level _STATE; the lto (Rust) crate keeps
+        // a static STATE. Pure exports omit it entirely.
+        let state_arg = if export.needs_state {
+            if lto { "STATE, " } else { "_STATE, " }
+        } else {
+            ""
+        };
+        // Per-export state parameter in the C-ABI/FFI declaration.
+        let state_ffi_param = if export.needs_state {
+            "state: *mut std::ffi::c_void, "
+        } else {
+            ""
+        };
+        // Per-export state ctypes argument-type prefix (c_abi).
+        let state_argtype = if export.needs_state {
+            if lto { "" } else { "ctypes.c_void_p, " }
+        } else {
+            ""
+        };
+        // Per-export state ffi-napi argument TYPE prefix (c_abi / node).
+        let state_ffi_type = if export.needs_state {
+            if lto { "" } else { "'pointer', " }
+        } else {
+            ""
+        };
+
         // Build per-function variables
         let mut fn_vars: HashMap<String, String> = HashMap::new();
         fn_vars.insert("name".to_string(), export.name.clone());
+        fn_vars.insert("s_param".to_string(), state_arg.to_string());
+        fn_vars.insert("s_ffi_param".to_string(), state_ffi_param.to_string());
+        fn_vars.insert("s_argtypes".to_string(), state_argtype.to_string());
+        fn_vars.insert("s_ffi_type".to_string(), state_ffi_type.to_string());
         let (native_ret, c_ret) = resolve_protocol(&export.return_type, &target.protocols);
         fn_vars.insert("return".to_string(), native_ret.clone());
         fn_vars.insert("c_return".to_string(), c_ret.clone());
@@ -506,34 +450,23 @@ pub fn run_export_cli(file_path: &str, language: &str, out_dir: &str) -> Result<
             .map(|(name, _)| name.clone())
             .collect();
 
-        // Build ABI conversion expressions from target.protocols.
-        // to_abi: {{name}} → {{name}}_abi
-        // from_abi: return value → safe type
+        // Build ABI conversion expressions from target.conversions (config).
+        // to_abi: {{name}} → boundary argument (config expression, `{name}`
+        // placeholder, default identity — the host side types the boundary).
         let args_abi: Vec<String> = export.params.iter()
             .map(|(name, ty)| {
-                let (native, c_abi) = resolve_protocol(ty, &target.protocols);
-                if native == c_abi {
-                    format!("{}", name)
-                } else if c_abi == "i64" && native.contains('*') {
-                    format!("{} as i64", name)
-                } else if native == "i64" && c_abi.contains('*') {
-                    format!("{} as *mut u8", name)
-                } else {
-                    format!("{} as {}", name, c_abi)
-                }
+                let proto = format!("#{}", ty);
+                target.conversions.to_abi.get(&proto)
+                    .map(|expr| expr.replace("{name}", name))
+                    .unwrap_or_else(|| name.clone())
             })
             .collect();
         let (_, ret_c_abi) = resolve_protocol(&export.return_type, &target.protocols);
-        let (ret_native, _) = resolve_protocol(&export.return_type, &target.protocols);
-        let return_expr = if ret_native == ret_c_abi {
-            "result_abi".to_string()
-        } else if ret_c_abi == "i64" && ret_native.contains('*') {
-            format!("result_abi as {}", ret_native)
-        } else if ret_native == "i64" && ret_c_abi.contains('*') {
-            format!("result_abi as {}", ret_c_abi)
-        } else {
-            format!("result_abi as {}", ret_native)
-        };
+        // from_abi: raw boundary `result_abi` → native return expression.
+        let ret_proto = format!("#{}", export.return_type);
+        let return_expr = target.conversions.from_abi.get(&ret_proto)
+            .cloned()
+            .unwrap_or_else(|| "result_abi".to_string());
 
         fn_vars.insert("params".to_string(), params.join(", "));
         fn_vars.insert("ffi_params".to_string(), ffi_params.join(", "));
@@ -548,11 +481,18 @@ pub fn run_export_cli(file_path: &str, language: &str, out_dir: &str) -> Result<
         fn_vars.insert("return_expr".to_string(), return_expr);
 
         if let Some(ft) = fn_template {
-            let rendered = render_template(ft, &fn_vars);
+            // 2026-08-03: per-function render sees both fn_vars and the
+            // global template_vars (s_init, bridge_name, …). The earlier
+            // render passed only fn_vars, silently dropping {{s_param}}.
+            let mut merged = template_vars.clone();
+            merged.extend(fn_vars.clone());
+            let rendered = render_template(ft, &merged);
             exports_buf.push_str(&rendered);
         }
         if let Some(ffit) = ffi_template {
-            let rendered = render_template(ffit, &fn_vars);
+            let mut merged = template_vars.clone();
+            merged.extend(fn_vars.clone());
+            let rendered = render_template(ffit, &merged);
             ffi_buf.push_str(&rendered);
         }
     }
@@ -672,9 +612,10 @@ mod tests {
             name: "print_int".to_string(),
             params: vec![("n".to_string(), "Int".to_string())],
             return_type: "Int".to_string(),
+            needs_state: false,
         }];
         let result = serialize_exports_tagged(&exports);
-        assert_eq!(result, "export,print_int,Int,Int");
+        assert_eq!(result, "export,print_int,Int,Int,pure");
     }
 
     #[test]
@@ -686,9 +627,10 @@ mod tests {
                 ("data".to_string(), "Data".to_string()),
             ],
             return_type: "Int".to_string(),
+            needs_state: true,
         }];
         let result = serialize_exports_tagged(&exports);
-        assert_eq!(result, "export,write_file,String|Data,Int");
+        assert_eq!(result, "export,write_file,String|Data,Int,state");
     }
 
     #[test]
@@ -720,88 +662,22 @@ mod tests {
     }
 
     #[test]
-    fn test_parse_type_map() {
-        let map = parse_type_map("{ Int: int64_t; Float: double; Bool: bool; }");
-        assert_eq!(map.get("Int"), Some(&"int64_t".to_string()));
-        assert_eq!(map.get("Float"), Some(&"double".to_string()));
-        assert_eq!(map.get("Bool"), Some(&"bool".to_string()));
-    }
-
-    #[test]
-    fn test_parse_type_map_empty() {
-        let map = parse_type_map("{}");
-        assert!(map.is_empty());
-    }
-
-    #[test]
-    fn test_parse_type_map_no_braces() {
-        let map = parse_type_map("Int: int64_t; Float: double");
-        assert_eq!(map.get("Int"), Some(&"int64_t".to_string()));
-        assert_eq!(map.get("Float"), Some(&"double".to_string()));
-        assert_eq!(map.len(), 2);
-    }
-
-    #[test]
     fn test_serialize_exports_tagged_multiple_separate() {
         let exports = vec![
             ExportDecl {
                 name: "add".to_string(),
                 params: vec![("a".to_string(), "Int".to_string()), ("b".to_string(), "Int".to_string())],
                 return_type: "Int".to_string(),
+                needs_state: false,
             },
             ExportDecl {
                 name: "greet".to_string(),
                 params: vec![("name".to_string(), "String".to_string())],
                 return_type: "String".to_string(),
+                needs_state: true,
             },
         ];
         let result = serialize_exports_tagged(&exports);
-        assert_eq!(result, "export,add,Int|Int,Int\nexport,greet,String,String");
-    }
-
-    #[test]
-    fn test_find_adapter_new_format() {
-        let dir = std::env::temp_dir();
-        let dbvl_path = dir.join("test_glue_export.dbvl");
-        let dbvl_content = ">schema glue/export.dbv\nrust; glue/rust/types.bv; rs; x86_64-unknown-linux-gnu; { Int: int64_t; Float: double; }";
-        fs::write(&dbvl_path, dbvl_content).unwrap();
-
-        let result = find_adapter("rust", &dbvl_path);
-        assert!(result.is_ok());
-        let adapter = result.unwrap();
-        assert_eq!(adapter.language, "rust");
-        assert_eq!(adapter.types_module, "glue/rust/types.bv");
-        assert_eq!(adapter.file_extension, "rs");
-        assert_eq!(adapter.llvm_triple, "x86_64-unknown-linux-gnu");
-        assert_eq!(adapter.c_type_map.get("Int"), Some(&"int64_t".to_string()));
-        assert_eq!(adapter.c_type_map.get("Float"), Some(&"double".to_string()));
-
-        let _ = fs::remove_file(&dbvl_path);
-    }
-
-    #[test]
-    fn test_find_adapter_language_not_found() {
-        let dir = std::env::temp_dir();
-        let dbvl_path = dir.join("test_glue_missing.dbvl");
-        let dbvl_content = ">schema glue/export.dbv\nrust; glue/rust/types.bv; rs; x86_64";
-        fs::write(&dbvl_path, dbvl_content).unwrap();
-
-        let result = find_adapter("python", &dbvl_path);
-        assert!(result.is_err());
-
-        let _ = fs::remove_file(&dbvl_path);
-    }
-
-    #[test]
-    fn test_find_adapter_too_few_fields() {
-        let dir = std::env::temp_dir();
-        let dbvl_path = dir.join("test_glue_too_few.dbvl");
-        let dbvl_content = ">schema glue/export.dbv\nrust; glue/rust/types.bv; rs";
-        fs::write(&dbvl_path, dbvl_content).unwrap();
-
-        let result = find_adapter("rust", &dbvl_path);
-        assert!(result.is_err(), "should reject entries with < 4 fields");
-
-        let _ = fs::remove_file(&dbvl_path);
+        assert_eq!(result, "export,add,Int|Int,Int,pure\nexport,greet,String,String,state");
     }
 }

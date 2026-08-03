@@ -220,7 +220,7 @@ pub fn resolve_single_frgn(
 
     Ok(ResolvedFrgn::Unsupported(format!(
         "frgn '{}' from '{}': extension '.{}' is not supported by the {} backend. \
-         Add a GLUE registry entry in lib/glue.toml or use a supported extension (.c, .rs, .py, .js, .mjs)",
+         Add a GLUE registry entry in config/glue.dbvl or use a supported extension (.c, .rs, .py, .js, .mjs)",
         fb.effective_brief_name(),
         ext,
         ext,
@@ -390,6 +390,7 @@ mod tests {
             module_init: false,
             protocols: HashMap::new(),
             templates: HashMap::new(),
+            conversions: crate::glue::config::Conversions::default(),
         });
         map.insert("rust".to_string(), GlueTarget {
             language: "rust".to_string(),
@@ -400,6 +401,7 @@ mod tests {
             module_init: false,
             protocols: HashMap::new(),
             templates: HashMap::new(),
+            conversions: crate::glue::config::Conversions::default(),
         });
         map
     }

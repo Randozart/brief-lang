@@ -26,6 +26,7 @@ fn sample_glue_targets() -> HashMap<String, GlueTarget> {
                 module_init: false,
                 protocols: HashMap::new(),
                 templates: HashMap::new(),
+            conversions: brief_compiler::glue::config::Conversions::default(),
             },
         ),
         (
@@ -39,6 +40,7 @@ fn sample_glue_targets() -> HashMap<String, GlueTarget> {
                 module_init: false,
                 protocols: HashMap::new(),
                 templates: HashMap::new(),
+            conversions: brief_compiler::glue::config::Conversions::default(),
             },
         ),
     ])
@@ -197,7 +199,7 @@ fn test_resolve_single_frgn_native_so() {
 
 #[test]
 fn test_load_glue_config_shiped() {
-    let config = load_glue_config(None).expect("should load built-in lib/glue.toml");
+    let config = load_glue_config(None).expect("should load built-in config/glue.dbvl");
     assert!(config.contains_key("python"), "should have python entry");
     assert!(config.contains_key("rust"), "should have rust entry");
     let python = config.get("python").unwrap();
@@ -211,7 +213,7 @@ fn test_load_glue_config_shiped() {
 
 #[test]
 fn test_load_glue_config_custom_path() {
-    let custom = Path::new("lib/glue.toml");
+    let custom = Path::new("config/glue.dbvl");
     let config = load_glue_config(Some(custom)).expect("should load from custom path");
     assert!(config.contains_key("python"));
 }

@@ -365,6 +365,7 @@ mod tests {
             module_init: false,
             protocols: HashMap::new(),
             templates: HashMap::new(),
+            conversions: crate::glue::config::Conversions::default(),
         });
         map.insert("rust".to_string(), GlueTarget {
             language: "rust".to_string(),
@@ -375,6 +376,7 @@ mod tests {
             module_init: false,
             protocols: HashMap::new(),
             templates: HashMap::new(),
+            conversions: crate::glue::config::Conversions::default(),
         });
         map
     }
