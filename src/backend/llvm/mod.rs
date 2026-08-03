@@ -3582,7 +3582,7 @@ impl LlvmBackend {
             let total_fields = self.ctx.field_index_map.len();
             self.fun.pending_post_hoist = post_hoist;
             self.warnings.push(format!("info: txn '{}' dispatched via inline SSA ({} fields)", node.name, total_fields));
-            self.emit_folded_main(out, &node.name, counter_idx, total_idx, total_const_name, false, Some(&body_stmts));
+            self.emit_folded_main(out, &node.name, counter_idx, total_idx, total_const_name, false, Some(&body_stmts), Some(&bp.var));
             return true;
         }
 

@@ -3044,10 +3044,10 @@ it now returns the member's result register, so the extract-into-target
 args without their LLVM types (`call i64 @pop(%t39)`), now `call i64 @pop(i64 %t39)`.
 **Regression test:** `backend::llvm::tests::test_arrow_only_collection_is_kept_in_state`.
 
-## Loop-Guard Variable's State Store Dropped — Stale Body Reads — OPEN
+## Loop-Guard Variable's State Store Dropped — Stale Body Reads — FIXED
 
-**Date:** 2026-08-01
-**Status:** Open (pre-existing, deep loop-emitter issue)
+**Date:** 2026-08-01 (fixed 2026-08-03)
+**Status:** Fixed
 **Root cause:** in the `.fmain` runtime loop (`emit_folded_loop`/
 `emit_countable_body`), a state field used as the loop GUARD (`[count < N]` +
 `count = count + 1`) has its per-iteration `%State` store dropped — the loop is
@@ -3056,10 +3056,21 @@ stored back. A body READ of the guard field (e.g. `println!(count)`) then sees
 the stale field value (0) every iteration instead of 1,2,3. Verified: a
 counter-only reactive program prints `count=1` ×N instead of 1..N. The
 benchmarks are unaffected (they never print/push the guard field mid-loop).
-**Fix (when the loop-emitter field routing is revisited):** remap the guard
-field's body reads to the loop-counter phi register (or store the body's writes
-to the field back to `%State` when the body reads it). No file has been
-modified for this yet.
+**Fix (2026-08-03):** in `emit_folded_loop`, register the guard field in
+`phi_field_regs` → the counter phi (mirroring `emit_countable_main`'s PerFieldPhi
+mapping at counter.rs:318), so a body read of the guard field resolves to the
+live per-iteration phi register instead of a stale `%State` load. `counter_var`
+(Option<&str>) is threaded through `emit_folded_main`/`emit_folded_loop`; the
+dispatch call site (`emit_folded_loop_shape`, InlineSsa path) passes `&bp.var`.
+When the body does NOT read the counter, the extra `phi_field_regs` entry is
+never referenced — zero IR change (benchmark A/B: byte-identical, zero MISMATCH).
+**Impact:** `println!(count)` in a counter-only loop prints 0,1,2,… correctly.
+Regression test: `test_counter_loop_guard_read_uses_phi_not_state` (asserts the
+main-fold print feeds `%flc` and the counter increments via the phi backedge).
+`print_loop.bv` (periodic-guard `println!(ops)`) dispatches via version-DAG, not
+InlineSsa, so it was never affected — output verified identical pre/post.
+**Undo:** revert the `phi_field_regs` registration + the `counter_var` threading;
+the stale-read behavior returns.
 
 ## `(n as String)` — Latent Link Error + Type Mismatch — FIXED
 

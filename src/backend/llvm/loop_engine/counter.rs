@@ -58,6 +58,12 @@ impl LlvmBackend {
     /// body is precomputed — only the counter phi and backedge are emitted.
     /// When `use_phi=false` with a body, the body statements are emitted
     /// inline with SSA registers.
+    ///
+    /// 2026-08-03 (loop-guard state-store fix): `counter_var` is the guard
+    /// field's NAME. It is registered in `phi_field_regs` → the counter phi so
+    /// body READS of the guard field resolve to the live per-iteration phi
+    /// value (0,1,2,…) instead of a stale `%State` load (which always returned
+    /// the initial 0). This mirrors emit_countable_main's PerFieldPhi mapping.
     pub(crate) fn emit_folded_loop(
         &mut self,
         out: &mut String,
@@ -71,6 +77,7 @@ impl LlvmBackend {
         unroll_factor: usize,
         is_decreasing: bool,
         bound_literal: Option<i64>,
+        counter_var: Option<&str>,
     ) {
         let c0 = self.fun.txn_counter;
         let bound_reg = self.fun.next_reg_with_prefix("flb");
@@ -116,6 +123,19 @@ impl LlvmBackend {
         writeln!(out, "  br i1 {}, label %{}.body, label %{}", done_reg, label_prefix, exit_label).ok();
         writeln!(out, "{}.body:", label_prefix).ok();
 
+        // 2026-08-03 (loop-guard state-store fix): register the guard field →
+        // counter phi so body reads of `count` resolve to the live phi value,
+        // not a stale %State load. Without this, a `println!(count)` in the
+        // body prints 0 every iteration (the %State slot is only stored once,
+        // after the loop). Cleared before body emission, mirrors
+        // emit_countable_main.
+        self.fun.phi_field_regs.clear();
+        self.fun.backedge_field_regs.clear();
+        if let Some(cv) = counter_var {
+            self.fun.phi_field_regs.insert(cv.to_string(), counter_name.clone());
+            self.fun.backedge_field_regs.insert(cv.to_string(), next.clone());
+        }
+
         if use_phi {
             // Pure phi — no body emission, counter only
         } else if let Some(stmts) = body {
@@ -151,12 +171,13 @@ impl LlvmBackend {
         total_const_name: Option<&str>,
         use_phi: bool,
         body: Option<&[Statement]>,
+        counter_var: Option<&str>,
     ) {
         self.emit_main_header(out, "#0", true);
         writeln!(out, "  %state = alloca %State, align 8").ok();
         self.emit_inline_init_stores(out, "%state");
         self.emit_folded_loop(out, txn_name, counter_idx, total_idx, total_const_name,
-            ".fmain", use_phi, body, 1, false, None);
+            ".fmain", use_phi, body, 1, false, None, counter_var);
         writeln!(out, "  ret i32 0").ok();
         writeln!(out, "}}").ok();
         writeln!(out).ok();
