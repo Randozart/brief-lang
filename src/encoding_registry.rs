@@ -1,13 +1,17 @@
 // ── Encoding Registry ──────────────────────────────────────────────────
 // 2026-07-18: All encoding names are quoted strings resolved through
-// config/encodings.toml. No hardcoded PascalCase table — the compiler
+// config/encodings.dbvl. No hardcoded PascalCase table — the compiler
 // knows zero encoding semantics. Each entry specifies:
 //   - char_width: 0 = variable-width (Index# delegates to runtime/stdlib)
 //                1+ = fixed-width (Index# emits direct GEP, O(1))
 //   - ops.index_at, ops.char_len: stdlib function names for runtime dispatch
 //
+// 2026-08-03 (Phase 3, data-brief-config plan): migrated from encodings.toml
+// to the flat .dbvl line-table form (`name: char_width; index_at; char_len;`).
+// The .toml remains until the parity test proves identical output.
+//
 // Lookup chain:
-//   1. config/encodings.toml (all names, quoted)
+//   1. config/encodings.dbvl (all names, quoted)
 //   2. char_width = 0 (conservative — delegate to stdlib)
 
 use std::collections::HashMap;
@@ -47,36 +51,33 @@ pub struct EncodingInfo {
     pub ops: EncodingOps,
 }
 
-/// Load config/encodings.toml. Returns empty map if file is missing.
+/// Load config/encodings.dbvl. Returns empty map if file is missing.
 fn config_encodings() -> HashMap<String, EncodingInfo> {
     let manifest_dir = match std::env::var("CARGO_MANIFEST_DIR") {
         Ok(d) => d,
         Err(_) => return HashMap::new(),
     };
-    let path = Path::new(&manifest_dir).join("config/encodings.toml");
+    let path = Path::new(&manifest_dir).join("config/encodings.dbvl");
     let content = match std::fs::read_to_string(&path) {
         Ok(c) => c,
         Err(_) => return HashMap::new(),
     };
-    let raw: HashMap<String, toml::Value> = match toml::from_str(&content) {
-        Ok(r) => r,
+    let db = match crate::dbrief::config_db::ConfigDb::from_str(&content) {
+        Ok(db) => db,
         Err(_) => return HashMap::new(),
     };
     let mut result = HashMap::new();
-    for (key, value) in raw {
-        if let Some(enc_key) = key.strip_prefix("encoding.") {
-            if let toml::Value::Table(table) = value {
-                let char_width = table.get("char_width")
-                    .and_then(|v| v.as_integer())
-                    .unwrap_or(0) as u64;
-                let index_mode = if char_width > 0 { IndexMode::Direct } else { IndexMode::Scan };
-                let ops = EncodingOps {
-                    index_at: table.get("ops").and_then(|v| v.get("index_at")).and_then(|v| v.as_str().map(|s| s.to_string())),
-                    char_len: table.get("ops").and_then(|v| v.get("char_len")).and_then(|v| v.as_str().map(|s| s.to_string())),
-                };
-                result.insert(enc_key.to_string(), EncodingInfo { char_width, index_mode, ops });
-            }
-        }
+    for key in db.keys() {
+        let Some(enc_key) = key.strip_prefix("encoding.") else {
+            continue;
+        };
+        let char_width = db.field_int(&key, 0).unwrap_or(0) as u64;
+        let index_mode = if char_width > 0 { IndexMode::Direct } else { IndexMode::Scan };
+        let ops = EncodingOps {
+            index_at: db.field_string(&key, 1).map(|s| s.to_string()),
+            char_len: db.field_string(&key, 2).map(|s| s.to_string()),
+        };
+        result.insert(enc_key.to_string(), EncodingInfo { char_width, index_mode, ops });
     }
     result
 }
@@ -127,5 +128,42 @@ mod tests {
         let info = get_encoding_info("ASCII");
         assert!(info.ops.index_at.is_none());
         assert!(info.ops.char_len.is_none());
+    }
+
+    #[test]
+    fn parity_encodings_dbvl_matches_toml() {
+        // Phase 3 migration gate: config/encodings.dbvl must produce exactly
+        // the char_width/ops map the .toml it replaces produces. The .toml is
+        // deleted only after this stays green.
+        let db_map = config_encodings();
+
+        // Parse the TOML with the pre-migration shape.
+        let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("config/encodings.toml");
+        let content = std::fs::read_to_string(&path).unwrap();
+        let raw: HashMap<String, toml::Value> = toml::from_str(&content).unwrap();
+        let mut toml_map = HashMap::new();
+        for (key, value) in raw {
+            if let Some(enc_key) = key.strip_prefix("encoding.") {
+                if let toml::Value::Table(table) = value {
+                    let char_width = table.get("char_width").and_then(|v| v.as_integer()).unwrap_or(0) as u64;
+                    let index_mode = if char_width > 0 { IndexMode::Direct } else { IndexMode::Scan };
+                    let ops = EncodingOps {
+                        index_at: table.get("ops").and_then(|v| v.get("index_at")).and_then(|v| v.as_str().map(|s| s.to_string())),
+                        char_len: table.get("ops").and_then(|v| v.get("char_len")).and_then(|v| v.as_str().map(|s| s.to_string())),
+                    };
+                    toml_map.insert(enc_key.to_string(), EncodingInfo { char_width, index_mode, ops });
+                }
+            }
+        }
+
+        assert_eq!(db_map.len(), toml_map.len());
+        for (name, expected) in &toml_map {
+            let actual = db_map.get(name)
+                .unwrap_or_else(|| panic!("encoding '{}' missing from encodings.dbvl", name));
+            assert_eq!(actual.char_width, expected.char_width);
+            assert_eq!(actual.index_mode, expected.index_mode);
+            assert_eq!(actual.ops.index_at, expected.ops.index_at);
+            assert_eq!(actual.ops.char_len, expected.ops.char_len);
+        }
     }
 }

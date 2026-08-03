@@ -1,0 +1,33 @@
+// ── Encoding Config ──────────────────────────────────────────────────────
+// 2026-07-18: All encoding definitions. No hardcoded PascalCase table in the
+// compiler — every encoding is resolved through this file.
+//
+// 2026-08-03 (Phase 3, data-brief-config plan): migrated from encodings.toml.
+// Each line is `<name>: <char_width>; <ops.index_at>; <ops.char_len>;` in the
+// flat .dbvl line-table form. The `encoding.` prefix on keys matches the TOML
+// table names the loader strips. `ops` fields are optional — when absent the
+// backend falls back to byte-level ops. The .toml remains until parity is
+// proven (config_db::config_encodings parity test).
+//
+// char_width:
+//   0 = variable-width encoding (Index# delegates to stdlib or runtime scan)
+//   1+ = fixed-width encoding (Index# emits direct GEP, O(1))
+//
+// ops.index_at : stdlib function for Index#(s, i) -> char at byte offset
+// ops.char_len : stdlib function for Length#(s) -> character count
+// Ops are optional — when absent, the backend falls back to byte-level ops.
+// Fixed-width encodings (char_width > 0) never need ops — compiler emits GEP.
+
+encoding.UTF-8: 0; std.encoding.UTF8.index_at; std.encoding.UTF8.char_count;
+encoding.ASCII: 1;
+encoding.Latin1: 1;
+encoding.UTF-16: 0; std.encoding.UTF16.index_at; std.encoding.UTF16.char_count;
+encoding.UTF-32: 4;
+encoding.shift_jis: 0; std.encoding.shift_jis.index_at; std.encoding.shift_jis.char_count;
+encoding.windows_1252: 1;
+encoding.iso_8859_15: 1;
+encoding.utf_16le: 0;
+encoding.utf_16be: 0;
+encoding.euc_jp: 0;
+encoding.gb2312: 0;
+encoding.koi8_r: 1;
