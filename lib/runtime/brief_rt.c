@@ -722,3 +722,17 @@ int64_t __brief_now(void) {
     clock_gettime(CLOCK_MONOTONIC, &ts);
     return (int64_t)ts.tv_sec * 1000000000LL + (int64_t)ts.tv_nsec;
 }
+
+/// Concatenate two nul-terminated C strings into a new heap buffer.
+/// 2026-08-03: the C_String sub-protocol's Concat cross-op binding — a C
+/// string is not [len][data], so the generic inline concat is wrong for it.
+char* brief_cstring_concat(const char* a, const char* b) {
+    size_t la = a ? strlen(a) : 0;
+    size_t lb = b ? strlen(b) : 0;
+    char* out = (char*)malloc(la + lb + 1);
+    if (!out) return NULL;
+    if (la) memcpy(out, a, la);
+    if (lb) memcpy(out + la, b, lb);
+    out[la + lb] = '\0';
+    return out;
+}

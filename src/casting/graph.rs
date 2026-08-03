@@ -111,6 +111,13 @@ pub struct CastingGraph {
     /// so a cast a → b through the base is a ZERO delta (identity). The
     /// `<<1`/`>>1` example: two sub-types whose encode/decode cancel are 1-to-1.
     inverse_pairs: HashSet<(String, String, String)>,
+
+    /// 2026-08-03 (P1.4): cross-variant op overrides from `proto` declarations
+    /// (`proto C_String: #String { op Concat(#String) = cstring_concat(#L,#R) }`).
+    /// (category, variant) → op name → binding fn. An op on a sub-protocol
+    /// value prefers its variant's own op (zero cast) — "adopt whatever
+    /// operations are most convenient."
+    variant_cross_ops: HashMap<(String, String), HashMap<String, String>>,
 }
 
 impl CastingGraph {
@@ -124,6 +131,7 @@ impl CastingGraph {
             cast_from_bit_overrides: HashMap::new(),
             protocol_llvm_types: HashMap::new(),
             inverse_pairs: HashSet::new(),
+            variant_cross_ops: HashMap::new(),
         };
         graph.seed_base_lanes();
         graph.seed_defaults();
@@ -396,6 +404,26 @@ impl CastingGraph {
                     .push(rev_step);
             }
         }
+
+        // 2026-08-03 (P1.4): cross-variant op overrides — `op Concat(#String) =
+        // cstring_concat(#L, #R)` lets a sub-protocol value use its own
+        // operation (zero cast) instead of casting to the base first.
+        for op in &pd.cross_ops {
+            let Some(fn_name) = Self::cross_op_fn(&op.impl_args) else { continue };
+            self.variant_cross_ops
+                .entry((pd.category.clone(), pd.name.clone()))
+                .or_default()
+                .insert(op.op.clone(), fn_name);
+        }
+    }
+
+    /// Look up a cross-variant op override: (category, variant, op name) →
+    /// binding fn. `C_String`/`Concat` → `cstring_concat`.
+    pub fn get_variant_op(&self, category: &str, variant: &str, op_name: &str) -> Option<&str> {
+        self.variant_cross_ops
+            .get(&(category.to_string(), variant.to_string()))
+            .and_then(|ops| ops.get(op_name))
+            .map(|s| s.as_str())
     }
 
     // ── Type-Level CastFrom(#Bit) Override Registration ────────────────
@@ -430,6 +458,20 @@ impl CastingGraph {
     /// Whether (category, a, b) is a proven inverse pair (a → b is zero-cost).
     pub fn is_inverse_pair(&self, category: &str, a: &str, b: &str) -> bool {
         self.inverse_pairs.contains(&(category.to_string(), a.to_string(), b.to_string()))
+    }
+
+    /// 2026-08-03 (P1.4): extract the binding function name from a cross-op's
+    /// `impl_args` (`= cstring_concat(#L, #R)` → "cstring_concat"). Accepts a
+    /// bare identifier or a call list whose first element is the function name.
+    fn cross_op_fn(impl_args: &Option<PropertyValue>) -> Option<String> {
+        match impl_args {
+            Some(PropertyValue::Identifier(n)) => Some(n.clone()),
+            Some(PropertyValue::List(items)) => match items.first() {
+                Some(PropertyValue::Identifier(n)) => Some(n.clone()),
+                _ => None,
+            },
+            _ => None,
+        }
     }
 
     // ── Path Resolution ────────────────────────────────────────────────
@@ -1005,5 +1047,48 @@ mod tests {
             Some(("String".to_string(), String::new())));
         assert_eq!(CastingGraph::parse_protocol_base(""), None);
         assert_eq!(CastingGraph::parse_protocol_base("<"), None);
+    }
+}
+
+#[cfg(test)]
+mod cross_op_tests {
+    use super::*;
+    use crate::ast::top::{CastDirection, CastEdge, CastBinding, OperatorDef, ProtocolDef};
+    use crate::ast::PropertyValue;
+
+    #[test]
+    fn test_get_variant_op() {
+        let mut graph = CastingGraph::new();
+        graph.register_protocol_def(&ProtocolDef {
+            name: "C_String".to_string(),
+            category: "String".to_string(),
+            contract: None,
+            cast_edges: vec![CastEdge {
+                direction: CastDirection::CastFrom,
+                target_category: "String".to_string(),
+                target_variant: "UTF8".to_string(),
+                binding: Some(CastBinding {
+                    fn_name: "str_to_c".to_string(),
+                    param: "#L".to_string(),
+                }),
+            }],
+            cross_ops: vec![OperatorDef {
+                op: "Concat".to_string(),
+                params: vec![],
+                pre: None,
+                suf: None,
+                impl_args: Some(PropertyValue::List(vec![
+                    PropertyValue::Identifier("cstring_concat".to_string()),
+                    PropertyValue::HashL,
+                    PropertyValue::HashR,
+                ])),
+                impl_name: String::new(),
+                span: None,
+            }],
+            span: None,
+        });
+        assert_eq!(graph.get_variant_op("String", "C_String", "Concat"), Some("cstring_concat"));
+        assert_eq!(graph.get_variant_op("String", "C_String", "Add"), None);
+        assert_eq!(graph.get_variant_op("String", "Other", "Concat"), None);
     }
 }

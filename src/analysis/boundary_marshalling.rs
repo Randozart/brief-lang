@@ -123,9 +123,22 @@ fn rewrite_expr(
                 *expr = name;
             }
         }
-        Expr::BinaryOp(_, l, r) => {
+        Expr::BinaryOp(kind, l, r) => {
             rewrite_expr(l, env, universe, graph, type_protocols);
             rewrite_expr(r, env, universe, graph, type_protocols);
+            // 2026-08-03 (P1.4): a concat on a boundary String variant (e.g.
+            // `CStr + CStr`, or `++`) uses the VARIANT's own cross-op
+            // (cstring_concat) — the generic inline concat treats the value
+            // as [len][data], which is wrong for a nul-terminated C string.
+            if matches!(kind, crate::ast::BinaryOpKind::Add | crate::ast::BinaryOpKind::Concat) {
+                let lt = expr_type_of(l, env, universe);
+                let rt = expr_type_of(r, env, universe);
+                if let Some(fn_name) = variant_concat_fn(graph, universe, type_protocols, &lt, &rt) {
+                    let lv = (**l).clone();
+                    let rv = (**r).clone();
+                    *expr = crate::ast::Expr::Call(fn_name, vec![lv, rv], None);
+                }
+            }
         }
         Expr::UnaryOp(_, inner) => rewrite_expr(inner, env, universe, graph, type_protocols),
         Expr::List(items) => {
@@ -164,6 +177,27 @@ fn resolve_category(
         }
         _ => graph.type_to_protocol(universe, ty),
     }
+}
+
+/// The Concat cross-op binding for an operand pair, when one is a boundary
+/// String variant that declares its own concat (e.g. CStr → cstring_concat).
+fn variant_concat_fn(
+    graph: &CastingGraph,
+    universe: &TypeUniverse,
+    type_protocols: &std::collections::HashMap<String, String>,
+    lt: &Type,
+    rt: &Type,
+) -> Option<String> {
+    let (lcat, lvar) = resolve_category(graph, universe, type_protocols, lt);
+    let (rcat, rvar) = resolve_category(graph, universe, type_protocols, rt);
+    if lcat != rcat || lcat != "String" {
+        return None;
+    }
+    let variant = if !lvar.is_empty() { lvar } else { rvar };
+    if variant.is_empty() {
+        return None;
+    }
+    graph.get_variant_op(&lcat, &variant, "Concat").map(str::to_string)
 }
 
 /// Resolve the binding function for a same-category representation cast:
