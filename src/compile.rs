@@ -384,6 +384,11 @@ pub fn compile_source(file_path: &str, source: &str, opts: &BuildOptions) -> Res
     // BinaryOp(Add) → Concat on the typed AST so the backend dispatches the
     // concat emitter (String operands are boxed to i64 before the binary op).
     brief_compiler::analysis::string_concat::rewrite_plus_concat(&mut items, &universe);
+    // 2026-08-03: same-category representation casts (`CStr as String`) become
+    // the graph-resolved binding calls (cstr_to_brief / str_to_c) — Brief's
+    // boxing loses the boundary type at codegen, so the marshalling decision
+    // (the casting graph's minimal path) is made on the typed AST.
+    brief_compiler::analysis::boundary_marshalling::rewrite_boundary_marshalling(&mut items, &universe);
 
     // ── Concurrency gate (Phase 3c, rule #21: no implicit concurrency) ──
     // Any pair of reactive txns that can fire together must be classified
@@ -1531,12 +1536,26 @@ fn compile_ll_to_binary(ll_path: &str, binary_path: &str, extra_objects: &[PathB
 /// -flto) and live in the .so; plain C hosts link the .a. Bridges with
 /// custom C frgns use the .so / clang.
 fn compile_ll_to_library(ll_path: &str, base: &str, _extra_objects: &[PathBuf]) -> Result<(), String> {
-    // Step 1: llc → PIC .o
+    // Step 1: optimize the IR, then codegen. 2026-08-03: `llc -O3` alone did
+    // NOT SROA the txn allocas in this LLVM (18.1.3) — the loop kept stack
+    // slots (2.2× slower than native). Running the IR pipeline via
+    // `opt -passes='default<O3>'` first produces the tight SSA loop, then
+    // llc codegens it.
+    let opt_path = format!("{}.opt.ll", base);
+    let mut opt = Command::new("opt");
+    opt.args(["-S", "-passes=default<O3>", "-o", &opt_path, ll_path]);
+    let status = opt.status()
+        .map_err(|e| format!("failed to invoke opt: {}", e))?;
+    if !status.success() {
+        let _ = std::fs::remove_file(&opt_path);
+        return Err(format!("opt failed for '{}'", ll_path));
+    }
     let o_path = format!("{}.o", base);
     let mut llc = Command::new("llc");
-    llc.args(["-filetype=obj", "-relocation-model=pic", "-o", &o_path, ll_path]);
+    llc.args(["-O2", "-filetype=obj", "-relocation-model=pic", "-o", &o_path, &opt_path]);
     let status = llc.status()
         .map_err(|e| format!("failed to invoke llc: {}", e))?;
+    let _ = std::fs::remove_file(&opt_path);
     if !status.success() {
         return Err(format!("llc failed for '{}'", ll_path));
     }
