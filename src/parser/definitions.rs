@@ -1509,7 +1509,16 @@ impl<'a> Parser<'a> {
             // Hashwords always sit left of what they attach to.
             match self.peek() {
                 Some(&Token::Identifier(ref s)) if s.starts_with('#') => {
-                    let proto = s.clone(); self.pos += 1;
+                    let mut proto = s.clone(); self.pos += 1;
+                    // 2026-08-03 (P1.4): variant base — `type CStr: #String<C_String>`
+                    // declares a sub-protocol representation, not just the category.
+                    if self.eat(&Token::Lt) {
+                        let variant = self.expect_identifier()?;
+                        if !self.eat_type_close() {
+                            return self.error_at_current("expected '>' in protocol variant base");
+                        }
+                        proto = format!("{}<{}>", proto, variant);
+                    }
                     protocol = Some(proto);
                     // Optional parent type after protocol hashword
                     match self.peek() {

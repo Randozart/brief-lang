@@ -78,6 +78,12 @@ pub struct TypecheckContext<'a> {
     /// members literal construction.
     type_protocols: HashMap<String, String>,
     regular_bindings: HashMap<String, Vec<crate::ast::top::OperatorBinding>>,
+    /// 2026-08-03 (P1.4): cross-variant op overrides from `proto` declarations
+    /// (`proto C_String: #String { op Concat(#String) = cstring_concat(#L,#R) }`).
+    /// Variant name → op name (e.g. "Add"/"Concat") → binding fn name. An op on
+    /// a sub-protocol value prefers its variant's own op (zero cast) — "adopt
+    /// whatever operations are most convenient."
+    variant_cross_ops: HashMap<String, HashMap<String, String>>,
 }
 
 impl<'a> TypecheckContext<'a> {
@@ -98,6 +104,7 @@ impl<'a> TypecheckContext<'a> {
             fn_param_types: HashMap::new(),
             current_output_type: None,
             type_protocols: HashMap::new(),
+            variant_cross_ops: HashMap::new(),
         }
     }
 
@@ -166,6 +173,25 @@ impl<'a> TypecheckContext<'a> {
         }
     }
 
+    /// 2026-08-03 (P1.4): the variant of a declared protocol string —
+    /// `#String<C_String>` → `Some("C_String")`, `#String` → `None`.
+    fn protocol_variant_of(proto: &str) -> Option<&str> {
+        let b = proto.trim_start_matches('#');
+        let lt = b.find('<')?;
+        let variant = b[lt + 1..].trim_end_matches('>');
+        if variant.is_empty() { None } else { Some(variant) }
+    }
+
+    /// The bare category of a declared protocol string —
+    /// `#String<C_String>` → `"String"`, `#String` → `"String"`.
+    fn protocol_category_of(proto: &str) -> &str {
+        let b = proto.trim_start_matches('#');
+        match b.find('<') {
+            Some(lt) => &b[..lt],
+            None => b,
+        }
+    }
+
     /// Protocol binding for a custom type via its declared protocol (own +
     /// parents). `MyNum : #Int` inherits `#Int`'s Add → `AddI64#`. Returns
     /// None for primordials (handled by `get_operator_intrinsic`) and
@@ -179,7 +205,27 @@ impl<'a> TypecheckContext<'a> {
             _ => return None,
         };
         let proto = self.declared_protocol_of(name)?;
-        protocol_binding(proto.trim_start_matches('#'), op_name)
+        // 2026-08-03: `+` is string concat for #String/#Data operands — resolve
+        // the Concat binding (and the variant's Concat cross-op) for "+".
+        let category = Self::protocol_category_of(proto);
+        let effective_op = if op_name == "Add" && (category == "String" || category == "Data") {
+            "Concat"
+        } else {
+            op_name
+        };
+        // 2026-08-03 (P1.4): a sub-protocol value (e.g. CStr: #String<C_String>)
+        // prefers its VARIANT's own cross-op override (zero cast) over the base
+        // binding. This is "adopt whatever operations are most convenient."
+        if let Some(variant) = Self::protocol_variant_of(proto) {
+            if let Some(fn_name) = self.variant_cross_ops.get(variant)
+                .and_then(|ops| ops.get(effective_op))
+            {
+                return Some(OpBinding::Function(fn_name.clone()));
+            }
+        }
+        // 2026-08-03: strip a `<variant>` suffix so a #String<C_String> type
+        // resolves the base #String protocol binding (Concat, Extract, ...).
+        protocol_binding(Self::protocol_category_of(proto), effective_op)
     }
 
     /// Does a declared operator parameter cover the operand type?
@@ -1604,7 +1650,21 @@ pub fn check_program(items: &[TopLevel], universe: &TypeUniverse) -> Result<(), 
     let mut all_type_members: HashMap<String, Vec<TopLevel>> = HashMap::new();
     let mut all_type_params: HashMap<String, Vec<String>> = HashMap::new();
     let mut all_type_protocols: HashMap<String, String> = HashMap::new();
+    // 2026-08-03 (P1.4): cross-variant op overrides from proto declarations —
+    // variant name → op name → binding fn (e.g. C_String → Concat →
+    // cstring_concat). An op on a sub-protocol value prefers its own variant's
+    // op (zero cast), falling back to the base binding via a delta cast.
+    let mut all_cross_ops: HashMap<String, HashMap<String, String>> = HashMap::new();
     for item in items {
+        if let TopLevel::ProtocolDef(pd) = item {
+            for op in &pd.cross_ops {
+                let Some(fn_name) = cross_op_fn_name(&op.impl_args) else { continue };
+                all_cross_ops
+                    .entry(pd.name.clone())
+                    .or_default()
+                    .insert(op.op.clone(), fn_name);
+            }
+        }
         if let TopLevel::TypeDef(td) = item {
             if !td.body.operators.is_empty() {
                 all_regular_ops.insert(td.name.clone(), td.body.operators.clone());
@@ -1657,6 +1717,7 @@ pub fn check_program(items: &[TopLevel], universe: &TypeUniverse) -> Result<(), 
             item, universe, &state_bindings, &fn_return_types, &fn_param_types,
             &all_parse_bindings, &all_type_parents, &all_regular_ops, &all_regular_bindings,
             &all_type_slots, &all_type_members, &all_type_params, &all_type_protocols,
+            &all_cross_ops,
         ) {
             errors.push(e);
         }
@@ -1736,6 +1797,21 @@ pub fn check_program(items: &[TopLevel], universe: &TypeUniverse) -> Result<(), 
 }
 
 /// Type-check a top-level item.
+/// 2026-08-03 (P1.4): extract the binding function name from a cross-op's
+/// `impl_args` (`= cstring_concat(#L, #R)` → "cstring_concat"). Accepts a bare
+/// identifier or a call list whose first element is the function name; other
+/// shapes yield None (the cross-op is skipped, the base binding is used).
+fn cross_op_fn_name(impl_args: &Option<PropertyValue>) -> Option<String> {
+    match impl_args {
+        Some(PropertyValue::Identifier(n)) => Some(n.clone()),
+        Some(PropertyValue::List(items)) => match items.first() {
+            Some(PropertyValue::Identifier(n)) => Some(n.clone()),
+            _ => None,
+        },
+        _ => None,
+    }
+}
+
 fn check_top_level(
     item: &TopLevel,
     universe: &TypeUniverse,
@@ -1750,6 +1826,7 @@ fn check_top_level(
     all_type_members: &HashMap<String, Vec<TopLevel>>,
     all_type_params: &HashMap<String, Vec<String>>,
     all_type_protocols: &HashMap<String, String>,
+    all_cross_ops: &HashMap<String, HashMap<String, String>>,
 ) -> Result<(), TypeError> {
     let mut ctx = TypecheckContext::new(universe);
     // 2026-07-27: Inject pre-collected parse bindings and type parents.
@@ -1766,6 +1843,7 @@ fn check_top_level(
     ctx.type_params = all_type_params.clone();
     ctx.fn_param_types = fn_param_types.clone();
     ctx.type_protocols = all_type_protocols.clone();
+    ctx.variant_cross_ops = all_cross_ops.clone();
     // 2026-07-14: Inject state variable bindings so transactions/defns can reference them.
     for (name, ty) in state_bindings {
         ctx.bindings.insert(name.clone(), ty.clone());
@@ -1801,7 +1879,7 @@ fn check_top_level(
             Ok(())
         }
         // 2026-07-25: Unwrap exports so exported defns are type-checked.
-        TopLevel::Export(e) => check_top_level(&e.inner, universe, state_bindings, fn_return_types, fn_param_types, all_parse_bindings, all_type_parents, all_regular_ops, all_regular_bindings, all_type_slots, all_type_members, all_type_params, all_type_protocols),
+        TopLevel::Export(e) => check_top_level(&e.inner, universe, state_bindings, fn_return_types, fn_param_types, all_parse_bindings, all_type_parents, all_regular_ops, all_regular_bindings, all_type_slots, all_type_members, all_type_params, all_type_protocols, all_cross_ops),
         TopLevel::Transaction(txn) => {
             for (name, ty) in &txn.parameters {
                 ctx.bindings.insert(name.clone(), ty.clone());

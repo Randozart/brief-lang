@@ -94,6 +94,11 @@ pub fn protocol_binding(category: &str, op_name: &str) -> Option<OpBinding> {
         ("Bool", "Or") => Some(OpBinding::Intrinsic("OrI1#".into())),
         ("Char", "Eq") => Some(OpBinding::Intrinsic("EqI32#".into())),
         ("String", "Concat") => Some(OpBinding::Intrinsic("StringConcat#".into())),
+        // 2026-08-03: `+` is string concat for #String operands — the `++`/
+        // Concat operation, resolved at the binding table so BOTH the builtin
+        // String path (get_operator_intrinsic) and the typechecker's
+        // variant-aware path get it from one source.
+        ("String", "Add") => Some(OpBinding::Intrinsic("StringConcat#".into())),
         ("String", "Eq") => Some(OpBinding::Intrinsic("StringEq#".into())),
         // 2026-08-01 (B1): #String bitwise defaults — & | ^ ~ operate on the
         // content bytes and return a new String of the same length (see

@@ -393,6 +393,14 @@ fn eval_binary_op(
 
     match kind {
         BinaryOpKind::Add => {
+            // 2026-08-03: `+` is string concat for #String/#Data operands (the
+            // Concat op). The backend routes +-on-strings to concat via the
+            // string_concat rewrite; the interpreter must match (rule 4).
+            if let (Some(a), Some(b)) = (lv.string_bytes(heap), rv.string_bytes(heap)) {
+                let mut out = a;
+                out.extend_from_slice(&b);
+                return Ok(Value::bits(out));
+            }
             // Simplified: try arithmetic, fall back to intrinsic
             let la = lv.as_i64();
             let ra = rv.as_i64();
@@ -400,6 +408,16 @@ fn eval_binary_op(
                 (Some(a), Some(b)) => Ok(i64_to_bits(a.wrapping_add(b))),
                 _ => execute_intrinsic("Add#", &[lv, rv], heap),
             }
+        }
+        BinaryOpKind::Concat => {
+            // 2026-08-03: `++`/Concat — string concatenation (interpreter
+            // reference for the backend's Concat emitter).
+            if let (Some(a), Some(b)) = (lv.string_bytes(heap), rv.string_bytes(heap)) {
+                let mut out = a;
+                out.extend_from_slice(&b);
+                return Ok(Value::bits(out));
+            }
+            execute_intrinsic("Concat#", &[lv, rv], heap)
         }
         BinaryOpKind::Sub => {
             let la = lv.as_i64();
@@ -775,6 +793,29 @@ mod tests {
             Box::new(Expr::Decimal(1)),
         );
         assert_eq!(eval1(&add).as_i64(), Some(66));
+    }
+
+    #[test]
+    fn test_plus_strings_concat() {
+        // 2026-08-03: `+` is string concat for #String operands.
+        let expr = Expr::BinaryOp(
+            BinaryOpKind::Add,
+            Box::new(Expr::Quoted(b"foo".to_vec())),
+            Box::new(Expr::Quoted(b"bar".to_vec())),
+        );
+        let result = eval1(&expr);
+        assert_eq!(result.string_bytes(&VirtualHeap::new()), Some(b"foobar".to_vec()));
+    }
+
+    #[test]
+    fn test_plus_ints_still_add() {
+        // Numeric + stays arithmetic.
+        let expr = Expr::BinaryOp(
+            BinaryOpKind::Add,
+            Box::new(Expr::Decimal(20)),
+            Box::new(Expr::Decimal(22)),
+        );
+        assert_eq!(eval1(&expr).as_i64(), Some(42));
     }
 
     #[test]

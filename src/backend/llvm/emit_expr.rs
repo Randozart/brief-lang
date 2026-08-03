@@ -2383,6 +2383,12 @@ impl LlvmBackend {
         }
         match kind {
             crate::ast::BinaryOpKind::Add => {
+                // 2026-08-03: `+` is string concat for #String/#Data operands
+                // (the `++`/Concat operation; + reads naturally and resolves
+                // to the same concat binding in the typechecker).
+                if self.is_string_operand(&l.ty) || self.is_string_operand(&r.ty) {
+                    return self.emit_inline_concat(out, indent, &l, &r);
+                }
                 // 2026-07-17: Pointer-offset arithmetic: `buf + N` emits GEP.
                 // When one operand is Ptr<T> and the other is Int, emit:
                 //   %gep = getelementptr T, ptr %ptr, i64 %offset
