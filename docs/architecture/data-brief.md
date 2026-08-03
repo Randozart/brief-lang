@@ -505,16 +505,73 @@ admin: Alice Smith; 30;    // key = "admin", name = "Alice Smith"
 
 The explicit key overrides the schema-derived key.
 
-### 7.4 Why No `" "` in `.dbvl`
+### 7.4 Quoted Values in `.dbvl`
 
-Quoted strings are not supported in `.dbvl` — not even as a parser flag. The
-format is designed for single-pass streaming parse. If data contains `;` or
-`>` at line start, use `.dbv` instead. This keeps the `.dbvl` parser at
-~40 lines of code in any language.
+`.dbvl` defaults to bare tokens for single-pass streaming parse. When a line
+must carry data containing syntax characters (`;`, `}`, `{`), the config
+loaders enable the `--quoted` parser flag (`ConfigDb::from_quoted_str` /
+`parse_document_quoted`). This is the migration seam that lets IR-template
+values live in `.dbvl`:
+
+```
+pool_serial: "%{v}_p = call ptr @pool_alloc(i64 {size})\n%{v} = ptrtoint ptr %{v}_p to i64"; none;
+```
+
+The `" "` string may contain `;`, `}`, `{`, `:` and `\n` escapes. Without the
+flag, the `"` is a literal character in a bare token (almost never what the
+user wants). See §3.4.
 
 ---
 
-## 8. Canonical Form
+## 8. Universal Config (`.dbvl` line tables)
+
+2026-08-03 (plan `docs/plans/2026-08-03-data-brief-config-and-board-hardware-
+map.md`): Data Brief is the compiler's universal config format. Every
+`config/*.toml` was migrated to a flat `.dbvl` line table; the `.toml` files
+are deleted and the parity (now golden) tests lock the exact values.
+
+Each config is a single shared loader (`ConfigDb`) with a flat `key: v; v2; ...;`
+row per line, two key families:
+
+- **Extension/registry entries** — `.bv: llvm; --budget 256; prelude env print
+  entry script; none; 50;`
+- **Dotted-prefix tables** — `target.x86_64: 16; 4.0; 4;`
+  (`encoding.UTF-8`, `alloc.pool_serial`, `[modules]` → plain `name: path;`)
+
+Rules the migrated configs follow:
+
+1. **`//` comments only.** `#` is NOT a comment in the v2 grammar — a `#` line
+   is a bare token that swallows the next keyed line (locked by
+   `only_double_slash_comments_are_skipped`).
+2. **Flattened dotted keys** replace nested tables: `target.x86_64`,
+   `encoding.UTF-8`. Hyphenated (`x86_64-linux`, `from-bits`) and leading-dot
+   (`.bv`) keys parse.
+3. **Space-separated lists** round-trip as one String field; consumers split
+   (the parser has no array grammar).
+4. **Protocol map names are quoted** in quoted mode (`{ "#System": "c" }`),
+   because `#` is not an identifier char.
+5. **IR templates require quoted mode** — `{v}`/`{size}` braces would be taken
+   as a nested sub-record in bare mode (`bare_mode_rejects_templates_with_braces`).
+
+The seven config files (all `.dbvl`):
+
+| File | Row shape |
+|------|-----------|
+| `config/targets.dbvl` | `<.ext>: <backend>; <defaults>; <plugins>; [asm]; [samples];` + `target.<prefix>: <float_regs>; <density>; <vec_min_width>;` |
+| `config/module-registry.dbvl` | `<name>: <std/path.bv>;` |
+| `config/protocols.dbvl` | `<triple>: { "<proto>": "<lib>"; };` (quoted) |
+| `config/encodings.dbvl` | `<name>: <char_width>; [index_at]; [char_len];` |
+| `config/ir-lowering.dbvl` | `<tunable>: <value>;` |
+| `config/alloc-strategies.dbvl` | `<name>: "<IR template>"; [free];` (quoted) |
+| `config/address-map.dbvl` | `<KEY>: <0x...>; <block_size>;` |
+
+The loader is `src/dbrief/config_db.rs` (`ConfigDb`), shared by all consumers;
+`resolve_config_file` resolves `.dbvl`/`.dbv` in the resolved config dir
+(`--config-dir` / profile / baked). `init_profile` seeds all seven.
+
+---
+
+## 9. Canonical Form
 
 Two `.dbv` or `.dbvl` files with the same data must produce the same canonical
 binary representation. This is critical for incremental builds and caching.
@@ -553,14 +610,14 @@ as Person {
 
 ---
 
-## 9. BeastDB Binary Format (`.beastdb`)
+## 10. BeastDB Binary Format (`.beastdb`)
 
 *Concept — implementation deferred to a dedicated plan.*
 
 BeastDB is a compiled binary representation of `.dbv`/`.dbvl` data designed
 for memory-mapped, zero-deserialization reads.
 
-### 9.1 Header
+### 10.1 Header
 
 ```
 ┌──────────────────────────────────────┐
@@ -574,7 +631,7 @@ for memory-mapped, zero-deserialization reads.
 └──────────────────────────────────────┘
 ```
 
-### 9.2 Key Dictionary
+### 10.2 Key Dictionary
 
 The key dictionary maps string keys to `u16` integer IDs. It is embedded in
 the header so the binary is self-contained.
@@ -585,7 +642,7 @@ Key 1 → "bob"     (ID = 1)
 ...
 ```
 
-### 9.3 Bit-Mask Presence Layout
+### 10.3 Bit-Mask Presence Layout
 
 Each record starts with a `u32` bit-mask. Bit N is 1 if field ID N is present
 in this record, 0 otherwise. Fields are packed sequentially in the order of
@@ -599,7 +656,7 @@ Record:
                        (field[1] absent — bit 1 = 0, no storage)
 ```
 
-### 9.4 Sparse Lookup
+### 10.4 Sparse Lookup
 
 Finding field N in a record:
 
@@ -611,21 +668,21 @@ u32 offset = popcount(shifted);  // single-cycle hardware instruction
 
 The field's data is at `record_ptr + 4 + offset` (after the mask).
 
-### 9.5 Schema Evolution
+### 10.5 Schema Evolution
 
 Adding a field assigns the next available bit. Old records have bit = 0 for
 the new field, which the popcount query handles automatically — the offset
 computation skips absent fields without needing to rewrite old records.
 
-### 9.6 Max Fields
+### 10.6 Max Fields
 
 128 fields per schema (u32 bit-mask, bits 0-127 reserved).
 
 ---
 
-## 10. Parser Architecture (Reference)
+## 11. Parser Architecture (Reference)
 
-### 10.1 `.dbvl` Parser
+### 11.1 `.dbvl` Parser
 
 ```
 for each line in file:
@@ -642,7 +699,7 @@ for each line in file:
 
 No state machine beyond directive tracking. ~40 lines in C/Rust/Brief.
 
-### 10.2 `.dbv` Parser
+### 11.2 `.dbv` Parser
 
 ```
 parse_schema_declaration()  // optional
@@ -676,7 +733,7 @@ parse_field_list() {
 }
 ```
 
-### 10.3 Error Handling
+### 11.3 Error Handling
 
 All parse errors must:
 1. Report the file path and line number
@@ -685,9 +742,9 @@ All parse errors must:
 
 ---
 
-## 11. Examples
+## 12. Examples
 
-### 11.1 FFI Bindings (`.dbv`)
+### 12.1 FFI Bindings (`.dbv`)
 
 ```
 schema FnBinding (name) {
@@ -711,7 +768,7 @@ as FnBinding {
 };
 ```
 
-### 11.2 GLUE Adapter Registry (`.dbvl`)
+### 12.2 GLUE Adapter Registry (`.dbvl`)
 
 ```
 >schema RegistryEntry from "glue/registry.dbv"
@@ -720,7 +777,7 @@ python; glue/python/types.bv;  py;  any;                       { Int: int64_t; F
 node;  glue/node/types.bv;    js;  any;                       { Int: int64_t; Float: double; Bool: bool; };
 ```
 
-### 11.3 Hardware Register Map (`.dbv`)
+### 12.3 Hardware Register Map (`.dbv`)
 
 ```
 schema Register {
@@ -740,7 +797,7 @@ as Device {
 };
 ```
 
-### 11.4 Standalone Entries
+### 12.4 Standalone Entries
 
 ```
 config: AppConfig { debug: true; budget: 256; threads: 4; };
@@ -749,35 +806,35 @@ target: Target { arch: x86_64; os: linux; };
 
 ---
 
-## 12. Design Decisions
+## 13. Design Decisions
 
-### 12.1 Why `;` Instead of `,`
+### 13.1 Why `;` Instead of `,`
 
 Commas appear frequently in data (lists, function arguments). Semicolons are
 rare in identifiers, paths, and type names. Using `;` as the universal
 separator means bare tokens are the default and escapes are rarely needed.
 
-### 12.2 Why No `/ /` Line Continuation
+### 13.2 Why No `/ /` Line Continuation
 
 Every entry is self-contained. Line continuation would require the parser to
 track state across lines, which conflicts with the single-pass streaming
 design of `.dbvl` and the brace-delimited clarity of `.dbv`.
 
-### 12.3 Why Schema is Never Inferred
+### 13.3 Why Schema is Never Inferred
 
 Inference is unsound without heuristics. A field containing `42` could be
 `Int`, `String`, `Float`, or `UInt`. The compiler must never guess — schema
 must always be explicitly declared or imported. This eliminates an entire
 class of silent miscompilation bugs.
 
-### 12.4 Why `.dbvl` Has No Nested Blocks
+### 13.4 Why `.dbvl` Has No Nested Blocks
 
 Line-oriented format means one entry per line. Nested blocks belong in `.dbv`
 where braces and multiple lines are expected. A `.dbvl` line with `{ }` would
 require the parser to track brace depth across line boundaries, defeating the
 purpose of the line-per-record design.
 
-### 12.5 Parser Error Messages
+### 13.5 Parser Error Messages
 
 The DBrief parser produces contextual errors for common mistakes. Each error
 must include: file path, line number, offending byte range, and what was
@@ -796,7 +853,7 @@ expected vs found.
 
 ---
 
-## 13. Migration from Legacy Syntax
+## 14. Migration from Legacy Syntax
 
 The old Data Brief syntax (`docs/DATABRIEF.md`, `docs/DATABRIEF_GUIDE.md`) used
 commas, quotes, and `schema { }` blocks with different token rules. Migration:
@@ -815,15 +872,15 @@ files — the resulting binary is identical regardless of input format.
 
 ---
 
-## 14. Future Directions
+## 15. Future Directions
 
-### 14.1 Schema Registry
+### 15.1 Schema Registry
 
 A `.brief/schemas/` directory (similar to `.brief/registry/`) for storing
 reusable schemas. `schema Person from "std/person.dbv"` resolves against the
 registry when the relative path fails.
 
-### 14.2 Byte Prefixes for Typed Bare Tokens
+### 15.2 Byte Prefixes for Typed Bare Tokens
 
 Optional type hint prefixes for bare tokens:
 - `i42` — literal Int
@@ -833,7 +890,7 @@ Optional type hint prefixes for bare tokens:
 These are consumed by the schema-aware consumer, not the parser. The parser
 sees them as bare tokens.
 
-### 14.3 Streaming `.dbvl` with `>checkpoint`
+### 15.3 Streaming `.dbvl` with `>checkpoint`
 
 A `>checkpoint N` directive that tells the parser "flush all prior entries,
 this is a safe resumption point" — enabling streaming processing of

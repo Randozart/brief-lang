@@ -1,7 +1,7 @@
 # Plan: Data Brief as Universal Config + Board-Owned Hardware Map
 
 **Date:** 2026-08-03
-**Status:** Phase 3 complete — all six TOML configs migrated to `.dbvl` and deleted (`8b52f0ff` `a37923af` `4e07e82d` `7d426e22` `aa56e9a5` `d648f3f2`); parity tests converted to golden tests; `address-map.toml` migrated to `.dbvl` and deleted; TOML fallback branches removed. Phase 4 (docs) next.
+**Status:** Phase 3 complete — all six TOML configs migrated to `.dbvl` and deleted (`8b52f0ff` `a37923af` `4e07e82d` `7d426e22` `aa56e9a5` `d648f3f2`); parity tests converted to golden tests; `address-map.toml` migrated to `.dbvl` and deleted; TOML fallback branches removed. Phase 4 docs done — plan complete (`.ebv` runtime hand-off is a follow-up).
 **Branch:** `feat/data-brief-config` (new)
 
 **This is the AUTHORITATIVE record** for two coupled streams that share one
@@ -330,12 +330,19 @@ so the five clean ones are not blocked by the IR one.
 
 ### Phase 4 — Documentation + `.ebv` runtime hand-off
 
-- Update `docs/architecture/data-brief.md`: note it is now the universal config
-  format (`schema RegistryEntry` / `as` per migrated config).
-- Update config-loading docs (the `config_resolver.rs` chain).
-- Write the follow-up-plan outline for the **per-target intrinsic runtime**
+- ✅ Update `docs/architecture/data-brief.md`: note it is now the universal config
+  format — new §8 "Universal Config (`.dbvl` line tables)" documents the seven
+  config files, their row shapes, and the conventions (// comments, flattened
+  dotted keys, space-separated lists, quoted protocol map names, quoted IR
+  templates). §7.4 rewritten: `.dbvl` DOES support quoted values via the
+  `--quoted` flag (`ConfigDb::from_quoted_str`), correcting the old "no quotes
+  in .dbvl" claim that the migrated protocols/alloc-strategies configs
+  contradict. Sections renumbered 8→15.
+- ✅ Update config-loading docs (the `config_resolver.rs` chain) — `resolve_config`
+  and `load_string_registry` doc comments now state the DB-only resolution.
+- ⏳ Write the follow-up-plan outline for the **per-target intrinsic runtime**
   (`.ebv` `Malloc#`/`Print#`/`Now#` symbol-map and no-C runtime), referencing the
-  Phase 3 DB convention.
+  Phase 3 DB convention — OUT OF SCOPE for this session.
 
 ---
 
