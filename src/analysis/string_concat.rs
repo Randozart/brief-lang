@@ -129,13 +129,11 @@ fn expr_is_string(
 
 /// Is a type a #String/#Data-category value? Mirrors the casting graph's
 /// base-chain walk (no graph needed — checks the universe's Cast.# properties
-/// and the declared base), plus the bootstrap String/Data names.
+/// and the declared base). The bootstrap String/Data entries carry
+/// Cast.#String/Cast.#Data, so no type names are matched (rule 18).
 pub fn is_string_category(ty: &Type, universe: &TypeUniverse) -> bool {
     match ty {
         Type::Custom(name) => {
-            if name == "String" || name == "Data" {
-                return true;
-            }
             universe.get(name).map(|rt| {
                 rt.properties.contains_key("Cast.#String")
                     || rt.properties.contains_key("Cast.#Data")

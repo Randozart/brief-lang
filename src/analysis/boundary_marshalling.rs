@@ -162,12 +162,9 @@ fn resolve_category(
 ) -> (String, String) {
     match ty {
         Type::Custom(name) => {
-            if name == "String" {
-                return ("String".to_string(), String::new());
-            }
-            if name == "Data" {
-                return ("Data".to_string(), String::new());
-            }
+            // Declared boundary types resolve via their protocol string; the
+            // bootstrap String/Data resolve via the graph's Cast.# property.
+            // No type names are matched (rule 18).
             if let Some(proto) = type_protocols.get(name) {
                 if let Some((cat, var)) = CastingGraph::parse_protocol_base(proto) {
                     return (cat, var);
