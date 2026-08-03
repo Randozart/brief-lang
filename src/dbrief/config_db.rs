@@ -1,0 +1,375 @@
+// ── ConfigDb — DB-backed shared config/board loader ─────────────────────
+//
+// 2026-08-03 (Phase 1a, plan docs/plans/2026-08-03-data-brief-config-and-
+// board-hardware-map.md): the single routing point for reading .dbv/.dbvl
+// configuration and board-map files. It dispatches through the v2 parser
+// (`v2::parse_document` / `v2::parse_document_quoted`) and exposes a keyed
+// lookup by capitalized constant — the shape both the address resolver and
+// config consumers need. The TOML layer is migrated file-by-file onto this
+// loader; the compiler never parses TOML for the migrated set.
+//
+// Design notes:
+// - Each standalone `.dbvl` line parses as its own DataGroup holding one
+//   DataEntry (probe-verified 2026-08-03). `ConfigDb` flattens groups into
+//   a single key → entry index, so callers never see the grouping.
+// - Keys are normalized to uppercase at index time; lookups are
+//   case-insensitive (the resolver's `id.to_lowercase()` contract).
+// - `>schema Name from "path"` registers a schema-import (v2.rs:325 pushes
+//   the path into `doc.imports`); `resolve_schema_imports` pulls the
+//   referenced schemas in so `.dbvl` line-tables carry their field names.
+// - Hex literals parse as DataValue::String; typed accessors return the raw
+//   string and let the caller radix-parse (matches the resolver today).
+
+use crate::dbrief::v2::{parse_document, parse_document_quoted, DataEntry, DataField, DataValue, DbriefDocument};
+use std::collections::HashMap;
+use std::path::{Path, PathBuf};
+
+/// Keyed access to a parsed .dbv/.dbvl document.
+pub struct ConfigDb {
+    doc: DbriefDocument,
+    /// Uppercased key → index into `entries`.
+    index: HashMap<String, usize>,
+    /// Flat keyed entries in source order.
+    entries: Vec<DataEntry>,
+}
+
+impl ConfigDb {
+    /// Parse bare-token content (default mode, hex strings land as String).
+    pub fn from_str(content: &str) -> Result<Self, String> {
+        Self::from_doc(parse_document(content)?)
+    }
+
+    /// Parse with `--quoted` mode (allows `"..."` literals containing `;`/`}`).
+    pub fn from_quoted_str(content: &str) -> Result<Self, String> {
+        Self::from_doc(parse_document_quoted(content)?)
+    }
+
+    /// Read and parse a file, choosing quoted mode by `quoted`.
+    pub fn from_file(path: &Path, quoted: bool) -> Result<Self, String> {
+        let content = std::fs::read_to_string(path)
+            .map_err(|e| format!("cannot read '{}': {}", path.display(), e))?;
+        if quoted {
+            Self::from_quoted_str(&content)
+        } else {
+            Self::from_str(&content)
+        }
+    }
+
+    /// Build the flattened index from a parsed document.
+    fn from_doc(doc: DbriefDocument) -> Result<Self, String> {
+        let mut index = HashMap::new();
+        let mut entries = Vec::new();
+        for group in &doc.data_groups {
+            for entry in &group.entries {
+                let key = match &entry.key {
+                    Some(k) => k,
+                    None => continue,
+                };
+                let idx = entries.len();
+                entries.push(entry.clone());
+                index.insert(key.to_uppercase(), idx);
+            }
+        }
+        Ok(ConfigDb { doc, index, entries })
+    }
+
+    /// Pull in schemas referenced by `>schema Name from "path"` directives.
+    /// `search_paths` is tried in order, then the bare path. A missing schema
+    /// file is not an error — line-tables degrade to positional fields.
+    pub fn resolve_schema_imports(&mut self, search_paths: &[PathBuf]) {
+        let mut schemas = Vec::new();
+        for import_path in &self.doc.imports {
+            let resolved = search_paths
+                .iter()
+                .map(|p| p.join(import_path))
+                .chain(std::iter::once(PathBuf::from(import_path)))
+                .find(|p| p.exists());
+            let Some(sp) = resolved else { continue };
+            if let Ok(content) = std::fs::read_to_string(&sp) {
+                if let Ok(imported) = parse_document(&content) {
+                    schemas.extend(imported.schemas);
+                }
+            }
+        }
+        for schema in schemas {
+            if !self.doc.schemas.iter().any(|s| s.name == schema.name) {
+                self.doc.schemas.push(schema);
+            }
+        }
+    }
+
+    /// Number of keyed entries.
+    pub fn len(&self) -> usize {
+        self.entries.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.entries.is_empty()
+    }
+
+    /// Sorted key list (deterministic iteration).
+    pub fn keys(&self) -> Vec<String> {
+        let mut keys: Vec<String> = self.entries.iter().filter_map(|e| e.key.clone()).collect();
+        keys.sort();
+        keys
+    }
+
+    /// Case-insensitive keyed lookup (matches `resolve_address`'s lowercase
+    /// contract).
+    pub fn get(&self, key: &str) -> Option<&DataEntry> {
+        self.index.get(&key.to_uppercase()).map(|i| &self.entries[*i])
+    }
+
+    /// Positional field value at `idx`, if present.
+    pub fn field(&self, key: &str, idx: usize) -> Option<&DataValue> {
+        let entry = self.get(key)?;
+        match entry.fields.get(idx) {
+            Some(DataField::Positional(v)) | Some(DataField::Named(_, v)) => Some(v),
+            _ => None,
+        }
+    }
+
+    /// String field (hex literals arrive as String — caller radix-parses).
+    pub fn field_string(&self, key: &str, idx: usize) -> Option<&str> {
+        match self.field(key, idx) {
+            Some(DataValue::String(s)) => Some(s),
+            _ => None,
+        }
+    }
+
+    /// Integer field.
+    pub fn field_int(&self, key: &str, idx: usize) -> Option<i64> {
+        match self.field(key, idx) {
+            Some(DataValue::Int(n)) => Some(*n),
+            _ => None,
+        }
+    }
+
+    /// Raw parsed document (schemas, imports).
+    pub fn doc(&self) -> &DbriefDocument {
+        &self.doc
+    }
+}
+
+/// Resolve a logical config name to a concrete file in `config_dir`,
+/// preferring Data Brief extensions over the legacy TOML:
+/// `<name>.dbvl`, then `<name>.dbv`, then `<name>.toml`.
+///
+/// 2026-08-03 (Phase 1a): migration seams — as configs move TOML → DB,
+/// existing `--config-dir`/profile users keep working because the resolved
+/// path just changes extension. `"__baked__"` (the compile-time fallback
+/// marker from `config_resolver::resolve_config_dir`) maps to the repo's
+/// `config/` directory.
+pub fn resolve_config_file(config_dir: &Path, name: &str) -> Option<PathBuf> {
+    let dir = if config_dir.to_string_lossy() == "__baked__" {
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("config")
+    } else {
+        config_dir.to_path_buf()
+    };
+    for ext in [".dbvl", ".dbv", ".toml"] {
+        let candidate = dir.join(format!("{}{}", name, ext));
+        if candidate.exists() {
+            return Some(candidate);
+        }
+    }
+    None
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::dbrief::v2::DataValue;
+
+    const ADDRESSES: &str = "\
+>schema Device from \"map.dbv\"\n\
+UART0: 0xFFE01000; 0x18;\n\
+UART1: 0x40004400; 0x18;\n\
+TIMER: 0xFE002000; 0x4;\n";
+
+    #[test]
+    fn indexes_keyed_lines_case_insensitively() {
+        let db = ConfigDb::from_str(ADDRESSES).unwrap();
+        assert_eq!(db.len(), 3);
+
+        // Lookup by any case — the resolver contract.
+        let uart0 = db.get("UART0").unwrap();
+        assert_eq!(uart0.key.as_deref(), Some("UART0"));
+        assert_eq!(db.get("uart0").unwrap().key.as_deref(), Some("UART0"));
+        assert_eq!(db.get("Timer").unwrap().key.as_deref(), Some("TIMER"));
+        assert!(db.get("NOPE").is_none());
+    }
+
+    #[test]
+    fn typed_field_access_hex_string_int() {
+        let db = ConfigDb::from_str(ADDRESSES).unwrap();
+        // Hex literals arrive as String (parser behavior) — the caller
+        // radix-parses, exactly like resolve_address does today.
+        assert_eq!(db.field_string("UART0", 0), Some("0xFFE01000"));
+        assert_eq!(db.field_string("UART0", 1), Some("0x18"));
+        assert_eq!(db.field_string("TIMER", 1), Some("0x4"));
+        // Decimal literals arrive as Int.
+        let db = ConfigDb::from_str(">schema T\nX: 16; 0x20;\n").unwrap();
+        assert_eq!(db.field_int("X", 0), Some(16));
+        assert_eq!(db.field_string("X", 1), Some("0x20"));
+        // Out-of-range access is None, not a panic.
+        assert!(db.field("UART0", 9).is_none());
+    }
+
+    #[test]
+    fn keys_are_sorted_and_deterministic() {
+        let db = ConfigDb::from_str(ADDRESSES).unwrap();
+        assert_eq!(db.keys(), vec!["TIMER", "UART0", "UART1"]);
+    }
+
+    #[test]
+    fn quoted_mode_parses_escaped_strings() {
+        // alloc-strategies templates arrive as quoted values. Real templates
+        // start with `%{v}_p = ...` — the leading `%` keeps them out of the
+        // nested-block branch; the quoted string carries the `;`s and escapes.
+        let db = ConfigDb::from_quoted_str(
+            ">schema Strategy\n\
+             pool_serial: \"%{v}_p = call ptr @pool_alloc(i64 {size});\"; none;\n",
+        )
+        .unwrap();
+        let s = db.field_string("pool_serial", 0).unwrap();
+        assert!(s.contains("call ptr @pool_alloc"));
+        // The `;` inside the quoted template survives quoted-mode parsing.
+        assert!(s.contains(';'));
+    }
+
+    #[test]
+    fn quoted_mode_preserves_multiline_templates() {
+        // `\n` escapes inside quoted templates become real newlines.
+        let db = ConfigDb::from_quoted_str(
+            ">schema Strategy\n\
+             mmap_shared: \"%{v}_p = call ptr @mmap_shared(i64 {size})\\n%{v} = ptrtoint ptr %{v}_p to i64\";\n",
+        )
+        .unwrap();
+        let s = db.field_string("mmap_shared", 0).unwrap();
+        assert!(s.contains('\n'));
+        assert!(s.contains("ptrtoint ptr %{v}_p to i64"));
+    }
+
+    #[test]
+    fn bare_mode_rejects_templates_with_braces() {
+        // Without quoted mode, `{size}` is taken as a nested sub-record block
+        // and the trailing `}` errors. alloc-strategies templates therefore
+        // REQUIRE quoted mode — this is the migration gate for Phase 4.
+        let bare = ConfigDb::from_str(
+            ">schema Strategy\nHOT_LOOP: \"%{v}_p = call ptr @pool_alloc(i64 {size})\";\n",
+        );
+        assert!(bare.is_err(), "bare mode must reject brace-containing templates");
+    }
+
+    #[test]
+    fn schema_imports_resolve_across_files() {
+        // Write a map.dbv + addresses.dbvl into a temp dir and resolve the
+        // `>schema Device from "map.dbv"` import.
+        let dir = std::env::temp_dir().join("brief-configdb-test");
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(
+            dir.join("map.dbv"),
+            "schema Device { base_addr: String; size: Int; };\n",
+        )
+        .unwrap();
+        std::fs::write(dir.join("addresses.dbvl"), ADDRESSES).unwrap();
+
+        let mut db = ConfigDb::from_file(&dir.join("addresses.dbvl"), false).unwrap();
+        db.resolve_schema_imports(&[dir.clone()]);
+        let doc = db.doc();
+        assert!(doc.schemas.iter().any(|s| s.name == "Device"));
+
+        // Cleanup.
+        let _ = std::fs::remove_file(dir.join("map.dbv"));
+        let _ = std::fs::remove_file(dir.join("addresses.dbvl"));
+        let _ = std::fs::remove_dir(&dir);
+    }
+
+    #[test]
+    fn missing_schema_import_is_not_fatal() {
+        let db = ConfigDb::from_str(
+            ">schema Device from \"no-such-file.dbv\"\nUART0: 0xFFE01000; 0x18;\n",
+        )
+        .unwrap();
+        let mut db = db;
+        db.resolve_schema_imports(&[]);
+        // Line still accessible by key.
+        assert_eq!(db.field_string("UART0", 0), Some("0xFFE01000"));
+    }
+
+    #[test]
+    fn resolve_config_file_prefers_db_over_toml() {
+        // Real baked config dir: prefers .dbvl/.dbv, falls back to .toml.
+        let baked = Path::new("__baked__");
+        // targets.toml still exists today — resolves to TOML until migrated.
+        let t = resolve_config_file(baked, "targets").unwrap();
+        assert_eq!(t.extension().unwrap().to_str(), Some("toml"));
+
+        // A name with no file anywhere resolves to None.
+        assert!(resolve_config_file(baked, "no-such-config").is_none());
+    }
+
+    #[test]
+    fn resolve_config_file_prefers_db_extension_in_dir() {
+        let dir = std::env::temp_dir().join("brief-configdb-resolve");
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("demo.toml"), "x = 1\n").unwrap();
+        std::fs::write(dir.join("demo.dbv"), "schema Demo { a: Int; };\n").unwrap();
+
+        let path = resolve_config_file(&dir, "demo").unwrap();
+        assert_eq!(path.file_name().unwrap().to_str(), Some("demo.dbv"));
+
+        // Cleanup.
+        let _ = std::fs::remove_file(dir.join("demo.toml"));
+        let _ = std::fs::remove_file(dir.join("demo.dbv"));
+        let _ = std::fs::remove_dir(&dir);
+    }
+
+    // ── Config-parity harness (Phase 1a) ──────────────────────────────────
+    //
+    // Proves a `.dbvl` address table loaded through ConfigDb yields exactly the
+    // addresses the current resolver produces from config/address-map.toml.
+    // Phase 2 retargets resolve_address onto the board's addresses.dbvl; this
+    // test locks the data contract so the swap is output-identical.
+
+    fn radix_parse_hex(s: &str) -> u64 {
+        let clean = s.trim_start_matches("0x").trim_start_matches("0X");
+        u64::from_str_radix(clean, 16).unwrap()
+    }
+
+    /// The address-map.toml contents as a .dbvl line-table (the Phase 2 board
+    /// form). Keys are CAPITALIZED constants per the plan.
+    const ADDRESS_MAP_DBVL: &str = "\
+>schema AddressEntry from \"map.dbv\"\n\
+UART: 0xFFE01000; 0x1000;\n\
+UART0: 0xFFE01000; 0x1000;\n\
+GPIO: 0xFE001000; 0x1000;\n\
+GPIO0: 0xFE001000; 0x1000;\n\
+TIMER: 0xFE002000; 0x1000;\n\
+TIMER0: 0xFE002000; 0x1000;\n\
+SPI: 0xFE003000; 0x1000;\n\
+SPI0: 0xFE003000; 0x1000;\n\
+I2C: 0xFE004000; 0x1000;\n\
+I2C0: 0xFE004000; 0x1000;\n\
+DMA: 0xFE005000; 0x1000;\n\
+DMA0: 0xFE005000; 0x1000;\n";
+
+    #[test]
+    fn parity_address_map_dbvl_matches_resolver() {
+        let db = ConfigDb::from_str(ADDRESS_MAP_DBVL).unwrap();
+        assert_eq!(db.len(), 12);
+
+        // Every name in config/address-map.toml resolves to the same address
+        // through the DB table as through the current resolver.
+        for name in ["uart", "uart0", "gpio", "gpio0", "timer", "timer0",
+                     "spi", "spi0", "i2c", "i2c0", "dma", "dma0"] {
+            let upper = name.to_uppercase();
+            let addr = db.field_string(&upper, 0).map(radix_parse_hex).unwrap();
+            assert_eq!(
+                addr,
+                crate::address_resolver::resolve_address(name),
+                "DB address for {name} diverges from current resolver"
+            );
+        }
+    }
+}

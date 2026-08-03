@@ -14,5 +14,6 @@
 
 pub mod v2;
 pub mod bridge;
+pub mod config_db;
 
 pub use v2::*;

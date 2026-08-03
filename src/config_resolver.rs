@@ -105,6 +105,17 @@ impl ConfigResolver {
         }
         HashMap::new()
     }
+
+    /// Resolve a logical config name against this session's resolved config
+    /// dir, preferring Data Brief (`.dbvl`/`.dbv`) over legacy TOML.
+    ///
+    /// 2026-08-03 (Phase 1a, plan docs/plans/2026-08-03-data-brief-config-and-
+    /// board-hardware-map.md): the migration seam for Phase 3. Existing
+    /// `--config-dir`/profile users keep working because only the resolved
+    /// extension changes; a config not yet migrated still resolves to TOML.
+    pub fn resolve_config(&self, name: &str) -> Option<PathBuf> {
+        crate::dbrief::config_db::resolve_config_file(&self.config_dir, name)
+    }
 }
 
 /// TOML structure for config/module-registry.toml
