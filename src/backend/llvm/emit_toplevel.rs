@@ -2764,6 +2764,17 @@ impl LlvmBackend {
         writeln!(out, "define dso_local void @__glue_release(i64 %frame_tag) local_unnamed_addr #0 {{").ok();
         writeln!(out, "  ret void").ok();
         writeln!(out, "}}").ok();
+        // 2026-08-03: host cancellation — raise/clear the process-global
+        // flag that CancelRequested#() polls. The state pointer is accepted
+        // (future: per-state flag) but unused; the flag is process-global.
+        writeln!(out, "define dso_local void @__brief_set_cancel(ptr %state, i32 %flag) local_unnamed_addr #0 {{").ok();
+        writeln!(out, "  store atomic i32 %flag, ptr @__brief_cancel_flag seq_cst, align 4").ok();
+        writeln!(out, "  ret void").ok();
+        writeln!(out, "}}").ok();
+        writeln!(out, "define dso_local void @__brief_clear_cancel(ptr %state) local_unnamed_addr #0 {{").ok();
+        writeln!(out, "  store atomic i32 0, ptr @__brief_cancel_flag seq_cst, align 4").ok();
+        writeln!(out, "  ret void").ok();
+        writeln!(out, "}}").ok();
     }
 
     /// Emit a standalone `@cell_persistent_ticks(ptr %state)` function that runs

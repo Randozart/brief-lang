@@ -2298,6 +2298,9 @@ impl LlvmBackend {
         // by lib/std/cli.bv's frgns (Int→i64, String→ptr).
         writeln!(out, "@__brief_argc = global i32 0").ok();
         writeln!(out, "@__brief_argv = global ptr null").ok();
+        // 2026-08-03: host cancellation flag — CancelRequested#() loads it,
+        // __brief_set_cancel/__brief_clear_cancel (library shim) write it.
+        writeln!(out, "@__brief_cancel_flag = global i32 0").ok();
         writeln!(out, "declare i64 @brief_getuid() #1").ok();
         writeln!(out, "declare i64 @brief_geteuid() #1").ok();
         writeln!(out, "declare i64 @brief_getgid() #1").ok();

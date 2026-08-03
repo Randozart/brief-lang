@@ -131,6 +131,11 @@ pub fn execute_intrinsic(
                 .map_err(|_| RuntimeError::HeapError("free failed".into()))?;
             Ok(Value::Void)
         }
+        // 2026-08-03: host cancellation. In-process there is no host to raise
+        // the flag, so CancelRequested# is always false (the backend's
+        // __brief_set_cancel is the real path).
+        "CancelRequested#" => Ok(Value::Bool(false)),
+        "ClearCancel#" => Ok(Value::Void),
          "Load#" => {
             let addr = arg_as_i64(args, 0)? as u64;
             let bytes = args.get(1).and_then(|a| if let Value::Int(n) = a { Some(*n as usize) } else { None }).unwrap_or(8);

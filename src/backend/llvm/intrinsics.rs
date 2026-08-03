@@ -44,6 +44,12 @@ pub fn emit_intrinsic_call(
         "GetEnvInt#" => return emit_get_env_int(backend, out, v, args, indent),
         // 2026-08-03: call a function-pointer value (host callback).
         "CallPtr#" => return emit_call_ptr(backend, out, v, args, indent),
+        // 2026-08-03: host cancellation flag (process-global atomic).
+        "CancelRequested#" => return emit_cancel_requested(backend, out, v, indent),
+        "ClearCancel#" => {
+            writeln!(out, "{}store atomic i32 0, ptr @__brief_cancel_flag seq_cst, align 4", indent).ok();
+            return BTypedRegister { name: v.to_string(), ty: Type::void() };
+        }
         "GetGlobalId#" => return emit_get_global_id(backend, out, v, args, indent),
         "GetGlobalSize#" => return emit_external_call(backend, out, v, name, args, indent),
         "GetLocalId#" => return emit_external_call(backend, out, v, name, args, indent),
@@ -674,6 +680,21 @@ fn emit_address_of(
     let addr_str = addr.to_string();
     backend.emit_inttoptr(out, indent, &v, &addr_str);
     BTypedRegister { name: v.to_string(), ty: Type::ptr(Type::bits(8)) }
+}
+
+/// `CancelRequested#()` — load the process-global cancel flag as a Bool.
+/// 2026-08-03: the host raises it via `__brief_set_cancel`; Brief loops
+/// poll explicitly (no implicit injection).
+fn emit_cancel_requested(
+    backend: &mut LlvmBackend, out: &mut String, v: &str, indent: &str,
+) -> BTypedRegister {
+    let flag = backend.fun.gen_reg();
+    writeln!(out, "{}{} = load atomic i32, ptr @__brief_cancel_flag seq_cst, align 4", indent, flag).ok();
+    let cmp = backend.fun.gen_reg();
+    writeln!(out, "{}{} = icmp ne i32 {}, 0", indent, cmp, flag).ok();
+    let zext = backend.fun.gen_reg();
+    writeln!(out, "{}{} = zext i1 {} to i8", indent, zext, cmp).ok();
+    BTypedRegister { name: zext.to_string(), ty: Type::bool_() }
 }
 
 /// `CallPtr#(cb, args...)` — call a function-pointer value.

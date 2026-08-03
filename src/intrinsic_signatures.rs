@@ -148,6 +148,25 @@ pub fn get_intrinsic_signature(name: &str) -> Option<Signature> {
             variadic: true,
         }),
 
+        // ── Host cancellation ─────────────────────────────────────────
+        // 2026-08-03: per-process cancel flag the host can raise via
+        // __brief_set_cancel. A long-running Brief loop polls
+        // CancelRequested#() explicitly (no implicit polling) and bails.
+        "CancelRequested#" => Some(Signature {
+            name: "CancelRequested#",
+            parameters: vec![],
+            return_kind: ReturnKind::Native("Bool"),
+            observable: false,
+            variadic: false,
+        }),
+        "ClearCancel#" => Some(Signature {
+            name: "ClearCancel#",
+            parameters: vec![],
+            return_kind: ReturnKind::Exact(Type::void()),
+            observable: false,
+            variadic: false,
+        }),
+
         // ── OS SysCall (observable, variadic) ──────────────────────────
         // 2026-07-15: Returns native Int (result or errno).
         // 2026-07-26: variadic — first arg is syscall number, up to 6 more args.

@@ -1,0 +1,17 @@
+// cancel.bv — GLUE host cancellation demo.
+// 2026-08-03: a long-running loop polls CancelRequested#() explicitly in its
+// precondition; the host raises the process-global flag via
+// __brief_set_cancel and the loop stops early (partial result).
+
+txn sum_loop(acc: Int, i: Int, count: Int)
+    [i < count && !CancelRequested#()][i == count] -> Int
+{
+    let na: Int = acc + (i * 3);
+    acc = na;
+    i = i + 1;
+    term acc;
+};
+
+export defn cancellable_sum(count: Int) -> Int {
+    term sum_loop(0, 0, count);
+};
