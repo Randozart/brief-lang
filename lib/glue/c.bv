@@ -1,0 +1,38 @@
+// c.bv — C-ABI boundary representations for GLUE export.
+// 2026-08-03 (plan 2026-08-03-protocol-driven-glue-boundary): Brief has no
+// type layouts — only adaptive protocols. An FFI boundary representation is a
+// sub-protocol (`#String<C_String>`, `#Float<C_Double>`, …) whose CastTo/
+// CastFrom bindings are the delta transforms. The casting graph finds the
+// minimal path between a Brief type and its boundary representation, and
+// codegen emits the delta — not a chain.
+//
+// Import this module (or a bridge-specific one derived from it) and declare
+// the bridge's boundary contract with these types:
+//   import "glue/c.bv";
+//   export defn greet(name: CStr) -> CStr { ... };
+
+// C string ↔ Brief string transforms (brief_rt.c). `cstr_to_brief` reads a
+// nul-terminated C string into a [len][data] Brief String; `str_to_c` emits a
+// nul-terminated C string from a Brief String. The CastTo/CastFrom pair makes
+// the C_String variant 1-to-1 with the UTF8 base: the delta is one call.
+frgn brief_cstr_to_brief(ptr: Int) -> String as cstr_to_brief from "lib/runtime/brief_rt.c" fallback "";
+frgn brief_str_to_c(handle: String) -> Int as str_to_c from "lib/runtime/brief_rt.c" fallback 0;
+
+// The C string sub-protocol of #String: nul-terminated bytes vs the base's
+// [len][data] encoding.
+proto C_String: #String {
+    CastTo(#String<UTF8>) = cstr_to_brief(#L);
+    CastFrom(#String<UTF8>) = str_to_c(#L);
+};
+
+// Boundary types — the export signature IS the boundary contract. The ABI
+// width and marshalling derive from each type's protocol + metadata.
+
+type CStr:    #String<C_String> { };
+type CFloat:  #Float<C_Float>   { };
+type CDouble: #Float<C_Double>  { };
+type CI64:    #Int              { };
+type CI32:    #Int<C_I32>       { !> bits: 32; };
+type CBool:   #Bool<C_I8>       { };
+type CChar:   #Char<C_I32>      { };
+type CPtr:    #Data<C_Ptr>      { };

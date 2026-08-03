@@ -565,8 +565,11 @@ impl ImportResolver {
             }
         }
 
-        // For std.* or std/ imports, also search from project root's lib/ directory
-        if !found_both && found_path.is_none() && (import.path().starts_with("std.") || import.path().starts_with("std/")) {
+        // Search from the project root's lib/ directory (findable from
+        // anywhere) — std/*, glue/*, and any other lib/ module. The walk-up
+        // stops at the first ancestor Cargo.toml (the compiler repo, or a
+        // user project's root).
+        if !found_both && found_path.is_none() {
             let mut current = source_dir.clone();
             while let Some(parent) = current.parent() {
                 if parent.join("Cargo.toml").exists() {

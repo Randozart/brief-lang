@@ -268,8 +268,13 @@ fn register_typedefs(items: &[TopLevel], universe: &mut TypeUniverse, int_bits: 
                 bytes.min(8)
             }));
         let mut properties: std::collections::HashMap<String, PropertyValue> = td.body.metadata.clone();
+        // 2026-08-03: the declared protocol hashword is the base when there is
+        // no parent type — `type CStr: #String<C_String>` must register base
+        // "#String<C_String>" (not "Bit") so type_to_protocol resolves it to
+        // (String, C_String) and the casting graph derives its ABI (ptr).
         let base = td.parent.as_ref()
             .and_then(|e| match e.as_ref() { Expr::Identifier(n) => Some(n.clone()), _ => None })
+            .or_else(|| td.protocol.clone())
             .unwrap_or_else(|| "Bit".to_string());
         let fields: Vec<(String, Type)> = td.body.slots.iter()
             .map(|s| (s.name.clone(), s.ty.clone()))

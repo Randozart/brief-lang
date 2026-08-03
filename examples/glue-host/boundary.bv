@@ -1,0 +1,17 @@
+// boundary.bv — GLUE boundary-types demo (plan: protocol-driven boundary).
+// The export signature IS the boundary contract: CStr is a #String<C_String>
+// (ptr ABI), CDouble is #Float<C_Double> (double ABI — the Float fix).
+
+import "glue/c.bv";
+
+// CStr in → CStr out: the boundary type's ABI (ptr) derives from the
+// casting graph, not a config conversion.
+export defn echo(name: CStr) -> CStr {
+    term name;
+};
+
+// CDouble → double in the .ll (the default #Float is float32; the boundary
+// type requests the C `double` representation explicitly).
+export defn identity(x: CDouble) -> CDouble {
+    term x;
+};

@@ -162,6 +162,29 @@ concat currently treats it as `[len][data]`. Completing P1.4 (graph registry +
 backend emission) is a follow-up; the boundary can otherwise cast `CStr → String`
 first.
 
+## Phase 2 status — `lib/glue/c.bv` DONE (ABI), marshalling = follow-up
+
+The C-ABI boundary module exists (`lib/glue/c.bv`): `proto C_String` with
+`cstr_to_brief`/`str_to_c` bindings, and the boundary types `CStr`/`CFloat`/
+`CDouble`/`CI64`/`CI32`/`CBool`/`CChar`/`CPtr`. The ABI derivation works:
+- `CStr` → `ptr` (a #String sub-protocol IS a ptr), `CDouble` → `double`
+  (the Float ABI fix — declaring the boundary type clears the BUGS.md item).
+- The normalizer now registers the declared protocol hashword as the base
+  (was `td.parent` only → `Bit`), so `type X: #String<C_String>` resolves
+  its category; and the import resolver's project-root walk-up was
+  generalized from `std/`-only to any `lib/` module.
+- Demo `examples/glue-host/boundary.bv` (echo: CStr→ptr, identity: CDouble→double).
+
+**Marshalling follow-up (cast-path):** `name as String` for a CStr param still
+emits `int_to_str` — Brief's boxing turns String/CStr values into `i64`
+registers (losing the type at codegen), so `emit_cast_path` sees `Int` and
+finds the Int→String lane. The `+`-concat solved the same boxing by rewriting
+the typed AST BEFORE codegen (`string_concat.rs`); boundary casts need the
+same treatment — a `rewrite_boundary_marshalling` pass that turns a
+`CStr → String`/`String → CStr` cast into the graph-resolved binding call
+(`cstr_to_brief`/`str_to_c`), preserving the protocol-driven decision in the
+frontend.
+
 ## Phase 2 — `lib/glue/c.bv` (the C-ABI boundary module)
 
 ```brief
