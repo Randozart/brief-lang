@@ -213,3 +213,33 @@ C ABI with zero marshalling and matches C bit-for-bit.
 **Known gap (logged in BUGS.md):** `#Float` exports are broken in the LLVM
 backend (float32 lowering + `fmul` with an `i64` operand). The benchmark uses
 Int exports only.
+
+## Completion Status (2026-08-03)
+
+- **Phase 1 (Data Brief config):** DONE. `lib/glue.toml` → `config/glue.dbvl`;
+  parity proven; legacy `.dbvl/.dbvs` + dead `run_export` path + `dbvl_reader`
+  removed; `glue_integration.sh` reconciled.
+- **Phase 2 (host-callable wrappers + library):** DONE. Transitive export ABI
+  (export_abi.rs incl. txn callees); config-driven conversions/state/param_decl;
+  per-export wrappers verified end-to-end (Python via ctypes, C via .a/.so,
+  Rust via LTO crate); `--library` + `brief bindings` + C-driver acceptance
+  test (issue #2 criterion).
+- **Phase 3 (demo + benchmark):** DONE. `examples/glue-host/rank.bv`
+  (feature_hash/add), C reference, `bench_glue_speed.py`, `rust-host` crate.
+  Baseline recorded above.
+- **Phase 4 (callbacks):** DONE. `fn(P)->R` annotations, `CallPtr#`
+  call-through-pointer, fn-typed export params (C fn-pointer ABI), demo
+  (`apply(cb, x)`), C-driver round-trip test. See
+  `docs/architecture/features/callbacks.md`.
+- **Phase 5 (host cancellation):** DONE. `CancelRequested#`/`ClearCancel#`
+  + `__brief_set_cancel`/`__brief_clear_cancel` (process-global atomic),
+  explicit polling demo (`cancellable_sum`), C-driver cancel test. See
+  `docs/architecture/features/host-cancellation.md`.
+
+### Known follow-ups
+- Python/Node wrapper templates don't render fn-typed (callback) params yet
+  (CFUNCTYPE/ffi-napi) — the C path is the verified callback on-ramp.
+- `#Float` backend corruption (BUGS.md) blocks Float exports.
+- `sync<group>` still has no codegen (out of scope).
+- Process-global cancel flag: per-state would allow concurrent instances
+  (documented in the feature doc).
