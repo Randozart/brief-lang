@@ -1,0 +1,18 @@
+// STM32F407 board — schema carrier only (see plan §5.1).
+//
+// 2026-08-03: This file is a schema-only .dbv. It declares the shapes for the
+// flat .dbvl line-tables that follow (addresses.dbvl, registers.dbvl). Data
+// lives in those .dbvl files; map.dbv holds no data entries. Machine-
+// generatable from vendor data (e.g. CMSIS-SVD) — the compiler only reads it.
+
+schema Device {
+    base_addr: String;
+    size: Int;
+};
+
+schema Register {
+    name: String;
+    offset: Int;
+    size: Int;
+    access: String;
+};

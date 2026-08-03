@@ -7,7 +7,6 @@
 // Conversion to native Value happens at import time.
 
 use std::collections::HashMap;
-use std::path::Path;
 use serde::Serialize;
 
 // ============================================================================
@@ -307,7 +306,7 @@ impl Parser {
     fn parse_directive_schema(&mut self, doc: &mut DbriefDocument) -> Result<(), String> {
         self.consume_keyword_ignore_case("schema")?;
         self.skip_ws();
-        let _name = self.parse_bare_ident();
+        let name = self.parse_bare_ident();
         self.skip_ws();
         // Optional `from <path>`
         if self.starts_with_ignore_case("from") && !self.is_alphanum_after(4) {
@@ -323,15 +322,17 @@ impl Parser {
                 self.advance();
             }
             doc.imports.push(path.clone());
-            // Set active schema from filename stem
-            if let Some(stem) = Path::new(&path).file_stem().and_then(|s| s.to_str()) {
-                self.current_schema = Some(stem.to_string());
-            }
+            // 2026-08-03 (Phase 2): the directive names the schema explicitly
+            // (`>schema Device from "map.dbv"`), so current_schema must be the
+            // NAME, not the file stem. The stem made data groups tag with "map"
+            // and flattening could not find the "Device" schema. Board .dbvl
+            // line-tables rely on this tag for register/base flattening.
+            self.current_schema = Some(name);
         } else {
             // No path — the name IS the schema name, imported from <name>.dbv
-            let path = format!("{}.dbv", _name);
+            let path = format!("{}.dbv", name);
             doc.imports.push(path);
-            self.current_schema = Some(_name);
+            self.current_schema = Some(name);
         }
         Ok(())
     }

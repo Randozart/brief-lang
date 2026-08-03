@@ -1,7 +1,7 @@
 # Plan: Data Brief as Universal Config + Board-Owned Hardware Map
 
 **Date:** 2026-08-03
-**Status:** Phase 1b (format golden test) DONE — 2026-08-03; Phase 1a next
+**Status:** Phase 2 (board-owned hardware map) DONE — 2026-08-03; Phase 3 next
 **Branch:** `feat/data-brief-config` (new)
 
 **This is the AUTHORITATIVE record** for two coupled streams that share one
@@ -218,6 +218,29 @@ as `String`). This locks the format **before** any loader dependency, so Phase
 - Add an `import "target"`-driven path so a board is selected the existing way
   (`--board` mechanism) and its map is the source.
 - Run the hardware-validator overlap checks against the board map.
+
+> **2026-08-03 (Phase 2 complete):** the board is rewritten as a directory
+> (`lib/boards/stm32f407/{map.dbv,addresses.dbvl,registers.dbvl}`) and
+> `resolve_address` is retargeted: active-board `addresses.dbvl` (via
+> `ConfigDb`) → config TOML (deprecated alias) → hardcoded **with warning** →
+> `0xFE000000`. `set_active_board` is driven by `import "target"` (thread-local,
+> set in `resolve_target_import`), so the interpreter, LLVM, and CIRCT agree by
+> construction — all route through the one function. Three latent divergences
+> were fixed while wiring:
+> 1. **`flatten_peripheral_constants` hex-as-String** (`bridge.rs`): the v2
+>    parser yields hex literals as `DataValue::String`, but flattening only
+>    accepted `DataValue::Int` → zero per-key constants. Now `data_value_as_u64`
+>    radix-parses `0x…` strings. This was a silent dead path — the old board
+>    file never parsed, so nothing noticed.
+> 2. **`>schema Name from "path"` tagged with file stem** (`v2.rs`): the
+>    directive set `current_schema` to `path`'s stem ("map"), so `.dbvl` groups
+>    were tagged "map" and flattening could not find the declared `Device`
+>    schema. The directive names the schema explicitly; `current_schema` is now
+>    the NAME. Matches `docs/architecture/data-brief.md` semantics.
+> 3. **Board schema carrier re-emitted as an import**: `>schema Device from
+>    "map.dbv"` pushed "map.dbv" into `doc.imports`; the bridge turned it into a
+>    literal `import "map.dbv"` that failed resolution. `resolve_target_import`
+>    now drops the merged `map.dbv` from `doc.imports`.
 
 ### Phase 3 — Migrate all six TOML configs → DB
 

@@ -143,9 +143,7 @@ fn flatten_peripheral_constants(doc: &DbriefDocument) -> Vec<ast::TopLevel> {
 
             // Extract base_addr value
             let base_addr = base_idx.and_then(|idx| entry.fields.get(idx)).and_then(|f| match f {
-                DataField::Named(_, DataValue::Int(n)) => Some(*n),
-                DataField::Positional(DataValue::Int(n)) => Some(*n),
-                _ => None,
+                DataField::Named(_, v) | DataField::Positional(v) => data_value_as_u64(v),
             });
             let base = match base_addr {
                 Some(b) => b,
@@ -156,19 +154,17 @@ fn flatten_peripheral_constants(doc: &DbriefDocument) -> Vec<ast::TopLevel> {
             result.push(ast::TopLevel::Constant(ast::Constant {
                 name: format!("{}_base", key),
                 ty: ast::Type::int(),
-                expr: ast::Expr::Decimal(base),
+                expr: ast::Expr::Decimal(base.try_into().unwrap()),
             }));
 
             // Emit end constant (base + size) if size is known
             if let Some(sz) = size_idx.and_then(|idx| entry.fields.get(idx)).and_then(|f| match f {
-                DataField::Named(_, DataValue::Int(n)) => Some(*n),
-                DataField::Positional(DataValue::Int(n)) => Some(*n),
-                _ => None,
+                DataField::Named(_, v) | DataField::Positional(v) => data_value_as_u64(v),
             }) {
                 result.push(ast::TopLevel::Constant(ast::Constant {
                     name: format!("{}_end", key),
                     ty: ast::Type::int(),
-                    expr: ast::Expr::Decimal(base + sz),
+                    expr: ast::Expr::Decimal((base + sz).try_into().unwrap()),
                 }));
             }
 
@@ -188,9 +184,7 @@ fn flatten_peripheral_constants(doc: &DbriefDocument) -> Vec<ast::TopLevel> {
                 }
 
                 if let Some(off) = entry.fields.get(i).and_then(|f| match f {
-                    DataField::Named(_, DataValue::Int(n)) => Some(*n),
-                    DataField::Positional(DataValue::Int(n)) => Some(*n),
-                    _ => None,
+                    DataField::Named(_, v) | DataField::Positional(v) => data_value_as_u64(v),
                 }) {
                     // Strip _offset suffix for cleaner constant name
                     let stem = if fname.ends_with("_offset") {
@@ -202,7 +196,7 @@ fn flatten_peripheral_constants(doc: &DbriefDocument) -> Vec<ast::TopLevel> {
                     result.push(ast::TopLevel::Constant(ast::Constant {
                         name: const_name,
                         ty: ast::Type::int(),
-                        expr: ast::Expr::Decimal(base + off),
+                        expr: ast::Expr::Decimal((base + off).try_into().unwrap()),
                     }));
                 }
             }
@@ -340,9 +334,22 @@ fn data_field_to_expr(field: &DataField) -> ast::Expr {
     }
 }
 
-/// Convert a DataValue to an Expr
-fn data_value_to_expr(dv: &DataValue) -> ast::Expr {
+/// Read a DataValue as a u64 — decimal Int directly, `0x`-prefixed String via
+/// radix parse. 2026-08-03 (Phase 2): the v2 parser yields hex literals as
+/// DataValue::String, so flattening must accept both.
+fn data_value_as_u64(dv: &DataValue) -> Option<u64> {
     match dv {
+        DataValue::Int(n) => u64::try_from(*n).ok(),
+        DataValue::String(s) => {
+            let clean = s.trim_start_matches("0x").trim_start_matches("0X");
+            u64::from_str_radix(clean, 16).ok()
+        }
+        _ => None,
+    }
+}
+
+/// Convert a DataValue to an Expr
+fn data_value_to_expr(dv: &DataValue) -> ast::Expr {    match dv {
         DataValue::String(s) => ast::Expr::Quoted(s.clone().into()),
         DataValue::Int(n) => ast::Expr::Decimal(*n),
         DataValue::Float(f) => ast::Expr::Float(*f),

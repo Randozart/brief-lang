@@ -59,16 +59,13 @@ impl ConfigDb {
     fn from_doc(doc: DbriefDocument) -> Result<Self, String> {
         let mut index = HashMap::new();
         let mut entries = Vec::new();
-        for group in &doc.data_groups {
-            for entry in &group.entries {
-                let key = match &entry.key {
-                    Some(k) => k,
-                    None => continue,
-                };
-                let idx = entries.len();
-                entries.push(entry.clone());
-                index.insert(key.to_uppercase(), idx);
-            }
+        // Flat iteration over every group's entries — each standalone .dbvl
+        // line is its own group holding one entry, so the total is linear.
+        for entry in doc.data_groups.iter().flat_map(|g| &g.entries) {
+            let Some(key) = &entry.key else { continue };
+            let idx = entries.len();
+            entries.push(entry.clone());
+            index.insert(key.to_uppercase(), idx);
         }
         Ok(ConfigDb { doc, index, entries })
     }
@@ -371,5 +368,30 @@ DMA0: 0xFE005000; 0x1000;\n";
                 "DB address for {name} diverges from current resolver"
             );
         }
+    }
+
+    #[test]
+    fn real_stm32f407_board_files_parse() {
+        // Locks the actual committed board data (Phase 2). The stm32f407
+        // board map owns UART1/GPIOA at their real addresses and the register
+        // detail table carries per-register rows.
+        let dir = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("lib").join("boards").join("stm32f407");
+
+        let mut addrs = ConfigDb::from_file(&dir.join("addresses.dbvl"), false).unwrap();
+        addrs.resolve_schema_imports(&[dir.clone()]);
+        assert_eq!(addrs.field_string("UART1", 0), Some("0x40011000"));
+        assert_eq!(addrs.field_string("UART2", 0), Some("0x40004400"));
+        assert_eq!(addrs.field_string("GPIOA", 0), Some("0x40020000"));
+        assert_eq!(addrs.field_string("GPIOB", 0), Some("0x40020400"));
+        // Schema carrier (map.dbv) resolved through the >schema import.
+        assert!(addrs.doc().schemas.iter().any(|s| s.name == "Device"));
+
+        let mut regs = ConfigDb::from_file(&dir.join("registers.dbvl"), false).unwrap();
+        regs.resolve_schema_imports(&[dir.clone()]);
+        assert_eq!(regs.field_string("UART1_DR", 0), Some("0x00"));
+        assert_eq!(regs.field_int("UART1_DR", 1), Some(9));
+        assert_eq!(regs.field_string("UART1_DR", 2), Some("rw"));
+        assert_eq!(regs.field_string("GPIOA_BSRR", 2), Some("wo"));
     }
 }

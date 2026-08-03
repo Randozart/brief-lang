@@ -1,0 +1,26 @@
+// STM32F407 — register-level detail.
+//
+// 2026-08-03: flat .dbvl line-table (plan §5.1): one register per line,
+// `KEY: offset; size; access;`. Offsets are relative to the owning device's
+// base (addresses.dbvl). Hex literals parse as String; decimal sizes as Int.
+//
+// Register lists carried from the pre-v2 lib/boards/stm32f407.dbvl
+// (STM32F407xx reference manual §30 UART, §8 GPIO).
+
+>schema Register from "map.dbv"
+UART1_DR: 0x00; 9; rw;
+UART1_SR: 0x01; 9; ro;
+UART1_CR1: 0x0C; 13; rw;
+UART1_CR2: 0x10; 15; rw;
+UART2_DR: 0x00; 9; rw;
+UART2_SR: 0x01; 9; ro;
+UART2_CR1: 0x0C; 13; rw;
+UART2_CR2: 0x10; 15; rw;
+GPIOA_MODER: 0x00; 2; rw;
+GPIOA_ODR: 0x14; 16; rw;
+GPIOA_IDR: 0x10; 16; ro;
+GPIOA_BSRR: 0x18; 32; wo;
+GPIOB_MODER: 0x00; 2; rw;
+GPIOB_ODR: 0x14; 16; rw;
+GPIOB_IDR: 0x10; 16; ro;
+GPIOB_BSRR: 0x18; 32; wo;

@@ -275,26 +275,69 @@ impl ImportResolver {
     /// Resolve `import "target"` — loads the board D-brief description and emits typed constants.
     fn resolve_target_import(&mut self) -> Result<Vec<TopLevel>, String> {
         let board = self.board_name.as_deref().unwrap_or("stm32f407");
-        let file_name = format!("{}.dbvl", board);
 
-        let file_path = self.search_paths.iter()
-            .map(|p| p.join("boards").join(&file_name))
-            .chain(std::iter::once(PathBuf::from(&file_name)))
+        // 2026-08-03 (Phase 2): the board map is now a directory:
+        //   lib/boards/<board>/map.dbv          — schemas only
+        //   lib/boards/<board>/addresses.dbvl   — flat KEY: addr; size; table
+        //   lib/boards/<board>/registers.dbvl   — flat register detail
+        // The old single-file `boards/<board>.dbvl` is obsolete. Look for the
+        // addresses table first; fall back to the legacy single file.
+        let addresses_path = self.search_paths.iter()
+            .map(|p| p.join("boards").join(board).join("addresses.dbvl"))
+            .chain(std::iter::once(PathBuf::from(board).join("addresses.dbvl")))
             .find(|p| p.exists());
 
-        let path = match file_path {
-            Some(p) => p,
-            None => return Err(format!(
-                "Board file 'lib/boards/{}.dbvl' not found. Use --board <name> or create a board file.",
-                board
-            )),
+        let mut doc = if let Some(path) = addresses_path {
+            // Activate the board map so address_resolver agrees with this table.
+            crate::address_resolver::set_active_board(board);
+
+            let content = std::fs::read_to_string(&path)
+                .map_err(|e| format!("Failed to read '{}': {}", path.display(), e))?;
+            let mut doc = crate::dbrief::v2::parse_document(&content)
+                .map_err(|e| format!("Failed to parse '{}': {}", path.display(), e))?;
+
+            // Merge the schema carrier (map.dbv) and register detail table.
+            let schemas_path = path.with_file_name("map.dbv");
+            if schemas_path.exists() {
+                if let Ok(schema_content) = std::fs::read_to_string(&schemas_path) {
+                    if let Ok(schema_doc) = crate::dbrief::v2::parse_document(&schema_content) {
+                        doc.schemas.extend(schema_doc.schemas);
+                        // map.dbv is merged inline — drop it from doc.imports so
+                        // the bridge does not re-emit it as a literal import.
+                        doc.imports.retain(|i| i != "map.dbv");
+                    }
+                }
+            }
+            let registers_path = path.with_file_name("registers.dbvl");
+            if registers_path.exists() {
+                if let Ok(reg_content) = std::fs::read_to_string(&registers_path) {
+                    if let Ok(reg_doc) = crate::dbrief::v2::parse_document(&reg_content) {
+                        doc.data_groups.extend(reg_doc.data_groups);
+                    }
+                }
+            }
+            doc
+        } else {
+            // Legacy single-file board (pre-2026-08-03). Kept as a fallback
+            // for out-of-tree board packs that still ship the old layout.
+            let file_name = format!("{}.dbvl", board);
+            let file_path = self.search_paths.iter()
+                .map(|p| p.join("boards").join(&file_name))
+                .chain(std::iter::once(PathBuf::from(&file_name)))
+                .find(|p| p.exists());
+            let path = match file_path {
+                Some(p) => p,
+                None => return Err(format!(
+                    "Board file 'lib/boards/{}.dbvl' or 'lib/boards/{}/addresses.dbvl' not found. \
+                     Use --board <name> or create a board directory.",
+                    board, board
+                )),
+            };
+            let content = std::fs::read_to_string(&path)
+                .map_err(|e| format!("Failed to read '{}': {}", path.display(), e))?;
+            crate::dbrief::v2::parse_document(&content)
+                .map_err(|e| format!("Failed to parse '{}': {}", path.display(), e))?
         };
-
-        let content = std::fs::read_to_string(&path)
-            .map_err(|e| format!("Failed to read '{}': {}", path.display(), e))?;
-
-        let mut doc = crate::dbrief::v2::parse_document(&content)
-            .map_err(|e| format!("Failed to parse '{}': {}", path.display(), e))?;
 
         // Resolve schema imports (schema <path>; directives)
         let mut resolved_imports = Vec::new();
@@ -1075,5 +1118,53 @@ mod tests {
         // Definitions come from explicit imports, not auto-injection.
         // This test is preserved as a smoke test that resolve_imports doesn't crash.
         assert!(true);
+    }
+
+    #[test]
+    fn test_import_target_board_directory() {
+        // 2026-08-03 (Phase 2): `import "target"` reads the board directory
+        // (map.dbv + addresses.dbvl + registers.dbvl) and flattens constants.
+        let dir = TempDir::new().unwrap();
+        let board_dir = dir.path().join("lib").join("boards").join("stm32f407");
+        fs::create_dir_all(&board_dir).unwrap();
+        fs::write(
+            board_dir.join("map.dbv"),
+            "schema Device { base_addr: String; size: Int; };\n",
+        )
+        .unwrap();
+        fs::write(
+            board_dir.join("addresses.dbvl"),
+            ">schema Device from \"map.dbv\"\nUART1: 0x40011000; 0x18;\nGPIOA: 0x40020000; 0x400;\n",
+        )
+        .unwrap();
+        fs::write(
+            board_dir.join("registers.dbvl"),
+            ">schema Device from \"map.dbv\"\nUART1_DR: 0x00; 9; rw;\n",
+        )
+        .unwrap();
+
+        let items = import_program("target", vec![]);
+        let mut resolver = ImportResolver::new();
+        resolver.add_search_path(dir.path().to_path_buf());
+        let src = dir.path().join("main.bv");
+        fs::write(&src, "").unwrap();
+
+        let result = resolver.resolve_imports(items, &src).unwrap();
+
+        // The board directory loads without error and emits the address
+        // constant; set_active_board ran (address resolver sees UART1).
+        assert!(result.len() > 0);
+        let constant_names: Vec<String> = result
+            .iter()
+            .filter_map(|i| match i {
+                TopLevel::Constant(c) => Some(c.name.clone()),
+                _ => None,
+            })
+            .collect();
+        assert!(
+            constant_names.iter().any(|n| n.contains("UART1")),
+            "expected UART1-derived constants, got {constant_names:?}"
+        );
+        assert_eq!(crate::address_resolver::resolve_address("uart1"), 0x40011000);
     }
 }

@@ -1,0 +1,15 @@
+// STM32F407 — peripheral base-address table.
+//
+// 2026-08-03: flat .dbvl line-table (plan §5.1): one CAPITALIZED constant per
+// line, `KEY: base_addr; size;`. Hex literals parse as String; the resolver
+// radix-parses. This is the backing table for `address_resolver::resolve_address`
+// (board map wins over config/address-map.toml and the hardcoded fallback).
+//
+// Sources: STM32F407xx datasheet §4.2 memory map; peripheral register
+// addresses carried from the pre-v2 lib/boards/stm32f407.dbvl.
+
+>schema Device from "map.dbv"
+UART1: 0x40011000; 0x18;
+UART2: 0x40004400; 0x18;
+GPIOA: 0x40020000; 0x400;
+GPIOB: 0x40020400; 0x400;
