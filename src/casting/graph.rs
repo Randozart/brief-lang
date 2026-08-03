@@ -21,6 +21,11 @@ pub enum LaneKind {
     FloatToInt,
     /// Call an external/intrinsic conversion function: call @fn_name
     ExtCall(&'static str),
+    /// Call a proto-binding transform function (owned name — user-declared
+    /// `proto C_String: #String { CastTo(...) = cstr_to_brief(#L); }`).
+    /// 2026-08-03: distinct from ExtCall so seeded base lanes keep their
+    /// `&'static str` without changing all call sites.
+    ExtCallDyn(String),
     /// Extract first field of a struct: extractvalue {i64,i64} %v, 0
     ExtractData,
     /// Pointer to integer: ptrtoint ptr %v to i64
@@ -343,24 +348,40 @@ impl CastingGraph {
         let key = (pd.category.clone(), pd.name.clone());
 
         for edge in &pd.cast_edges {
-            // Forward edge
-            let step = CastStep {
-                lane: LaneKind::Bitcast, // placeholder — real emission determined by binding
-                src_category: key.0.clone(),
-                src_variant: key.1.clone(),
-                dst_category: edge.target_category.clone(),
-                dst_variant: edge.target_variant.clone(),
+            // 2026-08-03: a CastBinding is the delta transform. CastTo binds
+            // proto → target (e.g. cstr_to_brief); CastFrom binds target →
+            // proto (e.g. str_to_c). Each edge gets the binding's function as
+            // its lane so emit_cast_steps emits a real call, not a bitcast.
+            let lane = match &edge.binding {
+                Some(b) => LaneKind::ExtCallDyn(b.fn_name.clone()),
+                None => LaneKind::Bitcast, // placeholder for unbound edges
             };
-            self.variant_edges.entry(key.clone()).or_default().push(step);
+            // Forward edge (proto → target). For a CastFrom-only declaration
+            // there is no proto→target transform, so skip the forward edge
+            // (the reverse edge below carries the CastFrom binding).
+            if edge.direction == CastDirection::CastTo {
+                let step = CastStep {
+                    lane: lane.clone(),
+                    src_category: key.0.clone(),
+                    src_variant: key.1.clone(),
+                    dst_category: edge.target_category.clone(),
+                    dst_variant: edge.target_variant.clone(),
+                };
+                self.variant_edges.entry(key.clone()).or_default().push(step);
+            }
 
-            // Reverse edge from CastFrom
+            // Reverse edge from CastFrom: the CastFrom binding converts
+            // target → proto (str_to_c: UTF8 → C_String). Stored under the
+            // TARGET key; BFS from the target follows it to the proto. The
+            // step's src is the PROTO (the neighbor reached), dst the target
+            // (the current node) — the lane still transforms current→neighbor.
             if edge.direction == CastDirection::CastFrom {
                 let rev_step = CastStep {
-                    lane: LaneKind::Bitcast,
-                    src_category: edge.target_category.clone(),
-                    src_variant: edge.target_variant.clone(),
-                    dst_category: key.0.clone(),
-                    dst_variant: key.1.clone(),
+                    lane,
+                    src_category: key.0.clone(),
+                    src_variant: key.1.clone(),
+                    dst_category: edge.target_category.clone(),
+                    dst_variant: edge.target_variant.clone(),
                 };
                 self.variant_reverse
                     .entry((edge.target_category.clone(), edge.target_variant.clone()))
@@ -570,8 +591,8 @@ impl CastingGraph {
             // graph's lanes (e.g. #Bit → #String encoding door with a
             // CastFrom(#Bit) override) apply to them. General: walks the
             // base chain, never matches specific type names (rule #18).
-            // 2026-08-03: variant bases (`type CStr: #String<CString>` ⇒
-            // base "#String<CString>") now resolve to (category, variant) —
+            // 2026-08-03: variant bases (`type CStr: #String<C_String>` ⇒
+            // base "#String<C_String>") now resolve to (category, variant) —
             // previously the variant form fell through to (Bit, "").
             if let Some((cat, var)) = Self::parse_protocol_base(&rt.base) {
                 match cat.as_str() {
@@ -587,7 +608,7 @@ impl CastingGraph {
 
     /// Parse a protocol base string (`#Cat`, `#Cat<Variant>`, or bare `Cat`)
     /// into `(category, variant)`. Returns None for empty/unparseable strings.
-    /// 2026-08-03: `#String<CString>` → `("String", "CString")`; `#String` →
+    /// 2026-08-03: `#String<C_String>` → `("String", "CString")`; `#String` →
     /// `("String", "")`.
     fn parse_protocol_base(base: &str) -> Option<(String, String)> {
         let b = base.trim_start_matches('#');
@@ -629,7 +650,7 @@ impl CastingGraph {
         // 2026-08-03: an unseeded `#Category<Variant>` falls back to the
         // category's default variant, then the base category — a `#String`
         // sub-protocol IS a String (ptr); only its encoding differs. Without
-        // this, `type CStr: #String<CString>` resolved to `i64`.
+        // this, `type CStr: #String<C_String>` resolved to `i64`.
         let resolver = self.get_llvm_type(&category, &variant)
             .or_else(|| self.get_llvm_type(&category, self.default_variant(&category)))
             .or_else(|| self.get_llvm_type(&category, ""));
@@ -814,13 +835,61 @@ mod tests {
     }
 
     #[test]
+    fn test_proto_binding_becomes_ext_call_lane() {
+        // 2026-08-03: `proto C_String: #String { CastTo(#String<UTF8>) =
+        // cstr_to_brief(#L); CastFrom(#String<UTF8>) = str_to_c(#L); }` — the
+        // bindings must become real call lanes (ExtCallDyn), not the old
+        // Bitcast placeholder.
+        let mut graph = CastingGraph::new();
+        graph.register_protocol_def(&ProtocolDef {
+            name: "C_String".to_string(),
+            category: "String".to_string(),
+            contract: None,
+            cast_edges: vec![
+                crate::ast::top::CastEdge {
+                    direction: crate::ast::top::CastDirection::CastTo,
+                    target_category: "String".to_string(),
+                    target_variant: "UTF8".to_string(),
+                    binding: Some(crate::ast::top::CastBinding {
+                        fn_name: "cstr_to_brief".to_string(),
+                        param: "#L".to_string(),
+                    }),
+                },
+                crate::ast::top::CastEdge {
+                    direction: crate::ast::top::CastDirection::CastFrom,
+                    target_category: "String".to_string(),
+                    target_variant: "UTF8".to_string(),
+                    binding: Some(crate::ast::top::CastBinding {
+                        fn_name: "str_to_c".to_string(),
+                        param: "#L".to_string(),
+                    }),
+                },
+            ],
+            cross_ops: vec![],
+            span: None,
+        });
+
+        // C_String → UTF8 uses the CastTo binding.
+        let path = graph.find_path("String", "C_String", "String", "UTF8")
+            .expect("C_String -> UTF8 path");
+        assert_eq!(path.len(), 1);
+        assert_eq!(path[0].lane, LaneKind::ExtCallDyn("cstr_to_brief".to_string()));
+
+        // UTF8 → C_String uses the CastFrom binding.
+        let rev = graph.find_path("String", "UTF8", "String", "C_String")
+            .expect("UTF8 -> C_String path");
+        assert_eq!(rev.len(), 1);
+        assert_eq!(rev[0].lane, LaneKind::ExtCallDyn("str_to_c".to_string()));
+    }
+
+    #[test]
     fn test_resolve_llvm_type_variant_fallback() {
-        // 2026-08-03: unseeded `#String<CString>` must resolve like any other
+        // 2026-08-03: unseeded `#String<C_String>` must resolve like any other
         // String (ptr), not fall through to i64; `#Float<C_Double>` → double.
         let graph = CastingGraph::new();
         let universe = crate::type_universe::TypeUniverse::new();
         assert_eq!(
-            graph.resolve_llvm_type(&universe, &Type::HashWordVariant("#String".into(), "CString".into()), 64),
+            graph.resolve_llvm_type(&universe, &Type::HashWordVariant("#String".into(), "C_String".into()), 64),
             "ptr"
         );
         assert_eq!(
@@ -839,9 +908,9 @@ mod tests {
 
     #[test]
     fn test_parse_protocol_base_variants() {        // 2026-08-03: variant bases — the FFI boundary types declare
-        // `type CStr: #String<CString>` ⇒ base "#String<CString>".
-        assert_eq!(CastingGraph::parse_protocol_base("#String<CString>"),
-            Some(("String".to_string(), "CString".to_string())));
+        // `type CStr: #String<C_String>` ⇒ base "#String<C_String>".
+        assert_eq!(CastingGraph::parse_protocol_base("#String<C_String>"),
+            Some(("String".to_string(), "C_String".to_string())));
         assert_eq!(CastingGraph::parse_protocol_base("#Float<C_Double>"),
             Some(("Float".to_string(), "C_Double".to_string())));
         assert_eq!(CastingGraph::parse_protocol_base("#Int<C_I32>"),

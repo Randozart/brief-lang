@@ -21,7 +21,7 @@ Conversion is `CastTo`/`CastFrom` edges in a protocol graph, and those protocols
 are *adaptive*: the compiler finds the minimal path between two representations
 and emits the **delta** of operations, not a hop-by-hop chain. FFI marshalling
 is exactly this problem — a boundary representation is a sub-protocol
-(`#String<CString>`, `#Float<C_Double>`), a `proto` declaration supplies the
+(`#String<C_String>`, `#Float<C_Double>`), a `proto` declaration supplies the
 transforms, and the casting graph resolves the path. The compiler should never
 carry per-language conversion strings; it should carry protocol edges.
 
@@ -32,10 +32,10 @@ boundary types, cast-path marshalling, and delta emission.
 
 1. **No type layouts, only adaptive protocols.** The base protocol
    (`#String`, `#Float`, `#Int`, …) is *never directly modified*; sub-protocols
-   add and adapt. `proto CString: #String { … }` extends `#String` without
+   add and adapt. `proto C_String: #String { … }` extends `#String` without
    touching it. Additive only.
 2. **Boundary types are bridge-declared.** The bridge imports the C-ABI module
-   and declares its boundary contract: `type CStr: #String<CString>` used
+   and declares its boundary contract: `type CStr: #String<C_String>` used
    directly in export signatures. The export signature IS the boundary contract.
    (Also expressible as a direct variant annotation, but the declared-type form
    is the primary one.)
@@ -110,10 +110,10 @@ says it should. Each verified against source.
 
 1. **Variant bases in `type_to_protocol`** (`graph.rs:567`): the base-chain walk
    only matches bare categories (`"String"`, `"Float"`, …). `type CStr:
-   #String<CString>` sets `rt.base = "#String<CString>"`, which falls through to
+   #String<C_String>` sets `rt.base = "#String<C_String>"`, which falls through to
    `(Bit, "")`. Parse `#Cat<Variant>` bases → `(String, CString)`.
 2. **Variant LLVM-type fallback** (`graph.rs:604`): an unseeded
-   `#String<CString>` resolves to `None` → struct-fields fallback → `"i64"`.
+   `#String<C_String>` resolves to `None` → struct-fields fallback → `"i64"`.
    Correct rule: a `#String` variant IS a `ptr`; a `#Float` variant defaults to
    the base (`float`); `#Int` is WidthParametric (driven by `!> bits` metadata).
    Fall back to `default_variant(category)`, then the base `""` resolver.
@@ -143,12 +143,12 @@ green; confirm nothing relied on the `i64` fallback.
 
 ```brief
 // The C string representation: nul-terminated bytes.
-proto CString: #String {
+proto C_String: #String {
     CastTo(#String<UTF8>) = cstr_to_brief(#L);   // nul-terminated → [len][data]
     CastFrom(#String<UTF8>) = str_to_c(#L);       // [len][data] → nul-terminated
 };
 
-type CStr:    #String<CString> { };
+type CStr:    #String<C_String> { };
 type CFloat:  #Float<C_Float>   { };
 type CDouble: #Float<C_Double>  { };
 type CI64:    #Int              { };
@@ -169,7 +169,7 @@ here (they already exist in the runtime). Verify:
 
 - `resolve_protocol` (`src/glue/export.rs`) → derive `(category, variant)` via
   `type_to_protocol(universe, ty)`; the wrapper/header vocabulary comes from
-  `config/glue.dbvl` protocols **keyed by variant** (`"#String<CString>" →
+  `config/glue.dbvl` protocols **keyed by variant** (`"#String<C_String>" →
   { native, c_abi }`), with bare-category fallback.
 - `format_type` handles `Type::HashWordVariant` and boundary custom types.
 - **Remove** the config `conversions` templates. The `.ll` ABI type already

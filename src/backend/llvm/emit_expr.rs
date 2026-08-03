@@ -3033,6 +3033,12 @@ impl LlvmBackend {
                     writeln!(out, "{}{} = call {} @{}({} {})",
                         indent, dst, dst_ll, fn_name, cur_ll, cur).ok();
                 }
+                crate::casting::graph::LaneKind::ExtCallDyn(fn_name) => {
+                    // 2026-08-03: proto-binding transform (owned function
+                    // name), e.g. cstr_to_brief/str_to_c for #String<CString>.
+                    writeln!(out, "{}{} = call {} @{}({} {})",
+                        indent, dst, dst_ll, fn_name, cur_ll, cur).ok();
+                }
                 crate::casting::graph::LaneKind::ExtractData => {
                     writeln!(out, "{}{} = extractvalue {} {}, 0",
                         indent, dst, cur_ll, cur).ok();
