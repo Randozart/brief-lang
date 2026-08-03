@@ -2320,7 +2320,7 @@ fn test_emit_address_of() {
         }),
     ];
     let output = LlvmBackend::new().generate(&program, None);
-    // uart = 0xFFE01000 in config/address-map.toml
+    // uart = 0xFFE01000 in config/address-map.dbvl
     assert!(output.contains("inttoptr"), "Should emit inttoptr");
     // Resolve the expected address from the shared resolver
     let expected_addr = crate::address_resolver::resolve_address("uart");

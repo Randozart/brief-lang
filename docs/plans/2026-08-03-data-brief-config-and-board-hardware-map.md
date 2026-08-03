@@ -1,7 +1,7 @@
 # Plan: Data Brief as Universal Config + Board-Owned Hardware Map
 
 **Date:** 2026-08-03
-**Status:** Phase 3 done — all six TOML configs migrated (module-registry `8b52f0ff`, ir-lowering `a37923af`, protocols `4e07e82d`, encodings `7d426e22`, targets `aa56e9a5`, alloc-strategies pending commit; next: .toml deletion)
+**Status:** Phase 3 complete — all six TOML configs migrated to `.dbvl` and deleted (`8b52f0ff` `a37923af` `4e07e82d` `7d426e22` `aa56e9a5` `d648f3f2`); parity tests converted to golden tests; `address-map.toml` migrated to `.dbvl` and deleted; TOML fallback branches removed. Phase 4 (docs) next.
 **Branch:** `feat/data-brief-config` (new)
 
 **This is the AUTHORITATIVE record** for two coupled streams that share one
@@ -307,20 +307,26 @@ so the five clean ones are not blocked by the IR one.
 - **`peek_has_named_fields` fix**: quoted-mode `{ }` blocks may open with a
   quoted name (`"#System"`); this was mis-typed as bare mode and rejected the
   whole protocols block.
-- **Migration gates**: `parity_module_registry_dbvl_matches_toml`,
+- **Migration gates** (2026-08-03): each config had a parity test proving the
+  `.dbvl` output equals the `.toml` output before the `.toml` was deleted:
+  `parity_module_registry_dbvl_matches_toml`,
   `parity_ir_lowering_dbvl_matches_toml`, `parity_protocols_dbvl_matches_toml`,
   `parity_encodings_dbvl_matches_toml`, `parity_targets_dbvl_matches_toml`
   (target.rs), `parity_target_settings_dbvl_matches_toml`
-  (config_tuning.rs), and `parity_alloc_strategies_dbvl_matches_toml`
-  (config.rs) each assert the `.dbvl` output equals the `.toml` output
-  exactly; a `.toml` is deleted only after its gate stays green.
-- **`init_profile`** now seeds migrated configs as `.dbvl` (targets,
-  module-registry, ir-lowering, protocols, encodings) so created profiles load
-  through the DB path; the not-yet-migrated TOMLs (ctd-llvm-mappings,
-  llvm-ops, spirv-ops) are copied as-is.
-- **Remaining before the .toml files can be deleted**: remove the migrated
-  `.toml` files and the TOML fallback branches in
-  `load_string_registry`/`resolve_config_file`.
+  (config_tuning.rs), `parity_alloc_strategies_dbvl_matches_toml`
+  (config.rs). After deletion they were CONVERTED TO GOLDEN TESTS — the
+  pre-migration TOML content is baked into each test and re-parsed, so the
+  exact-value regression guard survives without the file on disk.
+- **`init_profile`** seeds all seven configs as `.dbvl` (targets,
+  module-registry, ir-lowering, protocols, encodings, alloc-strategies,
+  address-map) so created profiles load through the DB path.
+- **Deletion phase (2026-08-03)**: all seven `.toml` files deleted
+  (`address-map`, `alloc-strategies`, `encodings`, `ir-lowering`,
+  `module-registry`, `protocols`, `targets`). `address-map.toml` was the last
+  Phase-2 deprecated alias — `address_resolver::resolve_from_config` now reads
+  `config/address-map.dbvl` via `ConfigDb`. The TOML fallback branches in
+  `load_string_registry`/`resolve_config_file` are removed (only `.dbvl`/`.dbv`
+  resolve; a stale pre-migration `.toml` in a profile dir falls back to baked).
 
 ### Phase 4 — Documentation + `.ebv` runtime hand-off
 

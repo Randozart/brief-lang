@@ -35,7 +35,7 @@ without specifying the variant:
 fn cross(a: #String<UTF8>, b: #String<ASCII>) { ... };
 ```
 
-Each backend declares supported protocols in `config/targets.toml`. A function
+Each backend declares supported protocols in `config/targets.dbvl`. A function
 requiring a protocol the backend doesn't support produces a compile error.
 
 ### `Cast#()` — Cast intrinsick

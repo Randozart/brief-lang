@@ -35,7 +35,7 @@ type String : #String { prop Size: chars(#L); prop Bytes: byte_len(#L); };
 - **`!> alu: PascalCase` or `!> alu: "quoted"`** — What hardware computes with values of this type. PascalCase for known ALUs (`Int`, `Float`, `Bool`), lowercase-quoted for backend/plugin-specific hardware.
 - **`fields: Vec<(String, Type)>`** — Struct field declarations on `ResolvedType`. Populated from `TypeDef.body.slots` by the normalizer. Drives LLVM struct type lowering, state slot width, and `is_string_like()` detection. Example: String with `data: Int; len: Int;` → `fields = [("data", Int), ("len", Int)]`.
 - **`op Add ~> "int.add"`** — Operator binding to a generic backend-agnostic identifier. The typechecker reads this via `get_operator_intrinsic(universe, "+", &Int)`, which returns `OpBinding::Function("int.add")`. The backend then looks up `("Add", "Int", 8)` in `config/llvm-ops.toml` for the LLVM IR template.
-- **`!> encoding: "UTF-8"`** — String encoding, resolved through `config/encodings.toml`. All encoding names are quoted strings — no PascalCase hardcoded table. The config specifies `char_width` (for Index# GEP eligibility) and optional `ops.index_at`/`char_len` (stdlib functions for runtime dispatch).
+- **`!> encoding: "UTF-8"`** — String encoding, resolved through `config/encodings.dbvl`. All encoding names are quoted strings — no PascalCase hardcoded table. The config specifies `char_width` (for Index# GEP eligibility) and optional `ops.index_at`/`char_len` (stdlib functions for runtime dispatch).
 - **Other metadata** — Any backend is free to use any metadata it needs. Unrecognized metadata is silently ignored.
 
 ## Flexible vs Fixed Width
@@ -128,7 +128,7 @@ Each backend reads what it needs and ignores the rest.
 | `Cast.#String` / `Cast.#Data` membership | Protocol category via `type_to_protocol` | String/Data values are `ptr` to `[len][bytes]`; `is_string_operand` / adapt_to_i64 |
 | `is_vector_like(ty, universe)` | Has `!> op.SVO: N` metadata | SVO inline list handle (N+1 slot struct) |
 | `svo_capacity(ty, universe)` | Reads `N` from `op.SVO` metadata | Number of inline elements before heap promotion |
-| `properties["encoding"]` | Looked up in `config/encodings.toml` for `char_width` and stdlib ops | `Index#` emits GEP (fixed-width) or stdlib call (variable-width) |
+| `properties["encoding"]` | Looked up in `config/encodings.dbvl` for `char_width` and stdlib ops | `Index#` emits GEP (fixed-width) or stdlib call (variable-width) |
 | `properties["op.Add"]` etc. | Generic identifier used for config dispatch | `OP_CONFIG.lookup("Add", "Int", 8)` → template fill |
 | `bytes` | Storage width. Derived from fields for struct types | `alloca`, `malloc` size, GEP offsets |
 | `alignment` | Memory alignment | `align N` attribute on `alloca`/`store` |
@@ -350,12 +350,12 @@ codegen fallback when config lookup returns None.
 
 ## Encoding Dispatch
 
-All encoding names are quoted strings resolved through `config/encodings.toml`:
+All encoding names are quoted strings resolved through `config/encodings.dbvl`:
 
 ```
-!> encoding: "UTF-8"      → config/encodings.toml (char_width=0, ops.index_at, ops.char_len)
-!> encoding: "ASCII"      → config/encodings.toml (char_width=1, no ops — direct GEP)
-!> encoding: "shift_jis"  → config/encodings.toml (char_width=0, ops.index_at, ops.char_len)
+!> encoding: "UTF-8"      → config/encodings.dbvl (char_width=0, ops.index_at, ops.char_len)
+!> encoding: "ASCII"      → config/encodings.dbvl (char_width=1, no ops — direct GEP)
+!> encoding: "shift_jis"  → config/encodings.dbvl (char_width=0, ops.index_at, ops.char_len)
 ```
 
 No PascalCase hardcoded table. The `char_width` field tells the compiler

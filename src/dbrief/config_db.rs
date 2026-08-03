@@ -172,22 +172,23 @@ impl ConfigDb {
     }
 }
 
-/// Resolve a logical config name to a concrete file in `config_dir`,
-/// preferring Data Brief extensions over the legacy TOML:
-/// `<name>.dbvl`, then `<name>.dbv`, then `<name>.toml`.
+/// Resolve a logical config name to a concrete file in `config_dir`.
+/// Data Brief extensions only: `<name>.dbvl`, then `<name>.dbv`.
 ///
-/// 2026-08-03 (Phase 1a): migration seams — as configs move TOML → DB,
-/// existing `--config-dir`/profile users keep working because the resolved
-/// path just changes extension. `"__baked__"` (the compile-time fallback
-/// marker from `config_resolver::resolve_config_dir`) maps to the repo's
-/// `config/` directory.
+/// 2026-08-03 (Phase 1a → 3): migration seam — as configs moved TOML → DB the
+/// resolved path just changed extension. 2026-08-03 (Phase 3-complete): all
+/// six configs are DB now and the `.toml` fallback is removed; a stale
+/// pre-migration `.toml` in a profile dir is no longer picked up (the baked
+/// fallback covers it). `"__baked__"` (the compile-time fallback marker from
+/// `config_resolver::resolve_config_dir`) maps to the repo's `config/`
+/// directory.
 pub fn resolve_config_file(config_dir: &Path, name: &str) -> Option<PathBuf> {
     let dir = if config_dir.to_string_lossy() == "__baked__" {
         PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("config")
     } else {
         config_dir.to_path_buf()
     };
-    for ext in [".dbvl", ".dbv", ".toml"] {
+    for ext in [".dbvl", ".dbv"] {
         let candidate = dir.join(format!("{}{}", name, ext));
         if candidate.exists() {
             return Some(candidate);
@@ -197,34 +198,19 @@ pub fn resolve_config_file(config_dir: &Path, name: &str) -> Option<PathBuf> {
 }
 
 /// Load a registry-style config (`name → string`) from the resolved config
-/// dir, preferring Data Brief over TOML.
+/// dir, as a Data Brief line table.
 ///
-/// 2026-08-03 (Phase 3): the shared migration seam for `module-registry`.
-/// `config_dir` is the already-resolved dir (or `"__baked__"`). Absent or
-/// unparseable → empty map (callers fall back to literal resolution), matching
-/// the pre-migration TOML semantics.
+/// 2026-08-03 (Phase 3): the shared seam for `module-registry`. `config_dir`
+/// is the already-resolved dir (or `"__baked__"`). Absent or unparseable →
+/// empty map (callers fall back to literal resolution), matching the
+/// pre-migration TOML semantics.
 pub fn load_string_registry(config_dir: &Path, name: &str) -> HashMap<String, String> {
     let Some(path) = resolve_config_file(config_dir, name) else {
         return HashMap::new();
     };
-    let ext = path.extension().and_then(|e| e.to_str());
-    if ext == Some("dbvl") || ext == Some("dbv") {
-        return ConfigDb::from_file(&path, false)
-            .map(|db| db.string_map())
-            .unwrap_or_default();
-    }
-    // Legacy TOML fallback (same shape as the pre-migration loader).
-    let Ok(content) = std::fs::read_to_string(&path) else {
-        return HashMap::new();
-    };
-    #[derive(serde::Deserialize)]
-    struct TomlRegistry {
-        modules: HashMap<String, String>,
-    }
-    match toml::from_str::<TomlRegistry>(&content) {
-        Ok(reg) => reg.modules,
-        Err(_) => HashMap::new(),
-    }
+    ConfigDb::from_file(&path, false)
+        .map(|db| db.string_map())
+        .unwrap_or_default()
 }
 
 #[cfg(test)]
@@ -237,6 +223,60 @@ mod tests {
 UART0: 0xFFE01000; 0x18;\n\
 UART1: 0x40004400; 0x18;\n\
 TIMER: 0xFE002000; 0x4;\n";
+
+    /// Pre-migration config/module-registry.toml, frozen as the golden
+    /// reference for parity_module_registry_dbvl_matches_toml. 2026-08-03: the
+    /// .toml file is deleted; edits to config/module-registry.dbvl must keep
+    /// this test green.
+    const MODULE_REGISTRY_TOML_GOLDEN: &str = r#"
+[modules]
+"prelude"         = "std/prelude.bv"
+"option"          = "std/option.bv"
+"result"          = "std/result.bv"
+"char"            = "std/char.bv"
+"string"          = "std/string.bv"
+"string_builder"  = "std/string_builder.bv"
+"collections"     = "std/collections.bv"
+"iterator"        = "std/iterator.bv"
+"hashmap"         = "std/hashmap.bv"
+"hashset"         = "std/hashset.bv"
+"stack"           = "std/stack.bv"
+"queue"           = "std/queue.bv"
+"ptr"             = "std/ptr.bv"
+"io"              = "std/io.bv"
+"out"             = "std/out.bv"
+"env"             = "std/env.bv"
+"process"         = "std/process.bv"
+"time"            = "std/time.bv"
+"http"            = "std/http.bv"
+"json"            = "std/json.bv"
+"encoding"        = "std/encoding.bv"
+"bits"            = "std/bits.bv"
+"from-bits"       = "std/from-bits.bv"
+"atomic"          = "std/atomic.bv"
+"state"           = "std/state.bv"
+"system"          = "std/system.bv"
+"console"         = "std/console.bv"
+"tty"             = "std/tty.bv"
+"gpu"             = "std/gpu.bv"
+"spatial"         = "std/spatial.bv"
+"xxhash"          = "std/xxhash.bv"
+"skiplist"        = "std/skiplist.bv"
+"shm"             = "std/shm.bv"
+"brief_rt"        = "std/brief_rt.bv"
+"types"           = "std/types.bv"
+"core"            = "std/core"
+"c"               = "std/c"
+"ffi"             = "std/ffi"
+"os"              = "std/os"
+"ext"             = "std/ext"
+"#;
+
+    /// Pre-migration TOML shape for module-registry (the `[modules]` table).
+    #[derive(serde::Deserialize)]
+    struct TomlRegistry {
+        modules: std::collections::HashMap<String, String>,
+    }
 
     #[test]
     fn indexes_keyed_lines_case_insensitively() {
@@ -350,8 +390,8 @@ TIMER: 0xFE002000; 0x4;\n";
     }
 
     #[test]
-    fn resolve_config_file_prefers_db_over_toml() {
-        // Real baked config dir: prefers .dbvl/.dbv, falls back to .toml.
+    fn resolve_config_file_prefers_db_extension() {
+        // Real baked config dir: only Data Brief extensions resolve.
         let baked = Path::new("__baked__");
         // targets migrated to .dbvl (Phase 3) — resolves to .dbvl.
         let t = resolve_config_file(baked, "targets").unwrap();
@@ -363,16 +403,15 @@ TIMER: 0xFE002000; 0x4;\n";
 
     #[test]
     fn resolve_config_file_prefers_db_extension_in_dir() {
+        // A directory with both forms resolves to the Data Brief one.
         let dir = std::env::temp_dir().join("brief-configdb-resolve");
         std::fs::create_dir_all(&dir).unwrap();
-        std::fs::write(dir.join("demo.toml"), "x = 1\n").unwrap();
         std::fs::write(dir.join("demo.dbv"), "schema Demo { a: Int; };\n").unwrap();
 
         let path = resolve_config_file(&dir, "demo").unwrap();
         assert_eq!(path.file_name().unwrap().to_str(), Some("demo.dbv"));
 
         // Cleanup.
-        let _ = std::fs::remove_file(dir.join("demo.toml"));
         let _ = std::fs::remove_file(dir.join("demo.dbv"));
         let _ = std::fs::remove_dir(&dir);
     }
@@ -380,7 +419,7 @@ TIMER: 0xFE002000; 0x4;\n";
     // ── Config-parity harness (Phase 1a) ──────────────────────────────────
     //
     // Proves a `.dbvl` address table loaded through ConfigDb yields exactly the
-    // addresses the current resolver produces from config/address-map.toml.
+    // addresses the current resolver produces from config/address-map.dbvl.
     // Phase 2 retargets resolve_address onto the board's addresses.dbvl; this
     // test locks the data contract so the swap is output-identical.
 
@@ -389,7 +428,7 @@ TIMER: 0xFE002000; 0x4;\n";
         u64::from_str_radix(clean, 16).unwrap()
     }
 
-    /// The address-map.toml contents as a .dbvl line-table (the Phase 2 board
+    /// The address-map.dbvl contents as a .dbvl line-table (the Phase 2 board
     /// form). Keys are CAPITALIZED constants per the plan.
     const ADDRESS_MAP_DBVL: &str = "\
 >schema AddressEntry from \"map.dbv\"\n\
@@ -411,7 +450,7 @@ DMA0: 0xFE005000; 0x1000;\n";
         let db = ConfigDb::from_str(ADDRESS_MAP_DBVL).unwrap();
         assert_eq!(db.len(), 12);
 
-        // Every name in config/address-map.toml resolves to the same address
+        // Every name in config/address-map.dbvl resolves to the same address
         // through the DB table as through the current resolver.
         for name in ["uart", "uart0", "gpio", "gpio0", "timer", "timer0",
                      "spi", "spi0", "i2c", "i2c0", "dma", "dma0"] {
@@ -453,21 +492,16 @@ DMA0: 0xFE005000; 0x1000;\n";
     #[test]
     fn parity_module_registry_dbvl_matches_toml() {
         // Phase 3 migration gate for module-registry: the .dbvl form must
-        // produce exactly the same name→path map as the .toml it replaces.
+        // produce exactly the same name→path map as the .toml it replaced.
+        // 2026-08-03: the .toml is deleted; this is now a GOLDEN test — the
+        // pre-migration TOML is baked below and re-parsed.
         let db_map = load_string_registry(Path::new("__baked__"), "module-registry");
         assert!(
             !db_map.is_empty(),
             "config/module-registry.dbvl must load via the baked config dir"
         );
 
-        // Compare against the TOML it replaces.
-        let toml_path = Path::new(env!("CARGO_MANIFEST_DIR")).join("config/module-registry.toml");
-        let toml_content = std::fs::read_to_string(&toml_path).unwrap();
-        #[derive(serde::Deserialize)]
-        struct TomlRegistry {
-            modules: std::collections::HashMap<String, String>,
-        }
-        let toml_map: TomlRegistry = toml::from_str(&toml_content).unwrap();
+        let toml_map: TomlRegistry = toml::from_str(MODULE_REGISTRY_TOML_GOLDEN).unwrap();
 
         assert_eq!(db_map.len(), toml_map.modules.len());
         for (name, path) in &toml_map.modules {
@@ -480,11 +514,10 @@ DMA0: 0xFE005000; 0x1000;\n";
     }
 
     #[test]
-    fn load_string_registry_prefers_dbvl() {
-        // A temp config dir with both forms must load the .dbvl.
+    fn load_string_registry_reads_dbvl() {
+        // A temp config dir with a .dbvl line table loads via the registry.
         let dir = std::env::temp_dir().join("brief-configdb-registry");
         std::fs::create_dir_all(&dir).unwrap();
-        std::fs::write(dir.join("demo.toml"), "[modules]\na = \"one\"\n").unwrap();
         std::fs::write(dir.join("demo.dbvl"), "a: one;\nb: two;\n").unwrap();
 
         let map = load_string_registry(&dir, "demo");
@@ -492,15 +525,17 @@ DMA0: 0xFE005000; 0x1000;\n";
         assert_eq!(map.get("b").map(String::as_str), Some("two"));
 
         // Cleanup.
-        let _ = std::fs::remove_file(dir.join("demo.toml"));
         let _ = std::fs::remove_file(dir.join("demo.dbvl"));
         let _ = std::fs::remove_dir(&dir);
     }
 
-    // ── PROBE: flat-config grammar (Phase 3) ─────────────────────────────
-    // 2026-08-03: verify the parser accepts the flattened key forms before
-    // committing config/*.dbvl. REMOVE after migration. These are probes, not
-    // golden tests — the migration parity tests supersede them.
+    // ── Flat-config grammar (Phase 3) ────────────────────────────────────
+    // 2026-08-03: verifies the parser accepts the flattened key forms the
+    // committed config/*.dbvl files depend on (dotted/hyphenated/leading-dot
+    // keys, space-separated list fields, quoted protocol map names, // comments).
+    // These were probes during migration and are now REGRESSION GUARDS: the
+    // golden parity tests prove the DBVL output; these prove the parser keeps
+    // accepting the exact shapes the configs are written in.
 
     #[test]
     fn probe_dotted_and_hyphenated_keys() {

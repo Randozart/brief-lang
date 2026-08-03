@@ -96,6 +96,56 @@ pub fn get_encoding_info(name: &str) -> EncodingInfo {
 mod tests {
     use super::*;
 
+    /// Pre-migration config/encodings.toml, frozen as the golden reference for
+    /// parity_encodings_dbvl_matches_toml. 2026-08-03: the .toml file is
+    /// deleted; edits to config/encodings.dbvl must keep this test green.
+    const ENCODINGS_TOML_GOLDEN: &str = r#"
+["encoding.UTF-8"]
+char_width = 0
+ops.index_at = "std.encoding.UTF8.index_at"
+ops.char_len = "std.encoding.UTF8.char_count"
+
+["encoding.ASCII"]
+char_width = 1
+
+["encoding.Latin1"]
+char_width = 1
+
+["encoding.UTF-16"]
+char_width = 0
+ops.index_at = "std.encoding.UTF16.index_at"
+ops.char_len = "std.encoding.UTF16.char_count"
+
+["encoding.UTF-32"]
+char_width = 4
+
+["encoding.shift_jis"]
+char_width = 0
+ops.index_at = "std.encoding.shift_jis.index_at"
+ops.char_len = "std.encoding.shift_jis.char_count"
+
+["encoding.windows_1252"]
+char_width = 1
+
+["encoding.iso_8859_15"]
+char_width = 1
+
+["encoding.utf_16le"]
+char_width = 0
+
+["encoding.utf_16be"]
+char_width = 0
+
+["encoding.euc_jp"]
+char_width = 0
+
+["encoding.gb2312"]
+char_width = 0
+
+["encoding.koi8_r"]
+char_width = 1
+"#;
+
     #[test]
     fn test_UTF8_from_config() {
         let info = get_encoding_info("UTF-8");
@@ -133,14 +183,12 @@ mod tests {
     #[test]
     fn parity_encodings_dbvl_matches_toml() {
         // Phase 3 migration gate: config/encodings.dbvl must produce exactly
-        // the char_width/ops map the .toml it replaces produces. The .toml is
-        // deleted only after this stays green.
+        // the char_width/ops map the .toml it replaced produced. 2026-08-03:
+        // the .toml is deleted; this is now a GOLDEN test — the pre-migration
+        // TOML is baked below and re-parsed with its pre-migration shape.
         let db_map = config_encodings();
 
-        // Parse the TOML with the pre-migration shape.
-        let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("config/encodings.toml");
-        let content = std::fs::read_to_string(&path).unwrap();
-        let raw: HashMap<String, toml::Value> = toml::from_str(&content).unwrap();
+        let raw: HashMap<String, toml::Value> = toml::from_str(ENCODINGS_TOML_GOLDEN).unwrap();
         let mut toml_map = HashMap::new();
         for (key, value) in raw {
             if let Some(enc_key) = key.strip_prefix("encoding.") {

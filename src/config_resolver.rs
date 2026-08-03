@@ -96,28 +96,28 @@ impl ConfigResolver {
         PathBuf::from("__baked__")
     }
 
-    /// Load the module registry (config/module-registry.toml).
+    /// Load the module registry (config/module-registry.dbvl).
     ///
-    /// 2026-08-03 (Phase 3): prefers the Data Brief form
-    /// (config/module-registry.dbvl); TOML remains as the pre-migration
-    /// fallback until parity is proven and the .toml is removed.
+    /// 2026-08-03 (Phase 3): the Data Brief form is the only form now — the
+    /// pre-migration .toml is deleted and the TOML fallback is removed.
     fn load_module_registry(config_dir: &Path) -> HashMap<String, String> {
         crate::dbrief::config_db::load_string_registry(config_dir, "module-registry")
     }
 
     /// Resolve a logical config name against this session's resolved config
-    /// dir, preferring Data Brief (`.dbvl`/`.dbv`) over legacy TOML.
+    /// dir, as a Data Brief file (`.dbvl`/`.dbv`).
     ///
-    /// 2026-08-03 (Phase 1a, plan docs/plans/2026-08-03-data-brief-config-and-
-    /// board-hardware-map.md): the migration seam for Phase 3. Existing
+    /// 2026-08-03 (Phase 1a → 3, plan docs/plans/2026-08-03-data-brief-config-
+    /// and-board-hardware-map.md): the migration seam for Phase 3. Existing
     /// `--config-dir`/profile users keep working because only the resolved
-    /// extension changes; a config not yet migrated still resolves to TOML.
+    /// extension changed during the migration.
     pub fn resolve_config(&self, name: &str) -> Option<PathBuf> {
         crate::dbrief::config_db::resolve_config_file(&self.config_dir, name)
     }
 }
 
-/// TOML structure for config/module-registry.toml
+/// Pre-migration TOML structure for config/module-registry.toml (retained for
+/// the golden-test reference; the file itself is deleted).
 #[derive(serde::Deserialize)]
 pub struct ModuleRegistry {
     modules: HashMap<String, String>,
@@ -216,35 +216,14 @@ pub fn init_profile(name: &str) -> Result<(), String> {
         .map_err(|e| format!("cannot create '{}': {}", profile_dir.display(), e))?;
 
     let baked_dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("config");
-    // 2026-07-17: Renamed llvm-primitives.toml to ctd-llvm-mappings.toml
-    // 2026-08-03 (Phase 3): the loaders prefer Data Brief (`.dbvl`/`.dbv`), so
-    // migrated configs are seeded as `.dbvl`; the not-yet-migrated TOML files
-    // (ctd-llvm-mappings/llvm-ops/spirv-ops) are copied as-is.
-    for file in &["targets.dbvl", "ctd-llvm-mappings.toml", "llvm-ops.toml", "spirv-ops.toml"] {
-        let src = baked_dir.join(file);
-        if src.exists() {
-            let content = std::fs::read_to_string(&src)
-                .map_err(|e| format!("cannot read '{}': {}", src.display(), e))?;
-            let dst = profile_dir.join(file);
-            std::fs::write(&dst, &content)
-                .map_err(|e| format!("cannot write '{}': {}", dst.display(), e))?;
-            println!("wrote {}", dst.display());
-        }
-    }
-
-    // Also copy module-registry (migrated to .dbvl)
-    let registry_src = baked_dir.join("module-registry.dbvl");
-    if registry_src.exists() {
-        let content = std::fs::read_to_string(&registry_src)
-            .map_err(|e| format!("cannot read '{}': {}", registry_src.display(), e))?;
-        let dst = profile_dir.join("module-registry.dbvl");
-        std::fs::write(&dst, &content)
-            .map_err(|e| format!("cannot write '{}': {}", dst.display(), e))?;
-        println!("wrote {}", dst.display());
-    }
-
-    // Also copy ir-lowering, protocols, encodings (migrated to .dbvl)
-    for file in &["ir-lowering.dbvl", "protocols.dbvl", "encodings.dbvl"] {
+    // 2026-08-03 (Phase 3): all six configs are Data Brief now — seed the
+    // profile with the .dbvl forms so created profiles load through the DB
+    // path. (The pre-migration TOMLs were deleted; nothing consumes them.)
+    for file in &[
+        "targets.dbvl", "module-registry.dbvl", "ir-lowering.dbvl",
+        "protocols.dbvl", "encodings.dbvl", "alloc-strategies.dbvl",
+        "address-map.dbvl",
+    ] {
         let src = baked_dir.join(file);
         if src.exists() {
             let content = std::fs::read_to_string(&src)

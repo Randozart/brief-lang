@@ -178,7 +178,7 @@ The frontend OWNS:   Expr, Statement, Type, TopLevel, TypeDef, PropertyValue
 The backend READS:    All of the above, via &reference
 The backend OWNS:    CompilerContext, TypedRegister, output string
 
-Backend selection is driven by config/targets.toml:
+Backend selection is driven by config/targets.dbvl:
   [.bv]   backend = "llvm"
   [.ebv]  backend = "llvm"
   [.cbv]  backend = "circt"
@@ -328,7 +328,7 @@ A backend can start with just `bytes` and be fully correct. It then opts into `p
 
 | Module | Purpose |
 |--------|---------|
-| `target.rs` | `TargetConfig` — reads `config/targets.toml`, resolves `BackendKind` |
+| `target.rs` | `TargetConfig` — reads `config/targets.dbvl`, resolves `BackendKind` |
 
 ### Plugins (`src/plugin/`)
 
@@ -401,12 +401,12 @@ the convergent txn loops through SROA + loop unrolling.
 
 | File | Purpose |
 |------|---------|
-| `config/targets.toml` | File extension → backend routing |
+| `config/targets.dbvl` | File extension → backend routing |
 | `config/ctd-llvm-mappings.toml` | (ctd, bytes) → LLVM type string |
 | `config/llvm-ops.toml` | (operation, primitive, bytes) → LLVM IR template |
 | `config/circt-ops.toml` | (operation, primitive, bytes) → MLIR template |
 | `config/alloc-strategies.dbvl` | Custom allocation strategy templates + Free# dispatch |
-| `config/encodings.toml` | String encoding metadata (char_width, ops for index_at/char_len) |
+| `config/encodings.dbvl` | String encoding metadata (char_width, ops for index_at/char_len) |
 | `config/webstack-ops.toml` | (operation, primitive, bytes) → JS/TS template |
 
 ## Key Source Files

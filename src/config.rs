@@ -78,6 +78,33 @@ impl AllocConfig {
 mod tests {
     use super::*;
 
+    /// Pre-migration config/alloc-strategies.toml, frozen as the golden
+    /// reference for parity_alloc_strategies_dbvl_matches_toml. 2026-08-03:
+    /// the .toml file is deleted; edits to config/alloc-strategies.dbvl must
+    /// keep this test green.
+    const ALLOC_STRATEGIES_TOML_GOLDEN: &str = r#"
+[alloc.pool_serial]
+template = """
+%{v}_p = call ptr @pool_alloc(i64 {size})
+%{v} = ptrtoint ptr %{v}_p to i64
+"""
+free = "none"
+
+[alloc.mmap_shared]
+template = """
+%{v}_p = call ptr @mmap_shared(i64 {size})
+%{v} = ptrtoint ptr %{v}_p to i64
+"""
+free = "munmap_shared"
+
+[alloc.pinned_dma]
+template = """
+%{v}_p = call ptr @alloc_dma_pinned(i64 {size})
+%{v} = ptrtoint ptr %{v}_p to i64
+"""
+free = "free_dma_pinned"
+"#;
+
     #[test]
     fn alloc_config_loads_strategies() {
         let config = AllocConfig::load();
@@ -101,7 +128,7 @@ mod tests {
     #[test]
     fn parity_alloc_strategies_dbvl_matches_toml() {
         // Phase 3 migration gate: config/alloc-strategies.dbvl must produce
-        // exactly the template+free map the alloc-strategies.toml INTENDS.
+        // exactly the template+free map the alloc-strategies.toml INTENDED.
         //
         // 2026-08-03: the pre-migration TOML loader had a latent bug —
         // `[alloc.pool_serial]` parses to a nested `alloc` table, so
@@ -109,10 +136,10 @@ mod tests {
         // loaded an EMPTY map. The DBVL loader fixes this (strategies now
         // actually load). The parity test therefore walks the nested `alloc`
         // table to compare against the TOML's intent, not its broken output.
+        // The .toml is deleted; this is now a GOLDEN test — the pre-migration
+        // TOML is baked below and re-parsed.
         let config = AllocConfig::load();
-        let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("config/alloc-strategies.toml");
-        let content = std::fs::read_to_string(&path).unwrap();
-        let raw: toml::Value = toml::from_str(&content).unwrap();
+        let raw: toml::Value = toml::from_str(ALLOC_STRATEGIES_TOML_GOLDEN).unwrap();
         let alloc = raw.get("alloc").and_then(toml::Value::as_table).unwrap();
         let mut toml_strategies = HashMap::new();
         for (name, value) in alloc {

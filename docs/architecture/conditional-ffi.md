@@ -133,7 +133,7 @@ different libraries per target but means the same thing to the compiler:
 | `wasm32-wasi` | `wasi_snapshot_preview1` |
 
 The compiler maps `#System` to the appropriate library per target in
-`config/protocols.toml`:
+`config/protocols.dbvl`:
 
 ```toml
 [x86_64-linux]
@@ -163,7 +163,7 @@ clang/gcc support — `-lz` for zlib, `-luser32` for Windows USER32,
 | Feature | `from #System` | `from #Link<z>` |
 |---------|---------------|-----------------|
 | Per-target resolution | Yes — different lib per target | No — always `-l<name>` |
-| Config file | `config/protocols.toml` | None |
+| Config file | `config/protocols.dbvl` | None |
 | Example | Linux: `-lc`, macOS: `-lSystem` | `-lz` on any platform |
 
 ### How it differs from `from "path"`

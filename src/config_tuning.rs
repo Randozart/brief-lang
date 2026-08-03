@@ -178,6 +178,55 @@ fn load_ir_lowering() -> IrLoweringSettings {
 mod tests {
     use super::*;
 
+    /// Pre-migration config/ir-lowering.toml, frozen as the golden reference
+    /// for parity_ir_lowering_dbvl_matches_toml. 2026-08-03: the .toml file is
+    /// deleted; edits to config/ir-lowering.dbvl must keep this test green.
+    const IR_LOWERING_TOML_GOLDEN: &str = r#"
+arena_min_budget = 128
+arena_initial_size = 65536
+stack_threshold = 4096
+max_fields_per_alloca = 15
+sso_max_bytes = 6
+svo_max_elements = 3
+callable_inline_weight_threshold = 40
+"#;
+
+    /// Pre-migration config/targets.toml, frozen as the golden reference for
+    /// parity_target_settings_dbvl_matches_toml (the `[target.<prefix>]`
+    /// tables only). 2026-08-03: the .toml file is deleted; edits to the
+    /// `target.*` rows in config/targets.dbvl must keep this test green.
+    const TARGET_SETTINGS_TOML_GOLDEN: &str = r#"
+[target.x86_64]
+float_registers = 16
+dense_compute_density = 4.0
+vector_min_width = 4
+
+[target.aarch64]
+float_registers = 32
+dense_compute_density = 4.0
+vector_min_width = 4
+
+[target.arm64]
+float_registers = 32
+dense_compute_density = 4.0
+vector_min_width = 4
+
+[target.wasm32]
+float_registers = 4294967295
+dense_compute_density = 4.0
+vector_min_width = 4
+
+[target.wasm64]
+float_registers = 4294967295
+dense_compute_density = 4.0
+vector_min_width = 4
+
+[target.spirv64]
+float_registers = 32
+dense_compute_density = 4.0
+vector_min_width = 4
+"#;
+
     #[test]
     fn test_ir_lowering_defaults_match_hardcoded() {
         let s = ir_lowering();
@@ -193,12 +242,11 @@ mod tests {
     #[test]
     fn parity_ir_lowering_dbvl_matches_toml() {
         // Phase 3 migration gate: config/ir-lowering.dbvl must produce exactly
-        // the values the TOML it replaces produces. The .toml is deleted only
-        // after this stays green.
+        // the values the TOML it replaces produced. 2026-08-03: the .toml is
+        // deleted; this is now a GOLDEN test — the pre-migration TOML is baked
+        // below and re-parsed.
         let s = ir_lowering();
-        let toml_content =
-            include_str!("../config/ir-lowering.toml");
-        let raw: toml::Value = toml::from_str(toml_content).unwrap();
+        let raw: toml::Value = toml::from_str(IR_LOWERING_TOML_GOLDEN).unwrap();
         let i64_of = |k: &str| raw.get(k).and_then(toml::Value::as_integer).unwrap();
         assert_eq!(s.arena_min_budget as i64, i64_of("arena_min_budget"));
         assert_eq!(s.arena_initial_size as i64, i64_of("arena_initial_size"));
@@ -222,11 +270,11 @@ mod tests {
     fn parity_target_settings_dbvl_matches_toml() {
         // Phase 3 migration gate (targets): config/targets.dbvl's `target.*`
         // rows must produce exactly the per-prefix tuning the targets.toml
-        // `[target.<prefix>]` tables produce. The .toml is deleted only after
-        // this AND parity_targets_dbvl_matches_toml both stay green.
+        // `[target.<prefix>]` tables produced. 2026-08-03: the .toml is
+        // deleted; this is now a GOLDEN test — the pre-migration TOML tables
+        // are baked below and re-parsed.
         let db_map = load_target_settings();
-        let content = include_str!("../config/targets.toml");
-        let raw: toml::Value = toml::from_str(content).unwrap();
+        let raw: toml::Value = toml::from_str(TARGET_SETTINGS_TOML_GOLDEN).unwrap();
         let toml_targets = raw.get("target").and_then(toml::Value::as_table).unwrap();
 
         assert_eq!(db_map.len(), toml_targets.len(),

@@ -493,7 +493,7 @@ directory for installing Brief modules and foreign sources. Managed by
 Lookup order for `import <name>` / `from <name>`:
 1. Project-local `.brief/registry/<name>` (if it exists)
 2. User-wide `~/.brief/registry/<name>`
-3. `config/module-registry.toml` (for imports)
+3. `config/module-registry.dbvl` (for imports)
 4. Stdlib path (for `from <name>` and `import <name>` fallback)
 
 See `docs/plans/2026-07-26-tamer-zero-c-and-static-memory.md` §1f.

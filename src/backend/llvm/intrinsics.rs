@@ -646,7 +646,7 @@ fn emit_get_global_id(
 
 /// 2026-07-15: AddressOf# resolves a named device/entity to a typed pointer.
 /// The address is resolved at compile time via the shared address_resolver
-/// (which reads config/address-map.toml + hardcoded fallbacks).
+/// (which reads config/address-map.dbvl + hardcoded fallbacks).
 /// Emits: %v = inttoptr i64 <addr> to ptr
 fn emit_address_of(
     backend: &mut LlvmBackend, out: &mut String, v: &str,

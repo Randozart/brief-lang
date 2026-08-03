@@ -208,7 +208,7 @@ When an operator like `+` is applied to a type with `#Int` protocol, the backend
 
 ## 6. Protocol Variants and Backend Support
 
-Each backend declares supported protocols in `config/targets.toml`. A function
+Each backend declares supported protocols in `config/targets.dbvl`. A function
 requiring a protocol the backend doesn't support produces a compile error.
 
 The file extension determines the default variant:

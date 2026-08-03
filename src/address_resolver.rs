@@ -8,7 +8,7 @@
 // board-hardware-map.md §5.2): the board's `addresses.dbvl` is now the
 // primary source. Resolution order:
 //   1. active board's `lib/boards/<board>/addresses.dbvl` (ConfigDb-backed)
-//   2. config/address-map.toml (deprecated alias)
+//   2. config/address-map.dbvl (deprecated alias)
 //   3. hardcoded table — with a warning (an unowned default must say so)
 //   4. default MMIO region base (0xFE000000)
 //
@@ -56,7 +56,7 @@ pub fn set_active_board(board: &str) {
 ///
 /// Tries, in order:
 /// 1. Active board's addresses.dbvl (if set)
-/// 2. config/address-map.toml (if present)
+/// 2. config/address-map.dbvl (if present)
 /// 3. Hardcoded well-known device names (with a warning)
 /// 4. Default MMIO region base (0xFE000000)
 pub fn resolve_address(id: &str) -> u64 {
@@ -84,30 +84,37 @@ pub fn resolve_address(id: &str) -> u64 {
     0xFE000000
 }
 
-/// 2026-07-15: Read config/address-map.toml and look up the id.
+/// 2026-07-15: Read config/address-map.dbvl and look up the id.
+/// 2026-08-03 (Phase 3): migrated from address-map.dbvl to the .dbvl
+/// line-table form; the lookup is case-insensitive like the board map.
 fn resolve_from_config(id: &str) -> Option<u64> {
     let config_path = find_config_path()?;
-    let content = std::fs::read_to_string(&config_path).ok()?;
-    let parsed: HashMap<String, toml::Value> = toml::from_str(&content).ok()?;
-    let addresses = parsed.get("addresses")?.as_table()?;
-    let value = addresses.get(id)?;
-    let s = value.as_str()?;
+    let db = ConfigDb::from_file(&config_path, false).ok()?;
+    let s = db.field_string(&id.to_uppercase(), 0)?;
     radix_parse_hex(s)
 }
 
-/// 2026-07-15: Locate config/address-map.toml relative to the project root
+/// 2026-07-15: Locate config/address-map.dbvl relative to the project root
 /// or the compiler binary.
-fn find_config_path() -> Option<String> {
+fn find_config_path() -> Option<PathBuf> {
     // Try relative to CWD (development)
-    if Path::new("config/address-map.toml").exists() {
-        return Some("config/address-map.toml".to_string());
+    let candidates = [
+        PathBuf::from("config/address-map.dbvl"),
+        PathBuf::from("config/address-map.dbv"),
+    ];
+    for c in &candidates {
+        if c.exists() {
+            return Some(c.clone());
+        }
     }
     // Try relative to executable
     if let Ok(exe) = std::env::current_exe() {
         if let Some(parent) = exe.parent() {
-            let path = parent.join("config/address-map.toml");
-            if path.exists() {
-                return Some(path.to_string_lossy().to_string());
+            for c in &candidates {
+                let path = parent.join(c);
+                if path.exists() {
+                    return Some(path);
+                }
             }
         }
     }
@@ -144,7 +151,7 @@ fn radix_parse_hex(s: &str) -> Option<u64> {
 }
 
 /// Hardcoded well-known device address table.
-/// 2026-07-15: Mirrors config/address-map.toml for fallback when the
+/// 2026-07-15: Mirrors config/address-map.dbvl for fallback when the
 /// board map and config file are not available. 2026-08-03: reaches here
 /// only after the board map and config both miss — and emits a warning.
 fn resolve_from_hardcoded(id: &str) -> Option<u64> {
@@ -190,7 +197,7 @@ mod tests {
 
     #[test]
     fn test_resolve_address_from_config_file() {
-        // This test passes if config/address-map.toml is present and
+        // This test passes if config/address-map.dbvl is present and
         // contains "uart" → 0xFFE01000. If the file is absent, fallback
         // kicks in and still returns the right value.
         clear_active_board();

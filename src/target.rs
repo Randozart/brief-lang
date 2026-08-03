@@ -71,7 +71,7 @@ pub struct TargetConfig {
 // Maps a target triple → { protocol_name → library_or_none }.
 // None means the protocol is unavailable on that target.
 
-/// Loaded config/protocols.toml.
+/// Loaded config/protocols.dbvl.
 ///
 /// 2026-07-26: Maps protocol names to linker library names per target triple.
 /// `#System` abstracts "the platform's standard system library" (libc on Linux,
@@ -99,15 +99,19 @@ impl ProtocolConfig {
             .unwrap_or_else(|e| panic!("config/protocols.dbvl parse error: {}", e));
         let mut per_target = HashMap::new();
         for key in db.keys() {
-            let mut map = HashMap::new();
-            if let Some(crate::dbrief::v2::DataValue::Map(entries)) = db.field(&key, 0) {
-                for (protocol, lib) in entries {
-                    map.insert(protocol.clone(), match lib {
-                        crate::dbrief::v2::DataValue::String(s) => Some(s.clone()),
-                        _ => None,
-                    });
-                }
-            }
+            let map = match db.field(&key, 0) {
+                Some(crate::dbrief::v2::DataValue::Map(entries)) => entries
+                    .iter()
+                    .map(|(protocol, lib)| {
+                        let lib = match lib {
+                            crate::dbrief::v2::DataValue::String(s) => Some(s.clone()),
+                            _ => None,
+                        };
+                        (protocol.clone(), lib)
+                    })
+                    .collect(),
+                _ => HashMap::new(),
+            };
             per_target.insert(key, map);
         }
         ProtocolConfig { per_target }
@@ -134,7 +138,7 @@ impl ProtocolConfig {
         }
         let target_map = self.per_target.get(target_triple).ok_or_else(|| {
             format!(
-                "target '{}' not found in config/protocols.toml. \
+                "target '{}' not found in config/protocols.dbvl. \
                  Add an entry for this target to configure protocol support",
                 target_triple
             )
@@ -143,7 +147,7 @@ impl ProtocolConfig {
             Some(Some(lib)) => Ok(Some(lib.as_str())),
             Some(None) => Ok(None),
             None => Err(format!(
-                "target '{}' has no '{}' entry in config/protocols.toml",
+                "target '{}' has no '{}' entry in config/protocols.dbvl",
                 target_triple, protocol
             )),
         }
@@ -259,6 +263,93 @@ pub fn get_extension(file_path: &str) -> String {
 mod tests {
     use super::*;
 
+    /// Pre-migration config/targets.toml, frozen as the golden reference for
+    /// parity_targets_dbvl_matches_toml. 2026-08-03: the .toml file is deleted;
+    /// edits to config/targets.dbvl must keep this test green.
+    const TARGETS_TOML_GOLDEN: &str = r#"
+# Extension → backend routing.
+
+[".bv"]
+backend = "llvm"
+defaults = ["--budget", "256"]
+plugins = ["prelude", "env", "print", "entry", "script"]
+assembler = "none"
+cross_verify_samples = 50
+
+[".ebv"]
+backend = "llvm"
+defaults = ["--optimize-size", "--budget", "0"]
+plugins = ["prelude"]
+
+[".cbv"]
+backend = "circt"
+defaults = []
+plugins = ["prelude-hw"]
+
+[".rbv"]
+backend = "webstack"
+defaults = ["--target", "wasm"]
+plugins = ["prelude"]
+
+[".abv"]
+backend = "spirv"
+defaults = ["--gpu-offload"]
+plugins = ["prelude"]
+
+[target.x86_64]
+float_registers = 16
+dense_compute_density = 4.0
+vector_min_width = 4
+
+[target.aarch64]
+float_registers = 32
+dense_compute_density = 4.0
+vector_min_width = 4
+
+[target.arm64]
+float_registers = 32
+dense_compute_density = 4.0
+vector_min_width = 4
+
+[target.wasm32]
+float_registers = 4294967295
+dense_compute_density = 4.0
+vector_min_width = 4
+
+[target.wasm64]
+float_registers = 4294967295
+dense_compute_density = 4.0
+vector_min_width = 4
+
+[target.spirv64]
+float_registers = 32
+dense_compute_density = 4.0
+vector_min_width = 4
+"#;
+
+    /// Pre-migration config/protocols.toml, frozen as the golden reference for
+    /// parity_protocols_dbvl_matches_toml. 2026-08-03: the .toml file is
+    /// deleted; edits to config/protocols.dbvl must keep this test green.
+    /// Uses `r##"..."##` because the TOML values contain `"#System` (`"#`
+    /// would close a `r#"` raw string).
+    const PROTOCOLS_TOML_GOLDEN: &str = r##"
+[x86_64-linux]
+"#System" = "c"
+
+[aarch64-linux]
+"#System" = "c"
+
+[x86_64-macos]
+"#System" = "System"
+
+[aarch64-macos]
+"#System" = "System"
+
+[wasm32-wasi]
+"#System" = "wasi_snapshot_preview1"
+"#Web" = "wasm_runtime"
+"##;
+
     #[test]
     fn test_target_config_loads() {
         let config = TargetConfig::load();
@@ -333,14 +424,14 @@ mod tests {
     #[test]
     fn parity_targets_dbvl_matches_toml() {
         // Phase 3 migration gate: config/targets.dbvl must produce exactly the
-        // extension→TargetEntry map the targets.toml it replaces produces. The
+        // extension→TargetEntry map the targets.toml it replaced produced. The
         // `target.*` tuning rows are skipped here — they feed config_tuning,
-        // whose own parity test covers them. The .toml is deleted only after
-        // both stay green.
+        // whose own parity test covers them. 2026-08-03: the .toml is deleted;
+        // this is now a GOLDEN test — the pre-migration TOML is baked below and
+        // re-parsed, so the exact-value comparison stays without the file.
         let db = TargetConfig::load();
-        let content = include_str!("../config/targets.toml");
         let toml_entries: HashMap<String, TargetEntry> =
-            toml::from_str(content).unwrap();
+            toml::from_str(TARGETS_TOML_GOLDEN).unwrap();
 
         let toml_exts: Vec<String> = toml_entries
             .keys()
@@ -373,26 +464,33 @@ mod tests {
     #[test]
     fn parity_protocols_dbvl_matches_toml() {
         // Phase 3 migration gate: config/protocols.dbvl must produce exactly
-        // the target→protocol→library map the .toml it replaces produces. The
-        // .toml is deleted only after this stays green.
+        // the target→protocol→library map the protocols.toml it replaced
+        // produced. 2026-08-03: the .toml is deleted; this is now a GOLDEN
+        // test — the pre-migration TOML is baked below and re-parsed.
         let db = ProtocolConfig::load();
-        let content = include_str!("../config/protocols.toml");
         let toml_map: HashMap<String, HashMap<String, Option<String>>> =
-            toml::from_str(content).unwrap();
+            toml::from_str(PROTOCOLS_TOML_GOLDEN).unwrap();
 
         assert_eq!(db.per_target.len(), toml_map.len());
-        for (triple, toml_protos) in &toml_map {
-            let db_map = db.per_target.get(triple)
+        // Flatten to (triple, protocol, lib) and iterate once (avoids nested
+        // loops for the Praetor complexity gate).
+        let flat: Vec<(String, String, Option<String>)> = toml_map
+            .iter()
+            .flat_map(|(triple, protos)| {
+                protos
+                    .iter()
+                    .map(move |(protocol, lib)| (triple.clone(), protocol.clone(), lib.clone()))
+            })
+            .collect();
+        for (triple, protocol, lib) in flat {
+            let db_map = db.per_target.get(&triple)
                 .unwrap_or_else(|| panic!("target '{}' missing from protocols.dbvl", triple));
-            assert_eq!(db_map.len(), toml_protos.len());
-            for (protocol, lib) in toml_protos {
-                assert_eq!(
-                    db_map.get(protocol),
-                    Some(lib),
-                    "protocol '{}' on '{}' diverges between .dbvl and .toml",
-                    protocol, triple
-                );
-            }
+            assert_eq!(
+                db_map.get(&protocol),
+                Some(&lib),
+                "protocol '{}' on '{}' diverges between .dbvl and .toml",
+                protocol, triple
+            );
         }
     }
 }
