@@ -405,7 +405,7 @@ the convergent txn loops through SROA + loop unrolling.
 | `config/ctd-llvm-mappings.toml` | (ctd, bytes) → LLVM type string |
 | `config/llvm-ops.toml` | (operation, primitive, bytes) → LLVM IR template |
 | `config/circt-ops.toml` | (operation, primitive, bytes) → MLIR template |
-| `config/alloc-strategies.toml` | Custom allocation strategy templates + Free# dispatch |
+| `config/alloc-strategies.dbvl` | Custom allocation strategy templates + Free# dispatch |
 | `config/encodings.toml` | String encoding metadata (char_width, ops for index_at/char_len) |
 | `config/webstack-ops.toml` | (operation, primitive, bytes) → JS/TS template |
 

@@ -238,7 +238,7 @@ fn emit_malloc(
 //   Alloc#(size, Arena)                 — PascalCase: intrinsic dispatch
 //   Alloc#(size, Malloc)                — PascalCase: intrinsic dispatch
 //   Alloc#(size, Alloca)                — PascalCase: intrinsic dispatch
-//   Alloc#(size, "pool_serial")         — quoted: config/alloc-strategies.toml
+//   Alloc#(size, "pool_serial")         — quoted: config/alloc-strategies.dbvl
 //   Alloc#(size, my_custom_alloc_fn)    — identifier: user Brief function
 fn emit_alloc(
     backend: &mut LlvmBackend, out: &mut String, v: &str,
@@ -363,7 +363,7 @@ fn emit_alloc_with_strategy(
         }
         Expr::Quoted(bytes) => {
             let strategy_name = String::from_utf8_lossy(bytes).to_string();
-            // Look up in config/alloc-strategies.toml.
+            // Look up in config/alloc-strategies.dbvl.
             let found = emit_alloc_from_config(backend, out, v, &strategy_name, size, indent);
             if !found {
                 // Fallback to @malloc with warning.
@@ -382,7 +382,7 @@ fn emit_alloc_with_strategy(
     BTypedRegister { name: v.to_string(), ty: Type::ptr(Type::int()) }
 }
 
-// 2026-07-18: Look up a quoted strategy name in config/alloc-strategies.toml
+// 2026-07-18: Look up a quoted strategy name in config/alloc-strategies.dbvl
 // and emit the corresponding LLVM IR template. Returns true if found.
 fn emit_alloc_from_config(
     backend: &mut LlvmBackend, out: &mut String, v: &str,

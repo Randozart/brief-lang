@@ -153,7 +153,7 @@ pub enum AllocStrategy {
     Inline,
     /// 2026-07-18: Circular buffer, overwrite-oldest. Free# is no-op.
     RingBuffer,
-    /// 2026-07-18: Named strategy from config/alloc-strategies.toml.
+    /// 2026-07-18: Named strategy from config/alloc-strategies.dbvl.
     Config(String),
     /// 2026-07-18: User-provided Brief function as allocator.
     Custom(String),

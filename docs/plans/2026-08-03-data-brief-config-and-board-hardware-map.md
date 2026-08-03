@@ -1,7 +1,7 @@
 # Plan: Data Brief as Universal Config + Board-Owned Hardware Map
 
 **Date:** 2026-08-03
-**Status:** Phase 3 in progress (module-registry, ir-lowering, protocols, encodings, targets migrated — `8b52f0ff` `a37923af` `4e07e82d` `7d426e22`; `alloc-strategies.toml` next, then .toml deletion)
+**Status:** Phase 3 done — all six TOML configs migrated (module-registry `8b52f0ff`, ir-lowering `a37923af`, protocols `4e07e82d`, encodings `7d426e22`, targets `aa56e9a5`, alloc-strategies pending commit; next: .toml deletion)
 **Branch:** `feat/data-brief-config` (new)
 
 **This is the AUTHORITATIVE record** for two coupled streams that share one
@@ -255,7 +255,7 @@ after the DB path provably produces identical output.
 | `module-registry.toml` | `.dbvl` `name → path` | none | ✅ `module-registry.dbvl` (8b52f0ff) |
 | `encodings.toml` | `.dbvl` `name: char_width; index_at; char_len;` | none | ✅ `encodings.dbvl` |
 | `ir-lowering.toml` | `.dbvl` tunables | none | ✅ `ir-lowering.dbvl` |
-| `alloc-strategies.toml` | `.dbvl` with **quoted** LLVM IR templates | **yes** — templates carry `{}`, `;`, `:`. Solved by `parse_document_quoted`: store the template as `template: "call @llvm.memset..."`. Escape `"`/`\`. | ⏳ Phase 3-last |
+| `alloc-strategies.toml` | `.dbvl` with **quoted** LLVM IR templates | **yes** — templates carry `{}`, `;`, `:`. Solved by `parse_document_quoted`: store the template as `template: "call @llvm.memset..."`. Escape `"`/`\`. | ✅ `alloc-strategies.dbvl` |
 
 `alloc-strategies` is Phase 3-*last* and gated behind the quoted-string test,
 so the five clean ones are not blocked by the IR one.
@@ -289,6 +289,17 @@ so the five clean ones are not blocked by the IR one.
   by `config_tuning::load_target_settings()`. The TOML `[target.<prefix>]`
   tables flatten to a single `target` key (nested table), not `target.*`, so
   the parity filter excludes both.
+- **`alloc-strategies.toml` → `config/alloc-strategies.dbvl`**: row shape
+  `<name>: "<template with \n escapes>"; [free];`, read by `AllocConfig::load()`
+  in quoted mode. Two findings:
+  - The pre-migration TOML loader had a **latent bug**: `[alloc.pool_serial]`
+    parses to a nested `alloc` table, so the old `strip_prefix("alloc.")` never
+    matched and the old config always loaded an EMPTY map. The DBVL loader
+    fixes this; `parity_alloc_strategies_dbvl_matches_toml` walks the nested
+    `alloc` table to compare against the TOML's intent, not its broken output.
+  - TOML multi-line `"""` templates carry a trailing newline; the emitter's
+    `writeln!` makes it cosmetic (blank line in valid LLVM IR), so the parity
+    test compares templates after `trim_end()`.
 - **Parser fix surfaced by the parity test**: `try_parse_identifier` excluded
   `-`, silently dropping hyphenated keys (`from-bits`). Now mirrors
   `parse_identifier`'s charset; locked by
@@ -299,16 +310,17 @@ so the five clean ones are not blocked by the IR one.
 - **Migration gates**: `parity_module_registry_dbvl_matches_toml`,
   `parity_ir_lowering_dbvl_matches_toml`, `parity_protocols_dbvl_matches_toml`,
   `parity_encodings_dbvl_matches_toml`, `parity_targets_dbvl_matches_toml`
-  (target.rs), and `parity_target_settings_dbvl_matches_toml`
-  (config_tuning.rs) each assert the `.dbvl` output equals the `.toml` output
+  (target.rs), `parity_target_settings_dbvl_matches_toml`
+  (config_tuning.rs), and `parity_alloc_strategies_dbvl_matches_toml`
+  (config.rs) each assert the `.dbvl` output equals the `.toml` output
   exactly; a `.toml` is deleted only after its gate stays green.
 - **`init_profile`** now seeds migrated configs as `.dbvl` (targets,
   module-registry, ir-lowering, protocols, encodings) so created profiles load
   through the DB path; the not-yet-migrated TOMLs (ctd-llvm-mappings,
   llvm-ops, spirv-ops) are copied as-is.
-- **Remaining before the .toml files can be deleted**: `alloc-strategies.toml`
-  (quoted IR templates, Phase 3-last), then remove the migrated `.toml` files
-  and the TOML fallback branches in `load_string_registry`/`resolve_config_file`.
+- **Remaining before the .toml files can be deleted**: remove the migrated
+  `.toml` files and the TOML fallback branches in
+  `load_string_registry`/`resolve_config_file`.
 
 ### Phase 4 — Documentation + `.ebv` runtime hand-off
 

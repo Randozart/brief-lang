@@ -23,7 +23,7 @@ pub struct AllocStrategyEntry {
 }
 
 /// 2026-07-18: Maps named allocation strategies to LLVM IR templates.
-/// Loaded from config/alloc-strategies.toml at compile time.
+/// Loaded from config/alloc-strategies.dbvl at compile time.
 #[derive(Debug, Clone)]
 pub struct AllocConfig {
     strategies: HashMap<String, AllocStrategyEntry>,
@@ -31,29 +31,32 @@ pub struct AllocConfig {
 
 impl AllocConfig {
     /// Load the built-in alloc strategies file.
+    ///
+    /// 2026-08-03 (Phase 3, data-brief-config plan): reads config/alloc-strategies.dbvl
+    /// in quoted mode — the LLVM IR templates carry `{v}`/`{size}` braces that
+    /// bare mode would take as a nested sub-record. Row shape:
+    /// `<name>: "<template with \n escapes>"; [free];`. The .toml remains as
+    /// the parity-test source until identical output is proven.
     pub fn load() -> Self {
-        let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("config/alloc-strategies.toml");
+        let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("config/alloc-strategies.dbvl");
         let content = match std::fs::read_to_string(&path) {
             Ok(c) => c,
             Err(_) => return AllocConfig { strategies: HashMap::new() },
         };
-        let raw: HashMap<String, toml::Value> = toml::from_str(&content)
-            .unwrap_or_default();
-        let mut strategies = HashMap::new();
-        for (key, value) in raw {
-            if let Some(strat_key) = key.strip_prefix("alloc.") {
-                if let toml::Value::Table(table) = value {
-                    let template = match table.get("template") {
-                        Some(toml::Value::String(t)) => t.clone(),
-                        _ => continue,
-                    };
-                    let free = match table.get("free") {
-                        Some(toml::Value::String(f)) => Some(f.clone()),
-                        _ => None,
-                    };
-                    strategies.insert(strat_key.to_string(), AllocStrategyEntry { template, free });
-                }
+        let db = match crate::dbrief::config_db::ConfigDb::from_quoted_str(&content) {
+            Ok(db) => db,
+            Err(e) => {
+                eprintln!("warning: config/alloc-strategies.dbvl parse error: {} — using empty set", e);
+                return AllocConfig { strategies: HashMap::new() };
             }
+        };
+        let mut strategies = HashMap::new();
+        for key in db.keys() {
+            let Some(template) = db.field_string(&key, 0).map(|s| s.to_string()) else {
+                continue;
+            };
+            let free = db.field_string(&key, 1).map(|s| s.to_string());
+            strategies.insert(key, AllocStrategyEntry { template, free });
         }
         AllocConfig { strategies }
     }
@@ -68,5 +71,70 @@ impl AllocConfig {
     /// Some("fn_name") → call custom free function.
     pub fn lookup_free(&self, name: &str) -> Option<&str> {
         self.strategies.get(name).and_then(|e| e.free.as_deref())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn alloc_config_loads_strategies() {
+        let config = AllocConfig::load();
+        assert!(config.lookup("pool_serial").is_some(), "should have pool_serial");
+        assert!(config.lookup("mmap_shared").is_some(), "should have mmap_shared");
+        assert!(config.lookup("pinned_dma").is_some(), "should have pinned_dma");
+    }
+
+    #[test]
+    fn alloc_config_preserves_templates_and_free() {
+        let config = AllocConfig::load();
+        let template = config.lookup("pool_serial").unwrap();
+        assert!(template.contains("call ptr @pool_alloc(i64 {size})"),
+            "template must keep the {{size}} placeholder (got: '{}')", template);
+        assert!(template.contains('\n'), "multi-line template must keep its newline");
+        assert_eq!(config.lookup_free("pool_serial"), Some("none"));
+        assert_eq!(config.lookup_free("mmap_shared"), Some("munmap_shared"));
+        assert_eq!(config.lookup_free("pinned_dma"), Some("free_dma_pinned"));
+    }
+
+    #[test]
+    fn parity_alloc_strategies_dbvl_matches_toml() {
+        // Phase 3 migration gate: config/alloc-strategies.dbvl must produce
+        // exactly the template+free map the alloc-strategies.toml INTENDS.
+        //
+        // 2026-08-03: the pre-migration TOML loader had a latent bug —
+        // `[alloc.pool_serial]` parses to a nested `alloc` table, so
+        // `strip_prefix("alloc.")` never matched and the old config always
+        // loaded an EMPTY map. The DBVL loader fixes this (strategies now
+        // actually load). The parity test therefore walks the nested `alloc`
+        // table to compare against the TOML's intent, not its broken output.
+        let config = AllocConfig::load();
+        let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("config/alloc-strategies.toml");
+        let content = std::fs::read_to_string(&path).unwrap();
+        let raw: toml::Value = toml::from_str(&content).unwrap();
+        let alloc = raw.get("alloc").and_then(toml::Value::as_table).unwrap();
+        let mut toml_strategies = HashMap::new();
+        for (name, value) in alloc {
+            let table = value.as_table().unwrap();
+            let template = table.get("template").and_then(toml::Value::as_str).unwrap();
+            let free = table.get("free").and_then(toml::Value::as_str);
+            toml_strategies.insert(name.clone(), (template.to_string(), free.map(|s| s.to_string())));
+        }
+
+        assert_eq!(config.strategies.len(), toml_strategies.len(),
+            "strategy count diverges between .dbvl and .toml");
+        for (name, (toml_template, toml_free)) in &toml_strategies {
+            let entry = config.strategies.get(name)
+                .unwrap_or_else(|| panic!("strategy '{}' missing from alloc-strategies.dbvl", name));
+            // Compare templates with trailing whitespace trimmed: the TOML
+            // multi-line `"""` string carries a trailing newline that the
+            // emitter's writeln! makes cosmetic (an extra blank line in valid
+            // LLVM IR), so a trailing-newline-only divergence is not semantic.
+            assert_eq!(entry.template.trim_end(), toml_template.trim_end(),
+                "template for '{}' diverges", name);
+            assert_eq!(&entry.free, toml_free,
+                "free for '{}' diverges", name);
+        }
     }
 }

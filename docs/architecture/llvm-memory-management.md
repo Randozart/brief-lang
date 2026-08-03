@@ -132,7 +132,7 @@ The growth path is taken only on the rare case of arena exhaustion.
 | `Malloc` | `call @free(ptr)` |
 | `Config(name)` | Checks config: `free = "none"` → no-op, `free = "fn"` → `call @fn(ptr)` |
 
-Config entries in `config/alloc-strategies.toml` can declare a `free` field:
+Config entries in `config/alloc-strategies.dbvl` can declare a `free` field:
 
 ```toml
 [alloc.pool_serial]
