@@ -5,7 +5,8 @@
 //
 // Key responsibilities:
 // - Expr::Call with # suffix → look up get_intrinsic_signature()
-// - BinaryOp/UnaryOp → resolve op via get_operator_intrinsic()
+// - BinaryOp/UnaryOp → resolve op via declared ops → protocol bindings
+//   (2026-08-03: protocol-category resolution, never type-name matching)
 // - Literals → validate formatting compatibility
 // - Variables → look up in scope
 
@@ -16,7 +17,9 @@ use crate::analysis::provenance::Provenance;
 use crate::ast::*;
 use crate::errors::{SyntaxError, TypeError};
 use crate::intrinsic_signatures::{get_intrinsic_signature, ReturnKind, Signature};
-use crate::type_universe::{get_operator_intrinsic, TypeUniverse};
+use crate::type_universe::{
+    get_operator_intrinsic, protocol_binding, rune_to_op_name, TypeUniverse,
+};
 use std::collections::HashMap;
 
 /// Type-check context: variable bindings and type universe.
@@ -111,28 +114,72 @@ impl<'a> TypecheckContext<'a> {
     }
 
     /// Does `ty` declare `op <op_name>` whose declared operand covers `operand`?
+    /// 2026-08-03 (operator-resolution fix): walks the `type_parents` chain, so
+    /// an op declared on a parent type is inherited by its subtype (mirroring
+    /// the Parse-op parent walk).
     fn type_declares_op(&self, ty: &Type, op_name: &str, operand: &Type) -> bool {
-        let type_name = match ty {
+        let Some(current) = (match ty {
+            Type::Custom(n) => Some(n.as_str()),
+            Type::Applied(n, _) => Some(n.as_str()),
+            _ => None,
+        }) else {
+            return false;
+        };
+        let mut current = current;
+        loop {
+            if let Some(ops) = self.regular_ops.get(current) {
+                if ops.iter().any(|op| {
+                    op.op == op_name
+                        && op.params.first().map_or(false, |p| self.param_covers(p, operand))
+                }) {
+                    return true;
+                }
+            }
+            if let Some(bindings) = self.regular_bindings.get(current) {
+                if bindings.iter().any(|b| {
+                    b.name == op_name && b.protocol_variant.as_ref().map_or(false, |v| self.variant_covers(v, operand))
+                }) {
+                    return true;
+                }
+            }
+            match self.type_parents.get(current) {
+                Some(parent) => current = parent.as_str(),
+                None => return false,
+            }
+        }
+    }
+
+    /// Resolve the protocol hashword a custom type declares (`MyNum : #Int` →
+    /// `"#Int"`), walking the `type_parents` chain until a declaration is
+    /// found. None for primordials and protocol-less types. 2026-08-03: the
+    /// operator-resolution fix — a subtype inherits its parent's protocol.
+    fn declared_protocol_of(&self, type_name: &str) -> Option<&str> {
+        let mut current = type_name;
+        loop {
+            if let Some(p) = self.type_protocols.get(current) {
+                return Some(p.as_str());
+            }
+            match self.type_parents.get(current) {
+                Some(parent) => current = parent.as_str(),
+                None => return None,
+            }
+        }
+    }
+
+    /// Protocol binding for a custom type via its declared protocol (own +
+    /// parents). `MyNum : #Int` inherits `#Int`'s Add → `AddI64#`. Returns
+    /// None for primordials (handled by `get_operator_intrinsic`) and
+    /// protocol-less types. 2026-08-03: keyed by the bare protocol CATEGORY —
+    /// never by type name.
+    fn protocol_binding_for(&self, rune: &str, ty: &Type) -> Option<OpBinding> {
+        let op_name = rune_to_op_name(rune)?;
+        let name = match ty {
             Type::Custom(n) => n.as_str(),
             Type::Applied(n, _) => n.as_str(),
-            _ => return false,
+            _ => return None,
         };
-        if let Some(ops) = self.regular_ops.get(type_name) {
-            if ops.iter().any(|op| {
-                op.op == op_name
-                    && op.params.first().map_or(false, |p| self.param_covers(p, operand))
-            }) {
-                return true;
-            }
-        }
-        if let Some(bindings) = self.regular_bindings.get(type_name) {
-            if bindings.iter().any(|b| {
-                b.name == op_name && b.protocol_variant.as_ref().map_or(false, |v| self.variant_covers(v, operand))
-            }) {
-                return true;
-            }
-        }
-        false
+        let proto = self.declared_protocol_of(name)?;
+        protocol_binding(proto.trim_start_matches('#'), op_name)
     }
 
     /// Does a declared operator parameter cover the operand type?
@@ -149,22 +196,14 @@ impl<'a> TypecheckContext<'a> {
             // Universal — every type is a member of #Bit via Cast.#Bit.
             return operand.universe_key().is_some();
         }
-        let prop = format!("Cast.{}", hw);
-        operand
-            .universe_key()
-            .and_then(|k| self.universe.get(k))
-            .map_or(false, |rt| rt.properties.contains_key(&prop))
+        self.operand_implements_protocol(operand, hw)
     }
 
     /// Does a type-body op's declared variant (`#Float` or `Float`) cover the
     /// operand type?
     fn variant_covers(&self, variant: &str, operand: &Type) -> bool {
         if variant.starts_with('#') {
-            let prop = format!("Cast.{}", variant);
-            operand
-                .universe_key()
-                .and_then(|k| self.universe.get(k))
-                .map_or(false, |rt| rt.properties.contains_key(&prop))
+            self.operand_implements_protocol(operand, variant)
         } else {
             // Concrete type name.
             match operand {
@@ -173,6 +212,30 @@ impl<'a> TypecheckContext<'a> {
                 _ => false,
             }
         }
+    }
+
+    /// Does `operand` implement protocol `hw` (e.g. `#Int`)? Checks the
+    /// universe's `Cast.#` properties (primordials) AND the typechecker's own
+    /// `type_protocols`/`type_parents` records (custom types — `MyNum : #Int`
+    /// is not in the typechecker's fresh universe). 2026-08-03: protocol
+    /// membership, never type-name matching.
+    fn operand_implements_protocol(&self, operand: &Type, hw: &str) -> bool {
+        // Universe membership (registered primordials + registered types).
+        let prop = format!("Cast.{}", hw);
+        if operand
+            .universe_key()
+            .and_then(|k| self.universe.get(k))
+            .map_or(false, |rt| rt.properties.contains_key(&prop))
+        {
+            return true;
+        }
+        // Typechecker record: the type (or a parent) declares the protocol.
+        let name = match operand {
+            Type::Custom(n) => n.as_str(),
+            Type::Applied(n, _) => n.as_str(),
+            _ => return false,
+        };
+        self.declared_protocol_of(name) == Some(hw)
     }
 
     /// 2026-07-31 (A6): For `&collection <- value`, find the collection's
@@ -909,6 +972,35 @@ fn infer_intrinsic_call(
     })
 }
 
+/// Resolve the result type for an arithmetic/bitwise binary op. Returns the
+/// LHS type when the op resolves (declared → protocol bindings), else an
+/// InvalidOperation error. 2026-08-03: extracted from infer_binary_op so the
+/// resolution chain stays flat (Praetor complexity gate).
+fn arithmetic_result_ty(
+    ctx: &TypecheckContext,
+    kind: &BinaryOpKind,
+    lhs_ty: &Type,
+    rhs_ty: &Type,
+    lhs_str: &str,
+    rune: &str,
+) -> Result<Type, TypeError> {
+    if ctx.has_cross_type_overload(rune, lhs_ty, rhs_ty) {
+        return Ok(lhs_ty.clone());
+    }
+    let binding = ctx
+        .protocol_binding_for(rune, lhs_ty)
+        .or_else(|| get_operator_intrinsic(ctx.universe, rune, lhs_ty))
+        .or_else(|| ctx.protocol_binding_for(rune, rhs_ty))
+        .or_else(|| get_operator_intrinsic(ctx.universe, rune, rhs_ty));
+    match binding {
+        Some(_) => Ok(lhs_ty.clone()),
+        None => Err(TypeError::InvalidOperation {
+            operation: format!("'{}'", kind),
+            type_name: lhs_str.to_string(),
+        }),
+    }
+}
+
 /// Infer the type of a binary operation.
 fn infer_binary_op(
     kind: &BinaryOpKind,
@@ -936,20 +1028,14 @@ fn infer_binary_op(
             // Arithmetic/bitwise: return LHS type
             // Check via operator resolution
             let rune = format!("{}", kind);
-            // 2026-07-18: Phase 0 — use universe-driven dispatch with
-            // builtin fallback (get_operator_intrinsic already chains to
-            // builtin_operator_binding when no universe property exists).
-            let binding = get_operator_intrinsic(ctx.universe, &rune, &lhs_ty)
-                .or_else(|| get_operator_intrinsic(ctx.universe, &rune, &rhs_ty));
-            match binding {
-                Some(_) => lhs_ty.clone(),
-                None => {
-                    return Err(TypeError::InvalidOperation {
-                        operation: format!("'{}'", kind),
-                        type_name: lhs_str,
-                    });
-                }
-            }
+            // 2026-08-03 (operator-resolution fix): resolution order is
+            //   declared (own + parents) → protocol bindings.
+            // A type declaring `op Add(#Float)`/`op Add(Float)` authorizes
+            // mixed arithmetic; a custom `MyNum : #Int` with no declared op
+            // inherits #Int's protocol binding (Add → AddI64#). Only the
+            // protocol bindings are hardcoded — keyed by category, never by
+            // type name. Same-type custom ops now resolve here too.
+            arithmetic_result_ty(ctx, kind, &lhs_ty, &rhs_ty, &lhs_str, &rune)?
         }
     };
 
@@ -2132,6 +2218,82 @@ node t [count < 5][count == 5] {
             err
         );
     }
+
+    /// A custom `MyNum : #Int` with NO declared op still supports SAME-TYPE
+    /// arithmetic — it inherits #Int's protocol binding (Add → AddI64#).
+    /// 2026-08-03 (operator-resolution fix): the old name-keyed table only
+    /// knew "Int", so `MyNum + MyNum` errored. Resolution is by protocol
+    /// category now.
+    #[test]
+    fn same_type_custom_op_inherits_protocol_binding() {
+        let src = r#"
+type MyNum : #Int { };
+let a: MyNum = 0;
+let b: MyNum = 0;
+node t [a < 5][a == 5] {
+    let s: MyNum = a + b;
+    term;
+};
+"#;
+        assert!(check(src).is_ok(), "MyNum + MyNum must inherit #Int's Add binding");
+    }
+
+    /// A custom type with a declared `op Add(#Int)` wins for same-type use.
+    #[test]
+    fn same_type_custom_op_declared_binding_wins() {
+        let src = r#"
+type MyNum : #Int {
+    op Add(#Int): func(#L, #R);
+};
+let a: MyNum = 0;
+let b: MyNum = 0;
+node t [a < 5][a == 5] {
+    let s: MyNum = a + b;
+    term;
+};
+"#;
+        assert!(check(src).is_ok(), "declared op Add(#Int) must authorize MyNum + MyNum");
+    }
+
+    /// A custom type with NO protocol and NO declared op still errors on
+    /// same-type arithmetic (no implicit blanket arithmetic).
+    #[test]
+    fn same_type_custom_op_no_protocol_errors() {
+        let src = r#"
+type MyNum { };
+let a: MyNum = 0;
+let b: MyNum = 0;
+node t [a < 5][a == 5] {
+    let s: MyNum = a + b;
+    term;
+};
+"#;
+        let err = check(src).unwrap_err();
+        assert!(
+            err.iter().any(|e| format!("{}", e).contains("invalid operation")),
+            "expected an invalid-operation error, got {:?}",
+            err
+        );
+    }
+    /// A subtype inherits an arithmetic op declared on its PARENT type
+    /// (parent walk in type_declares_op).
+    #[test]
+    fn subtype_inherits_parent_declared_op() {
+        let src = r#"
+type Base : #Int {
+    op Add(#Int): func(#L, #R);
+};
+type MyNum : #Int Base { };
+let a: MyNum = 0;
+let b: MyNum = 0;
+node t [a < 5][a == 5] {
+    let s: MyNum = a + b;
+    term;
+};
+"#;
+        assert!(check(src).is_ok(), "subtype must inherit the parent's declared op");
+    }
+
     #[test]
     fn field_access_on_non_struct_errors() {
         let src = r#"

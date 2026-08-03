@@ -2,6 +2,19 @@
 // 2026-07-12: Phase 2.3 — Resolve runes (+ - * / == [] etc.) to op bindings.
 // This is the most critical function in the compiler (Risk #1 from the plan).
 // Flat code: each function is max 2 levels, extracted helpers where needed.
+//
+// 2026-08-03 (operator-resolution fix): operator bindings are resolved by
+// PROTOCOL CATEGORY, never by type name. The resolution order is
+//   declared → parent's bindings → protocol bindings
+// and ONLY the protocol bindings are hardcoded — keyed by the bare protocol
+// category ("Int", "Float", "String", "Bool", "Char"), which is what the
+// table keys always were. Matching a custom type's NAME against those keys
+// (the old `type_name_str` lookup) made `MyNum : #Int` + `MyNum` fail even
+// though MyNum is a #Int member and should inherit #Int's Add → AddI64#.
+// The protocol category is derived from the universe (Cast.# properties /
+// base chain), mirroring casting::graph::type_to_protocol — no name matching
+// (rules 14/18). Custom types not registered in a given universe resolve
+// their category through the typechecker's own type_protocols/type_parents.
 
 use crate::ast::{OpBinding, Type};
 use crate::type_universe::TypeUniverse;
@@ -39,58 +52,25 @@ pub(crate) fn rune_to_op_name(rune: &str) -> Option<&'static str> {
 /// Resolve a rune to an OpBinding for a given type.
 /// Returns None if the type has no binding for the given operator.
 ///
-/// 2026-07-20: Old metadata["op.Add"] lookup removed. Only uses
-/// builtin_operator_binding() — a hardcoded table of standard
-/// operator-to-intrinsic mappings for well-known types.
-/// Hashword OperatorDef from the AST (used for custom types) is
-/// resolved separately in emit_expr.rs and intrinsics.rs.
+/// 2026-08-03: resolves the type's PROTOCOL CATEGORY from the universe and
+/// looks the operator up in the hardcoded protocol-binding table. Custom
+/// types not registered in `universe` (e.g. the typechecker's fresh universe)
+/// return None here — their category is resolved by the typechecker via
+/// `type_protocols`/`type_parents`, which then calls `protocol_binding`.
 pub fn get_operator_intrinsic(universe: &TypeUniverse, rune: &str, ty: &Type) -> Option<OpBinding> {
-    builtin_operator_binding(rune, ty)
-}
-
-/// Get the string name of a type for property lookup.
-fn type_name_str(ty: &Type) -> Option<&str> {
-    match ty {
-        Type::Custom(name) => Some(name.as_str()),
-        Type::Applied(name, _) => Some(name.as_str()),
-        _ => None,
-    }
-}
-
-/// Get the intrinsic name for an operator on a type.
-/// Returns a pretty-printed description for error messages if not found.
-pub fn resolve_operator_or_error(
-    universe: &TypeUniverse,
-    rune: &str,
-    ty: &Type,
-) -> Result<OpBinding, String> {
-    get_operator_intrinsic(universe, rune, ty)
-        .ok_or_else(|| format!("no op '{}' for type {}", rune, display_type_short(ty)))
-}
-
-/// Short display of a type for error messages.
-fn display_type_short(ty: &Type) -> String {
-    match ty {
-        Type::Custom(name) => name.clone(),
-        Type::Applied(name, _) => format!("{}<...>", name),
-        Type::Bits(n) => format!("Bits({})", n),
-        Type::Void => "Void".into(),
-        Type::Ptr(inner) => format!("Ptr<{}>", display_type_short(inner)),
-        Type::Tuple(types) => {
-            let inner: Vec<String> = types.iter().map(display_type_short).collect();
-            format!("({})", inner.join(", "))
-        }
-        _ => "unknown".into(),
-    }
-}
-
-/// Hardcoded operator bindings for built-in types (when not in the universe yet).
-/// Phase 2A: minimal set. Extended as new types are registered.
-pub fn builtin_operator_binding(rune: &str, ty: &Type) -> Option<OpBinding> {
     let op_name = rune_to_op_name(rune)?;
-    let type_name = type_name_str(ty)?;
+    let category = protocol_category(universe, ty)?;
+    protocol_binding(&category, op_name)
+}
 
-    match (type_name, op_name) {
+/// Resolve a rune to an OpBinding by protocol category (the ONLY hardcoded
+/// operator knowledge). `category` is the bare protocol category ("Int",
+/// "Float", "Bool", "Char", "String") — never a type name. 2026-08-03: split
+/// out of the old name-keyed `builtin_operator_binding` so callers that know
+/// the category (the typechecker, via its type_protocols record) can consult
+/// it directly.
+pub fn protocol_binding(category: &str, op_name: &str) -> Option<OpBinding> {
+    match (category, op_name) {
         ("Int", "Add") => Some(OpBinding::Intrinsic("AddI64#".into())),
         ("Int", "Sub") => Some(OpBinding::Intrinsic("SubI64#".into())),
         ("Int", "Mul") => Some(OpBinding::Intrinsic("MulI64#".into())),
@@ -127,6 +107,76 @@ pub fn builtin_operator_binding(rune: &str, ty: &Type) -> Option<OpBinding> {
     }
 }
 
+/// Resolve a type's PROTOCOL CATEGORY (bare name: "Int", "Float", "String",
+/// ...) from the universe. Mirrors casting::graph::type_to_protocol's
+/// universe path — Cast.#<Category> properties first, then the `base` chain.
+/// Never matches type names (rules 14/18). Returns None for types with no
+/// registered universe entry (custom types in a fresh universe); the
+/// typechecker resolves those via its own type_protocols/type_parents.
+fn protocol_category(universe: &TypeUniverse, ty: &Type) -> Option<String> {
+    match ty {
+        // A hashword IS a protocol category reference — strip the `#`.
+        Type::HashWord(name) => return name.strip_prefix('#').map(str::to_string),
+        Type::HashWordVariant(name, _) => return name.strip_prefix('#').map(str::to_string),
+        Type::Bits(_) | Type::Void => return Some("Bit".to_string()),
+        _ => {}
+    }
+    let key = ty.universe_key()?;
+    let rt = universe.get(key)?;
+    // Cast.# properties (primordial seeding) — checking order mirrors the
+    // casting graph: Float → UInt → Int → String → Bool → Char → Data.
+    let props = &rt.properties;
+    for (prop, cat) in [
+        ("Cast.#Float", "Float"),
+        ("Cast.#UInt", "UInt"),
+        ("Cast.#Int", "Int"),
+        ("Cast.#String", "String"),
+        ("Cast.#Bool", "Bool"),
+        ("Cast.#Char", "Char"),
+        ("Cast.#Data", "Data"),
+    ] {
+        if props.contains_key(prop) {
+            return Some(cat.to_string());
+        }
+    }
+    // base-chain fallback (the normalizer no longer injects Cast.# for
+    // subtypes) — `type Latin1String: #String` ⇒ base "String".
+    let base = rt.base.trim_start_matches('#');
+    match base {
+        "Float" | "UInt" | "Int" | "String" | "Bool" | "Char" | "Data" => {
+            Some(base.to_string())
+        }
+        _ => None,
+    }
+}
+
+/// Get the intrinsic name for an operator on a type.
+/// Returns a pretty-printed description for error messages if not found.
+pub fn resolve_operator_or_error(
+    universe: &TypeUniverse,
+    rune: &str,
+    ty: &Type,
+) -> Result<OpBinding, String> {
+    get_operator_intrinsic(universe, rune, ty)
+        .ok_or_else(|| format!("no op '{}' for type {}", rune, display_type_short(ty)))
+}
+
+/// Short display of a type for error messages.
+fn display_type_short(ty: &Type) -> String {
+    match ty {
+        Type::Custom(name) => name.clone(),
+        Type::Applied(name, _) => format!("{}<...>", name),
+        Type::Bits(n) => format!("Bits({})", n),
+        Type::Void => "Void".into(),
+        Type::Ptr(inner) => format!("Ptr<{}>", display_type_short(inner)),
+        Type::Tuple(types) => {
+            let inner: Vec<String> = types.iter().map(display_type_short).collect();
+            format!("({})", inner.join(", "))
+        }
+        _ => "unknown".into(),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -145,46 +195,76 @@ mod tests {
     }
 
     #[test]
+    fn test_protocol_binding_int_add() {
+        assert_eq!(
+            protocol_binding("Int", "Add"),
+            Some(OpBinding::Intrinsic("AddI64#".into()))
+        );
+    }
+
+    #[test]
+    fn test_protocol_binding_missing_category() {
+        assert_eq!(protocol_binding("NoSuchCategory", "Add"), None);
+        assert_eq!(protocol_binding("Int", "NoSuchOp"), None);
+    }
+
+    #[test]
     fn test_builtin_int_add() {
-        let binding = builtin_operator_binding("+", &Type::int());
+        let binding = get_operator_intrinsic(&empty_universe(), "+", &Type::int());
         assert_eq!(binding, Some(OpBinding::Intrinsic("AddI64#".into())));
     }
 
     #[test]
     fn test_builtin_float_mul() {
-        let binding = builtin_operator_binding("*", &Type::float());
+        let binding = get_operator_intrinsic(&empty_universe(), "*", &Type::float());
         assert_eq!(binding, Some(OpBinding::Intrinsic("FMulF64#".into())));
     }
 
     #[test]
     fn test_builtin_bool_eq() {
-        let binding = builtin_operator_binding("==", &Type::bool_());
+        let binding = get_operator_intrinsic(&empty_universe(), "==", &Type::bool_());
         assert_eq!(binding, Some(OpBinding::Intrinsic("EqI1#".into())));
     }
 
     #[test]
     fn test_builtin_string_concat() {
-        let binding = builtin_operator_binding("++", &Type::string());
+        let binding = get_operator_intrinsic(&empty_universe(), "++", &Type::string());
         assert_eq!(binding, Some(OpBinding::Intrinsic("StringConcat#".into())));
     }
 
     #[test]
     fn test_missing_operator() {
-        let binding = builtin_operator_binding("*", &Type::bool_());
+        let binding = get_operator_intrinsic(&empty_universe(), "*", &Type::bool_());
         assert_eq!(binding, None);
     }
 
     #[test]
     fn test_missing_type() {
-        let binding = builtin_operator_binding("+", &Type::Custom("Nonexistent".into()));
+        // A custom type with no universe entry resolves to no category.
+        let binding = get_operator_intrinsic(&empty_universe(), "+", &Type::Custom("Nonexistent".into()));
         assert_eq!(binding, None);
+    }
+
+    #[test]
+    fn test_int8_resolves_via_protocol() {
+        // Int8 is a #Int protocol member — + must resolve through the
+        // category, not the type name. 2026-08-03: the old name-keyed table
+        // returned None here (the bug this fix removes).
+        let binding = get_operator_intrinsic(&empty_universe(), "+", &Type::Custom("Int8".into()));
+        assert_eq!(binding, Some(OpBinding::Intrinsic("AddI64#".into())));
+    }
+
+    #[test]
+    fn test_hashword_category_resolves() {
+        // A protocol hashword resolves directly to its category.
+        let binding = get_operator_intrinsic(&empty_universe(), "+", &Type::HashWord("#Int".into()));
+        assert_eq!(binding, Some(OpBinding::Intrinsic("AddI64#".into())));
     }
 
     #[test]
     fn test_universe_lookup_empty() {
         let uni = empty_universe();
-        // 2026-07-18: Phase 0 — falls back to builtin_operator_binding
-        // when no universe property exists for the type.
+        // Int is a seeded primordial with Cast.#Int — resolves via category.
         let result = get_operator_intrinsic(&uni, "+", &Type::int());
         assert_eq!(result, Some(OpBinding::Intrinsic("AddI64#".into())));
     }

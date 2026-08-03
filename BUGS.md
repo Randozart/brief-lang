@@ -1,5 +1,47 @@
 # Bugs
 
+## Custom-Type Operator Resolution Matched Type Names, Not Protocol Categories — FIXED
+
+**Date:** 2026-08-03
+**Status:** Fixed
+**Root cause:** `type_universe::operators::builtin_operator_binding` resolved an
+operator by the type's literal NAME (`type_name_str`) against a table whose keys
+were actually protocol CATEGORIES (`"Int"`, `"Float"`, `"String"`, …). `Int + Int`
+worked only because the type name happens to equal its category key. A custom
+`type MyNum : #Int` (no declared op) failed `MyNum + MyNum` with
+`InvalidOperation`, because `"MyNum"` matched no key even though `MyNum` is a
+`#Int` protocol member that should inherit `#Int`'s Add → `AddI64#`. This was a
+Rule 14/18 sloppy-name-matching defect. Two compounding gaps: (a)
+`typechecker::type_declares_op` never walked `type_parents`, so an op declared on
+a parent type wasn't inherited by a subtype; (b) `variant_covers`/`param_covers`
+checked only `Cast.#` universe properties, but custom types are NOT registered in
+the typechecker's fresh universe, so `#Int`-coverage for `MyNum` always returned
+false.
+**Correct model:** operator resolution is **declared → parent's bindings →
+protocol bindings**, and ONLY the protocol bindings are hardcoded — keyed by
+protocol category, never type name.
+**Fix:**
+- `operators.rs`: `get_operator_intrinsic`/`protocol_binding` resolve the type's
+  protocol category from the universe (`Cast.#` properties, then `rt.base`
+  chain, mirroring `casting::graph::type_to_protocol`) — no name matching.
+  `type_name_str` removed.
+- `typechecker/mod.rs`: `infer_binary_op`'s arithmetic arm now tries declared
+  (own + parents) first, then protocol bindings (universe + the typechecker's
+  own `type_protocols`/`type_parents` records via `protocol_binding_for` /
+  `declared_protocol_of` / `operand_implements_protocol`).
+- `type_declares_op` walks `type_parents` (mirrors the Parse-op parent walk).
+**Impact:** `MyNum : #Int` + `MyNum` (same-type, no declared op) typechecks and
+inherits `#Int`'s binding; subtypes inherit parent-declared ops; a protocol-less
+custom type with no declared op still errors. 1450 tests pass. Regression tests:
+`same_type_custom_op_inherits_protocol_binding`,
+`same_type_custom_op_declared_binding_wins`,
+`same_type_custom_op_no_protocol_errors`, `subtype_inherits_parent_declared_op`,
+`test_int8_resolves_via_protocol`.
+**Undo:** revert the operators.rs rewrite + the typechecker resolution change;
+the old name-keyed table and direct-only `type_declares_op` return.
+
+---
+
 ## DBV Parser: Trailing `;` After `}` Misparsed as Empty Positional Value — FIXED
 
 **Date:** 2026-07-28
