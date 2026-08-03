@@ -35,8 +35,8 @@ impl AllocConfig {
     /// 2026-08-03 (Phase 3, data-brief-config plan): reads config/alloc-strategies.dbvl
     /// in quoted mode — the LLVM IR templates carry `{v}`/`{size}` braces that
     /// bare mode would take as a nested sub-record. Row shape:
-    /// `<name>: "<template with \n escapes>"; [free];`. The .toml remains as
-    /// the parity-test source until identical output is proven.
+    /// `<name>: "<template with \n escapes>"; [free];`. The .toml is deleted;
+    /// the golden parity test bakes the pre-migration values.
     pub fn load() -> Self {
         let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("config/alloc-strategies.dbvl");
         let content = match std::fs::read_to_string(&path) {
