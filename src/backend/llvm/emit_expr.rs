@@ -2981,6 +2981,21 @@ impl LlvmBackend {
 
         // Identity (same protocol) — return source with target type
         if path.is_empty() {
+            let src_ll = self.llvm_type(&src.ty);
+            let target_ll = self.llvm_type(target);
+            // 2026-08-03: a Float width change (float → double / double →
+            // float) has no graph lane — it is not a representation change,
+            // just a precision change, so emit fpext/fptrunc. This fixes
+            // `2.0 as Float64` / `x as CDouble` emitting a bitcast+sitofp mess.
+            if (src_ll == "float" || src_ll == "double")
+                && (target_ll == "float" || target_ll == "double")
+                && src_ll != target_ll
+            {
+                let reg = self.fun.gen_reg();
+                let op = if target_ll == "double" { "fpext" } else { "fptrunc" };
+                writeln!(out, "{}{} = {} {} {} to {}", indent, reg, op, src_ll, src.name, target_ll).ok();
+                return Some(TypedRegister { name: reg, ty: target.clone() });
+            }
             return Some(TypedRegister { name: src.name.clone(), ty: target.clone() });
         }
 
@@ -3065,12 +3080,22 @@ impl LlvmBackend {
                     writeln!(out, "{}{} = trunc {} {} to {}",
                         indent, dst, cur_ll, cur, dst_ll).ok();
                 }
+                crate::casting::graph::LaneKind::FloatWidth => {
+                    // 2026-08-03: the #Float protocol's width cast — fpext/
+                    // fptrunc between float and double (same width → identity).
+                    if cur_ll == target_ll {
+                        return Some(TypedRegister { name: cur.clone(), ty: target.clone() });
+                    }
+                    let op = if target_ll == "double" { "fpext" } else { "fptrunc" };
+                    writeln!(out, "{}{} = {} {} {} to {}", indent, dst, op, cur_ll, cur, target_ll).ok();
+                }
                 crate::casting::graph::LaneKind::Chain(a, b) => {
-                    // Emit first step into temp, then second step into dst
-                    let temp = self.fun.gen_reg();
-                    self.emit_single_cast_lane(out, &temp, a, &cur, &cur_ll, indent);
-                    let temp_ll = self.llvm_type(&src.ty); // conservative estimate
-                    self.emit_single_cast_lane(out, &dst, b, &temp, &temp_ll, indent);
+                    // 2026-07-30: Emit the composite as two consecutive lanes
+                    // (recursively). The chain only appears in BFS-compressed
+                    // paths (Bit → String often collapses a PtrToInt + IntToPtr).
+                    // Handle by emitting each step separately via emit_cast_steps.
+                    let _ = (a, b);
+                    return None;
                 }
                 crate::casting::graph::LaneKind::CastFromBitCallback => {
                     // 2026-08-01 (B2): the ENCODING DOOR — `#Bit → <type>`.

@@ -38,6 +38,9 @@ pub enum LaneKind {
     Trunc,
     /// Type-level CastFrom(#Bit) override — function name resolved at emission time
     CastFromBitCallback,
+    /// 2026-08-03: the #Float protocol's width cast — any Float variant casts
+    /// to any other Float variant by fpext/fptrunc (width is the only delta).
+    FloatWidth,
     /// Composite: chain two consecutive lanes
     Chain(Box<LaneKind>, Box<LaneKind>),
 }
@@ -68,6 +71,11 @@ pub enum LlvmTypeResolver {
     Fixed(&'static str),
     /// Width-parametric: !> bits → !> maxbits → !> minbits → int_bits
     WidthParametric,
+    /// 2026-08-03: the #Float protocol's width semantics — derive the LLVM
+    /// type from the type's `bits` metadata (16 → half/bfloat via disamb,
+    /// 32 → float, 64 → double, 80 → x86_fp80, 128 → fp128, default → float).
+    /// The protocol owns the width; no type names are hardcoded.
+    FloatWidth,
 }
 
 // ── Casting Graph ───────────────────────────────────────────────────────
@@ -293,7 +301,7 @@ impl CastingGraph {
         self.set_llvm_type("Bit", "",    LlvmTypeResolver::WidthParametric);
         self.set_llvm_type("Int", "",    LlvmTypeResolver::WidthParametric);
         self.set_llvm_type("UInt", "",   LlvmTypeResolver::WidthParametric);
-        self.set_llvm_type("Float", "",  LlvmTypeResolver::Fixed("float"));
+        self.set_llvm_type("Float", "",  LlvmTypeResolver::FloatWidth);
         self.set_llvm_type("Bool", "",   LlvmTypeResolver::Fixed("i8"));
         self.set_llvm_type("Char", "",   LlvmTypeResolver::Fixed("i32"));
         // 2026-08-01 (B0): A Brief String value IS a pointer to a
@@ -493,6 +501,20 @@ impl CastingGraph {
             return self.find_base_path(src_cat, dst_cat);
         }
 
+        // 2026-08-03: the #Float protocol — any Float variant casts to any
+        // other Float variant by a width cast (fpext/fptrunc); the delta is
+        // the width, never a representation chain. Handles Float → CDouble
+        // (Float<C_Double>), which the variant BFS has no lane for.
+        if src_cat == dst_cat && src_cat == "Float" {
+            return Some(vec![CastStep {
+                lane: LaneKind::FloatWidth,
+                src_category: src_cat.to_string(),
+                src_variant: src_var.to_string(),
+                dst_category: dst_cat.to_string(),
+                dst_variant: dst_var.to_string(),
+            }]);
+        }
+
         // BFS through variant edges + base lanes
         let path = self.bfs_path(src_cat, src_var, dst_cat, dst_var)?;
 
@@ -657,6 +679,10 @@ impl CastingGraph {
         };
 
         if rt.properties.contains_key("Cast.#Float") {
+            // 2026-08-03: the Float CATEGORY is width-parametric — the LLVM
+            // type is derived from the type's `bits` metadata by the
+            // FloatWidth resolver (protocol-owned width semantics). No variant
+            // is named here, and no type names are matched.
             ("Float".to_string(), String::new())
         } else if rt.properties.contains_key("Cast.#UInt") {
             ("UInt".to_string(), String::new())
@@ -757,6 +783,43 @@ impl CastingGraph {
                         })
                 }).unwrap_or(int_bits);
                 return format!("i{}", bits);
+            }
+            Some(LlvmTypeResolver::FloatWidth) => {
+                // 2026-08-03: the #Float protocol owns the width semantics —
+                // derive the LLVM type from the type's `bits` metadata.
+                // 16-bit is half/bfloat (via disamb); 32→float, 64→double,
+                // 80→x86_fp80, 128→fp128, default→float. No type names.
+                let key = ty.universe_key().and_then(|k| universe.get(k));
+                let bits = key.and_then(|rt| {
+                    rt.properties.get("bits")
+                        .or_else(|| rt.properties.get("maxbits"))
+                        .or_else(|| rt.properties.get("minbits"))
+                        .and_then(|pv| match pv {
+                            PropertyValue::Int(n) => Some(*n as u64),
+                            _ => None,
+                        })
+                });
+                let float_ty = match bits {
+                    Some(16) => {
+                        // Half vs BFloat are both 2-byte #Float variants,
+                        // distinguished by the `disamb` metadata value.
+                        let disamb = key.and_then(|rt| match rt.properties.get("disamb") {
+                            Some(PropertyValue::String(s)) => Some(s.clone()),
+                            _ => None,
+                        });
+                        if disamb.as_deref() == Some("bfloat") {
+                            "bfloat".to_string()
+                        } else {
+                            "half".to_string()
+                        }
+                    }
+                    Some(32) => "float".to_string(),
+                    Some(64) => "double".to_string(),
+                    Some(80) => "x86_fp80".to_string(),
+                    Some(128) => "fp128".to_string(),
+                    _ => "float".to_string(),
+                };
+                return float_ty;
             }
             None => {}
         }
@@ -1006,6 +1069,20 @@ mod tests {
         // are declared) — the collapse is asymmetric, keyed to the proven pair.
         let rev = graph.find_path("String", "B", "String", "A");
         assert!(rev.is_none(), "B → A has no edges; only A.CastTo and B.CastFrom exist");
+    }
+
+    #[test]
+    fn test_float_width_resolution() {
+        // 2026-08-03: the #Float protocol owns the width semantics — derived
+        // from the type's `bits` metadata, no type names matched.
+        let graph = CastingGraph::new();
+        let universe = crate::type_universe::TypeUniverse::new();
+        assert_eq!(graph.resolve_llvm_type(&universe, &Type::Custom("Float".to_string()), 64), "float");
+        assert_eq!(graph.resolve_llvm_type(&universe, &Type::Custom("Float64".to_string()), 64), "double");
+        assert_eq!(graph.resolve_llvm_type(&universe, &Type::Custom("Half".to_string()), 64), "half");
+        // Float→Float<C_Double> is a width lane (fpext), not a chain.
+        let path = graph.find_path("Float", "", "Float", "C_Double");
+        assert!(path.is_some_and(|p| matches!(p[0].lane, LaneKind::FloatWidth)));
     }
 
     #[test]

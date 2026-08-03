@@ -29,5 +29,5 @@ export defn add(a: Int, b: Int) -> Int {
 import "glue/c.bv";
 
 export defn scale(x: CDouble) -> CDouble {
-    term x + x;
+    term x * (2.0 as CDouble);
 };
