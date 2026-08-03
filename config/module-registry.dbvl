@@ -1,0 +1,49 @@
+// Module Registry (Data Brief form).
+//
+// 2026-08-03 (Phase 3): migration of config/module-registry.toml. Maps
+// registry names (used in `import <name>`) to stdlib paths. Paths are
+// resolved relative to the project search paths (lib/, imports/, ./).
+//
+// When the registry file doesn't exist, Registry imports fall back to
+// literal filesystem resolution (same as import "path").
+
+prelude: std/prelude.bv;
+option: std/option.bv;
+result: std/result.bv;
+char: std/char.bv;
+string: std/string.bv;
+string_builder: std/string_builder.bv;
+collections: std/collections.bv;
+iterator: std/iterator.bv;
+hashmap: std/hashmap.bv;
+hashset: std/hashset.bv;
+stack: std/stack.bv;
+queue: std/queue.bv;
+ptr: std/ptr.bv;
+io: std/io.bv;
+out: std/out.bv;
+env: std/env.bv;
+process: std/process.bv;
+time: std/time.bv;
+http: std/http.bv;
+json: std/json.bv;
+encoding: std/encoding.bv;
+bits: std/bits.bv;
+from-bits: std/from-bits.bv;
+atomic: std/atomic.bv;
+state: std/state.bv;
+system: std/system.bv;
+console: std/console.bv;
+tty: std/tty.bv;
+gpu: std/gpu.bv;
+spatial: std/spatial.bv;
+xxhash: std/xxhash.bv;
+skiplist: std/skiplist.bv;
+shm: std/shm.bv;
+brief_rt: std/brief_rt.bv;
+types: std/types.bv;
+core: std/core;
+c: std/c;
+ffi: std/ffi;
+os: std/os;
+ext: std/ext;

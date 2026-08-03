@@ -24,7 +24,6 @@ use crate::ast::{Expr, Import, ImportKind, TopLevel, Type};
 use crate::dbrief::v2 as dbrief_v2;
 use crate::lexer::Token;
 use logos::Logos;
-use serde::Deserialize;
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
@@ -33,33 +32,13 @@ use std::path::{Path, PathBuf};
 // 2026-07-15: Removed hardcoded prelude injection.
 // Removed fields: use_stdlib, core_imported. Removed method: with_use_stdlib.
 
-#[derive(Deserialize)]
-struct ModuleRegistry {
-    modules: HashMap<String, String>,
-}
-
-/// Load the module registry from config/module-registry.toml.
+/// Load the module registry from config/module-registry.toml (or its Data
+/// Brief form module-registry.dbvl — Phase 3, 2026-08-03).
 /// When the file doesn't exist or can't be parsed, returns an empty map
 /// so that Registry imports fall back to literal filesystem resolution.
 /// 2026-07-15: Phase 7i
 fn load_module_registry() -> HashMap<String, String> {
-    let config_path = PathBuf::from("config/module-registry.toml");
-    if !config_path.exists() {
-        return HashMap::new();
-    }
-    match std::fs::read_to_string(&config_path) {
-        Ok(content) => match toml::from_str::<ModuleRegistry>(&content) {
-            Ok(reg) => reg.modules,
-            Err(e) => {
-                eprintln!("Warning: failed to parse config/module-registry.toml: {}", e);
-                HashMap::new()
-            }
-        },
-        Err(e) => {
-            eprintln!("Warning: failed to read config/module-registry.toml: {}", e);
-            HashMap::new()
-        }
-    }
+    crate::dbrief::config_db::load_string_registry(Path::new("config"), "module-registry")
 }
 
 pub struct ImportResolver {

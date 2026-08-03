@@ -1223,9 +1223,13 @@ impl Parser {
     }
 
     /// Try to parse an identifier without consuming on failure.
+    /// Mirrors parse_identifier's charset (alnum, `_`, `.`, `-`) so that
+    /// hyphenated keys like `from-bits` round-trip. 2026-08-03: previously
+    /// omitted `-`, silently dropping standalone entries whose key contained a
+    /// hyphen (module-registry). Undo: revert to alnum/`_`/`.` only.
     fn try_parse_identifier(&mut self) -> Option<String> {
         let save = self.pos;
-        let s = self.parse_while(|c| c.is_alphanumeric() || c == '_' || c == '.');
+        let s = self.parse_while(|c| c.is_alphanumeric() || c == '_' || c == '.' || c == '-');
         if s.is_empty() {
             self.pos = save;
             None
@@ -2173,5 +2177,21 @@ as Device {
 };
 "#;
         assert!(parse_document(nested).is_err());
+    }
+
+    #[test]
+    fn standalone_entry_key_with_hyphen_round_trips() {
+        // Module-registry keys are module names like `from-bits`; the keyed
+        // standalone-entry path must not drop them. 2026-08-03: try_parse_identifier
+        // omitted `-`, silently discarding the whole line.
+        let src = "from-bits: std/from-bits.bv;\nmy_mod: std/my-mod.bv;\n";
+        let doc = parse_document(src).unwrap();
+        let keys: Vec<&str> = doc
+            .data_groups
+            .iter()
+            .flat_map(|g| g.entries.iter())
+            .filter_map(|e| e.key.as_deref())
+            .collect();
+        assert_eq!(keys, vec!["from-bits", "my_mod"]);
     }
 }

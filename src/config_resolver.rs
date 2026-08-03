@@ -92,18 +92,12 @@ impl ConfigResolver {
     }
 
     /// Load the module registry (config/module-registry.toml).
+    ///
+    /// 2026-08-03 (Phase 3): prefers the Data Brief form
+    /// (config/module-registry.dbvl); TOML remains as the pre-migration
+    /// fallback until parity is proven and the .toml is removed.
     fn load_module_registry(config_dir: &Path) -> HashMap<String, String> {
-        let path = if config_dir.to_string_lossy() == "__baked__" {
-            Path::new(env!("CARGO_MANIFEST_DIR")).join("config/module-registry.toml")
-        } else {
-            config_dir.join("module-registry.toml")
-        };
-        if let Ok(content) = std::fs::read_to_string(&path) {
-            if let Ok(parsed) = toml::from_str::<ModuleRegistry>(&content) {
-                return parsed.modules;
-            }
-        }
-        HashMap::new()
+        crate::dbrief::config_db::load_string_registry(config_dir, "module-registry")
     }
 
     /// Resolve a logical config name against this session's resolved config

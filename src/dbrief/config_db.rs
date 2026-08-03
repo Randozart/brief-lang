@@ -142,6 +142,22 @@ impl ConfigDb {
         }
     }
 
+    /// All keyed entries as a `key → first-string-field` map.
+    ///
+    /// 2026-08-03 (Phase 3): the shape registry-style configs
+    /// (module-registry) need — every entry's key maps to its value string.
+    pub fn string_map(&self) -> HashMap<String, String> {
+        let mut map = HashMap::new();
+        for entry in &self.entries {
+            let Some(key) = &entry.key else { continue };
+            let Some(DataField::Positional(DataValue::String(s))) = entry.fields.first() else {
+                continue;
+            };
+            map.insert(key.clone(), s.clone());
+        }
+        map
+    }
+
     /// Raw parsed document (schemas, imports).
     pub fn doc(&self) -> &DbriefDocument {
         &self.doc
@@ -170,6 +186,37 @@ pub fn resolve_config_file(config_dir: &Path, name: &str) -> Option<PathBuf> {
         }
     }
     None
+}
+
+/// Load a registry-style config (`name → string`) from the resolved config
+/// dir, preferring Data Brief over TOML.
+///
+/// 2026-08-03 (Phase 3): the shared migration seam for `module-registry`.
+/// `config_dir` is the already-resolved dir (or `"__baked__"`). Absent or
+/// unparseable → empty map (callers fall back to literal resolution), matching
+/// the pre-migration TOML semantics.
+pub fn load_string_registry(config_dir: &Path, name: &str) -> HashMap<String, String> {
+    let Some(path) = resolve_config_file(config_dir, name) else {
+        return HashMap::new();
+    };
+    let ext = path.extension().and_then(|e| e.to_str());
+    if ext == Some("dbvl") || ext == Some("dbv") {
+        return ConfigDb::from_file(&path, false)
+            .map(|db| db.string_map())
+            .unwrap_or_default();
+    }
+    // Legacy TOML fallback (same shape as the pre-migration loader).
+    let Ok(content) = std::fs::read_to_string(&path) else {
+        return HashMap::new();
+    };
+    #[derive(serde::Deserialize)]
+    struct TomlRegistry {
+        modules: HashMap<String, String>,
+    }
+    match toml::from_str::<TomlRegistry>(&content) {
+        Ok(reg) => reg.modules,
+        Err(_) => HashMap::new(),
+    }
 }
 
 #[cfg(test)]
@@ -393,5 +440,52 @@ DMA0: 0xFE005000; 0x1000;\n";
         assert_eq!(regs.field_int("UART1_DR", 1), Some(9));
         assert_eq!(regs.field_string("UART1_DR", 2), Some("rw"));
         assert_eq!(regs.field_string("GPIOA_BSRR", 2), Some("wo"));
+    }
+
+    #[test]
+    fn parity_module_registry_dbvl_matches_toml() {
+        // Phase 3 migration gate for module-registry: the .dbvl form must
+        // produce exactly the same name→path map as the .toml it replaces.
+        let db_map = load_string_registry(Path::new("__baked__"), "module-registry");
+        assert!(
+            !db_map.is_empty(),
+            "config/module-registry.dbvl must load via the baked config dir"
+        );
+
+        // Compare against the TOML it replaces.
+        let toml_path = Path::new(env!("CARGO_MANIFEST_DIR")).join("config/module-registry.toml");
+        let toml_content = std::fs::read_to_string(&toml_path).unwrap();
+        #[derive(serde::Deserialize)]
+        struct TomlRegistry {
+            modules: std::collections::HashMap<String, String>,
+        }
+        let toml_map: TomlRegistry = toml::from_str(&toml_content).unwrap();
+
+        assert_eq!(db_map.len(), toml_map.modules.len());
+        for (name, path) in &toml_map.modules {
+            assert_eq!(
+                db_map.get(name).map(String::as_str),
+                Some(path.as_str()),
+                "module-registry entry '{name}' diverges between .dbvl and .toml"
+            );
+        }
+    }
+
+    #[test]
+    fn load_string_registry_prefers_dbvl() {
+        // A temp config dir with both forms must load the .dbvl.
+        let dir = std::env::temp_dir().join("brief-configdb-registry");
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("demo.toml"), "[modules]\na = \"one\"\n").unwrap();
+        std::fs::write(dir.join("demo.dbvl"), "a: one;\nb: two;\n").unwrap();
+
+        let map = load_string_registry(&dir, "demo");
+        assert_eq!(map.get("a").map(String::as_str), Some("one"));
+        assert_eq!(map.get("b").map(String::as_str), Some("two"));
+
+        // Cleanup.
+        let _ = std::fs::remove_file(dir.join("demo.toml"));
+        let _ = std::fs::remove_file(dir.join("demo.dbvl"));
+        let _ = std::fs::remove_dir(&dir);
     }
 }
