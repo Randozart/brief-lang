@@ -139,6 +139,29 @@ Tests for each: variant base mapping, LLVM fallback, ExtCall lane, variant-op
 preference, inverse-pair collapse (the `<<1`/`>>1` example). `cargo test --lib`
 green; confirm nothing relied on the `i64` fallback.
 
+## `+` is string concat (2026-08-03, author request)
+
+`+` now concatenates `#String`/`#Data` values (the `++`/Concat operation) —
+`++` was a wart. Wired end-to-end: `('String','Add') → StringConcat#` in the
+binding table (single source), the typechecker maps `+` → Concat for string
+categories and prefers the variant's cross-op, a post-typecheck pass
+(`src/analysis/string_concat.rs`) rewrites `BinaryOp(Add)` → `Concat` on the
+typed AST (the backend can't see String types after i64 boxing), the backend
+routes string `+` to the concat emitter, and the interpreter concatenates on
+`+` and `++` (rule 4). Tests for each.
+
+## Phase 1 status
+
+P1.1 (variant bases), P1.2 (variant LLVM fallback), P1.3 (bindings →
+ExtCallDyn), P1.5 (inverse-delta collapse) are DONE. P1.4 is PARTIAL: variant
+bases + the typechecker's cross-op resolution are wired (a `#String<C_String>`
+value resolves `+` to its own `cstring_concat`), but the cross_ops are not yet
+registered on the casting graph and the backend's Concat arm always emits the
+generic inline concat rather than the variant's cross-op — a `CStr` value
+concat currently treats it as `[len][data]`. Completing P1.4 (graph registry +
+backend emission) is a follow-up; the boundary can otherwise cast `CStr → String`
+first.
+
 ## Phase 2 — `lib/glue/c.bv` (the C-ABI boundary module)
 
 ```brief
