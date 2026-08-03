@@ -185,4 +185,31 @@ as phases complete, never retroactively edited.
 
 | Date | Worktree | `bench_glue_cross` median (Brief path) | Note |
 |------|----------|---------------------------------------|------|
-| (Step 0) | HEAD 21454601 | (capture in Step 0) | Brief path is an identity fn today |
+| 2026-08-03 | HEAD 21454601 | identity fn (echo ptr) | "Brief" did zero work today |
+| 2026-08-03 | glue-host-callable | `feature_hash` 1000 → 2008ns/call | real FNV-1a compute; identical output to C |
+
+### Phase 3 benchmark (2026-08-03, `benchmarks/bridge/bench_glue_speed.py`)
+
+`make speed BRIEFC=<repo>/target/debug/briefc` — per-call latency over 20000
+calls, `feature_hash(count=1000, seed=42)` (FNV-1a folding over 1000 features):
+
+| Path | median ns/call | mean ns/call |
+|------|----------------|--------------|
+| Python → Brief (.so) feature_hash | 2008 | 2183 |
+| Python → C (.so) feature_hash | 1830 | 1969 |
+| Python → Brief add (pure, no state) | 759 | 856 |
+
+Brief vs C: 0.91× per-call overhead (identical output `8125762261814307938`).
+The gap is ctypes marshalling + the state-arg path, not the compute. The Rust
+LTO host (`examples/glue-host/rust-host`) calls `feature_hash`/`add` via plain
+C ABI with zero marshalling and matches C bit-for-bit.
+
+**Verified end-to-end hosts** (all produce identical results):
+- C driver: `cc driver.c -lrank` against `librank.a` (real ELF, gcc-linkable).
+- Python: generated `__init__.py` via ctypes against `rank.so`.
+- Rust: `cargo run` in `examples/glue-host/rust-host` (build.rs runs
+  `briefc build --library`, links `librank.a`, calls generated bindings).
+
+**Known gap (logged in BUGS.md):** `#Float` exports are broken in the LLVM
+backend (float32 lowering + `fmul` with an `i64` operand). The benchmark uses
+Int exports only.

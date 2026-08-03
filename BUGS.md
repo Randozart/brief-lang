@@ -3037,3 +3037,20 @@ path emits `call ptr @__int_to_str__`; (d) the declares are `ptr`-returning.
 Verified end-to-end: `s = (n as String); println!("s={}", s)` prints `s=42`.
 Regression tests: `test_cast_int_to_string_lane_emits_ptr_call` (lane path) +
 `test_emit_cast_int_to_string` (direct path).
+
+## Float ABI/opcode corruption in the LLVM backend — OPEN
+
+**Date:** 2026-08-03
+**Root cause (two related):** (1) The `#Float` protocol crosses the boundary as
+LLVM `float` (32-bit) but config/glue.dbvl declares `c_abi = "double"` — a C
+caller using `double` gets garbage for Brief `Float` args/returns. (2) Float
+parameter/arithmetic codegen is broken: `export defn scale(x: Float) -> Float`
+emits `%ac0 = zext i32 (bitcast float %arg0) to i64` then `fmul float %ac0, ...`
+— an `i64` used as a `float` operand, rejected by `llc` ("'%ac0' defined with
+type 'i64' but expected 'float'").
+**Impact:** Float exports are unusable across the FFI boundary. The native-speed
+demo (examples/glue-host/rank.bv) uses Int exports only.
+**Path to fix:** align the LLVM `#Float` lowering with the protocol ABI (double,
+i.e. `f64`) and fix the Float param/op emission (remove the i32 bitcast +
+zext-to-i64 indirection). Worth a dedicated pass on Float end-to-end (interpreter
+already handles f64).

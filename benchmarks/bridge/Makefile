@@ -57,3 +57,22 @@ run: all
 
 clean:
 	rm -rf $(BRIDGE_DIR)
+
+# ── Native-speed benchmark (rank.bv: real compute, Brief vs C) ──────────
+# 2026-08-03: build rank.so via the real --library pipeline and the C
+# reference, then run bench_glue_speed.py.
+
+speed: $(BRIDGE_DIR) $(BRIDGE_DIR)/librank.so $(BRIDGE_DIR)/librank_ref.so
+	python3 bench_glue_speed.py
+
+$(BRIDGE_DIR)/librank.so: $(PROJECT_ROOT)/examples/glue-host/rank.bv $(BRIEFC)
+	@mkdir -p $(BRIDGE_DIR)
+	cd $(PROJECT_ROOT) && \
+	  $(BRIEFC) build examples/glue-host/rank.bv --library --out $(BRIDGE_DIR) && \
+	  cp $(BRIDGE_DIR)/rank.so $(BRIDGE_DIR)/librank.so && \
+	  rm -f $(BRIDGE_DIR)/rank.ll $(BRIDGE_DIR)/rank.o $(BRIDGE_DIR)/rank.brief_rt.o
+	@echo "  Brief .so: $@"
+
+$(BRIDGE_DIR)/librank_ref.so: $(PROJECT_ROOT)/benchmarks/bridge/rank_ref.c
+	$(CC) -shared -fPIC -O3 -o $@ $<
+	@echo "  C ref .so: $@"

@@ -1,0 +1,24 @@
+// rank.bv — GLUE host demo bridge (context-engine flavored workload).
+// 2026-08-03: feature_hash does real runtime compute (FNV-1a-style folding
+// over a numeric feature range) so the native-speed benchmark measures
+// actual throughput, not a folded identity. Exportable as a C static
+// library, Rust crate, or Python package.
+
+// FNV-1a 64-bit folding over a numeric feature vector — the "hash every
+// token in a document into one fingerprint" pattern. The `[i < count]`
+// precondition drives a runtime loop with the host-supplied bound.
+txn hash_loop(h: Int, i: Int, count: Int) [i < count][i == count] -> Int {
+    let nh: Int = h ^ (i * 2654435761);
+    h = nh * 1099511628211;
+    i = i + 1;
+    term h;
+};
+
+export defn feature_hash(count: Int, seed: Int) -> Int {
+    term hash_loop(seed, 0, count);
+};
+
+// Pure arithmetic export (clean C ABI, no state) for the ABI-mix demo.
+export defn add(a: Int, b: Int) -> Int {
+    term a + b;
+};
