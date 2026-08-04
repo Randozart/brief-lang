@@ -1,0 +1,14 @@
+let a: Int = 0;
+
+// The bare-term-guard confusion (2026-08-03 test-project-otto cascade):
+// the guard ends in bare `term;` and code follows it. Valid — bare `term;`
+// is a convergence checkpoint and execution continues — but the compiler
+// must warn so the author does not expect an early exit.
+node n [a == 0][a == 1] {
+  a = 1;
+  when a == 1 {
+    Print#(1);
+    term;
+  };
+  Print#(2);
+};

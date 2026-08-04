@@ -1,0 +1,8 @@
+let a: Int = 0;
+
+// Canonical swan song: the terminating guard is the last statement, so the
+// hoist (`analysis/swan_song.rs`) handles it. Must pass with no warning.
+node n [a == 0][a == 1] {
+  a = 1;
+  when a == 1 { term! -> Print#(a); };
+};
