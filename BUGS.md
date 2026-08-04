@@ -3344,3 +3344,73 @@ are typed `Int` but physically `ptr` at param/argument boundaries.
 it to a param (method call / frgn / call), and inttoptr's on load — an
 invariant: "a String crossing a call/store boundary is an i64 handle; a String
 in a register is a ptr." Audit the call-arg and store sites against it.
+
+## String representation inconsistency — remaining boundary sites
+
+**Date:** 2026-08-04
+**Status:** Open — follow-up to the entry above (fixed: emit_member_body param
+binding ptrtoint's boxed String params; emit_method_call + 4 call sites use the
+i64 ABI).
+**Symptom:** the boundary between "String in a register is a ptr" and "String
+crossing a call/store boundary is an i64 handle" is enforced ad-hoc. A String
+element STORED into a List slot and then LOADED (e.g. `l.get(i)`) — the load
+path inttoptr's per `index_elem_ty`, but a String element READ via a field /
+index whose type resolves to `Custom("Int")` (fixed-array local element type
+falls back to `Int` at emit_expr.rs:611) hits `.^Len` with ty Int → "Phase-1b
+boundary" panic.
+**Impact:** fixed-size local arrays of String (`let a: String[4]`) cannot be
+indexed for string ops; `a[1] .^Len` errors.
+**Fix direction:** `index_elem_ty` must resolve a `Vector(String, [N])` (or
+`Custom("String[N]")`) index to its element type `String`, not the `_ => Int`
+fallback; then the load path inttoptr's. This is the array-slot element-type
+resolution gap (A4/A5 emit paths handle `Type::Vector` member-slot + state-field
+arrays but the generic/`Custom` local-array case is missing).
+
+## Generic struct array-field layout is zeroed (Stack<T,N> unusable)
+
+**Date:** 2026-08-04
+**Status:** Open — compiler-in-Brief PoC. Any struct with an inline array field
+whose element type is the generic parameter (`obj Stack<T, N> { data: T[N]; len:
+Int; }`) codegens `len` and `data[i]` at byte offset 0 (element stride 0).
+Verified: `Stack<Int,8>` + `Malloc#(72) as Stack<Int,8>`; init writes data[0]
+then len overwrites it; `data[len]` scales by 0. Root cause is unresolved generic
+field types in `struct_types` (offsets computed from `type_size(T)` = 0) and the
+`data: T[N]` element type resolving to `T` (size 0) instead of the instantiated
+type.
+**Impact:** the stdlib `Stack<T,N>` (inline, fixed-cap) cannot be used at all.
+**Fix direction:** substitute the generic parameter when registering/offsetting
+struct fields (`Stack<Int,8>.data` → `Vector(Int,[8])`), and make the A4/A5
+member-slot index path use the instantiated element type.
+
+## List<T>.init allocates 2 elements but advertises cap 16
+
+**Date:** 2026-08-04
+**Status:** Open — latent overflow in the shipped stdlib (surfaced while
+building the splitter). `txn init` does `inner.data = Malloc#(16) as Ptr<T>`
+(16 BYTES = 2 i64 elements) but `inner.cap = 16` (ELEMENTS). `push`'s precondition
+`[len < inner.cap]` permits 16 pushes into a 2-element buffer → heap overflow.
+The earlier needs_state probes that pushed 3+ elements after init "worked" by
+heap luck, not by contract.
+**Impact:** any List<String> with >2 elements corrupts the heap. Blocks the
+pass's line/token lists.
+**Fix direction:** either cap must be bytes-based (`[len*8 < inner.cap]`, `cap
+= 16` bytes) or init must allocate `inner.cap` elements. The generic element
+size (8 for the i64-handle ABI) is the blocker — see the pass's decision to
+avoid List for unbounded collections.
+
+## string.bv does not type-check (legacy bodies)
+
+**Date:** 2026-08-04
+**Status:** Open — pre-existing, MASKED by the import parse-error swallow (now
+surfaced). The whole stdlib `lib/std/string.bv` parses only after the `..`→`:`
+slice migration, then fails typecheck: `bytes()` calls unknown intrinsic
+`StrBytes#` and an undefined `StringError` type; `split()` uses `List +`;
+`trim`/`join`/`pad`/`starts_with`/`ends_with` call String/StringBuilder methods
+(`.is_whitespace()`, `.append_char()`, etc.) that are free `frgn`s, not obj
+members. These bodies were never exercised (the module never parsed).
+**Impact:** `import "std/string"` now fails loudly; `lib/compiler/main.bv` and
+the backends (which import it) cannot build until it type-checks. The pass
+avoids std/string (defines its own `str_len`).
+**Fix direction:** migrate bodies to the current syntax (free-function calls or
+`obj String { fn is_whitespace: __is_whitespace; }` bindings), fix `split` with
+the init/push pattern, implement `bytes` via the byte-slice reflection.

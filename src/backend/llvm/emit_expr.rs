@@ -1813,7 +1813,7 @@ impl LlvmBackend {
                 self.warnings.push(format!("frgn '{}' unsupported: {}", sig.name, msg));
                 let ret_type = sig.result_type.return_type().unwrap_or(Type::int());
                 if ret_type != Type::Void {
-                    let ret_llvm = self.llvm_type(&ret_type);
+                    let ret_llvm = self.llvm_ret_abi_type(&ret_type);
                     if ret_llvm == "ptr" {
                         writeln!(out, "{}  {} = inttoptr i64 0 to ptr", indent, v).ok();
                     } else if ret_llvm == "float" {
@@ -2009,7 +2009,7 @@ impl LlvmBackend {
             .collect();
         let ret_type = sig.result_type.return_type().unwrap_or(Type::int());
         // 2026-07-19: Void-returning functions must not have a name assignment.
-        let ret_llvm = self.llvm_type(&ret_type);
+        let ret_llvm = self.llvm_ret_abi_type(&ret_type);
         if ret_type == Type::Void {
             writeln!(
                 out,
@@ -2097,7 +2097,7 @@ impl LlvmBackend {
             .map(|reg| format!("{} {}", self.llvm_type(&reg.ty), reg.name))
             .collect();
         let ret_type = sig.result_type.return_type().unwrap_or(Type::int());
-        let ret_llvm = self.llvm_type(&ret_type);
+        let ret_llvm = self.llvm_ret_abi_type(&ret_type);
         let bridge_name = format!("bridge_{}", sig.name);
 
         if ret_type == Type::Void {
@@ -2212,7 +2212,7 @@ impl LlvmBackend {
             .get(name)
             .and_then(|types| types.first().cloned())
             .unwrap_or(Type::int());
-        let ret_llvm = self.llvm_type(&ret_type);
+        let ret_llvm = self.llvm_ret_abi_type(&ret_type);
         // 2026-08-01 (Phase 4): `defn main` is renamed to `brief_main` at
         // emission (emit_definition) to avoid colliding with the runtime
         // entry point; calls to `main` must use the same renamed symbol or

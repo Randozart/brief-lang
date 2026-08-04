@@ -575,11 +575,16 @@ impl ImportResolver {
             let bv = bv_candidate.exists();
             let ebv = ebv_candidate.exists();
             if bv && ebv {
+                // 2026-08-04 (compiler-in-brief): prefer_ebv=false (the
+                // default) prefers the `.bv` variant — the natural behavior
+                // before `.ebv` existed. Only an embedded target prefers
+                // `.ebv`. This was regressed to an "Ambiguous import" error,
+                // breaking `import "std/string"` from any normal .bv file
+                // once string.ebv was added.
                 if self.prefer_ebv {
                     found_path = Some(ebv_candidate);
                 } else {
-                    found_both = true;
-                    break;
+                    found_path = Some(bv_candidate);
                 }
             } else if bv {
                 found_path = Some(bv_candidate);
@@ -604,7 +609,7 @@ impl ImportResolver {
                         if self.prefer_ebv {
                             found_path = Some(std_ebv);
                         } else {
-                            found_both = true;
+                            found_path = Some(std_path);
                         }
                     } else if bv {
                         found_path = Some(std_path);
@@ -626,7 +631,7 @@ impl ImportResolver {
                 if self.prefer_ebv {
                     found_path = Some(direct_ebv);
                 } else {
-                    found_both = true;
+                    found_path = Some(direct_bv);
                 }
             } else if bv {
                 found_path = Some(direct_bv);
@@ -654,6 +659,7 @@ impl ImportResolver {
             )
         })?;
 
+
         // 2026-07-01: Cycle detection
         if !self.in_progress.insert(import.path().to_string()) {
             return Err(format!(
@@ -671,7 +677,21 @@ impl ImportResolver {
         // 2026-07-14: Parse errors in imported files are non-fatal — the
         // imported file may use syntax (struct literals, etc.) that the
         // parser supports as AST but not yet as a fully parseable form.
-        let imported_program = parser.parse_program().unwrap_or_default();
+        // 2026-08-04 (compiler-in-Brief): the error is NOT swallowed — it is
+        // reported as a visible warning so a silently-empty import (which
+        // drops a module's defns, e.g. std/string's `..` slices) is never
+        // hidden again. The import still proceeds with the items that DID
+        // parse (non-fatal, pre-merge behavior).
+        let imported_program = match parser.parse_program() {
+            Ok(p) => p,
+            Err(e) => {
+                eprintln!(
+                    "warning: import '{}' at '{}' failed to fully parse: {}",
+                    import.path(), resolved_path.display(), e
+                );
+                vec![]
+            }
+        };
 
         let resolved = self.resolve_imports(imported_program, &resolved_path)?;
 
@@ -680,6 +700,7 @@ impl ImportResolver {
             .insert(import.path().to_string(), (resolved.clone(), vec![]));
 
         let result = self.filter_items(&resolved, &[], &import.symbols);
+
         self.in_progress.remove(import.path());
         result
     }

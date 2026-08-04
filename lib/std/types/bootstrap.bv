@@ -100,5 +100,5 @@ type Data: Int { !> bits: 64; };
 type Slice<T> {
     data: Ptr<T>;
     len: Int;
-    prop Size: len;
+    prop Size: len(#L);
 };

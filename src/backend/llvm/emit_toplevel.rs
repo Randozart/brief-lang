@@ -1178,7 +1178,7 @@ impl LlvmBackend {
         } else {
             d.output_type.as_ref()
                 .and_then(|ot| match ot {
-                    crate::ast::OutputType::Single(ty) => Some(self.llvm_type(ty)),
+                    crate::ast::OutputType::Single(ty) => Some(self.llvm_ret_abi_type(ty)),
                     _ => None,
                 })
                 .unwrap_or_else(|| "i64".to_string())
@@ -2263,7 +2263,7 @@ impl LlvmBackend {
         let ret_llvm = if has_return {
             txn.output_type.as_ref()
                 .and_then(|ot| match ot {
-                    crate::ast::OutputType::Single(ty) => Some(self.llvm_type(ty)),
+                    crate::ast::OutputType::Single(ty) => Some(self.llvm_ret_abi_type(ty)),
                     _ => None,
                 })
                 .unwrap_or_else(|| "i64".to_string())
@@ -2777,6 +2777,25 @@ impl LlvmBackend {
     }
 
     /// Called when `self.ctx.library_mode` is true.
+
+    /// 2026-08-04 (compiler-in-Brief): the LLVM ABI return type for a
+    /// function. Struct/obj values are pointer handles (alloca + ptrtoint),
+    /// so a function returning `List<T>` or any struct returns the i64
+    /// HANDLE, not the struct ABI type — `llvm_type(List<String>)` resolves
+    /// to `{ { ptr, i64 }, i64 }`, but the value emitted is the i64 pointer,
+    /// which opt rejects ("defined with type 'i64' but expected '{...}'").
+    pub(super) fn llvm_ret_abi_type(&self, ty: &crate::ast::Type) -> String {
+        let base = match ty {
+            crate::ast::Type::Custom(n) | crate::ast::Type::Applied(n, _) => n,
+            _ => return self.llvm_type(ty),
+        };
+        if self.ctx.struct_types.contains_key(base) {
+            "i64".to_string()
+        } else {
+            self.llvm_type(ty)
+        }
+    }
+
     pub(super) fn emit_library_shim(&mut self, out: &mut String, txns: &[(String, &crate::ast::Transaction)]) {
         // The #export wrappers are already emitted by emit_definition (called
         // earlier in generate()). We only need to add __brief_init_state.
