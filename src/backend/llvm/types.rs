@@ -41,9 +41,18 @@ fn lower_custom_type(name: &str, universe: Option<&crate::type_universe::TypeUni
 /// Uses the ResolvedType.bytes from the universe when available.
 /// Falls back to computing from the LLVM type string.
 pub fn type_size(ty: &Type, universe: Option<&crate::type_universe::TypeUniverse>) -> u64 {
+    // 2026-08-04 (compiler-in-Brief): a Ptr is ALWAYS one machine word. The
+    // universe path below would return 0 for an unsubstituted generic
+    // `Ptr<T>` (bytes=0, no Cast.# property) and silently collapse struct
+    // layouts containing such fields (List<String>.len collided with
+    // inner.cap at offset 8). Pointer width is target-invariant here (8).
+    if matches!(ty, Type::Ptr(_)) {
+        return 8;
+    }
     // When universe is available, read bytes from ResolvedType.
     if let Some(ref u) = universe {
         if let Some(rt) = ty.universe_key().and_then(|k| u.get(k)) {
+
             if rt.bytes > 0 {
                 return rt.bytes;
             }

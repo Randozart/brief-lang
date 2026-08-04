@@ -3414,3 +3414,33 @@ avoids std/string (defines its own `str_len`).
 **Fix direction:** migrate bodies to the current syntax (free-function calls or
 `obj String { fn is_whitespace: __is_whitespace; }` bindings), fix `split` with
 the init/push pattern, implement `bytes` via the byte-slice reflection.
+
+## String element reads from List<String> return generic T (no string ops)
+
+**Date:** 2026-08-04
+**Status:** Open — blocks the pass's splitter element reads. After the List
+layout fix (this batch), `List<String>` fields register as `inner.data: Ptr<T>`
+(T unsubstituted even for the concrete `List<String>` instantiation). Reading
+`l.inner.data[i]` / `l.get(i)` yields a `T`-typed register; `.^Len` on it
+panics ("Phase-1b boundary"), and `let x: String = l.inner.data[i]` fails
+typecheck (T vs String). `as String` casts codegen a `{ ptr, i64 }` load that
+opt rejects (mismatch with i64 use).
+**Impact:** a Brief pass cannot read back list elements as Strings for
+comparison/slicing — the needs_state splitter can push but not inspect.
+**Fix direction:** substitute the generic T when resolving `Ptr<T>` pointees
+for concrete instantiations (the index_elem_ty / load path), OR define the
+element read to always return the boxed i64 handle typed as `String` (the
+bits-model invariant: element at a boundary IS an i64 handle).
+
+## meld CStr→String length reads wrong in a linked library
+
+**Date:** 2026-08-04
+**Status:** Open — probe `let text: String = s` (s: CStr) then `text .^Len`
+returned 5 for a 2-char input "xy" when linked as `briefc build --library`.
+The glue-path meld (boundary.bv echo/greet) passes its test, so the divergence
+is likely in the library-mode export wrapper or the String length-prefix read
+after the meld. Verify against `__glue_release`/`str_to_c` before trusting any
+String length/slice computed from a melded input in the pass.
+**Fix direction:** reproduce with a focused boundary-style export (not a defn
+export), compare the length-prefix write in `brief_cstr_to_brief` vs the
+`.^Len` codegen path.

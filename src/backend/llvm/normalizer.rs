@@ -185,22 +185,16 @@ fn register_typedefs(items: &[TopLevel], universe: &mut TypeUniverse, int_bits: 
             .or_else(|| exact_bits.map(|b| b / 8))
             .or_else(|| {
                 if td.body.slots.is_empty() { return None; }
+                // 2026-08-04 (compiler-in-Brief): sum slot sizes via
+                // type_size (NOT raw rt.bytes). Flexible primordials (Int,
+                // String, ...) register bytes=0 ("not yet resolved"); reading
+                // rt.bytes directly collapsed `ListBuffer<T> { data: Ptr<T>,
+                // cap: Int }` to 8 bytes (Ptr=8 + Int=0) and List<T>.len
+                // collided with inner.cap at offset 8. type_size resolves the
+                // flexible protocols (Cast.#Int → 8, Cast.#String → 8) and
+                // fixes Ptr at one word.
                 let total: u64 = td.body.slots.iter().map(|slot| {
-                    if matches!(slot.ty, crate::ast::Type::Ptr(_)) { return 8u64; }
-                    slot.ty.universe_key()
-                        .and_then(|k| universe.get(k))
-                        .map(|rt| rt.bytes)
-                        .unwrap_or_else(|| {
-                            // 2026-07-31: Phase 3 (§8.6) — unknown slot type falls
-                            // back to 8-byte (conservative max scalar); recorded so
-                            // the assumption is not silent.
-                            universe.warnings.push(format!(
-                                "normalizer: slot type {:?} of type '{}' is not in the \
-                                 universe — assuming 8-byte slot size",
-                                slot.ty, td.name
-                            ));
-                            8
-                        })
+                    crate::backend::llvm::types::type_size(&slot.ty, Some(universe))
                 }).sum();
                 Some(total)
             })
@@ -268,6 +262,20 @@ fn register_typedefs(items: &[TopLevel], universe: &mut TypeUniverse, int_bits: 
                 bytes.min(8)
             }));
         let mut properties: std::collections::HashMap<String, PropertyValue> = td.body.metadata.clone();
+        // 2026-08-04 (compiler-in-Brief): when re-registering a primordial (e.g.
+        // `type Int: #Int { ... }` in bootstrap.bv), inherit the primordial's
+        // protocol Cast.#* properties. The flexible-protocol fallbacks in
+        // type_size (types.rs) key on Cast.#Int/#String/#Float/#Bool — without
+        // them, `type Int: #Int` (empty metadata) registers bytes=0 and
+        // `type_size(Int)` returns 0, collapsing any struct containing an Int
+        // slot (ListBuffer.cap → 0 → List<T>.len collides with inner.cap).
+        if let Some(prim) = &primordial {
+            for (k, v) in &prim.properties {
+                if k.starts_with("Cast.") {
+                    properties.entry(k.clone()).or_insert_with(|| v.clone());
+                }
+            }
+        }
         // 2026-08-03: the declared protocol hashword is the base when there is
         // no parent type — `type CStr: #String<C_String>` must register base
         // "#String<C_String>" (not "Bit") so type_to_protocol resolves it to
