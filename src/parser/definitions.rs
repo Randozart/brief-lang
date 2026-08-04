@@ -62,6 +62,61 @@ impl<'a> Parser<'a> {
                 txn.is_async = true;
                 Ok(TopLevel::Transaction(txn))
             }
+            // 2026-08-04 (out-observability plan): `out defn` / `out node` /
+            // `out txn` / `out let` — the observability pin. Marks the
+            // callable's calls (or the variable's reads/writes) as liveness
+            // roots. Never an acceleration — a pin the compiler must respect.
+            Some(Token::Out)
+                if matches!(
+                    self.tokens.get(self.pos + 1).map(|(t, _)| t),
+                    Some(Token::Defn)
+                        | Some(Token::Node)
+                        | Some(Token::Txn)
+                        | Some(Token::Let)
+                        | Some(Token::Vol)
+                ) =>
+            {
+                self.pos += 1; // consume out
+                match self.peek() {
+                    Some(Token::Defn) => {
+                        let mut defn = self.parse_definition()?;
+                        defn.modifiers.push(Annotation {
+                            name: "out".to_string(),
+                            value: None,
+                        });
+                        Ok(TopLevel::Definition(defn))
+                    }
+                    Some(Token::Node) => {
+                        let mut txn = self.parse_node()?;
+                        txn.modifiers.push(Annotation {
+                            name: "out".to_string(),
+                            value: None,
+                        });
+                        Ok(TopLevel::Transaction(txn))
+                    }
+                    Some(Token::Txn) => {
+                        let mut txn = self.parse_transaction(false, false)?;
+                        txn.modifiers.push(Annotation {
+                            name: "out".to_string(),
+                            value: None,
+                        });
+                        Ok(TopLevel::Transaction(txn))
+                    }
+                    _ => {
+                        // `out let` or `out vol let` — recurse through the
+                        // statement parser so the let (and any vol) modifiers
+                        // are recorded, then push `out` last.
+                        let mut stmt = self.parse_statement()?;
+                        if let Statement::Let { modifiers, .. } = &mut stmt {
+                            modifiers.push(Annotation {
+                                name: "out".to_string(),
+                                value: None,
+                            });
+                        }
+                        Ok(TopLevel::Statement(Box::new(stmt)))
+                    }
+                }
+            }
             Some(Token::Cell) => self.parse_cell().map(TopLevel::Cell),
             Some(Token::Import) => self.parse_import().map(TopLevel::Import),
             Some(Token::Meld) => self.parse_meld().map(TopLevel::Meld),
@@ -3025,6 +3080,84 @@ mod tests {
             assert!(t.body.iter().any(|s| matches!(s,
                 crate::ast::Statement::Let { modifiers, .. } if modifiers.iter().any(|m| m.name == "vol")
             )), "vol modifier must be recorded on the let");
+        } else {
+            panic!("expected Transaction, got {item:?}");
+        }
+    }
+
+    #[test]
+    fn test_out_defn_records_out_modifier() {
+        // 2026-08-04 (out-observability plan): `out defn` records "out".
+        let src = "out defn log(msg: String) -> Int { term 1; };";
+        let tokens = tokenize(src).unwrap();
+        let mut p = Parser::new(tokens, src);
+        let item = p.parse_top_level().unwrap();
+        if let crate::ast::TopLevel::Definition(d) = item {
+            assert!(d.modifiers.iter().any(|m| m.name == "out"), "out modifier must be recorded");
+        } else {
+            panic!("expected Definition, got {item:?}");
+        }
+    }
+
+    #[test]
+    fn test_out_node_records_out_modifier() {
+        // 2026-08-04: `out node` records "out" on the Transaction.
+        let src = "out node work [true][done] { done = true; term; };";
+        let tokens = tokenize(src).unwrap();
+        let mut p = Parser::new(tokens, src);
+        let item = p.parse_top_level().unwrap();
+        if let crate::ast::TopLevel::Transaction(t) = item {
+            assert!(t.modifiers.iter().any(|m| m.name == "out"), "out modifier must be recorded");
+        } else {
+            panic!("expected Transaction, got {item:?}");
+        }
+    }
+
+    #[test]
+    fn test_out_txn_records_out_modifier() {
+        // 2026-08-04: `out txn` records "out" on the Transaction.
+        let src = "out txn step(x: Int) -> Int [true][term >= 0] { term x; };";
+        let tokens = tokenize(src).unwrap();
+        let mut p = Parser::new(tokens, src);
+        let item = p.parse_top_level().unwrap();
+        if let crate::ast::TopLevel::Transaction(t) = item {
+            assert!(t.modifiers.iter().any(|m| m.name == "out"), "out modifier must be recorded");
+        } else {
+            panic!("expected Transaction, got {item:?}");
+        }
+    }
+
+    #[test]
+    fn test_out_let_records_out_modifier() {
+        // 2026-08-04: `out let` inside a node body records "out".
+        let src = "node work [true][done] { out let x: Int = 1; done = true; term; };";
+        let tokens = tokenize(src).unwrap();
+        let mut p = Parser::new(tokens, src);
+        let item = p.parse_top_level().unwrap();
+        if let crate::ast::TopLevel::Transaction(t) = item {
+            assert!(t.body.iter().any(|s| matches!(s,
+                crate::ast::Statement::Let { modifiers, .. } if modifiers.iter().any(|m| m.name == "out")
+            )), "out modifier must be recorded on the let");
+        } else {
+            panic!("expected Transaction, got {item:?}");
+        }
+    }
+
+    #[test]
+    fn test_out_vol_let_records_both_modifiers() {
+        // 2026-08-04: `out vol let` is legal — both pins recorded independently.
+        let src = "node work [true][done] { out vol let x: Int = 1; done = true; term; };";
+        let tokens = tokenize(src).unwrap();
+        let mut p = Parser::new(tokens, src);
+        let item = p.parse_top_level().unwrap();
+        if let crate::ast::TopLevel::Transaction(t) = item {
+            let lets: Vec<_> = t.body.iter().filter_map(|s| match s {
+                crate::ast::Statement::Let { modifiers, .. } => Some(modifiers.clone()),
+                _ => None,
+            }).collect();
+            let mods = lets.first().expect("expected a let");
+            assert!(mods.iter().any(|m| m.name == "out"), "out modifier must be recorded");
+            assert!(mods.iter().any(|m| m.name == "vol"), "vol modifier must be recorded");
         } else {
             panic!("expected Transaction, got {item:?}");
         }
