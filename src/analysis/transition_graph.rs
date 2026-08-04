@@ -1183,11 +1183,6 @@ pub(crate) fn collect_statement_identifiers(
                 collect_state_identifiers(v, state_fields, out);
             }
         }
-        Statement::Return(val) => {
-            if let Some(v) = val {
-                collect_state_identifiers(v, state_fields, out);
-            }
-        }
         Statement::Block(stmts) => {
             for s in stmts {
                 collect_statement_identifiers(s, state_fields, out);
@@ -1293,7 +1288,6 @@ pub(crate) fn statement_contains_ffi_with_decls(stmt: &Statement) -> bool {
         Statement::Expression(e) => references_triggers_or_ffi_with_decls(e),
         Statement::Term(Some(e)) => references_triggers_or_ffi_with_decls(e),
         Statement::TermBang(Some(e)) => references_triggers_or_ffi_with_decls(e),
-        Statement::Return(Some(e)) => references_triggers_or_ffi_with_decls(e),
         Statement::Guarded(condition, statements) => {
             references_triggers_or_ffi_with_decls(condition)
                 || statements.iter().any(|s| statement_contains_ffi_with_decls(s))

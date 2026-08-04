@@ -85,13 +85,6 @@ impl VmBackend {
                 }
             }
 
-            Statement::Return(opt_expr) => {
-                if let Some(e) = opt_expr {
-                    self.emit_expr(e);
-                }
-                self.asm.emit_ret();
-            }
-
             Statement::Term(opt_expr) => {
                 if let Some(e) = opt_expr {
                     self.emit_expr(e);

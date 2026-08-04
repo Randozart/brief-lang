@@ -565,30 +565,6 @@ pub fn emit_statement(backend: &mut LlvmBackend, out: &mut String, stmt: &Statem
             }
             TypedRegister { name: backend.fun.gen_reg(), ty: Type::void() }
         }
-        Statement::Return(val) => {
-            if let Some(val) = val {
-                let reg = backend.emit_expr(out, val, indent);
-                let val_ty = backend.llvm_type(&reg.ty);
-                let final_name = if val_ty != backend.fun.fn_ret_ty {
-                    if val_ty == "i64" && backend.fun.fn_ret_ty == "ptr" {
-                        let c = backend.fun.gen_reg();
-                        writeln!(out, "{}{} = inttoptr i64 {} to ptr", indent, c, reg.name).ok();
-                        c
-                        } else if val_ty == "ptr" && backend.fun.fn_ret_ty == "i64" {
-                            let c = backend.fun.gen_reg();
-                            writeln!(out, "{}{} = ptrtoint ptr {} to i64", indent, c, reg.name).ok();
-                            c
-                        } else {
-                        reg.name
-                    }
-                } else {
-                    reg.name
-                };
-                writeln!(out, "{}ret {} {}", indent, backend.fun.fn_ret_ty, final_name).ok();
-                backend.fun.terminated = true;
-            }
-            TypedRegister { name: backend.fun.gen_reg(), ty: Type::void() }
-        }
         Statement::Guarded(cond, body) => {
             let cond_reg = backend.emit_expr(out, cond, indent);
             // 2026-07-14: labels need a counter without % prefix — gen_reg() returns %tN

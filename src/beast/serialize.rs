@@ -142,14 +142,7 @@ fn emit_statement(s: &Statement) -> SExpr {
                 None => list(&[atom("term!")]),
             }
         }
-        Statement::Return(e) => {
-            match e {
-                Some(e) => list(&[atom("return"), emit_expr(e)]),
-                None => list(&[atom("return")]),
-            }
-        }
-        Statement::Expression(e) => list(&[atom("expr"), emit_expr(e)]),
-        Statement::Guarded(cond, body) => {
+        Statement::Expression(e) => list(&[atom("expr"), emit_expr(e)]),        Statement::Guarded(cond, body) => {
             let mut children = vec![atom("guarded"), emit_expr(cond)];
             children.push(list(&[atom("body")]));
             for s in body { children.push(emit_statement(s)); }

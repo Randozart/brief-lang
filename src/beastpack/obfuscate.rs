@@ -96,7 +96,7 @@ fn collect_stmt_names(stmt: &Statement, names: &mut HashSet<String>) {
             collect_expr_names(target, names);
             collect_expr_names(value, names);
         }
-        Statement::Return(opt) | Statement::Term(opt) | Statement::TermBang(opt) => {
+        Statement::Term(opt) | Statement::TermBang(opt) => {
             if let Some(e) = opt {
                 collect_expr_names(e, names);
             }
@@ -280,7 +280,6 @@ fn rename_stmt(stmt: &Statement, map: &HashMap<String, String>) -> Statement {
             rename_expr(target, map),
             rename_expr(value, map),
         ),
-        Statement::Return(opt) => Statement::Return(opt.as_ref().map(|e| rename_expr(e, map))),
         Statement::Term(opt) => Statement::Term(opt.as_ref().map(|e| rename_expr(e, map))),
         Statement::TermBang(opt) => Statement::TermBang(opt.as_ref().map(|e| rename_expr(e, map))),
         Statement::Expression(e) => Statement::Expression(rename_expr(e, map)),

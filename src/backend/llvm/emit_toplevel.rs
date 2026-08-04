@@ -1649,7 +1649,7 @@ impl LlvmBackend {
             match stmt {
                 Statement::Let { expr: Some(e), .. } => is_ffi_call(e),
                 Statement::Expression(e) => is_ffi_call(e),
-                Statement::Term(Some(e)) | Statement::TermBang(Some(e)) | Statement::Return(Some(e)) => is_ffi_call(e),
+                Statement::Term(Some(e)) | Statement::TermBang(Some(e)) => is_ffi_call(e),
                 Statement::Assign(_, e) => is_ffi_call(e),
                 Statement::Guarded(_, body) => body.iter().any(|s| has_ffi_call(s)),
                 Statement::Block(body) => body.iter().any(|s| has_ffi_call(s)),
@@ -1676,7 +1676,7 @@ impl LlvmBackend {
             match stmt {
                 Statement::Let { expr: Some(e), .. } => collect_expr_idents(e, names),
                 Statement::Expression(e) => collect_expr_idents(e, names),
-                Statement::Term(Some(e)) | Statement::TermBang(Some(e)) | Statement::Return(Some(e)) => collect_expr_idents(e, names),
+                Statement::Term(Some(e)) | Statement::TermBang(Some(e)) => collect_expr_idents(e, names),
                 Statement::Assign(lhs, rhs) => { collect_expr_idents(lhs, names); collect_expr_idents(rhs, names); }
                 Statement::Guarded(_, body) => { for s in body { collect_idents(s, names); } }
                 Statement::Block(body) => { for s in body { collect_idents(s, names); } }

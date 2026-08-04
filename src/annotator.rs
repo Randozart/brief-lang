@@ -84,11 +84,6 @@ impl Annotator {
                         self.collect_calls_from_expr(v, calls);
                     }
                 }
-                Statement::Return(val) => {
-                    if let Some(v) = val {
-                        self.collect_calls_from_expr(v, calls);
-                    }
-                }
                 Statement::Let { expr, .. } => {
                     if let Some(v) = expr {
                         self.collect_calls_from_expr(v, calls);
@@ -423,10 +418,6 @@ impl Annotator {
             Statement::TermBang(val) => {
                 let val_str = val.as_ref().map(|v| self.format_expr(v)).unwrap_or_default();
                 format!("{}term! {};\n", spaces, val_str)
-            }
-            Statement::Return(val) => {
-                let val_str = val.as_ref().map(|v| self.format_expr(v)).unwrap_or_default();
-                format!("{}return {};\n", spaces, val_str)
             }
             Statement::Escape(val) => {
                 let val_str = val

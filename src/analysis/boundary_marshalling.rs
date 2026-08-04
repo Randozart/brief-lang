@@ -76,7 +76,6 @@ fn rewrite_body(
         match stmt {
             Statement::Term(opt)
             | Statement::TermBang(opt)
-            | Statement::Return(opt)
             | Statement::Escape(opt) => {
                 if let Some(expr) = opt.as_mut() {
                     rewrite_expr(expr, env, universe, graph, type_protocols);

@@ -268,9 +268,8 @@ fn collect_unsafe_ffi_stmt(stmt: &Statement, reasons: &mut Vec<String>) {
         }
         Statement::Term(Some(expr))
         | Statement::TermBang(Some(expr))
-        | Statement::Return(Some(expr))
         | Statement::Escape(Some(expr)) => collect_unsafe_ffi(expr, reasons),
-        Statement::Term(None) | Statement::TermBang(None) | Statement::Return(None) | Statement::Escape(None) => {}
+        Statement::Term(None) | Statement::TermBang(None) | Statement::Escape(None) => {}
         Statement::SyncBlock(stmts) => {
             for s in stmts {
                 collect_unsafe_ffi_stmt(s, reasons);

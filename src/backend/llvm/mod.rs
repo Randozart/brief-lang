@@ -244,8 +244,8 @@ fn collect_strings_stmt(stmt: &Statement, seen: &mut std::collections::HashSet<S
         }
         Statement::FreeHint(_) | Statement::KeepHint(_) => {}
         Statement::Expression(e) => { collect_strings_expr(e, seen, out); }
-        Statement::Term(Some(e)) | Statement::TermBang(Some(e)) | Statement::Return(Some(e)) => { collect_strings_expr(e, seen, out); }
-        Statement::Term(None) | Statement::TermBang(None) | Statement::Return(None) => {}
+        Statement::Term(Some(e)) | Statement::TermBang(Some(e)) => { collect_strings_expr(e, seen, out); }
+        Statement::Term(None) | Statement::TermBang(None) => {}
         Statement::Guarded(condition, statements) => {
             collect_strings_expr(condition, seen, out);
             for s in statements { collect_strings_stmt(s, seen, out); }
@@ -1565,10 +1565,6 @@ impl LlvmBackend {
                 self.check_expr_embedded(e, ctx_name, threading_intrinsics);
             }
             Statement::Term(None) | Statement::TermBang(None) => {}
-            Statement::Return(Some(e)) => {
-                self.check_expr_embedded(e, ctx_name, threading_intrinsics);
-            }
-            Statement::Return(None) => {}
             Statement::Guarded(condition, statements) => {
                 self.check_expr_embedded(condition, ctx_name, threading_intrinsics);
                 for s in statements {

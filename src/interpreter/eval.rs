@@ -709,13 +709,6 @@ pub fn eval_statement(
                 }
             }
         }
-        Statement::Return(val) => {
-            if let Some(val) = val {
-                eval_expr(val, heap, bindings)
-            } else {
-                Ok(Value::Void)
-            }
-        }
         Statement::Escape(_) => Ok(Value::Void),
         Statement::MetadataAssignment(_, _) => Ok(Value::Void),
         Statement::InlineAsm { .. } | Statement::InlineDefn(_) | Statement::InlineTxn(_) => Ok(Value::Void),

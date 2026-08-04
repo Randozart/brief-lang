@@ -1,5 +1,36 @@
 # Bugs
 
+## Vestigial `return` Statement Removed (was the "return divergence") — RESOLVED
+
+**Date:** 2026-08-04
+**Status:** Resolved by REMOVING the feature (branch `feat/term-termination-diagnostics`)
+**Root cause:** `return expr;` / `return;` was a vestigial parser path carried
+over from the Phase 1 parser rewrite (`77836c35`). Brief's language never
+defined a `return` statement — `spec/SPEC.md` documents "return" only as a
+return TYPE. Zero `.bv` files used it. Its semantics disagreed across engines:
+the interpreter (`src/interpreter/eval.rs`) returned `Ok(Value)` so execution
+CONTINUED (and the runner's `result = last statement value` overwrote it), while
+the LLVM backend (`src/backend/llvm/emit_stmt.rs`) emitted a real `ret` +
+`terminated=true` (hard exit) and the VM backend (`src/backend/vm/emit_stmt.rs`)
+treated it identically to `term`. A user who wrote `return` got silently wrong
+codegen. The 2026-08-04 term-termination plan (§5) claimed this divergence was
+"logged in BUGS.md" — it was not; this entry resolves the matter by removing the
+statement.
+**Fix:** Parser now rejects `return` (at top level and in statement bodies) with
+`invalid statement: Brief has no \`return\` statement. To return a value from a
+defn use \`term <value>\`; to mark a convergence checkpoint use bare \`term;\`;
+\`term!\` closes the program.` The `Statement::Return` AST variant and all ~50
+match arms across the pipeline (parser → AST → typechecker → interpreter →
+normalizer → derive/SMT → proof engine → reactor → plugins → beastpack → LLVM/VM
+backends → beast serialize/deserialize) were removed. `return` is now an
+ordinary identifier again in non-statement positions.
+**Impact:** 1469 lib tests + 5 integration tests + 2 parser tests green; no
+`.bv` was affected (zero usages); no benchmark impact (no codegen path changed).
+**Regression tests:** `parser::statements::tests::return_statement_errors_with_helpful_message`.
+**Undo:** re-add `Statement::Return` + the parser dispatch (do NOT — the feature
+was never specced; see `docs/plans/2026-08-04-remove-vestigial-return-statement.md`).
+
+---
 ## Value-Form `term`/`term!` in a Void Txn Fell Through Past the Guard — FIXED
 
 **Date:** 2026-08-04

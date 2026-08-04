@@ -334,12 +334,6 @@ impl Reactor {
             Statement::TrgBinding { .. } => {
                 Ok(StmtResult::Continue)
             }
-            Statement::Return(val) => {
-                if let Some(expr) = val {
-                    interp.eval_expr(expr)?;
-                }
-                Ok(StmtResult::Continue)
-            }
             Statement::If(cond, then, else_) => {
                 let cv = interp.eval_expr(cond)?;
                 if cv .is_true() {

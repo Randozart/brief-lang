@@ -169,8 +169,6 @@ mod tests {
         assert!(statement_always_terminates(&Statement::TermBang(Some(Expr::Decimal(1)))));
         assert!(!statement_always_terminates(&Statement::Term(None)));
         assert!(!statement_always_terminates(&Statement::TermBang(None)));
-        // `return` continues per the interpreter — NOT a terminator.
-        assert!(!statement_always_terminates(&Statement::Return(Some(Expr::Decimal(1)))));
         // A guard is conditional — NOT unconditional.
         assert!(!statement_always_terminates(&Statement::Guarded(
             Expr::Bool(true),
@@ -258,18 +256,6 @@ mod tests {
         ])]);
         assert!(errors.is_empty());
         assert!(warnings.is_empty(), "trailing checkpoint guard is harmless");
-    }
-
-    #[test]
-    fn return_does_not_flag_following_statements() {
-        // Mirror-image divergence: the interpreter's `return` continues the
-        // list, so we must NOT flag what follows (the backend's `ret` there is
-        // a tracked bug, not something this pass rejects).
-        let (errors, _) = analyze(&[txn("n", vec![
-            Statement::Return(Some(Expr::Decimal(1))),
-            Statement::Expression(expr_call("more")),
-        ])]);
-        assert!(errors.is_empty(), "return is not a terminator per the interpreter");
     }
 
     #[test]
