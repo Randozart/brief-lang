@@ -78,6 +78,13 @@ pub enum Token {
     #[token("vol")]
     Vol,
 
+    /// 2026-08-04 (out-observability plan): `out` — observability modifier
+    /// (prefix). `out defn`/`out node`/`out txn` mark the callable's calls as
+    /// liveness roots (the compiler must not eliminate them); `out let` marks
+    /// the variable's reads/writes as live. A pin, never an acceleration.
+    #[token("out")]
+    Out,
+
     #[token("await")]
     Await,
 
@@ -589,6 +596,7 @@ impl std::fmt::Display for Token {
             Token::Async => write!(f, "async"),
             Token::Seq => write!(f, "seq"),
             Token::Vol => write!(f, "vol"),
+            Token::Out => write!(f, "out"),
             Token::Await => write!(f, "await"),
             Token::Term => write!(f, "term"),
             Token::TermBang => write!(f, "term!"),

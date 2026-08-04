@@ -287,6 +287,8 @@ are **prefix** (`async node`; `node async` is rejected). See
 | `seq txn foo` / `seq node foo` | sequential dispatch — never the parallel reactor |
 | `seq Int[N]` / `seq foreach` | sequential access — `!llvm.loop.vectorize.enable = false` |
 | `vol let x` | every access is `load volatile`/`store volatile` |
+| `out defn foo` / `out node foo` / `out txn foo` | the callable's calls are liveness roots — the compiler must not eliminate them (the stdlib-side twin of the intrinsic `observable: true` flag); the body is still fully optimized, only the call boundary survives. Direct-only: a pure function calling an `out` function is not itself pinned. |
+| `out let x` | the variable's reads/writes are liveness roots (never eliminated); does NOT force volatile memory semantics. `vol` implies `out`; `out vol let x` is legal. |
 | `async node foo` | explicit acknowledgement of simultaneous firing (not a hint) |
 | `sync<group> node foo` | group barrier — members that fire hold off finishing until all fired members have |
 
@@ -358,7 +360,7 @@ lookups are fine. Reference: commit `139c345`,
 - `x == x` self-references to force liveness; synthetic exit-condition fields
 - Hardcoded `from "libruntime"` (use `from "c"` / `from "link/brief_rt.c"`);
   missing `from` on `frgn`
-- `#export` (use `export defn`); `#out` (use `!> observable: true`)
+- `#export` (use `export defn`); `#out` (use the `out` keyword)
 - Hardcoded runtime declares (`__rt_init` must be `frgn` in `std/rt.bv`)
 - Name-based interpreter dispatch (dispatch on `Value::HashMap`, not names);
   `"None"`/`"Err"` discriminant magic (use declaration order); runtime type

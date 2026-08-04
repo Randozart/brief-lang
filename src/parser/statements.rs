@@ -27,6 +27,27 @@ impl<'a> Parser<'a> {
                 }
                 Ok(stmt)
             }
+            // 2026-08-04 (out-observability plan): `out let x` — the variable's
+            // reads/writes are liveness roots (never eliminated). Unlike `vol`,
+            // it does NOT force volatile memory semantics. `out vol let x` is
+            // legal (vol implies out, but both pins are recorded independently);
+            // `out vol` is handled by recursing into the vol arm below.
+            Some(Token::Out)
+                if matches!(
+                    self.tokens.get(self.pos + 1).map(|(t, _)| t),
+                    Some(Token::Let) | Some(Token::Vol)
+                ) =>
+            {
+                self.pos += 1; // consume out
+                let mut stmt = self.parse_statement()?;
+                if let Statement::Let { modifiers, .. } = &mut stmt {
+                    modifiers.push(crate::ast::Annotation {
+                        name: "out".to_string(),
+                        value: None,
+                    });
+                }
+                Ok(stmt)
+            }
             Some(Token::Term) => self.parse_term_statement(false),
             Some(Token::TermBang) => self.parse_term_statement(true),
             Some(Token::Escape) => self.parse_escape_statement(),

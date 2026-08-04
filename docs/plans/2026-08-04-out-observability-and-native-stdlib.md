@@ -1,7 +1,7 @@
 # `out` Observability Keyword + Native-Stdlib Path (C Independence)
 
 **Date:** 2026-08-04
-**Status:** Active plan
+**Status:** Phases 1–3 DONE (`03becb29` cast, `cc8fe299`+`47e5964c`+`29da13b0`+`d86f9844` out, `bcb3cebe` casting de-dup); Phase 4 (`.ebv` heap reframe) IN PROGRESS
 **Branch:** `feat/out-observability` (worktree `../brief-compiler-out`)
 **Related:**
 - `docs/plans/2026-08-03-glue-folders-node-bridge.md` (GLUE convergence — Phase 6)
@@ -169,15 +169,21 @@ unchanged.
 
 ### Benchmark anchor migration
 
-Migrate the `Store#`/`Load#`-as-observability-anchor benchmarks to `out`-marked
-functions — the benchmarks use `Load#`/`Store#` only to keep allocations
-observable:
-- `benchmarks/utf8_ops.bv` (Store#)
-- `benchmarks/arena_churn.bv` (Store#/Load#)
-- `benchmarks/linked_list.bv` (Malloc#/Store#/Load# comment)
+**2026-08-04 finding (supersedes the original intent):** on inspection, the
+three candidate benchmarks GENUINELY use the memory intrinsics for computation —
+they are not pure observability anchors:
 
-This validates `out` on real code and removes redundant raw memory intrinsics
-from the benchmark surface.
+- `benchmarks/arena_churn.bv` — `Load#(a)` feeds `sum` (real work).
+- `benchmarks/utf8_ops.bv` — `Store#` writes runtime-varying data that
+  `memcmp`/`UTF8_validate` consume (real work).
+- `benchmarks/linked_list.bv` — uses `node[0]`/`node[1]` indexing (real work).
+
+Forcing `out` onto them would BREAK benchmark semantics, so **no migration**. The
+backend is already conservative (any call blocks folding; `Malloc#`/`Store#`/
+`Load#` are `observable: true` intrinsics), so the "keep the allocation
+observable" goal is already met without `out`. The `out` keyword's benchmark
+value materializes in Phases 4–5, when stdlib print/format functions move into
+Brief and need `out` to survive DCE.
 
 **Tests:** parse tests for all four forms; a DCE test proving an `out` function
 call survives while an identical non-`out` call is folded; a folding test proving
@@ -192,6 +198,8 @@ proving reads/writes are live but not volatile.
 ---
 
 ## Phase 3 — Casting De-duplication (native-wins)
+
+**Status: DONE (2026-08-04, commit `bcb3cebe`).**
 
 **Goal:** delete the hardcoded `IntToStr#`/`FloatToStr#`/`ToString#` arms and
 route casting through the casting graph's existing lanes.
@@ -223,32 +231,111 @@ the `.ebv` seam); `to_string` works; no `IntToStr#` references remain.
 
 ---
 
-## Phase 4 — `.ebv` Stdlib: The Freestanding Proof
+## Phase 4 — `.ebv` Freestanding Heap + Stdlib: The Independence Proof
 
-**Goal:** the first real `.ebv` freestanding stdlib — pure Brief logic with no C.
+**Status: IN PROGRESS (2026-08-04).** Wiring done (`70f596f9`, `c7f25a95`);
+static bump arena + heap-rejection downgrade done (`f2b57043`). Remaining: the
+C-free `.ebv` stdlib/prelude (see "Remaining" below).
 
-**Current state (verified):** zero `.ebv` files exist. `is_embedded_extension`
-is documented (`docs/architecture/backend-strategy.md:60-73`) but not wired in
-`src/compile.rs`/`src/target.rs`. The `.ebv` target currently means "LLVM with
-embedded defaults" only in docs.
+**Goal:** prove Brief can hold its own as a systems language without C — a real
+`.ebv` freestanding target with a **heap** (static bump arena, no `@malloc`),
+String/Data support, and the string-conversion stdlib implemented in Brief.
 
-**Work:**
-- Create `lib/std/` `.ebv` variants of the pure-logic functions:
-  - digit→string loop (`int_to_str` replacement — real Brief digit division)
-  - string byte-ops (`band`/`bor`/`bxor`/`eq`) as actual byte loops over
-    `[len][bytes]`
-  - `str_to_int` (currently `to_int` is a `term 0` **stub** in `string.bv`)
-- Wire `is_embedded_extension()` detection in `compile.rs`/`target.rs` so `.ebv`
-  selects the freestanding stdlib.
-- The import resolver already tries `.bv` first and treats `.ebv` as an
-  interchangeable variant (`intrinsics-vs-stdlib.md:54-55`) — a freestanding
-  target prefers `.ebv`.
+### Why `.ebv` rejects heap is WRONG (the provenance)
 
-**Measure:** `brief_rt.c` shrinks; the pure-logic half becomes Brief-native; a
-`--no-stdlib` program doing string formatting works.
+`check_embedded_restrictions` (commit `28543c3b`, 2026-06-19) rejects heap types
+(`#String`/`#Data`/List/HashMap/…) on `.ebv`. This is a **vestige of the
+`.ebv`/`.cbv` entanglement**, not a freestanding design:
 
-**Files:** new `lib/std/*.ebv`, `src/compile.rs`, `src/target.rs`,
-`lib/runtime/brief_rt.c` (shrink).
+- The restriction and the backend split (`docs/plans/2026-06-19-backend-routing-
+  async-await.md:156`, "Split `.ebv`/`.sebv` from `.cbv`") are the **same date**.
+  The checker was written while `.ebv` still shared the circuit/hardware mindset
+  with `.cbv` — the routing plan even marked `"embedded" => "llvm.toml"` as
+  "wrong for both" (line 153) before the split.
+- After the split, `.ebv` → LLVM embedded (heap-capable), `.cbv` → CIRCT circuit
+  (genuinely no heap — it synthesizes hardware). The heap rejection should have
+  gone with `.cbv`.
+- The documented `.ebv` vision REQUIRES a heap and Strings:
+  - `docs/plans/2026-08-03-data-brief-config-and-board-hardware-map.md:81` —
+    `.ebv` is explicitly `Malloc#`→ bump allocator, `Print#`→ pure Brief
+    formatting + `write`, `Now#`→ freestanding clock.
+  - `docs/plans/2026-06-23-arena-allocation.md` — the bump-allocator design.
+  - `docs/plans/2026-07-26-tamer-zero-c-and-static-memory.md:992` — `SysCall#`
+    with inline asm, "no C runtime needed".
+
+**Decision (2026-08-04):** heap is RIGHT for `.ebv`. The rejection belongs to
+`.cbv`. Brief should PROVIDE an allocator on bare metal, not forbid Strings.
+
+### Current state (verified)
+
+- `is_embedded_extension()` was **documented but nonexistent** (backend-strategy
+  said it existed; grep found nothing). The `is_embedded` flag existed on the
+  backend but was never wired.
+- **Latent link-error bug found+fixed** (`70f596f9`): the casting graph declares
+  10 `ExtCall` string-lane symbols; only `int_to_str` existed in `brief_rt.c`.
+  The other nine (str_to_int, uint_to_str, str_to_uint, float_to_str,
+  str_to_float, str_to_bool, bool_to_str, str_first_char, char_to_str) were
+  undefined — `(s as Int)` etc. LINK-ERRORED for .bv and .ebv alike. Added the
+  C definitions (String ABI = ptr to [len: i64][bytes]; Float lanes use the
+  32-bit float ABI) + the lane declares.
+- **Wiring done** (`c7f25a95`): `with_prefer_ebv` in the import resolver (an
+  .ebv target picks the .ebv stdlib variant over .bv); `.ebv` activates
+  `with_embedded_mode(true)` at the four LLVM backend construction sites; the
+  cast-lane declares are skipped when the program defines the symbol.
+- The arena machinery (`emit_arena_alloc`, `mod.rs:1280`) exists but is
+  `@malloc`-backed — the `.ebv` branch replaces `@malloc`/`@free` with a static
+  `.bss` buffer.
+
+### Work
+
+**1. Static bump arena for `.ebv`** — ✅ DONE (`f2b57043`)
+- `emit_arena_init` embedded branch: the bump pointer targets a static
+  `@embedded_heap` global (configurable size = `ir-lowering arena_initial_size`,
+  default 64KB) — no `@malloc`.
+- `emit_arena_alloc` embedded: grow path yields null (no `@realloc` on bare
+  metal; fixed-size heap).
+- `emit_arena_fini` embedded: skip `@free` (static global lives for the
+  program's lifetime).
+- `Malloc#`/`Alloc#` in `.ebv` mode dispatch to the static arena; the `.ebv`
+  default becomes `AllocStrategy::Arena`.
+
+**2. Downgrade `check_embedded_restrictions`** — ✅ DONE (`f2b57043`)
+- Heap types (`#String`/`#Data`/List/…) are now a **TargetWarning** (finite
+  static arena), not a TargetError.
+- **Threading intrinsics stay rejected** (genuine: bare metal has no threads).
+  Recursion check stays (no stack growth).
+- Tests: `test_embedded_string_state_uses_static_heap` (IR has `@embedded_heap`,
+  no `@malloc` call), `test_embedded_string_state_warns_not_errors`.
+
+**3. `.ebv` string-conversion stdlib** — ⏳ REMAINING
+- `lib/std/conversions.ebv` provides the cast-lane symbols (`int_to_str`,
+  `str_to_int`, `uint_to_str`, `str_to_uint`, `float_to_str`, `str_to_float`,
+  `str_to_bool`, `bool_to_str`, `str_first_char`, `char_to_str`) as **Brief
+  defns** over the arena. The declare-guard (`c7f25a95`) already skips the
+  backend declares when the program defines the symbol.
+- `with_prefer_ebv` means an `.ebv` program importing `std/conversions` picks
+  the `.ebv` variant over a `.bv` one.
+
+**3b. C-free `.ebv` prelude** — ⏳ REMAINING (the freestanding-link blocker)
+- The `prelude` plugin (`plugins/parsed/prelude.bv`) imports `std/os/*`,
+  `std/io.bv`, `std/env.bv` — these transitively import `std/brief_rt.bv`
+  which does `import "link/brief_rt.c"`, pulling `brief_rt.o` into EVERY build
+  including `.ebv`. Verified: `nm` on an `.ebv` binary shows `int_to_str` (a
+  brief_rt.c symbol).
+- For a true freestanding `.ebv`, the prelude must be a **C-free variant**
+  (import only `std/types/bootstrap.bv` + C-free compute modules), and the
+  `.ebv` build must skip `brief_rt.c` in `collect_extra_objects`. This is a
+  stdlib restructure (os/* and io/env are C-backed).
+
+**4. Stale docs**
+- `docs/architecture/backend-strategy.md` — fix the `is_embedded_extension()` /
+  `is_circuit_extension()` routing (describes code that doesn't exist); update
+  the restrictions table ("Reject heap types ✅" → "Static bump arena").
+
+### Measure
+
+A `.ebv` firmware program with String state + `(n as String)` / `(s as Int)`
+compiles, links, and runs with `brief_rt.c` NOT linked (freestanding).
 
 ---
 

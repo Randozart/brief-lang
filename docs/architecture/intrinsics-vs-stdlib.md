@@ -16,6 +16,23 @@ If `rm -rf lib/std && compiler --no-stdlib` still type-checks and compiles
 `let x: Int = 5`, it's an intrinsic. If a user could write a `.bv` file that
 achieves the same thing, it belongs in stdlib.
 
+## Observability: Two Enforcement Points, One Concept
+
+Intrinsics and stdlib both need "the compiler must not eliminate this call."
+Intrinsics are pinned **by design** (`observable: true` in
+`intrinsic_signatures.rs`); stdlib functions claim the same contract with the
+**`out` keyword** (2026-08-04, `docs/plans/2026-08-04-out-observability-and-
+native-stdlib.md`):
+
+| Where | Mechanism | Semantics |
+|---|---|---|
+| Intrinsics | `observable: true` in `intrinsic_signatures.rs` | Pinned by design — an intrinsic IS its behavior (`Print#`, `Malloc#`, `Copy#` …) |
+| Stdlib (`defn`/`node`/`txn`/`let`) | `out` keyword | Calls are liveness roots; the body is still fully optimized; only the call boundary survives. `out let` pins reads/writes without volatile. |
+
+`out` is a **pin, never an acceleration**: the compiler always maximizes
+optimization (even to a LUT); `out` says "I need this specific call done, you
+cannot optimize it out." This is the never-faster contract (AGENTS.md Rule 2).
+
 ## Three-Layer Architecture
 
 | Layer | File | Role | Validated |

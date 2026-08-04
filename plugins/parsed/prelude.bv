@@ -4,7 +4,7 @@
 // Runs at $(Parsed) with highest priority so imports are available
 // before type checking.
 
-    $(Parsed @ highest) {
+$(Parsed @ highest) {
     let anchor = Tag$("import").First$();
     when anchor.Count$() > 0 {
         anchor.Before$().Insert$(

@@ -228,6 +228,20 @@ fn emit_malloc(
     // raw bits are still i64 (ptrtoint); the type annotation only affects
     // downstream codegen dispatch. State storage boxes via adapt_to_i64.
     let name = v.trim_start_matches('%');
+    // 2026-08-04 (Phase 4, .ebv heap reframe): embedded freestanding — Malloc#
+    // routes to the static bump arena (@embedded_heap), never @malloc. The
+    // arena result is an i64 (the bump address); emit_arena_alloc returns the
+    // ptrtoint'd i64 which we re-interpret as a pointer for the Ptr<Int> ABI.
+    if backend.ctx.is_embedded {
+        let arena_result = backend.emit_arena_alloc(out, indent, &size);
+        writeln!(out, "{}%{}_p = inttoptr i64 {} to ptr", indent, name, arena_result).ok();
+        writeln!(out, "{}{} = ptrtoint ptr %{}_p to i64", indent, v, name).ok();
+        backend.fun.alloc_strategies.insert(v.to_string(), AllocStrategy::Arena);
+        let remaining_reg = backend.fun.gen_reg();
+        writeln!(out, "{} {} = add i64 {}, 0", indent, remaining_reg, size).ok();
+        backend.fun.fat_ptrs.insert(v.to_string(), (v.to_string(), "0".to_string(), remaining_reg));
+        return BTypedRegister { name: v.to_string(), ty: Type::ptr(Type::int()) };
+    }
     writeln!(out, "{}%{}_p = call ptr @malloc(i64 {})", indent, name, size).ok();
     writeln!(out, "{}{} = ptrtoint ptr %{}_p to i64", indent, v, name).ok();
     // 2026-07-18: Record Malloc strategy so Free# can dispatch correctly.

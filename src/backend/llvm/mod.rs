@@ -1344,19 +1344,29 @@ impl LlvmBackend {
 
         // Grow path
         writeln!(out, "{}{}:", indent, grow_l).ok();
-        let base = load_state_ptr!(abase_idx, "aaob");
-        let grow_sz = self.fun.next_reg_with_prefix("aags");
-        writeln!(out, "{}{} = shl i64 {}, 1", indent, grow_sz, size_reg).ok();
-        let min_sz = self.fun.next_reg_with_prefix("aams");
-        writeln!(out, "{}{} = add i64 {}, {}", indent, min_sz, grow_sz, self.ctx.arena_initial_size).ok();
-        let new_base = self.fun.next_reg_with_prefix("aanb");
-        writeln!(out, "{}{} = call ptr @realloc(ptr {}, i64 {})", indent, new_base, base, min_sz).ok();
-        store_state_ptr!(aptr_idx, "aaps", &new_base);
-        store_state_ptr!(abase_idx, "aabs", &new_base);
-        let new_end = self.fun.next_reg_with_prefix("aane");
-        writeln!(out, "{}{} = getelementptr i8, ptr {}, i64 {}", indent, new_end, new_base, min_sz).ok();
-        store_state_ptr!(aend_idx, "aaes", &new_end);
-        writeln!(out, "{}br label %aaok_{}", indent, ok_l_n).ok();
+        // 2026-08-04 (Phase 4): embedded freestanding has NO realloc — the
+        // static bump heap is fixed-size. A bump past the end yields null
+        // (the allocator contract: null ⇒ allocation failed); the caller's
+        // bounds checks handle it. No @realloc/@free on bare metal.
+        let grow_incoming;
+        if self.ctx.is_embedded {
+            grow_incoming = "null".to_string();
+        } else {
+            let base = load_state_ptr!(abase_idx, "aaob");
+            let grow_sz = self.fun.next_reg_with_prefix("aags");
+            writeln!(out, "{}{} = shl i64 {}, 1", indent, grow_sz, size_reg).ok();
+            let min_sz = self.fun.next_reg_with_prefix("aams");
+            writeln!(out, "{}{} = add i64 {}, {}", indent, min_sz, grow_sz, self.ctx.arena_initial_size).ok();
+            let new_base = self.fun.next_reg_with_prefix("aanb");
+            writeln!(out, "{}{} = call ptr @realloc(ptr {}, i64 {})", indent, new_base, base, min_sz).ok();
+            store_state_ptr!(aptr_idx, "aaps", &new_base);
+            store_state_ptr!(abase_idx, "aabs", &new_base);
+            let new_end = self.fun.next_reg_with_prefix("aane");
+            writeln!(out, "{}{} = getelementptr i8, ptr {}, i64 {}", indent, new_end, new_base, min_sz).ok();
+            store_state_ptr!(aend_idx, "aaes", &new_end);
+            writeln!(out, "{}br label %aaok_{}", indent, ok_l_n).ok();
+            grow_incoming = new_base;
+        }
 
         // OK path
         writeln!(out, "aaok_{}:", ok_l_n).ok();
@@ -1367,7 +1377,7 @@ impl LlvmBackend {
         self.fun.cur_block = Some(format!("aaok_{}", ok_l_n));
         let phi = self.fun.next_reg_with_prefix("aaphi");
         writeln!(out, "{}{} = phi ptr [ {}, %{} ], [ {}, %{} ]",
-            indent, phi, cur, check_l, new_base, grow_l).ok();
+            indent, phi, cur, check_l, grow_incoming, grow_l).ok();
         let new_bump = self.fun.next_reg_with_prefix("aanbp");
         writeln!(out, "{}{} = getelementptr i8, ptr {}, i64 {}", indent, new_bump, phi, size_reg).ok();
         store_state_ptr!(aptr_idx, "aaps2", &new_bump);
@@ -1394,6 +1404,21 @@ impl LlvmBackend {
         if self.has_async_txns {
             writeln!(out, "{}%arena_mutex = alloca i64, align 8", indent).ok();
             writeln!(out, "{}store i64 0, ptr %arena_mutex, align 8", indent).ok();
+        }
+        // 2026-08-04 (Phase 4): embedded freestanding — point the bump pointer
+        // at the static @embedded_heap global (no @malloc, no heap growth).
+        if self.ctx.is_embedded {
+            let base = self.fun.next_reg_with_prefix("arib");
+            writeln!(out, "{}{} = ptrtoint ptr @embedded_heap to i64", indent, base).ok();
+            self.emit_state_store_i64_by_idx(out, indent, aptr_idx, &base);
+            self.emit_state_store_i64_by_idx(out, indent, abase_idx, &base);
+            let init_end = self.fun.next_reg_with_prefix("arie");
+            writeln!(out, "{}{} = getelementptr i8, ptr @embedded_heap, i64 {}",
+                indent, init_end, self.ctx.arena_initial_size).ok();
+            let end_i64 = self.fun.next_reg_with_prefix("ariei");
+            writeln!(out, "{}{} = ptrtoint ptr {} to i64", indent, end_i64, init_end).ok();
+            self.emit_state_store_i64_by_idx(out, indent, aend_idx, &end_i64);
+            return;
         }
         let init = self.fun.next_reg_with_prefix("arinit");
         writeln!(out, "{}{} = call ptr @malloc(i64 {})", indent, init, self.ctx.arena_initial_size).ok();
@@ -1432,6 +1457,11 @@ impl LlvmBackend {
             return;
         }
         let Some(abase_idx) = self.arena_base_idx else { return; };
+        // 2026-08-04 (Phase 4): embedded freestanding — the static @embedded_heap
+        // global lives for the program's lifetime; nothing to free.
+        if self.ctx.is_embedded {
+            return;
+        }
         let (base_val, _) = self.emit_state_load_i64_by_idx(out, indent, abase_idx);
         let base_ptr = self.fun.next_reg_with_prefix("afp");
         writeln!(out, "{}{} = inttoptr i64 {} to ptr", indent, base_ptr, base_val).ok();
@@ -1483,9 +1513,18 @@ impl LlvmBackend {
         &self.spirv_kernels
     }
 
-    /// Scan the typed program for constructs that are forbidden in embedded mode:
-    /// dynamic heap allocation (List, String, HashMap) and threading intrinsics.
-    /// Also warns about unbounded recursion via the call graph's cycle detection.
+    /// Scan the typed program for constructs that are forbidden in embedded mode.
+    ///
+    /// 2026-08-04 (Phase 4, .ebv heap reframe): heap types (#String/#Data/List/
+    /// HashMap/…) are now LEGAL on the embedded target — the static bump arena
+    /// (@embedded_heap) provides a heap without @malloc/brief_rt.c. The old
+    /// hard rejection was a vestige of the pre-split .ebv/.cbv entanglement
+    /// (the .cbv CIRCT target synthesizes hardware and truly has no heap; .ebv
+    /// is LLVM embedded and does). We still WARN when the program uses heap
+    /// types so a bare-metal developer knows the static arena is finite, but
+    /// it is not a TargetError. Threading intrinsics remain forbidden (bare
+    /// metal has no threads) and unbounded recursion still warns (no stack
+    /// growth).
     pub(crate) fn check_embedded_restrictions(&mut self, items: &[TopLevel]) {
         let threading_intrinsics: &[&str] = &[
             "ThreadCreate#", "ThreadJoin#", "ThreadExit#",
@@ -1497,8 +1536,8 @@ impl LlvmBackend {
                 TopLevel::StateDecl(decl) => {
                     if self.type_is_heap_allocated(&decl.ty) {
                         self.warnings.push(format!(
-                            "TargetError: dynamic allocation not supported on target 'Embedded' — state variable '{}' has type {:?}",
-                            decl.name, decl.ty
+                            "TargetWarning: heap-typed state '{}' ({:?}) on 'Embedded' uses the static bump arena (@embedded_heap, {} bytes) — finite, no free until arena reset",
+                            decl.name, decl.ty, self.ctx.arena_initial_size
                         ));
                     }
                 }
@@ -1542,12 +1581,15 @@ impl LlvmBackend {
 
     fn check_stmt_embedded(&mut self, stmt: &Statement, ctx_name: &str, threading_intrinsics: &[&str]) {
         match stmt {
-            Statement::Let { ty, expr, .. } => {
+            Statement::Let { name, ty, expr, .. } => {
                 if let Some(t) = ty {
                     if self.type_is_heap_allocated(t) {
+                        // 2026-08-04 (Phase 4): heap types are legal now (static
+                        // bump arena) — warn, don't error, mirroring the StateDecl
+                        // downgrade.
                         self.warnings.push(format!(
-                            "TargetError: dynamic allocation not supported on target 'Embedded' — variable in '{}' has type {:?}",
-                            ctx_name, t
+                            "TargetWarning: heap-typed local '{}' in '{}' ({:?}) uses the static bump arena (@embedded_heap)",
+                            name, ctx_name, t
                         ));
                     }
                 }
@@ -1685,6 +1727,7 @@ impl LlvmBackend {
         );
         self.ctx.dep_graph = analysis.dependency_graph.clone();
         self.ctx.global_free_after = analysis.global_lifetime.free_after.clone();
+        self.ctx.observable_names = analysis.observable_names.clone();
         // 2026-08-03: Per-export ABI (needs_state) computed once up front by
         // the export ABI analysis — the backend only consumes the decision.
         self.ctx.export_needs_state =
@@ -2190,11 +2233,60 @@ impl LlvmBackend {
         // (getpid, sigprocmask, close, nanosleep, sched_yield, getuid, etc.)
 
         // Declare cast helper functions
-        writeln!(out, "declare i8* @__chr_to_str(i32) #1").ok();
-        writeln!(out, "declare ptr @int_to_str(i64) #1").ok();
-        writeln!(out, "declare ptr @__int_to_str__(i64) #1").ok();
-        writeln!(out, "declare i64 @__str_bytes__(i64) #1").ok();
-        writeln!(out, "declare i64 @__str_to_int(i8*) #1").ok();
+        // 2026-08-04 (Phase 3): the `__int_to_str__`/`__str_to_int` declares
+        // are REMOVED — the casting graph's ExtCall lanes call `int_to_str` /
+        // `str_to_int` (no double-underscore) and emit their own declares via
+        // emit_external_call. The old hardcoded cast arms were dead code.
+        //
+        // 2026-08-04 (Phase 4): the ExtCall lane emission (emit_cast_steps,
+        // LaneKind::ExtCall) writes the `call` inline WITHOUT a declare, so
+        // every lane symbol must be declared here or clang errors "use of
+        // undefined value". The C definitions live in brief_rt.c (the .bv
+        // path); the .ebv freestanding path provides the same symbols as
+        // Brief defns in lib/std/*.ebv — in that case the program DEFINES the
+        // symbol (a Brief defn lowers to a global with the same name), so the
+        // declare must be skipped or clang errors "invalid redefinition".
+        // Signatures match the lane ABI:
+        //   String ABI = ptr to [len: i64][bytes]; Int/Bool = i64; Float = float.
+        let defined: std::collections::HashSet<String> = items.iter().filter_map(|it| match it {
+            crate::ast::TopLevel::Definition(d) => Some(d.name.clone()),
+            crate::ast::TopLevel::Export(e) => match e.inner.as_ref() {
+                crate::ast::TopLevel::Definition(d) => Some(d.name.clone()),
+                _ => None,
+            },
+            _ => None,
+        }).collect();
+        
+        let mut declare = |out: &mut String, name: &str, ret: &str, args: &str| {
+            if !defined.contains(name) {
+                writeln!(out, "declare {} @{}({}) #1", ret, name, args).ok();
+            }
+        };
+        declare(&mut out, "__chr_to_str", "i8*", "i32");
+        declare(&mut out, "int_to_str", "ptr", "i64");
+        declare(&mut out, "uint_to_str", "ptr", "i64");
+        declare(&mut out, "float_to_str", "ptr", "float");
+        declare(&mut out, "bool_to_str", "ptr", "i64");
+        declare(&mut out, "char_to_str", "ptr", "i64");
+        declare(&mut out, "str_to_int", "i64", "ptr");
+        declare(&mut out, "str_to_uint", "i64", "ptr");
+        declare(&mut out, "str_to_float", "float", "ptr");
+        declare(&mut out, "str_to_bool", "i64", "ptr");
+        declare(&mut out, "str_first_char", "i64", "ptr");
+        declare(&mut out, "__str_bytes__", "i64", "i64");
+
+        // 2026-08-04 (Phase 4, .ebv heap reframe): the embedded freestanding
+        // target gets a STATIC bump heap — a zero-initialized `.bss` global
+        // (no @malloc/@free, no brief_rt.c). Size is the configurable
+        // ir-lowering arena_initial_size (default 64KB). The bump pointer
+        // lives in %State (arena_ptr_idx); emit_arena_init points it at this
+        // buffer and emit_arena_alloc bumps within it. Grow-on-overflow is
+        // impossible (no realloc) — a bump past the end is a compile-time
+        // warning + runtime trap to 0, matching a fixed-heap bare-metal model.
+        if self.ctx.is_embedded {
+            writeln!(out, "@embedded_heap = private global [{} x i8] zeroinitializer",
+                self.ctx.arena_initial_size).ok();
+        }
 
         // 2026-07-08: Phase 3 — brief_rt.c wrapper function declarations
         // These are called by inop declarations in lib/std/os/*.bv.

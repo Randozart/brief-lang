@@ -1645,18 +1645,19 @@ impl LlvmBackend {
                 _ => {}
             }
         }
-        fn has_ffi_call(stmt: &Statement) -> bool {
+        fn has_ffi_call(stmt: &Statement, observable: &std::collections::HashSet<String>) -> bool {
             match stmt {
-                Statement::Let { expr: Some(e), .. } => is_ffi_call(e),
-                Statement::Expression(e) => is_ffi_call(e),
-                Statement::Term(Some(e)) | Statement::TermBang(Some(e)) => is_ffi_call(e),
-                Statement::Assign(_, e) => is_ffi_call(e),
-                Statement::Guarded(_, body) => body.iter().any(|s| has_ffi_call(s)),
-                Statement::Block(body) => body.iter().any(|s| has_ffi_call(s)),
+                Statement::Let { expr: Some(e), .. } => is_ffi_call(e, observable),
+                Statement::Expression(e) => is_ffi_call(e, observable),
+                Statement::Term(Some(e)) | Statement::TermBang(Some(e)) => is_ffi_call(e, observable),
+                Statement::Assign(_, e) => is_ffi_call(e, observable),
+                Statement::Guarded(_, body) => body.iter().any(|s| has_ffi_call(s, observable)),
+                Statement::Block(body) => body.iter().any(|s| has_ffi_call(s, observable)),
+
                 _ => false,
             }
         }
-        fn is_ffi_call(expr: &Expr) -> bool {
+        fn is_ffi_call(expr: &Expr, observable: &std::collections::HashSet<String>) -> bool {
             match expr {
                 Expr::Call(name, _, _) => {
                     !name.ends_with('#')
@@ -1667,8 +1668,13 @@ impl LlvmBackend {
                     // like Add#, Sub#, etc.
                     || crate::intrinsic_signatures::get_intrinsic_signature(name)
                         .map_or(false, |sig| sig.observable)
+                    // 2026-08-04 (out-observability plan): a call to an `out`
+                    // defn/txn is an observable boundary — it must be outlined
+                    // out of guard bodies (same memory-barrier rationale as the
+                    // observable intrinsics) and survive DCE.
+                    || observable.contains(name)
                 }
-                Expr::Block(stmts) => stmts.iter().any(|s| has_ffi_call(s)),
+                Expr::Block(stmts) => stmts.iter().any(|s| has_ffi_call(s, observable)),
                 _ => false,
             }
         }
@@ -1799,7 +1805,7 @@ impl LlvmBackend {
                 let mut guard_bodies: Vec<&[Statement]> = Vec::new();
                 for (ri, s) in reordered.iter().enumerate() {
                     if let Statement::Guarded(_, body) = s {
-                        if body.iter().any(|s| has_ffi_call(s)) {
+                        if body.iter().any(|s| has_ffi_call(s, &self.ctx.observable_names)) {
                             ffi_guard_indices.push(ri);
                             guard_bodies.push(body);
                         }

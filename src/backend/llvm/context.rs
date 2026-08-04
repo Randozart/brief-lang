@@ -79,6 +79,12 @@ pub struct CompilerContext {
     /// 2026-08-01 (D2): garbage scheduling — txn name → heap-backed fields to
     /// free after that txn's body (the frontend-computed free_after map).
     pub global_free_after: HashMap<String, Vec<String>>,
+    /// 2026-08-04 (out-observability plan): names whose calls are liveness
+    /// roots (`out defn`/`out node`/`out txn`) or whose reads/writes are live
+    /// (`out`/`vol` lets). Frontend-computed into AnalysisResults; copied here
+    /// so the backend's guard-outlining / folding gates treat calls to these
+    /// like observable-intrinsic calls.
+    pub observable_names: std::collections::HashSet<String>,
     /// 2026-08-03: Per-export `needs_state` from the export ABI analysis
     /// (src/analysis/export_abi.rs). Pure exports keep a clean C ABI;
     /// exports calling any Brief defn carry `ptr %state` first.
@@ -283,6 +289,7 @@ impl CompilerContext {
             range_bounds: HashMap::new(),
             field_to_meta_idx: HashMap::new(),
             global_free_after: HashMap::new(),
+            observable_names: std::collections::HashSet::new(),
             export_needs_state: HashMap::new(),
             idx_to_field_name: HashMap::new(),
             state_alias_scope_md: 0,

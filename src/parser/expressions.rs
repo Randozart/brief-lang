@@ -508,7 +508,16 @@ impl<'a> Parser<'a> {
     }
 
     /// Parse a parenthesized expression or tuple.
+    ///
+    /// 2026-08-04 (Phase 1): also handles the C-style cast `(Type) expr`.
+    /// `(Type)` is a cast only when (a) the identifier after `(` is a known
+    /// type name, (b) it is immediately followed by `)`, and (c) the token
+    /// after `)` can start an expression. This is the C typedef-table
+    /// disambiguation: `(x) - 1` stays grouping-minus, `(Int) -1` is a cast.
     fn parse_grouping(&mut self) -> Result<Expr, SyntaxError> {
+        if let Some(cast) = self.try_parse_c_style_cast()? {
+            return Ok(cast);
+        }
         let mut exprs = Vec::new();
         if !self.check(&Token::RParen) {
             loop {
@@ -524,6 +533,98 @@ impl<'a> Parser<'a> {
         } else {
             Ok(Expr::Tuple(exprs))
         }
+    }
+
+    /// 2026-08-04 (Phase 1): `(Type) expr` — the C-style cast. `(` is already
+    /// consumed (parse_primary advanced past it). Returns Some(cast) when the
+    /// lookahead proves a cast; None to fall through to grouping/tuple.
+    fn try_parse_c_style_cast(&mut self) -> Result<Option<Expr>, SyntaxError> {
+        // Pattern: Identifier(name) [ RParen ] <expr-start>
+        let Some((Token::Identifier(name), _)) = self.peek_with_span() else {
+            return Ok(None);
+        };
+        if !self.known_types.contains(name) {
+            return Ok(None);
+        }
+        let Some(&Token::RParen) = self.tokens.get(self.pos + 1).map(|(t, _)| t) else {
+            return Ok(None);
+        };
+        let Some(next) = self.tokens.get(self.pos + 2).map(|(t, _)| t) else {
+            return Ok(None);
+        };
+        if !Self::token_starts_expression(next) {
+            return Ok(None);
+        }
+        // Consume `Identifier` then `)`, then parse the operand at UNARY
+        // precedence (matching C: `(Int) x + 1` = `((Int) x) + 1`; the outer
+        // binary + is applied by the caller's precedence chain).
+        let ty_name = name.clone();
+        self.pos += 2;
+        let ty = Self::simple_type_from_name(&ty_name);
+        let operand = self.parse_unary()?;
+        Ok(Some(Expr::Cast(Box::new(operand), ty)))
+    }
+
+    /// 2026-08-04 (Phase 1): construct the Type for a simple type NAME without
+    /// consuming tokens (the `(Type) expr` form only supports bare type names —
+    /// `Ptr<T>`/`Int[8]` casts use `expr as Ptr<Int>`). Mirrors parse_type's
+    /// primitive dispatch.
+    fn simple_type_from_name(name: &str) -> crate::ast::Type {
+        match name {
+            "Int" => crate::ast::Type::int(),
+            "UInt" => crate::ast::Type::Custom("UInt".into()),
+            "Float" | "Float32" | "F32" => crate::ast::Type::float(),
+            "Float64" | "F64" | "Double" => crate::ast::Type::float64(),
+            "String" => crate::ast::Type::string(),
+            "Bool" => crate::ast::Type::bool_(),
+            "Void" => crate::ast::Type::void(),
+            "Char" => crate::ast::Type::char_(),
+            "Data" => crate::ast::Type::data(),
+            "Bit" | "bits" => crate::ast::Type::Bits(0),
+            other if other.starts_with('#') => {
+                // Bare hashwords resolve to their default variant (mirrors
+                // parse_type: #String → UTF8, #Float → IEEE754, #Char → unicode).
+                let variant = match other {
+                    "#String" => "UTF8",
+                    "#Float" => "IEEE754",
+                    "#Char" => "unicode",
+                    _ => "",
+                };
+                if !variant.is_empty() {
+                    crate::ast::Type::HashWordVariant(other.to_string(), variant.to_string())
+                } else {
+                    crate::ast::Type::HashWord(other.to_string())
+                }
+            }
+            other => crate::ast::Type::Custom(other.to_string()),
+        }
+    }
+
+    /// Does this token begin an expression? Used by the C-style cast
+    /// disambiguation — the token after `)` must start the cast operand.
+    fn token_starts_expression(tok: &Token) -> bool {
+        matches!(
+            tok,
+            Token::Identifier(_)
+                | Token::Integer(_)
+                | Token::Float(_)
+                | Token::Float32(_)
+                | Token::Float64(_)
+                | Token::String(_)
+                | Token::Char(_)
+                | Token::BoolTrue
+                | Token::BoolFalse
+                | Token::LParen
+                | Token::LBracket
+                | Token::LBrace
+                | Token::At
+                | Token::Not
+                | Token::Minus
+                | Token::Tilde
+                | Token::Star
+                | Token::Ampersand
+                | Token::HashSelf
+        )
     }
 
     /// Parse a block expression: { stmt; stmt; ... }
@@ -672,5 +773,88 @@ impl<'a> Parser<'a> {
         }
         self.expect(Token::RBrace)?;
         Ok(stmts)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::lexer::tokenize;
+
+    fn parse_expr(src: &str) -> Result<Expr, SyntaxError> {
+        let tokens = tokenize(src).unwrap();
+        let mut p = Parser::new(tokens, src);
+        p.parse_expression()
+    }
+
+    /// Both cast syntaxes lower to the same Expr::Cast(operand, ty).
+    fn assert_cast_equiv(as_form: &str, paren_form: &str) {
+        let a = parse_expr(as_form).expect(as_form);
+        let b = parse_expr(paren_form).expect(paren_form);
+        assert_eq!(a, b, "'{as_form}' must parse identically to '{paren_form}'");
+    }
+
+    #[test]
+    fn c_style_cast_string_matches_as() {
+        assert_cast_equiv("n as String", "(String) n");
+    }
+
+    #[test]
+    fn c_style_cast_int_matches_as() {
+        assert_cast_equiv("f as Int", "(Int) f");
+    }
+
+    #[test]
+    fn c_style_cast_float_matches_as() {
+        assert_cast_equiv("x as Float", "(Float) x");
+    }
+
+    #[test]
+    fn c_style_cast_hashword_matches_as() {
+        // Hashword categories are types too.
+        assert_cast_equiv("b as #String", "(#String) b");
+    }
+
+    #[test]
+    fn c_style_cast_custom_type_prescan() {
+        // Custom types: the pre-scan must collect `type MyNum` declarations.
+        let src = "type MyNum : #Int { };";
+        let tokens = tokenize(src).unwrap();
+        let mut p = Parser::new(tokens, src);
+        let first = p.parse_top_level().expect("type decl");
+        assert!(matches!(first, crate::ast::TopLevel::TypeDef(_)));
+        assert!(p.known_types.contains("MyNum"));
+    }
+
+    #[test]
+    fn c_style_cast_binds_tighter_than_binary() {
+        // (Int) x + 1 must be ((Int) x) + 1 — binary + applies at the outer level.
+        let e = parse_expr("(Int) x + 1").unwrap();
+        assert!(
+            matches!(e, Expr::BinaryOp(BinaryOpKind::Add, _, _)),
+            "expected outer Add, got {e:?}"
+        );
+    }
+
+    #[test]
+    fn grouping_still_parses_for_non_type() {
+        // A lowercase name is not a known type → grouping, not cast.
+        let e = parse_expr("(x) - 1").unwrap();
+        assert!(
+            matches!(e, Expr::BinaryOp(BinaryOpKind::Sub, _, _)),
+            "expected grouping-minus, got {e:?}"
+        );
+    }
+
+    #[test]
+    fn grouping_single_expr_unchanged() {
+        let e = parse_expr("(x)").unwrap();
+        assert!(matches!(e, Expr::Identifier(ref n) if n == "x"));
+    }
+
+    #[test]
+    fn tuple_grouping_unchanged() {
+        let e = parse_expr("(a, b)").unwrap();
+        assert!(matches!(e, Expr::Tuple(ref v) if v.len() == 2));
     }
 }

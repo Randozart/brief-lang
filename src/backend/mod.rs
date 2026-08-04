@@ -57,6 +57,13 @@ pub struct AnalysisResults {
     // by the backend to emit a `Free#` exactly after that transaction's body.
     // See docs/plans/2026-08-01-global-lifetime-design.md.
     pub global_lifetime: crate::analysis::global_lifetime::GlobalLifetime,
+    // 2026-08-04 (out-observability plan): the names whose CALLS (defn/node/
+    // txn marked `out`) or whose READS/WRITES (`out`/`vol`-marked lets) are
+    // liveness roots. The backend consumes this set (frontend-driven) so calls
+    // to `out` functions survive DCE and block pure-loop folding — the
+    // stdlib-side twin of the intrinsic `observable: true` flag. Direct-only:
+    // a pure function calling an `out` function is not itself pinned.
+    pub observable_names: std::collections::HashSet<String>,
 }
 
 /// Intent: Run shared program analysis for backend code generation.
@@ -115,6 +122,7 @@ pub fn analyze_program(items: &[TopLevel], optimize: bool, min_width: usize) -> 
     }
     let node_order: Vec<String> = transition_graph.nodes.iter().map(|n| n.name.clone()).collect();
     let global_lifetime = crate::analysis::global_lifetime::analyze(items, &field_inits, &node_order);
+    let observable_names = collect_observable_names(items);
     AnalysisResults {
         call_graph: CallGraph::new(),
         param_ranges: ParameterRanges::new(),
@@ -132,6 +140,58 @@ pub fn analyze_program(items: &[TopLevel], optimize: bool, min_width: usize) -> 
         inline_decisions,
         batch_shape,
         global_lifetime,
+        observable_names,
+    }
+}
+
+/// 2026-08-04 (out-observability plan): collect the liveness-root names —
+/// `out defn`/`out node`/`out txn` names, plus `out`/`vol`-marked `let`
+/// variables (vol implies out). Direct-only: a pure function that calls an
+/// `out` function is not itself pinned (the out function's own body is a root,
+/// so anything it calls survives inside it).
+fn collect_observable_names(items: &[TopLevel]) -> std::collections::HashSet<String> {
+    use crate::ast::Annotation;
+    let mut names = std::collections::HashSet::new();
+    let has_out = |modifiers: &[Annotation]| modifiers.iter().any(|m| m.name == "out");
+    for item in items {
+        match item {
+            TopLevel::Definition(d) if has_out(&d.modifiers) => {
+                names.insert(d.name.clone());
+            }
+            TopLevel::Transaction(t) if has_out(&t.modifiers) => {
+                names.insert(t.name.clone());
+            }
+            // StateDecl has no modifiers; `out`/`vol` state fields are captured
+            // via their top-level `let` sites below.
+            TopLevel::Statement(stmt) => {
+                collect_let_observable_names(stmt, &mut names);
+            }
+            _ => {}
+        }
+    }
+    names
+}
+
+/// Recursively find `let` statements marked `out` or `vol` and add their
+/// variable names to the observable set. Walks blocks and guards.
+fn collect_let_observable_names(stmt: &Statement, names: &mut std::collections::HashSet<String>) {
+    match stmt {
+        Statement::Let { name, modifiers, .. }
+            if modifiers.iter().any(|m| m.name == "out" || m.name == "vol") =>
+        {
+            names.insert(name.clone());
+        }
+        Statement::Block(body) => {
+            for s in body {
+                collect_let_observable_names(s, names);
+            }
+        }
+        Statement::Guarded(_, body) => {
+            for s in body {
+                collect_let_observable_names(s, names);
+            }
+        }
+        _ => {}
     }
 }
 

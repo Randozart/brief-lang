@@ -125,6 +125,132 @@ char* __int_to_str__(int64_t n) {
     return int_to_str(n);
 }
 
+// ── 2026-08-04: the remaining #String casting-graph lane symbols ────────
+// The casting graph (src/casting/graph.rs:195-257) declares ExtCall lanes
+// between #String and every other base protocol. Only `int_to_str` existed in
+// the runtime; the other NINE were undefined symbols — a latent LINK ERROR
+// whenever `(s as Int)` / `(f as String)` etc. was exercised (.bv and .ebv
+// alike). Each function here converts between the Brief String ABI (ptr to
+// [len: i64][bytes], heap-allocated, freed via brief_free_brief_str) and a C
+// value. The `.ebv` freestanding path provides the SAME symbols as Brief
+// defns (lib/std/*.ebv) — never both linked.
+//
+// A Brief String's payload is NOT null-terminated as an invariant (the length
+// header is authoritative), so these helpers copy the payload to a temporary
+// C buffer before strtoll/strtod.
+
+// String → Int: parse the payload as a base-10 integer. Empty/garbage → 0
+// (matches the C strtoll semantics the old `to_int` stub deferred to).
+int64_t str_to_int(const char* s) {
+    if (!s) return 0;
+    int64_t len = *(const int64_t*)s;
+    if (len < 0) return 0;
+    char tmp[128];
+    if (len >= (int64_t)sizeof(tmp)) return 0; // too long to be a sane int
+    memcpy(tmp, s + 8, (size_t)len);
+    tmp[len] = '\0';
+    return strtoll(tmp, 0, 10);
+}
+
+// Int → String (unsigned) — `#UInt → #String` lane.
+char* uint_to_str(uint64_t n) {
+    char tmp[32];
+    snprintf(tmp, sizeof(tmp), "%llu", (unsigned long long)n);
+    return brief_cstr_to_brief(tmp);
+}
+
+// String → UInt.
+uint64_t str_to_uint(const char* s) {
+    if (!s) return 0;
+    int64_t len = *(const int64_t*)s;
+    if (len < 0) return 0;
+    char tmp[128];
+    if (len >= (int64_t)sizeof(tmp)) return 0;
+    memcpy(tmp, s + 8, (size_t)len);
+    tmp[len] = '\0';
+    return (uint64_t)strtoull(tmp, 0, 10);
+}
+
+// Float → String — `#Float → #String` lane. The Brief Float protocol is the
+// 32-bit `float` LLVM type, so the ABI takes a float (the IR emits
+// `call ptr @float_to_str(float ...)`), matching the C signature.
+char* float_to_str(float d) {
+    char tmp[64];
+    snprintf(tmp, sizeof(tmp), "%g", (double)d);
+    return brief_cstr_to_brief(tmp);
+}
+
+// String → Float — returns the 32-bit float ABI.
+float str_to_float(const char* s) {
+    if (!s) return 0.0f;
+    int64_t len = *(const int64_t*)s;
+    if (len < 0) return 0.0f;
+    char tmp[128];
+    if (len >= (int64_t)sizeof(tmp)) return 0.0f;
+    memcpy(tmp, s + 8, (size_t)len);
+    tmp[len] = '\0';
+    return (float)strtod(tmp, 0);
+}
+
+// String → Bool — a non-empty payload that is not the string "false" is true.
+int64_t str_to_bool(const char* s) {
+    if (!s) return 0;
+    int64_t len = *(const int64_t*)s;
+    if (len <= 0) return 0;
+    if (len == 5 && memcmp(s + 8, "false", 5) == 0) return 0;
+    return 1;
+}
+
+// Bool → String.
+char* bool_to_str(int64_t b) {
+    return brief_cstr_to_brief(b ? "true" : "false");
+}
+
+// String → Char — the first codepoint's value (as i32). Empty → 0.
+int64_t str_first_char(const char* s) {
+    if (!s) return 0;
+    int64_t len = *(const int64_t*)s;
+    if (len <= 0) return 0;
+    // Read the first UTF8 codepoint from the payload (a Brief String's bytes
+    // are valid UTF8; continuation bytes are skipped the same way brief_char_len
+    // counts them).
+    const unsigned char* p = (const unsigned char*)(s + 8);
+    if (p[0] < 0x80) return (int64_t)p[0];
+    int64_t cp = 0;
+    int64_t extra = 0;
+    if ((p[0] & 0xE0) == 0xC0) { cp = p[0] & 0x1F; extra = 1; }
+    else if ((p[0] & 0xF0) == 0xE0) { cp = p[0] & 0x0F; extra = 2; }
+    else if ((p[0] & 0xF8) == 0xF0) { cp = p[0] & 0x07; extra = 3; }
+    else return (int64_t)p[0];
+    for (int64_t i = 1; i <= extra && i < len; i++) {
+        cp = (cp << 6) | (p[i] & 0x3F);
+    }
+    return cp;
+}
+
+// Char → String — a single-codepoint string (the inverse of str_first_char).
+char* char_to_str(int64_t c) {
+    char tmp[8];
+    int64_t n = 0;
+    if (c < 0x80) {
+        tmp[n++] = (char)c;
+    } else if (c < 0x800) {
+        tmp[n++] = (char)(0xC0 | (c >> 6));
+        tmp[n++] = (char)(0x80 | (c & 0x3F));
+    } else if (c < 0x10000) {
+        tmp[n++] = (char)(0xE0 | (c >> 12));
+        tmp[n++] = (char)(0x80 | ((c >> 6) & 0x3F));
+        tmp[n++] = (char)(0x80 | (c & 0x3F));
+    } else {
+        tmp[n++] = (char)(0xF0 | (c >> 18));
+        tmp[n++] = (char)(0x80 | ((c >> 12) & 0x3F));
+        tmp[n++] = (char)(0x80 | ((c >> 6) & 0x3F));
+        tmp[n++] = (char)(0x80 | (c & 0x3F));
+    }
+    tmp[n] = '\0';
+    return brief_cstr_to_brief(tmp);
+}
+
 /// Free a Brief string allocated by brief_cstr_to_brief or similar.
 void brief_free_brief_str(void* handle) {
     if (handle) free(handle);

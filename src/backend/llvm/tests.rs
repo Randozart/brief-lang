@@ -1535,11 +1535,13 @@ fn test_emit_cast_int_to_string() {
         }),
     ];
     let output = backend.generate(&program, None);
-    // With a universe the cast resolves through the casting graph's Int->String
-    // lane (int_to_str) — the direct __int_to_str__ path is the fallback.
-    assert!(output.contains("call ptr @int_to_str(i64")
-        || output.contains("call ptr @__int_to_str__(i64"),
-        "Cast Int -> String should call a ptr-returning int-to-str (a String is a ptr to [len][bytes]). Got:\n{}", output);
+    // 2026-08-04 (Phase 3): the hardcoded `__int_to_str__` fallback arm was
+    // removed — the casting graph's `Int -> String` ExtCall lane is the sole
+    // path. Assert ONLY the graph lane is emitted.
+    assert!(output.contains("call ptr @int_to_str(i64"),
+        "Cast Int -> String must resolve through the casting graph lane. Got:\n{}", output);
+    assert!(!output.contains("call ptr @__int_to_str__("),
+        "The hardcoded __int_to_str__ fallback must be gone. Got:\n{}", output);
 }
 
 #[test]
@@ -3323,6 +3325,127 @@ fn test_print_plugin_emits_direct_ffi_calls() {
     assert!(
         !ir.contains("bridge_"),
         "print rewrite must not route through the GLUE bridge; got:\n{ir}"
+    );
+}
+
+/// 2026-08-04 (out-observability plan): SMOKE test — `out defn` parses, flows
+/// through the plugin/normalizer pipeline, and emits valid IR. (The current
+/// backend is conservative: any non-hash call already blocks folding, so the
+/// call-survival behavior is the SAME with or without `out` today. The
+/// discriminating regression tests live at the analysis layer — see
+/// transition_graph::tests::test_out_let_field_forced_live.)
+#[test]
+fn test_out_defn_unused_result_call_survives() {
+    let src = r#"
+        out defn sink(x: Int) -> Int {
+            term x;
+        };
+        let start: Int = 0;
+        node work [start == 0][start == 0] {
+            sink(42);
+            term;
+        };
+    "#;
+    let mut items = parse_bv_source(src);
+    let mut universe = crate::type_universe::TypeUniverse::new();
+    let mut pm = crate::plugin::PluginManager::new();
+    pm.run_ast(crate::ast::StageKind::Parsed, &mut items, &mut universe)
+        .expect("plugin stage failed");
+    let mut backend = LlvmBackend::new().with_type_universe(universe);
+    let ir = backend.generate(&items, None);
+    assert!(
+        ir.contains("call i64 @sink(i64 42)") || ir.contains("call i64 @sink("),
+        "an out-defn call with an unused result must survive in the IR; got:\n{ir}"
+    );
+}
+
+/// 2026-08-04: SMOKE test — `out let` parses and emits valid IR end-to-end.
+/// (Discriminating liveness behavior is tested at the analysis layer.)
+#[test]
+fn test_out_let_computation_survives() {
+    let src = r#"
+        defn expensive() -> Int {
+            term 99;
+        };
+        node work [true][true] {
+            out let x: Int = expensive();
+            term;
+        };
+    "#;
+    let mut items = parse_bv_source(src);
+    let mut universe = crate::type_universe::TypeUniverse::new();
+    let mut pm = crate::plugin::PluginManager::new();
+    pm.run_ast(crate::ast::StageKind::Parsed, &mut items, &mut universe)
+        .expect("plugin stage failed");
+    let mut backend = LlvmBackend::new().with_type_universe(universe);
+    let ir = backend.generate(&items, None);
+    assert!(
+        ir.contains("call i64 @expensive("),
+        "an out-let's RHS call must survive (the computation is live); got:\n{ir}"
+    );
+}
+
+/// 2026-08-04 (Phase 4, .ebv heap reframe): an embedded target with String
+/// state must NOT error — the static bump arena (@embedded_heap) provides a
+/// heap without @malloc/brief_rt.c. The old hard rejection was a vestige of
+/// the pre-split .ebv/.cbv entanglement; the heap rejection belongs to .cbv
+/// (CIRCT synthesizes hardware), not .ebv (LLVM embedded).
+#[test]
+fn test_embedded_string_state_uses_static_heap() {
+    let src = r#"
+        let done: Bool = false;
+        node work [done == false][done == true] {
+            let s: String = "hi";
+            done = true;
+            term;
+        };
+    "#;
+    let mut items = parse_bv_source(src);
+    let mut universe = crate::type_universe::TypeUniverse::new();
+    let mut pm = crate::plugin::PluginManager::new();
+    pm.run_ast(crate::ast::StageKind::Parsed, &mut items, &mut universe)
+        .expect("plugin stage failed");
+    let mut backend = LlvmBackend::new()
+        .with_type_universe(universe)
+        .with_embedded_mode(true);
+    let ir = backend.generate(&items, None);
+    // The static bump heap must be emitted and no @malloc call may appear.
+    assert!(
+        ir.contains("@embedded_heap"),
+        "embedded target must emit the static bump heap; got:\n{ir}"
+    );
+    // String literals are static constants — no heap allocation call.
+    assert!(
+        !ir.contains("call ptr @malloc(") && !ir.contains("call noalias ptr @malloc("),
+        "embedded target must not call @malloc (static heap instead); got:\n{ir}"
+    );
+}
+
+/// 2026-08-04 (Phase 4): embedded String state is a WARNING (finite static
+/// heap), not a TargetError. The old rejection was removed.
+#[test]
+fn test_embedded_string_state_warns_not_errors() {
+    let src = r#"
+        let done: Bool = false;
+        node work [done == false][done == true] {
+            let s: String = "hi";
+            done = true;
+            term;
+        };
+    "#;
+    let mut items = parse_bv_source(src);
+    let mut universe = crate::type_universe::TypeUniverse::new();
+    let mut pm = crate::plugin::PluginManager::new();
+    pm.run_ast(crate::ast::StageKind::Parsed, &mut items, &mut universe)
+        .expect("plugin stage failed");
+    let mut backend = LlvmBackend::new()
+        .with_type_universe(universe)
+        .with_embedded_mode(true);
+    let _ = backend.generate(&items, None);
+    assert!(
+        backend.warnings().iter().any(|w| w.contains("TargetWarning") && w.contains("static bump arena")),
+        "embedded String state must be a warning, not an error; got {:?}",
+        backend.warnings()
     );
 }
 
