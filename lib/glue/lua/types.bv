@@ -1,0 +1,6 @@
+// lua/types.bv — Lua boundary representations for GLUE export.
+// 2026-08-04 (plan 2026-08-04-ship-common-language-environments): Lua bridges
+// through a generated C module (luaopen_<bridge>). Strings cross via
+// luaL_checkstring / lua_pushstring on the composite NUL-invariant data.
+
+import "glue/c.bv";
