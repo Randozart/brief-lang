@@ -128,8 +128,13 @@ Add a folder `lib/glue/<lang>/` — no compiler changes:
 4. **A test** — render assertion + toolchain-guarded round-trip.
 
 `briefc bindings|export|extension <bridge> <lang>` finds `lib/glue/<lang>/` by
-name and renders through the generic pipeline. See
-`docs/architecture/glue-ffi.md` §5 for the complete anatomy.
+name and renders through the generic pipeline.
+
+> **New to this? The full step-by-step is in
+> `docs/guides/add-an-ffi-target.md`** — a field-by-field walkthrough with the
+> shipped Lua target as the worked example, the template system explained, the
+> renderer variables, a copy-the-right-folder table, and a checklist. The
+> anatomy reference is `docs/architecture/glue-ffi.md` §5.
 
 ---
 

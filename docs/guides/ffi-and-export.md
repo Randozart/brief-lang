@@ -194,6 +194,12 @@ compiler never injects checks.
 
 ## 8. Extending: adding a language
 
+> **New to Brief? Read `docs/guides/add-an-ffi-target.md`** — the beginner
+> walkthrough. It explains the three target shapes (`bindings` / `export` /
+> `extension`), every field of `glue.dbvl`, the template system with real Lua
+> content, the renderer variables, and ends with a checklist and a
+> copy-the-right-folder table.
+
 The FFI is infinitely extensible through per-language glue folders
 (`lib/glue/<lang>/`), each a Data Brief config + templates. Zero compiler
 changes. The steps:
@@ -213,7 +219,8 @@ changes. The steps:
 4. `tests/c_driver_<lang>.rs` — a render assertion (runs everywhere) + a
    toolchain-guarded round-trip.
 
-See `docs/architecture/glue-ffi.md` §5 for the complete anatomy.
+Each step is explained field-by-field in `docs/guides/add-an-ffi-target.md`.
+The complete anatomy is in `docs/architecture/glue-ffi.md` §5.
 
 ## 9. Performance notes
 

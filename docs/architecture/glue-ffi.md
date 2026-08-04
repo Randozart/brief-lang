@@ -150,6 +150,11 @@ melds and boundary vocabulary of a library apply to the importing bridge.
 
 ## 5. How to add a new language
 
+> **New to Brief? Start with `docs/guides/add-an-ffi-target.md`** — a complete,
+> field-by-field walkthrough with the shipped Lua target as the worked example
+> (plus a copy-the-right-folder table and a checklist). The anatomy below is the
+> reference summary; the guide is the tutorial.
+
 Adding a language is **config-only** — zero Rust changes (any exception is a
 finding about the generic system). Create `lib/glue/<lang>/`:
 
@@ -204,7 +209,10 @@ language needs.
 `{{bridge_name}}`, `{{params}}` (param_decl + native types), `{{ffi_params}}`,
 `{{args}}`, `{{c_types}}`, `{{args_abi}}` (to_abi), `{{return_expr}}`
 (from_abi), `{{return}}`, `{{c_return}}`, `{{s_param}}` (state arg),
-`{{s_ffi_param}}`, `{{s_ffi_type}}`, `{{exports}}`, `{{ffi_decls}}`.
+`{{s_ffi_param}}`, `{{s_ffi_type}}`, `{{exports}}`, `{{ffi_decls}}`; native
+shims add `{{parse_code}}`, `{{ret_c}}`, `{{call}}`, `{{build_code}}`,
+`{{sig_params}}`, `{{ret_jni}}`, `{{nargs}}`, `{{nargs_arr}}`. Each is
+explained with a real example in `docs/guides/add-an-ffi-target.md` §4.
 
 ### 5.4 Test it
 
