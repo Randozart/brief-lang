@@ -6,10 +6,7 @@
 // without native Brief string construction. Conversion between C strings
 // and Brief strings uses the brief_rt.c runtime helpers.
 
-import "std/types.bv";
-import "std/string.bv";
 import "pp/types.bv";
-import "pp/exprs.bv";
 
 // C string ↔ Brief string conversion (brief_rt.c). Declared here because
 // no stdlib module wires these yet; the round-trip tests rely on them.

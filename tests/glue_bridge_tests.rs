@@ -30,6 +30,12 @@ fn sample_glue_targets() -> HashMap<String, GlueTarget> {
             state: brief_compiler::glue::config::StateAbi::default(),
             param_decl: "{name}: {type}".to_string(),
             fn_param_decl: "{name}: {type}".to_string(),
+            native_include_cmd: None,
+            native_suffix: None,
+            native_suffix_cmd: None,
+            native_link_cmd: None,
+            native_cc: None,
+            native_prefix: None,
             },
         ),
         (
@@ -47,6 +53,12 @@ fn sample_glue_targets() -> HashMap<String, GlueTarget> {
             state: brief_compiler::glue::config::StateAbi::default(),
             param_decl: "{name}: {type}".to_string(),
             fn_param_decl: "{name}: {type}".to_string(),
+            native_include_cmd: None,
+            native_suffix: None,
+            native_suffix_cmd: None,
+            native_link_cmd: None,
+            native_cc: None,
+            native_prefix: None,
             },
         ),
     ])
@@ -219,7 +231,10 @@ fn test_load_glue_config_shiped() {
 
 #[test]
 fn test_load_glue_config_custom_path() {
-    let custom = Path::new("config/glue.dbvl");
+    // 2026-08-04 (glue-host): glue configs moved to per-language folders
+    // (lib/glue/<lang>/glue.dbvl); the old config/glue.dbvl monolith is gone.
+    // A custom-path load points at one language folder's dbvl.
+    let custom = Path::new("lib/glue/python/glue.dbvl");
     let config = load_glue_config(Some(custom)).expect("should load from custom path");
     assert!(config.contains_key("python"));
 }

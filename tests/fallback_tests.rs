@@ -26,6 +26,12 @@ fn sample_glue_targets() -> HashMap<String, GlueTarget> {
             state: brief_compiler::glue::config::StateAbi::default(),
             param_decl: "{name}: {type}".to_string(),
             fn_param_decl: "{name}: {type}".to_string(),
+            native_include_cmd: None,
+            native_suffix: None,
+            native_suffix_cmd: None,
+            native_link_cmd: None,
+            native_cc: None,
+            native_prefix: None,
         },
     )])
 }
