@@ -320,3 +320,34 @@ NUL-invariant `[len][bytes][\0]` region — zero-copy read from every host
 **Timing** (feature_hash count=1000, ns/call, interleaved median): C 1223,
 C++ 1229, Lua 1200, Java 1160 (JIT), Node 1260, Go 1302, Python 1430 — all
 within ~17% of native C. See `docs/plans/2026-08-04-ship-common-language-environments.md`.
+
+## 15. The zero-friction FFI gate
+
+`benchmarks/bridge/gate/run_gate.sh` is the committed regression gate: Brief's
+`feature_hash` vs each host's *own* native `feature_hash` (Gate A — real work)
+and Brief's `add` vs the host's pure-internal `add` (Gate B — dispatch). Run it
+with `BRIEF_RUN_GATE=1 cargo test --test gate`.
+
+**Gate A — Brief vs native feature_hash (median):**
+| host | ratio | |
+|------|-------|---|
+| C | 1.03 | parity |
+| C++ | 1.01 | parity |
+| Java | 0.95 | Brief faster (JIT) |
+| Go | 1.12 | cgo + compute |
+| Lua | 0.07 | Brief 14× |
+| Python | 0.004 | Brief 238× |
+| Node | 0.01 | Brief 192× |
+
+Compiled hosts are at parity; interpreted hosts get Brief's native-machine-code
+compute and win by 1–2 orders of magnitude.
+
+**Gate B — dispatch (Brief add vs native internal add):** Python 0.63 (the
+`METH_FASTCALL` shim dispatches *faster* than Python's own function call),
+Lua 1.19, C 1.23, C++ 1.44, Node 2.15, Java 5.99, Go 143×. Node/Java/Go sit at
+their structural FFI bounds (NAPI/JNI/cgo — the host's own foreign-call cost).
+
+The gate keeps the native sink live (Go's dead-code eliminator stripped a
+dead timed loop → bogus sub-1ns/iter numbers) and measures Go native in a
+pure-Go binary (a cgo-linked binary distorted it). See
+`docs/plans/2026-08-04-zero-friction-ffi-gate.md`.

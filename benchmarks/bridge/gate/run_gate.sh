@@ -5,6 +5,7 @@
 # present. Toolchains: cc/g++/go (PATH or ~/brief-tools/go), javac (PATH or
 # ~/brief-tools/jdk-*), lua (~/brief-tools/lua-*/src/lua), python3, node.
 set -u
+export LC_ALL=C
 HERE="$(cd "$(dirname "$0")" && pwd)"
 ROOT="$(cd "$HERE/../../.." && pwd)"
 WORK="$(mktemp -d)"
