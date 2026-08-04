@@ -244,16 +244,26 @@ defn repeat(s: String, count: Int) [count >= 0][term .^Len == s .^Len * count] -
 };
 
 // Type conversions
+// 2026-08-04 (out-observability plan, Phase 3): `IntToStr#` was removed from
+// the intrinsic table in ffd55677 (the casting graph's `Int → #String`
+// ExtCall lane owns this conversion). Use the cast, which resolves through the
+// graph — `.bv` emits `call ptr @int_to_str`, `.ebv` will emit a Brief digit
+// loop. Undo: restore `term IntToStr#(n);` only if the intrinsic is ever
+// re-registered.
 defn to_string(n: Int) [true][term .^Len >= 0] -> String {
-  term IntToStr#(n);
+  term n as String;
 };
 
 defn to_float(s: String) [true][term >= 0.0 || term < 0.0] -> Float {
-  term 0.0;
+  // 2026-08-04 (Phase 3): was `term 0.0` — a stub. The casting graph owns
+  // `#String → #Float` (ExtCall("str_to_float")); use the cast form.
+  term s as Float;
 };
 
 defn to_int(s: String) [true][term == 0 || term != 0] -> Int {
-  term 0;
+  // 2026-08-04 (Phase 3): was `term 0` — a stub. The casting graph owns
+  // `#String → #Int` (ExtCall("str_to_int")); use the cast form.
+  term s as Int;
 };
 // ===== TIER 2: NATIVE CHARACTER CLASSIFICATION =====
 // NOTE: All iterative functions use `txn` with `[pre][post]` convergence contracts.

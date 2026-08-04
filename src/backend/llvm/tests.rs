@@ -1535,11 +1535,13 @@ fn test_emit_cast_int_to_string() {
         }),
     ];
     let output = backend.generate(&program, None);
-    // With a universe the cast resolves through the casting graph's Int->String
-    // lane (int_to_str) — the direct __int_to_str__ path is the fallback.
-    assert!(output.contains("call ptr @int_to_str(i64")
-        || output.contains("call ptr @__int_to_str__(i64"),
-        "Cast Int -> String should call a ptr-returning int-to-str (a String is a ptr to [len][bytes]). Got:\n{}", output);
+    // 2026-08-04 (Phase 3): the hardcoded `__int_to_str__` fallback arm was
+    // removed — the casting graph's `Int -> String` ExtCall lane is the sole
+    // path. Assert ONLY the graph lane is emitted.
+    assert!(output.contains("call ptr @int_to_str(i64"),
+        "Cast Int -> String must resolve through the casting graph lane. Got:\n{}", output);
+    assert!(!output.contains("call ptr @__int_to_str__("),
+        "The hardcoded __int_to_str__ fallback must be gone. Got:\n{}", output);
 }
 
 #[test]

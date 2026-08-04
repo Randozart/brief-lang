@@ -2195,11 +2195,13 @@ impl LlvmBackend {
         // (getpid, sigprocmask, close, nanosleep, sched_yield, getuid, etc.)
 
         // Declare cast helper functions
+        // 2026-08-04 (Phase 3): the `__int_to_str__`/`__str_to_int` declares
+        // are REMOVED — the casting graph's ExtCall lanes call `int_to_str` /
+        // `str_to_int` (no double-underscore) and emit their own declares via
+        // emit_external_call. The old hardcoded cast arms were dead code.
         writeln!(out, "declare i8* @__chr_to_str(i32) #1").ok();
         writeln!(out, "declare ptr @int_to_str(i64) #1").ok();
-        writeln!(out, "declare ptr @__int_to_str__(i64) #1").ok();
         writeln!(out, "declare i64 @__str_bytes__(i64) #1").ok();
-        writeln!(out, "declare i64 @__str_to_int(i8*) #1").ok();
 
         // 2026-07-08: Phase 3 — brief_rt.c wrapper function declarations
         // These are called by inop declarations in lib/std/os/*.bv.
