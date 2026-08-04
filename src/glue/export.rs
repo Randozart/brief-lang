@@ -300,11 +300,24 @@ fn serialize_ctypes_dbvl(c_type_map: &HashMap<String, String>) -> String {
 fn export_template_vars(export: &ExportDecl, target: &GlueTarget, type_protocols: &HashMap<String, String>) -> HashMap<String, String> {
     let mut fn_vars: HashMap<String, String> = HashMap::new();
     fn_vars.insert("name".to_string(), export.name.clone());
+    // 2026-08-04 (ship common languages): capitalized form — Go wrappers must
+    // be exported (`Echo`, `Greet`), and the source names are lowercase.
+    let mut cap = export.name.clone();
+    if let Some(c) = cap.get_mut(0..1) {
+        c.make_ascii_uppercase();
+    }
+    fn_vars.insert("name_upper".to_string(), cap);
 
     let params: Vec<String> = export.params.iter()
         .map(|(name, ty)| {
             let (native, _) = resolve_protocol(ty, &target.protocols, type_protocols);
-            format!("{}: {}", name, native)
+            // 2026-08-04 (ship common languages): `{{params}}` uses the
+            // target's param_decl (C-family `{type} {name}`, Go `{name} {type}`,
+            // python/rust `{name}: {type}`) with NATIVE types — previously the
+            // `name: native` colon form was hardcoded, which is wrong for Go.
+            target.param_decl
+                .replace("{name}", name)
+                .replace("{type}", &native)
         })
         .collect();
     let ffi_params: Vec<String> = export.params.iter()
@@ -334,8 +347,8 @@ fn export_template_vars(export: &ExportDecl, target: &GlueTarget, type_protocols
         })
         .collect();
 
-    let args_abi = to_abi_args(export, target);
-    let return_expr = from_abi_return(export, target);
+    let args_abi = to_abi_args(export, target, type_protocols);
+    let return_expr = from_abi_return(export, target, type_protocols);
     let (state_arg, state_ffi_param, state_ffi_type) =
         state_vars(export, target, !args_abi.is_empty(), !ffi_params.is_empty(), !c_types.is_empty());
 
@@ -356,12 +369,18 @@ fn export_template_vars(export: &ExportDecl, target: &GlueTarget, type_protocols
 }
 
 /// `to_abi`: render each argument's boundary form from the config expression
-/// (`{name}` placeholder); identity when the target has no conversion.
-fn to_abi_args(export: &ExportDecl, target: &GlueTarget) -> Vec<String> {
+/// (`{name}` placeholder); identity when the target has no conversion. The
+/// lookup key is the type's protocol CATEGORY (`#String` for a CStr boundary
+/// type), not the raw type name.
+fn to_abi_args(
+    export: &ExportDecl,
+    target: &GlueTarget,
+    type_protocols: &HashMap<String, String>,
+) -> Vec<String> {
     export.params.iter()
         .map(|(name, ty)| {
-            let proto = format!("#{}", ty);
-            target.conversions.to_abi.get(&proto)
+            let key = format!("#{}", protocol_category_of(ty, type_protocols));
+            target.conversions.to_abi.get(&key)
                 .map(|expr| expr.replace("{name}", name))
                 .unwrap_or_else(|| name.clone())
         })
@@ -369,11 +388,24 @@ fn to_abi_args(export: &ExportDecl, target: &GlueTarget) -> Vec<String> {
 }
 
 /// `from_abi`: render the raw boundary `result_abi` back to a native value.
-fn from_abi_return(export: &ExportDecl, target: &GlueTarget) -> String {
-    let proto = format!("#{}", export.return_type);
-    target.conversions.from_abi.get(&proto)
+/// Keyed by the return type's protocol category (boundary types resolve).
+fn from_abi_return(
+    export: &ExportDecl,
+    target: &GlueTarget,
+    type_protocols: &HashMap<String, String>,
+) -> String {
+    let key = format!("#{}", protocol_category_of(&export.return_type, type_protocols));
+    target.conversions.from_abi.get(&key)
         .cloned()
         .unwrap_or_else(|| "result_abi".to_string())
+}
+
+/// The protocol category of a type string — `CStr` → "String" (via its
+/// declared `#String<C_String>` protocol), `Int` → "Int".
+fn protocol_category_of(ty: &str, type_protocols: &HashMap<String, String>) -> String {
+    type_protocols.get(ty)
+        .map(|p| protocol_category(p).to_string())
+        .unwrap_or_else(|| ty.to_string())
 }
 
 /// Per-export state-handle variables, joined WITHOUT a dangling separator
@@ -442,6 +474,10 @@ pub fn run_bindings_cli(file_path: &str, language: &str, out_dir: &str) -> Resul
 
     let target = crate::glue::config::load_glue_language(language)?;
     let info = extract_bridge_info(&items, bridge_name);
+    if std::env::var("BRIEF_DEBUG_BINDINGS").is_ok() {
+        eprintln!("DBG target.templates keys: {:?}", target.templates.keys().collect::<Vec<_>>());
+        eprintln!("DBG exports: {:?}", info.exports.iter().map(|e| e.name.clone()).collect::<Vec<_>>());
+    }
     // 2026-08-03 (P3): type → declared protocol (`type CStr: #String<C_String>`)
     // so boundary types resolve to their category's ABI names in the header/
     // wrapper. The export runs before codegen's normalizer, so the universe
@@ -816,8 +852,11 @@ pub fn run_export_cli(file_path: &str, language: &str, out_dir: &str) -> Result<
         }
     }
 
-    template_vars.insert("exports".to_string(), exports_buf);
-    template_vars.insert("ffi_decls".to_string(), ffi_buf);
+    template_vars.insert("exports".to_string(), exports_buf.clone());
+    template_vars.insert("ffi_decls".to_string(), ffi_buf.clone());
+    if std::env::var("BRIEF_DEBUG_BINDINGS").is_ok() {
+        eprintln!("DBG exports_buf=[{}]", exports_buf);
+    }
 
     // Write each file template
     for (filename, template) in &target.templates {
