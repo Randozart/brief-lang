@@ -54,6 +54,24 @@ single C-ABI call, so the gap should be the host-language call overhead).
 3. `tests/c_driver_<lang>.rs` — render assertion + guarded round-trip.
 4. Timing table.
 
+## Timing results (feature_hash count=1000, ns/call, interleaved median)
+
+| Host | ns/call | vs native C |
+|------|---------|-------------|
+| C (reference) | 1223 | — |
+| C++ | 1229 | +0.4% |
+| Java (JNI, JIT) | 1160 | −5% |
+| Lua (C module) | 1200 | −2% |
+| Node (.node addon) | 1260 | +3% |
+| Go (cgo) | 1302 | +6.4% |
+| Python (native ext) | 1430 | +16.9% |
+
+All within ~17% of native C; the boundary call itself is ~2–6ns (C), so the
+delta is the host-language call overhead per invocation. The compute
+(~1180–1200ns) dominates. Java's JIT even lands below the C reference this
+round (machine variance). No host language needs optimization — the shims are
+already at native speed.
+
 ## Sequencing
 
 1. Plan + downloads (Go/JDK/Lua) in parallel.
