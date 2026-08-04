@@ -27,17 +27,16 @@ use std::collections::{HashMap, HashSet};
 ///
 /// Non-float items and items that cannot be safely reordered remain in their
 /// original position.
-struct FloatField {
-    name: String,
-    prefix: String,
-    index: usize,
-    item_index: usize,
-    ty: Type,
-    expr: Option<Expr>,
+pub(crate) struct FloatField {
+    pub(crate) name: String,
+    pub(crate) prefix: String,
+    pub(crate) index: usize,
+    pub(crate) item_index: usize,
+    pub(crate) ty: Type,
+    pub(crate) expr: Option<Expr>,
 }
 
-pub fn reorder_fields(items: &[TopLevel]) -> Vec<TopLevel> {
-    let mut float_fields: Vec<FloatField> = Vec::new();
+pub fn reorder_fields(items: &[TopLevel]) -> Vec<TopLevel> {    let mut float_fields: Vec<FloatField> = Vec::new();
     let mut non_float_indices: HashSet<usize> = HashSet::new();
 
     for (i, item) in items.iter().enumerate() {
@@ -120,9 +119,33 @@ pub fn reorder_fields(items: &[TopLevel]) -> Vec<TopLevel> {
     result
 }
 
+/// 2026-08-04 (compiler-in-Brief, P5): reorder via the Brief soa_reorder pass
+/// when its library is present (it computes the item permutation through the
+/// GLUE C ABI, src/glue/brief_pass.rs); otherwise the Rust reference runs.
+/// The permutation's correctness against `reorder_fields` is asserted by
+/// brief_pass.rs's soa_pass_matches_reorder_fields test.
+pub fn reorder_fields_brief(items: &[TopLevel]) -> Vec<TopLevel> {
+    match crate::glue::brief_pass::compute_soa_permutation(items) {
+        Some(perm) if perm.len() == items.len() => {
+            let mut result = Vec::with_capacity(items.len());
+            for &orig in &perm {
+                if orig < items.len() {
+                    result.push(items[orig].clone());
+                }
+            }
+            if result.len() == items.len() {
+                return result;
+            }
+            // Malformed permutation — fall through to the reference.
+            reorder_fields(items)
+        }
+        _ => reorder_fields(items),
+    }
+}
+
 /// Extract a FloatField from a TopLevel item if it's a float let declaration
 /// with a numeric suffix (e.g., "bx0", "vx12"). Returns None otherwise.
-fn try_extract_float_field(item: &TopLevel, index: usize) -> Option<FloatField> {
+pub(crate) fn try_extract_float_field(item: &TopLevel, index: usize) -> Option<FloatField> {
     let box_stmt = match item {
         TopLevel::Statement(s) => s,
         TopLevel::StateDecl(s) => {
@@ -162,14 +185,14 @@ fn try_extract_float_field(item: &TopLevel, index: usize) -> Option<FloatField> 
 }
 
 /// Check if a Brief type is reorderable (float or double).
-fn is_reorderable_float_type(ty: &Type) -> bool {
+pub(crate) fn is_reorderable_float_type(ty: &Type) -> bool {
     ty == &Type::float() || ty == &Type::float64() || ty.to_string() == "Float32"
         || ty.to_string() == "Float64"
 }
 
 /// Parse a field name to extract prefix and numeric index.
 /// e.g., "bx0" → Some(("bx", 0)), "energy" → None, "count" → None
-fn parse_numeric_prefix(name: &str) -> Option<(String, usize)> {
+pub(crate) fn parse_numeric_prefix(name: &str) -> Option<(String, usize)> {
     let digits_start = name.rfind(|c: char| !c.is_ascii_digit())? + 1;
     if digits_start >= name.len() || digits_start == 0 {
         return None;
@@ -240,7 +263,7 @@ fn expr_references_group_other(expr: &Expr, group_names: &HashSet<&str>, self_na
 }
 
 /// Find the body of the first transaction in items.
-fn find_txn_body(items: &[TopLevel]) -> Vec<Statement> {
+pub(crate) fn find_txn_body(items: &[TopLevel]) -> Vec<Statement> {
     for item in items {
         if let TopLevel::Transaction(t) = item {
             return t.body.clone();
@@ -339,5 +362,45 @@ mod tests {
         assert_eq!(parse_numeric_prefix("energy"), None);
         assert_eq!(parse_numeric_prefix("count"), None);
         assert_eq!(parse_numeric_prefix("x"), None);
+    }
+
+    /// 2026-08-04 (compiler-in-Brief, P5): the Brief soa_reorder pass must
+    /// reproduce reorder_fields on a real AoS benchmark (nbody_newton.bv).
+    /// Uses the transition harness (parse_and_check + reorder_fields_brief).
+    #[test]
+    fn brief_reorder_matches_reference_on_nbody() {
+        let root = env!("CARGO_MANIFEST_DIR");
+        let rel = "benchmarks/nbody_newton.bv";
+        let src = std::fs::read_to_string(format!("{}/{}", root, rel)).unwrap();
+        let (items, _) = crate::library::parse_and_check(rel, &src).unwrap();
+        let reference = reorder_fields(&items);
+        let brief = reorder_fields_brief(&items);
+        assert_eq!(
+            brief.len(), reference.len(),
+            "Brief reorder length diverged for {}", rel,
+        );
+        // Compare the ORDER of item names.
+        for (i, (b, r)) in brief.iter().zip(reference.iter()).enumerate() {
+            assert_eq!(
+                name_of_item(b), name_of_item(r),
+                "Brief reorder diverged at position {} for {}", i, rel,
+            );
+        }
+        // The real nbody has AoS fields — the reorder must move them.
+        let names: Vec<String> = reference.iter().map(name_of_item).collect();
+        assert!(names.iter().position(|n| n == "bx0").unwrap() < names.iter().position(|n| n == "by0").unwrap(),
+            "expected SoA (bx0 before by0) in {}", rel);
+    }
+
+    fn name_of_item(item: &TopLevel) -> String {
+        match item {
+            TopLevel::Statement(s) => match s.as_ref() {
+                Statement::Let { name, .. } => name.clone(),
+                _ => "stmt".to_string(),
+            },
+            TopLevel::Constant(c) => c.name.clone(),
+            TopLevel::Transaction(t) => t.name.clone(),
+            _ => "unknown".to_string(),
+        }
     }
 }

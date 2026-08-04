@@ -139,11 +139,26 @@ assert the Brief result equals the Rust reference on the five-bridge corpus;
 all c_driver glue tests (boundary/node/callback/cancel) pass through the
 dlopen'd pass. `pass_available()` exposes load state for diagnostics.
 
-Next: P5 (generalize the serializer + migrate `soa_reorder`; write
-`docs/architecture/compiler-in-brief.md`). Known gaps to fix before P5: the
-imported-module frgn String-param+String-return resolves to Int (the pass
-declares `brief_str_substr` locally — BUGS.md); the `.so` path is embedded at
-compile time (a moved checkout rebuilds it).
+**P5 complete — the pattern generalizes.** Second pass `soa_reorder` proves
+it: a DIFFERENT handoff shape (field descriptors + sibling-reference counts →
+an item-index permutation buffer, vs a statement-tree → bitmask). The shared
+scanner is extracted to `lib/compiler/reader.bv` (both passes import it; the
+imported-frgn bug that forced local declarations is fixed — see BUGS.md).
+`brief_pass.rs` is now a generic `LoadedPass` dlopen loader; build.rs compiles
+both passes. The Brief `soa_reorder_compute` produces the EXACT permutation of
+the Rust `reorder_fields` on the real `nbody_newton.bv` benchmark (asserted by
+`soa_reorder.rs::brief_reorder_matches_reference_on_nbody` +
+`brief_pass.rs::soa_pass_matches_reorder_fields`), and the backend wires it at
+`mod.rs:1808`. Recipe: `docs/architecture/compiler-in-brief.md`. Also fixed
+en route: `expr_needs_state`/the needs_state projection dropped wrapping Expr
+kinds (Cast/MethodCall/Reflect/Index/Slice/AddrOf) — a cast-wrapped call to a
+regular defn produced a STATELESS export shim that referenced `%state`.
+
+Remaining (future): more passes (a third would justify generalizing
+`soa_projection.rs`'s section-line writer into a shared Rust helper); embed the
+.so bytes via `include_bytes!` instead of an absolute path (a moved checkout
+currently rebuilds it); the `String slice`/`String +`/`List<String>` codegen
+gaps in BUGS.md.
 
 
 

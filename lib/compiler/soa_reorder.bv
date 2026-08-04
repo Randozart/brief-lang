@@ -1,0 +1,176 @@
+// soa_reorder.bv — the second compiler pass written in Brief.
+// 2026-08-04 (plan 2026-08-04-compiler-in-brief-dogfood-ffi, P5): proves the
+// compiler-in-Brief pattern generalizes past needs_state. This pass computes
+// the AoS → SoA field REORDERING of src/analysis/soa_reorder.rs — which state
+// fields move into which position — and returns the resulting PERMUTATION of
+// item indices (a Malloc'd buffer `[N][idx0]...[idx_{N-1}]`, address as Int).
+// Rust applies the permutation to the items; the reference stays in Rust.
+//
+// The projection (src/analysis/soa_projection.rs) is the permutation-only
+// handoff — Rust walks the AST and emits, per reorderable float field, its
+// SIBLING-REFERENCE count (how many same-prefix fields its update expr / the
+// txn body's assigns reference). The Brief pass decides the DECISION: which
+// prefix groups are SAFE to reorder (≥2 members AND no member references a
+// sibling) and builds the permutation. `when` is an if-guard (not a while
+// loop), so all iteration is RECURSION.
+//
+// Projection format:
+//   soa 1
+//   total <N>
+//   nfields <k>
+//   prefixes <p> <prefix> <maxidx> ...     # distinct prefixes, Rust-sorted
+//   field <name> <prefix> <index> <itemidx> <refcnt>
+//   ...                                    # declaration order
+//   nonfloat <m> <itemidx> ...
+//
+// Output permutation (matches reorder_fields EXACTLY):
+//   1. non-float item indices, declaration order
+//   2. safe groups (projection prefix order; members by index)
+//   3. remaining float fields, declaration order
+
+import "glue/c.bv";
+import "compiler/reader.bv";
+
+// ── field line accessors ───────────────────────────────────────────────
+defn field_prefix(line: String) -> String {
+    term token_at(line, 2);
+};
+defn field_index(line: String) -> Int {
+    term token_at(line, 3) as Int;
+};
+defn field_itemidx(line: String) -> Int {
+    term token_at(line, 4) as Int;
+};
+defn field_refcnt(line: String) -> Int {
+    term token_at(line, 5) as Int;
+};
+
+// field_line_at(text, i, n): the text of the field line STARTING at i (i must
+// be a line start and the line must be a "field" line); "" otherwise. Lets the
+// scans visit every line once and pick the fields.
+defn field_line_at(text: String, i: Int, n: Int) -> String {
+    when i >= n { term ""; };
+    when i > 0 && char_at(text, i - 1) != 10 { term ""; };
+    when !line_has_key(text, i, n, "field") { term ""; };
+    term line_text(text, i, n);
+};
+
+// count_prefix_fields(text, prefix): how many fields share this prefix.
+defn count_prefix_fields(text: String, prefix: String) -> Int {
+    term count_pf_scan(text, 0, text .^Len, prefix, 0);
+};
+defn count_pf_scan(text: String, i: Int, n: Int, prefix: String, cnt: Int) -> Int {
+    when i >= n { term cnt; };
+    let line: String = field_line_at(text, i, n);
+    when line .^Len > 0 && field_prefix(line) == prefix {
+        term count_pf_scan(text, i + 1, n, prefix, cnt + 1);
+    };
+    term count_pf_scan(text, i + 1, n, prefix, cnt);
+};
+
+// group_safe(text, prefix): 1 iff NO field with this prefix references a
+// sibling (every member's refcnt is 0).
+defn group_safe(text: String, prefix: String) -> Int {
+    term group_safe_scan(text, 0, text .^Len, prefix, 1);
+};
+defn group_safe_scan(text: String, i: Int, n: Int, prefix: String, safe: Int) -> Int {
+    when i >= n { term safe; };
+    when safe == 0 { term 0; };
+    let line: String = field_line_at(text, i, n);
+    when line .^Len > 0 && field_prefix(line) == prefix && field_refcnt(line) != 0 { term 0; };
+    term group_safe_scan(text, i + 1, n, prefix, safe);
+};
+
+// is_safe_group(text, prefix): 1 iff the group is safe to reorder (≥2 members
+// AND all independent).
+defn is_safe_group(text: String, prefix: String) -> Int {
+    let cnt: Int = count_prefix_fields(text, prefix);
+    when cnt >= 2 && group_safe(text, prefix) == 1 { term 1; };
+    term 0;
+};
+
+// find_field(text, prefix, index): the field line for (prefix, index); "" if
+// absent. Used to emit a safe group's members BY INDEX (the reference sorts
+// each group by index).
+defn find_field(text: String, prefix: String, index: Int) -> String {
+    term find_field_scan(text, 0, text .^Len, prefix, index);
+};
+defn find_field_scan(text: String, i: Int, n: Int, prefix: String, index: Int) -> String {
+    when i >= n { term ""; };
+    let line: String = field_line_at(text, i, n);
+    when line .^Len > 0 && field_prefix(line) == prefix && field_index(line) == index {
+        term line;
+    };
+    term find_field_scan(text, i + 1, n, prefix, index);
+};
+
+// ── permutation builders ───────────────────────────────────────────────
+// emit_indices(buf, pos, line, i): write each token from i as an Int to the
+// buffer (used for the non-float item indices).
+defn emit_indices(buf: Ptr<Int>, pos: Int, line: String, i: Int) -> Int {
+    let t: String = token_at(line, i);
+    when t .^Len == 0 { term pos; };
+    buf[pos] = t as Int;
+    term emit_indices(buf, pos + 1, line, i + 1);
+};
+
+// emit_safe_groups(text, buf, pos): for each prefix in the projection's
+// (sorted) prefix list, emit the group's members by index when the group is
+// safe.
+defn emit_safe_groups(text: String, buf: Ptr<Int>, pos: Int) -> Int {
+    let pl: String = section_line(text, "prefixes");
+    term emit_groups(text, buf, pos, pl, 2);
+};
+defn emit_groups(text: String, buf: Ptr<Int>, pos: Int, pl: String, i: Int) -> Int {
+    let prefix: String = token_at(pl, i);
+    when prefix .^Len == 0 { term pos; };
+    let maxidx: Int = token_at(pl, i + 1) as Int;
+    let safe: Int = is_safe_group(text, prefix);
+    let pos2: Int = pos;
+    when safe == 1 {
+        let after: Int = emit_group_fields(text, buf, pos, prefix, maxidx, 0);
+        pos2 = after;
+    };
+    term emit_groups(text, buf, pos2, pl, i + 2);
+};
+defn emit_group_fields(text: String, buf: Ptr<Int>, pos: Int, prefix: String, maxidx: Int, index: Int) -> Int {
+    when index > maxidx { term pos; };
+    let line: String = find_field(text, prefix, index);
+    when line .^Len > 0 {
+        buf[pos] = field_itemidx(line);
+        term emit_group_fields(text, buf, pos + 1, prefix, maxidx, index + 1);
+    };
+    term emit_group_fields(text, buf, pos, prefix, maxidx, index + 1);
+};
+
+// emit_remaining(text, buf, pos): the float fields NOT in a safe group, in
+// declaration order.
+defn emit_remaining(text: String, buf: Ptr<Int>, pos: Int) -> Int {
+    term emit_rem_scan(text, 0, text .^Len, buf, pos);
+};
+defn emit_rem_scan(text: String, i: Int, n: Int, buf: Ptr<Int>, pos: Int) -> Int {
+    when i >= n { term pos; };
+    let line: String = field_line_at(text, i, n);
+    when line .^Len > 0 {
+        let prefix: String = field_prefix(line);
+        let safe: Int = is_safe_group(text, prefix);
+        when safe == 0 {
+            buf[pos] = field_itemidx(line);
+            term emit_rem_scan(text, i + 1, n, buf, pos + 1);
+        };
+    };
+    term emit_rem_scan(text, i + 1, n, buf, pos);
+};
+
+// ── the export ─────────────────────────────────────────────────────────
+export defn soa_reorder_compute(proj: CStr) -> Int {
+    let text: String = proj;
+    let total: Int = token_at(section_line(text, "total"), 1) as Int;
+    let buf: Ptr<Int> = Malloc#((total + 1) * 8) as Ptr<Int>;
+    buf[0] = total;
+    let pos: Int = 1;
+    let pos: Int = emit_indices(buf, pos, section_line(text, "nonfloat"), 2);
+    let pos: Int = emit_safe_groups(text, buf, pos);
+    let pos: Int = emit_remaining(text, buf, pos);
+    term buf as Int;
+};

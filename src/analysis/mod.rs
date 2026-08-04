@@ -30,6 +30,7 @@ pub mod string_concat;
 pub mod boundary_marshalling;
 pub mod slp_isomorphism;
 pub mod soa_reorder;
+pub mod soa_projection;
 pub mod licm;
 pub mod match_normalize;
 pub mod node_decompose;

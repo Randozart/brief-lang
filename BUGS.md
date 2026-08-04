@@ -3514,3 +3514,15 @@ is DETERMINISTIC and matches the Rust reference on all five bridges
 (boundary=0, node_bridge=31, cancel=1, rank=2, bench=2) — asserted by
 `tests/c_driver_needs_state.rs`. Lesson: a stateful export's C signature takes
 the state handle first; the glue `bindings` header is the source of truth.
+
+## RESOLVED — imported-module frgn with String param + String return resolves to Int
+
+**Date:** 2026-08-04
+**Status:** Resolved (fixed incidentally). The `lib/compiler/reader.bv` shared
+module now declares `brief_str_substr(handle: String, a: Int, b: Int) -> String`
+and both passes import it — the return type resolves correctly and the pass
+runs (verified: soa_reorder imports reader.bv and produces the exact
+permutation). The failure was observed before the P3 string/codegen fixes
+(clear_locals, is_semantic_string, Len-on-boxed-String); one of those repaired
+the imported-frgn return-type resolution. The needs_state.bv comment about
+declaring the frgn locally is now stale — the shared reader is the single home.

@@ -167,6 +167,28 @@ fn emit_expr_flat(out: &mut Vec<String>, expr: &Expr) {
             for e in items { emit_expr_flat(out, e); }
         }
         Expr::Identifier(name) => out.push(format!("I:{}", name)),
+        // 2026-08-04 (compiler-in-Brief): wrapping kinds that can HIDE a
+        // stateful inner (a cast-wrapped call, a method call on a state-field
+        // receiver, an index/slice/addr-of of a state field). Walk the inner —
+        // mirrors export_abi.rs expr_needs_state so the Brief pass sees the
+        // same nodes the Rust reference does.
+        Expr::Cast(inner, _) => emit_expr_flat(out, inner),
+        Expr::MethodCall(recv, name, args, _) => {
+            out.push(format!("C:{}", name));
+            emit_expr_flat(out, recv);
+            for a in args { emit_expr_flat(out, a); }
+        }
+        Expr::Reflect(recv, _, _) => emit_expr_flat(out, recv),
+        Expr::Index(arr, idx) => {
+            emit_expr_flat(out, arr);
+            emit_expr_flat(out, idx);
+        }
+        Expr::Slice { array, start, end, .. } => {
+            emit_expr_flat(out, array);
+            if let Some(s) = start { emit_expr_flat(out, s); }
+            if let Some(e) = end { emit_expr_flat(out, e); }
+        }
+        Expr::AddrOf(inner) => emit_expr_flat(out, inner),
         _ => out.push("_:".into()),
     }
 }

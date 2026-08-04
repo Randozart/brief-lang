@@ -1,0 +1,113 @@
+// reader.bv — shared projection-reading primitives for compiler-in-Brief
+// passes. 2026-08-04 (plan 2026-08-04-compiler-in-brief-dogfood-ffi, P5):
+// every Brief pass (needs_state.bv, soa_reorder.bv, ...) reads a tagged Data
+// Brief projection as a String with these primitives. All iteration is
+// RECURSION (`when` is an if-guard, not a while loop, in both the interpreter
+// and the LLVM backend). Character comparisons use char_at (an Int-returning
+// frgn — a per-char brief_str_substr corrupted the heap under long recursion,
+// see BUGS.md); substrings use brief_str_substr (the runtime half of dynamic
+// String slicing, which the LLVM backend emits as the whole array).
+
+import "glue/c.bv";
+
+frgn brief_str_substr(handle: String, a: Int, b: Int) -> String as brief_str_substr from "lib/runtime/brief_rt.c" fallback "";
+frgn brief_str_char_at(handle: String, i: Int) -> Int as brief_str_char_at from "lib/runtime/brief_rt.c" fallback 0;
+
+// char_at(s, i): the i-th byte as an Int (no allocation).
+defn char_at(s: String, i: Int) -> Int {
+    term brief_str_char_at(s, i);
+};
+
+// str_substr(a, b): byte-wise substring [a, b) of a Brief String.
+defn str_substr(s: String, a: Int, b: Int) -> String {
+    term brief_str_substr(s, a, b);
+};
+
+// line_end(proj, i, n): index of the first '\n' at/after i, else n.
+defn line_end(proj: String, i: Int, n: Int) -> Int {
+    when i >= n { term i; };
+    when char_at(proj, i) == 10 { term i; };
+    term line_end(proj, i + 1, n);
+};
+
+// ── token extraction ────────────────────────────────────────────────────
+// token_at(line, idx): the idx-th space-separated token (0-based); "" if the
+// line has fewer than idx+1 tokens. The projection uses single spaces.
+defn token_at(line: String, idx: Int) -> String {
+    let n: Int = line .^Len;
+    term token_at_scan(line, 0, n, idx, 0, 0);
+};
+defn token_at_scan(line: String, i: Int, n: Int, idx: Int, cur: Int, start: Int) -> String {
+    when cur == idx {
+        when i >= n { term brief_str_substr(line, start, n); };
+        when char_at(line, i) == 32 { term brief_str_substr(line, start, i); };
+        term token_at_scan(line, i + 1, n, idx, cur, start);
+    };
+    when i >= n { term ""; };
+    when char_at(line, i) == 32 { term token_at_scan(line, i + 1, n, idx, cur + 1, i + 1); };
+    term token_at_scan(line, i + 1, n, idx, cur, start);
+};
+
+// has_token(line, name): is `name` one of the line's tokens?
+defn has_token(line: String, name: String) -> Bool {
+    term has_token_scan(line, 0, line .^Len, name, 0);
+};
+defn has_token_scan(line: String, i: Int, n: Int, name: String, start: Int) -> Bool {
+    when i >= n { term brief_str_substr(line, start, n) == name; };
+    when char_at(line, i) == 32 {
+        when brief_str_substr(line, start, i) == name { term true; };
+        term has_token_scan(line, i + 1, n, name, i + 1);
+    };
+    term has_token_scan(line, i + 1, n, name, start);
+};
+
+// ── section lookup ──────────────────────────────────────────────────────
+// in_section(proj, key, name): is `name` listed in the `key` section line?
+defn in_section(proj: String, key: String, name: String) -> Bool {
+    term scan_sections(proj, 0, proj .^Len, key, name);
+};
+defn scan_sections(proj: String, i: Int, n: Int, key: String, name: String) -> Bool {
+    when i >= n { term false; };
+    when i == 0 && line_has_key(proj, 0, n, key) { term line_has_name(proj, 0, n, key, name); };
+    when char_at(proj, i) == 10 && line_has_key(proj, i + 1, n, key) { term line_has_name(proj, i + 1, n, key, name); };
+    term scan_sections(proj, i + 1, n, key, name);
+};
+defn line_has_key(proj: String, ls: Int, n: Int, key: String) -> Bool {
+    let le: Int = line_end(proj, ls, n);
+    let line: String = brief_str_substr(proj, ls, le);
+    let klen: Int = key .^Len;
+    when line .^Len >= klen + 1 && brief_str_substr(line, 0, klen) == key && char_at(line, klen) == 32 { term true; };
+    term false;
+};
+defn line_has_name(proj: String, ls: Int, n: Int, key: String, name: String) -> Bool {
+    let le: Int = line_end(proj, ls, n);
+    let line: String = brief_str_substr(proj, ls, le);
+    let klen: Int = key .^Len;
+    let rest: String = brief_str_substr(line, klen + 1, line .^Len);
+    term has_token(rest, name);
+};
+
+// section_line(proj, key): the text of the `key` section line ("" if absent).
+defn section_line(proj: String, key: String) -> String {
+    term find_section(proj, 0, proj .^Len, key);
+};
+defn find_section(proj: String, i: Int, n: Int, key: String) -> String {
+    when i >= n { term ""; };
+    when i == 0 && line_has_key(proj, 0, n, key) { term line_text(proj, 0, n); };
+    when char_at(proj, i) == 10 && line_has_key(proj, i + 1, n, key) { term line_text(proj, i + 1, n); };
+    term find_section(proj, i + 1, n, key);
+};
+defn line_text(proj: String, ls: Int, n: Int) -> String {
+    let le: Int = line_end(proj, ls, n);
+    term brief_str_substr(proj, ls, le);
+};
+
+// ── token name after ':' ────────────────────────────────────────────────
+defn token_name(tok: String) -> String {
+    term tok_after_colon(tok, 0, tok .^Len);
+};
+defn tok_after_colon(tok: String, i: Int, n: Int) -> String {
+    when i >= n { term ""; };
+    when char_at(tok, i) == 58 { term brief_str_substr(tok, i + 1, n); };
+    term tok_after_colon(tok, i + 1, n);
+};

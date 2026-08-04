@@ -1,12 +1,11 @@
-// ── Compiler-in-Brief: the needs_state pass loaded through the GLUE C ABI ─
-// 2026-08-04 (plan 2026-08-04-compiler-in-brief-dogfood-ffi, P3): the Brief
-// pass lib/compiler/needs_state.bv is compiled by briefc (build.rs) into
-// target/compiler-in-brief/needs_state.so and loaded HERE via dlopen — the
-// same way a host language calls a Brief bridge. `compute_export_needs_state`
-// (src/analysis/export_abi.rs) is the Rust reference; this module returns its
-// answer when the pass library is present, else falls back to the reference
-// (first build / no prebuilt briefc). The transition test
-// (tests/c_driver_needs_state.rs) asserts the two agree on the bridge corpus.
+// ── Compiler-in-Brief: Brief passes loaded through the GLUE C ABI ─────
+// 2026-08-04 (plan 2026-08-04-compiler-in-brief-dogfood-ffi, P3+P5): Brief
+// passes (lib/compiler/needs_state.bv, lib/compiler/soa_reorder.bv) are
+// compiled by briefc (build.rs) into target/compiler-in-brief/*.so and loaded
+// HERE via dlopen — the same way a host language calls a Brief bridge. Each
+// pass has a Rust reference that runs when its library is absent (first build
+// / no prebuilt briefc). Transition tests assert the Brief result equals the
+// reference.
 
 use std::ffi::{c_char, c_int, c_void, CString};
 
@@ -14,21 +13,19 @@ use once_cell::sync::OnceCell;
 
 use crate::ast::TopLevel;
 
-/// The dlopen handle + resolved symbols for the Brief needs_state pass.
-struct BriefPass {
+/// A dlopen'd Brief pass: `compute(state, proj) -> i64`. The i64's MEANING is
+/// pass-specific (needs_state: the bitmask; soa_reorder: the address of a
+/// `[total][idx0]...` permutation buffer).
+struct LoadedPass {
     _handle: *mut c_void,
-    /// `needs_state_compute(state, proj) -> i64` — bit i = export[i] (sorted
-    /// by name) needs `ptr %state`.
     compute: unsafe extern "C" fn(state: *const c_void, proj: *const c_char) -> i64,
-    /// `__brief_init_state() -> i64` — the pass is stateful by ABI (it calls
-    /// regular defns), so the driver supplies the runtime state handle.
     init_state: unsafe extern "C" fn() -> i64,
 }
 
 // The pass functions are pure over the projection string; the handle is a
 // shared immutable library. The fn pointers are thread-safe to call.
-unsafe impl Send for BriefPass {}
-unsafe impl Sync for BriefPass {}
+unsafe impl Send for LoadedPass {}
+unsafe impl Sync for LoadedPass {}
 
 const RTLD_NOW: c_int = 2;
 
@@ -38,13 +35,13 @@ unsafe extern "C" {
     fn dlsym(handle: *mut c_void, symbol: *const c_char) -> *mut c_void;
 }
 
-impl BriefPass {
-    /// Load the pass library from `BRIEF_COMPILER_IN_BRIEF_SO` (set by
-    /// build.rs via cargo:rustc-env, read here at COMPILE time so the path is
-    /// embedded — a runtime env lookup would miss it). None = not built (first
-    /// build) or not loadable — the caller falls back to the Rust reference.
-    fn load() -> Option<BriefPass> {
-        let path = option_env!("BRIEF_COMPILER_IN_BRIEF_SO")?.to_string();
+impl LoadedPass {
+    /// Load a pass library. `path` is the compiled-time value of the
+    /// cargo:rustc-env var set by build.rs (option_env!, since rustc-env is
+    /// not a runtime var); `compute_symbol` is the pass's export name. None =
+    /// not built (first build) or not loadable — the caller falls back to Rust.
+    fn load(path: Option<&'static str>, compute_symbol: &str) -> Option<LoadedPass> {
+        let path = path?.to_string();
         if path.is_empty() {
             return None;
         }
@@ -55,7 +52,7 @@ impl BriefPass {
             return None;
         }
         let compute = unsafe {
-            dlsym(handle, b"needs_state_compute\0".as_ptr() as *const c_char)
+            dlsym(handle, CString::new(compute_symbol).ok()?.as_ptr() as *const c_char)
         };
         let init_state = unsafe {
             dlsym(handle, b"__brief_init_state\0".as_ptr() as *const c_char)
@@ -64,14 +61,14 @@ impl BriefPass {
             return None;
         }
         // SAFETY: the symbols were resolved to the declared C signatures.
-        Some(BriefPass {
+        Some(LoadedPass {
             _handle: handle,
             compute: unsafe { std::mem::transmute(compute) },
             init_state: unsafe { std::mem::transmute(init_state) },
         })
     }
 
-    /// Run the pass over a serialized projection and return the bitmask.
+    /// Run the pass over a serialized projection and return the raw i64 result.
     fn compute(&self, proj: &str) -> i64 {
         let c_proj = match CString::new(proj) {
             Ok(c) => c,
@@ -84,17 +81,21 @@ impl BriefPass {
     }
 }
 
-static BRIEF_PASS: OnceCell<Option<BriefPass>> = OnceCell::new();
+// ── needs_state pass (P3) ──────────────────────────────────────────────
 
-fn brief_pass() -> Option<&'static BriefPass> {
-    BRIEF_PASS.get_or_init(BriefPass::load).as_ref()
+static NEEDS_STATE_PASS: OnceCell<Option<LoadedPass>> = OnceCell::new();
+
+fn needs_state_pass() -> Option<&'static LoadedPass> {
+    NEEDS_STATE_PASS
+        .get_or_init(|| LoadedPass::load(option_env!("BRIEF_COMPILER_IN_BRIEF_SO"), "needs_state_compute"))
+        .as_ref()
 }
 
 /// Compute the needs_state map for a program, preferring the Brief pass when
 /// its library is present. Falls back to the Rust reference (export_abi.rs).
 /// The two must agree — asserted by tests/c_driver_needs_state.rs.
 pub fn compute_export_needs_state(items: &[TopLevel]) -> std::collections::HashMap<String, bool> {
-    if let Some(pass) = brief_pass() {
+    if let Some(pass) = needs_state_pass() {
         let proj = crate::analysis::needs_state_projection::serialize_needs_state_projection(items);
         let mask = pass.compute(&proj);
         // Reconstruct the map in the SAME order the serializer emitted the
@@ -118,15 +119,77 @@ pub fn compute_export_needs_state(items: &[TopLevel]) -> std::collections::HashM
     crate::analysis::export_abi::compute_export_needs_state(items)
 }
 
-/// Whether the compiled Brief pass library is available to load (the build.rs
-/// produced it). Exposed for tests/diagnostics.
+// ── soa_reorder pass (P5) ──────────────────────────────────────────────
+
+static SOA_REORDER_PASS: OnceCell<Option<LoadedPass>> = OnceCell::new();
+
+fn soa_reorder_pass() -> Option<&'static LoadedPass> {
+    SOA_REORDER_PASS
+        .get_or_init(|| LoadedPass::load(option_env!("BRIEF_COMPILER_IN_BRIEF_SOA_SO"), "soa_reorder_compute"))
+        .as_ref()
+}
+
+/// Compute the AoS → SoA item permutation via the Brief pass, when its
+/// library is present. Returns None when the pass is unavailable (caller falls
+/// back to the Rust reorder_fields). The permutation is the pass's Malloc'd
+/// `[total][idx0]...[idx_{N-1}]` buffer; read and freed here.
+pub fn compute_soa_permutation(items: &[TopLevel]) -> Option<Vec<usize>> {
+    let pass = soa_reorder_pass()?;
+    let proj = crate::analysis::soa_projection::serialize_soa_projection(items);
+    let addr = pass.compute(&proj);
+    if addr == 0 {
+        return None;
+    }
+    let buf = addr as *const i64;
+    // SAFETY: the pass wrote [total][idx...] to a Malloc'd buffer.
+    let total = unsafe { *buf };
+    if total < 0 || total as usize != items.len() {
+        return None;
+    }
+    let mut perm = Vec::with_capacity(total as usize);
+    for i in 0..total as usize {
+        // SAFETY: the pass fills exactly `total` indices.
+        perm.push(unsafe { *buf.add(1 + i) } as usize);
+    }
+    // The pass allocated the buffer with Malloc# (= malloc); free it.
+    unsafe { rt_free(buf as *mut c_void) }
+    Some(perm)
+}
+
+#[link(name = "c")]
+unsafe extern "C" {
+    fn free(ptr: *mut c_void);
+}
+
+fn rt_free(ptr: *mut c_void) {
+    unsafe { free(ptr) }
+}
+
+// ── diagnostics ────────────────────────────────────────────────────────
+
+/// Whether the compiled Brief needs_state pass library is available to load.
 pub fn pass_available() -> bool {
-    brief_pass().is_some()
+    needs_state_pass().is_some()
+}
+
+/// Whether the compiled Brief soa_reorder pass library is available to load.
+pub fn soa_pass_available() -> bool {
+    soa_reorder_pass().is_some()
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn state_let(name: &str, expr: crate::ast::Expr) -> TopLevel {
+        TopLevel::Statement(Box::new(crate::ast::Statement::Let {
+            names: vec![],
+            name: name.to_string(),
+            ty: Some(crate::ast::Type::float()),
+            expr: Some(expr),
+            modifiers: vec![],
+        }))
+    }
 
     /// The dlopen path must actually run (not silently fall back). Builds the
     /// bridges, runs BOTH the Brief pass and the Rust reference, and requires
@@ -149,12 +212,54 @@ mod tests {
             let brief = compute_export_needs_state(&items);
             let reference = crate::analysis::export_abi::compute_export_needs_state(&items);
             assert_eq!(brief, reference, "Brief pass diverged from reference for {}", rel);
-            if brief_pass().is_some() {
+            if needs_state_pass().is_some() {
                 used_brief = true;
             }
         }
         if option_env!("BRIEF_COMPILER_IN_BRIEF_SO").map_or(false, |p| !p.is_empty()) {
             assert!(used_brief, "pass library was built but never used");
+        }
+    }
+
+    /// The soa_reorder pass (when loaded) must reproduce reorder_fields on a
+    /// small AoS program: bx0, by0, bx1 → bx0, bx1, by0. Group "bx" is safe
+    /// (2 members, no sibling refs); "by" is singleton. Expected permutation:
+    /// [0, 2, 1] (bx0, bx1, by0).
+    #[test]
+    fn soa_pass_matches_reorder_fields() {
+        let bx0 = state_let("bx0", crate::ast::Expr::Decimal(1));
+        let by0 = state_let("by0", crate::ast::Expr::Decimal(2));
+        let bx1 = state_let(
+            "bx1",
+            crate::ast::Expr::BinaryOp(
+                crate::ast::BinaryOpKind::Add,
+                Box::new(crate::ast::Expr::Decimal(1)),
+                Box::new(crate::ast::Expr::Decimal(1)),
+            ),
+        );
+        let items = vec![bx0, by0, bx1];
+        let reference: Vec<usize> = crate::analysis::soa_reorder::reorder_fields(&items)
+            .iter()
+            .map(|out| items.iter().position(|orig| name_of(orig) == name_of(out)).unwrap())
+            .collect();
+        assert_eq!(reference, vec![0, 2, 1], "reference expected AoS→SoA order");
+        if let Some(perm) = compute_soa_permutation(&items) {
+            assert_eq!(perm, vec![0, 2, 1], "soa pass diverged from reorder_fields");
+        }
+        if option_env!("BRIEF_COMPILER_IN_BRIEF_SOA_SO").map_or(false, |p| !p.is_empty()) {
+            assert!(soa_pass_available(), "soa pass library was built but never used");
+        }
+    }
+
+    fn name_of(item: &TopLevel) -> String {
+        match item {
+            TopLevel::Statement(s) => match s.as_ref() {
+                crate::ast::Statement::Let { name, .. } => name.clone(),
+                _ => "stmt".to_string(),
+            },
+            TopLevel::Constant(c) => c.name.clone(),
+            TopLevel::Transaction(t) => t.name.clone(),
+            _ => "unknown".to_string(),
         }
     }
 }

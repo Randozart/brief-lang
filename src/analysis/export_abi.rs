@@ -212,6 +212,28 @@ fn expr_needs_state(
         Expr::List(items) => {
             items.iter().any(|e| expr_needs_state(e, regular, txns, exports, state_fields, memo, visiting))
         }
+        // 2026-08-04 (compiler-in-Brief): wrapping expression kinds that can
+        // HIDE a stateful inner — a cast-wrapped call (`token_at(t, 1) as Int`),
+        // a method call on a state-field receiver, an index/slice/addr-of of a
+        // state field. Previously the `_ => false` arm made these invisible, so
+        // an export calling a regular defn through a cast got a STATELESS shim
+        // that referenced `%state` (opt: "use of undefined value '%state'").
+        Expr::Cast(inner, _) => expr_needs_state(inner, regular, txns, exports, state_fields, memo, visiting),
+        Expr::MethodCall(recv, _, args, _) => {
+            expr_needs_state(recv, regular, txns, exports, state_fields, memo, visiting)
+                || args.iter().any(|a| expr_needs_state(a, regular, txns, exports, state_fields, memo, visiting))
+        }
+        Expr::Reflect(recv, _, _) => expr_needs_state(recv, regular, txns, exports, state_fields, memo, visiting),
+        Expr::Index(arr, idx) => {
+            expr_needs_state(arr, regular, txns, exports, state_fields, memo, visiting)
+                || expr_needs_state(idx, regular, txns, exports, state_fields, memo, visiting)
+        }
+        Expr::Slice { array, start, end, .. } => {
+            expr_needs_state(array, regular, txns, exports, state_fields, memo, visiting)
+                || start.as_ref().is_some_and(|e| expr_needs_state(e, regular, txns, exports, state_fields, memo, visiting))
+                || end.as_ref().is_some_and(|e| expr_needs_state(e, regular, txns, exports, state_fields, memo, visiting))
+        }
+        Expr::AddrOf(inner) => expr_needs_state(inner, regular, txns, exports, state_fields, memo, visiting),
         // 2026-08-03 (node bridge): a bare read of a state field needs the
         // `%state` handle even though no intrinsic/call is involved
         // (`term saved;`). Params/locals (not in state_fields) stay pure.

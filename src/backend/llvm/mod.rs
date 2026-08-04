@@ -1805,7 +1805,10 @@ impl LlvmBackend {
         // index assignment. This makes same-component fields (bx0..bx4) have
         // consecutive indices, enabling the backend to form <N x float> vector
         // phi groups. See analysis/soa_reorder.rs for safety verification.
-        let reordered_items = crate::analysis::soa_reorder::reorder_fields(items);
+        // 2026-08-04 (compiler-in-Brief, P5): the Brief soa_reorder pass
+        // computes the permutation through the GLUE C ABI when its library is
+        // present; otherwise the Rust reference runs.
+        let reordered_items = crate::analysis::soa_reorder::reorder_fields_brief(items);
         self.build_field_index(&reordered_items);
 
         // Scan for cell-to-cell wires from TrgBinding statements

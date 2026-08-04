@@ -14,10 +14,28 @@
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
+fn build_pass(briefc: &Path, bv: &str, out_root: &Path) -> Option<PathBuf> {
+    let ok = Command::new(briefc)
+        .args(["build", bv, "--library", "--out"])
+        .arg(out_root)
+        .status()
+        .map(|s| s.success())
+        .unwrap_or(false);
+    if !ok {
+        return None;
+    }
+    // The output .so is `<stem>.so` inside the --out directory.
+    let stem = Path::new(bv).file_stem()?.to_string_lossy().to_string();
+    let so = out_root.join(format!("{stem}.so"));
+    if so.exists() { Some(so) } else { None }
+}
+
 fn main() {
     let manifest = std::env::var("CARGO_MANIFEST_DIR").unwrap_or_default();
     let out_root = Path::new(&manifest).join("target").join("compiler-in-brief");
     println!("cargo:rerun-if-changed=lib/compiler/needs_state.bv");
+    println!("cargo:rerun-if-changed=lib/compiler/soa_reorder.bv");
+    println!("cargo:rerun-if-changed=lib/compiler/reader.bv");
 
     // A prebuilt briefc from a previous build (or BRIEFC_BIN override).
     let briefc = std::env::var("BRIEFC_BIN").ok().map(PathBuf::from).or_else(|| {
@@ -27,29 +45,31 @@ fn main() {
     });
 
     let Some(briefc) = briefc else {
-        println!("cargo:warning=compiler-in-Brief: no prebuilt briefc found on first build — pass library skipped (runtime falls back to the Rust reference)");
+        println!("cargo:warning=compiler-in-Brief: no prebuilt briefc found on first build — pass libraries skipped (runtime falls back to the Rust references)");
         println!("cargo:rustc-env=BRIEF_COMPILER_IN_BRIEF_SO=");
+        println!("cargo:rustc-env=BRIEF_COMPILER_IN_BRIEF_SOA_SO=");
         return;
     };
 
-    let ok = Command::new(&briefc)
-        .args(["build", "lib/compiler/needs_state.bv", "--library", "--out"])
-        .arg(&out_root)
-        .status()
-        .map(|s| s.success())
-        .unwrap_or(false);
-    if !ok {
-        println!("cargo:warning=compiler-in-Brief: briefc build failed — pass library skipped (runtime falls back to the Rust reference)");
-        println!("cargo:rustc-env=BRIEF_COMPILER_IN_BRIEF_SO=");
-        return;
+    // Each pass is an independent .so, dlopen'd by src/glue/brief_pass.rs.
+    match build_pass(&briefc, "lib/compiler/needs_state.bv", &out_root) {
+        Some(so) => {
+            println!("cargo:rustc-env=BRIEF_COMPILER_IN_BRIEF_SO={}", so.display());
+            println!("cargo:warning=compiler-in-Brief: needs_state pass ready at {}", so.display());
+        }
+        None => {
+            println!("cargo:warning=compiler-in-Brief: needs_state pass build failed — runtime falls back to the Rust reference");
+            println!("cargo:rustc-env=BRIEF_COMPILER_IN_BRIEF_SO=");
+        }
     }
-
-    // The output .so is `needs_state.so` inside the --out directory.
-    let so = out_root.join("needs_state.so");
-    if so.exists() {
-        println!("cargo:rustc-env=BRIEF_COMPILER_IN_BRIEF_SO={}", so.display());
-        println!("cargo:warning=compiler-in-Brief: pass library ready at {}", so.display());
-    } else {
-        println!("cargo:rustc-env=BRIEF_COMPILER_IN_BRIEF_SO=");
+    match build_pass(&briefc, "lib/compiler/soa_reorder.bv", &out_root) {
+        Some(so) => {
+            println!("cargo:rustc-env=BRIEF_COMPILER_IN_BRIEF_SOA_SO={}", so.display());
+            println!("cargo:warning=compiler-in-Brief: soa_reorder pass ready at {}", so.display());
+        }
+        None => {
+            println!("cargo:warning=compiler-in-Brief: soa_reorder pass build failed — runtime falls back to the Rust reference");
+            println!("cargo:rustc-env=BRIEF_COMPILER_IN_BRIEF_SOA_SO=");
+        }
     }
 }
