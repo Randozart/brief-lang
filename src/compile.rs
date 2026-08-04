@@ -350,6 +350,12 @@ pub fn compile_source(file_path: &str, source: &str, opts: &BuildOptions) -> Res
         emit_beast_snapshot(file_path, BeastStage::Parse, BeastPosition::After, &items, &snapshot_universe, opts)?;
     }
 
+    // 2026-08-04 (Phase 4, .ebv heap reframe): the embedded mode backend
+    // emits int_to_str and the other cast-lane symbols directly as LLVM
+    // define functions using the static bump arena (see mod.rs generate fn,
+    // after the embedded_heap global). The compiler provides the runtime.
+    // No auto-import of string.ebv; the backend handles it.
+
     // ── Resolved stage (after import resolution) ──────────────────────
     let mut resolver = brief_compiler::import_resolver::ImportResolver::new();
     if let Some(ref stdlib_path) = opts.stdlib_path {
@@ -569,7 +575,7 @@ pub fn compile_source(file_path: &str, source: &str, opts: &BuildOptions) -> Res
 
     // 2026-07-16: P4 — Collect extra objects from ForeignBinding FromSpec paths
     // for linking into the final binary.
-    let extra_objects = collect_extra_objects(&items, &resolver)?;
+    let extra_objects = collect_extra_objects(&items, &resolver, get_extension(file_path) == ".ebv")?;
 
     // ── Frgn dispatch resolution ──────────────────────────────────────
     // 2026-07-22: Resolve each frgn declaration's dispatch strategy before
@@ -1429,7 +1435,7 @@ fn determine_out_path(file_path: &str, out_dir: Option<&str>) -> Result<String, 
 /// 2026-07-16: P4 — Collect extra object files from ForeignBinding FromSpec paths.
 /// Each frgn declaration with a .c/.so/.a/etc. path triggers compilation or direct
 /// inclusion. The resolver is used to resolve compiler-relative <name> paths.
-fn collect_extra_objects(items: &[brief_compiler::ast::TopLevel], resolver: &brief_compiler::import_resolver::ImportResolver) -> Result<Vec<PathBuf>, String> {
+fn collect_extra_objects(items: &[brief_compiler::ast::TopLevel], resolver: &brief_compiler::import_resolver::ImportResolver, skip_brief_rt: bool) -> Result<Vec<PathBuf>, String> {
     let cache_dir = get_ffi_cache_dir();
     let mut objects = Vec::new();
     for item in items {
@@ -1438,6 +1444,15 @@ fn collect_extra_objects(items: &[brief_compiler::ast::TopLevel], resolver: &bri
             _ => continue,
         };
         let ext = fb.from.extension();
+        // 2026-08-04 (Phase 4, .ebv heap reframe): for .ebv freestanding
+        // targets, skip brief_rt.c — the .ebv stdlib provides the symbols
+        // (int_to_str, etc.) as Brief defns over the static bump arena.
+        if skip_brief_rt && ext.as_deref() == Some("c") {
+            let from_str = fb.from.as_str();
+            if from_str.contains("brief_rt") || from_str.contains("lib/runtime") {
+                continue;
+            }
+        }
         // 2026-07-26: Check registry directory first for <name> lookups,
         // then fall back to stdlib path, then use the name as a direct path.
         let resolved_path = || -> PathBuf {

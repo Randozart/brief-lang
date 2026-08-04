@@ -2260,6 +2260,7 @@ impl LlvmBackend {
             },
             _ => None,
         }).collect();
+        
         let mut declare = |out: &mut String, name: &str, ret: &str, args: &str| {
             if !defined.contains(name) {
                 writeln!(out, "declare {} @{}({}) #1", ret, name, args).ok();

@@ -1559,6 +1559,12 @@ impl LlvmBackend {
                     recv, recv_reg.ty
                 ),
             },
+            ("Absolute", ReflectKind::Runtime) => {
+                // 2026-08-04: `x.^Absolute` — emit `llvm.abs.i64`.
+                let r = self.fun.gen_reg();
+                writeln!(out, "{}{} = call i64 @llvm.abs.i64(i64 {}, i1 false)", indent, r, recv_reg.name).ok();
+                TypedRegister { name: r, ty: Type::int() }
+            }
             _ => panic!(
                 "reflection '{}' with kind '{:?}' reached codegen without emission",
                 target, kind
