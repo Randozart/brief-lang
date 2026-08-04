@@ -172,6 +172,21 @@ impl ReactorTransitionGraph {
         }
 
         let live_fields = compute_live_fields(exit_condition, out_pragmas, &nodes);
+        // 2026-08-04 (out-observability plan): `out let`/`vol let` top-level
+        // state fields are observability pins — their writes are liveness
+        // roots. Force them live so dead-field elimination cannot drop the
+        // field (a field written only inside an observable context must keep
+        // its slot even when nothing reads it).
+        let mut live_fields = live_fields;
+        for item in items {
+            if let TopLevel::Statement(stmt) = item {
+                if let Statement::Let { name, modifiers, .. } = stmt.as_ref() {
+                    if modifiers.iter().any(|m| m.name == "out" || m.name == "vol") {
+                        live_fields.insert(name.clone());
+                    }
+                }
+            }
+        }
         for node in &mut nodes {
             compute_effectively_pure(node, &live_fields);
         }
@@ -845,7 +860,6 @@ pub fn compute_live_fields(
             scan_for_ffi_args(stmt, &mut live);
         }
     }
-
     loop {
         let mut changed = false;
         for node in nodes {
@@ -1889,5 +1903,62 @@ mod tests {
         let g = ReactorTransitionGraph::build(&items, &None, &[]);
         assert!(!g.has_unguarded_ffi.contains("work"),
             "FFI inside a `when` guard is guarded (outlined) — not unguarded");
+    }
+
+    /// 2026-08-04 (out-observability plan): a top-level `out let` state field
+    /// written but never read must stay live — `out` marks its writes as
+    /// liveness roots, so dead-field elimination cannot drop the field.
+    #[test]
+    fn test_out_let_field_forced_live() {
+        use crate::ast::Annotation;
+        let items = vec![
+            make_state("count", Type::int()),
+            make_state("total", Type::int()),
+            TopLevel::Statement(Box::new(Statement::Let {
+                name: "pinned".to_string(),
+                names: vec![],
+                ty: Some(Type::int()),
+                expr: Some(Expr::Decimal(0)),
+                modifiers: vec![Annotation { name: "out".to_string(), value: None }],
+            })),
+            TopLevel::Transaction(Transaction {
+                name: "work".to_string(),
+                is_reactive: true,
+                is_async: false,
+                type_params: vec![],
+                parameters: vec![],
+                output_type: None,
+                outputs: Vec::new(),
+                contract: crate::ast::Contract {
+                    pre_condition: Expr::BinaryOp(BinaryOpKind::Lt,
+                        Box::new(Expr::Identifier("count".to_string())),
+                        Box::new(Expr::Identifier("total".to_string())),
+                    ),
+                    post_condition: Expr::Bool(true),
+                    watchdog: None,
+                    explicit: false,
+                    span: None,
+                },
+                body: vec![
+                    Statement::Assign(Expr::Identifier("count".to_string()),
+                        Expr::BinaryOp(BinaryOpKind::Add,
+                            Box::new(Expr::Identifier("count".to_string())),
+                            Box::new(Expr::Decimal(1)),
+                        ),
+                    ),
+                    // pinned is written but never read — only `out` keeps it live.
+                    Statement::Assign(Expr::Identifier("pinned".to_string()), Expr::Decimal(7)),
+                    Statement::Term(None),
+                ],
+                span: None,
+                metadata: std::collections::HashMap::new(),
+                modifiers: vec![],
+                derivation: None,
+                doc: None,
+            }),
+        ];
+        let g = ReactorTransitionGraph::build(&items, &None, &[]);
+        assert!(g.live_fields.contains("pinned"),
+            "out-let field must stay live even though never read");
     }
 }

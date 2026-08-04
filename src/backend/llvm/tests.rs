@@ -3326,6 +3326,63 @@ fn test_print_plugin_emits_direct_ffi_calls() {
     );
 }
 
+/// 2026-08-04 (out-observability plan): SMOKE test — `out defn` parses, flows
+/// through the plugin/normalizer pipeline, and emits valid IR. (The current
+/// backend is conservative: any non-hash call already blocks folding, so the
+/// call-survival behavior is the SAME with or without `out` today. The
+/// discriminating regression tests live at the analysis layer — see
+/// transition_graph::tests::test_out_let_field_forced_live.)
+#[test]
+fn test_out_defn_unused_result_call_survives() {
+    let src = r#"
+        out defn sink(x: Int) -> Int {
+            term x;
+        };
+        let start: Int = 0;
+        node work [start == 0][start == 0] {
+            sink(42);
+            term;
+        };
+    "#;
+    let mut items = parse_bv_source(src);
+    let mut universe = crate::type_universe::TypeUniverse::new();
+    let mut pm = crate::plugin::PluginManager::new();
+    pm.run_ast(crate::ast::StageKind::Parsed, &mut items, &mut universe)
+        .expect("plugin stage failed");
+    let mut backend = LlvmBackend::new().with_type_universe(universe);
+    let ir = backend.generate(&items, None);
+    assert!(
+        ir.contains("call i64 @sink(i64 42)") || ir.contains("call i64 @sink("),
+        "an out-defn call with an unused result must survive in the IR; got:\n{ir}"
+    );
+}
+
+/// 2026-08-04: SMOKE test — `out let` parses and emits valid IR end-to-end.
+/// (Discriminating liveness behavior is tested at the analysis layer.)
+#[test]
+fn test_out_let_computation_survives() {
+    let src = r#"
+        defn expensive() -> Int {
+            term 99;
+        };
+        node work [true][true] {
+            out let x: Int = expensive();
+            term;
+        };
+    "#;
+    let mut items = parse_bv_source(src);
+    let mut universe = crate::type_universe::TypeUniverse::new();
+    let mut pm = crate::plugin::PluginManager::new();
+    pm.run_ast(crate::ast::StageKind::Parsed, &mut items, &mut universe)
+        .expect("plugin stage failed");
+    let mut backend = LlvmBackend::new().with_type_universe(universe);
+    let ir = backend.generate(&items, None);
+    assert!(
+        ir.contains("call i64 @expensive("),
+        "an out-let's RHS call must survive (the computation is live); got:\n{ir}"
+    );
+}
+
 /// 2026-08-01: Format-string println! — literal segments print via __print_str,
 /// placeholders dispatch on the value kind, and a newline is appended. All
 /// must remain direct runtime calls with no bridge indirection.
