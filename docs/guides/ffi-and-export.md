@@ -1,15 +1,20 @@
 # Brief FFI & Export — A Practical Guide
 
-**Date:** 2026-08-03
-**Applies to:** the `glue-host-callable` work, merged into `main` at `ff108698`.
+**Date:** 2026-08-04
+**Applies to:** the current `glue-host-callable` work (per-language glue
+folders, native extensions, the zero-friction gate).
+**Architecture reference:** `docs/architecture/glue-ffi.md` — this guide is the
+hands-on how-to; the arch doc is the complete method.
 
-Brief compiles to a native library that any language can call at near-native
-speed — C, Rust (within ~2.4% of native), Python (at ctypes parity, and see
-the native-extension note at the end). The FFI is **protocol-driven**: Brief
-has no type layouts, only adaptive protocols. A boundary representation is a
-sub-protocol (`#String<C_String>`), a `proto` declaration supplies the
-transforms, and the casting graph finds the minimal path between a Brief type
-and its boundary representation — emitting the **delta**, not a chain.
+Brief compiles to a native library that any language can call at **native
+speed** — C, C++, Rust, Python, Node, Go, Java, Lua, C# are prepackaged
+(§14). The FFI is **protocol-driven**: Brief has no type layouts, only
+adaptive protocols. A boundary representation is a sub-protocol
+(`#String<C_String>`), a `proto` declaration supplies the transforms, and the
+casting graph finds the minimal path between a Brief type and its boundary
+representation — emitting the **delta**, not a chain. The composite String
+crosses as a pointer into a state-owned NUL-invariant region — zero-copy from
+every host.
 
 ---
 
@@ -23,10 +28,11 @@ and its boundary representation — emitting the **delta**, not a chain.
 - **Marshalling is ordinary Brief casting.** `name as String` on a `CStr`
   emits the graph's binding call (`cstr_to_brief`); `s as CStr` emits
   `str_to_c`. `+` concatenates strings; `CStr + CStr` uses the variant's own
-  `cstring_concat`.
+  `cstring_concat`. The `meld CStr -> String` declaration makes the pair
+  interchangeable with no `as` at all.
 - **The compiler knows no type names and no language.** Only protocol
   categories and metadata are hardcoded; every language's vocabulary lives in
-  the Data Brief config (`config/glue.dbvl`).
+  per-language Data Brief config (`lib/glue/<lang>/glue.dbvl`).
 
 ## 2. Quick start
 
@@ -133,9 +139,10 @@ lib.greet.restype = ctypes.c_int64
 print(ctypes.cast(lib.greet(state, ctypes.c_void_p(b"hello").value), ctypes.c_char_p).value.decode())
 ```
 
-The ~2µs/call is ctypes marshalling (identical for C through ctypes) — Brief is
-within 5% of C through Python. A **native Python C-extension** target (no
-ctypes) is in development for ~10× lower per-call overhead (see §9).
+The ~2µs/call is ctypes marshalling (identical for C through ctypes). The
+shipped **native Python C-extension** target (§10, `brief extension python`)
+removes it entirely — a Python→Brief call is now **faster than Python calling
+Python** (§15, Gate B).
 
 ## 6. Callbacks (host → Brief → host)
 
@@ -187,31 +194,48 @@ compiler never injects checks.
 
 ## 8. Extending: adding a language
 
-The FFI is infinitely extensible through `config/glue.dbvl` (Data Brief). A
-language target is a section: protocols (category → native/c-ABI names), state
-representation, parameter-declaration formats, and wrapper/binding templates.
-Boundary representations are `proto` declarations in `.bv` files — the compiler
-teaches, the config/stdlib learns.
+The FFI is infinitely extensible through per-language glue folders
+(`lib/glue/<lang>/`), each a Data Brief config + templates. Zero compiler
+changes. The steps:
+
+1. `mkdir lib/glue/<lang>/` with `types.bv` (boundary declarations — usually
+   `import "glue/c.bv"`).
+2. `glue.dbvl` — the target entry: `protocols` (category → native / C-ABI
+   names), `conversions` (`to_abi`/`from_abi` per category), `state`,
+   `param_decl`, and the **toolchain recipe** (`native_include_cmd`,
+   `native_suffix`/`native_suffix_cmd`, `native_link_cmd`, `native_cc`,
+   `native_prefix`).
+3. Templates — `bindings.*` (declarative, via `brief bindings`), `templates.*`
+   (packages, via `brief export`, with `{{exports}}`), and/or `native.*` (the
+   extension shim, via `brief extension`: module, method, per-category
+   `parse`/`build`/`c_type`/`ret` snippets; JNI-style shims add
+   `native.sig.<cat>` + `native.ret_jni.<cat>`).
+4. `tests/c_driver_<lang>.rs` — a render assertion (runs everywhere) + a
+   toolchain-guarded round-trip.
+
+See `docs/architecture/glue-ffi.md` §5 for the complete anatomy.
 
 ## 9. Performance notes
 
-| path | per-call (feature_hash, count=1000) |
-|------|-------------------------------------|
-| Rust → Brief | 1127 ns (native Rust 1101 — **2.4%**) |
-| C → Brief (.a) | 1092 ns (native C 1082 — **1%**) |
-| Python → Brief (ctypes) | 3057 ns (200k-call bench) |
-| Python → Brief (native ext) | **1297 ns** (**2.4×** vs ctypes) |
-| Python → Brief `add` (ctypes) | 1058 ns |
-| Python → Brief `add` (native ext) | **179 ns** (**6×** — native CPython speed) |
+The authoritative numbers are the **zero-friction gate** (§15) — Brief vs each
+host writing the same function natively. Quick reference (feature_hash
+count=1000, ns/call):
+
+| host | Brief | native | ratio |
+|------|-------|--------|-------|
+| C | 1098 | 1100 | 1.00 |
+| C++ | 1107 | 1094 | 1.01 |
+| Java | 1116 | 1122 | 1.00 |
+| Go | 1189 | 1107 | 1.07 |
+| Lua | 1162 | 12309 | **0.09** |
+| Python | 1179 | 229794 | **0.01** |
+| Node | 1282 | 190498 | **0.01** |
 
 - The `.a` path runs `opt -passes='default<O3>'` before llc so the emitted loop
   is fully SSA (a plain `llc -O3` in LLVM 18.1.3 did not SROA the transaction
   loop's allocas).
-- The boundary is a single C-ABI call (~26 ns/call); the work dominates.
-- The native extension's pure-call overhead is ~179 ns — the Python method
-  dispatch + per-category parse/build in the generated shim. The compute-heavy
-  case sits at the native compute floor (feature_hash's FNV-1a loop is ~1080 ns
-  of real work; the Python method adds only ~217 ns).
+- The boundary is a single C-ABI call; the compute dominates. Interpreted hosts
+  get Brief's native-machine-code compute and win by 1–2 orders of magnitude.
 
 ## 10. Native Python extension (no ctypes)
 
@@ -225,9 +249,10 @@ $ python3 -c "import rank; print(rank.feature_hash(1000, 42))"
 ```
 
 - The shim is a single `.c`: a `PyInit_<bridge>` module with one method per
-  export. Per-category parse/build snippets (in `config/glue.dbvl`, the python
-  target's `native.*` templates) marshal natively — Python `int`/`float`/`str`
-  in, native Python values out. String params use `PyUnicode_AsUTF8AndSize`
+  export (`METH_FASTCALL` — the argument tuple is skipped). Per-category
+  parse/build snippets (in `lib/glue/python/glue.dbvl`, the python target's
+  `native.*` templates) marshal natively — Python `int`/`float`/`str` in,
+  native Python values out. String params use `PyUnicode_AsUTF8AndSize`
   (limited API ≥ 3.10); `#String` handles are the CStr/Brief pointer.
 - The `CStr <-> String` meld (`lib/glue/c.bv`) makes boundary functions
   cast-free: `let s: String = name;` needs no `as`, and the marshalling inserts
@@ -317,9 +342,10 @@ NUL-invariant `[len][bytes][\0]` region — zero-copy read from every host
 (`C.GoString`, `NewStringUTF`, `lua_pushstring`, `Marshal.PtrToStringUTF8`,
 `PyUnicode_FromString`, `napi_create_string_utf8`).
 
-**Timing** (feature_hash count=1000, ns/call, interleaved median): C 1223,
-C++ 1229, Lua 1200, Java 1160 (JIT), Node 1260, Go 1302, Python 1430 — all
-within ~17% of native C. See `docs/plans/2026-08-04-ship-common-language-environments.md`.
+**The speed table** (feature_hash count=1000, median ns/call — see §9 and
+`docs/architecture/glue-ffi.md` §6): compiled hosts at parity (C 1.00, C++ 1.01,
+Java 1.00, Go 1.07), interpreted hosts won by Brief 1–2 orders of magnitude
+(Lua 0.09, Python 0.01, Node 0.01).
 
 ## 15. The zero-friction FFI gate
 
@@ -331,23 +357,24 @@ with `BRIEF_RUN_GATE=1 cargo test --test gate`.
 **Gate A — Brief vs native feature_hash (median):**
 | host | ratio | |
 |------|-------|---|
-| C | 1.03 | parity |
+| C | 1.00 | parity |
 | C++ | 1.01 | parity |
-| Java | 0.95 | Brief faster (JIT) |
-| Go | 1.12 | cgo + compute |
-| Lua | 0.07 | Brief 14× |
-| Python | 0.004 | Brief 238× |
-| Node | 0.01 | Brief 192× |
+| Java | 1.00 | parity (JIT) |
+| Go | 1.07 | parity (cgo) |
+| Lua | 0.09 | Brief 11× |
+| Python | 0.01 | Brief 195× |
+| Node | 0.01 | Brief 149× |
 
 Compiled hosts are at parity; interpreted hosts get Brief's native-machine-code
 compute and win by 1–2 orders of magnitude.
 
-**Gate B — dispatch (Brief add vs native internal add):** Python 0.63 (the
+**Gate B — dispatch (Brief add vs native internal add):** Python 0.77 (the
 `METH_FASTCALL` shim dispatches *faster* than Python's own function call),
-Lua 1.19, C 1.23, C++ 1.44, Node 2.15, Java 5.99, Go 143×. Node/Java/Go sit at
+C 1.07, C++ 1.09, Lua 1.10, Node 2.17, Java ~6×, Go ~70×. Node/Java/Go sit at
 their structural FFI bounds (NAPI/JNI/cgo — the host's own foreign-call cost).
 
 The gate keeps the native sink live (Go's dead-code eliminator stripped a
 dead timed loop → bogus sub-1ns/iter numbers) and measures Go native in a
 pure-Go binary (a cgo-linked binary distorted it). See
-`docs/plans/2026-08-04-zero-friction-ffi-gate.md`.
+`docs/plans/2026-08-04-zero-friction-ffi-gate.md` and
+`docs/architecture/glue-ffi.md` §7.

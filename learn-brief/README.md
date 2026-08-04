@@ -64,12 +64,12 @@
    - Trimming and padding
    - Split and join
 
-8. **[07-ffi.md](07-ffi.md)** - Foreign Function Interface
-    - FFI signatures (`frgn`)
-    - Error handling
-    - Metropolitan FFI (zero-copy)
-    - Type mapping
-    - Complete examples
+ 8. **[07-ffi.md](07-ffi.md)** - Foreign Function Interface
+    - Importing with `frgn`
+    - Exporting with `export defn`
+    - The three commands: `bindings` / `export` / `extension`
+    - Adding a new language (a `lib/glue/<lang>/` folder)
+    - The zero-friction speed table
 
 ### Advanced
 

@@ -1,272 +1,171 @@
-# Metropolitan FFI — Foreign Function Interface
+# FFI — Make Brief the central language
 
-Brief's **Metropolitan FFI** is the umbrella architecture for all cross-language
-interoperability. It has two mechanisms:
+Brief compiles to a native library that any other language can call at
+**native speed**. There are two directions:
 
-| Mechanism | When | What it does |
-|-----------|------|-------------|
-| **GLUE** | Compile time | Exports Brief functions as native wrappers (Rust crate, Python module, Node module) |
-| **Metropipe** | Runtime | Shared memory IPC between running processes |
+| Direction | Keyword / command | What it does |
+|-----------|-------------------|-------------|
+| **Import** | `frgn ... from "..."` | Call a foreign (C/runtime) function from Brief |
+| **Export** | `export defn ...` + `briefc bindings\|export\|extension` | Expose a Brief function to any host language |
 
-Both use the same `frgn` declaration syntax for importing foreign functions,
-and the same `export defn` syntax for exporting Brief functions.
+Every language is a folder in `lib/glue/<lang>/` — config + templates. The
+compiler has zero language knowledge; adding a language is adding a folder.
 
 ---
 
-## 1. `frgn` — Importing Foreign Functions
-
-Declare functions from C, Rust, Python, or any other language:
+## 1. `frgn` — importing foreign functions
 
 ```brief
-// C function: int64_t getenv_brief(const char* key);
-// Brief calls it "frgn__getenv_brief"
-frgn __getenv_brief(key: String) -> String as frgn__getenv_brief
-  from "lib/runtime/brief_rt.c" fallback "";
-```
-
-**The Syntax:**
-
-```
-frgn <C_symbol>(<params>) [-> <ret>] [as <brief_name>] from <source> [fallback <expr>];
+// frgn <C_symbol>(<params>) [-> <ret>] [as <brief_name>] from <source> [fallback <expr>];
+frgn __read_file__(path: String) -> Int as brief_read_file_raw
+  from "lib/runtime/brief_rt.c" fallback 0;
+frgn __write_file__(path: String, data: String) -> Int as brief_write_file
+  from "lib/runtime/brief_rt.c" fallback 0;
 ```
 
 | Part | Meaning |
 |------|---------|
-| `frgn` | Keyword — this is an import declaration |
-| `__getenv_brief` | The **C/foreign symbol name** — what the linker sees |
-| `(key: String)` | Parameters with Brief types |
-| `-> String` | Return type (optional, defaults to void) |
-| `as frgn__getenv_brief` | Brief-side name — what Brief code uses at call sites |
-| `from "..."` | **Required** — provenance of the foreign module (path or registry name) |
-| `fallback ""` | Value to use if the foreign function cannot be called |
+| `frgn` | This is an import declaration |
+| `__read_file__` | The **C/runtime symbol** — what the linker sees |
+| `(path: String)` | Parameters with Brief types |
+| `-> Int` | Return type (optional, defaults to void) |
+| `as brief_read_file_raw` | The **Brief-side name** — what Brief code calls |
+| `from "..."` | Provenance: an inlined C source, a GLUE bridge target, or a linked library |
+| `fallback 0` | Value to use if the foreign function cannot be called |
 
-### Calling Imported Functions
-
-Imported functions resolve through the GLUE pipeline and produce either inline
-calls (C/Rust sources) or bridge calls (Python/JavaScript):
+Call it like any Brief function:
 
 ```brief
-import "std/env.bv";
-
-node print_env [!env_printed][env_printed == true] {
-    let home = frgn__getenv_brief("HOME");
-    when home.is_ok() {
-        frgn__print_str(home.value);
-    };
-    &env_printed = true;
-    term;
-};
+let w: Int = brief_write_file(path, saved);   // writes via the runtime
 ```
 
-### Common Patterns
+The `from` sources:
 
-```brief
-// C symbol has no underscore prefix — use `as` for clear naming
-frgn XXH64(data: Int, len: Int, seed: Int) -> Int as frgn__xxh64
-  from "lib/xxhash.c" fallback 0;
+| Source form | What happens |
+|-------------|-------------|
+| `from "lib/runtime/brief_rt.c"` | Compiles the C source and links it |
+| `from "something.py"` / `.mjs` | Routes through a GLUE bridge target |
+| `from "link/library.so"` | Links a system library |
 
-// Void return — no `->` needed
-frgn log_message(msg: String) from "lib/runtime/brief_rt.c" fallback;
-
-// Result type with custom error
-frgn read_file(path: String) -> Result<String, IOError>
-  from "lib/runtime/brief_rt.c" fallback Err(IOError { message: "" });
-```
-
-### Naming Convention
-
-FFI declarations use the C/foreign symbol name as the first identifier,
-optionally renamed with `as`:
-
-```brief
-frgn __getenv_brief(key: String) -> String as get_env from "lib/runtime/brief_rt.c" fallback "";
-```
-
-The `as` clause provides the Brief-side name. When omitted, the C symbol
-name is used directly. There is no required `frgn__` prefix convention —
-use descriptive Brief-style names in the `as` clause:
-
-```brief
-frgn XXH64(data: Int, len: Int, seed: Int) -> Int as hash64 from "link/xxhash/xxhash.c" fallback 0;
-```
-
-### `from` Sources
-
-| Source form | Example | What happens |
-|-------------|---------|-------------|
-| `from "path/to/file.c"` | `from "lib/runtime/brief_rt.c"` | Compiles C source and links it |
-| `from "<registry_name>"` | `from "<xxhash.c>"` | Resolves via TypeUniverse registry |
-| `from "link/library.so"` | `from "link/libm.so.6"` | Links to system library |
+`import "glue/c.bv"` brings the C boundary types (`CStr`, `CDouble`, …) and the
+`meld CStr -> String` declaration, so boundary modules' vocabulary applies to
+your bridge.
 
 ---
 
-## 2. `export defn` — Exporting Brief Functions
+## 2. `export defn` — exporting Brief functions
 
-Expose a Brief function so foreign code can call it:
+The export signature **is** the boundary contract:
 
 ```brief
-export defn brief_pp_type(n: String) -> String {
-    term pp_type(n);
+import "glue/c.bv";
+
+export defn echo(name: CStr) -> CStr { term name; };
+export defn greet(name: CStr) -> CStr {
+    let s: String = name;      // the CStr ↔ String meld: no `as` needed
+    term s;
 };
+export defn join(a: CStr, b: CStr) -> CStr { term a + b; };
+export defn identity(x: CDouble) -> CDouble { term x; };
 ```
 
-The `export` keyword creates a `dso_local` symbol that's visible to the linker.
-At LTO time, LLVM can inline across the boundary — zero-cost calls.
+Boundary types live in `lib/glue/c.bv`: `CStr` (`#String<C_String>`),
+`CFloat`, `CDouble`, `CI64`, `CI32`, `CBool`, `CChar`, `CPtr`.
 
-### Exporting for Specific Languages
+A **stateful** export (one that reads or writes a state field) automatically
+carries the `%state` pointer:
 
-Use the `brief export` CLI to generate language-specific wrappers:
+```brief
+let saved: String = "";
+export defn read() -> CStr { term saved; };   // takes the state handle
+```
+
+The composite String crosses every boundary as a pointer into a state-owned
+`[len][bytes][\0]` region — the host reads it zero-copy in place.
+
+### The three commands
+
+| Command | What you get |
+|---------|-------------|
+| `briefc bindings <bridge> <lang>` | Declarative bindings (C header, C# class) |
+| `briefc export <bridge> <lang>` | A language package (Go package, Java class, Rust crate) |
+| `briefc extension <bridge> <lang>` | A **native extension** (Python `.so`, Node `.node`, Java JNI `lib*.so`, Lua C module) |
 
 ```bash
-# Generate a compilable Rust crate with safe wrappers
-brief export my_bridge.bv rust --out ./rust-crate
+# A C-callable static + shared library:
+briefc build my_bridge.bv --library --out build/
+#   → libmy_bridge.a  +  my_bridge.so
 
-# Generate a ctypes Python module
-brief export my_bridge.bv python --out ./py-module
+# A native Python extension (no ctypes):
+briefc extension my_bridge.bv python --out build/
+$ python3 -c "import my_bridge; print(my_bridge.feature_hash(1000, 42))"
 
-# Generate an ffi-napi Node.js module
-brief export my_bridge.bv node --out ./node-module
+# A NAPI Node addon (no npm):
+briefc extension my_bridge.bv node --out build/
+$ node -e "const b = require('./my_bridge.node'); console.log(b.join('foo','bar'))"
+
+# A Go cgo package:
+briefc export my_bridge.bv go --out build/
+
+# A Java JNI shim + class:
+briefc extension my_bridge.bv java --out build/
+briefc export my_bridge.bv java --out build/
 ```
-
-Adding a new language = adding a `[lang]` section to `lib/glue.toml` — zero
-Rust changes.
-
-### How Export Works
-
-The `brief export` command:
-
-1. Compiles the bridge `.bv` file through the **full LLVM backend** (real
-   function bodies, no `ret i64 0` stubs)
-2. Reads the language target's configuration from `lib/glue.toml`
-3. For each exported function, generates:
-   - A **safe wrapper** using the language's native types (from `protocols`)
-   - An **FFI declaration** using the C ABI types (from `c_abi` fields)
-   - **Conversion expressions** when native and C ABI types differ
-4. Outputs a complete crate/module with the bridge `.so`
-
-The generated wrappers handle:
-- State allocation and initialization (`init_state()`)
-- Type conversion between native and C ABI representations
-- Proper `state` pointer passing to every exported function
 
 ---
 
-## 3. Protocol-Driven Type Mapping
+## 3. Adding a new language
 
-The type mapping between Brief types and foreign types is driven by
-**protocol categories** (`#String`, `#Int`, `#Float`, `#Bits`), not by
-Brief-type-specific rules.
+Add a folder `lib/glue/<lang>/` — no compiler changes:
 
-**In `lib/glue.toml`:**
-```toml
-[rust.protocols]
-"#String" = { native = "str", c_abi = "i64" }
-"#Int" = { native = "i64", c_abi = "i64" }
-"#Float" = { native = "f64", c_abi = "double" }
-```
+1. **`types.bv`** — boundary declarations (usually `import "glue/c.bv";`).
+2. **`glue.dbvl`** — the target: `protocols` (category → native / C-ABI),
+   `conversions` (`to_abi`/`from_abi`), `state`, `param_decl`, and the
+   **toolchain recipe** (`native_include_cmd`, `native_suffix`,
+   `native_link_cmd`, `native_cc`, `native_prefix`).
+3. **Templates** — `bindings.*`, `templates.*` (with `{{exports}}`), and/or
+   `native.*` (the extension shim: module, method, per-category parse/build).
+4. **A test** — render assertion + toolchain-guarded round-trip.
 
-**Resolution flow:**
-1. A Brief `String` parameter has `CastTo(#String)` in the type universe
-2. The protocol is `#String` → look up in TOML → native = `"str"`, c_abi = `"i64"`
-3. The wrapper uses `str` as the parameter type, the FFI uses `i64`
-4. The conversion is: `n as i64` (pointer → integer)
-
-For **Rust** (calling convention `"lto"`), the generated wrapper:
-
-```rust
-pub fn brief_pp_type(n: *mut u8) -> *mut u8 {
-    unsafe { ffi::brief_pp_type(STATE, n as i64) as *mut u8 }
-}
-```
-
-The `protocols` section replaces the old `type_map` + `c_type_map` + `conversions`
-system — only protocol categories appear in the TOML.
+`briefc bindings|export|extension <bridge> <lang>` finds `lib/glue/<lang>/` by
+name and renders through the generic pipeline. See
+`docs/architecture/glue-ffi.md` §5 for the complete anatomy.
 
 ---
 
-## 4. Protocol Path Optimization
+## 4. The speed table (zero friction)
 
-When a frgn call crosses a language boundary, the BFS in `find_cast_path()`
-computes the cheapest transform chain. If both sides speak the same protocol
-with compatible layouts, the boundary compiles to **zero instructions**:
+`feature_hash(count=1000)` — **Brief vs the host writing it natively**
+(median ns/call; run the gate with `BRIEF_RUN_GATE=1 cargo test --test gate`):
 
-```
-Brief String (SSO {i64,i64}) → #String → Rust &str ({ptr, len})
-  Step 1: CastTo(#String) — identity (both layouts represent UTF-8)
-  Step 2: CastFrom(#String) — identity (both are {ptr, len} UTF-8)
-  Total cost: 0 → LLVM eliminates the boundary at LTO time
-```
+| host | Brief | native | ratio |
+|------|-------|--------|-------|
+| C | 1098 | 1100 | 1.00 |
+| C++ | 1107 | 1094 | 1.01 |
+| Java | 1116 | 1122 | 1.00 |
+| Go | 1189 | 1107 | 1.07 |
+| Lua | 1162 | 12309 | **0.09** |
+| Python | 1179 | 229794 | **0.01** |
+| Node | 1282 | 190498 | **0.01** |
 
-If the types differ in layout, the bridge emits the necessary transforms:
-
-| Transform | When | IR Emitted |
-|-----------|------|-----------|
-| **Identity** | Same layout | Nothing |
-| **Bitcast** | Same byte width | `%r = bitcast T1 %v to T2` |
-| **MeldShuffle** | Field reordering | `extractvalue`/`insertvalue` |
-| **ProtocolTransform** | Real conversion needed | `call @_CastTo_#Cat(T %v)` |
+Compiled hosts are at parity. **Interpreted hosts get Brief's native-machine-code
+compute and win by 1–2 orders of magnitude** — Python calling Brief is like
+calling a super-efficient version of Python. Even a zero-work call dispatches
+faster than Python's own function call (the `METH_FASTCALL` shim).
 
 ---
 
-## 5. Metropipe (Runtime Shared Memory)
+## 5. Summary
 
-For inter-process communication at runtime, use **Metropipe**:
+| Task | Tool |
+|------|------|
+| Call a C/runtime function | `frgn ... as ... from "file.c" ...` |
+| Expose a Brief function | `export defn ...` |
+| Build a linkable library | `briefc build <bridge>.bv --library` |
+| C/C++ bindings | `briefc bindings <bridge> c` |
+| Native extension (Python/Node/Java/Lua) | `briefc extension <bridge> <lang>` |
+| Language package (Go/Java/Rust) | `briefc export <bridge> <lang>` |
+| Add a language | a `lib/glue/<lang>/` folder |
+| Verify the zero-friction gate | `BRIEF_RUN_GATE=1 cargo test --test gate` |
 
-```brief
-import "std/metro_bridge.bv";
-
-node exchange_data [data_ready][data_ready == true] {
-    let ch = frgn__metro_create_channel("my_channel", 1024, 1024);
-    frgn__mmap_write(addr, 0, data, length);
-    frgn__atomic_store_u32(addr, 0, 1);  // signal readiness
-    &data_ready = true;
-    term;
-};
-```
-
-Metropipe provides:
-- Shared memory segments with atomic operations
-- Signal triggers for data availability notification
-- Consensus protocol for multi-process coordination
-
----
-
-## 6. Target Integer Width (`--int-bits`)
-
-The `--int-bits <N>` CLI flag controls the target integer width for compiled
-output. Supported values:
-
-| Value | Effect |
-|-------|--------|
-| `64` (default) | All `Int` values are i64. Best performance on 64-bit hosts. |
-| `32` | All `Int` values are i32. Required for WASM targets (avoids BigInt). |
-| `16` | All `Int` values are i16. For embedded targets. |
-| `8` | All `Int` values are i8. For tiny embedded targets. |
-
-The narrowing pass (contracts) can prove narrower widths — the declared
-`--int-bits` is the maximum integer width the backend will use.
-
-**Example for WASM:**
-```bash
-briefc build myfile.bv --llvm --int-bits 32
-```
-
-This emits i32 for all `Int` values, avoiding JavaScript BigInt
-interop issues.
-
----
-
-## 7. Summary
-
-| Task | Syntax | Tool |
-|------|--------|------|
-| Call a C function | `frgn ... as ... from "file.c" ...` | Compiler |
-| Call a Python function | `frgn ... as ... from "file.py" ...` | GLUE bridge |
-| Export to Rust | `export defn ...` + `brief export ... rust` | GLUE |
-| Export to Python | `export defn ...` + `brief export ... python` | GLUE |
-| Process IPC | `import "std/metro_bridge.bv"` | Metropipe |
-
-The `frgn` and `export` syntax gives you import/export for any language.
-The protocol system ensures type safety at the boundary. The GLUE bridge
-handles code generation for the wrapper. Metropipe handles runtime IPC.
-All under the **Metropolitan FFI** umbrella.
+Deep reference: `docs/architecture/glue-ffi.md` and `docs/guides/ffi-and-export.md`.
