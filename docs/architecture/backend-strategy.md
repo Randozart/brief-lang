@@ -60,20 +60,23 @@ File extension determines which backend (and `CompilationTarget`) is used:
 | `.ebv`/`.sebv` | LLVM | `Embedded` | Bare-metal LLVM, `halt#` emits `wfi` |
 | `.cbv` | CIRCT | `Circuit` | Pure logic graph → MLIR |
 
-Routing dispatch is in `run_build()` (`src/main.rs:984`). The helpers
-`is_embedded_extension()` and `is_circuit_extension()` detect `.ebv`/`.cbv`
-files. `run_compile_unified()` infers target spec from extension.
+Routing dispatch is `run_build()` (`src/main.rs:453`) → `compile_build_opts()`
+(`src/compile.rs`), which dispatches on `opts.backend` (inferred from the file
+extension via `config/targets.dbvl`):
+- `.bv`/`.ebv` → LLVM backend (`BackendKind::Llvm`)
+- `.cbv` → CIRCT (`BackendKind::Circt`)
+- `.rbv` → Webstack (`BackendKind::Webstack`)
+- `.abv` → SPIR-V (`BackendKind::Gpu`)
+- `.vbv` → VM (`BackendKind::Vm`)
 
-`run_compile_unified()` dispatch:
-- `"llvm"` → `run_llvm_compile()` (handles `.bv`, `.sbv`, `.ebv`, `.sebv`)
-- `"circt"` → `run_cbv()` (handles `.cbv`)
-- `"react"` → RBV/Webstack path (handles `.rbv`, `.srbv`)
-- `"verilog"`/`"vhdl"` → errors (backends removed)
+There is no `is_embedded_extension()`/`is_circuit_extension()` helper (the old
+`run_compile_unified()` routing was removed); `.ebv` detection is
+`get_extension(file_path) == ".ebv"` in `compile.rs`.
 
 ## Embedded LLVM Mode (.ebv) (2026-06-19)
 
-When `is_embedded_extension()` is true (`.ebv`/`.sebv` files), the LLVM backend
-activates restricted "embedded" mode:
+When the source is an `.ebv` file (`get_extension == ".ebv"`), the LLVM backend
+activates embedded mode:
 
 | Feature | Status | Detail |
 |---------|--------|--------|
@@ -81,7 +84,8 @@ activates restricted "embedded" mode:
 | `Intrinsic::Halt` | ✅ | `halt#()` emits `asm("wfi")` |
 | `is_embedded` flag | ✅ | `LlvmBackend.is_embedded: bool` + `with_embedded_mode()` builder |
 | `term!` → `wfi` | ✅ | `Statement::TermBang` emits `wfi` asm before `ret` in embedded mode |
-| Reject heap types | ✅ | `check_embedded_restrictions()` warns on `String`, `List`, `HashMap`, etc. |
+| Static bump heap | ✅ | `@embedded_heap` (configurable via `ir-lowering arena_initial_size`, default 64KB) — `Malloc#`/`Alloc#`/`Free#` use it, no `@malloc`/`@free`/`@realloc` (2026-08-04, `f2b57043`) |
+| Heap types (String/List/…) | ✅ (warn) | Legal via the static arena; `check_embedded_restrictions` emits a `TargetWarning`, not an error (2026-08-04 — the old hard rejection was a `.ebv`/`.cbv` entanglement vestige; the heap rejection belongs to `.cbv`/CIRCT, not `.ebv`) |
 | Reject threading | ✅ | ThreadCreate, MutexLock, CondvarWait etc. produce `TargetError` |
 | Freestanding linker | ⬜ | `-ffreestanding -nostdlib -nostartfiles` |
 | Unbounded recursion | ⬜ | Static call-graph depth check |
@@ -89,12 +93,12 @@ activates restricted "embedded" mode:
 
 ### Restrictions Checker
 
-`check_embedded_restrictions()` (`src/backend/llvm/mod.rs:892`) scans the typed AST:
-- **State declarations**: rejects `String`, `Data`, `Custom("List")`, `Custom("HashMap")`, `Custom("HashSet")`, `Custom("Stack")`, `Custom("Queue")`, `Custom("StringBuilder")`
-- **Threading intrinsics**: rejects `ThreadCreate`, `ThreadJoin`, `ThreadExit`, `MutexLock`, `MutexUnlock`, `CondvarWait`, `CondvarSignal`, `CondvarBroadcast`
+`check_embedded_restrictions()` (`src/backend/llvm/mod.rs:1519`) scans the typed AST:
+- **State/local declarations of heap types** (`#String`, `#Data`, `List`, `HashMap`, …): emits a **`TargetWarning`** that the value uses the finite static bump arena — NOT an error (2026-08-04 reframe).
+- **Threading intrinsics**: rejects `ThreadCreate`, `ThreadJoin`, `ThreadExit`, `MutexLock`, `MutexUnlock`, `CondvarWait`, `CondvarSignal`, `CondvarBroadcast` — bare metal has no threads.
+- **Unbounded recursion**: warns (no stack growth).
 
-Called from `generate()` before any code emission. Errors are collected as
-warnings (non-fatal for now, will become hard errors in strict mode).
+Called from `generate()` before any code emission. Warnings are non-fatal.
 
 ## LLVM Backend (Split into Subdirectory)
 

@@ -234,7 +234,8 @@ the `.ebv` seam); `to_string` works; no `IntToStr#` references remain.
 ## Phase 4 — `.ebv` Freestanding Heap + Stdlib: The Independence Proof
 
 **Status: IN PROGRESS (2026-08-04).** Wiring done (`70f596f9`, `c7f25a95`);
-the heap reframe (below) is the active work.
+static bump arena + heap-rejection downgrade done (`f2b57043`). Remaining: the
+C-free `.ebv` stdlib/prelude (see "Remaining" below).
 
 **Goal:** prove Brief can hold its own as a systems language without C — a real
 `.ebv` freestanding target with a **heap** (static bump arena, no `@malloc`),
@@ -287,25 +288,26 @@ String/Data support, and the string-conversion stdlib implemented in Brief.
 
 ### Work
 
-**1. Static bump arena for `.ebv`** (the heap, configurable)
-- Extend `emit_arena_alloc` with an embedded branch: a static `.bss` buffer
-  (`@embedded_heap = private global [N x i8] zeroinitializer`) + a bump pointer
-  in `%State`, replacing the `@malloc`/`@free` calls. `Free#` becomes a no-op
-  (arena resets per tick — the existing `emit_arena_reset`/`emit_arena_fini`).
-- The arena size is **configurable**: a `target.<triple>` tuning row in
-  `config/targets.dbvl` (e.g. `embedded_heap_bytes`), with a sensible default
-  (64KB), falling back to the default when absent.
+**1. Static bump arena for `.ebv`** — ✅ DONE (`f2b57043`)
+- `emit_arena_init` embedded branch: the bump pointer targets a static
+  `@embedded_heap` global (configurable size = `ir-lowering arena_initial_size`,
+  default 64KB) — no `@malloc`.
+- `emit_arena_alloc` embedded: grow path yields null (no `@realloc` on bare
+  metal; fixed-size heap).
+- `emit_arena_fini` embedded: skip `@free` (static global lives for the
+  program's lifetime).
 - `Malloc#`/`Alloc#` in `.ebv` mode dispatch to the static arena; the `.ebv`
   default becomes `AllocStrategy::Arena`.
 
-**2. Downgrade `check_embedded_restrictions`**
-- The heap-type rejection (`mod.rs:1497-1503`) becomes a **warning only when no
-  allocator is wired** — once the arena exists, String/Data/List state is legal
-  on `.ebv`.
+**2. Downgrade `check_embedded_restrictions`** — ✅ DONE (`f2b57043`)
+- Heap types (`#String`/`#Data`/List/…) are now a **TargetWarning** (finite
+  static arena), not a TargetError.
 - **Threading intrinsics stay rejected** (genuine: bare metal has no threads).
   Recursion check stays (no stack growth).
+- Tests: `test_embedded_string_state_uses_static_heap` (IR has `@embedded_heap`,
+  no `@malloc` call), `test_embedded_string_state_warns_not_errors`.
 
-**3. `.ebv` string-conversion stdlib** (in this same effort)
+**3. `.ebv` string-conversion stdlib** — ⏳ REMAINING
 - `lib/std/conversions.ebv` provides the cast-lane symbols (`int_to_str`,
   `str_to_int`, `uint_to_str`, `str_to_uint`, `float_to_str`, `str_to_float`,
   `str_to_bool`, `bool_to_str`, `str_first_char`, `char_to_str`) as **Brief
@@ -313,6 +315,17 @@ String/Data support, and the string-conversion stdlib implemented in Brief.
   backend declares when the program defines the symbol.
 - `with_prefer_ebv` means an `.ebv` program importing `std/conversions` picks
   the `.ebv` variant over a `.bv` one.
+
+**3b. C-free `.ebv` prelude** — ⏳ REMAINING (the freestanding-link blocker)
+- The `prelude` plugin (`plugins/parsed/prelude.bv`) imports `std/os/*`,
+  `std/io.bv`, `std/env.bv` — these transitively import `std/brief_rt.bv`
+  which does `import "link/brief_rt.c"`, pulling `brief_rt.o` into EVERY build
+  including `.ebv`. Verified: `nm` on an `.ebv` binary shows `int_to_str` (a
+  brief_rt.c symbol).
+- For a true freestanding `.ebv`, the prelude must be a **C-free variant**
+  (import only `std/types/bootstrap.bv` + C-free compute modules), and the
+  `.ebv` build must skip `brief_rt.c` in `collect_extra_objects`. This is a
+  stdlib restructure (os/* and io/env are C-backed).
 
 **4. Stale docs**
 - `docs/architecture/backend-strategy.md` — fix the `is_embedded_extension()` /
