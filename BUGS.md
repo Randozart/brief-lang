@@ -3444,3 +3444,29 @@ String length/slice computed from a melded input in the pass.
 **Fix direction:** reproduce with a focused boundary-style export (not a defn
 export), compare the length-prefix write in `brief_cstr_to_brief` vs the
 `.^Len` codegen path.
+
+## String slicing returns the whole string (no substring semantics)
+
+**Date:** 2026-08-04
+**Status:** Open — blocks the needs_state pass EXECUTION (the pass type-checks
+and its string-scanning design is complete). Constant-bounds slices
+(`s[0:1]`) are narrowed to `Vector<String,1>` and `.^Len`/`==` on them read the
+WHOLE buffer (brief_char_len(%t0) for both a=whole and c=whole). Dynamic-bounds
+slices (`s[a:b]`) hit the emit_expr.rs:992 arm which only evaluates the bounds
+and RETURNS array_reg — no substring is created. Verified in a linked library:
+`let a = t[1:t .^Len]; a .^Len` returns the WHOLE string's length.
+**Impact:** any Brief code that slices a String (including every scanner in the
+pass: line_end, token_at, has_token, in_section, token_name) computes against
+the whole string. The pass currently panics at `line .^Len` when `line` is a
+`let` from a dynamic slice of a String PARAM (the boxed i64 param is passed to
+brief_char_len as a raw ptr).
+**Fix direction (two paths, pick per plan):**
+  (a) emit a REAL substring for String-typed slices — a `[len][bytes]` copy of
+      chars a..b via a runtime `brief_str_substr` + a `frgn __str_substr(s,
+      a, b) -> String` (the stdlib already declares frgns with String
+      params/returns, but NONE is exercised — the frgn String marshalling
+      (i64 handle vs ptr) is UNVERIFIED and must be tested first), or
+  (b) fix the dynamic-slice codegen to construct a length-prefixed substring
+      inline. Either way, `.^Len`/`==`/concat on slices then need to see the
+      substring, and the param-handle (boxed i64) must be inttoptr'd before
+      slicing.

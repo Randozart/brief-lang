@@ -22,173 +22,165 @@
 //          m metadata (false), o any other (TRUE — conservative)
 //   exprs: D field (TRUE), C call, B binary, U unary, L list, I identifier,
 //          _ other (false)
+//
+// 2026-08-04 (rewrite): the pass is PURE string scanning. `when` is an if
+// guard (not a while loop) in both the interpreter and the LLVM backend, so
+// all iteration is RECURSION. String concat (`+`) codegens a register
+// collision (see BUGS.md) and List<String> element reads return the generic
+// `T`, so no collection is built — sections are located by re-scanning the
+// projection string with `:` slices and `==`.
 
-import "std/string";
-import "std/collections";
 import "glue/c.bv";
 
-// ── linear membership over a name list ────────────────────────────────
-defn in_list(name: String, list: List<String>) -> Bool {
-    foreach(item in list) {
-        when item == name {
-            term true;
-        };
-    };
-    term false;
+// ── char / line primitives ──────────────────────────────────────────────
+
+defn line_end(proj: String, i: Int, n: Int) -> Int {
+    when i >= n { term i; };
+    when proj[i:i+1] == "\n" { term i; };
+    term line_end(proj, i + 1, n);
 };
 
-// ── projection parsing ────────────────────────────────────────────────
-// Parse the whole projection into:
-//   state/regular/txn/intrinsic/export name lists, and a List<List<String> >
-//   of bodies (each [name, token...]).
-
-defn parse_projection(proj: String)
-    -> (List<String>, List<String>, List<String>, List<String>, List<String>, List<List<String> >)
-{
-    let lines: List<String> = split(proj, "\n");
-    let state: List<String> = [];
-    let regular: List<String> = [];
-    let txn: List<String> = [];
-    let intrinsic: List<String> = [];
-    let export: List<String> = [];
-    let bodies: List<List<String> > = [];
-    foreach(line in lines) {
-        let parts: List<String> = split(line, " ");
-        when parts .^Len >= 2 {
-            let key = parts[0];
-            when key == "state" {
-                let i: Int = 2;
-                when i < parts .^Len {
-                    state = state + [parts[i]];
-                    i = i + 1;
-                };
-            };
-            when key == "regular" {
-                let i: Int = 2;
-                when i < parts .^Len {
-                    regular = regular + [parts[i]];
-                    i = i + 1;
-                };
-            };
-            when key == "txn" {
-                let i: Int = 2;
-                when i < parts .^Len {
-                    txn = txn + [parts[i]];
-                    i = i + 1;
-                };
-            };
-            when key == "intrinsic" {
-                let i: Int = 2;
-                when i < parts .^Len {
-                    intrinsic = intrinsic + [parts[i]];
-                    i = i + 1;
-                };
-            };
-            when key == "export" {
-                let i: Int = 2;
-                when i < parts .^Len {
-                    export = export + [parts[i]];
-                    i = i + 1;
-                };
-            };
-            when key == "body" {
-                when parts .^Len >= 3 {
-                    let bname = parts[1];
-                    let cnt = parts[2];
-                    let entry: List<String> = [bname];
-                    let i: Int = 3;
-                    when i < parts .^Len {
-                        entry = entry + [parts[i]];
-                        i = i + 1;
-                    };
-                    bodies = bodies + [entry];
-                };
-            };
-        };
+// ── token extraction ────────────────────────────────────────────────────
+// token_at(line, idx): the idx-th space-separated token (0-based); "" if the
+// line has fewer than idx+1 tokens. The projection uses single spaces.
+defn token_at(line: String, idx: Int) -> String {
+    let n: Int = line .^Len;
+    term token_at_scan(line, 0, n, idx, 0, 0);
+};
+defn token_at_scan(line: String, i: Int, n: Int, idx: Int, cur: Int, start: Int) -> String {
+    when cur == idx {
+        when i >= n { term line[start:n]; };
+        when line[i:i+1] == " " { term line[start:i]; };
+        term token_at_scan(line, i + 1, n, idx, cur, start);
     };
-    term (state, regular, txn, intrinsic, export, bodies);
+    when i >= n { term ""; };
+    when line[i:i+1] == " " { term token_at_scan(line, i + 1, n, idx, cur + 1, i + 1); };
+    term token_at_scan(line, i + 1, n, idx, cur, start);
+};
+
+// has_token(line, name): is `name` one of the line's tokens?
+defn has_token(line: String, name: String) -> Bool {
+    term has_token_scan(line, 0, line .^Len, name, 0);
+};
+defn has_token_scan(line: String, i: Int, n: Int, name: String, start: Int) -> Bool {
+    when i >= n { term line[start:n] == name; };
+    when line[i:i+1] == " " {
+        when line[start:i] == name { term true; };
+        term has_token_scan(line, i + 1, n, name, i + 1);
+    };
+    term has_token_scan(line, i + 1, n, name, start);
+};
+
+// ── section lookup ──────────────────────────────────────────────────────
+// in_section(proj, key, name): is `name` listed in the `key` section line?
+defn in_section(proj: String, key: String, name: String) -> Bool {
+    term scan_sections(proj, 0, proj .^Len, key, name);
+};
+defn scan_sections(proj: String, i: Int, n: Int, key: String, name: String) -> Bool {
+    when i >= n { term false; };
+    when i == 0 && line_has_key(proj, 0, n, key) { term line_has_name(proj, 0, n, key, name); };
+    when proj[i:i+1] == "\n" && line_has_key(proj, i + 1, n, key) { term line_has_name(proj, i + 1, n, key, name); };
+    term scan_sections(proj, i + 1, n, key, name);
+};
+defn line_has_key(proj: String, ls: Int, n: Int, key: String) -> Bool {
+    let le: Int = line_end(proj, ls, n);
+    let line: String = proj[ls:le];
+    let klen: Int = key .^Len;
+    when line .^Len >= klen + 1 && line[0:klen] == key && line[klen:klen+1] == " " { term true; };
+    term false;
+};
+defn line_has_name(proj: String, ls: Int, n: Int, key: String, name: String) -> Bool {
+    let le: Int = line_end(proj, ls, n);
+    let line: String = proj[ls:le];
+    let klen: Int = key .^Len;
+    let rest: String = line[klen+1:line .^Len];
+    term has_token(rest, name);
+};
+
+// section_line(proj, key): the text of the `key` section line ("" if absent).
+defn section_line(proj: String, key: String) -> String {
+    term find_section(proj, 0, proj .^Len, key);
+};
+defn find_section(proj: String, i: Int, n: Int, key: String) -> String {
+    when i >= n { term ""; };
+    when i == 0 && line_has_key(proj, 0, n, key) { term line_text(proj, 0, n); };
+    when proj[i:i+1] == "\n" && line_has_key(proj, i + 1, n, key) { term line_text(proj, i + 1, n); };
+    term find_section(proj, i + 1, n, key);
+};
+defn line_text(proj: String, ls: Int, n: Int) -> String {
+    let le: Int = line_end(proj, ls, n);
+    term proj[ls:le];
+};
+
+// ── token name after ':' ────────────────────────────────────────────────
+defn token_name(tok: String) -> String {
+    term tok_after_colon(tok, 0, tok .^Len);
+};
+defn tok_after_colon(tok: String, i: Int, n: Int) -> String {
+    when i >= n { term ""; };
+    when tok[i:i+1] == ":" { term tok[i+1:n]; };
+    term tok_after_colon(tok, i + 1, n);
 };
 
 // ── the needs_state walk ───────────────────────────────────────────────
-// body_needs(tokens, ...) → Int (0/1): the OR of {o/D → true, I:name in state,
-// C:name in intrinsic/regular/txn → true, C:name in export → transitive}.
-// The token's name is the part after the first ':'.
-defn token_name(tok: String) -> String {
-    let parts: List<String> = split(tok, ":");
-    term parts[1];
+// body_needs(proj, name, depth) → 0/1: does the export's body reference
+// state/regular/txn/intrinsic (directly) or another export (transitively)?
+// depth is the recursion guard (a cycle → conservative 1, like export_abi.rs).
+defn export_needs(proj: String, name: String, depth: Int) -> Int {
+    when depth > 64 { term 1; };
+    term scan_bodies(proj, 0, proj .^Len, name, depth);
 };
-
-defn export_needs(
-    name: String,
-    state: List<String>,
-    regular: List<String>,
-    txn: List<String>,
-    intrinsic: List<String>,
-    export: List<String>,
-    bodies: List<List<String> >,
-    visiting: List<String>
-) -> Int
-{
-    // cycle → conservative true
-    when in_list(name, visiting) {
-        term 1;
+defn scan_bodies(proj: String, i: Int, n: Int, name: String, depth: Int) -> Int {
+    when i >= n { term 0; };
+    when i == 0 && body_matches(proj, 0, n, name) { term body_needs(proj, 0, n, name, depth); };
+    when proj[i:i+1] == "\n" && body_matches(proj, i + 1, n, name) { term body_needs(proj, i + 1, n, name, depth); };
+    term scan_bodies(proj, i + 1, n, name, depth);
+};
+defn body_matches(proj: String, ls: Int, n: Int, name: String) -> Bool {
+    let le: Int = line_end(proj, ls, n);
+    let line: String = proj[ls:le];
+    let t0: String = token_at(line, 0);
+    let t1: String = token_at(line, 1);
+    when t0 == "body" && t1 == name { term true; };
+    term false;
+};
+// Walk the body line's tokens (indices 2..) of `line`.
+defn body_needs(proj: String, ls: Int, n: Int, name: String, depth: Int) -> Int {
+    let le: Int = line_end(proj, ls, n);
+    let line: String = proj[ls:le];
+    term walk_body_tokens(line, 2, proj, depth);
+};
+defn walk_body_tokens(line: String, idx: Int, proj: String, depth: Int) -> Int {
+    let tok: String = token_at(line, idx);
+    when tok .^Len == 0 { term 0; };
+    let kind: String = tok[0:1];
+    let nm: String = token_name(tok);
+    let mine: Int = 0;
+    when kind == "o" || kind == "D" { mine = 1; };
+    when kind == "I" && in_section(proj, "state", nm) { mine = 1; };
+    when kind == "C" && (in_section(proj, "intrinsic", nm) || in_section(proj, "regular", nm) || in_section(proj, "txn", nm)) {
+        mine = 1;
     };
-    let vis = visiting + [name];
-    // find the body
-    let tokens: List<String> = [];
-    let found: Bool = false;
-    foreach(entry in bodies) {
-        when entry[0] == name {
-            let i: Int = 1;
-            when i < entry .^Len {
-                tokens = tokens + [entry[i]];
-                i = i + 1;
-            };
-            found = true;
-        };
+    when kind == "C" && in_section(proj, "export", nm) {
+        let sub: Int = export_needs(proj, nm, depth + 1);
+        when sub == 1 { mine = 1; };
     };
-    when found == false {
-        term 0;
-    };
-    let needs: Int = 0;
-    foreach(tok in tokens) {
-        when needs == 0 {
-            let kind = tok[0:1];
-            let nm = token_name(tok);
-            when kind == "o" || kind == "D" {
-                needs = 1;
-            };
-            when kind == "I" {
-                when in_list(nm, state) {
-                    needs = 1;
-                };
-            };
-            when kind == "C" {
-                when in_list(nm, intrinsic) || in_list(nm, regular) || in_list(nm, txn) {
-                    needs = 1;
-                };
-                when in_list(nm, export) {
-                    when export_needs(nm, state, regular, txn, intrinsic, export, bodies, vis) == 1 {
-                        needs = 1;
-                    };
-                };
-            };
-        };
-    };
-    term needs;
+    when mine == 1 { term 1; };
+    term walk_body_tokens(line, idx + 1, proj, depth);
 };
 
 // ── the export: compute the bitmask ────────────────────────────────────
 export defn needs_state_compute(proj: CStr) -> Int {
     let text: String = proj;
-    let (state, regular, txn, intrinsic, export, bodies) = parse_projection(text);
-    let mask: Int = 0;
-    let i: Int = 0;
-    when i < export .^Len {
-        when export_needs(export[i], state, regular, txn, intrinsic, export, bodies, []) == 1 {
-            mask = mask | (1 << i);
-        };
-        i = i + 1;
-    };
-    term mask;
+    let el: String = section_line(text, "export");
+    term compute_mask(text, el, 0, 0);
+};
+defn compute_mask(text: String, el: String, i: Int, mask: Int) -> Int {
+    let name: String = token_at(el, i + 2);
+    when name .^Len == 0 { term mask; };
+    let needs: Int = export_needs(text, name, 0);
+    let bit: Int = 1 << i;
+    let m2: Int = mask;
+    when needs == 1 { m2 = mask | bit; };
+    term compute_mask(text, el, i + 1, m2);
 };

@@ -82,3 +82,43 @@ handoff) to prove the pattern generalizes. Record the recipe in
 
 `cargo test --lib` green; behavioral byte-identical shims; the transition test
 (Brief result == Rust reference) on a corpus; Praetor on changed dirs.
+
+## Session report (2026-08-04)
+
+Completed, in order:
+
+1. **Serializer** (P1): `src/analysis/needs_state_projection.rs` — flat-preorder
+   token format, tested.
+2. **Real compiler bugs fixed along the way** (each committed with the
+   investigation that found it):
+   - import resolver swallowed imported-file parse errors (`unwrap_or_default`)
+     — now a visible warning; this surfaced a systemic `onst` → `const` typo
+     (546×, 21 `std/os` files), `Slice<T>.prop Size: len` (prop parser needs
+     call syntax), and string.bv's legacy `..` slices.
+   - generic struct layout was silently zeroed: `List<T>.len` collided with
+     `inner.cap` at offset 8 (type_size(Ptr) via universe = 0; normalizer
+     slot-sum read raw rt.bytes = 0 for flexible Int/String; re-registering
+     `type Int: #Int` wiped the Cast.#* properties). List init/push verified.
+   - `List.init` allocated 16 BYTES but advertised cap 16 ELEMENTS (overflow);
+     grow(cap) added (memcpy via `Copy#`).
+   - a let reassigned inside a `when`/if guard demoted to an alloca AT the
+     assignment site → LLVM dominance violation; emit_definition now
+     pre-declares entry allocas for reassigned top-level lets.
+3. **Verified language facts that shaped the pass**: `when` is an if-guard, not
+   a while loop (interpreter + backend agree) → iteration must be recursion;
+   recursion + `build --library` link/run correctly; List init/push/grow run.
+4. **`lib/compiler/needs_state.bv`**: rewritten as PURE string scanning (no
+   List reads — generic `T` element reads and String `+` are broken), recursion
+   for iteration, `:` slices + `==` + `.^Len` for scanning. Type-checks clean.
+
+**Blocked at P2 execution by the String-slicing codegen** (see BUGS.md): both
+constant-bounds (narrowed to `Vector`) and dynamic-bounds slices return the
+whole string — `s[a:b]` never creates a substring, and slicing a boxed String
+param passes the i64 handle to brief_char_len as a raw ptr. The pass therefore
+cannot build as a library yet. Next step: implement `brief_str_substr` in the
+runtime + a `frgn __str_substr(s, a, b) -> String` (verify the frgn String
+marshalling first — no stdlib frgn with String params is currently exercised),
+OR fix the dynamic-slice codegen to construct a length-prefixed substring; then
+test `needs_state_compute` against the Rust reference (`export_abi.rs`) on the
+boundary/node/bridge corpus and proceed to P3 (root build.rs linkage).
+
