@@ -1,0 +1,194 @@
+// needs_state.bv — the first compiler pass written in Brief.
+// 2026-08-04 (plan 2026-08-04-compiler-in-brief-dogfood-ffi): the compiler
+// dogfoods its own GLUE FFI. This pass reads the tagged projection produced by
+// src/analysis/needs_state_projection.rs and computes, per exported defn,
+// whether it carries `ptr %state` — exactly the analysis in
+// src/analysis/export_abi.rs — then returns a needs_state bitmask (bit i =
+// export[i] needs state). The compiler links this .a natively (build.rs) and
+// calls it through the C ABI, the same way any host language calls Brief.
+//
+// Projection format (see needs_state_projection.rs):
+//   ns 1
+//   state <n> <names...>
+//   regular <n> <names...>
+//   txn <n> <names...>
+//   intrinsic <n> <names...>
+//   export <n> <names...>
+//   body <name> <count> <token...>      # token = kind:name, flat preorder
+//
+// Node kinds (mirror export_abi.rs EXACTLY):
+//   stmts: t term, b termbang, e escape, x expression, l let, a assign,
+//          g guarded, i if, f foreach, c block (walked)
+//          m metadata (false), o any other (TRUE — conservative)
+//   exprs: D field (TRUE), C call, B binary, U unary, L list, I identifier,
+//          _ other (false)
+
+import "std/string";
+import "std/collections";
+import "glue/c.bv";
+
+// ── linear membership over a name list ────────────────────────────────
+defn in_list(name: String, list: List<String>) -> Bool {
+    foreach(item in list) {
+        when item == name {
+            term true;
+        };
+    };
+    term false;
+};
+
+// ── projection parsing ────────────────────────────────────────────────
+// Parse the whole projection into:
+//   state/regular/txn/intrinsic/export name lists, and a List<List<String> >
+//   of bodies (each [name, token...]).
+
+defn parse_projection(proj: String)
+    -> (List<String>, List<String>, List<String>, List<String>, List<String>, List<List<String> >)
+{
+    let lines: List<String> = split(proj, "\n");
+    let state: List<String> = [];
+    let regular: List<String> = [];
+    let txn: List<String> = [];
+    let intrinsic: List<String> = [];
+    let export: List<String> = [];
+    let bodies: List<List<String> > = [];
+    foreach(line in lines) {
+        let parts: List<String> = split(line, " ");
+        when parts .^Len >= 2 {
+            let key = parts[0];
+            when key == "state" {
+                let i: Int = 2;
+                when i < parts .^Len {
+                    state = state + [parts[i]];
+                    i = i + 1;
+                };
+            };
+            when key == "regular" {
+                let i: Int = 2;
+                when i < parts .^Len {
+                    regular = regular + [parts[i]];
+                    i = i + 1;
+                };
+            };
+            when key == "txn" {
+                let i: Int = 2;
+                when i < parts .^Len {
+                    txn = txn + [parts[i]];
+                    i = i + 1;
+                };
+            };
+            when key == "intrinsic" {
+                let i: Int = 2;
+                when i < parts .^Len {
+                    intrinsic = intrinsic + [parts[i]];
+                    i = i + 1;
+                };
+            };
+            when key == "export" {
+                let i: Int = 2;
+                when i < parts .^Len {
+                    export = export + [parts[i]];
+                    i = i + 1;
+                };
+            };
+            when key == "body" {
+                when parts .^Len >= 3 {
+                    let bname = parts[1];
+                    let cnt = parts[2];
+                    let entry: List<String> = [bname];
+                    let i: Int = 3;
+                    when i < parts .^Len {
+                        entry = entry + [parts[i]];
+                        i = i + 1;
+                    };
+                    bodies = bodies + [entry];
+                };
+            };
+        };
+    };
+    term (state, regular, txn, intrinsic, export, bodies);
+};
+
+// ── the needs_state walk ───────────────────────────────────────────────
+// body_needs(tokens, ...) → Int (0/1): the OR of {o/D → true, I:name in state,
+// C:name in intrinsic/regular/txn → true, C:name in export → transitive}.
+// The token's name is the part after the first ':'.
+defn token_name(tok: String) -> String {
+    let parts: List<String> = split(tok, ":");
+    term parts[1];
+};
+
+defn export_needs(
+    name: String,
+    state: List<String>,
+    regular: List<String>,
+    txn: List<String>,
+    intrinsic: List<String>,
+    export: List<String>,
+    bodies: List<List<String> >,
+    visiting: List<String>
+) -> Int
+{
+    // cycle → conservative true
+    when in_list(name, visiting) {
+        term 1;
+    };
+    let vis = visiting + [name];
+    // find the body
+    let tokens: List<String> = [];
+    let found: Bool = false;
+    foreach(entry in bodies) {
+        when entry[0] == name {
+            let i: Int = 1;
+            when i < entry .^Len {
+                tokens = tokens + [entry[i]];
+                i = i + 1;
+            };
+            found = true;
+        };
+    };
+    when found == false {
+        term 0;
+    };
+    let needs: Int = 0;
+    foreach(tok in tokens) {
+        when needs == 0 {
+            let kind = tok[0:1];
+            let nm = token_name(tok);
+            when kind == "o" || kind == "D" {
+                needs = 1;
+            };
+            when kind == "I" {
+                when in_list(nm, state) {
+                    needs = 1;
+                };
+            };
+            when kind == "C" {
+                when in_list(nm, intrinsic) || in_list(nm, regular) || in_list(nm, txn) {
+                    needs = 1;
+                };
+                when in_list(nm, export) {
+                    when export_needs(nm, state, regular, txn, intrinsic, export, bodies, vis) == 1 {
+                        needs = 1;
+                    };
+                };
+            };
+        };
+    };
+    term needs;
+};
+
+// ── the export: compute the bitmask ────────────────────────────────────
+export defn needs_state_compute(proj: CStr) -> Int {
+    let text: String = proj;
+    let (state, regular, txn, intrinsic, export, bodies) = parse_projection(text);
+    let mask: Int = 0;
+    let i: Int = 0;
+    when i < export .^Len {
+        when export_needs(export[i], state, regular, txn, intrinsic, export, bodies, []) == 1 {
+            mask = mask | (1 << i);
+        };
+        i = i + 1;
+    };
+    term mask;
+};

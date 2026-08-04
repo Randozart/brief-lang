@@ -601,6 +601,15 @@ impl LlvmBackend {
             Expr::Index(obj, index) => {
                 let obj_reg = self.emit_expr(out, obj, indent);
                 let idx_reg = self.emit_expr(out, index, indent);
+                // 2026-08-01 (D3): a Ptr-index read returns the POINTEE type
+                // (`buckets[h]` on a Ptr<List<...>> → List<...>); a heap List
+                // index returns its ELEMENT type (`List<String>[i]` → String).
+                // Computed early so the load path can inttoptr string elements.
+                let index_elem_ty = match &obj_reg.ty {
+                    Type::Ptr(inner) => (**inner).clone(),
+                    Type::Applied(_, args) if !args.is_empty() => args[0].clone(),
+                    _ => Type::int(),
+                };
                 // 2026-07-18: SVO List indexing — extract inline element.
                 if self.feature_svo
                     && self
@@ -678,7 +687,9 @@ impl LlvmBackend {
                          }
                      }
                  }
-                 if matches!(obj_reg.ty, Type::Ptr(_)) {
+                if matches!(obj_reg.ty, Type::Ptr(_))
+                    || matches!(&obj_reg.ty, Type::Applied(n, _) if n == "List")
+                {
                     let ptr = self.fun.gen_reg();
                     writeln!(
                         out,
@@ -709,8 +720,19 @@ impl LlvmBackend {
                     .ok();
                     // 2026-08-01 (E): `vol let` — Ptr-Index reads emit
                     // `load volatile` (MMIO register arrays).
-                    writeln!(out, "{}{} = load {}{}, ptr {}", indent, v,
-                        if self.fun.volatile_read { "volatile " } else { "" }, "i64", gep).ok();
+                    // 2026-08-04 (compiler-in-Brief): a String element is
+                    // boxed in the i64 list slot — inttoptr it back to a real
+                    // ptr so consumers (brief_str_eq) see a pointer, matching
+                    // how string literals are represented.
+                    if self.is_string_operand(&index_elem_ty) {
+                        let raw = self.fun.gen_reg();
+                        writeln!(out, "{}{} = load {}{}, ptr {}", indent, raw,
+                            if self.fun.volatile_read { "volatile " } else { "" }, "i64", gep).ok();
+                        writeln!(out, "{}{} = inttoptr i64 {} to ptr", indent, v, raw).ok();
+                    } else {
+                        writeln!(out, "{}{} = load {}{}, ptr {}", indent, v,
+                            if self.fun.volatile_read { "volatile " } else { "" }, "i64", gep).ok();
+                    }
                 } else {
                     writeln!(
                         out,
@@ -723,14 +745,10 @@ impl LlvmBackend {
                     )
                     .ok();
                 }
-                // 2026-08-01 (D3): a Ptr-index read returns the POINTEE type
-                // (`buckets[h]` on a Ptr<List<...>> → List<...>) so a method
-                // call on it resolves the obj; was Int (the fallback), which
-                // broke '.push()' dispatch.
-                let elem_ty = match &obj_reg.ty {
-                    Type::Ptr(inner) => (**inner).clone(),
-                    _ => Type::int(),
-                };
+                // 2026-08-04 (compiler-in-Brief): the element type was computed
+                // early (index_elem_ty) so the load path could inttoptr string
+                // elements.
+                let elem_ty = index_elem_ty.clone();
                 TypedRegister {
                     name: v.to_string(),
                     ty: elem_ty,
@@ -1035,7 +1053,11 @@ impl LlvmBackend {
                     i + 1
                 )
                 .ok();
-                writeln!(out, "{}store i64 {}, ptr {}", indent, e.name, slot).ok();
+                // 2026-08-04 (compiler-in-Brief): list slots are i64 — a
+                // String element (a ptr to [len][bytes]) must be ptrtoint'd
+                // before the store, or `store i64 <ptr>, ptr` is invalid IR.
+                let e64 = self.adapt_to_i64(out, indent, &e);
+                writeln!(out, "{}store i64 {}, ptr {}", indent, e64, slot).ok();
             }
             writeln!(out, "{}{} = ptrtoint ptr {} to i64", indent, v, hdr).ok();
         }
@@ -1485,7 +1507,23 @@ impl LlvmBackend {
         };
         for (i, (reg, rty)) in arg_regs.iter().enumerate() {
             if let Some((pname, pty)) = params.get(i) {
-                self.fun.let_bindings.insert(pname.clone(), reg.clone());
+                // 2026-08-04 (compiler-in-Brief): a String argument (a real
+                // ptr) binds to a boxed parameter (an i64 handle) — ptrtoint
+                // at the param boundary so `inner.data[len] = val` in the
+                // member body stores an i64, not a ptr. This is the bits-model
+                // invariant: "a String crossing a call boundary is an i64
+                // handle; a String in a register is a ptr."
+                let bound = if self.is_string_operand(rty) {
+                    let boxed = self.adapt_to_i64(
+                        out,
+                        indent,
+                        &TypedRegister { name: reg.clone(), ty: rty.clone() },
+                    );
+                    boxed
+                } else {
+                    reg.clone()
+                };
+                self.fun.let_bindings.insert(pname.clone(), bound);
                 self.fun.let_binding_types.insert(pname.clone(), pty.clone());
                 self.fun.let_original_types.insert(pname.clone(), pty.clone());
             }
@@ -2509,14 +2547,18 @@ impl LlvmBackend {
             }
             crate::ast::BinaryOpKind::Eq => {
                 // 2026-08-01 (B1): String operands compare CONTENT, not
-                // addresses. Both operands are #String → deref via the
-                // runtime's brief_str_eq (length + memcmp on the [len][bytes]
-                // payloads). Matches the interpreter's content Eq (rule #4).
+                // addresses. 2026-08-04 (compiler-in-Brief): fire when EITHER
+                // operand is #String — the typechecker guarantees both are
+                // strings, but the other may have been boxed to i64
+                // (adapt_to_i64 loses the String type), so inttoptr it before
+                // the content compare. Matches the interpreter's content Eq.
                 let is_str = self.is_string_operand(&l.ty)
-                    && self.is_string_operand(&r.ty);
+                    || self.is_string_operand(&r.ty);
                 if is_str {
                     let eq = self.fun.gen_reg();
-                    writeln!(out, "{}{} = call i64 @brief_str_eq(ptr {}, ptr {})", indent, eq, l.name, r.name).ok();
+                    let lp = self.string_ptr(out, indent, l);
+                    let rp = self.string_ptr(out, indent, r);
+                    writeln!(out, "{}{} = call i64 @brief_str_eq(ptr {}, ptr {})", indent, eq, lp, rp).ok();
                     let icmp = self.fun.gen_reg();
                     writeln!(out, "{}{} = icmp ne i64 {}, 0", indent, icmp, eq).ok();
                     writeln!(out, "{}{} = zext i1 {} to i8", indent, v, icmp).ok();
@@ -2547,11 +2589,14 @@ impl LlvmBackend {
             }
             crate::ast::BinaryOpKind::Neq => {
                 // 2026-08-01 (B1): content inequality — mirrors the Eq arm.
+                // 2026-08-04: either-operand + inttoptr, as in Eq.
                 let is_str = self.is_string_operand(&l.ty)
-                    && self.is_string_operand(&r.ty);
+                    || self.is_string_operand(&r.ty);
                 if is_str {
                     let eq = self.fun.gen_reg();
-                    writeln!(out, "{}{} = call i64 @brief_str_eq(ptr {}, ptr {})", indent, eq, l.name, r.name).ok();
+                    let lp = self.string_ptr(out, indent, l);
+                    let rp = self.string_ptr(out, indent, r);
+                    writeln!(out, "{}{} = call i64 @brief_str_eq(ptr {}, ptr {})", indent, eq, lp, rp).ok();
                     let icmp = self.fun.gen_reg();
                     writeln!(out, "{}{} = icmp eq i64 {}, 0", indent, icmp, eq).ok();
                     writeln!(out, "{}{} = zext i1 {} to i8", indent, v, icmp).ok();

@@ -3297,3 +3297,25 @@ heuristic in `brief_str_to_c` misread any Brief String whose length byte is
 printable ASCII (a 35-char path read as '$'); removed — under the composite
 every String IS `[len][bytes][\0]`. `__read_file__`/`__write_file__` free'd the
 now-borrowed `str_to_c` result (P2 zero-copy) — removed the frees.
+
+## String Value Representation Inconsistency (bits model) — compiler-in-Brief blocker
+
+**Date:** 2026-08-04
+**Status:** Open — a systemic backend issue surfaced by the compiler-in-Brief PoC
+(plan 2026-08-04-compiler-in-brief-dogfood-ffi).
+**Symptom:** `inner.data[len] = val` (List.push) emits `store i64 %t7, ptr %t37`
+where `%t7` is a String-literal `ptr` and the slot is `i64` → invalid IR.
+**Root cause:** a String value's representation is inconsistent at the crossing
+points of the bits model — a literal is a real `ptr` (ty=String), but when
+passed as a txn param it is typed `Int` (boxed) while physically still a `ptr`,
+so `adapt_to_i64` (which trusts the `Int` type) emits no `ptrtoint` and the
+store writes a `ptr` into an `i64` slot. Fixed instances: String==literal
+comparison (`string_ptr` inttoptr), list-element store (`adapt_to_i64`), the
+lvalue Index store (`adapt_to_i64`). The remaining instance: String values that
+are typed `Int` but physically `ptr` at param/argument boundaries.
+**Impact:** any Brief code passing a String literal into a collection constructor
+(`List.push("b")`) fails codegen. Blocks the needs_state pass's list handling.
+**Fix direction:** a single point that ptrtoint's a String argument when binding
+it to a param (method call / frgn / call), and inttoptr's on load — an
+invariant: "a String crossing a call/store boundary is an i64 handle; a String
+in a register is a ptr." Audit the call-arg and store sites against it.

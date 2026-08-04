@@ -285,8 +285,13 @@ pub fn emit_statement(backend: &mut LlvmBackend, out: &mut String, stmt: &Statem
                             Expr::Identifier(n) => backend.fun.volatile_locals.contains(n),
                             _ => false,
                         };
+                        // 2026-08-04 (compiler-in-Brief): collection slots are
+                        // i64 — a String element (a ptr) must be ptrtoint'd
+                        // before the store (`inner.data[len] = val`), or
+                        // `store i64 <ptr>, ptr` is invalid IR.
+                        let e64 = backend.adapt_to_i64(out, indent, &val);
                         writeln!(out, "{}store {}i64 {}, ptr {}", indent,
-                            if vol_obj { "volatile " } else { "" }, val.name, gep).ok();
+                            if vol_obj { "volatile " } else { "" }, e64, gep).ok();
                     }
                 }
                 // 2026-08-01 (D3): field store — `obj.name = val`. The receiver

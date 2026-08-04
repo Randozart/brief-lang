@@ -1268,6 +1268,25 @@ impl LlvmBackend {
         self.is_protocol_member(ty, "#String")
     }
 
+    /// 2026-08-04 (compiler-in-Brief): the pointer form of a string operand
+    /// for a content compare. A #String operand that survived unboxed (a
+    /// literal's `@str.N` global) is already a `ptr`; a boxed one
+    /// (adapt_to_i64 lost the String type → i64 handle) must be inttoptr'd
+    /// back to the [len][bytes] pointer before `brief_str_eq`.
+    pub(super) fn string_ptr(
+        &mut self,
+        out: &mut String,
+        indent: &str,
+        reg: &TypedRegister,
+    ) -> String {
+        if self.is_string_operand(&reg.ty) {
+            return reg.name.clone();
+        }
+        let p = self.fun.gen_reg();
+        writeln!(out, "{}{} = inttoptr i64 {} to ptr", indent, p, reg.name).ok();
+        p
+    }
+
     /// Choose the dedup opcode based on float vs int.
     fn dedup_op<'a>(
         a_is_native: bool,

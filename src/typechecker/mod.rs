@@ -627,6 +627,11 @@ pub fn infer_expression(
                 Type::Vector(inner, _) => (**inner).clone(),
                 Type::Ptr(inner) | Type::PtrConst(inner) => (**inner).clone(),
                 Type::Custom(n) if n == "String" => Type::int(),
+                // 2026-08-04 (compiler-in-Brief): indexing a generic returns
+                // its element type param — `List<String>[i]` is String, not
+                // Int. General (any generic's first type param is its
+                // element), so no type-name matching.
+                Type::Applied(_, args) if !args.is_empty() => args[0].clone(),
                 _ => Type::int(),
             };
             Ok((

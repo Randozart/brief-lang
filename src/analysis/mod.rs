@@ -25,6 +25,7 @@ pub mod meld_validation;
 pub mod frgn_dispatch;
 pub mod frgn_guard;
 pub mod export_abi;
+pub mod needs_state_projection;
 pub mod string_concat;
 pub mod boundary_marshalling;
 pub mod slp_isomorphism;
