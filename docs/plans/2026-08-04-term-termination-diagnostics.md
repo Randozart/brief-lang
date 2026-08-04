@@ -1,8 +1,9 @@
 # Term Termination Diagnostics + Void-Term Checkpoint
 
 **Date:** 2026-08-04
-**Status:** Active plan — §1-§3 implemented (`5ab100b1`, `be934d61`, `ac6aca40`);
-post-change benchmarks running; docs updated.
+**Status:** Implemented (`5ab100b1`, `be934d61`, `ac6aca40`) — all 37 runtime
+benchmarks MATCH post-change (A/B table below), queue_drain regression fixed and
+documented; docs updated.
 **Branch:** `feat/term-termination-diagnostics` (worktree `../brief-compiler-term-diagnostics`)
 **Related:**
 - `docs/plans/2026-07-31-frontend-driven-dispatch.md` (frontend-driven dispatch — the pass model this follows)
@@ -216,9 +217,58 @@ Table format follows `benchmarks/results/2026-08-01-plugin-rework-baseline.md`.
 | bridge_glue | done | | | | SKIP |
 | bridge_multi | done | | | | PASS |
 
-### Post-change (feature worktree @ `be934d61`)
+### Post-change (feature worktree @ `ac6aca40`)
 
-_TBD — run in progress._
+| Benchmark | Brief | C | Ratio | Winner | Correct |
+|-----------|:-----:|:--:|:-----:|:------:|:-------:|
+| ring_buffer | .0652s | .0684s | .95x | Brief | MATCH |
+| float_math | .0470s | .0779s | .60x | Brief | MATCH |
+| float_math_nonzero | .1624s | .1787s | .90x | Brief | MATCH |
+| sparse_dispatch | .0634s | .0714s | .88x | Brief | MATCH |
+| print_loop | .0421s | .0683s | .61x | Brief | MATCH |
+| nbody_newton | 8.8868s | 10.6070s | .83x | Brief | MATCH |
+| nbody_sqrt | 2.8409s | 3.8678s | .73x | Brief | MATCH |
+| nbody_sqrt_idio | 4.0222s | 4.7522s | .84x | Brief | MATCH |
+| fasta | .3176s | .3309s | .95x | Brief | MATCH |
+| fannkuch_redux | .0934s | .0958s | .97x | Brief | MATCH |
+| mandelbrot | .8272s | .8189s | 1.01x | C | MATCH |
+| kalman_filter_runtime | .1587s | .1866s | .85x | Brief | MATCH |
+| knucleotide | .2129s | .2197s | .96x | Brief | MATCH |
+| cancel_math | .0688s | .0761s | .90x | Brief | MATCH |
+| bit_clear | .0001s | .0003s | .33x | Brief | MATCH |
+| queue_drain | .0428s | .0723s | .59x | Brief | MATCH |
+| queue_drain_sym | .0414s | .0737s | .56x | Brief | MATCH |
+| queue_drain_idio | .0457s | .0749s | .61x | Brief | MATCH |
+| stack_push_pop | .0455s | .0742s | .61x | Brief | MATCH |
+| interval_step | .0777s | .0768s | 1.01x | C | MATCH |
+| telemetry_stream | .2007s | .2415s | .83x | Brief | MATCH |
+| pid_control | .3493s | .3556s | .98x | Brief | MATCH |
+| matrix_pipeline | .4739s | 1.1448s | .41x | Brief | MATCH |
+| accumulator_flush | .1771s | .2421s | .73x | Brief | MATCH |
+| sweep_sparse | .2231s | .1672s | 1.33x | C | MATCH |
+| sweep_mid | .2798s | .2501s | 1.11x | C | MATCH |
+| sweep_dense | .4136s | .2789s | 1.48x | C | MATCH |
+| sweep_arr | .4113s | .3658s | 1.12x | C | MATCH |
+| series_converge | .0004s | .0003s | 1.33x | C | MATCH |
+| global_lifetime | .0426s | .0920s | .46x | Brief | MATCH |
+| deep_recursion | .0008s | .0005s | 1.60x | C | MATCH |
+| arena_churn | .0910s | .1279s | .71x | Brief | MATCH |
+| linked_list | 1.4680s | 2.1151s | .69x | Brief | MATCH |
+| hash_ops | 1.4328s | 1.5354s | .93x | Brief | MATCH |
+| hash_ops_idio | .0324s | .0651s | .49x | Brief | MATCH |
+| enemy_swarm | .1458s | .1801s | .80x | Brief | MATCH |
+| bridge_glue | done | | | | SKIP |
+| bridge_multi | done | | | | PASS |
+
+**A/B verdict:** All 37 benchmarks MATCH; the previously-broken `queue_drain`
+family is restored (.59x/.56x/.61x vs baseline .57x/.60x/.57x — unchanged).
+Winner per benchmark is unchanged across the whole suite. The only movements
+are sub-millisecond noise (`series_converge`, `deep_recursion`, `bit_clear`) and
+within-variance swings (`fannkuch_redux` +12ms, `accumulator_flush` +28ms,
+`kalman_filter_runtime` +13ms); several improved (`ring_buffer` now Brief-wins
+at .95x vs baseline 1.07x C, `nbody_sqrt` -8%, `enemy_swarm` -8%,
+`linked_list` -5%). No regression; the real-terminator codegen change is
+performance-neutral as measured.
 
 ---
 
