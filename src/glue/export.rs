@@ -557,8 +557,12 @@ pub fn run_extension_cli(file_path: &str, language: &str, out_dir: &str) -> Resu
     if !cc_link.status.success() {
         return Err(format!("link failed:\n{}", String::from_utf8_lossy(&cc_link.stderr)));
     }
-    let _ = std::fs::remove_file(&shim_path);
     let _ = std::fs::remove_file(&shim_o);
+    if std::env::var("BRIEF_KEEP_SHIM").is_ok() {
+        println!("  Shim:    {}", shim_path.display());
+    } else {
+        let _ = std::fs::remove_file(&shim_path);
+    }
 
     println!("  Extension: {}", ext_path.display());
     println!("  Usage:     import {}", bridge_name);
@@ -592,35 +596,30 @@ fn render_native_shim(
             method_defs.push('\n');
             protos.push('\n');
         }
-        // Per-param C type + parse format + call args.
-        let mut fmt = String::new();
-        let mut decls: Vec<String> = Vec::new();
-        let mut parse_args: Vec<String> = Vec::new();
+        // Per-param native parse snippets + call args.
+        let mut parse_code = String::new();
         let mut call_args: Vec<String> = Vec::new();
         if export.needs_state {
             call_args.push("g_state".to_string());
         }
         for (name, ty) in &export.params {
             let key = native_key(ty, type_protocols);
-            let c_type = tpl_for(target, &format!("native.c_type.{}", key), "long long");
-            let f = tpl_for(target, &format!("native.fmt.{}", key), "l");
-            fmt.push_str(&f);
-            decls.push(format!("{} {}", c_type, name));
-            parse_args.push(format!("&{}", name));
+            let parse_tpl = tpl_for(target, &format!("native.parse.{}", key), "");
+            let mut vars: HashMap<String, String> = HashMap::new();
+            vars.insert("name".to_string(), name.clone());
+            parse_code.push_str(&render_template(&parse_tpl, &vars));
             call_args.push(name.clone());
         }
         let ret_key = native_key(&export.return_type, type_protocols);
         let ret_c = tpl_for(target, &format!("native.ret.{}", ret_key), "long long");
-        let build = tpl_for(target, &format!("native.build.{}", ret_key), "PyLong_FromLongLong(r)");
+        let build = tpl_for(target, &format!("native.build.{}", ret_key), "return PyLong_FromLongLong(r);");
 
         let mut vars: HashMap<String, String> = HashMap::new();
         vars.insert("name".to_string(), export.name.clone());
-        vars.insert("parse_decls".to_string(), format!("{};", decls.join("; ")));
-        vars.insert("parse_fmt".to_string(), fmt);
-        vars.insert("parse_args".to_string(), parse_args.join(", "));
+        vars.insert("parse_code".to_string(), parse_code);
         vars.insert("ret_c".to_string(), ret_c.clone());
         vars.insert("call".to_string(), format!("{}({})", export.name, call_args.join(", ")));
-        vars.insert("build".to_string(), build);
+        vars.insert("build_code".to_string(), build);
         if let Some(t) = method_tpl {
             methods.push_str(&render_template(t, &vars));
         }
@@ -635,7 +634,7 @@ fn render_native_shim(
                 format!("{} {}", tpl_for(target, &format!("native.c_type.{}", key), "long long"), name)
             })
             .collect();
-        protos.push_str(&format!("{} {}({}{});", ret_c, export.name, state_proto, param_decls.join(", ")));
+        protos.push_str(&format!("extern {} {}({}{});", ret_c, export.name, state_proto, param_decls.join(", ")));
     }
 
     let module_tpl = target.templates.get("native.module");

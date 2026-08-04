@@ -91,15 +91,23 @@ NUL invariant. The contracts:
 - Full suite green (1459) + `c_driver_boundary` round-trip green.
 
 ### P3 — Meld-driven interchangeability
-- Register melds on the casting graph; the typechecker accepts melded types
-  interchangeably (a `CStr` value usable as a `String` with no explicit `as`).
-- `lib/glue/c.bv` declares the boundary melds (`meld C_String <-> String`, …).
-- The FFI (header, wrappers, shims) derives which representation to present from
-  the meld; with the composite + NUL invariant, the marshalling is zero-copy.
+- **Done (2026-08-03).** `lib/glue/c.bv` declares `meld CStr -> String` — the
+  composite declaration. The typechecker admits melded pairs at assignment,
+  let-init, call args, constructor slots, and term/return without `as`; the
+  boundary marshalling inserts the delta (`cstr_to_brief`/`str_to_c`) at those
+  implicit sites (verified in the emitted IR). `TopLevel::Meld` survives
+  imports so a boundary module's melds apply to the importing bridge.
+- The CStr <-> String composite is asymmetric: String → CStr is zero-copy
+  (P2's in-place `str_to_c`); CStr → String wraps (a bare C string has no
+  length prefix — inherent).
+- `examples/glue-host/boundary.bv` dropped its `as` casts — the meld carries
+  the interchangeability.
 
 ### P4 — Verification + docs
-- Python-native round-trip test (import the extension, call exports, assert
-  results); existing C-driver tests.
+- Python-native round-trip test (`tests/c_driver_python.rs`, toolchain-
+  guarded: imports the extension, calls exports, asserts results — including
+  Python str args through the CStr <-> String meld path); existing C-driver
+  tests all green (1459 lib + 4 glue).
 - `docs/architecture/casting-protocol.md` (composite ABI contract +
   meld-composite layouts), `docs/guides/ffi-and-export.md` §9 (native
   extension), BUGS.md, plan results table.

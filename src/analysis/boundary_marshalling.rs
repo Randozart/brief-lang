@@ -18,7 +18,9 @@ use crate::ast::{Expr, Statement, TopLevel, Type};
 use crate::casting::graph::{CastingGraph, LaneKind};
 use crate::type_universe::TypeUniverse;
 
-/// Rewrite same-category representation casts into their binding calls.
+/// Rewrite same-category representation casts into their binding calls, and
+/// insert the marshalling call at implicit meld-conversion sites (let-init,
+/// term) so codegen emits the delta even without an explicit `as`.
 pub fn rewrite_boundary_marshalling(items: &mut [TopLevel], universe: &TypeUniverse) {
     // Build a casting graph from the program's proto declarations so the
     // marshalling decision (minimal path → binding fn) is protocol-driven.
@@ -27,6 +29,9 @@ pub fn rewrite_boundary_marshalling(items: &mut [TopLevel], universe: &TypeUnive
     // "#String<C_String>"). The universe is not populated until codegen, so
     // the pass resolves custom boundary types from their declarations.
     let mut type_protocols: std::collections::HashMap<String, String> = std::collections::HashMap::new();
+    // 2026-08-03 (P3): meld declarations — the composite interchangeability
+    // pairs (both orderings) that the typechecker admits without `as`.
+    let mut melds: std::collections::HashSet<(String, String)> = std::collections::HashSet::new();
     for item in items.iter() {
         match item {
             TopLevel::ProtocolDef(pd) => {
@@ -37,6 +42,10 @@ pub fn rewrite_boundary_marshalling(items: &mut [TopLevel], universe: &TypeUnive
                     type_protocols.insert(td.name.clone(), p.clone());
                 }
             }
+            TopLevel::Meld(m) => {
+                melds.insert((m.name.clone(), m.target.clone()));
+                melds.insert((m.target.clone(), m.name.clone()));
+            }
             _ => {}
         }
     }
@@ -44,16 +53,19 @@ pub fn rewrite_boundary_marshalling(items: &mut [TopLevel], universe: &TypeUnive
         match item {
             TopLevel::Definition(d) => {
                 let mut env = param_env(&d.parameters);
-                rewrite_body(&mut d.body, &mut env, universe, &graph, &type_protocols);
+                let out = output_type_to_type(d.output_type.as_ref());
+                rewrite_body(&mut d.body, &mut env, universe, &graph, &type_protocols, &melds, out);
             }
             TopLevel::Transaction(t) => {
                 let mut env = param_env(&t.parameters);
-                rewrite_body(&mut t.body, &mut env, universe, &graph, &type_protocols);
+                let out = output_type_to_type(t.output_type.as_ref());
+                rewrite_body(&mut t.body, &mut env, universe, &graph, &type_protocols, &melds, out);
             }
             TopLevel::Export(e) => {
                 if let TopLevel::Definition(d) = e.inner.as_mut() {
                     let mut env = param_env(&d.parameters);
-                    rewrite_body(&mut d.body, &mut env, universe, &graph, &type_protocols);
+                    let out = output_type_to_type(d.output_type.as_ref());
+                    rewrite_body(&mut d.body, &mut env, universe, &graph, &type_protocols, &melds, out);
                 }
             }
             _ => {}
@@ -65,12 +77,22 @@ fn param_env(params: &[(String, Type)]) -> std::collections::HashMap<String, Typ
     params.iter().cloned().collect()
 }
 
+/// The declared output type of a definition/txn, or None.
+fn output_type_to_type(ot: Option<&crate::ast::top::OutputType>) -> Option<Type> {
+    match ot {
+        Some(crate::ast::top::OutputType::Single(t)) => Some(t.clone()),
+        _ => None,
+    }
+}
+
 fn rewrite_body(
     body: &mut [Statement],
     env: &mut std::collections::HashMap<String, Type>,
     universe: &TypeUniverse,
     graph: &CastingGraph,
     type_protocols: &std::collections::HashMap<String, String>,
+    melds: &std::collections::HashSet<(String, String)>,
+    current_output: Option<Type>,
 ) {
     for stmt in body {
         match stmt {
@@ -80,27 +102,68 @@ fn rewrite_body(
             | Statement::Escape(opt) => {
                 if let Some(expr) = opt.as_mut() {
                     rewrite_expr(expr, env, universe, graph, type_protocols);
+                    // 2026-08-03 (P3): an implicit meld conversion at the
+                    // return — `term s;` where s: String and the output is a
+                    // melded CStr — needs the marshalling call inserted too.
+                    if let Some(out) = &current_output {
+                        wrap_if_marshalled(expr, env, universe, graph, type_protocols, melds, out);
+                    }
                 }
             }
             Statement::Expression(expr) => rewrite_expr(expr, env, universe, graph, type_protocols),
             Statement::Let { name, expr, ty, .. } => {
                 if let Some(e) = expr.as_mut() {
                     rewrite_expr(e, env, universe, graph, type_protocols);
+                    // 2026-08-03 (P3): `let s: String = name;` (name: CStr) —
+                    // the meld admits the pair; insert the marshalling call.
+                    if let Some(declared) = ty.as_ref() {
+                        wrap_if_marshalled(e, env, universe, graph, type_protocols, melds, declared);
+                    }
                 }
                 if let Some(t) = ty.as_ref() {
                     env.insert(name.clone(), t.clone());
                 }
             }
             Statement::Assign(_, expr) => rewrite_expr(expr, env, universe, graph, type_protocols),
-            Statement::Guarded(_, body) => rewrite_body(body, env, universe, graph, type_protocols),
+            Statement::Guarded(_, body) => rewrite_body(body, env, universe, graph, type_protocols, melds, current_output.clone()),
             Statement::If(_, then, els) => {
-                rewrite_body(then, env, universe, graph, type_protocols);
-                rewrite_body(els, env, universe, graph, type_protocols);
+                rewrite_body(then, env, universe, graph, type_protocols, melds, current_output.clone());
+                rewrite_body(els, env, universe, graph, type_protocols, melds, current_output.clone());
             }
-            Statement::Foreach { body, .. } => rewrite_body(body, env, universe, graph, type_protocols),
-            Statement::Block(body) => rewrite_body(body, env, universe, graph, type_protocols),
+            Statement::Foreach { body, .. } => rewrite_body(body, env, universe, graph, type_protocols, melds, current_output.clone()),
+            Statement::Block(body) => rewrite_body(body, env, universe, graph, type_protocols, melds, current_output.clone()),
             _ => {}
         }
+    }
+}
+
+/// Wrap `expr` in its marshalling binding call when it crosses a melded
+/// boundary representation (the typechecker admitted the pair without `as`).
+/// Only same-category String variants produce a binding (marshalling_fn); any
+/// other melded pair is left for the codegen layout machinery.
+fn wrap_if_marshalled(
+    expr: &mut Expr,
+    env: &mut std::collections::HashMap<String, Type>,
+    universe: &TypeUniverse,
+    graph: &CastingGraph,
+    type_protocols: &std::collections::HashMap<String, String>,
+    melds: &std::collections::HashSet<(String, String)>,
+    target: &Type,
+) {
+    let src_ty = expr_type_of(expr, env, universe);
+    let melded = {
+        let (fa, tb) = match (&src_ty, target) {
+            (Type::Custom(a) | Type::Applied(a, _), Type::Custom(b) | Type::Applied(b, _)) => (a, b),
+            _ => return,
+        };
+        melds.contains(&(fa.clone(), tb.clone()))
+    };
+    if !melded {
+        return;
+    }
+    if let Some(fn_name) = marshalling_fn(graph, universe, type_protocols, &src_ty, target) {
+        let arg = expr.clone();
+        *expr = crate::ast::Expr::Call(fn_name, vec![arg], None);
     }
 }
 

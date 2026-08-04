@@ -84,6 +84,29 @@ pub struct TypecheckContext<'a> {
     /// a sub-protocol value prefers its variant's own op (zero cast) — "adopt
     /// whatever operations are most convenient."
     variant_cross_ops: HashMap<String, HashMap<String, String>>,
+    /// 2026-08-03 (P3, plan 2026-08-03-native-python-meld-composite): melds
+    /// declare composite interchangeability — two types usable interchangeably
+    /// at a boundary with no explicit `as`. Keyed by type name, both orderings.
+    /// The conversion itself (marshalling binding call for String variants,
+    /// layout shuffle for struct melds) is emitted downstream; the typechecker
+    /// only admits the pair.
+    pub melds: std::collections::HashSet<(String, String)>,
+}
+
+impl<'a> TypecheckContext<'a> {
+    /// Whether a meld declares `from` and `to` interchangeable (either
+    /// direction). Only user-named types can be melded.
+    pub fn meld_coercible(&self, from: &Type, to: &Type) -> bool {
+        let fa = match from {
+            Type::Custom(n) | Type::Applied(n, _) => n,
+            _ => return false,
+        };
+        let tb = match to {
+            Type::Custom(n) | Type::Applied(n, _) => n,
+            _ => return false,
+        };
+        self.melds.contains(&(fa.clone(), tb.clone()))
+    }
 }
 
 impl<'a> TypecheckContext<'a> {
@@ -105,6 +128,7 @@ impl<'a> TypecheckContext<'a> {
             current_output_type: None,
             type_protocols: HashMap::new(),
             variant_cross_ops: HashMap::new(),
+            melds: std::collections::HashSet::new(),
         }
     }
 
@@ -931,7 +955,7 @@ fn infer_call(name: &str, args: &[Expr], ctx: &mut TypecheckContext) -> Result<T
     for (i, arg) in args.iter().enumerate() {
         let arg_ty = infer_type_only(arg, ctx)?;
         if let Some(param_ty) = param_types.get(i) {
-            if arg_ty != *param_ty {
+            if arg_ty != *param_ty && !ctx.meld_coercible(&arg_ty, param_ty) {
                 let coercible = try_coerce_via_parse(arg, &arg_ty, param_ty, ctx);
                 if !coercible {
                     return Err(TypeError::TypeMismatch {
@@ -950,7 +974,7 @@ fn infer_call(name: &str, args: &[Expr], ctx: &mut TypecheckContext) -> Result<T
         for (i, arg) in args.iter().enumerate() {
             let arg_ty = infer_type_only(arg, ctx)?;
             if let Some(slot) = slots.get(i) {
-                if arg_ty != slot.ty {
+                if arg_ty != slot.ty && !ctx.meld_coercible(&arg_ty, &slot.ty) {
                     let coercible = try_coerce_via_parse(arg, &arg_ty, &slot.ty, ctx);
                     if !coercible {
                         return Err(TypeError::TypeMismatch {
@@ -1245,6 +1269,14 @@ pub fn infer_statement(stmt: &Statement, ctx: &mut TypecheckContext) -> Result<(
                     }
                 };
                 if !compatible {
+                    // 2026-08-03 (P3): a declared meld admits the pair — the
+                    // composite interchangeability (`let s: String = name;`
+                    // where name: CStr and `meld CStr -> String` exists).
+                    if ctx.meld_coercible(&inferred, declared) {
+                        let resolved = declared.clone();
+                        ctx.bindings.insert(name.clone(), resolved);
+                        return Ok(());
+                    }
                     let coercible = expr.as_ref().map_or(false, |e| {
                         try_coerce_via_parse(e, &inferred, declared, ctx)
                     });
@@ -1304,8 +1336,9 @@ pub fn infer_statement(stmt: &Statement, ctx: &mut TypecheckContext) -> Result<(
                 }
             }
             // 2026-07-31 (A2): assignment must preserve the LHS type — no
-            // implicit coercion (`len = "hello"` where len: Int errors).
-            if lhs_ty != rhs_ty {
+            // implicit coercion (`len = "hello"` where len: Int errors). A
+            // declared meld (2026-08-03, P3) admits the pair instead.
+            if lhs_ty != rhs_ty && !ctx.meld_coercible(&rhs_ty, &lhs_ty) {
                 let coercible = try_coerce_via_parse(rhs, &rhs_ty, &lhs_ty, ctx);
                 if !coercible {
                     return Err(TypeError::TypeMismatch {
@@ -1434,9 +1467,10 @@ pub fn infer_statement(stmt: &Statement, ctx: &mut TypecheckContext) -> Result<(
             if let Some(val) = val {
                 let vty = infer_type_only(val, ctx)?;
                 // 2026-07-31 (Phase 2): a declared return type must match the
-                // term value — no implicit coercion.
+                // term value — no implicit coercion. A declared meld
+                // (2026-08-03, P3) admits the pair instead.
                 if let Some(out) = &ctx.current_output_type {
-                    if vty != *out {
+                    if vty != *out && !ctx.meld_coercible(&vty, out) {
                         return Err(TypeError::TypeMismatch {
                             expected: format!("{}", out),
                             found: format!("{}", vty),
@@ -1623,6 +1657,23 @@ pub fn check_program(items: &[TopLevel], universe: &TypeUniverse) -> Result<(), 
         })
         .collect();
 
+    // 2026-08-03 (P3): Pre-collect meld declarations — the composite
+    // interchangeability pairs (both orderings).
+    let melds: std::collections::HashSet<(String, String)> = items
+        .iter()
+        .filter_map(|item| {
+            if let TopLevel::Meld(m) = item {
+                Some(vec![
+                    (m.name.clone(), m.target.clone()),
+                    (m.target.clone(), m.name.clone()),
+                ])
+            } else {
+                None
+            }
+        })
+        .flatten()
+        .collect();
+
     // 2026-07-27: Pre-collect Parse bindings and type parents from ALL TypeDef items.
     let mut all_parse_bindings: HashMap<String, Vec<OperatorBinding>> = HashMap::new();
     let mut all_type_parents: HashMap<String, String> = HashMap::new();
@@ -1717,7 +1768,7 @@ pub fn check_program(items: &[TopLevel], universe: &TypeUniverse) -> Result<(), 
             item, universe, &state_bindings, &fn_return_types, &fn_param_types,
             &all_parse_bindings, &all_type_parents, &all_regular_ops, &all_regular_bindings,
             &all_type_slots, &all_type_members, &all_type_params, &all_type_protocols,
-            &all_cross_ops,
+            &all_cross_ops, &melds,
         ) {
             errors.push(e);
         }
@@ -1740,6 +1791,7 @@ pub fn check_program(items: &[TopLevel], universe: &TypeUniverse) -> Result<(), 
             };
             for member in &td.body.members {
                 let mut mctx = TypecheckContext::new(universe);
+                mctx.melds = melds.clone();
                 mctx.type_parents = all_type_parents.clone();
                 mctx.regular_ops = all_regular_ops.clone();
                 mctx.regular_bindings = all_regular_bindings.clone();
@@ -1827,8 +1879,10 @@ fn check_top_level(
     all_type_params: &HashMap<String, Vec<String>>,
     all_type_protocols: &HashMap<String, String>,
     all_cross_ops: &HashMap<String, HashMap<String, String>>,
+    melds: &std::collections::HashSet<(String, String)>,
 ) -> Result<(), TypeError> {
     let mut ctx = TypecheckContext::new(universe);
+    ctx.melds = melds.clone();
     // 2026-07-27: Inject pre-collected parse bindings and type parents.
     for (type_name, bindings) in all_parse_bindings {
         ctx.register_parse_bindings(type_name, bindings.clone(), None);
@@ -1879,7 +1933,7 @@ fn check_top_level(
             Ok(())
         }
         // 2026-07-25: Unwrap exports so exported defns are type-checked.
-        TopLevel::Export(e) => check_top_level(&e.inner, universe, state_bindings, fn_return_types, fn_param_types, all_parse_bindings, all_type_parents, all_regular_ops, all_regular_bindings, all_type_slots, all_type_members, all_type_params, all_type_protocols, all_cross_ops),
+        TopLevel::Export(e) => check_top_level(&e.inner, universe, state_bindings, fn_return_types, fn_param_types, all_parse_bindings, all_type_parents, all_regular_ops, all_regular_bindings, all_type_slots, all_type_members, all_type_params, all_type_protocols, all_cross_ops, melds),
         TopLevel::Transaction(txn) => {
             for (name, ty) in &txn.parameters {
                 ctx.bindings.insert(name.clone(), ty.clone());

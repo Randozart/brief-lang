@@ -4,9 +4,11 @@ export defn echo(name: CStr) -> CStr {
     term name;
 };
 
+// The CStr <-> String meld (declared in c.bv) makes the pair interchangeable
+// — no explicit `as` casts; the marshalling inserts cstr_to_brief/str_to_c.
 export defn greet(name: CStr) -> CStr {
-    let s: String = name as String;
-    term s as CStr;
+    let s: String = name;
+    term s;
 };
 
 export defn identity(x: CDouble) -> CDouble {
