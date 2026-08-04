@@ -63,6 +63,18 @@ NUL invariant. The contracts:
 - Benchmark: native extension vs ctypes vs C. **Baseline:** Python→Brief ctypes
   2033 ns/call (Python→C 1927). **Target:** ~300–500 ns/call.
 
+  **P1 result (2026-08-03, `feature_hash` count=1000, 200k calls):**
+  | path | ns/call | vs |
+  |------|---------|----|
+  | Python → Brief (ctypes) | 3057 | — |
+  | Python → Brief (native ext) | 1297 | **2.4×** |
+  | Python → Brief add (ctypes) | 1058 | — |
+  | Python → Brief add (native ext) | **179** | **6×** |
+
+  The pure-call overhead is ~179 ns — native CPython-extension speed. The
+  compute-heavy case sits at the compute floor (~1080 ns is the FNV-1a work
+  itself; the Python method adds only ~217 ns).
+
 ### P2 — The NUL allocator invariant
 - The Brief arena allocates String buffers as `len+1` and writes `bytes[len] =
   '\0'`. The type stays `[len][bytes]`; the trailing NUL is an implementation

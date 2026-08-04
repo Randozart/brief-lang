@@ -491,6 +491,179 @@ pub fn run_bindings_cli(file_path: &str, language: &str, out_dir: &str) -> Resul
     Ok(())
 }
 
+/// `brief extension <bridge.bv> <language> [--out <dir>]` — build a native
+/// host-language extension (no FFI marshalling layer). 2026-08-03 (plan
+/// 2026-08-03-native-python-meld-composite): for Python this generates a
+/// CPython C-extension module (`PyInit_<bridge>` + per-export methods) that
+/// calls the Brief exports directly — the ~1.9µs ctypes overhead disappears.
+/// Config-driven: the language's `native.*` templates + per-category
+/// parse/build snippets live in config/glue.dbvl; the compiler only renders.
+pub fn run_extension_cli(file_path: &str, language: &str, out_dir: &str) -> Result<(), String> {
+    let source = std::fs::read_to_string(file_path)
+        .map_err(|e| format!("Cannot read '{}': {}", file_path, e))?;
+    let bridge_name = std::path::Path::new(file_path)
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .unwrap_or("bridge");
+    let (items, _universe) = crate::library::parse_and_check(file_path, &source)?;
+
+    let glue_targets = crate::glue::config::load_glue_config(None)?;
+    let target = glue_targets.get(language).ok_or_else(|| {
+        format!("Unknown extension target '{}'. Targets: {}", language,
+            glue_targets.keys().cloned().collect::<Vec<_>>().join(", "))
+    })?;
+    let info = extract_bridge_info(&items, bridge_name);
+    let type_protocols = build_type_protocols(&items);
+
+    // Build the bridge static library (.a) with the current compiler, so the
+    // extension is self-contained (links the real-ELF objects directly).
+    let lib_dir = std::path::Path::new(out_dir);
+    std::fs::create_dir_all(lib_dir).map_err(|e| format!("create {}: {}", lib_dir.display(), e))?;
+    let exe = std::env::current_exe()
+        .map_err(|e| format!("cannot locate briefc: {}", e))?;
+    let build = std::process::Command::new(&exe)
+        .args(["build", file_path, "--library", "--out", out_dir])
+        .output()
+        .map_err(|e| format!("failed to run briefc build --library: {}", e))?;
+    if !build.status.success() {
+        return Err(format!("briefc build --library failed:\n{}", String::from_utf8_lossy(&build.stderr)));
+    }
+
+    // Render the native shim (.c).
+    let shim = render_native_shim(&info, target, &type_protocols, bridge_name);
+    let shim_path = lib_dir.join(format!("{}_module.c", bridge_name));
+    std::fs::write(&shim_path, &shim).map_err(|e| format!("write shim: {}", e))?;
+
+    // Compile + link against Python.
+    let py_inc = py3_cfg("--includes").unwrap_or_default();
+    let shim_o = lib_dir.join(format!("{}_module.o", bridge_name));
+    let cc_c = std::process::Command::new("cc")
+        .arg("-fPIC").arg("-c").arg(&shim_path).arg("-o").arg(&shim_o)
+        .args(py_inc.split_whitespace())
+        .output().map_err(|e| format!("failed to run cc: {}", e))?;
+    if !cc_c.status.success() {
+        return Err(format!("cc failed:\n{}", String::from_utf8_lossy(&cc_c.stderr)));
+    }
+
+    let suffix = py3_cfg("--extension-suffix")
+        .unwrap_or_else(|| ".so".to_string());
+    let ext_path = lib_dir.join(format!("{}{}", bridge_name, suffix.trim()));
+    let ldflags = py3_cfg("--ldflags").unwrap_or_default();
+    let archive = lib_dir.join(format!("lib{}.a", bridge_name));
+    let cc_link = std::process::Command::new("cc")
+        .arg("-shared").arg("-o").arg(&ext_path).arg(&shim_o).arg(&archive)
+        .args(ldflags.split_whitespace())
+        .output().map_err(|e| format!("failed to link extension: {}", e))?;
+    if !cc_link.status.success() {
+        return Err(format!("link failed:\n{}", String::from_utf8_lossy(&cc_link.stderr)));
+    }
+    let _ = std::fs::remove_file(&shim_path);
+    let _ = std::fs::remove_file(&shim_o);
+
+    println!("  Extension: {}", ext_path.display());
+    println!("  Usage:     import {}", bridge_name);
+    Ok(())
+}
+
+fn py3_cfg(flag: &str) -> Option<String> {
+    let out = std::process::Command::new("python3-config").arg(flag).output().ok()?;
+    if out.status.success() {
+        Some(String::from_utf8_lossy(&out.stdout).trim().to_string())
+    } else {
+        None
+    }
+}
+
+/// Render the native shim (.c) from the language's `native.*` templates.
+fn render_native_shim(
+    info: &BridgeInfo,
+    target: &GlueTarget,
+    type_protocols: &HashMap<String, String>,
+    bridge_name: &str,
+) -> String {
+    let mut methods = String::new();
+    let mut method_defs = String::new();
+    let mut protos = String::new();
+    let method_tpl = target.templates.get("native.method");
+    let method_def_tpl = target.templates.get("native.method_def");
+    for (i, export) in info.exports.iter().enumerate() {
+        if i > 0 {
+            methods.push('\n');
+            method_defs.push('\n');
+            protos.push('\n');
+        }
+        // Per-param C type + parse format + call args.
+        let mut fmt = String::new();
+        let mut decls: Vec<String> = Vec::new();
+        let mut parse_args: Vec<String> = Vec::new();
+        let mut call_args: Vec<String> = Vec::new();
+        if export.needs_state {
+            call_args.push("g_state".to_string());
+        }
+        for (name, ty) in &export.params {
+            let key = native_key(ty, type_protocols);
+            let c_type = tpl_for(target, &format!("native.c_type.{}", key), "long long");
+            let f = tpl_for(target, &format!("native.fmt.{}", key), "l");
+            fmt.push_str(&f);
+            decls.push(format!("{} {}", c_type, name));
+            parse_args.push(format!("&{}", name));
+            call_args.push(name.clone());
+        }
+        let ret_key = native_key(&export.return_type, type_protocols);
+        let ret_c = tpl_for(target, &format!("native.ret.{}", ret_key), "long long");
+        let build = tpl_for(target, &format!("native.build.{}", ret_key), "PyLong_FromLongLong(r)");
+
+        let mut vars: HashMap<String, String> = HashMap::new();
+        vars.insert("name".to_string(), export.name.clone());
+        vars.insert("parse_decls".to_string(), format!("{};", decls.join("; ")));
+        vars.insert("parse_fmt".to_string(), fmt);
+        vars.insert("parse_args".to_string(), parse_args.join(", "));
+        vars.insert("ret_c".to_string(), ret_c.clone());
+        vars.insert("call".to_string(), format!("{}({})", export.name, call_args.join(", ")));
+        vars.insert("build".to_string(), build);
+        if let Some(t) = method_tpl {
+            methods.push_str(&render_template(t, &vars));
+        }
+        if let Some(t) = method_def_tpl {
+            method_defs.push_str(&render_template(t, &vars));
+        }
+        // Extern prototype for the export (the shim calls it directly).
+        let state_proto = if export.needs_state { "BriefState* state, ".to_string() } else { String::new() };
+        let param_decls: Vec<String> = export.params.iter()
+            .map(|(name, ty)| {
+                let key = native_key(ty, type_protocols);
+                format!("{} {}", tpl_for(target, &format!("native.c_type.{}", key), "long long"), name)
+            })
+            .collect();
+        protos.push_str(&format!("{} {}({}{});", ret_c, export.name, state_proto, param_decls.join(", ")));
+    }
+
+    let module_tpl = target.templates.get("native.module");
+    let mut vars: HashMap<String, String> = HashMap::new();
+    vars.insert("bridge_name".to_string(), bridge_name.to_string());
+    vars.insert("export_protos".to_string(), protos);
+    vars.insert("methods".to_string(), methods);
+    vars.insert("method_defs".to_string(), method_defs);
+    match module_tpl {
+        Some(t) => render_template(t, &vars),
+        None => String::new(),
+    }
+}
+
+/// The native-template key for a type string: its protocol category (via the
+/// declared protocol map), e.g. "CDouble" → "#Float", "Int" → "#Int".
+fn native_key(ty: &str, type_protocols: &HashMap<String, String>) -> String {
+    let cat = match type_protocols.get(ty) {
+        Some(proto) => protocol_category(proto).to_string(),
+        None => ty.to_string(),
+    };
+    format!("#{}", cat)
+}
+
+fn tpl_for(target: &GlueTarget, key: &str, default: &str) -> String {
+    target.templates.get(key).cloned().unwrap_or_else(|| default.to_string())
+}
+
 /// CLI entry point for `brief export <bridge.bv> <language> [--out <dir>]`.
 ///
 /// 2026-07-22: Reads a Brief bridge file, extracts exports and foreign
