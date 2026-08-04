@@ -169,15 +169,21 @@ unchanged.
 
 ### Benchmark anchor migration
 
-Migrate the `Store#`/`Load#`-as-observability-anchor benchmarks to `out`-marked
-functions — the benchmarks use `Load#`/`Store#` only to keep allocations
-observable:
-- `benchmarks/utf8_ops.bv` (Store#)
-- `benchmarks/arena_churn.bv` (Store#/Load#)
-- `benchmarks/linked_list.bv` (Malloc#/Store#/Load# comment)
+**2026-08-04 finding (supersedes the original intent):** on inspection, the
+three candidate benchmarks GENUINELY use the memory intrinsics for computation —
+they are not pure observability anchors:
 
-This validates `out` on real code and removes redundant raw memory intrinsics
-from the benchmark surface.
+- `benchmarks/arena_churn.bv` — `Load#(a)` feeds `sum` (real work).
+- `benchmarks/utf8_ops.bv` — `Store#` writes runtime-varying data that
+  `memcmp`/`UTF8_validate` consume (real work).
+- `benchmarks/linked_list.bv` — uses `node[0]`/`node[1]` indexing (real work).
+
+Forcing `out` onto them would BREAK benchmark semantics, so **no migration**. The
+backend is already conservative (any call blocks folding; `Malloc#`/`Store#`/
+`Load#` are `observable: true` intrinsics), so the "keep the allocation
+observable" goal is already met without `out`. The `out` keyword's benchmark
+value materializes in Phases 4–5, when stdlib print/format functions move into
+Brief and need `out` to survive DCE.
 
 **Tests:** parse tests for all four forms; a DCE test proving an `out` function
 call survives while an identical non-`out` call is folded; a folding test proving
