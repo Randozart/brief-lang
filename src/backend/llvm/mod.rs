@@ -1689,6 +1689,7 @@ impl LlvmBackend {
         );
         self.ctx.dep_graph = analysis.dependency_graph.clone();
         self.ctx.global_free_after = analysis.global_lifetime.free_after.clone();
+        self.ctx.observable_names = analysis.observable_names.clone();
         // 2026-08-03: Per-export ABI (needs_state) computed once up front by
         // the export ABI analysis — the backend only consumes the decision.
         self.ctx.export_needs_state =
