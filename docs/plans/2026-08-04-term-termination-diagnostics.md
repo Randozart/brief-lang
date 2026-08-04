@@ -1,8 +1,8 @@
 # Term Termination Diagnostics + Void-Term Checkpoint
 
 **Date:** 2026-08-04
-**Status:** Active plan — §1-§3 implemented (`5ab100b1`, `be934d61`); post-change
-benchmarks running; docs updated.
+**Status:** Active plan — §1-§3 implemented (`5ab100b1`, `be934d61`, `ac6aca40`);
+post-change benchmarks running; docs updated.
 **Branch:** `feat/term-termination-diagnostics` (worktree `../brief-compiler-term-diagnostics`)
 **Related:**
 - `docs/plans/2026-07-31-frontend-driven-dispatch.md` (frontend-driven dispatch — the pass model this follows)
@@ -245,11 +245,19 @@ _TBD — run in progress._
   (after `check_types`). (Note: this commit landed in two parts due to a staging
   hiccup; `5ab100b1` is the pass, `be934d61` is the codegen fix.)
 - `be934d61`: codegen real-terminator fix (see §3).
+- `ac6aca40`: regression fix — value-form `term <val>` inside an INLINED member
+  body (e.g. RingBuffer pop via `<- queue`) is a member-local return, not a
+  control-flow exit. The `be934d61` void path emitted `ret void` for these in
+  the countdown loop, breaking `queue_drain` (`value doesn't match function
+  result type 'i32'` at `queue_drain.ll:366`). The void path now checks
+  `member_result.is_some()` first and emits no terminator (documented in BUGS.md).
 - Verified: `corrected_term_guard.bv` prints `"1"` (was `"12"`);
   `term_valid_swan_song.bv` / all four `test-project-otto` CLI files pass with
   the expected checkpoint warnings; 1468 lib tests + 4 integration tests green;
   zero termination failures across all 352 tracked `.bv` files;
-  `transition_validate` output identical (404/422/409/200).
+  `transition_validate` output identical (404/422/409/200);
+  `queue_drain.bv` compiles/links/runs and prints correct boundary output after
+  `ac6aca40` (live countdown-loop IR in `@main` equivalent to pre-change).
 - Pre-existing `.bv` check failures (~202/352) are legacy-syntax parse/type
   errors (`rct`, `sig`, `codec`, `frgn from <source>`, Ptr arithmetic,
   shebang trophies) that fail before termination analysis — not regressions.

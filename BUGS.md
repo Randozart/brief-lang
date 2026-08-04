@@ -60,6 +60,38 @@ terminates the function. Verified by IR diff: the async body now contains the
 
 ---
 
+## Inlined Member Terms Broke the Countdown Loop with a Spurious `ret void` — FIXED
+
+**Date:** 2026-08-04
+**Status:** Fixed (branch `feat/term-termination-diagnostics`)
+**Root cause:** The value-form void-path terminator added in `be934d61` fired for
+`term <val>` inside an INLINED member body too. Member bodies are inlined via
+`emit_member_body` (`emit_expr.rs:1494`) → `emit_statement_sequence`; their
+`term <val>` is the member's RETURN VALUE, captured in `member_result` and taken
+by `emit_member_body` — it is NOT a control-flow exit of the enclosing function.
+In the countdown loop (`queue_drain.bv`'s `<- queue` pop, dispatched via
+`emit_countable_body`), `void_txn_abort_label` is `None`, so the new void path
+emitted `ret void` in the middle of `define i32 @main` — clang failed with
+`queue_drain.ll:366:7: error: value doesn't match function result type 'i32'`.
+`emit_countable_body` ignores `terminated` and kept emitting after the ret. The
+pre-2026-08-04 code was accidentally correct: the void path emitted no
+terminator and the loop never stopped for member terms.
+**Fix:** The void path now checks `member_result.is_some()` FIRST: an inlined
+member term emits NO terminator and leaves `terminated` unchanged (member-local
+return, matching the interpreter's member-call frame semantics). Txn-level value
+terms (SSA: `br` to abort label; per-txn void fns: `ret void`) are unchanged.
+**Impact:** `queue_drain.bv` compiles, links, and prints the correct boundary
+output again; live IR (the countdown loop in `@main`) is byte-for-byte
+equivalent to pre-change apart from dead-function register numbering; timing
+identical (0.03s vs 0.04s @ BOUND=50M).
+**Regression tests:** the full harness `queue_drain` case (A/B vs baseline);
+`corrected_term_guard.bv` still prints `"1"`; 1468 lib tests + 4 integration
+tests.
+**Undo:** remove the `else if backend.fun.member_result.is_some()` branch in the
+Term value-form void path of `emit_stmt.rs`.
+
+---
+
 ## Custom-Type Operator Resolution Matched Type Names, Not Protocol Categories — FIXED
 
 **Date:** 2026-08-03
