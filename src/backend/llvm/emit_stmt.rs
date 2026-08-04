@@ -525,10 +525,31 @@ pub fn emit_statement(backend: &mut LlvmBackend, out: &mut String, stmt: &Statem
                     writeln!(out, "{}ret {} {}", indent, backend.fun.fn_ret_ty, final_name).ok();
                     backend.fun.terminated = true;
                 } else {
+                    // 2026-08-04 (term-termination-diagnostics): a value-form
+                    // `term <val>`/`term! <val>` in a void function unwinds the
+                    // transaction body (interpreter TermReturn in
+                    // src/interpreter/eval.rs:646-657). Emit a REAL terminator:
+                    // in the SSA main loop, branch to the current txn's
+                    // next-txn label (skipping the rest of THIS txn's body); in
+                    // per-txn void functions, return. Without a real terminator
+                    // the guard.thenN / body block was left dangling whenever
+                    // the Guarded handler skipped its convergence branch.
+                    if let Some(ref abort) = backend.fun.void_txn_abort_label {
+                        writeln!(out, "{}br label %{}", indent, abort).ok();
+                    } else {
+                        writeln!(out, "{}ret void", indent).ok();
+                    }
                     backend.fun.terminated = true;
                 }
             } else {
-                backend.fun.terminated = true;
+                // 2026-08-04 (term-termination-diagnostics): bare `term;` /
+                // `term!;` is a convergence checkpoint, NOT a terminator — the
+                // interpreter returns Ok(Void) and continues to the next
+                // statement (src/interpreter/eval.rs:646-657, 707-709). Setting
+                // terminated=true here made the async/callable/pre void paths
+                // stop the body mid-way, diverging from the interpreter. It now
+                // stays false so the body keeps emitting; the enclosing
+                // epilogue still terminates the function.
             }
             TypedRegister { name: backend.fun.gen_reg(), ty: Type::void() }
         }
@@ -577,15 +598,24 @@ pub fn emit_statement(backend: &mut LlvmBackend, out: &mut String, stmt: &Statem
             for stmt in body {
                 emit_statement(backend, out, stmt, indent);
             }
-            // 2026-07-19: Always emit br to end label — the guard body always
-            // converges to guard.endN regardless of term! or term; inside it.
-            // Previously this was conditional on !terminated, but term! inside
-            // a guard body sets terminated=true without emitting a real LLVM
-            // terminator, leaving the guard.thenN block dangling. The branch
-            // is harmless dead code if the body already has a ret.
-            writeln!(out, "{}br label %{}", indent, end_lbl).ok();
+            // 2026-08-04 (term-termination-diagnostics): REWRITTEN from the
+            // 2026-07-19 "always emit br" version. That version was a
+            // workaround: a value-form term!/term in a void txn set
+            // terminated=true WITHOUT emitting a real LLVM terminator, so the
+            // guard.thenN block dangled and the unconditional convergence
+            // branch was required to produce valid IR — at the cost of
+            // falling through past the term (interpreter divergence: TermReturn
+            // unwinds the whole body, not just the guard). The void term path
+            // now emits a real terminator (emit_stmt.rs value-form void arm),
+            // so this convergence branch is emitted only when the body did NOT
+            // terminate: the true path skips the rest of the txn body, the
+            // false path continues at guard.endN.
+            if !backend.fun.terminated {
+                writeln!(out, "{}br label %{}", indent, end_lbl).ok();
+            }
             writeln!(out, "{}{}:", indent, end_lbl).ok();
-            backend.fun.terminated = false;
+            // Reset so the false-path (guard condition not met) continues
+            // emitting the rest of the body after guard.endN.
             backend.fun.terminated = false;
             TypedRegister { name: backend.fun.gen_reg(), ty: Type::void() }
         }

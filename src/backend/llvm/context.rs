@@ -461,6 +461,16 @@ pub struct FunctionContext {
     /// Set by callable-txn body entry. Gate emits `br i1 %cond, continue, convergence_target`
     /// when the condition is false, branching back to the convergence loop for retry.
     pub convergence_target: Option<String>,
+    /// 2026-08-04 (term-termination-diagnostics): label that a value-form
+    /// `term <val>` / `term! <val>` in a VOID function branches to, unwinding
+    /// the rest of the transaction body (interpreter TermReturn in
+    /// src/interpreter/eval.rs). Set by the SSA main loop to the current
+    /// txn's `.ssn_<name>` next-txn label so a terminating term skips the
+    /// remaining statements of THIS txn without returning from the reactor.
+    /// `None` in per-txn void functions (async/standalone/pre/callable) —
+    /// there the term emits `ret void`. A bare `term;` / `term!;` is a
+    /// convergence checkpoint and never uses this.
+    pub void_txn_abort_label: Option<String>,
 
     // SSA state
     pub ssa_state_reg: Option<String>,
@@ -682,6 +692,7 @@ impl FunctionContext {
             callable_txn_result: None,
             callable_txn_post_label: None,
             convergence_target: None,
+            void_txn_abort_label: None,
             ssa_state_reg: None,
             param_slots: HashMap::new(),
             state_reg_name: "%state".to_string(),
@@ -769,6 +780,7 @@ impl FunctionContext {
         self.callable_txn_result = None;
         self.callable_txn_post_label = None;
         self.convergence_target = None;
+        self.void_txn_abort_label = None;
         self.loop_exit_label = None;
         self.phi_induction_reg = None;
         self.arena_slots = None;

@@ -361,13 +361,24 @@ impl LlvmBackend {
                 self.fun.txn_counter += 1;
                 writeln!(out, "  br i1 {}, label %{}, label %{}", bool_reg, body_label, next_label).ok();
                 writeln!(out, "{}:", body_label).ok();
+                // 2026-08-04 (term-termination-diagnostics): a value-form term
+                // in this txn's body unwinds to the next txn's label, skipping
+                // the rest of THIS body — interpreter TermReturn semantics.
+                // Reset per-txn so a terminated previous txn does not leak into
+                // this one's body loop.
+                self.fun.terminated = false;
+                self.fun.void_txn_abort_label = Some(next_label.clone());
                 if let Some(ref slot) = active_slot {
                     writeln!(out, "  store i64 1, ptr {}", slot).ok();
                 }
                 for stmt in &txn.body {
+                    if self.fun.terminated { break; }
                     self.emit_statement(out, stmt, "  ");
                 }
-                writeln!(out, "  br label %{}", next_label).ok();
+                self.fun.void_txn_abort_label = None;
+                if !self.fun.terminated {
+                    writeln!(out, "  br label %{}", next_label).ok();
+                }
                 writeln!(out, "{}:", next_label).ok();
             }
         }

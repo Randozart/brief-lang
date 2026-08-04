@@ -380,6 +380,19 @@ pub fn compile_source(file_path: &str, source: &str, opts: &BuildOptions) -> Res
     resolve_comptime_refs(&pm, &mut items)?;
     let mut universe = TypeUniverse::new();
     check_types(&items, &universe)?;
+    // 2026-08-04: term termination diagnostics — unreachable code after a
+    // terminating `term <value>`/`term! <value>` and the bare-term-guard
+    // hint. Runs here (typed AST, pre-normalizer) so the backend never sees
+    // a body whose semantics the interpreter would unwind early.
+    {
+        let (term_errors, term_warnings) = brief_compiler::analysis::termination::analyze(&items);
+        for w in &term_warnings {
+            eprintln!("warning: {w}");
+        }
+        if !term_errors.is_empty() {
+            return Err(format!("termination errors:\n{}", term_errors.join("\n")));
+        }
+    }
     // 2026-08-03: `+` is string concat for #String/#Data operands — rewrite
     // BinaryOp(Add) → Concat on the typed AST so the backend dispatches the
     // concat emitter (String operands are boxed to i64 before the binary op).
@@ -1673,6 +1686,16 @@ fn parse_and_check(file_path: &str, source: &str, opts: &BuildOptions) -> Result
     }
     brief_compiler::analysis::watchdog::check_on_fire_handlers(&items)
         .map_err(|e| format!("watchdog error:\n{}", e))?;
+    // 2026-08-04: term termination diagnostics — `check` must catch
+    // unreachable code after a terminating `term <value>`/`term! <value>`
+    // exactly like `build` does, or the two paths silently diverge.
+    let (term_errors, term_warnings) = brief_compiler::analysis::termination::analyze(&items);
+    for w in &term_warnings {
+        eprintln!("warning: {w}");
+    }
+    if !term_errors.is_empty() {
+        return Err(format!("termination errors:\n{}", term_errors.join("\n")));
+    }
     Ok((items, universe))
 }
 
