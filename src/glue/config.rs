@@ -1,9 +1,12 @@
 // ── GLUE Configuration (Data Brief) ───────────────────────────────────
-// 2026-08-03: Reads config/glue.dbvl to resolve language targets for frgn
-// dispatch and export generation (migrated from lib/glue.toml — the FFI
-// must be infinitely extensible, and config is Data Brief). The TOML
-// serde path remains only for the parity golden test; the compiler never
-// parses TOML at runtime.
+// 2026-08-03 (plan 2026-08-03-glue-folders-node-bridge): the GLUE registry is
+// a per-language folder tree — lib/glue/<lang>/glue.dbvl. The compiler finds
+// the relevant folder BY NAME on invocation (`brief export|bindings|extension
+// <bridge> <lang>`) and loads that file; the full registry (all languages) is
+// the merged scan, used by extension routing (find_language_by_extension) and
+// ConfigGet$. Replaced the monolithic config/glue.dbvl (itself migrated from
+// lib/glue.toml). The compiler carries zero language knowledge — the glue
+// folder is data.
 //
 // Format (one entry per language, quoted mode):
 //   <lang>: { types_module: "…"; extension: "…"; bridge_kind: "…";
@@ -11,7 +14,7 @@
 //             protocols: { "#String": { native: "…"; c_abi: "…"; }; };
 //             templates: { "file": "…\n…"; "fn_template": "…"; }; };
 
-use crate::dbrief::config_db::{resolve_config_file, ConfigDb};
+use crate::dbrief::config_db::ConfigDb;
 use crate::dbrief::v2::DataValue;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -22,7 +25,7 @@ use std::path::{Path, PathBuf};
 /// Protocol mapping replaces old type_map/c_type_map/conversions —
 /// the config only knows about protocol categories (#String, #Int, #Float),
 /// not about Brief-internal type names.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Default)]
 pub struct GlueTarget {
     /// Language identifier (e.g., "python", "rust", "node")
     pub language: String,
@@ -64,6 +67,25 @@ pub struct GlueTarget {
     /// 2026-08-03: Declaration format for function-pointer (callback) params.
     /// `{ret}` / `{name}` / `{params}` placeholders. C: `{ret} (*{name})({params})`.
     pub fn_param_decl: String,
+    /// 2026-08-03 (P2, plan glue-folders-node-bridge): the native-extension
+    /// build recipe — how to compile + link the generated shim for this
+    /// language. Each command emits its value on stdout; None = absent.
+    /// Keeps ALL toolchain knowledge out of the compiler (config-driven).
+    pub native_include_cmd: Option<String>,
+    /// Literal output suffix for the built extension (e.g. node: ".node").
+    pub native_suffix: Option<String>,
+    /// Command whose stdout is the output suffix (e.g. python's
+    /// `python3-config --extension-suffix`).
+    pub native_suffix_cmd: Option<String>,
+    /// Command whose stdout is the link flags (python's `python3-config
+    /// --ldflags`; node needs none — symbols resolve at load).
+    pub native_link_cmd: Option<String>,
+    /// The C compiler to invoke (default "cc").
+    pub native_cc: Option<String>,
+    /// 2026-08-04 (ship common languages): filename prefix for the built
+    /// extension — the JVM's `System.loadLibrary("x")` loads `libx.so`, so the
+    /// java target sets "lib"; python/node default to "".
+    pub native_prefix: Option<String>,
 }
 
 /// How the state handle crosses the boundary for one language.
@@ -111,19 +133,97 @@ pub struct ProtocolEntry {
     pub wasm_abi: Option<String>,
 }
 
-/// Load the GLUE registry (Data Brief). `None` resolves config/glue.dbvl
-/// from the compiler's baked config dir; `Some(path)` loads that file.
+/// Load the GLUE registry (Data Brief). `None` scans the per-language glue
+/// folders (lib/glue/<lang>/glue.dbvl) and merges by folder name; `Some(path)`
+/// loads a single config file (the `--glue-config` override / tests).
 pub fn load_glue_config(path: Option<&Path>) -> Result<HashMap<String, GlueTarget>, String> {
-    let config_path = match path {
-        Some(p) => p.to_path_buf(),
-        None => resolve_config_file(Path::new("__baked__"), "glue")
-            .ok_or_else(|| "config/glue.dbvl not found — was the compiler built before the Data Brief migration?".to_string())?,
-    };
+    match path {
+        Some(p) => {
+            let source = std::fs::read_to_string(p)
+                .map_err(|e| format!("Failed to read GLUE config '{}': {}", p.display(), e))?;
+            parse_glue_dbvl(&source)
+        }
+        None => load_glue_folders(),
+    }
+}
 
-    let source = std::fs::read_to_string(&config_path)
-        .map_err(|e| format!("Failed to read GLUE config '{}': {}", config_path.display(), e))?;
+/// Load one language's glue config BY NAME — `lib/glue/<lang>/glue.dbvl`.
+/// Used by `brief export|bindings|extension <bridge> <lang>` after the
+/// invocation resolves the language folder.
+pub fn load_glue_language(lang: &str) -> Result<GlueTarget, String> {
+    let glue_root = resolve_glue_root().ok_or_else(|| {
+        format!("lib/glue/ not found — cannot load glue config for '{}'", lang)
+    })?;
+    let cfg = glue_root.join(lang).join("glue.dbvl");
+    if !cfg.exists() {
+        return Err(format!(
+            "no glue config for language '{}' (wanted lib/glue/{}/glue.dbvl)",
+            lang, lang
+        ));
+    }
+    let source = std::fs::read_to_string(&cfg)
+        .map_err(|e| format!("Failed to read '{}': {}", cfg.display(), e))?;
+    let parsed = parse_glue_dbvl(&source)?;
+    parsed.get(lang).cloned().ok_or_else(|| {
+        format!("'{}' has no '{}' target entry", cfg.display(), lang)
+    })
+}
 
-    parse_glue_dbvl(&source)
+/// Scan lib/glue/*/glue.dbvl and merge every language into the registry,
+/// keyed by folder name.
+fn load_glue_folders() -> Result<HashMap<String, GlueTarget>, String> {
+    let glue_root = resolve_glue_root().ok_or_else(|| {
+        "lib/glue/ not found — per-language glue configs unavailable".to_string()
+    })?;
+    let mut targets: HashMap<String, GlueTarget> = HashMap::new();
+    let mut found = false;
+    let entries = std::fs::read_dir(&glue_root)
+        .map_err(|e| format!("cannot read glue dir '{}': {}", glue_root.display(), e))?;
+    for entry in entries.flatten() {
+        let dir = entry.path();
+        if !dir.is_dir() {
+            continue;
+        }
+        let cfg = dir.join("glue.dbvl");
+        if !cfg.exists() {
+            continue;
+        }
+        let source = std::fs::read_to_string(&cfg)
+            .map_err(|e| format!("Failed to read '{}': {}", cfg.display(), e))?;
+        found = true;
+        targets.extend(parse_glue_dbvl(&source)?);
+    }
+    if !found {
+        return Err(format!(
+            "no lib/glue/*/glue.dbvl found under '{}'",
+            glue_root.display()
+        ));
+    }
+    Ok(targets)
+}
+
+/// Locate the per-language glue folder root: project-local lib/glue, then the
+/// executable-relative dev layout, then the compiler-shipped lib/glue.
+fn resolve_glue_root() -> Option<PathBuf> {
+    if let Ok(cwd) = std::env::current_dir() {
+        let local = cwd.join("lib/glue");
+        if local.is_dir() {
+            return Some(local);
+        }
+    }
+    if let Ok(exe) = std::env::current_exe() {
+        if let Some(dir) = exe.parent() {
+            let dev = dir.join("../../lib/glue");
+            if dev.is_dir() {
+                return Some(dev);
+            }
+        }
+    }
+    let baked = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("lib/glue");
+    if baked.is_dir() {
+        return Some(baked);
+    }
+    None
 }
 
 /// Parse Data Brief glue config into GlueTargets.
@@ -257,6 +357,12 @@ fn glue_target_from_entry(
         state,
         param_decl,
         fn_param_decl,
+        native_include_cmd: str_field("native_include_cmd"),
+        native_suffix: str_field("native_suffix"),
+        native_suffix_cmd: str_field("native_suffix_cmd"),
+        native_link_cmd: str_field("native_link_cmd"),
+        native_cc: str_field("native_cc"),
+        native_prefix: str_field("native_prefix"),
     })
 }
 
@@ -318,6 +424,7 @@ mod tests {
             state: crate::glue::config::StateAbi::default(),
             param_decl: "{name}: {type}".to_string(),
             fn_param_decl: "{name}: {type}".to_string(),
+            ..Default::default()
         });
         targets.insert("rust".to_string(), GlueTarget {
             language: "rust".to_string(),
@@ -332,6 +439,7 @@ mod tests {
             state: crate::glue::config::StateAbi::default(),
             param_decl: "{name}: {type}".to_string(),
             fn_param_decl: "{name}: {type}".to_string(),
+            ..Default::default()
         });
 
         // Should work with or without leading dot
@@ -355,6 +463,7 @@ mod tests {
             state: crate::glue::config::StateAbi::default(),
             param_decl: "{name}: {type}".to_string(),
             fn_param_decl: "{name}: {type}".to_string(),
+            ..Default::default()
         });
 
         // Should work with or without leading dot
@@ -378,6 +487,7 @@ mod tests {
             state: crate::glue::config::StateAbi::default(),
             param_decl: "{name}: {type}".to_string(),
             fn_param_decl: "{name}: {type}".to_string(),
+            ..Default::default()
         });
 
         // Should work with or without leading dot

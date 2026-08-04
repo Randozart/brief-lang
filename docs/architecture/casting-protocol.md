@@ -615,3 +615,37 @@ for value-level proofs and Layer 5 (SMT) for full formal verification.
 - Parse resolution in literal construction (typechecker)
 - Round-trip verification in symbolic execution engine
 - Replace `formatting <~` codec property with Parse ops
+
+## Melds and the Composite ABI (GLUE boundaries)
+
+2026-08-03 (plan `2026-08-03-native-python-meld-composite.md`). A meld
+declaration (`meld CStr -> String`) is a *composite*: one memory region under
+two native views, not a conversion recipe. The composite ABI contract every
+shim honors:
+
+1. **Handle ABI.** A String/Data composite crosses the boundary as an i64
+   handle. Every shim dereferences it to a state-owned, stable region
+   `(ptr, len)` with a **NUL invariant** (`bytes[len] == '\0'`).
+2. **Lifetime = the state's life.** The arena owns the memory; the state is the
+   arena's handle. A composite view is valid from creation until
+   `__glue_release`; hosts borrow read-only; each shim *pins* the state so the
+   borrow is safe (Python's `memoryview` holds the state ref, Rust borrows the
+   state, C is a documented don't-release contract).
+3. **Mutability is declared by the meld**, never per language. Default
+   read-only (a Brief String is immutable — every language must see it
+   read-only); a meld may declare a mutable region.
+4. **Interchangeability is declared by the meld.** `meld CStr -> String`
+   admits the pair without `as` at assignment, let-init, call args, constructor
+   slots, and term/return. The boundary marshalling inserts the delta
+   (`cstr_to_brief`/`str_to_c`) at those sites; the typechecker only admits
+   the pair — the conversion stays a casting-graph / marshalling decision.
+5. **The composite is asymmetric.** A Brief String's data region IS a
+   nul-terminated C string, so String → CStr is zero-copy (`str_to_c` returns
+   the in-place `(handle + 8)` pointer). CStr → String wraps (a bare C string
+   has no length prefix — `cstr_to_brief` allocates the `[len][bytes][\0]`
+   form).
+6. **No language knowledge in the compiler.** Every language's shim is a
+   config-driven recipe (`config/glue.dbvl` templates + per-category
+   parse/build snippets). The compiler carries only the composite ABI contract
+   + the meld declarations. Adding a language (Lisp, COBOL, …) is a config
+   section, never a compiler change.

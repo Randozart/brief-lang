@@ -2308,7 +2308,15 @@ impl LlvmBackend {
         // 2026-07-18: Use the function's return type for %result, not always i64.
         // Bool-returning functions need i8 result type to match the define i8 signature.
         writeln!(out, "  %result = alloca {}, align 8", ret_llvm).ok();
-        writeln!(out, "  store {} 0, ptr %result, align 8", ret_llvm).ok();
+        // 2026-08-03 (node bridge): a callable txn may return ptr (CStr), float,
+        // or double — the zero constant must match the LLVM type or opt rejects
+        // it ("integer constant must have integer type" / invalid float literal).
+        let init_val = match ret_llvm.as_str() {
+            "ptr" => "null".to_string(),
+            "float" | "double" => "0.0".to_string(),
+            _ => "0".to_string(),
+        };
+        writeln!(out, "  store {} {}, ptr %result, align 8", ret_llvm, init_val).ok();
 
         for (i, (n, t)) in txn.parameters.iter().enumerate() {
             let raw = format!("%arg{}", i);
@@ -2753,11 +2761,17 @@ impl LlvmBackend {
     pub(super) fn emit_library_shim(&mut self, out: &mut String, txns: &[(String, &crate::ast::Transaction)]) {
         // The #export wrappers are already emitted by emit_definition (called
         // earlier in generate()). We only need to add __brief_init_state.
-        // __brief_init_state — allocates %State, calls init_state, returns ptr
+        // 2026-08-03 (node bridge): __brief_init_state MUST return a
+        // long-lived state pointer — the previous `alloca %State` returned a
+        // stack address that dangled as soon as the call returned. It stayed
+        // latent while no export touched a state field (rank.bv), but any
+        // stateful export (save/read on `saved`) read garbage/crashed. The
+        // library model is one state per process, so a module global is
+        // correct; init_state fills it, __glue_release stays a no-op.
+        writeln!(out, "@__brief_state = global %State zeroinitializer").ok();
         writeln!(out, "define dso_local i64 @__brief_init_state() local_unnamed_addr #0 {{").ok();
-        writeln!(out, "  %state = alloca %State, align 8").ok();
-        self.emit_inline_init_stores(out, "%state");
-        writeln!(out, "  %ptr = ptrtoint ptr %state to i64").ok();
+        writeln!(out, "  call void @init_state(ptr @__brief_state)").ok();
+        writeln!(out, "  %ptr = ptrtoint ptr @__brief_state to i64").ok();
         writeln!(out, "  ret i64 %ptr").ok();
         writeln!(out, "}}").ok();
         // Also emit a __glue_release placeholder (no-op for arena-free bridge)

@@ -1,0 +1,6 @@
+// csharp/types.bv — C# (P/Invoke) boundary representations for GLUE export.
+// 2026-08-04 (plan 2026-08-04-ship-common-language-environments): C# bridges
+// through P/Invoke DllImport against the bridge .so. Strings are IntPtr
+// handles into the composite; the composite ABI is the substrate.
+
+import "glue/c.bv";

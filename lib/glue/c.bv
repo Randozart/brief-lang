@@ -40,3 +40,11 @@ type CI32:    #Int<C_I32>       { !> bits: 32; };
 type CBool:   #Bool<C_I8>       { };
 type CChar:   #Char<C_I32>      { };
 type CPtr:    #Data<C_Ptr>      { };
+
+// The composite declaration: a CStr and a String are one memory region under
+// two views. Every Brief String carries the NUL invariant ([len][bytes][\0]),
+// so the region at offset 8 IS a nul-terminated C string. `meld CStr -> String`
+// admits the pair interchangeably — the typechecker accepts `let s: String =
+// name;` (name: CStr) with no `as`, and the marshalling inserts the delta
+// (cstr_to_brief / str_to_c) — zero-copy in the String → CStr direction.
+meld CStr -> String;

@@ -300,11 +300,21 @@ fn serialize_ctypes_dbvl(c_type_map: &HashMap<String, String>) -> String {
 fn export_template_vars(export: &ExportDecl, target: &GlueTarget, type_protocols: &HashMap<String, String>) -> HashMap<String, String> {
     let mut fn_vars: HashMap<String, String> = HashMap::new();
     fn_vars.insert("name".to_string(), export.name.clone());
+    // 2026-08-04 (ship common languages): camelCase the export name — Go/Java
+    // wrappers must be exported and camelCase (`FeatureHash` from
+    // `feature_hash`); the source names are snake_case.
+    fn_vars.insert("name_upper".to_string(), to_camel_case(&export.name));
 
     let params: Vec<String> = export.params.iter()
         .map(|(name, ty)| {
             let (native, _) = resolve_protocol(ty, &target.protocols, type_protocols);
-            format!("{}: {}", name, native)
+            // 2026-08-04 (ship common languages): `{{params}}` uses the
+            // target's param_decl (C-family `{type} {name}`, Go `{name} {type}`,
+            // python/rust `{name}: {type}`) with NATIVE types — previously the
+            // `name: native` colon form was hardcoded, which is wrong for Go.
+            target.param_decl
+                .replace("{name}", name)
+                .replace("{type}", &native)
         })
         .collect();
     let ffi_params: Vec<String> = export.params.iter()
@@ -334,8 +344,8 @@ fn export_template_vars(export: &ExportDecl, target: &GlueTarget, type_protocols
         })
         .collect();
 
-    let args_abi = to_abi_args(export, target);
-    let return_expr = from_abi_return(export, target);
+    let args_abi = to_abi_args(export, target, type_protocols);
+    let return_expr = from_abi_return(export, target, type_protocols);
     let (state_arg, state_ffi_param, state_ffi_type) =
         state_vars(export, target, !args_abi.is_empty(), !ffi_params.is_empty(), !c_types.is_empty());
 
@@ -356,12 +366,18 @@ fn export_template_vars(export: &ExportDecl, target: &GlueTarget, type_protocols
 }
 
 /// `to_abi`: render each argument's boundary form from the config expression
-/// (`{name}` placeholder); identity when the target has no conversion.
-fn to_abi_args(export: &ExportDecl, target: &GlueTarget) -> Vec<String> {
+/// (`{name}` placeholder); identity when the target has no conversion. The
+/// lookup key is the type's protocol CATEGORY (`#String` for a CStr boundary
+/// type), not the raw type name.
+fn to_abi_args(
+    export: &ExportDecl,
+    target: &GlueTarget,
+    type_protocols: &HashMap<String, String>,
+) -> Vec<String> {
     export.params.iter()
         .map(|(name, ty)| {
-            let proto = format!("#{}", ty);
-            target.conversions.to_abi.get(&proto)
+            let key = format!("#{}", protocol_category_of(ty, type_protocols));
+            target.conversions.to_abi.get(&key)
                 .map(|expr| expr.replace("{name}", name))
                 .unwrap_or_else(|| name.clone())
         })
@@ -369,11 +385,24 @@ fn to_abi_args(export: &ExportDecl, target: &GlueTarget) -> Vec<String> {
 }
 
 /// `from_abi`: render the raw boundary `result_abi` back to a native value.
-fn from_abi_return(export: &ExportDecl, target: &GlueTarget) -> String {
-    let proto = format!("#{}", export.return_type);
-    target.conversions.from_abi.get(&proto)
+/// Keyed by the return type's protocol category (boundary types resolve).
+fn from_abi_return(
+    export: &ExportDecl,
+    target: &GlueTarget,
+    type_protocols: &HashMap<String, String>,
+) -> String {
+    let key = format!("#{}", protocol_category_of(&export.return_type, type_protocols));
+    target.conversions.from_abi.get(&key)
         .cloned()
         .unwrap_or_else(|| "result_abi".to_string())
+}
+
+/// The protocol category of a type string — `CStr` → "String" (via its
+/// declared `#String<C_String>` protocol), `Int` → "Int".
+fn protocol_category_of(ty: &str, type_protocols: &HashMap<String, String>) -> String {
+    type_protocols.get(ty)
+        .map(|p| protocol_category(p).to_string())
+        .unwrap_or_else(|| ty.to_string())
 }
 
 /// Per-export state-handle variables, joined WITHOUT a dangling separator
@@ -440,12 +469,12 @@ pub fn run_bindings_cli(file_path: &str, language: &str, out_dir: &str) -> Resul
         .unwrap_or("bridge");
     let (items, universe) = crate::library::parse_and_check(file_path, &source)?;
 
-    let glue_targets = crate::glue::config::load_glue_config(None)?;
-    let target = glue_targets.get(language).ok_or_else(|| {
-        format!("Unknown bindings target '{}'.\n  Add an entry to config/glue.dbvl: {}", language,
-            glue_targets.keys().cloned().collect::<Vec<_>>().join(", "))
-    })?;
+    let target = crate::glue::config::load_glue_language(language)?;
     let info = extract_bridge_info(&items, bridge_name);
+    if std::env::var("BRIEF_DEBUG_BINDINGS").is_ok() {
+        eprintln!("DBG target.templates keys: {:?}", target.templates.keys().collect::<Vec<_>>());
+        eprintln!("DBG exports: {:?}", info.exports.iter().map(|e| e.name.clone()).collect::<Vec<_>>());
+    }
     // 2026-08-03 (P3): type → declared protocol (`type CStr: #String<C_String>`)
     // so boundary types resolve to their category's ABI names in the header/
     // wrapper. The export runs before codegen's normalizer, so the universe
@@ -458,7 +487,7 @@ pub fn run_bindings_cli(file_path: &str, language: &str, out_dir: &str) -> Resul
     let bindings_ffi = target.templates.get("bindings.ffi_template")
         .or_else(|| target.templates.get("ffi_template"))
         .ok_or_else(|| format!("target '{}' has no bindings.ffi_template in config/glue.dbvl", language))?;
-    let ffi_decls = render_ffi_decls(&info.exports, target, &template_vars, bindings_ffi, &type_protocols);
+    let ffi_decls = render_ffi_decls(&info.exports, &target, &template_vars, bindings_ffi, &type_protocols);
     template_vars.insert("ffi_decls".to_string(), ffi_decls);
 
     let output_dir = std::path::Path::new(out_dir).join(format!("{}-bindings", bridge_name));
@@ -491,6 +520,239 @@ pub fn run_bindings_cli(file_path: &str, language: &str, out_dir: &str) -> Resul
     Ok(())
 }
 
+/// `brief extension <bridge.bv> <language> [--out <dir>]` — build a native
+/// host-language extension (no FFI marshalling layer). 2026-08-03 (plan
+/// 2026-08-03-native-python-meld-composite): for Python this generates a
+/// CPython C-extension module (`PyInit_<bridge>` + per-export methods) that
+/// calls the Brief exports directly — the ~1.9µs ctypes overhead disappears.
+/// Config-driven: the language's `native.*` templates + per-category
+/// parse/build snippets live in config/glue.dbvl; the compiler only renders.
+pub fn run_extension_cli(file_path: &str, language: &str, out_dir: &str) -> Result<(), String> {
+    let source = std::fs::read_to_string(file_path)
+        .map_err(|e| format!("Cannot read '{}': {}", file_path, e))?;
+    let bridge_name = std::path::Path::new(file_path)
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .unwrap_or("bridge");
+    let (items, _universe) = crate::library::parse_and_check(file_path, &source)?;
+
+    let target = crate::glue::config::load_glue_language(language)?;
+    let info = extract_bridge_info(&items, bridge_name);
+    let type_protocols = build_type_protocols(&items);
+
+    // Build the bridge static library (.a) with the current compiler, so the
+    // extension is self-contained (links the real-ELF objects directly).
+    let lib_dir = std::path::Path::new(out_dir);
+    std::fs::create_dir_all(lib_dir).map_err(|e| format!("create {}: {}", lib_dir.display(), e))?;
+    let exe = std::env::current_exe()
+        .map_err(|e| format!("cannot locate briefc: {}", e))?;
+    let build = std::process::Command::new(&exe)
+        .args(["build", file_path, "--library", "--out", out_dir])
+        .output()
+        .map_err(|e| format!("failed to run briefc build --library: {}", e))?;
+    if !build.status.success() {
+        return Err(format!("briefc build --library failed:\n{}", String::from_utf8_lossy(&build.stderr)));
+    }
+
+    // Render the native shim (.c).
+    let shim = render_native_shim(&info, &target, &type_protocols, bridge_name);
+    let shim_path = lib_dir.join(format!("{}_module.c", bridge_name));
+    std::fs::write(&shim_path, &shim).map_err(|e| format!("write shim: {}", e))?;
+
+    // Compile + link via the language's toolchain recipe (config-driven —
+    // the compiler only knows "compile C, link a shared library").
+    let cc = target.native_cc.clone().unwrap_or_else(|| "cc".to_string());
+    let include_flags = run_recipe_cmd(&target.native_include_cmd).unwrap_or_default();
+    let shim_o = lib_dir.join(format!("{}_module.o", bridge_name));
+    let cc_c = std::process::Command::new(&cc)
+        .arg("-fPIC").arg("-c").arg(&shim_path).arg("-o").arg(&shim_o)
+        .args(include_flags.split_whitespace())
+        .output().map_err(|e| format!("failed to run {}: {}", cc, e))?;
+    if !cc_c.status.success() {
+        return Err(format!("{} failed:\n{}", cc, String::from_utf8_lossy(&cc_c.stderr)));
+    }
+
+    let suffix = target.native_suffix.clone()
+        .or_else(|| run_recipe_cmd(&target.native_suffix_cmd))
+        .unwrap_or_else(|| ".so".to_string());
+    let prefix = target.native_prefix.clone().unwrap_or_default();
+    let ext_path = lib_dir.join(format!("{}{}{}", prefix, bridge_name, suffix.trim()));
+    let ldflags = run_recipe_cmd(&target.native_link_cmd).unwrap_or_default();
+    let archive = lib_dir.join(format!("lib{}.a", bridge_name));
+    // 2026-08-03 (node bridge): bind the addon's own exported symbols locally
+    // (-Bsymbolic-functions) so the host cannot interpose them. A bridge export
+    // named like a libc function (`read`, `open`, `exec`) otherwise resolves
+    // through the PLT to the host's symbol and returns garbage (read → -1).
+    let cc_link = std::process::Command::new(&cc)
+        .arg("-shared").arg("-o").arg(&ext_path).arg(&shim_o).arg(&archive)
+        .arg("-Wl,-Bsymbolic-functions")
+        .args(ldflags.split_whitespace())
+        .output().map_err(|e| format!("failed to link extension: {}", e))?;
+    if !cc_link.status.success() {
+        return Err(format!("link failed:\n{}", String::from_utf8_lossy(&cc_link.stderr)));
+    }
+    let _ = std::fs::remove_file(&shim_o);
+    if std::env::var("BRIEF_KEEP_SHIM").is_ok() {
+        println!("  Shim:    {}", shim_path.display());
+    } else {
+        let _ = std::fs::remove_file(&shim_path);
+    }
+
+    println!("  Extension: {}", ext_path.display());
+    println!("  Usage:     import {}", bridge_name);
+    Ok(())
+}
+
+/// Run a toolchain-recipe command from the language config; its stdout is the
+/// value (include flags, link flags, suffix). None if no command is configured
+/// or it fails (e.g. node needs no link flags).
+fn run_recipe_cmd(cmd: &Option<String>) -> Option<String> {
+    let cmd = cmd.as_ref()?;
+    let out = std::process::Command::new("sh").arg("-c").arg(cmd).output().ok()?;
+    if out.status.success() {
+        Some(String::from_utf8_lossy(&out.stdout).trim().to_string())
+    } else {
+        None
+    }
+}
+
+/// Render the native shim (.c) from the language's `native.*` templates.
+fn render_native_shim(
+    info: &BridgeInfo,
+    target: &GlueTarget,
+    type_protocols: &HashMap<String, String>,
+    bridge_name: &str,
+) -> String {
+    let mut methods = String::new();
+    let mut method_defs = String::new();
+    let mut protos = String::new();
+    let method_tpl = target.templates.get("native.method");
+    let method_def_tpl = target.templates.get("native.method_def");
+    for (i, export) in info.exports.iter().enumerate() {
+        if i > 0 {
+            methods.push('\n');
+            method_defs.push('\n');
+            protos.push('\n');
+        }
+        // Per-param native parse snippets + call args.
+        let mut parse_code = String::new();
+        let mut sig_params: Vec<String> = Vec::new();
+        let mut call_args: Vec<String> = Vec::new();
+        if export.needs_state {
+            call_args.push("g_state".to_string());
+        }
+        for (name, ty) in &export.params {
+            let key = native_key(ty, type_protocols);
+            let parse_tpl = tpl_for(target, &format!("native.parse.{}", key), "");
+            let mut pvars: HashMap<String, String> = HashMap::new();
+            pvars.insert("name".to_string(), name.clone());
+            parse_code.push_str(&render_template(&parse_tpl, &pvars));
+            // 2026-08-04 (ship common languages): JNI-style native shims take
+            // the host values DIRECTLY as signature params (`jlong name`,
+            // `jstring jname`) rather than parsing a tuple. Each language
+            // declares its signature form via `native.sig.<cat>`.
+            let sig_tpl = tpl_for(target, &format!("native.sig.{}", key), "jlong {{name}}");
+            let mut svars: HashMap<String, String> = HashMap::new();
+            svars.insert("name".to_string(), name.clone());
+            sig_params.push(render_template(&sig_tpl, &svars));
+            call_args.push(name.clone());
+        }
+        let ret_key = native_key(&export.return_type, type_protocols);
+        let ret_c = tpl_for(target, &format!("native.ret.{}", ret_key), "long long");
+        let build = tpl_for(target, &format!("native.build.{}", ret_key), "return PyLong_FromLongLong(r);");
+        let ret_jni = tpl_for(target, &format!("native.ret_jni.{}", ret_key), "jlong");
+        // 2026-08-03 (node bridge): the shim calls each export under a unique
+        // C identifier (`__brief_export_<name>`) aliased to the real symbol via
+        // an `asm("...")` label. An export named like a libc/Python/Node header
+        // function (`read`, `open`, `malloc`, …) would otherwise conflict with
+        // the host's prototype at COMPILE time (conflicting types) and be
+        // interposed at LINK time (read → libc read(2) → -1).
+        let call_name = format!("__brief_export_{}", export.name);
+        let mut vars: HashMap<String, String> = HashMap::new();
+        vars.insert("name".to_string(), export.name.clone());
+        vars.insert("name_upper".to_string(), to_camel_case(&export.name));
+        vars.insert("bridge_name".to_string(), bridge_name.to_string());
+        vars.insert("parse_code".to_string(), parse_code);
+        vars.insert("ret_c".to_string(), ret_c.clone());
+        vars.insert("call".to_string(), format!("{}({})", call_name, call_args.join(", ")));
+        vars.insert("build_code".to_string(), build);
+        vars.insert("sig_params".to_string(), sig_params.join(", "));
+        // 2026-08-04 (JNI): a comma before the first host param in the
+        // signature (`jclass cls, jlong count`) — absent for 0-param exports.
+        vars.insert("sig_comma".to_string(), if export.params.is_empty() { String::new() } else { ", ".to_string() });
+        vars.insert("ret_jni".to_string(), ret_jni);
+        // Node native shim: argc is the real param count; array sizes must be
+        // >= 1 (a 0-param export like `read()` must not emit `argv[0]`).
+        let nargs = export.params.len();
+        vars.insert("nargs".to_string(), nargs.to_string());
+        vars.insert("nargs_arr".to_string(), nargs.max(1).to_string());
+        if let Some(t) = method_tpl {
+            methods.push_str(&render_template(t, &vars));
+        }
+        if let Some(t) = method_def_tpl {
+            method_defs.push_str(&render_template(t, &vars));
+        }
+        // Extern prototype for the export (the shim calls it directly).
+        let mut proto_params: Vec<String> = Vec::new();
+        if export.needs_state {
+            proto_params.push("BriefState* state".to_string());
+        }
+        for (name, ty) in &export.params {
+            let key = native_key(ty, type_protocols);
+            proto_params.push(format!(
+                "{} {}",
+                tpl_for(target, &format!("native.c_type.{}", key), "long long"),
+                name
+            ));
+        }
+        protos.push_str(&format!(
+            "extern {} {}({}) asm(\"{}\");",
+            ret_c, call_name, proto_params.join(", "), export.name
+        ));
+    }
+
+    let module_tpl = target.templates.get("native.module");
+    let mut vars: HashMap<String, String> = HashMap::new();
+    vars.insert("bridge_name".to_string(), bridge_name.to_string());
+    vars.insert("export_protos".to_string(), protos);
+    vars.insert("methods".to_string(), methods);
+    vars.insert("method_defs".to_string(), method_defs);
+    vars.insert("nmethods".to_string(), info.exports.len().to_string());
+    match module_tpl {
+        Some(t) => render_template(t, &vars),
+        None => String::new(),
+    }
+}
+
+/// The native-template key for a type string: its protocol category (via the
+/// declared protocol map), e.g. "CDouble" → "#Float", "Int" → "#Int".
+fn native_key(ty: &str, type_protocols: &HashMap<String, String>) -> String {
+    let cat = match type_protocols.get(ty) {
+        Some(proto) => protocol_category(proto).to_string(),
+        None => ty.to_string(),
+    };
+    format!("#{}", cat)
+}
+
+fn tpl_for(target: &GlueTarget, key: &str, default: &str) -> String {
+    target.templates.get(key).cloned().unwrap_or_else(|| default.to_string())
+}
+
+/// camelCase a snake_case export name for host conventions: `feature_hash` →
+/// `FeatureHash` (Go exported funcs, Java/JNI methods).
+fn to_camel_case(name: &str) -> String {
+    name.split('_')
+        .filter(|s| !s.is_empty())
+        .map(|seg| {
+            let mut c = seg.to_string();
+            if let Some(f) = c.get_mut(0..1) {
+                f.make_ascii_uppercase();
+            }
+            c
+        })
+        .collect()
+}
+
 /// CLI entry point for `brief export <bridge.bv> <language> [--out <dir>]`.
 ///
 /// 2026-07-22: Reads a Brief bridge file, extracts exports and foreign
@@ -516,11 +778,9 @@ pub fn run_export_cli(file_path: &str, language: &str, out_dir: &str) -> Result<
     let (items, universe) = crate::library::parse_and_check(file_path, &source)?;
 
     // 2026-07-22: Step 2 — find language target and extract bridge info
+    let target = crate::glue::config::load_glue_language(language)?;
+    // Full registry for frgn dispatch routing (extension → language).
     let glue_targets = crate::glue::config::load_glue_config(None)?;
-    let target = glue_targets.get(language).ok_or_else(|| {
-        format!("Unknown export target '{}'.\n  Add an entry to config/glue.dbvl or use a supported language: {}",
-            language, glue_targets.keys().cloned().collect::<Vec<_>>().join(", "))
-    })?;
     let info = extract_bridge_info(&items, bridge_name);
     let type_protocols = build_type_protocols(&items);
     println!("  Bridge '{}': {} exports, {} frgns, {} melds",
@@ -602,7 +862,7 @@ pub fn run_export_cli(file_path: &str, language: &str, out_dir: &str) -> Result<
         if i > 0 { exports_buf.push('\n'); }
         if i > 0 { ffi_buf.push('\n'); }
 
-        let fn_vars = export_template_vars(export, target, &type_protocols);
+        let fn_vars = export_template_vars(export, &target, &type_protocols);
 
         if let Some(ft) = fn_template {
             // 2026-08-03: per-function render sees both fn_vars and the
@@ -621,12 +881,15 @@ pub fn run_export_cli(file_path: &str, language: &str, out_dir: &str) -> Result<
         }
     }
 
-    template_vars.insert("exports".to_string(), exports_buf);
-    template_vars.insert("ffi_decls".to_string(), ffi_buf);
+    template_vars.insert("exports".to_string(), exports_buf.clone());
+    template_vars.insert("ffi_decls".to_string(), ffi_buf.clone());
+    if std::env::var("BRIEF_DEBUG_BINDINGS").is_ok() {
+        eprintln!("DBG exports_buf=[{}]", exports_buf);
+    }
 
     // Write each file template
     for (filename, template) in &target.templates {
-        if filename == "fn_template" || filename == "ffi_template" {
+        if filename == "fn_template" || filename == "ffi_template" || filename.starts_with("native.") {
             continue;
         }
         let rendered = render_template(template, &template_vars);

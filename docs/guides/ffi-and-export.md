@@ -1,15 +1,20 @@
 # Brief FFI & Export — A Practical Guide
 
-**Date:** 2026-08-03
-**Applies to:** the `glue-host-callable` work, merged into `main` at `ff108698`.
+**Date:** 2026-08-04
+**Applies to:** the current `glue-host-callable` work (per-language glue
+folders, native extensions, the zero-friction gate).
+**Architecture reference:** `docs/architecture/glue-ffi.md` — this guide is the
+hands-on how-to; the arch doc is the complete method.
 
-Brief compiles to a native library that any language can call at near-native
-speed — C, Rust (within ~2.4% of native), Python (at ctypes parity, and see
-the native-extension note at the end). The FFI is **protocol-driven**: Brief
-has no type layouts, only adaptive protocols. A boundary representation is a
-sub-protocol (`#String<C_String>`), a `proto` declaration supplies the
-transforms, and the casting graph finds the minimal path between a Brief type
-and its boundary representation — emitting the **delta**, not a chain.
+Brief compiles to a native library that any language can call at **native
+speed** — C, C++, Rust, Python, Node, Go, Java, Lua, C# are prepackaged
+(§14). The FFI is **protocol-driven**: Brief has no type layouts, only
+adaptive protocols. A boundary representation is a sub-protocol
+(`#String<C_String>`), a `proto` declaration supplies the transforms, and the
+casting graph finds the minimal path between a Brief type and its boundary
+representation — emitting the **delta**, not a chain. The composite String
+crosses as a pointer into a state-owned NUL-invariant region — zero-copy from
+every host.
 
 ---
 
@@ -23,10 +28,11 @@ and its boundary representation — emitting the **delta**, not a chain.
 - **Marshalling is ordinary Brief casting.** `name as String` on a `CStr`
   emits the graph's binding call (`cstr_to_brief`); `s as CStr` emits
   `str_to_c`. `+` concatenates strings; `CStr + CStr` uses the variant's own
-  `cstring_concat`.
+  `cstring_concat`. The `meld CStr -> String` declaration makes the pair
+  interchangeable with no `as` at all.
 - **The compiler knows no type names and no language.** Only protocol
   categories and metadata are hardcoded; every language's vocabulary lives in
-  the Data Brief config (`config/glue.dbvl`).
+  per-language Data Brief config (`lib/glue/<lang>/glue.dbvl`).
 
 ## 2. Quick start
 
@@ -133,9 +139,10 @@ lib.greet.restype = ctypes.c_int64
 print(ctypes.cast(lib.greet(state, ctypes.c_void_p(b"hello").value), ctypes.c_char_p).value.decode())
 ```
 
-The ~2µs/call is ctypes marshalling (identical for C through ctypes) — Brief is
-within 5% of C through Python. A **native Python C-extension** target (no
-ctypes) is in development for ~10× lower per-call overhead (see §9).
+The ~2µs/call is ctypes marshalling (identical for C through ctypes). The
+shipped **native Python C-extension** target (§10, `brief extension python`)
+removes it entirely — a Python→Brief call is now **faster than Python calling
+Python** (§15, Gate B).
 
 ## 6. Callbacks (host → Brief → host)
 
@@ -187,23 +194,187 @@ compiler never injects checks.
 
 ## 8. Extending: adding a language
 
-The FFI is infinitely extensible through `config/glue.dbvl` (Data Brief). A
-language target is a section: protocols (category → native/c-ABI names), state
-representation, parameter-declaration formats, and wrapper/binding templates.
-Boundary representations are `proto` declarations in `.bv` files — the compiler
-teaches, the config/stdlib learns.
+The FFI is infinitely extensible through per-language glue folders
+(`lib/glue/<lang>/`), each a Data Brief config + templates. Zero compiler
+changes. The steps:
+
+1. `mkdir lib/glue/<lang>/` with `types.bv` (boundary declarations — usually
+   `import "glue/c.bv"`).
+2. `glue.dbvl` — the target entry: `protocols` (category → native / C-ABI
+   names), `conversions` (`to_abi`/`from_abi` per category), `state`,
+   `param_decl`, and the **toolchain recipe** (`native_include_cmd`,
+   `native_suffix`/`native_suffix_cmd`, `native_link_cmd`, `native_cc`,
+   `native_prefix`).
+3. Templates — `bindings.*` (declarative, via `brief bindings`), `templates.*`
+   (packages, via `brief export`, with `{{exports}}`), and/or `native.*` (the
+   extension shim, via `brief extension`: module, method, per-category
+   `parse`/`build`/`c_type`/`ret` snippets; JNI-style shims add
+   `native.sig.<cat>` + `native.ret_jni.<cat>`).
+4. `tests/c_driver_<lang>.rs` — a render assertion (runs everywhere) + a
+   toolchain-guarded round-trip.
+
+See `docs/architecture/glue-ffi.md` §5 for the complete anatomy.
 
 ## 9. Performance notes
 
-| path | per-call (feature_hash, count=1000) |
-|------|-------------------------------------|
-| Rust → Brief | 1127 ns (native Rust 1101 — **2.4%**) |
-| C → Brief (.a) | 1092 ns (native C 1082 — **1%**) |
-| Python → Brief (ctypes) | 2033 ns (Python → C 1927 — **5%**) |
+The authoritative numbers are the **zero-friction gate** (§15) — Brief vs each
+host writing the same function natively. Quick reference (feature_hash
+count=1000, ns/call):
+
+| host | Brief | native | ratio |
+|------|-------|--------|-------|
+| C | 1098 | 1100 | 1.00 |
+| C++ | 1107 | 1094 | 1.01 |
+| Java | 1116 | 1122 | 1.00 |
+| Go | 1189 | 1107 | 1.07 |
+| Lua | 1162 | 12309 | **0.09** |
+| Python | 1179 | 229794 | **0.01** |
+| Node | 1282 | 190498 | **0.01** |
 
 - The `.a` path runs `opt -passes='default<O3>'` before llc so the emitted loop
   is fully SSA (a plain `llc -O3` in LLVM 18.1.3 did not SROA the transaction
   loop's allocas).
-- The boundary is a single C-ABI call (~26 ns/call); the work dominates.
-- Native Python C-extension target: **in development** — see the plan
-  `docs/plans/2026-08-03-native-python-extension.md`.
+- The boundary is a single C-ABI call; the compute dominates. Interpreted hosts
+  get Brief's native-machine-code compute and win by 1–2 orders of magnitude.
+
+## 10. Native Python extension (no ctypes)
+
+`brief extension <bridge.bv> python` generates a CPython C-extension module
+that calls the Brief exports directly — no ctypes marshalling layer:
+
+```
+$ brief extension rank.bv python --out build/
+  Extension: build/rank.cpython-312-x86_64-linux-gnu.so
+$ python3 -c "import rank; print(rank.feature_hash(1000, 42))"
+```
+
+- The shim is a single `.c`: a `PyInit_<bridge>` module with one method per
+  export (`METH_FASTCALL` — the argument tuple is skipped). Per-category
+  parse/build snippets (in `lib/glue/python/glue.dbvl`, the python target's
+  `native.*` templates) marshal natively — Python `int`/`float`/`str` in,
+  native Python values out. String params use `PyUnicode_AsUTF8AndSize`
+  (limited API ≥ 3.10); `#String` handles are the CStr/Brief pointer.
+- The `CStr <-> String` meld (`lib/glue/c.bv`) makes boundary functions
+  cast-free: `let s: String = name;` needs no `as`, and the marshalling inserts
+  `cstr_to_brief`/`str_to_c` (zero-copy in the String → CStr direction — a
+  Brief String's data region IS a nul-terminated C string).
+- Adding another language is a config section (templates + protocol mappings)
+  — the compiler renders, it never hardcodes a language.
+- The composite ABI contract: a String/Data composite crosses as an i64 handle;
+  every shim dereferences it to a state-owned `(ptr, len)` region (NUL
+  invariant) valid for the state's life; hosts borrow read-only; mutability is
+  declared by the meld, never per language. See
+  `docs/architecture/casting-protocol.md` and the plan
+  `docs/plans/2026-08-03-native-python-meld-composite.md`.
+
+## 11. Per-language glue folders (referenced as config)
+
+Each language's entire interop definition lives in `lib/glue/<lang>/` — a
+`glue.dbvl` config file (protocols, ABI, templates, **toolchain recipe**),
+`types.bv` (boundary declarations), and an optional `gen.bv` compile-time
+plugin escape hatch. `brief export|bindings|extension <bridge.bv> <lang>`
+resolves `lib/glue/<lang>/` BY NAME and loads its config; `load_glue_config`
+scans the folders for extension routing. The compiler carries zero language
+knowledge — the glue folder is data.
+
+The toolchain recipe lives in `glue.dbvl`: `native_include_cmd`,
+`native_suffix`/`native_suffix_cmd`, `native_link_cmd`, `native_cc`. The
+compiler only does "compile C, link a shared library"; python's
+`python3-config` and node's include discovery are config commands.
+
+## 12. Native Node addon + the Python ↔ Node bridge
+
+`brief extension <bridge.bv> node` generates a NAPI `.node` addon (no npm) —
+same generic renderer as the Python shim, node's `native.*` templates in
+`lib/glue/node/glue.dbvl`:
+
+```
+$ brief extension node_bridge.bv node --out build/
+  Extension: build/node_bridge.node
+$ node -e "const b = require('./node_bridge.node'); console.log(b.save('hi'))"
+```
+
+Python and Node have no native binding between them; Brief's composite is their
+only common interface. The cross-language test (`tests/c_driver_node.rs`)
+proves both directions: Node persists `"hello from node"` via the bridge's
+`persist` (runtime file I/O), Python loads it with `load`; then Python
+persists `"hello from python"` and Node loads it. Stateful exports (a String
+state field read/written across calls) work — several latent backend bugs were
+fixed along the way (see `BUGS.md`): the library `__brief_init_state` now
+returns a module-global state instead of a dangling stack pointer, state-field
+references from exports are no longer eliminated as dead, and stateful exports
+keep their `%state` param.
+
+Two shim-level correctness notes: every export is declared in the shim as
+`__brief_export_<name>` with an `asm("<name>")` label (a bridge export named
+like a libc function — `read`, `open` — would otherwise collide with the host's
+prototype at compile time and be PLT-interposed at runtime); and the link adds
+`-Wl,-Bsymbolic-functions` so the addon binds its own symbols.
+
+## 13. The gen.bv plugin escape hatch (designed)
+
+If `lib/glue/<lang>/gen.bv` exists, the command can invoke it instead of the
+renderer: the pipeline writes a `bridge.dbvl` contract next to the output, the
+plugin reads it via `FileRead$`/`ConfigGet$`, generates files via `FileWrite$`,
+and runs the toolchain via `ShellCmd$`. Turing-complete generation for anything
+the templates can't express. Staged after the config-driven path is proven.
+
+## 14. Shipped language roster (2026-08-04)
+
+Each language is a `lib/glue/<lang>/` folder — config, templates, toolchain
+recipe. Zero compiler knowledge; `brief bindings` / `brief export` /
+`brief extension` render through the generic pipeline.
+
+| Language | Flavor | Command | Notes |
+|----------|--------|---------|-------|
+| C | bindings | `brief bindings <b> c` | header, C/C++-compatible (`extern "C"`) |
+| C++ | bindings | same C header | g++ round-trip test |
+| Rust | bindings | `brief export <b> rust` | cgo-free crate |
+| Python | native ext | `brief extension <b> python` | CPython C-extension (no ctypes) |
+| Node | native ext | `brief extension <b> node` | NAPI `.node` addon (no npm) |
+| Go | cgo package | `brief export <b> go` | `import "C"` + wrappers; String → `C.GoString` |
+| Java | native ext | `brief extension <b> java` + `brief export <b> java` | JNI shim (`lib<b>.so`) + class with `native` methods |
+| Lua | native ext | `brief extension <b> lua` | C module `luaopen_<b>`; `lua_pushstring` |
+| C# | bindings | `brief bindings <b> csharp` | P/Invoke DllImport class |
+
+The composite String crosses every boundary as a pointer into the
+NUL-invariant `[len][bytes][\0]` region — zero-copy read from every host
+(`C.GoString`, `NewStringUTF`, `lua_pushstring`, `Marshal.PtrToStringUTF8`,
+`PyUnicode_FromString`, `napi_create_string_utf8`).
+
+**The speed table** (feature_hash count=1000, median ns/call — see §9 and
+`docs/architecture/glue-ffi.md` §6): compiled hosts at parity (C 1.00, C++ 1.01,
+Java 1.00, Go 1.07), interpreted hosts won by Brief 1–2 orders of magnitude
+(Lua 0.09, Python 0.01, Node 0.01).
+
+## 15. The zero-friction FFI gate
+
+`benchmarks/bridge/gate/run_gate.sh` is the committed regression gate: Brief's
+`feature_hash` vs each host's *own* native `feature_hash` (Gate A — real work)
+and Brief's `add` vs the host's pure-internal `add` (Gate B — dispatch). Run it
+with `BRIEF_RUN_GATE=1 cargo test --test gate`.
+
+**Gate A — Brief vs native feature_hash (median):**
+| host | ratio | |
+|------|-------|---|
+| C | 1.00 | parity |
+| C++ | 1.01 | parity |
+| Java | 1.00 | parity (JIT) |
+| Go | 1.07 | parity (cgo) |
+| Lua | 0.09 | Brief 11× |
+| Python | 0.01 | Brief 195× |
+| Node | 0.01 | Brief 149× |
+
+Compiled hosts are at parity; interpreted hosts get Brief's native-machine-code
+compute and win by 1–2 orders of magnitude.
+
+**Gate B — dispatch (Brief add vs native internal add):** Python 0.77 (the
+`METH_FASTCALL` shim dispatches *faster* than Python's own function call),
+C 1.07, C++ 1.09, Lua 1.10, Node 2.17, Java ~6×, Go ~70×. Node/Java/Go sit at
+their structural FFI bounds (NAPI/JNI/cgo — the host's own foreign-call cost).
+
+The gate keeps the native sink live (Go's dead-code eliminator stripped a
+dead timed loop → bogus sub-1ns/iter numbers) and measures Go native in a
+pure-Go binary (a cgo-linked binary distorted it). See
+`docs/plans/2026-08-04-zero-friction-ffi-gate.md` and
+`docs/architecture/glue-ffi.md` §7.

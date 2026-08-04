@@ -74,31 +74,25 @@ char* brief_str_to_c(const char* handle) {
         c_str[len] = '\0';
         return c_str;
     }
-    // Check for C string pointer: ptr looks like a valid pointer
-    // (not zero, not a small integer, first byte is printable ASCII).
-    if (ptr > 4096 && ptr < 0x800000000000) {
-        uint8_t first = *(uint8_t*)ptr;
-        if (first >= 32 && first < 127) {
-            // Looks like a C string — strlen it
-            int64_t len = (int64_t)strlen((const char*)ptr);
-            if (len > 0 && len < 4096) {
-                char* c_str = malloc((size_t)(len + 1));
-                if (!c_str) return NULL;
-                memcpy(c_str, (void*)ptr, (size_t)len);
-                c_str[len] = '\0';
-                return c_str;
-            }
-        }
-    }
-    // Heap Brief string: ptr is a pointer to [8-byte length][data].
+    // 2026-08-03 (plan 2026-08-03-native-python-meld-composite): the fragile
+    // "looks like a C string" heuristic was REMOVED — it misread any Brief
+    // String whose length byte is printable ASCII (a 35-char path reads as
+    // '$' → the [len][bytes] header was strlened as a bare C string). Under
+    // the composite, every String value IS a [len][bytes][\0] Brief String
+    // (CStr → String is marshalled through cstr_to_brief at the boundary), so
+    // str_to_c only ever sees the heap form below. A bare C string passed to a
+    // String-typed site is a programming error, not a runtime case to guess.
+    // Heap Brief string: ptr is a pointer to [8-byte length][data][\0].
+    // 2026-08-03 (plan 2026-08-03-native-python-meld-composite): every Brief
+    // String allocation carries the NUL invariant (bytes[len] == '\0'), so
+    // the data region IS a valid C string in place — return it directly
+    // (zero-copy, the composite). Caller must NOT free; valid for the state's
+    // life (the composite ABI contract). Previously this malloc'd a copy (a
+    // leak for C drivers that never freed it).
     if (ptr == 0) return NULL;
     int64_t len = *(int64_t*)ptr;
     if (len < 0 || len > 1024 * 1024 * 1024) return NULL;
-    char* c_str = malloc((size_t)(len + 1));
-    if (!c_str) return NULL;
-    if (len > 0) memcpy(c_str, (void*)(ptr + 8), (size_t)len);
-    c_str[len] = '\0';
-    return c_str;
+    return (char*)(ptr + 8);
 }
 
 /// Convert a C string (null-terminated) to a Brief string.
@@ -564,10 +558,11 @@ void __wait_for_trigger__(void) {
 // (String ABI = ptr).
 
 int64_t __read_file__(const char* path_bstr) {
+    // 2026-08-03 (P2): brief_str_to_c returns the IN-PLACE data pointer (the
+    // composite) for heap Strings — arena-owned, must NOT be freed.
     char* c_path = brief_str_to_c(path_bstr);
     if (!c_path) return -1;
     FILE* f = fopen(c_path, "r");
-    free(c_path);
     if (!f) return -1;
     fseek(f, 0, SEEK_END);
     long size = ftell(f);
@@ -581,15 +576,15 @@ int64_t __read_file__(const char* path_bstr) {
 }
 
 int64_t __write_file__(const char* path_bstr, const char* data_bstr) {
+    // 2026-08-03 (P2): str_to_c results are borrowed arena pointers — the old
+    // free() calls freed invalid pointers (P2 made str_to_c zero-copy).
     char* c_path = brief_str_to_c(path_bstr);
     char* c_data = brief_str_to_c(data_bstr);
-    if (!c_path || !c_data) { free(c_path); free(c_data); return -1; }
+    if (!c_path || !c_data) return -1;
     FILE* f = fopen(c_path, "w");
-    free(c_path);
-    if (!f) { free(c_data); return -1; }
+    if (!f) return -1;
     size_t len = strlen(c_data);
     size_t written = fwrite(c_data, 1, len, f);
-    free(c_data);
     fclose(f);
     return (int64_t)written;
 }

@@ -755,6 +755,10 @@ impl ImportResolver {
                     // the variant edges (marshalling paths) from library
                     // boundary modules like lib/glue/c.bv.
                     TopLevel::ProtocolDef(p) => Some(p.name.as_str()),
+                    // 2026-08-03 (P3): meld declarations (meld CStr -> String)
+                    // must survive imports so a boundary module's composite
+                    // interchangeability applies to the importing bridge.
+                    TopLevel::Meld(m) => Some(m.name.as_str()),
                     // 2026-08-01 (D3): a generic `struct ListBuffer<T>` is a
                     // StaticStruct — without an arm here it was DROPPED from
                     // every import, so `List<T>.inner: ListBuffer<T>` lost its

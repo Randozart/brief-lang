@@ -1,0 +1,49 @@
+// node_bridge.bv — the Python <-> Node cross-language bridge.
+// 2026-08-03 (plan 2026-08-03-glue-folders-node-bridge): Python and Node have
+// no mature native binding between them. Brief's composite is their only
+// common interface: both call save/read/bump (live, in-process) and exchange
+// the composite String across process boundaries via the runtime's file I/O
+// (persist/load) — the only transport both languages share is Brief itself.
+//
+// The CStr <-> String meld (lib/glue/c.bv) makes the boundary cast-free; the
+// marshalling inserts cstr_to_brief / str_to_c at the implicit meld sites
+// (let, term, assignment, call args).
+
+import "glue/c.bv";
+
+// Runtime file I/O — the cross-process transport. `__read_file__` returns a
+// bare nul-terminated buffer; `load` wraps it with cstr_to_brief (correctness
+// first — never the fragile str_to_c heuristic). Note the frgn convention:
+// `frgn <C_symbol>(...) as <brief_name>` — the first is the C/runtime symbol,
+// `as` is the Brief name used in Brief code.
+frgn __read_file__(path: String) -> Int as brief_read_file_raw from "lib/runtime/brief_rt.c" fallback 0;
+frgn __write_file__(path: String, data: String) -> Int as brief_write_file from "lib/runtime/brief_rt.c" fallback 0;
+
+let saved: String = "";
+let count: Int = 0;
+
+export defn save(name: CStr) -> CStr {
+    saved = name;
+    term saved;
+};
+
+export defn read() -> CStr {
+    term saved;
+};
+
+export defn bump(delta: Int) -> Int {
+    count = count + delta;
+    term count;
+};
+
+export defn persist(path: CStr) -> CStr {
+    let w: Int = brief_write_file(path, saved);
+    term saved;
+};
+
+export defn load(path: CStr) -> CStr {
+    let raw: Int = brief_read_file_raw(path);
+    let s: String = cstr_to_brief(raw);
+    saved = s;
+    term saved;
+};

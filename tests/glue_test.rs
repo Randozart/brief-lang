@@ -1,8 +1,9 @@
 // GLUE Integration Tests
 //
-// 2026-07-22: Tests the GLUE pipeline using the TOML-based registry
-// (config/glue.dbvl). These run as `cargo test --test glue_test` (separate
-// binary from lib tests). Only uses `pub` items from the library crate.
+// 2026-08-03 (plan 2026-08-03-glue-folders-node-bridge): tests the per-language
+// GLUE registry (lib/glue/<lang>/glue.dbvl, referenced as config). These run
+// as `cargo test --test glue_test` (separate binary from lib tests). Only
+// uses `pub` items from the library crate.
 
 use brief_compiler::glue::config::find_language_by_extension;
 use brief_compiler::glue::config::load_glue_config;
@@ -30,7 +31,8 @@ fn test_glue_dbvl_parses() {
 
 #[test]
 fn test_glue_dbvl_custom_path() {
-    let config = load_glue_config(Some(Path::new("config/glue.dbvl")))
+    // A single per-language config file loads on its own.
+    let config = load_glue_config(Some(Path::new("lib/glue/python/glue.dbvl")))
         .expect("custom path should load");
     assert!(config.contains_key("python"));
 }

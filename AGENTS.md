@@ -287,6 +287,7 @@ contracts.
 | **Casting protocol** | `docs/architecture/casting-protocol.md` |
 | **Hash words** | `docs/architecture/hash-words.md` |
 | **Benchmark strategy** | `docs/architecture/benchmark-strategy.md` |
+| **GLUE FFI (how to link/export/import/add a language)** | `docs/architecture/glue-ffi.md` + `docs/guides/ffi-and-export.md` |
 | **Intrinsics vs stdlib** | `docs/architecture/intrinsics-vs-stdlib.md` |
 | **Frontend-driven dispatch (active plan)** | `docs/plans/2026-07-31-frontend-driven-dispatch.md` |
 | **kalman/float_math parity (active plan)** | `docs/plans/2026-07-31-regain-kalman-float-math-parity.md` |

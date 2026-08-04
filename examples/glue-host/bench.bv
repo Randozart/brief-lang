@@ -1,0 +1,22 @@
+// bench.bv — timing bridge for the cross-language performance gate.
+// 2026-08-04 (plan 2026-08-04-ship-common-language-environments): feature_hash
+// is the compute-heavy export (real FNV-1a folding, the same as rank.bv but
+// without the CDouble literal that trips the run_export_cli LLVM path); add is
+// the pure-call baseline. Timed from every host language vs native C.
+
+import "glue/c.bv";
+
+txn hash_loop(h: Int, i: Int, count: Int) [i < count][i == count] -> Int {
+    let nh: Int = h ^ (i * 2654435761);
+    h = nh * 1099511628211;
+    i = i + 1;
+    term h;
+};
+
+export defn feature_hash(count: Int, seed: Int) -> Int {
+    term hash_loop(seed, 0, count);
+};
+
+export defn add(a: Int, b: Int) -> Int {
+    term a + b;
+};

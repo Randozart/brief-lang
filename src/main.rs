@@ -29,6 +29,7 @@ fn main() {
         "library" | "lib" => library::run_library_mode(&args[2..]),
         "export" => run_export(&args[2..]),
         "bindings" => run_bindings(&args[2..]),
+        "extension" => run_extension(&args[2..]),
         "doc" => run_doc(&args[2..]),
         "link" => run_link(&args[2..]),
         "audit" => run_audit_cmd(&args[2..]),
@@ -734,6 +735,24 @@ fn run_export(args: &[String]) -> Result<(), String> {
         }
     }
     brief_compiler::glue::export::run_export_cli(file_path, language, &out_dir)
+}
+
+/// `brief extension <file.bv> <language> [--out <dir>]` — build a native
+/// host-language extension module (e.g. a CPython C-extension, no ctypes).
+fn run_extension(args: &[String]) -> Result<(), String> {
+    let file_path = args.first().ok_or("usage: brief extension <file.bv> <language> [--out <dir>]")?;
+    let language = args.get(1).ok_or("usage: brief extension <file.bv> <language> [--out <dir>]")?;
+    let mut out_dir = ".".to_string();
+    let mut i = 2;
+    while i < args.len() {
+        if args[i] == "--out" {
+            out_dir = args.get(i + 1).ok_or("--out requires a directory argument")?.clone();
+            i += 2;
+        } else {
+            return Err(format!("unknown flag: {}", args[i]));
+        }
+    }
+    brief_compiler::glue::export::run_extension_cli(file_path, language, &out_dir)
 }
 
 /// `brief bindings <file.bv> <language> [--out <dir>]` — render only the
