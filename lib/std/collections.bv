@@ -105,11 +105,7 @@ obj List<T> {
         let n: Int = len;
         inner.data = Malloc#(cap * 8) as Ptr<T>;
         inner.cap = cap;
-        let i: Int = 0;
-        when i < n {
-            inner.data[i] = old[i];
-            i = i + 1;
-        };
+        Copy#(inner.data, old, n * 8);
     };
 
     txn push(val: T) [len < inner.cap][len <= inner.cap] {

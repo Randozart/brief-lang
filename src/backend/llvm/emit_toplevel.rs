@@ -7,9 +7,46 @@ use std::fmt::Write;
 use std::sync::LazyLock;
 
 impl LlvmBackend {
+    /// 2026-08-04 (compiler-in-Brief): top-level `let` names in a body that are
+    /// ASSIGNED later (incl. inside when/if/foreach/sync blocks). Such lets get
+    /// an entry-block alloca instead of a bare SSA register, so a reassignment
+    /// inside a guard/loop stores into an entry alloca — the old demotion at the
+    /// assignment site put the alloca in guard.thenN while the post-guard load
+    /// lived in guard.endN (LLVM: "instruction does not dominate all uses").
+    /// Only TOP-LEVEL lets are collected (a nested let's alloca would land in
+    /// the nested block and re-introduce the same violation).
+    fn collect_reassigned_lets(stmts: &[Statement]) -> std::collections::HashMap<String, Option<Type>> {
+        use std::collections::HashMap;
+        fn collect_assigned(s: &Statement, out: &mut HashSet<String>) {
+            match s {
+                Statement::Assign(Expr::Identifier(name), _) => { out.insert(name.clone()); }
+                Statement::ArrowAssign { target: Some(e), .. } => {
+                    if let Expr::Identifier(name) = e.as_ref() { out.insert(name.clone()); }
+                }
+                Statement::Guarded(_, body) => { for st in body { collect_assigned(st, out); } }
+                Statement::If(_, then, els) => {
+                    for st in then { collect_assigned(st, out); }
+                    for st in els { collect_assigned(st, out); }
+                }
+                Statement::Block(body) => { for st in body { collect_assigned(st, out); } }
+                Statement::Foreach { body, .. } => { for st in body { collect_assigned(st, out); } }
+                Statement::SyncBlock(body) => { for st in body { collect_assigned(st, out); } }
+                _ => {}
+            }
+        }
+        let mut top_lets: HashMap<String, Option<Type>> = HashMap::new();
+        for s in stmts {
+            if let Statement::Let { name, ty, .. } = s {
+                top_lets.insert(name.clone(), ty.clone());
+            }
+        }
+        let mut assigned: HashSet<String> = HashSet::new();
+        for s in stmts { collect_assigned(s, &mut assigned); }
+        top_lets.into_iter().filter(|(n, _)| assigned.contains(n)).collect()
+    }
     /// Check if any modifier has the given name and extract its export name.
     /// Returns Some(export_name) if #export or #export("name") was found.
-    /// 2026-07-14: string_value() removed from Annotation. Extract string from tag.value instead.
+    /// 2026-07-14: string_value() removed from Annotation. Extract from tag.value instead.
     pub fn get_export_name(modifiers: &[crate::ast::Annotation]) -> Option<String> {
         for tag in modifiers {
             if tag.name == "export" {
@@ -1162,6 +1199,7 @@ impl LlvmBackend {
     pub(super) fn emit_definition(&mut self, out: &mut String, d: &crate::ast::Definition, needs_state: bool) {
         self.fun.pending_cleanup.clear();
         self.fun.let_bindings.clear(); self.fun.let_binding_types.clear(); self.fun.let_original_types.clear(); self.fun.reg_float_cache.clear(); self.fun.reg_type_cache.clear();
+        self.fun.reassigned_lets.clear();
         self.fun.expr_dedup_cache.clear();
         self.fun.is_static_bound = false;
         self.fun.ssa_old_int_regs.clear();
@@ -1301,6 +1339,23 @@ impl LlvmBackend {
         // the function falls through to "ret i64 0" — every defn silently
         // returns zero regardless of its actual computation.
         self.fun.in_callable_txn = true;
+        // 2026-08-04 (compiler-in-Brief): pre-declare entry-block allocas for
+        // top-level lets that are reassigned inside a guard/loop — the 
+        // reassignment must NOT demote to an alloca at the assignment site
+        // (dominance violation). The alloca is bound BEFORE the body so the
+        // let's initial store and later stores both target the entry alloca.
+        self.fun.reassigned_lets = Self::collect_reassigned_lets(&d.body);
+        let reassigned: Vec<(String, Option<Type>)> = self.fun.reassigned_lets.iter()
+            .map(|(n, t)| (n.clone(), t.clone())).collect();
+        for (name, ty) in &reassigned {
+            let slot = self.fun.gen_reg();
+            let slot_ty = ty.as_ref().map(|t| self.llvm_type(t)).unwrap_or_else(|| "i64".to_string());
+            writeln!(out, "  {} = alloca {}, align 8", slot, slot_ty).ok();
+            self.fun.let_bindings.insert(name.clone(), slot.clone());
+            self.fun.let_binding_allocas.insert(slot.clone());
+            self.fun.let_binding_types.insert(name.clone(), ty.clone().unwrap_or_else(Type::int));
+            self.fun.let_original_types.insert(name.clone(), ty.clone().unwrap_or_else(Type::int));
+        }
         for s in &d.body {
             if self.fun.terminated { break; }
             emit_statement(self, out, s, "  ");

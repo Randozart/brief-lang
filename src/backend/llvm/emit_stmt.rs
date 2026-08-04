@@ -89,6 +89,20 @@ pub fn emit_statement(backend: &mut LlvmBackend, out: &mut String, stmt: &Statem
                     TypedRegister { name: v, ty: ty.clone().unwrap_or(Type::int()) }
                 }
             };
+            // 2026-08-04 (compiler-in-Brief): a top-level let that is reassigned
+            // later was PRE-BOUND to an entry-block alloca (emit_definition's
+            // pre-declaration). Store the value into that alloca and keep the
+            // binding — reassignments then store into the same entry alloca,
+            // never demoting at the assignment site (dominance violation).
+            if backend.fun.reassigned_lets.contains_key(name) {
+                if let Some(slot) = backend.fun.let_bindings.get(name).cloned() {
+                    let store_ty = backend.llvm_type(&val.ty);
+                    let store_val = backend.ensure_typed_value(out, indent, &store_ty, &val.name, Some(val.ty.clone()), backend.ctx.type_universe.clone().as_ref());
+                    writeln!(out, "{}store {} {}, ptr {}", indent, store_ty, store_val, slot).ok();
+                    backend.fun.let_binding_allocas.insert(slot.clone());
+                    return TypedRegister { name: val.name, ty: val.ty.clone() };
+                }
+            }
             // 2026-07-18: Track alloca bindings so identifier codegen loads values.
             if expr.is_none() {
                 backend.fun.let_binding_allocas.insert(val.name.clone());

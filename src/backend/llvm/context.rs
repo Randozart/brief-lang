@@ -391,6 +391,14 @@ pub struct FunctionContext {
     pub let_original_types: HashMap<String, Type>,
     /// 2026-07-18: Tracks which let-bindings point to allocas (vs SSA registers).
     pub let_binding_allocas: HashSet<String>,
+    /// 2026-08-04 (compiler-in-Brief): top-level `let name` bindings that are
+    /// reassigned somewhere in the body (incl. inside when/if/foreach blocks).
+    /// Pre-declared as allocas at the function ENTRY so a reassignment inside a
+    /// guard/loop body stores into an entry-block alloca — emitting the demotion
+    /// alloca at the assignment site violated LLVM dominance (alloca in
+    /// guard.thenN, load in guard.endN → "Instruction does not dominate all
+    /// uses"). Value is the let's declared type (None = untyped).
+    pub reassigned_lets: HashMap<String, Option<Type>>,
     /// 2026-08-01 (audit): regs produced by boxing a Bool/Char/Data param
     /// (zext from the native width to i64) at defn entry. The Print#
     /// convenience intrinsic dispatches on the declared protocol category
@@ -676,6 +684,7 @@ impl FunctionContext {
             let_binding_types: HashMap::new(),
             let_original_types: HashMap::new(),
             let_binding_allocas: HashSet::new(),
+            reassigned_lets: HashMap::new(),
             boxed_scalar_regs: HashSet::new(),
             pending_consumes: Vec::new(),
             struct_literal_allocas: HashMap::new(),
