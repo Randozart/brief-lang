@@ -578,7 +578,8 @@ pub fn run_extension_cli(file_path: &str, language: &str, out_dir: &str) -> Resu
     let suffix = target.native_suffix.clone()
         .or_else(|| run_recipe_cmd(&target.native_suffix_cmd))
         .unwrap_or_else(|| ".so".to_string());
-    let ext_path = lib_dir.join(format!("{}{}", bridge_name, suffix.trim()));
+    let prefix = target.native_prefix.clone().unwrap_or_default();
+    let ext_path = lib_dir.join(format!("{}{}{}", prefix, bridge_name, suffix.trim()));
     let ldflags = run_recipe_cmd(&target.native_link_cmd).unwrap_or_default();
     let archive = lib_dir.join(format!("lib{}.a", bridge_name));
     // 2026-08-03 (node bridge): bind the addon's own exported symbols locally
@@ -638,6 +639,7 @@ fn render_native_shim(
         }
         // Per-param native parse snippets + call args.
         let mut parse_code = String::new();
+        let mut sig_params: Vec<String> = Vec::new();
         let mut call_args: Vec<String> = Vec::new();
         if export.needs_state {
             call_args.push("g_state".to_string());
@@ -645,16 +647,23 @@ fn render_native_shim(
         for (name, ty) in &export.params {
             let key = native_key(ty, type_protocols);
             let parse_tpl = tpl_for(target, &format!("native.parse.{}", key), "");
-            let mut vars: HashMap<String, String> = HashMap::new();
-            vars.insert("name".to_string(), name.clone());
-            parse_code.push_str(&render_template(&parse_tpl, &vars));
+            let mut pvars: HashMap<String, String> = HashMap::new();
+            pvars.insert("name".to_string(), name.clone());
+            parse_code.push_str(&render_template(&parse_tpl, &pvars));
+            // 2026-08-04 (ship common languages): JNI-style native shims take
+            // the host values DIRECTLY as signature params (`jlong name`,
+            // `jstring jname`) rather than parsing a tuple. Each language
+            // declares its signature form via `native.sig.<cat>`.
+            let sig_tpl = tpl_for(target, &format!("native.sig.{}", key), "jlong {{name}}");
+            let mut svars: HashMap<String, String> = HashMap::new();
+            svars.insert("name".to_string(), name.clone());
+            sig_params.push(render_template(&sig_tpl, &svars));
             call_args.push(name.clone());
         }
         let ret_key = native_key(&export.return_type, type_protocols);
         let ret_c = tpl_for(target, &format!("native.ret.{}", ret_key), "long long");
         let build = tpl_for(target, &format!("native.build.{}", ret_key), "return PyLong_FromLongLong(r);");
-
-        let mut vars: HashMap<String, String> = HashMap::new();
+        let ret_jni = tpl_for(target, &format!("native.ret_jni.{}", ret_key), "jlong");
         // 2026-08-03 (node bridge): the shim calls each export under a unique
         // C identifier (`__brief_export_<name>`) aliased to the real symbol via
         // an `asm("...")` label. An export named like a libc/Python/Node header
@@ -662,11 +671,23 @@ fn render_native_shim(
         // the host's prototype at COMPILE time (conflicting types) and be
         // interposed at LINK time (read → libc read(2) → -1).
         let call_name = format!("__brief_export_{}", export.name);
+        let mut cap = export.name.clone();
+        if let Some(c) = cap.get_mut(0..1) {
+            c.make_ascii_uppercase();
+        }
+        let mut vars: HashMap<String, String> = HashMap::new();
         vars.insert("name".to_string(), export.name.clone());
+        vars.insert("name_upper".to_string(), cap);
+        vars.insert("bridge_name".to_string(), bridge_name.to_string());
         vars.insert("parse_code".to_string(), parse_code);
         vars.insert("ret_c".to_string(), ret_c.clone());
         vars.insert("call".to_string(), format!("{}({})", call_name, call_args.join(", ")));
         vars.insert("build_code".to_string(), build);
+        vars.insert("sig_params".to_string(), sig_params.join(", "));
+        // 2026-08-04 (JNI): a comma before the first host param in the
+        // signature (`jclass cls, jlong count`) — absent for 0-param exports.
+        vars.insert("sig_comma".to_string(), if export.params.is_empty() { String::new() } else { ", ".to_string() });
+        vars.insert("ret_jni".to_string(), ret_jni);
         // Node native shim: argc is the real param count; array sizes must be
         // >= 1 (a 0-param export like `read()` must not emit `argv[0]`).
         let nargs = export.params.len();
@@ -860,7 +881,7 @@ pub fn run_export_cli(file_path: &str, language: &str, out_dir: &str) -> Result<
 
     // Write each file template
     for (filename, template) in &target.templates {
-        if filename == "fn_template" || filename == "ffi_template" {
+        if filename == "fn_template" || filename == "ffi_template" || filename.starts_with("native.") {
             continue;
         }
         let rendered = render_template(template, &template_vars);

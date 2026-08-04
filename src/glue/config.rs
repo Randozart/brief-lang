@@ -82,6 +82,10 @@ pub struct GlueTarget {
     pub native_link_cmd: Option<String>,
     /// The C compiler to invoke (default "cc").
     pub native_cc: Option<String>,
+    /// 2026-08-04 (ship common languages): filename prefix for the built
+    /// extension — the JVM's `System.loadLibrary("x")` loads `libx.so`, so the
+    /// java target sets "lib"; python/node default to "".
+    pub native_prefix: Option<String>,
 }
 
 /// How the state handle crosses the boundary for one language.
@@ -358,6 +362,7 @@ fn glue_target_from_entry(
         native_suffix_cmd: str_field("native_suffix_cmd"),
         native_link_cmd: str_field("native_link_cmd"),
         native_cc: str_field("native_cc"),
+        native_prefix: str_field("native_prefix"),
     })
 }
 
