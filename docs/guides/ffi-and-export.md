@@ -293,3 +293,30 @@ renderer: the pipeline writes a `bridge.dbvl` contract next to the output, the
 plugin reads it via `FileRead$`/`ConfigGet$`, generates files via `FileWrite$`,
 and runs the toolchain via `ShellCmd$`. Turing-complete generation for anything
 the templates can't express. Staged after the config-driven path is proven.
+
+## 14. Shipped language roster (2026-08-04)
+
+Each language is a `lib/glue/<lang>/` folder — config, templates, toolchain
+recipe. Zero compiler knowledge; `brief bindings` / `brief export` /
+`brief extension` render through the generic pipeline.
+
+| Language | Flavor | Command | Notes |
+|----------|--------|---------|-------|
+| C | bindings | `brief bindings <b> c` | header, C/C++-compatible (`extern "C"`) |
+| C++ | bindings | same C header | g++ round-trip test |
+| Rust | bindings | `brief export <b> rust` | cgo-free crate |
+| Python | native ext | `brief extension <b> python` | CPython C-extension (no ctypes) |
+| Node | native ext | `brief extension <b> node` | NAPI `.node` addon (no npm) |
+| Go | cgo package | `brief export <b> go` | `import "C"` + wrappers; String → `C.GoString` |
+| Java | native ext | `brief extension <b> java` + `brief export <b> java` | JNI shim (`lib<b>.so`) + class with `native` methods |
+| Lua | native ext | `brief extension <b> lua` | C module `luaopen_<b>`; `lua_pushstring` |
+| C# | bindings | `brief bindings <b> csharp` | P/Invoke DllImport class |
+
+The composite String crosses every boundary as a pointer into the
+NUL-invariant `[len][bytes][\0]` region — zero-copy read from every host
+(`C.GoString`, `NewStringUTF`, `lua_pushstring`, `Marshal.PtrToStringUTF8`,
+`PyUnicode_FromString`, `napi_create_string_utf8`).
+
+**Timing** (feature_hash count=1000, ns/call, interleaved median): C 1223,
+C++ 1229, Lua 1200, Java 1160 (JIT), Node 1260, Go 1302, Python 1430 — all
+within ~17% of native C. See `docs/plans/2026-08-04-ship-common-language-environments.md`.
