@@ -524,6 +524,18 @@ pub fn emit_statement(backend: &mut LlvmBackend, out: &mut String, stmt: &Statem
                     };
                     writeln!(out, "{}ret {} {}", indent, backend.fun.fn_ret_ty, final_name).ok();
                     backend.fun.terminated = true;
+                } else if backend.fun.member_result.is_some() {
+                    // 2026-08-04 (term-termination-diagnostics): INLINED member
+                    // body (emit_member_body -> emit_statement_sequence): this
+                    // `term <val>` is the member's return value, captured above
+                    // in member_result and taken by emit_member_body. It is NOT
+                    // a control-flow exit of the enclosing function — emitting
+                    // `ret void` here broke the countdown loop (queue_drain's
+                    // `<- queue` pop): the loop emitter keeps emitting after the
+                    // ret, producing invalid IR ("value doesn't match function
+                    // result type 'i32'"). Emit no terminator and leave
+                    // `terminated` unchanged so the enclosing body continues,
+                    // matching the interpreter's member-call frame semantics.
                 } else {
                     // 2026-08-04 (term-termination-diagnostics): a value-form
                     // `term <val>`/`term! <val>` in a void function unwinds the
