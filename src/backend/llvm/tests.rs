@@ -3385,6 +3385,70 @@ fn test_out_let_computation_survives() {
     );
 }
 
+/// 2026-08-04 (Phase 4, .ebv heap reframe): an embedded target with String
+/// state must NOT error — the static bump arena (@embedded_heap) provides a
+/// heap without @malloc/brief_rt.c. The old hard rejection was a vestige of
+/// the pre-split .ebv/.cbv entanglement; the heap rejection belongs to .cbv
+/// (CIRCT synthesizes hardware), not .ebv (LLVM embedded).
+#[test]
+fn test_embedded_string_state_uses_static_heap() {
+    let src = r#"
+        let done: Bool = false;
+        node work [done == false][done == true] {
+            let s: String = "hi";
+            done = true;
+            term;
+        };
+    "#;
+    let mut items = parse_bv_source(src);
+    let mut universe = crate::type_universe::TypeUniverse::new();
+    let mut pm = crate::plugin::PluginManager::new();
+    pm.run_ast(crate::ast::StageKind::Parsed, &mut items, &mut universe)
+        .expect("plugin stage failed");
+    let mut backend = LlvmBackend::new()
+        .with_type_universe(universe)
+        .with_embedded_mode(true);
+    let ir = backend.generate(&items, None);
+    // The static bump heap must be emitted and no @malloc call may appear.
+    assert!(
+        ir.contains("@embedded_heap"),
+        "embedded target must emit the static bump heap; got:\n{ir}"
+    );
+    // String literals are static constants — no heap allocation call.
+    assert!(
+        !ir.contains("call ptr @malloc(") && !ir.contains("call noalias ptr @malloc("),
+        "embedded target must not call @malloc (static heap instead); got:\n{ir}"
+    );
+}
+
+/// 2026-08-04 (Phase 4): embedded String state is a WARNING (finite static
+/// heap), not a TargetError. The old rejection was removed.
+#[test]
+fn test_embedded_string_state_warns_not_errors() {
+    let src = r#"
+        let done: Bool = false;
+        node work [done == false][done == true] {
+            let s: String = "hi";
+            done = true;
+            term;
+        };
+    "#;
+    let mut items = parse_bv_source(src);
+    let mut universe = crate::type_universe::TypeUniverse::new();
+    let mut pm = crate::plugin::PluginManager::new();
+    pm.run_ast(crate::ast::StageKind::Parsed, &mut items, &mut universe)
+        .expect("plugin stage failed");
+    let mut backend = LlvmBackend::new()
+        .with_type_universe(universe)
+        .with_embedded_mode(true);
+    let _ = backend.generate(&items, None);
+    assert!(
+        backend.warnings().iter().any(|w| w.contains("TargetWarning") && w.contains("static bump arena")),
+        "embedded String state must be a warning, not an error; got {:?}",
+        backend.warnings()
+    );
+}
+
 /// 2026-08-01: Format-string println! — literal segments print via __print_str,
 /// placeholders dispatch on the value kind, and a newline is appended. All
 /// must remain direct runtime calls with no bridge indirection.
