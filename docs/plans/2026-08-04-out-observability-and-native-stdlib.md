@@ -1,7 +1,7 @@
 # `out` Observability Keyword + Native-Stdlib Path (C Independence)
 
 **Date:** 2026-08-04
-**Status:** Active plan
+**Status:** Phases 1–3 DONE (`03becb29` cast, `cc8fe299`+`47e5964c`+`29da13b0`+`d86f9844` out, `bcb3cebe` casting de-dup); Phase 4 (`.ebv`) next
 **Branch:** `feat/out-observability` (worktree `../brief-compiler-out`)
 **Related:**
 - `docs/plans/2026-08-03-glue-folders-node-bridge.md` (GLUE convergence — Phase 6)
@@ -198,6 +198,8 @@ proving reads/writes are live but not volatile.
 ---
 
 ## Phase 3 — Casting De-duplication (native-wins)
+
+**Status: DONE (2026-08-04, commit `bcb3cebe`).**
 
 **Goal:** delete the hardcoded `IntToStr#`/`FloatToStr#`/`ToString#` arms and
 route casting through the casting graph's existing lanes.
