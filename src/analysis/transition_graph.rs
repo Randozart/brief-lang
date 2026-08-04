@@ -988,6 +988,17 @@ pub fn compute_referenced_fields(items: &[TopLevel]) -> HashSet<String> {
         let body: Option<&[Statement]> = match item {
             TopLevel::Transaction(t) => Some(&t.body),
             TopLevel::Definition(d) => Some(&d.body),
+            // 2026-08-03 (node bridge): an `export defn` referencing a state
+            // field (`term saved;`) must count as a reference — without this
+            // the field is eliminated as dead by apply_field_modes and the
+            // export body emits an undefined `@saved` global.
+            TopLevel::Export(e) => {
+                if let TopLevel::Definition(d) = e.inner.as_ref() {
+                    Some(&d.body)
+                } else {
+                    None
+                }
+            }
             _ => None,
         };
         if let Some(body) = body {

@@ -545,8 +545,13 @@ pub fn run_extension_cli(file_path: &str, language: &str, out_dir: &str) -> Resu
     let ext_path = lib_dir.join(format!("{}{}", bridge_name, suffix.trim()));
     let ldflags = run_recipe_cmd(&target.native_link_cmd).unwrap_or_default();
     let archive = lib_dir.join(format!("lib{}.a", bridge_name));
+    // 2026-08-03 (node bridge): bind the addon's own exported symbols locally
+    // (-Bsymbolic-functions) so the host cannot interpose them. A bridge export
+    // named like a libc function (`read`, `open`, `exec`) otherwise resolves
+    // through the PLT to the host's symbol and returns garbage (read → -1).
     let cc_link = std::process::Command::new(&cc)
         .arg("-shared").arg("-o").arg(&ext_path).arg(&shim_o).arg(&archive)
+        .arg("-Wl,-Bsymbolic-functions")
         .args(ldflags.split_whitespace())
         .output().map_err(|e| format!("failed to link extension: {}", e))?;
     if !cc_link.status.success() {
@@ -614,11 +619,23 @@ fn render_native_shim(
         let build = tpl_for(target, &format!("native.build.{}", ret_key), "return PyLong_FromLongLong(r);");
 
         let mut vars: HashMap<String, String> = HashMap::new();
+        // 2026-08-03 (node bridge): the shim calls each export under a unique
+        // C identifier (`__brief_export_<name>`) aliased to the real symbol via
+        // an `asm("...")` label. An export named like a libc/Python/Node header
+        // function (`read`, `open`, `malloc`, …) would otherwise conflict with
+        // the host's prototype at COMPILE time (conflicting types) and be
+        // interposed at LINK time (read → libc read(2) → -1).
+        let call_name = format!("__brief_export_{}", export.name);
         vars.insert("name".to_string(), export.name.clone());
         vars.insert("parse_code".to_string(), parse_code);
         vars.insert("ret_c".to_string(), ret_c.clone());
-        vars.insert("call".to_string(), format!("{}({})", export.name, call_args.join(", ")));
+        vars.insert("call".to_string(), format!("{}({})", call_name, call_args.join(", ")));
         vars.insert("build_code".to_string(), build);
+        // Node native shim: argc is the real param count; array sizes must be
+        // >= 1 (a 0-param export like `read()` must not emit `argv[0]`).
+        let nargs = export.params.len();
+        vars.insert("nargs".to_string(), nargs.to_string());
+        vars.insert("nargs_arr".to_string(), nargs.max(1).to_string());
         if let Some(t) = method_tpl {
             methods.push_str(&render_template(t, &vars));
         }
@@ -626,14 +643,22 @@ fn render_native_shim(
             method_defs.push_str(&render_template(t, &vars));
         }
         // Extern prototype for the export (the shim calls it directly).
-        let state_proto = if export.needs_state { "BriefState* state, ".to_string() } else { String::new() };
-        let param_decls: Vec<String> = export.params.iter()
-            .map(|(name, ty)| {
-                let key = native_key(ty, type_protocols);
-                format!("{} {}", tpl_for(target, &format!("native.c_type.{}", key), "long long"), name)
-            })
-            .collect();
-        protos.push_str(&format!("extern {} {}({}{});", ret_c, export.name, state_proto, param_decls.join(", ")));
+        let mut proto_params: Vec<String> = Vec::new();
+        if export.needs_state {
+            proto_params.push("BriefState* state".to_string());
+        }
+        for (name, ty) in &export.params {
+            let key = native_key(ty, type_protocols);
+            proto_params.push(format!(
+                "{} {}",
+                tpl_for(target, &format!("native.c_type.{}", key), "long long"),
+                name
+            ));
+        }
+        protos.push_str(&format!(
+            "extern {} {}({}) asm(\"{}\");",
+            ret_c, call_name, proto_params.join(", "), export.name
+        ));
     }
 
     let module_tpl = target.templates.get("native.module");
@@ -642,6 +667,7 @@ fn render_native_shim(
     vars.insert("export_protos".to_string(), protos);
     vars.insert("methods".to_string(), methods);
     vars.insert("method_defs".to_string(), method_defs);
+    vars.insert("nmethods".to_string(), info.exports.len().to_string());
     match module_tpl {
         Some(t) => render_template(t, &vars),
         None => String::new(),

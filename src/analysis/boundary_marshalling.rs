@@ -32,6 +32,14 @@ pub fn rewrite_boundary_marshalling(items: &mut [TopLevel], universe: &TypeUnive
     // 2026-08-03 (P3): meld declarations — the composite interchangeability
     // pairs (both orderings) that the typechecker admits without `as`.
     let mut melds: std::collections::HashSet<(String, String)> = std::collections::HashSet::new();
+    // 2026-08-03 (P3, node bridge): the typechecker admits melded pairs at
+    // assignment, call args, and constructor slots too — the marshalling must
+    // insert the delta at those sites as well. Pre-collect the types needed to
+    // resolve the targets.
+    let mut state_types: std::collections::HashMap<String, Type> = std::collections::HashMap::new();
+    let mut fn_param_types: std::collections::HashMap<String, Vec<Type>> = std::collections::HashMap::new();
+    let mut type_slots: std::collections::HashMap<String, Vec<crate::ast::top::TypeDefSlot>> =
+        std::collections::HashMap::new();
     for item in items.iter() {
         match item {
             TopLevel::ProtocolDef(pd) => {
@@ -41,31 +49,100 @@ pub fn rewrite_boundary_marshalling(items: &mut [TopLevel], universe: &TypeUnive
                 if let Some(p) = td.protocol.as_ref() {
                     type_protocols.insert(td.name.clone(), p.clone());
                 }
+                if !td.body.slots.is_empty() {
+                    type_slots.insert(td.name.clone(), td.body.slots.clone());
+                }
+            }
+            TopLevel::StaticStruct(sd) => {
+                let slots: Vec<crate::ast::top::TypeDefSlot> = sd.fields
+                    .iter()
+                    .map(|(n, ty)| crate::ast::top::TypeDefSlot {
+                        name: n.clone(),
+                        ty: ty.clone(),
+                        bit_range: None,
+                    })
+                    .collect();
+                if !slots.is_empty() {
+                    type_slots.insert(sd.name.clone(), slots);
+                }
             }
             TopLevel::Meld(m) => {
                 melds.insert((m.name.clone(), m.target.clone()));
                 melds.insert((m.target.clone(), m.name.clone()));
             }
+            TopLevel::Statement(stmt) => {
+                if let crate::ast::Statement::Let { name, ty, .. } = stmt.as_ref() {
+                    if let Some(t) = ty {
+                        state_types.insert(name.clone(), t.clone());
+                    }
+                }
+            }
+            TopLevel::Constant(c) => {
+                state_types.insert(c.name.clone(), c.ty.clone());
+            }
+            TopLevel::Definition(d) => {
+                fn_param_types.insert(
+                    d.name.clone(),
+                    d.parameters.iter().map(|(_, t)| t.clone()).collect(),
+                );
+            }
+            TopLevel::Transaction(t) => {
+                fn_param_types.insert(
+                    t.name.clone(),
+                    t.parameters.iter().map(|(_, t)| t.clone()).collect(),
+                );
+            }
+            TopLevel::Export(e) => {
+                if let TopLevel::Definition(d) = e.inner.as_ref() {
+                    fn_param_types.insert(
+                        d.name.clone(),
+                        d.parameters.iter().map(|(_, t)| t.clone()).collect(),
+                    );
+                }
+            }
+            TopLevel::ForeignBinding(fb) => {
+                fn_param_types.insert(
+                    fb.effective_brief_name().to_string(),
+                    fb.inputs.iter().map(|(_, t)| t.clone()).collect(),
+                );
+            }
             _ => {}
         }
     }
     for item in items.iter_mut() {
+        let ctx = MarshallingCtx {
+            universe,
+            graph: &graph,
+            type_protocols: &type_protocols,
+            melds: &melds,
+            fn_param_types: &fn_param_types,
+            type_slots: &type_slots,
+        };
         match item {
             TopLevel::Definition(d) => {
                 let mut env = param_env(&d.parameters);
+                for (n, t) in &state_types {
+                    env.insert(n.clone(), t.clone());
+                }
                 let out = output_type_to_type(d.output_type.as_ref());
-                rewrite_body(&mut d.body, &mut env, universe, &graph, &type_protocols, &melds, out);
+                rewrite_body(&ctx, &mut env, &mut d.body, out);
             }
             TopLevel::Transaction(t) => {
                 let mut env = param_env(&t.parameters);
+                for (n, ty) in &state_types {
+                    env.insert(n.clone(), ty.clone());
+                }
                 let out = output_type_to_type(t.output_type.as_ref());
-                rewrite_body(&mut t.body, &mut env, universe, &graph, &type_protocols, &melds, out);
+                rewrite_body(&ctx, &mut env, &mut t.body, out);
             }
             TopLevel::Export(e) => {
                 if let TopLevel::Definition(d) = e.inner.as_mut() {
                     let mut env = param_env(&d.parameters);
+                    for (n, ty) in &state_types {
+                        env.insert(n.clone(), ty.clone());
+                    }
                     let out = output_type_to_type(d.output_type.as_ref());
-                    rewrite_body(&mut d.body, &mut env, universe, &graph, &type_protocols, &melds, out);
+                    rewrite_body(&ctx, &mut env, &mut d.body, out);
                 }
             }
             _ => {}
@@ -85,13 +162,21 @@ fn output_type_to_type(ot: Option<&crate::ast::top::OutputType>) -> Option<Type>
     }
 }
 
+/// Shared immutable context for the marshalling rewrite (bundled so the
+/// recursive pass stays within the param-count guideline).
+struct MarshallingCtx<'a> {
+    universe: &'a TypeUniverse,
+    graph: &'a CastingGraph,
+    type_protocols: &'a std::collections::HashMap<String, String>,
+    melds: &'a std::collections::HashSet<(String, String)>,
+    fn_param_types: &'a std::collections::HashMap<String, Vec<Type>>,
+    type_slots: &'a std::collections::HashMap<String, Vec<crate::ast::top::TypeDefSlot>>,
+}
+
 fn rewrite_body(
-    body: &mut [Statement],
+    ctx: &MarshallingCtx<'_>,
     env: &mut std::collections::HashMap<String, Type>,
-    universe: &TypeUniverse,
-    graph: &CastingGraph,
-    type_protocols: &std::collections::HashMap<String, String>,
-    melds: &std::collections::HashSet<(String, String)>,
+    body: &mut [Statement],
     current_output: Option<Type>,
 ) {
     for stmt in body {
@@ -101,37 +186,46 @@ fn rewrite_body(
             | Statement::Return(opt)
             | Statement::Escape(opt) => {
                 if let Some(expr) = opt.as_mut() {
-                    rewrite_expr(expr, env, universe, graph, type_protocols);
+                    rewrite_expr(ctx, env, expr);
                     // 2026-08-03 (P3): an implicit meld conversion at the
                     // return — `term s;` where s: String and the output is a
                     // melded CStr — needs the marshalling call inserted too.
                     if let Some(out) = &current_output {
-                        wrap_if_marshalled(expr, env, universe, graph, type_protocols, melds, out);
+                        wrap_if_marshalled(ctx, env, expr, out);
                     }
                 }
             }
-            Statement::Expression(expr) => rewrite_expr(expr, env, universe, graph, type_protocols),
+            Statement::Expression(expr) => rewrite_expr(ctx, env, expr),
             Statement::Let { name, expr, ty, .. } => {
                 if let Some(e) = expr.as_mut() {
-                    rewrite_expr(e, env, universe, graph, type_protocols);
+                    rewrite_expr(ctx, env, e);
                     // 2026-08-03 (P3): `let s: String = name;` (name: CStr) —
                     // the meld admits the pair; insert the marshalling call.
                     if let Some(declared) = ty.as_ref() {
-                        wrap_if_marshalled(e, env, universe, graph, type_protocols, melds, declared);
+                        wrap_if_marshalled(ctx, env, e, declared);
                     }
                 }
                 if let Some(t) = ty.as_ref() {
                     env.insert(name.clone(), t.clone());
                 }
             }
-            Statement::Assign(_, expr) => rewrite_expr(expr, env, universe, graph, type_protocols),
-            Statement::Guarded(_, body) => rewrite_body(body, env, universe, graph, type_protocols, melds, current_output.clone()),
-            Statement::If(_, then, els) => {
-                rewrite_body(then, env, universe, graph, type_protocols, melds, current_output.clone());
-                rewrite_body(els, env, universe, graph, type_protocols, melds, current_output.clone());
+            Statement::Assign(lhs, expr) => {
+                rewrite_expr(ctx, env, expr);
+                // 2026-08-03 (P3): `saved = name;` — the meld admits the pair
+                // at assignment; the state field type (in env) drives the wrap.
+                if let crate::ast::Expr::Identifier(target) = lhs {
+                    if let Some(target_ty) = env.get(target).cloned() {
+                        wrap_if_marshalled(ctx, env, expr, &target_ty);
+                    }
+                }
             }
-            Statement::Foreach { body, .. } => rewrite_body(body, env, universe, graph, type_protocols, melds, current_output.clone()),
-            Statement::Block(body) => rewrite_body(body, env, universe, graph, type_protocols, melds, current_output.clone()),
+            Statement::Guarded(_, body) => rewrite_body(ctx, env, body, current_output.clone()),
+            Statement::If(_, then, els) => {
+                rewrite_body(ctx, env, then, current_output.clone());
+                rewrite_body(ctx, env, els, current_output.clone());
+            }
+            Statement::Foreach { body, .. } => rewrite_body(ctx, env, body, current_output.clone()),
+            Statement::Block(body) => rewrite_body(ctx, env, body, current_output.clone()),
             _ => {}
         }
     }
@@ -142,71 +236,84 @@ fn rewrite_body(
 /// Only same-category String variants produce a binding (marshalling_fn); any
 /// other melded pair is left for the codegen layout machinery.
 fn wrap_if_marshalled(
-    expr: &mut Expr,
+    ctx: &MarshallingCtx<'_>,
     env: &mut std::collections::HashMap<String, Type>,
-    universe: &TypeUniverse,
-    graph: &CastingGraph,
-    type_protocols: &std::collections::HashMap<String, String>,
-    melds: &std::collections::HashSet<(String, String)>,
+    expr: &mut Expr,
     target: &Type,
 ) {
-    let src_ty = expr_type_of(expr, env, universe);
+    let src_ty = expr_type_of(expr, env, ctx.universe);
     let melded = {
         let (fa, tb) = match (&src_ty, target) {
             (Type::Custom(a) | Type::Applied(a, _), Type::Custom(b) | Type::Applied(b, _)) => (a, b),
             _ => return,
         };
-        melds.contains(&(fa.clone(), tb.clone()))
+        ctx.melds.contains(&(fa.clone(), tb.clone()))
     };
     if !melded {
         return;
     }
-    if let Some(fn_name) = marshalling_fn(graph, universe, type_protocols, &src_ty, target) {
+    if let Some(fn_name) = marshalling_fn(ctx.graph, ctx.universe, ctx.type_protocols, &src_ty, target) {
         let arg = expr.clone();
         *expr = crate::ast::Expr::Call(fn_name, vec![arg], None);
     }
 }
 
 fn rewrite_expr(
-    expr: &mut Expr,
+    ctx: &MarshallingCtx<'_>,
     env: &mut std::collections::HashMap<String, Type>,
-    universe: &TypeUniverse,
-    graph: &CastingGraph,
-    type_protocols: &std::collections::HashMap<String, String>,
+    expr: &mut Expr,
 ) {
     match expr {
         Expr::Cast(inner, target) => {
-            rewrite_expr(inner, env, universe, graph, type_protocols);
+            rewrite_expr(ctx, env, inner);
             // A same-category representation cast (boundary type ⇄ base) is
             // the marshalling delta — resolve the graph path and emit the
             // binding call in its place.
-            let src_ty = expr_type_of(inner, env, universe);
-            if let Some(fn_name) = marshalling_fn(graph, universe, type_protocols, &src_ty, target) {
+            let src_ty = expr_type_of(inner, env, ctx.universe);
+            if let Some(fn_name) = marshalling_fn(ctx.graph, ctx.universe, ctx.type_protocols, &src_ty, target) {
                 let name = crate::ast::Expr::Call(fn_name, vec![(**inner).clone()], None);
                 *expr = name;
             }
         }
+        Expr::Call(fn_name, args, _) => {
+            // 2026-08-03 (P3, node bridge): wrap call args that cross a melded
+            // boundary representation — a callee param (frgn or defn) or a
+            // struct/obj constructor slot whose type is melded with the arg.
+            let callee_params: Option<Vec<Type>> = if ctx.type_slots.contains_key(fn_name) {
+                ctx.type_slots.get(fn_name).map(|slots| slots.iter().map(|s| s.ty.clone()).collect())
+            } else {
+                ctx.fn_param_types.get(fn_name).cloned()
+            };
+            for (i, arg) in args.iter_mut().enumerate() {
+                rewrite_expr(ctx, env, arg);
+                if let Some(pts) = &callee_params {
+                    if let Some(pt) = pts.get(i) {
+                        wrap_if_marshalled(ctx, env, arg, pt);
+                    }
+                }
+            }
+        }
         Expr::BinaryOp(kind, l, r) => {
-            rewrite_expr(l, env, universe, graph, type_protocols);
-            rewrite_expr(r, env, universe, graph, type_protocols);
+            rewrite_expr(ctx, env, l);
+            rewrite_expr(ctx, env, r);
             // 2026-08-03 (P1.4): a concat on a boundary String variant (e.g.
             // `CStr + CStr`, or `++`) uses the VARIANT's own cross-op
             // (cstring_concat) — the generic inline concat treats the value
             // as [len][data], which is wrong for a nul-terminated C string.
             if matches!(kind, crate::ast::BinaryOpKind::Add | crate::ast::BinaryOpKind::Concat) {
-                let lt = expr_type_of(l, env, universe);
-                let rt = expr_type_of(r, env, universe);
-                if let Some(fn_name) = variant_concat_fn(graph, universe, type_protocols, &lt, &rt) {
+                let lt = expr_type_of(l, env, ctx.universe);
+                let rt = expr_type_of(r, env, ctx.universe);
+                if let Some(fn_name) = variant_concat_fn(ctx.graph, ctx.universe, ctx.type_protocols, &lt, &rt) {
                     let lv = (**l).clone();
                     let rv = (**r).clone();
                     *expr = crate::ast::Expr::Call(fn_name, vec![lv, rv], None);
                 }
             }
         }
-        Expr::UnaryOp(_, inner) => rewrite_expr(inner, env, universe, graph, type_protocols),
+        Expr::UnaryOp(_, inner) => rewrite_expr(ctx, env, inner),
         Expr::List(items) => {
             for item in items {
-                rewrite_expr(item, env, universe, graph, type_protocols);
+                rewrite_expr(ctx, env, item);
             }
         }
         _ => {}

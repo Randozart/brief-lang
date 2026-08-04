@@ -394,6 +394,7 @@ mod tests {
             state: crate::glue::config::StateAbi::default(),
             param_decl: "{name}: {type}".to_string(),
             fn_param_decl: "{name}: {type}".to_string(),
+            ..Default::default()
         });
         map.insert("rust".to_string(), GlueTarget {
             language: "rust".to_string(),
@@ -408,6 +409,7 @@ mod tests {
             state: crate::glue::config::StateAbi::default(),
             param_decl: "{name}: {type}".to_string(),
             fn_param_decl: "{name}: {type}".to_string(),
+            ..Default::default()
         });
         map
     }

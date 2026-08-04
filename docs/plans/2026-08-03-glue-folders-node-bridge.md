@@ -90,6 +90,18 @@ via `ShellCmd$` (both already wired: macros/audit.rs severity, macros/eval.rs).
 Turing-complete generation for anything the templates can't express.
 **Documented now; implemented after the config-driven path is proven.**
 
+## 3. Status
+
+- **P1 done:** per-language `lib/glue/<lang>/glue.dbvl` + by-name loader
+  (`load_glue_language`), registry scan, tests green.
+- **P2 done:** toolchain recipe fields in `glue.dbvl` (include/suffix/link/cc)
+  + generic `run_extension_cli`; python3-config now config, not Rust.
+- **P3 done:** the `.node` addon target (NAPI templates + node recipe) +
+  `node_bridge.bv` + the **Python ↔ Node cross-language test
+  (`tests/c_driver_node.rs`) — Node persists "hello from node", Python loads it,
+  Python persists "hello from python", Node loads it. Stateful exports work
+  (several latent bugs fixed, see BUGS.md). All 1459 lib + 7 glue tests green.
+
 ## 4. Node target — generated `.node` addon
 
 `lib/glue/node/glue.dbvl`: NAPI templates —

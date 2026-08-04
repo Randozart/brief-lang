@@ -3117,3 +3117,34 @@ already handles f64).
 - The boundary ABI is correct: `CDouble` → `double` in the generated header and
   the `.ll`. The remaining `x * 2.0` on a CDouble requires an explicit
   `(2.0 as CDouble)` cast (no implicit Float coercion — by design).
+
+## Stateful Exports: State Fields Eliminated / Missing State Param / Dangling State — FIXED
+
+**Date:** 2026-08-03
+**Status:** Fixed (plan 2026-08-03-glue-folders-node-bridge, the Python ↔ Node
+bridge probe)
+**Root causes (all latent until a bridge export touched a state field across
+calls — rank/cancel/boundary never did):**
+1. `compute_referenced_fields` (transition_graph.rs) never unwrapped
+   `TopLevel::Export`, so `export defn read() { term saved; }` left `saved`
+   "unreferenced" → `apply_field_modes` eliminated it → the body emitted an
+   undefined `@saved` global.
+2. `expr_needs_state` (export_abi.rs) treated a bare `Expr::Identifier` as pure,
+   so `term saved;` (and the marshalled `term str_to_c(saved);` — the CStr↔String
+   meld rewrite makes the read a frgn call ARG) didn't mark the export stateful
+   → the wrapper lost its `%state` param.
+3. `__brief_init_state` (emit_library_shim) returned a STACK `alloca` pointer
+   that dangled on return. Fixed to a module-global `@__brief_state`
+   (library model is one state per process).
+4. `fn_return_types` omitted Transactions → `term store_text(name)` on a
+   CStr-returning txn inferred Int (the Int fallback only ever worked by luck).
+5. Callable-txn result init emitted `store ptr 0` / `store float 0` (invalid
+   LLVM constants for non-integer return types) → opt rejected the IR.
+**Also fixed along the way:** the shim exported `read` collided with libc's
+`read(2)` (compile-time conflicting prototypes + runtime PLT interposition → -1)
+— the renderer now emits `__brief_export_<name>` + `asm("name")` labels and the
+link adds `-Wl,-Bsymbolic-functions`. The fragile "looks like a C string"
+heuristic in `brief_str_to_c` misread any Brief String whose length byte is
+printable ASCII (a 35-char path read as '$'); removed — under the composite
+every String IS `[len][bytes][\0]`. `__read_file__`/`__write_file__` free'd the
+now-borrowed `str_to_c` result (P2 zero-copy) — removed the frees.

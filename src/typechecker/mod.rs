@@ -1624,6 +1624,15 @@ pub fn check_program(items: &[TopLevel], universe: &TypeUniverse) -> Result<(), 
                 TopLevel::Definition(d) => defn_return_type(d).map(|ty| (d.name.clone(), ty)),
                 _ => None,
             },
+            // 2026-08-03 (node bridge): transaction return types — `term
+            // store_text(name)` on a CStr-returning txn must see CStr, not the
+            // Int fallback (which only happened to work for Int-returning txns).
+            TopLevel::Transaction(t) => {
+                t.output_type.as_ref().and_then(|ot| match ot {
+                    OutputType::Single(ty) => Some((t.name.clone(), ty.clone())),
+                    _ => None,
+                })
+            }
             // 2026-07-31 (Phase 2): frgn return types — `term frgn_foo(x)`
             // must see the declared foreign return type, not the Int fallback.
             TopLevel::ForeignBinding(fb) => {

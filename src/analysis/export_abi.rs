@@ -29,6 +29,11 @@ pub fn compute_export_needs_state(items: &[TopLevel]) -> HashMap<String, bool> {
     let mut regular: HashMap<String, &Definition> = HashMap::new();
     let mut txns: HashSet<String> = HashSet::new();
     let mut exports: HashMap<String, &Definition> = HashMap::new();
+    // 2026-08-03 (node bridge): bare reads/writes of a state field
+    // (`term saved;`, `saved = name;`) need the `%state` handle even though no
+    // intrinsic/call is involved. Collect the top-level state field names so
+    // identifier access to them is detected (a pure local/param is not).
+    let mut state_fields: HashSet<String> = HashSet::new();
     for item in items {
         match item {
             TopLevel::Definition(d) => {
@@ -44,13 +49,24 @@ pub fn compute_export_needs_state(items: &[TopLevel]) -> HashMap<String, bool> {
                     exports.insert(d.name.clone(), d);
                 }
             }
+            TopLevel::Statement(stmt) => {
+                if let crate::ast::Statement::Let { name, .. } = stmt.as_ref() {
+                    state_fields.insert(name.clone());
+                }
+            }
+            TopLevel::Constant(c) => {
+                state_fields.insert(c.name.clone());
+            }
+            TopLevel::StateDecl(s) => {
+                state_fields.insert(s.name.clone());
+            }
             _ => {}
         }
     }
 
     let mut memo: HashMap<String, bool> = HashMap::new();
     for name in exports.keys() {
-        defn_needs_state(name, &regular, &txns, &exports, &mut memo, &mut Vec::new());
+        defn_needs_state(name, &regular, &txns, &exports, &state_fields, &mut memo, &mut Vec::new());
     }
     memo
 }
@@ -62,6 +78,7 @@ fn defn_needs_state(
     regular: &HashMap<String, &Definition>,
     txns: &HashSet<String>,
     exports: &HashMap<String, &Definition>,
+    state_fields: &HashSet<String>,
     memo: &mut HashMap<String, bool>,
     visiting: &mut Vec<String>,
 ) -> bool {
@@ -79,7 +96,7 @@ fn defn_needs_state(
         return false;
     };
     visiting.push(name.to_string());
-    let result = body_needs_state(&d.body, regular, txns, exports, memo, visiting);
+    let result = body_needs_state(&d.body, regular, txns, exports, state_fields, memo, visiting);
     visiting.pop();
     memo.insert(name.to_string(), result);
     result
@@ -90,10 +107,11 @@ fn body_needs_state(
     regular: &HashMap<String, &Definition>,
     txns: &HashSet<String>,
     exports: &HashMap<String, &Definition>,
+    state_fields: &HashSet<String>,
     memo: &mut HashMap<String, bool>,
     visiting: &mut Vec<String>,
 ) -> bool {
-    body.iter().any(|s| stmt_needs_state(s, regular, txns, exports, memo, visiting))
+    body.iter().any(|s| stmt_needs_state(s, regular, txns, exports, state_fields, memo, visiting))
 }
 
 fn stmt_needs_state(
@@ -101,6 +119,7 @@ fn stmt_needs_state(
     regular: &HashMap<String, &Definition>,
     txns: &HashSet<String>,
     exports: &HashMap<String, &Definition>,
+    state_fields: &HashSet<String>,
     memo: &mut HashMap<String, bool>,
     visiting: &mut Vec<String>,
 ) -> bool {
@@ -109,25 +128,30 @@ fn stmt_needs_state(
         | Statement::TermBang(opt)
         | Statement::Return(opt)
         | Statement::Escape(opt) => {
-            opt.as_ref().is_some_and(|e| expr_needs_state(e, regular, txns, exports, memo, visiting))
+            opt.as_ref().is_some_and(|e| expr_needs_state(e, regular, txns, exports, state_fields, memo, visiting))
         }
-        Statement::Expression(expr) => expr_needs_state(expr, regular, txns, exports, memo, visiting),
+        Statement::Expression(expr) => expr_needs_state(expr, regular, txns, exports, state_fields, memo, visiting),
         Statement::Let { expr, .. } => {
-            expr.as_ref().is_some_and(|e| expr_needs_state(e, regular, txns, exports, memo, visiting))
+            expr.as_ref().is_some_and(|e| expr_needs_state(e, regular, txns, exports, state_fields, memo, visiting))
         }
-        Statement::Assign(_, expr) => expr_needs_state(expr, regular, txns, exports, memo, visiting),
+        // 2026-08-03 (node bridge): the assignment TARGET may be a state field
+        // (`saved = name;`) — check it too, not just the RHS.
+        Statement::Assign(lhs, expr) => {
+            expr_needs_state(lhs, regular, txns, exports, state_fields, memo, visiting)
+                || expr_needs_state(expr, regular, txns, exports, state_fields, memo, visiting)
+        }
         Statement::Guarded(_, body) => {
-            body.iter().any(|s| stmt_needs_state(s, regular, txns, exports, memo, visiting))
+            body.iter().any(|s| stmt_needs_state(s, regular, txns, exports, state_fields, memo, visiting))
         }
         Statement::If(_, then, els) => {
-            then.iter().any(|s| stmt_needs_state(s, regular, txns, exports, memo, visiting))
-                || els.iter().any(|s| stmt_needs_state(s, regular, txns, exports, memo, visiting))
+            then.iter().any(|s| stmt_needs_state(s, regular, txns, exports, state_fields, memo, visiting))
+                || els.iter().any(|s| stmt_needs_state(s, regular, txns, exports, state_fields, memo, visiting))
         }
         Statement::Foreach { body, .. } => {
-            body.iter().any(|s| stmt_needs_state(s, regular, txns, exports, memo, visiting))
+            body.iter().any(|s| stmt_needs_state(s, regular, txns, exports, state_fields, memo, visiting))
         }
         Statement::Block(body) => {
-            body.iter().any(|s| stmt_needs_state(s, regular, txns, exports, memo, visiting))
+            body.iter().any(|s| stmt_needs_state(s, regular, txns, exports, state_fields, memo, visiting))
         }
         // MetadataAssignment is compile-time only, no state needed
         Statement::MetadataAssignment(..) => false,
@@ -141,16 +165,17 @@ fn expr_needs_state(
     regular: &HashMap<String, &Definition>,
     txns: &HashSet<String>,
     exports: &HashMap<String, &Definition>,
+    state_fields: &HashSet<String>,
     memo: &mut HashMap<String, bool>,
     visiting: &mut Vec<String>,
 ) -> bool {
     match expr {
         // Field access always needs state (reads struct metadata)
         Expr::Field(_, _) => true,
-        Expr::Call(name, _, _) => {
+        Expr::Call(name, args, _) => {
             // Observable/stateful intrinsics need state (unchanged from the
             // backend's original list).
-            if matches!(name.as_str(),
+            let name_needs = if matches!(name.as_str(),
                 "Malloc#" | "Memcpy#" | "Memmove#" | "Memset#"
                 | "Print#"
                 | "FileRead#" | "FileWrite#" | "ShellCmd#"
@@ -158,30 +183,41 @@ fn expr_needs_state(
                 | "AllocArray#" | "AllocInitArray#" | "StringNew#"
                 | "StringFromPtr#" | "StringConcat#"
             ) {
-                return true;
-            }
-            // Regular (non-exported) defns and transactions are ALWAYS emitted
-            // with a %state parameter, so a caller must carry state.
-            if regular.contains_key(name.as_str()) || txns.contains(name.as_str()) {
-                return true;
-            }
-            // Export-to-export calls: the callee may be pure (no state) or
-            // stateful — resolve transitively.
-            if exports.contains_key(name.as_str()) {
-                return defn_needs_state(name, regular, txns, exports, memo, visiting);
-            }
-            // frgn / other external calls do not need state at the boundary.
-            false
+                true
+            } else if regular.contains_key(name.as_str()) || txns.contains(name.as_str()) {
+                // Regular (non-exported) defns and transactions are ALWAYS
+                // emitted with a %state parameter, so a caller must carry state.
+                true
+            } else if exports.contains_key(name.as_str()) {
+                // Export-to-export calls: the callee may be pure (no state) or
+                // stateful — resolve transitively.
+                defn_needs_state(name, regular, txns, exports, state_fields, memo, visiting)
+            } else {
+                // frgn / other external calls do not need state at the boundary
+                // — BUT their arguments may read/write state fields. The
+                // marshalling rewrites `term saved;` → `term str_to_c(saved);`
+                // (the CStr<->String meld), so a bare state-field read becomes
+                // a frgn call ARG. Check the args too.
+                false
+            };
+            name_needs
+                || args.iter().any(|a| {
+                    expr_needs_state(a, regular, txns, exports, state_fields, memo, visiting)
+                })
         }
         Expr::BinaryOp(_, lhs, rhs) => {
-            expr_needs_state(lhs, regular, txns, exports, memo, visiting)
-                || expr_needs_state(rhs, regular, txns, exports, memo, visiting)
+            expr_needs_state(lhs, regular, txns, exports, state_fields, memo, visiting)
+                || expr_needs_state(rhs, regular, txns, exports, state_fields, memo, visiting)
         }
-        Expr::UnaryOp(_, inner) => expr_needs_state(inner, regular, txns, exports, memo, visiting),
+        Expr::UnaryOp(_, inner) => expr_needs_state(inner, regular, txns, exports, state_fields, memo, visiting),
         Expr::List(items) => {
-            items.iter().any(|e| expr_needs_state(e, regular, txns, exports, memo, visiting))
+            items.iter().any(|e| expr_needs_state(e, regular, txns, exports, state_fields, memo, visiting))
         }
-        // literals, identifiers are pure
+        // 2026-08-03 (node bridge): a bare read of a state field needs the
+        // `%state` handle even though no intrinsic/call is involved
+        // (`term saved;`). Params/locals (not in state_fields) stay pure.
+        Expr::Identifier(name) => state_fields.contains(name),
+        // other literals are pure
         _ => false,
     }
 }
