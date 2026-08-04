@@ -199,11 +199,45 @@ teaches, the config/stdlib learns.
 |------|-------------------------------------|
 | Rust → Brief | 1127 ns (native Rust 1101 — **2.4%**) |
 | C → Brief (.a) | 1092 ns (native C 1082 — **1%**) |
-| Python → Brief (ctypes) | 2033 ns (Python → C 1927 — **5%**) |
+| Python → Brief (ctypes) | 3057 ns (200k-call bench) |
+| Python → Brief (native ext) | **1297 ns** (**2.4×** vs ctypes) |
+| Python → Brief `add` (ctypes) | 1058 ns |
+| Python → Brief `add` (native ext) | **179 ns** (**6×** — native CPython speed) |
 
 - The `.a` path runs `opt -passes='default<O3>'` before llc so the emitted loop
   is fully SSA (a plain `llc -O3` in LLVM 18.1.3 did not SROA the transaction
   loop's allocas).
 - The boundary is a single C-ABI call (~26 ns/call); the work dominates.
-- Native Python C-extension target: **in development** — see the plan
-  `docs/plans/2026-08-03-native-python-extension.md`.
+- The native extension's pure-call overhead is ~179 ns — the Python method
+  dispatch + per-category parse/build in the generated shim. The compute-heavy
+  case sits at the native compute floor (feature_hash's FNV-1a loop is ~1080 ns
+  of real work; the Python method adds only ~217 ns).
+
+## 10. Native Python extension (no ctypes)
+
+`brief extension <bridge.bv> python` generates a CPython C-extension module
+that calls the Brief exports directly — no ctypes marshalling layer:
+
+```
+$ brief extension rank.bv python --out build/
+  Extension: build/rank.cpython-312-x86_64-linux-gnu.so
+$ python3 -c "import rank; print(rank.feature_hash(1000, 42))"
+```
+
+- The shim is a single `.c`: a `PyInit_<bridge>` module with one method per
+  export. Per-category parse/build snippets (in `config/glue.dbvl`, the python
+  target's `native.*` templates) marshal natively — Python `int`/`float`/`str`
+  in, native Python values out. String params use `PyUnicode_AsUTF8AndSize`
+  (limited API ≥ 3.10); `#String` handles are the CStr/Brief pointer.
+- The `CStr <-> String` meld (`lib/glue/c.bv`) makes boundary functions
+  cast-free: `let s: String = name;` needs no `as`, and the marshalling inserts
+  `cstr_to_brief`/`str_to_c` (zero-copy in the String → CStr direction — a
+  Brief String's data region IS a nul-terminated C string).
+- Adding another language is a config section (templates + protocol mappings)
+  — the compiler renders, it never hardcodes a language.
+- The composite ABI contract: a String/Data composite crosses as an i64 handle;
+  every shim dereferences it to a state-owned `(ptr, len)` region (NUL
+  invariant) valid for the state's life; hosts borrow read-only; mutability is
+  declared by the meld, never per language. See
+  `docs/architecture/casting-protocol.md` and the plan
+  `docs/plans/2026-08-03-native-python-meld-composite.md`.
