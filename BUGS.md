@@ -1,5 +1,31 @@
 # Bugs
 
+## Runtime: Stale `free()` of Zero-Copy `brief_str_to_c` Results Crashed `get_env_int`/`__print` — FIXED
+
+**Date:** 2026-08-04
+**Status:** Fixed (main, post-merge)
+**Root cause:** The 2026-08-03 composite plan
+(`docs/plans/2026-08-03-native-python-meld-composite.md`) made
+`brief_str_to_c` return the IN-PLACE data pointer for heap Brief strings —
+zero-copy, contract "caller must NOT free". `__read_file__`/`__write_file__`
+were updated, but five callers still `free()`d the result (a stale free of an
+arena/state-owned pointer): `__getenv_brief`, `__getenv_int`, `__print`,
+`__print_str`, `__eprint_str`. The crash surfaced when the
+`feat/term-termination-diagnostics` merge's clang-guarded integration test
+(`member_inline_term_links_in_countdown_loop`, which reads `BOUND` via
+`get_env_int!`) ran on main — SIGSEGV in the allocator. This also means EVERY
+runtime benchmark using the `BOUND` mechanism would crash on main.
+**Fix:** Remove the stale `free(c_key)`/`free(c_msg)` calls in the five
+functions, per the composite ownership contract; the results are borrowed.
+SSO strings (the only owned `str_to_c` case) are accepted as a leak, matching
+the updated `__read_file__`/`__write_file__` behavior.
+**Impact:** `get_env_int!`/`BOUND`-driven programs and string printing work
+again on main; 6/6 integration + 1469 lib tests green.
+**Regression tests:** `tests/termination_diagnostics_test.rs::member_inline_term_links_in_countdown_loop`.
+**Undo:** restore the `free()` calls (do NOT — they free borrowed pointers).
+
+---
+
 ## Vestigial `return` Statement Removed (was the "return divergence") — RESOLVED
 
 **Date:** 2026-08-04

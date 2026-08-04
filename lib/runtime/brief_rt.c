@@ -320,7 +320,6 @@ char* __getenv_brief(const char* key_bstr) {
     char* c_key = brief_str_to_c(key_bstr);
     if (!c_key) return 0;
     char* val = getenv(c_key);
-    free(c_key);
     if (!val) return 0;
     int64_t len = (int64_t)strlen(val);
     char* bstr = (char*)malloc((size_t)(len + 8 + 1));
@@ -336,7 +335,6 @@ int64_t __getenv_int(const char* key_bstr) {
     char* c_key = brief_str_to_c(key_bstr);
     if (!c_key) return 0;
     char* val = getenv(c_key);
-    free(c_key);
     if (!val) return 0;
     return atol(val);
 }
@@ -353,7 +351,7 @@ int64_t brief_sysconf(int64_t name) {
 
 int64_t __print(const char* msg_bstr) {
     char* c_msg = brief_str_to_c(msg_bstr);
-    if (c_msg) { fputs(c_msg, stdout); free(c_msg); }
+    if (c_msg) { fputs(c_msg, stdout); }
     return 0;
 }
 
@@ -399,11 +397,11 @@ __attribute__((always_inline)) int64_t __print_char(int64_t c) {
 // 2026-08-01: String printer for the PrintStr# intrinsic — the target of
 // format-string literal segments in print!/println!. Mirrors __print: takes
 // a ptr to a length-prefixed [len][bytes] buffer (String ABI = ptr), prints
-// it without a trailing newline, and frees the C copy. Defined here
-// because the print plugin expands literal segments to PrintStr# calls.
+// it without a trailing newline. Defined here because the print plugin
+// expands literal segments to PrintStr# calls.
 int64_t __print_str(const char* msg_bstr) {
     char* c_msg = brief_str_to_c(msg_bstr);
-    if (c_msg) { fputs(c_msg, stdout); free(c_msg); }
+    if (c_msg) { fputs(c_msg, stdout); }
     return 0;
 }
 
@@ -411,7 +409,7 @@ int64_t __print_str(const char* msg_bstr) {
 // __print_str but writes to stderr (no buffering assumptions).
 __attribute__((always_inline)) int64_t __eprint_str(const char* msg_bstr) {
     char* c_msg = brief_str_to_c(msg_bstr);
-    if (c_msg) { fputs(c_msg, stderr); free(c_msg); }
+    if (c_msg) { fputs(c_msg, stderr); }
     return 0;
 }
 
