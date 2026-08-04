@@ -220,8 +220,7 @@ fn collect_from_stmt(
         | Statement::Assign(_, e)
         | Statement::Expression(e)
         | Statement::Term(Some(e))
-        | Statement::TermBang(Some(e))
-        | Statement::Return(Some(e)) => collect_from_expr(e, entry_commands, arg_flags),
+        | Statement::TermBang(Some(e)) => collect_from_expr(e, entry_commands, arg_flags),
         Statement::Guarded(cond, body) => {
             collect_from_expr(cond, entry_commands, arg_flags);
             for s in body {
@@ -426,7 +425,6 @@ fn rewrite_stmt(
         Statement::Expression(e) => Statement::Expression(rewrite_expr(e, entries, arg_flags)?),
         Statement::Term(Some(e)) => Statement::Term(Some(rewrite_expr(e, entries, arg_flags)?)),
         Statement::TermBang(Some(e)) => Statement::TermBang(Some(rewrite_expr(e, entries, arg_flags)?)),
-        Statement::Return(Some(e)) => Statement::Return(Some(rewrite_expr(e, entries, arg_flags)?)),
         Statement::Guarded(cond, body) => Statement::Guarded(
             rewrite_expr(cond, entries, arg_flags)?,
             body.into_iter()

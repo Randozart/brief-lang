@@ -1649,7 +1649,7 @@ impl LlvmBackend {
             match stmt {
                 Statement::Let { expr: Some(e), .. } => is_ffi_call(e),
                 Statement::Expression(e) => is_ffi_call(e),
-                Statement::Term(Some(e)) | Statement::TermBang(Some(e)) | Statement::Return(Some(e)) => is_ffi_call(e),
+                Statement::Term(Some(e)) | Statement::TermBang(Some(e)) => is_ffi_call(e),
                 Statement::Assign(_, e) => is_ffi_call(e),
                 Statement::Guarded(_, body) => body.iter().any(|s| has_ffi_call(s)),
                 Statement::Block(body) => body.iter().any(|s| has_ffi_call(s)),
@@ -1676,7 +1676,7 @@ impl LlvmBackend {
             match stmt {
                 Statement::Let { expr: Some(e), .. } => collect_expr_idents(e, names),
                 Statement::Expression(e) => collect_expr_idents(e, names),
-                Statement::Term(Some(e)) | Statement::TermBang(Some(e)) | Statement::Return(Some(e)) => collect_expr_idents(e, names),
+                Statement::Term(Some(e)) | Statement::TermBang(Some(e)) => collect_expr_idents(e, names),
                 Statement::Assign(lhs, rhs) => { collect_expr_idents(lhs, names); collect_expr_idents(rhs, names); }
                 Statement::Guarded(_, body) => { for s in body { collect_idents(s, names); } }
                 Statement::Block(body) => { for s in body { collect_idents(s, names); } }
@@ -2147,7 +2147,12 @@ impl LlvmBackend {
             if !self.fun.terminated {
                 self.emit_arena_fini(out, "  ");
             }
-            writeln!(out, "  ret void").ok();
+            // 2026-08-04 (term-termination-diagnostics): a value-form term in
+            // this void txn emits `ret void` itself (terminated=true); guard
+            // against emitting a second ret after it.
+            if !self.fun.terminated {
+                writeln!(out, "  ret void").ok();
+            }
             writeln!(out, "}}").ok();
 
             // Emit cold functions after the txn function
@@ -2191,11 +2196,15 @@ impl LlvmBackend {
                 writeln!(out, "define void @{}({}) local_unnamed_addr #0 {{", cold_name, param_sig.join(", ")).ok();
 
                 // Rewrite guard body: replace ident references with param names
+                self.fun.terminated = false;
                 for stmt in &body {
+                    if self.fun.terminated { break; }
                     let rewritten = Self::rewrite_stmt_idents(stmt, &field_names, &cp_names);
                     emit_statement(self, out, &rewritten, "  ");
                 }
-                writeln!(out, "  ret void").ok();
+                if !self.fun.terminated {
+                    writeln!(out, "  ret void").ok();
+                }
                 writeln!(out, "}}").ok();
                 writeln!(out).ok();
 
@@ -2622,11 +2631,15 @@ impl LlvmBackend {
             if self.fun.terminated { break; }
             emit_statement(self, out, s, "  ");
         }
-        // 2026-07-19: term; sets terminated=true but emits no terminator —
-        // always branch to the done label so the block is not left dangling.
-        // If the body already emitted a ret (not typical for async void fn),
-        // this br is dead code after a terminator (harmless).
-        writeln!(out, "  br label %{}_done", async_name).ok();
+        // 2026-08-04 (term-termination-diagnostics): REWRITTEN from the
+        // 2026-07-19 "always branch" version. The void value-form term now
+        // emits a real terminator (`ret void` in this void async fn), so this
+        // convergence branch is emitted only when the body did NOT terminate.
+        // The 2026-07-19 version emitted an unconditional br that left the
+        // block dangling whenever the body ended in a terminator.
+        if !self.fun.terminated {
+            writeln!(out, "  br label %{}_done", async_name).ok();
+        }
         writeln!(out, "{}_done:", async_name).ok();
         writeln!(out, "  ret void").ok();
         writeln!(out, "}}").ok();

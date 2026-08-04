@@ -50,9 +50,25 @@ impl<'a> Parser<'a> {
                     self.pos += 1;
                     return self.parse_statement();
                 }
-                // Keywords that lex as identifiers: return, if, $defn, $txn
+                // Keywords that lex as identifiers: if, $defn, $txn
+                // 2026-08-04 (remove-vestigial-return): Brief has NO `return`
+                // statement (never specced, never used). Previously it parsed to
+                // Statement::Return whose semantics disagreed across the
+                // interpreter (continues) and the LLVM/VM backends (exits) —
+                // a latent wrong-codegen hazard. Raise a helpful error instead.
                 if self.check_identifier("return") {
-                    self.parse_return_statement()
+                    let span = self
+                        .peek_with_span()
+                        .map(|(_, r)| self.make_span(r.clone()))
+                        .unwrap_or_else(crate::errors::Span::dummy);
+                    self.pos += 1; // consume `return`
+                    return Err(SyntaxError::InvalidStatement {
+                        reason: "Brief has no `return` statement. To return a value \
+                                 from a defn use `term <value>`; to mark a convergence \
+                                 checkpoint use bare `term;`; `term!` closes the program."
+                            .to_string(),
+                        span,
+                    });
                 } else if self.check_identifier("if") {
                     self.parse_if_statement()
                 } else if self.check_identifier("$defn") {
@@ -136,18 +152,6 @@ impl<'a> Parser<'a> {
         } else {
             Ok(Statement::Term(val))
         }
-    }
-
-    /// return expr;
-    fn parse_return_statement(&mut self) -> Result<Statement, SyntaxError> {
-        self.pos += 1; // consume 'return' identifier
-        let val = if !self.check(&Token::Semicolon) {
-            Some(self.parse_expression()?)
-        } else {
-            None
-        };
-        self.expect(Token::Semicolon)?;
-        Ok(Statement::Return(val))
     }
 
     /// escape expr;
@@ -491,5 +495,40 @@ impl<'a> Parser<'a> {
         self.pos += 1; // consume '}'
         self.expect(Token::Semicolon)?;
         Ok(Statement::Match { expr, arms })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::lexer::tokenize;
+
+    // 2026-08-04 (remove-vestigial-return): Brief has no `return` statement —
+    // using it must fail with a helpful error pointing at `term`, not parse to
+    // a Statement::Return whose semantics disagreed across engines.
+    #[test]
+    fn return_statement_errors_with_helpful_message() {
+        for src in ["defn f(x: Int) -> Int { return x; };", "return;", "node n [a==0][a==1] { a = 1; return; };"] {
+            let tokens = tokenize(src).unwrap();
+            let mut p = Parser::new(tokens, src);
+            let err = p.parse_program().unwrap_err();
+            assert!(
+                err.to_string().contains("has no `return`"),
+                "expected the helpful 'has no `return`' message, got: {err}"
+            );
+            assert!(
+                err.to_string().contains("`term <value>`"),
+                "message must suggest `term <value>`, got: {err}"
+            );
+        }
+    }
+
+    #[test]
+    fn term_statements_still_parse() {
+        let src = "defn f(x: Int) -> Int { term x; };\nnode n [a==0][a==1] { a = 1; term; };";
+        let tokens = tokenize(src).unwrap();
+        let mut p = Parser::new(tokens, src);
+        let program = p.parse_program().unwrap();
+        assert_eq!(program.len(), 2, "both defn and node must parse");
     }
 }

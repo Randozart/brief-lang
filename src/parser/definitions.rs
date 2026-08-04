@@ -149,6 +149,19 @@ impl<'a> Parser<'a> {
                 if self.check_identifier("asm") {
                     return self.parse_asm_fn().map(TopLevel::AsmFn);
                 }
+                // 2026-08-04 (remove-vestigial-return): Brief has no `return`
+                // statement — give the same helpful error at top level as in
+                // statement bodies (src/parser/statements.rs parse_statement).
+                if self.check_identifier("return") {
+                    self.pos += 1; // consume `return`
+                    return Err(SyntaxError::InvalidStatement {
+                        reason: "Brief has no `return` statement. To return a value \
+                                 from a defn use `term <value>`; to mark a convergence \
+                                 checkpoint use bare `term;`; `term!` closes the program."
+                            .to_string(),
+                        span: crate::errors::Span::dummy(),
+                    });
+                }
                 let name = self.expect_identifier()?;
                 self.error_at_current(&format!("unexpected top-level item '{}'", name))
             }

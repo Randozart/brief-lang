@@ -448,7 +448,6 @@ pub fn stmt_tag(stmt: &Statement) -> &str {
         Statement::KeepHint(_) => "keep-hint",
         Statement::Term(_) => "term",
         Statement::TermBang(_) => "term!",
-        Statement::Return(_) => "return",
         Statement::Guarded(_, _) => "when",
         Statement::Gate(_) => "gate",
         Statement::Expression(_) => "expr",

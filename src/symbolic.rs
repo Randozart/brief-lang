@@ -433,7 +433,7 @@ pub fn enumerate_paths(body: &[Statement]) -> Vec<SymbolicState> {
                     new_paths.push(false_state);
                 }
 
-                Statement::Term(..) | Statement::TermBang(..) | Statement::Escape(_) | Statement::Return(..) => {
+                Statement::Term(..) | Statement::TermBang(..) | Statement::Escape(_) => {
                     new_paths.push(state);
                 }
 

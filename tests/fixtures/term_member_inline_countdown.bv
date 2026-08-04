@@ -1,0 +1,22 @@
+// Regression fixture (2026-08-04, queue_drain): a value-form `term <val>` INSIDE
+// an INLINED collection member body (RingBuffer pop via `<- queue`) must NOT be
+// treated as a control-flow exit of the enclosing function. Before `ac6aca40`
+// the value-form void path emitted `ret void` for these in the countdown loop,
+// producing IR that clang rejects ("value doesn't match function result type").
+// The member's `term <val>` is a member-local return captured in member_result.
+let N: Int = get_env_int!("BOUND");
+import { RingBuffer } from "std/collections.bv";
+let queue: RingBuffer<Int> = 0;
+let count: Int = 0;
+
+node work [count < N][count == N] {
+    queue <- count;
+    <- queue;
+    count = count + 1;
+
+    when count % 1000 == 0 {
+        println!(count);
+    };
+
+    term;
+};

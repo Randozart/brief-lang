@@ -738,9 +738,6 @@ fn rename_stmt(stmt: &Statement, from_names: &[String], to_names: &[String]) -> 
         Statement::SyncBlock(body) => {
             Statement::SyncBlock(body.iter().map(|s| rename_stmt(s, from_names, to_names)).collect())
         }
-        Statement::Return(val) => {
-            Statement::Return(val.as_ref().map(|e| rename_variables(e, from_names, to_names)))
-        }
         _ => stmt.clone(),
     }
 }

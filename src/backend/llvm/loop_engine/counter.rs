@@ -1710,10 +1710,6 @@ impl LlvmBackend {
                         self.emit_expr(out, e, "  ");
                     }
                 }
-                Statement::Return(Some(e)) => {
-                    let val = self.emit_expr(out, e, "  ");
-                    writeln!(out, "  ret i64 {}", val.name).ok();
-                }
                 Statement::ArrowAssign { .. } => {
                     // 2026-08-01 (Phase 4): the arrow (stream write, collection
                     // insert/extract, discard) — delegate to the standard emitter;

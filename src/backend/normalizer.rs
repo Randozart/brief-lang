@@ -61,7 +61,6 @@ where F: FnMut(&Expr) {
             Statement::Expression(e) => f(e),
             Statement::Term(Some(e)) => f(e),
             Statement::TermBang(Some(e)) => f(e),
-            Statement::Return(Some(e)) => f(e),
             Statement::Guarded(_, body) => walk_statements(body, f),
             Statement::Block(body) => walk_statements(body, f),
             Statement::If(_, then_, else_) => {

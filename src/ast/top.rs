@@ -212,8 +212,6 @@ pub enum Statement {
     Term(Option<Expr>),
     /// term! expr;
     TermBang(Option<Expr>),
-    /// return expr;
-    Return(Option<Expr>),
     /// when condition { body } or [condition] stmt;
     Guarded(Expr, Vec<Statement>),
     /// [condition]; — convergence gate (static assertion, re-convergence point)
@@ -304,10 +302,9 @@ impl PartialEq for Statement {
              Statement::Let { name: n2, ty: t2, expr: e2, modifiers: m2, .. }) =>
                 n1 == n2 && t1 == t2 && e1 == e2 && m1 == m2,
             (Statement::Assign(l1, r1), Statement::Assign(l2, r2)) => l1 == l2 && r1 == r2,
-            (Statement::Term(e1), Statement::Term(e2)) => e1 == e2,
-            (Statement::TermBang(e1), Statement::TermBang(e2)) => e1 == e2,
-            (Statement::Return(e1), Statement::Return(e2)) => e1 == e2,
-            (Statement::Guarded(c1, b1), Statement::Guarded(c2, b2)) => c1 == c2 && b1 == b2,
+             (Statement::Term(e1), Statement::Term(e2)) => e1 == e2,
+             (Statement::TermBang(e1), Statement::TermBang(e2)) => e1 == e2,
+             (Statement::Guarded(c1, b1), Statement::Guarded(c2, b2)) => c1 == c2 && b1 == b2,
             (Statement::Gate(c1), Statement::Gate(c2)) => c1 == c2,
             (Statement::Expression(e1), Statement::Expression(e2)) => e1 == e2,
             (Statement::If(c1, t1, e1), Statement::If(c2, t2, e2)) => c1 == c2 && t1 == t2 && e1 == e2,

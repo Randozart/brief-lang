@@ -1481,12 +1481,6 @@ pub fn infer_statement(stmt: &Statement, ctx: &mut TypecheckContext) -> Result<(
             }
             Ok(())
         }
-        Statement::Return(val) => {
-            if let Some(val) = val {
-                infer_type_only(val, ctx)?;
-            }
-            Ok(())
-        }
         Statement::Expression(expr) => {
             infer_type_only(expr, ctx)?;
             Ok(())

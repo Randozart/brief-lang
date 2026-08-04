@@ -1,0 +1,6 @@
+// Unreachable in a defn: `term x;` returns via TermReturn, so the trailing
+// Print#(x) can never run.
+defn f(x: Int) -> Int {
+  term x;
+  Print#(x);
+};

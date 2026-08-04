@@ -288,13 +288,6 @@ impl fmt::Display for Statement {
                     write!(f, "term!;")
                 }
             }
-            Statement::Return(val) => {
-                if let Some(val) = val {
-                    write!(f, "return {};", val)
-                } else {
-                    write!(f, "return;")
-                }
-            }
             Statement::Guarded(cond, body) => {
                 write!(f, "when {} {{ ", cond)?;
                 for stmt in body {
