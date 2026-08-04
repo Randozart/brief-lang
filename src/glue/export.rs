@@ -526,23 +526,26 @@ pub fn run_extension_cli(file_path: &str, language: &str, out_dir: &str) -> Resu
     let shim_path = lib_dir.join(format!("{}_module.c", bridge_name));
     std::fs::write(&shim_path, &shim).map_err(|e| format!("write shim: {}", e))?;
 
-    // Compile + link against Python.
-    let py_inc = py3_cfg("--includes").unwrap_or_default();
+    // Compile + link via the language's toolchain recipe (config-driven —
+    // the compiler only knows "compile C, link a shared library").
+    let cc = target.native_cc.clone().unwrap_or_else(|| "cc".to_string());
+    let include_flags = run_recipe_cmd(&target.native_include_cmd).unwrap_or_default();
     let shim_o = lib_dir.join(format!("{}_module.o", bridge_name));
-    let cc_c = std::process::Command::new("cc")
+    let cc_c = std::process::Command::new(&cc)
         .arg("-fPIC").arg("-c").arg(&shim_path).arg("-o").arg(&shim_o)
-        .args(py_inc.split_whitespace())
-        .output().map_err(|e| format!("failed to run cc: {}", e))?;
+        .args(include_flags.split_whitespace())
+        .output().map_err(|e| format!("failed to run {}: {}", cc, e))?;
     if !cc_c.status.success() {
-        return Err(format!("cc failed:\n{}", String::from_utf8_lossy(&cc_c.stderr)));
+        return Err(format!("{} failed:\n{}", cc, String::from_utf8_lossy(&cc_c.stderr)));
     }
 
-    let suffix = py3_cfg("--extension-suffix")
+    let suffix = target.native_suffix.clone()
+        .or_else(|| run_recipe_cmd(&target.native_suffix_cmd))
         .unwrap_or_else(|| ".so".to_string());
     let ext_path = lib_dir.join(format!("{}{}", bridge_name, suffix.trim()));
-    let ldflags = py3_cfg("--ldflags").unwrap_or_default();
+    let ldflags = run_recipe_cmd(&target.native_link_cmd).unwrap_or_default();
     let archive = lib_dir.join(format!("lib{}.a", bridge_name));
-    let cc_link = std::process::Command::new("cc")
+    let cc_link = std::process::Command::new(&cc)
         .arg("-shared").arg("-o").arg(&ext_path).arg(&shim_o).arg(&archive)
         .args(ldflags.split_whitespace())
         .output().map_err(|e| format!("failed to link extension: {}", e))?;
@@ -561,8 +564,12 @@ pub fn run_extension_cli(file_path: &str, language: &str, out_dir: &str) -> Resu
     Ok(())
 }
 
-fn py3_cfg(flag: &str) -> Option<String> {
-    let out = std::process::Command::new("python3-config").arg(flag).output().ok()?;
+/// Run a toolchain-recipe command from the language config; its stdout is the
+/// value (include flags, link flags, suffix). None if no command is configured
+/// or it fails (e.g. node needs no link flags).
+fn run_recipe_cmd(cmd: &Option<String>) -> Option<String> {
+    let cmd = cmd.as_ref()?;
+    let out = std::process::Command::new("sh").arg("-c").arg(cmd).output().ok()?;
     if out.status.success() {
         Some(String::from_utf8_lossy(&out.stdout).trim().to_string())
     } else {

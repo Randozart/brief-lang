@@ -25,7 +25,7 @@ use std::path::{Path, PathBuf};
 /// Protocol mapping replaces old type_map/c_type_map/conversions —
 /// the config only knows about protocol categories (#String, #Int, #Float),
 /// not about Brief-internal type names.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Default)]
 pub struct GlueTarget {
     /// Language identifier (e.g., "python", "rust", "node")
     pub language: String,
@@ -67,6 +67,21 @@ pub struct GlueTarget {
     /// 2026-08-03: Declaration format for function-pointer (callback) params.
     /// `{ret}` / `{name}` / `{params}` placeholders. C: `{ret} (*{name})({params})`.
     pub fn_param_decl: String,
+    /// 2026-08-03 (P2, plan glue-folders-node-bridge): the native-extension
+    /// build recipe — how to compile + link the generated shim for this
+    /// language. Each command emits its value on stdout; None = absent.
+    /// Keeps ALL toolchain knowledge out of the compiler (config-driven).
+    pub native_include_cmd: Option<String>,
+    /// Literal output suffix for the built extension (e.g. node: ".node").
+    pub native_suffix: Option<String>,
+    /// Command whose stdout is the output suffix (e.g. python's
+    /// `python3-config --extension-suffix`).
+    pub native_suffix_cmd: Option<String>,
+    /// Command whose stdout is the link flags (python's `python3-config
+    /// --ldflags`; node needs none — symbols resolve at load).
+    pub native_link_cmd: Option<String>,
+    /// The C compiler to invoke (default "cc").
+    pub native_cc: Option<String>,
 }
 
 /// How the state handle crosses the boundary for one language.
@@ -338,6 +353,11 @@ fn glue_target_from_entry(
         state,
         param_decl,
         fn_param_decl,
+        native_include_cmd: str_field("native_include_cmd"),
+        native_suffix: str_field("native_suffix"),
+        native_suffix_cmd: str_field("native_suffix_cmd"),
+        native_link_cmd: str_field("native_link_cmd"),
+        native_cc: str_field("native_cc"),
     })
 }
 
@@ -399,6 +419,7 @@ mod tests {
             state: crate::glue::config::StateAbi::default(),
             param_decl: "{name}: {type}".to_string(),
             fn_param_decl: "{name}: {type}".to_string(),
+            ..Default::default()
         });
         targets.insert("rust".to_string(), GlueTarget {
             language: "rust".to_string(),
@@ -413,6 +434,7 @@ mod tests {
             state: crate::glue::config::StateAbi::default(),
             param_decl: "{name}: {type}".to_string(),
             fn_param_decl: "{name}: {type}".to_string(),
+            ..Default::default()
         });
 
         // Should work with or without leading dot
@@ -436,6 +458,7 @@ mod tests {
             state: crate::glue::config::StateAbi::default(),
             param_decl: "{name}: {type}".to_string(),
             fn_param_decl: "{name}: {type}".to_string(),
+            ..Default::default()
         });
 
         // Should work with or without leading dot
@@ -459,6 +482,7 @@ mod tests {
             state: crate::glue::config::StateAbi::default(),
             param_decl: "{name}: {type}".to_string(),
             fn_param_decl: "{name}: {type}".to_string(),
+            ..Default::default()
         });
 
         // Should work with or without leading dot
