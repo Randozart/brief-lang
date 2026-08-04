@@ -440,11 +440,7 @@ pub fn run_bindings_cli(file_path: &str, language: &str, out_dir: &str) -> Resul
         .unwrap_or("bridge");
     let (items, universe) = crate::library::parse_and_check(file_path, &source)?;
 
-    let glue_targets = crate::glue::config::load_glue_config(None)?;
-    let target = glue_targets.get(language).ok_or_else(|| {
-        format!("Unknown bindings target '{}'.\n  Add an entry to config/glue.dbvl: {}", language,
-            glue_targets.keys().cloned().collect::<Vec<_>>().join(", "))
-    })?;
+    let target = crate::glue::config::load_glue_language(language)?;
     let info = extract_bridge_info(&items, bridge_name);
     // 2026-08-03 (P3): type → declared protocol (`type CStr: #String<C_String>`)
     // so boundary types resolve to their category's ABI names in the header/
@@ -458,7 +454,7 @@ pub fn run_bindings_cli(file_path: &str, language: &str, out_dir: &str) -> Resul
     let bindings_ffi = target.templates.get("bindings.ffi_template")
         .or_else(|| target.templates.get("ffi_template"))
         .ok_or_else(|| format!("target '{}' has no bindings.ffi_template in config/glue.dbvl", language))?;
-    let ffi_decls = render_ffi_decls(&info.exports, target, &template_vars, bindings_ffi, &type_protocols);
+    let ffi_decls = render_ffi_decls(&info.exports, &target, &template_vars, bindings_ffi, &type_protocols);
     template_vars.insert("ffi_decls".to_string(), ffi_decls);
 
     let output_dir = std::path::Path::new(out_dir).join(format!("{}-bindings", bridge_name));
@@ -507,11 +503,7 @@ pub fn run_extension_cli(file_path: &str, language: &str, out_dir: &str) -> Resu
         .unwrap_or("bridge");
     let (items, _universe) = crate::library::parse_and_check(file_path, &source)?;
 
-    let glue_targets = crate::glue::config::load_glue_config(None)?;
-    let target = glue_targets.get(language).ok_or_else(|| {
-        format!("Unknown extension target '{}'. Targets: {}", language,
-            glue_targets.keys().cloned().collect::<Vec<_>>().join(", "))
-    })?;
+    let target = crate::glue::config::load_glue_language(language)?;
     let info = extract_bridge_info(&items, bridge_name);
     let type_protocols = build_type_protocols(&items);
 
@@ -530,7 +522,7 @@ pub fn run_extension_cli(file_path: &str, language: &str, out_dir: &str) -> Resu
     }
 
     // Render the native shim (.c).
-    let shim = render_native_shim(&info, target, &type_protocols, bridge_name);
+    let shim = render_native_shim(&info, &target, &type_protocols, bridge_name);
     let shim_path = lib_dir.join(format!("{}_module.c", bridge_name));
     std::fs::write(&shim_path, &shim).map_err(|e| format!("write shim: {}", e))?;
 
@@ -688,11 +680,9 @@ pub fn run_export_cli(file_path: &str, language: &str, out_dir: &str) -> Result<
     let (items, universe) = crate::library::parse_and_check(file_path, &source)?;
 
     // 2026-07-22: Step 2 — find language target and extract bridge info
+    let target = crate::glue::config::load_glue_language(language)?;
+    // Full registry for frgn dispatch routing (extension → language).
     let glue_targets = crate::glue::config::load_glue_config(None)?;
-    let target = glue_targets.get(language).ok_or_else(|| {
-        format!("Unknown export target '{}'.\n  Add an entry to config/glue.dbvl or use a supported language: {}",
-            language, glue_targets.keys().cloned().collect::<Vec<_>>().join(", "))
-    })?;
     let info = extract_bridge_info(&items, bridge_name);
     let type_protocols = build_type_protocols(&items);
     println!("  Bridge '{}': {} exports, {} frgns, {} melds",
@@ -774,7 +764,7 @@ pub fn run_export_cli(file_path: &str, language: &str, out_dir: &str) -> Result<
         if i > 0 { exports_buf.push('\n'); }
         if i > 0 { ffi_buf.push('\n'); }
 
-        let fn_vars = export_template_vars(export, target, &type_protocols);
+        let fn_vars = export_template_vars(export, &target, &type_protocols);
 
         if let Some(ft) = fn_template {
             // 2026-08-03: per-function render sees both fn_vars and the
