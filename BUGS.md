@@ -1,5 +1,65 @@
 # Bugs
 
+## Value-Form `term`/`term!` in a Void Txn Fell Through Past the Guard — FIXED
+
+**Date:** 2026-08-04
+**Status:** Fixed (branch `feat/term-termination-diagnostics`)
+**Root cause:** The value-form `term <val>` / `term! <val>` void-path in
+`src/backend/llvm/emit_stmt.rs` set `backend.fun.terminated = true` WITHOUT
+emitting a real LLVM terminator. The `Guarded` handler therefore had to emit an
+unconditional convergence branch (`guard.thenN -> guard.endN`) so the block
+wasn't dangling — and execution fell through past the term. This diverged from
+the interpreter, where a value-form term unwinds the ENTIRE transaction body
+(`RuntimeError::TermReturn`, `src/interpreter/eval.rs:646-657`), not just the
+guard. Repro: `when a == 1 { term! -> Print#(1); }; Print#(2);` printed `"12"`;
+the interpreter (and the fix) print only `"1"`. A top-level terminating term
+was masked from this bug only because the pre-2026-08-04 body loops emitted
+every statement regardless of `terminated`, so nothing dangled — the fallthrough
+was simply misordered execution.
+**Fix:** Value-form terms in a void function now emit a REAL terminator. New
+`FunctionContext.void_txn_abort_label` is set by the SSA main loop to the
+current txn's `.ssn_<name>` next-txn label so the term branches past the rest of
+THIS txn's body (faithful TermReturn); in per-txn void functions
+(async/standalone/pre/callable) the term emits `ret void`. The `Guarded`
+handler emits its convergence branch only when the body did NOT terminate.
+Body loops that emit statements unconditionally (`ssa.rs` main loop, outlined
+cold-function bodies) now `break` on `terminated`; epilogues that unconditionally
+emitted a trailing `br %...done` / `ret void` (async, pre-function, cold
+function) are now conditional so they don't double-terminate the block. The
+2026-07-19 "always emit br" workarounds in `emit_stmt.rs` (Guarded),
+`emit_toplevel.rs` (async, pre) are rewritten with the new rationale.
+**Impact:** `corrected_term_guard.bv` prints `"1"`; async-checkpoint IR (bare
+`term;` continues) unchanged; `transition_validate.bv` output identical
+(404/422/409/200); 1468 lib tests + 4 termination integration tests pass.
+**Regression tests:** `tests/fixtures/term_{unreachable,defn_unreachable,
+guard_hint,valid_swan_song}.bv` + `tests/termination_diagnostics_test.rs`;
+in-module unit tests in `src/analysis/termination.rs`.
+**Undo:** revert `void_txn_abort_label` wiring + the conditional epilogues; the
+2026-07-19 unconditional-br version returns.
+
+---
+
+## Bare `term;` Checkpoint Body-Stopped in Async/Callable/Pre Void Paths — FIXED
+
+**Date:** 2026-08-04
+**Status:** Fixed (branch `feat/term-termination-diagnostics`)
+**Root cause:** The bare `term;` / `term!;` arm in `emit_stmt.rs` set
+`backend.fun.terminated = true`, but the interpreter treats BOTH bare forms as a
+convergence CHECKPOINT, not a terminator — it returns `Ok(Void)` and continues
+to the next statement (`src/interpreter/eval.rs:646-657`, `707-709`). In the
+async/callable/standalone/pre void paths, whose body loops `break` on
+`terminated`, a bare `term;` mid-body stopped the rest of the body from being
+emitted — so a print after the checkpoint silently disappeared.
+**Fix:** The bare-form arm no longer sets `terminated`; the body keeps emitting
+past the checkpoint exactly like the interpreter. The enclosing epilogue still
+terminates the function. Verified by IR diff: the async body now contains the
+`__print_int` after the bare `term;` (new binary), matching the interpreter.
+**Impact:** parity between interpreter and backend for checkpoint semantics.
+**Regression tests:** `scratch_verify/async_term_checkpoint.bv`.
+**Undo:** revert the bare-form arm in `emit_stmt.rs`.
+
+---
+
 ## Custom-Type Operator Resolution Matched Type Names, Not Protocol Categories — FIXED
 
 **Date:** 2026-08-03
