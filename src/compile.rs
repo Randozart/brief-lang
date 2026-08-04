@@ -355,6 +355,9 @@ pub fn compile_source(file_path: &str, source: &str, opts: &BuildOptions) -> Res
     if let Some(ref stdlib_path) = opts.stdlib_path {
         resolver = resolver.with_stdlib_path(Some(std::path::PathBuf::from(stdlib_path)));
     }
+    // 2026-08-04 (Phase 4): an .ebv embedded target prefers the .ebv stdlib
+    // variant (the casting-lane symbols as Brief defns, not C).
+    resolver = resolver.with_prefer_ebv(get_extension(file_path) == ".ebv");
     items = resolver.resolve_imports(items, &std::path::PathBuf::from(file_path))?;
 
     // 2026-07-24: Extract stage blocks from imported files. The first
@@ -1055,6 +1058,12 @@ fn codegen(
             }
             // Apply target config if available
             let ext = get_extension(&opts.file_path);
+            // 2026-08-04 (Phase 4): an .ebv embedded target activates the
+            // restricted embedded mode (check_embedded_restrictions, term! ->
+            // wfi) — the freestanding bare-metal path.
+            if ext == ".ebv" {
+                b = b.with_embedded_mode(true);
+            }
             let target_config = load_target_config(opts);
             if let Some(entry) = target_config.lookup(&ext) {
                 if let Some(ref triple) = entry.target_triple {
@@ -1110,6 +1119,12 @@ fn codegen(
             }
             // Apply target config if available
             let ext = get_extension(&opts.file_path);
+            // 2026-08-04 (Phase 4): an .ebv embedded target activates the
+            // restricted embedded mode (check_embedded_restrictions, term! ->
+            // wfi) — the freestanding bare-metal path.
+            if ext == ".ebv" {
+                b = b.with_embedded_mode(true);
+            }
             let target_config = load_target_config(opts);
             if let Some(entry) = target_config.lookup(&ext) {
                 if let Some(ref triple) = entry.target_triple {
@@ -1148,6 +1163,12 @@ fn codegen(
             }
             // Apply target config if available
             let ext = get_extension(&opts.file_path);
+            // 2026-08-04 (Phase 4): an .ebv embedded target activates the
+            // restricted embedded mode (check_embedded_restrictions, term! ->
+            // wfi) — the freestanding bare-metal path.
+            if ext == ".ebv" {
+                b = b.with_embedded_mode(true);
+            }
             let target_config = load_target_config(opts);
             if let Some(entry) = target_config.lookup(&ext) {
                 if let Some(ref triple) = entry.target_triple {
@@ -1237,6 +1258,12 @@ fn codegen(
             }
             // Apply target config (same logic as Llvm)
             let ext = get_extension(&opts.file_path);
+            // 2026-08-04 (Phase 4): an .ebv embedded target activates the
+            // restricted embedded mode (check_embedded_restrictions, term! ->
+            // wfi) — the freestanding bare-metal path.
+            if ext == ".ebv" {
+                b = b.with_embedded_mode(true);
+            }
             let target_config = load_target_config(opts);
             if let Some(entry) = target_config.lookup(&ext) {
                 if let Some(ref triple) = entry.target_triple {
@@ -1367,6 +1394,7 @@ pub fn compile_to_typed(file_path: &str, source: &str, opts: &BuildOptions) -> R
     if let Some(ref stdlib_path) = opts.stdlib_path {
         resolver = resolver.with_stdlib_path(Some(std::path::PathBuf::from(stdlib_path)));
     }
+    resolver = resolver.with_prefer_ebv(get_extension(file_path) == ".ebv");
     items = resolver.resolve_imports(items, &std::path::PathBuf::from(file_path))?;
     extract_inline_stage_blocks(&mut items, &mut pm);
     {
@@ -1659,6 +1687,7 @@ fn parse_and_check(file_path: &str, source: &str, opts: &BuildOptions) -> Result
     if let Some(ref stdlib_path) = opts.stdlib_path {
         resolver = resolver.with_stdlib_path(Some(std::path::PathBuf::from(stdlib_path)));
     }
+    resolver = resolver.with_prefer_ebv(get_extension(file_path) == ".ebv");
     let items = resolver.resolve_imports(items, &std::path::PathBuf::from(file_path))?;
 
     let universe = TypeUniverse::new();

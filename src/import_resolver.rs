@@ -55,6 +55,12 @@ pub struct ImportResolver {
     /// Loaded from config/module-registry.toml or hardcoded fallback.
     /// 2026-07-15: Phase 7i — import <name> resolution.
     registry: HashMap<String, String>,
+    /// 2026-08-04 (out-observability plan, Phase 4): when true (an `.ebv`
+    /// embedded target), the resolver prefers the `.ebv` stdlib variant over
+    /// the `.bv` one instead of erroring "Ambiguous import". The `.ebv`
+    /// stdlib provides the casting-lane symbols (int_to_str, str_to_int, …)
+    /// as Brief defns; the `.bv` stdlib + brief_rt.c provide them as C.
+    prefer_ebv: bool,
 }
 
 /// The name of a top-level item, if it carries one.
@@ -142,7 +148,16 @@ impl ImportResolver {
             board_name: None,
             in_progress: HashSet::new(),
             registry: load_module_registry(),
+            prefer_ebv: false,
         }
+    }
+
+    /// 2026-08-04 (Phase 4): prefer the `.ebv` stdlib variant (embedded
+    /// freestanding target). When both `.bv` and `.ebv` exist, the `.ebv` is
+    /// chosen instead of erroring "Ambiguous import".
+    pub fn with_prefer_ebv(mut self, prefer: bool) -> Self {
+        self.prefer_ebv = prefer;
+        self
     }
 
     /// Set the board name for `import "target"` resolution.
@@ -544,7 +559,9 @@ impl ImportResolver {
             self.root_path.clone()
         };
 
-        // Try both .bv and .ebv extensions
+        // Try both .bv and .ebv extensions. With prefer_ebv (an embedded
+        // target), the .ebv variant wins when both exist; otherwise both
+        // existing is ambiguous.
         let mut found_path = None;
         let mut found_both = false;
         for search_dir in &self.search_paths {
@@ -555,12 +572,18 @@ impl ImportResolver {
                 .join(search_dir)
                 .join(format!("{}.ebv", module_path));
 
-            if bv_candidate.exists() && ebv_candidate.exists() {
-                found_both = true;
-                break;
-            } else if bv_candidate.exists() {
+            let bv = bv_candidate.exists();
+            let ebv = ebv_candidate.exists();
+            if bv && ebv {
+                if self.prefer_ebv {
+                    found_path = Some(ebv_candidate);
+                } else {
+                    found_both = true;
+                    break;
+                }
+            } else if bv {
                 found_path = Some(bv_candidate);
-            } else if ebv_candidate.exists() {
+            } else if ebv {
                 found_path = Some(ebv_candidate);
             }
         }
@@ -575,11 +598,17 @@ impl ImportResolver {
                 if parent.join("Cargo.toml").exists() {
                     let std_path = parent.join("lib").join(format!("{}.bv", module_path));
                     let std_ebv = parent.join("lib").join(format!("{}.ebv", module_path));
-                    if std_path.exists() && std_ebv.exists() {
-                        found_both = true;
-                    } else if std_path.exists() {
+                    let bv = std_path.exists();
+                    let ebv = std_ebv.exists();
+                    if bv && ebv {
+                        if self.prefer_ebv {
+                            found_path = Some(std_ebv);
+                        } else {
+                            found_both = true;
+                        }
+                    } else if bv {
                         found_path = Some(std_path);
-                    } else if std_ebv.exists() {
+                    } else if ebv {
                         found_path = Some(std_ebv);
                     }
                     break;
@@ -591,12 +620,17 @@ impl ImportResolver {
         if !found_both && found_path.is_none() {
             let direct_bv = source_dir.join(format!("{}.bv", module_path));
             let direct_ebv = source_dir.join(format!("{}.ebv", module_path));
-
-            if direct_bv.exists() && direct_ebv.exists() {
-                found_both = true;
-            } else if direct_bv.exists() {
+            let bv = direct_bv.exists();
+            let ebv = direct_ebv.exists();
+            if bv && ebv {
+                if self.prefer_ebv {
+                    found_path = Some(direct_ebv);
+                } else {
+                    found_both = true;
+                }
+            } else if bv {
                 found_path = Some(direct_bv);
-            } else if direct_ebv.exists() {
+            } else if ebv {
                 found_path = Some(direct_ebv);
             }
         }

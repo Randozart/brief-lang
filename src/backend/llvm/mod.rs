@@ -2205,20 +2205,36 @@ impl LlvmBackend {
         // every lane symbol must be declared here or clang errors "use of
         // undefined value". The C definitions live in brief_rt.c (the .bv
         // path); the .ebv freestanding path provides the same symbols as
-        // Brief defns in lib/std/*.ebv. Signatures match the lane ABI:
-        //   String ABI = ptr to [len: i64][bytes]; Int/Bool = i64; Float = double.
-        writeln!(out, "declare i8* @__chr_to_str(i32) #1").ok();
-        writeln!(out, "declare ptr @int_to_str(i64) #1").ok();
-        writeln!(out, "declare ptr @uint_to_str(i64) #1").ok();
-        writeln!(out, "declare ptr @float_to_str(float) #1").ok();
-        writeln!(out, "declare ptr @bool_to_str(i64) #1").ok();
-        writeln!(out, "declare ptr @char_to_str(i64) #1").ok();
-        writeln!(out, "declare i64 @str_to_int(ptr) #1").ok();
-        writeln!(out, "declare i64 @str_to_uint(ptr) #1").ok();
-        writeln!(out, "declare float @str_to_float(ptr) #1").ok();
-        writeln!(out, "declare i64 @str_to_bool(ptr) #1").ok();
-        writeln!(out, "declare i64 @str_first_char(ptr) #1").ok();
-        writeln!(out, "declare i64 @__str_bytes__(i64) #1").ok();
+        // Brief defns in lib/std/*.ebv — in that case the program DEFINES the
+        // symbol (a Brief defn lowers to a global with the same name), so the
+        // declare must be skipped or clang errors "invalid redefinition".
+        // Signatures match the lane ABI:
+        //   String ABI = ptr to [len: i64][bytes]; Int/Bool = i64; Float = float.
+        let defined: std::collections::HashSet<String> = items.iter().filter_map(|it| match it {
+            crate::ast::TopLevel::Definition(d) => Some(d.name.clone()),
+            crate::ast::TopLevel::Export(e) => match e.inner.as_ref() {
+                crate::ast::TopLevel::Definition(d) => Some(d.name.clone()),
+                _ => None,
+            },
+            _ => None,
+        }).collect();
+        let mut declare = |out: &mut String, name: &str, ret: &str, args: &str| {
+            if !defined.contains(name) {
+                writeln!(out, "declare {} @{}({}) #1", ret, name, args).ok();
+            }
+        };
+        declare(&mut out, "__chr_to_str", "i8*", "i32");
+        declare(&mut out, "int_to_str", "ptr", "i64");
+        declare(&mut out, "uint_to_str", "ptr", "i64");
+        declare(&mut out, "float_to_str", "ptr", "float");
+        declare(&mut out, "bool_to_str", "ptr", "i64");
+        declare(&mut out, "char_to_str", "ptr", "i64");
+        declare(&mut out, "str_to_int", "i64", "ptr");
+        declare(&mut out, "str_to_uint", "i64", "ptr");
+        declare(&mut out, "str_to_float", "float", "ptr");
+        declare(&mut out, "str_to_bool", "i64", "ptr");
+        declare(&mut out, "str_first_char", "i64", "ptr");
+        declare(&mut out, "__str_bytes__", "i64", "i64");
 
         // 2026-07-08: Phase 3 — brief_rt.c wrapper function declarations
         // These are called by inop declarations in lib/std/os/*.bv.
