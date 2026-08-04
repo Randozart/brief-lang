@@ -149,6 +149,31 @@ Term value-form void path of `emit_stmt.rs`.
 
 ---
 
+
+## Nine of Ten `#String` Cast-Lane Symbols Missing From the Runtime — FIXED
+
+**Date:** 2026-08-04
+**Status:** Fixed
+**Root cause:** the casting graph (`src/casting/graph.rs:195-257`) declares ten
+`ExtCall` lanes between `#String` and the other base protocols. Only `int_to_str`
+existed in `lib/runtime/brief_rt.c`. The other nine (str_to_int, uint_to_str,
+str_to_uint, float_to_str, str_to_float, str_to_bool, bool_to_str,
+str_first_char, char_to_str) were **undefined symbols** — a latent LINK ERROR
+whenever `(s as Int)`, `(f as String)`, etc. was exercised, for `.bv` and `.ebv`
+alike. (The `to_int`/`to_float` stubs in `std/string.bv` were `term 0`/`term 0.0`,
+so the broken path was rarely hit.) Verified: `(s as Int)` on `"42"` failed with
+"use of undefined value '@str_to_int'".
+**Fix (`70f596f9`):** added all nine to `brief_rt.c` (String ABI = ptr to
+[len: i64][bytes]; the Float lanes use the 32-bit `float` ABI — the Brief Float
+protocol is `float`, not `double`, which a first attempt got wrong; the Char
+lanes are single-UTF8-codepoint strings), and added the lane declares to the LLVM
+header (the ExtCall lane emission writes the `call` inline without a declare).
+**Impact:** all `#String` conversions round-trip correctly (verified `42`, `3.5`,
+`true`, `A`). The `.ebv` freestanding path will provide these same symbols as
+Brief defns (the declare-guard from `c7f25a95` skips the backend declare when the
+program defines the symbol).
+**Undo:** remove the nine C functions + the lane declares.
+
 ## Custom-Type Operator Resolution Matched Type Names, Not Protocol Categories — FIXED
 
 **Date:** 2026-08-03

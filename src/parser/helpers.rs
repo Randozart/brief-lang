@@ -5,6 +5,7 @@
 use crate::ast::TopLevel;
 use crate::errors::{Span, SyntaxError};
 use crate::lexer::Token;
+use std::collections::HashSet;
 
 pub struct Parser<'a> {
     pub tokens: Vec<(Token, std::ops::Range<usize>)>,
@@ -19,11 +20,18 @@ pub struct Parser<'a> {
     /// When the type parser consumes `>>` as a single `>`, it sets this flag
     /// so the next `expect(Gt)` or `eat(Gt)` uses the pending token.
     pub pending_gt: bool,
+    /// 2026-08-04 (Phase 1): names that denote TYPES, pre-scanned from the
+    /// token stream. Used to disambiguate the C-style cast `(Type) expr` from
+    /// grouping `(expr)` — `(x) - 1` is grouping-minus, `(Int) -1` is a cast.
+    /// Mirrors the C typedef-table approach; includes primitives, hashwords,
+    /// and in-file `type`/`struct`/`obj`/`enum`/`meld` declaration names.
+    pub known_types: HashSet<String>,
 }
 
 impl<'a> Parser<'a> {
     pub fn new(tokens: Vec<(Token, std::ops::Range<usize>)>, source: &'a str) -> Self {
-        Parser {
+        let mut p = Parser {
+            known_types: HashSet::new(),
             tokens,
             pos: 0,
             source,
@@ -31,6 +39,40 @@ impl<'a> Parser<'a> {
             pending_types: Vec::new().into_iter(),
             pending_doc: None,
             pending_gt: false,
+        };
+        p.prescan_known_types();
+        p
+    }
+
+    /// 2026-08-04 (Phase 1): collect type names from the token stream for the
+    /// C-style cast disambiguation. Primitives + hashwords (`#Int`, `#String`)
+    /// are always types; `type`/`struct`/`obj`/`enum`/`meld` declaration names
+    /// are collected from their declaration sites. Cheap, single pass.
+    fn prescan_known_types(&mut self) {
+        for name in [
+            "Int", "UInt", "Float", "Float32", "F32", "Float64", "F64", "Double",
+            "String", "Bool", "Void", "Char", "Data", "Bit", "bits", "Ptr", "Ptr!",
+        ] {
+            self.known_types.insert(name.to_string());
+        }
+        let toks = &self.tokens;
+        let mut i = 0;
+        while i < toks.len() {
+            let is_decl = matches!(toks[i].0, Token::Type | Token::Struct | Token::Obj | Token::Enum | Token::Meld);
+            if is_decl {
+                if let Some((Token::Identifier(name), _)) = toks.get(i + 1) {
+                    self.known_types.insert(name.clone());
+                }
+                i += 2;
+                continue;
+            }
+            // Hashword categories are types: `#Int`, `#String`, `#String<UTF8>`.
+            if let Token::Identifier(name) = &toks[i].0 {
+                if name.starts_with('#') {
+                    self.known_types.insert(name.clone());
+                }
+            }
+            i += 1;
         }
     }
 

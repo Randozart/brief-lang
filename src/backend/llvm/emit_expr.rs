@@ -782,22 +782,6 @@ impl LlvmBackend {
                         writeln!(out, "{}{} = ptrtoint ptr {} to i64", indent, v, src.name).ok();
                         writeln!(out, "{}{} = inttoptr i64 {} to ptr", indent, v, v).ok();
                     }
-                } else if self.is_protocol_member(target, "#String") || self.is_protocol_member(target, "#Data") {
-                    if src_ll == "i64" {
-                        // 2026-08-01: __int_to_str__ returns a String (a ptr to
-                        // [len][bytes]); the old `call i64` mismatched the
-                        // char* return type at LTO.
-                        writeln!(
-                            out,
-                            "{}{} = call ptr @__int_to_str__(i64 {})",
-                            indent, v, src.name
-                        )
-                        .ok();
-                    } else {
-                        let ip = self.fun.gen_reg();
-                        writeln!(out, "{}{} = inttoptr i64 {} to ptr", indent, ip, src.name).ok();
-                        writeln!(out, "{}{} = call i64 @__str_to_int(ptr {})", indent, v, ip).ok();
-                    }
                 } else if target_ll == "i64" && matches!(src.ty, Type::Ptr(_)) {
                     // 2026-07-30: Ptr values stored as i64 internally (ptrtoint
                     // at function entry). Register is already i64 — identity.
@@ -1613,6 +1597,12 @@ impl LlvmBackend {
                     recv, recv_reg.ty
                 ),
             },
+            ("Absolute", ReflectKind::Runtime) => {
+                // 2026-08-04: `x.^Absolute` — emit `llvm.abs.i64`.
+                let r = self.fun.gen_reg();
+                writeln!(out, "{}{} = call i64 @llvm.abs.i64(i64 {}, i1 false)", indent, r, recv_reg.name).ok();
+                TypedRegister { name: r, ty: Type::int() }
+            }
             _ => panic!(
                 "reflection '{}' with kind '{:?}' reached codegen without emission",
                 target, kind

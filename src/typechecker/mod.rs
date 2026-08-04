@@ -2056,6 +2056,13 @@ fn resolve_reflect(
             }
             Ok(Type::ptr(receiver.clone()))
         }
+        "Absolute" => {
+            // 2026-08-04: `x.^Absolute` — absolute value. Valid on Int/Float.
+            if is_compile_time {
+                return Err(wrong_kind("runtime"));
+            }
+            Ok(receiver.clone())
+        }
         "Size" => {
             if !is_compile_time {
                 return Err(wrong_kind("compile-time"));
@@ -2082,7 +2089,7 @@ fn resolve_reflect(
         }
         _ => Err(TypeError::InvalidOperation {
             operation: format!("reflection target '{}'", target),
-            type_name: "unknown reflection target — expected Len, Ptr, Size, Bytes, Alignment, or Type".into(),
+            type_name: "unknown reflection target — expected Len, Ptr, Absolute, Size, Bytes, Alignment, or Type".into(),
         }),
     }
 }
