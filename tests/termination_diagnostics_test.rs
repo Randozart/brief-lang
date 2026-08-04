@@ -102,3 +102,59 @@ fn member_inline_term_links_in_countdown_loop() {
     }
 }
 
+// 2026-08-04 (be934d61): a value-form `term! <val>` inside a `when` guard must
+// unwind the WHOLE transaction body (interpreter TermReturn) — Print#(2) after
+// the guard must NOT run. Pre-fix the LLVM backend fell through past the guard
+// and printed "12"; the fix (void_txn_abort_label + conditional convergence)
+// prints only "1". The statement after the guard IS reachable when the guard is
+// false, so `briefc check` must pass — this is a codegen-only parity test.
+#[test]
+fn guard_value_form_term_unwinds_body() {
+    for tool in ["clang"] {
+        if !has(tool) {
+            eprintln!("SKIP: {tool} not available");
+            return;
+        }
+    }
+    let briefc = env!("CARGO_BIN_EXE_briefc");
+    let out_dir = std::env::temp_dir().join("brief_term_guard_value_form_test");
+    let _ = std::fs::remove_dir_all(&out_dir);
+    std::fs::create_dir_all(&out_dir).unwrap();
+
+    let bv = format!("{}/tests/fixtures/term_guard_value_form.bv", PROJECT_ROOT);
+
+    let check = Command::new(briefc)
+        .args(["check", &bv])
+        .output()
+        .expect("failed briefc check");
+    assert!(check.status.success(),
+        "statement after a conditional guard is reachable — check must pass: {}",
+        String::from_utf8_lossy(&check.stderr));
+
+    let build = Command::new(briefc)
+        .args(["build", &bv, "--out", &out_dir.to_string_lossy(), "--optimize-budget", "256"])
+        .output()
+        .expect("failed briefc build");
+    assert!(build.status.success(), "build failed: {}", String::from_utf8_lossy(&build.stderr));
+
+    let ll = out_dir.join("term_guard_value_form.ll");
+    let exe = out_dir.join("term_guard_value_form");
+    let link = Command::new("clang")
+        .args(["-O3", "-flto", "-march=native", "-ffast-math", "-fdata-sections", "-ffunction-sections",
+               "-Wl,--gc-sections", &ll.to_string_lossy(),
+               &format!("{}/lib/runtime/brief_rt.c", PROJECT_ROOT), "-o", &exe.to_string_lossy()])
+        .output()
+        .expect("failed clang link");
+    assert!(link.status.success(),
+        "link failed:\n{}", String::from_utf8_lossy(&link.stderr));
+
+    let run = Command::new(&exe)
+        .output()
+        .expect("failed to run linked binary");
+    assert!(run.status.success(), "run failed: {}", String::from_utf8_lossy(&run.stderr));
+    let stdout = String::from_utf8_lossy(&run.stdout).to_string();
+    assert!(stdout.contains('1'), "expected Print#(1) in guard body, got: {stdout}");
+    assert!(!stdout.contains('2'),
+        "guard body term! must unwind the whole txn — Print#(2) must NOT run, got: {stdout}");
+}
+
