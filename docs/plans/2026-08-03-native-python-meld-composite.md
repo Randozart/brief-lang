@@ -76,13 +76,19 @@ NUL invariant. The contracts:
   itself; the Python method adds only ~217 ns).
 
 ### P2 — The NUL allocator invariant
-- The Brief arena allocates String buffers as `len+1` and writes `bytes[len] =
-  '\0'`. The type stays `[len][bytes]`; the trailing NUL is an implementation
-  invariant (one byte, zero semantic change). SSO literals already
-  nul-terminate.
-- `str_to_c`/`cstr_to_brief` return in-place pointers (zero-copy) where the
-  invariant holds; dwarfdump verifies the emitted layout.
-- The whole test suite must stay green (no Brief semantics change).
+- **Audit result (2026-08-03): the invariant already holds everywhere.**
+  - `emit_inline_concat` — `compute_alloc_size` allocates `8+len+1`,
+    `emit_null_terminate` writes the NUL.
+  - Runtime `brief_cstr_to_brief` / `__int_to_str__` — `malloc(len+9)`,
+    `buf[8+len]='\0'`.
+  - String literals — global `@str.N = ... c"bytes\00"` (initializer carries
+    the NUL).
+- The composite layout `[len][bytes][\0]` was already the de-facto format.
+- **Change:** `brief_str_to_c` now returns the in-place data pointer
+  `(handle + 8)` for heap Strings (zero-copy, the composite) instead of
+  malloc'ing a copy. Contract: caller must NOT free; valid for the state's
+  life. Fixes the leak in C drivers that never freed the copies.
+- Full suite green (1459) + `c_driver_boundary` round-trip green.
 
 ### P3 — Meld-driven interchangeability
 - Register melds on the casting graph; the typechecker accepts melded types

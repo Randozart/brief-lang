@@ -90,15 +90,17 @@ char* brief_str_to_c(const char* handle) {
             }
         }
     }
-    // Heap Brief string: ptr is a pointer to [8-byte length][data].
+    // Heap Brief string: ptr is a pointer to [8-byte length][data][\0].
+    // 2026-08-03 (plan 2026-08-03-native-python-meld-composite): every Brief
+    // String allocation carries the NUL invariant (bytes[len] == '\0'), so
+    // the data region IS a valid C string in place — return it directly
+    // (zero-copy, the composite). Caller must NOT free; valid for the state's
+    // life (the composite ABI contract). Previously this malloc'd a copy (a
+    // leak for C drivers that never freed it).
     if (ptr == 0) return NULL;
     int64_t len = *(int64_t*)ptr;
     if (len < 0 || len > 1024 * 1024 * 1024) return NULL;
-    char* c_str = malloc((size_t)(len + 1));
-    if (!c_str) return NULL;
-    if (len > 0) memcpy(c_str, (void*)(ptr + 8), (size_t)len);
-    c_str[len] = '\0';
-    return c_str;
+    return (char*)(ptr + 8);
 }
 
 /// Convert a C string (null-terminated) to a Brief string.
