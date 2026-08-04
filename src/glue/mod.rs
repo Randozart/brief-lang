@@ -22,6 +22,7 @@
 // See docs/plans/2026-06-23-glue-implementation-status.md for status.
 
 pub mod bridge;
+pub mod brief_pass;
 pub mod config;
 pub mod export;
 pub mod link;

@@ -1730,8 +1730,11 @@ impl LlvmBackend {
         self.ctx.observable_names = analysis.observable_names.clone();
         // 2026-08-03: Per-export ABI (needs_state) computed once up front by
         // the export ABI analysis — the backend only consumes the decision.
+        // 2026-08-04 (compiler-in-Brief, P4): the Brief pass (brief_pass.rs)
+        // computes it through the GLUE C ABI when its library is present;
+        // otherwise the Rust reference runs.
         self.ctx.export_needs_state =
-            crate::analysis::export_abi::compute_export_needs_state(items);
+            crate::glue::brief_pass::compute_export_needs_state(items);
         // 2026-08-01 (Phase 5): a `keep x;` on a field the scheduler would not
         // auto-free anyway is redundant — surface it as a warning.
         for k in &analysis.global_lifetime.redundant_keeps {

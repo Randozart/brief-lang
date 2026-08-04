@@ -113,7 +113,10 @@ fn has_export_modifier(modifiers: &[Annotation]) -> bool {
 fn extract_exports(items: &[TopLevel]) -> Vec<ExportDecl> {
     // 2026-08-03: Body-dependent ABI — whether each export carries the
     // leading state param. Shared with the backend (src/analysis/export_abi.rs).
-    let needs_state = crate::analysis::export_abi::compute_export_needs_state(items);
+    // 2026-08-04 (compiler-in-Brief, P4): the Brief pass (brief_pass.rs)
+    // computes this through the GLUE C ABI when its library is present;
+    // otherwise the Rust reference runs.
+    let needs_state = crate::glue::brief_pass::compute_export_needs_state(items);
     let mut exports = Vec::new();
     for item in items {
         match item {

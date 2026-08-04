@@ -124,13 +124,26 @@ Completed, in order:
     first (`__brief_init_state()`), which the first C driver got wrong — the
     "heap corruption" was that arity bug (see BUGS.md correction).
 
-**P2 complete.** Next: P3 (root `build.rs` links `libneeds_state.a` into
-`briefc` and calls `needs_state_compute` through the C ABI), then P4 integration
-(replace the two Rust call sites at `src/backend/llvm/mod.rs:1691` and
-`src/glue/export.rs:116` with serialize → Brief pass → read the bitmask;
-byte-identical shims; the transition test stays as the regression gate). Known
-gaps to fix before P4: the imported-module frgn String-param+String-return
-resolves to Int (the pass declares `brief_str_substr` locally — BUGS.md); the
-`soa_reorder` generalization (P5) will need the same frgn treatment.
+**P2 complete.** **P3 complete (Option 1 — runtime dlopen):** the root
+`build.rs` compiles `needs_state.bv` with a prebuilt briefc into
+`target/compiler-in-brief/needs_state.so` and embeds its path via
+`cargo:rustc-env=BRIEF_COMPILER_IN_BRIEF_SO`; `src/glue/brief_pass.rs` dlopens
+it at first use (the GLUE host model) and resolves `needs_state_compute` +
+`__brief_init_state` through the C ABI. First build has no briefc yet (self
+-hosted bootstrap) — the runtime falls back to the Rust reference; every later
+build rebuilds the .so. **P4 complete:** both production call sites
+(`src/backend/llvm/mod.rs:1734`, `src/glue/export.rs:116`) now route through
+`brief_pass::compute_export_needs_state` (Brief pass when loaded, reference
+otherwise). `tests/c_driver_needs_state.rs` and the `brief_pass` unit test
+assert the Brief result equals the Rust reference on the five-bridge corpus;
+all c_driver glue tests (boundary/node/callback/cancel) pass through the
+dlopen'd pass. `pass_available()` exposes load state for diagnostics.
+
+Next: P5 (generalize the serializer + migrate `soa_reorder`; write
+`docs/architecture/compiler-in-brief.md`). Known gaps to fix before P5: the
+imported-module frgn String-param+String-return resolves to Int (the pass
+declares `brief_str_substr` locally — BUGS.md); the `.so` path is embedded at
+compile time (a moved checkout rebuilds it).
+
 
 
