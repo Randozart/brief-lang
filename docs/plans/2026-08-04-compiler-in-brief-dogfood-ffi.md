@@ -104,21 +104,33 @@ Completed, in order:
    - a let reassigned inside a `when`/if guard demoted to an alloca AT the
      assignment site → LLVM dominance violation; emit_definition now
      pre-declares entry allocas for reassigned top-level lets.
-3. **Verified language facts that shaped the pass**: `when` is an if-guard, not
-   a while loop (interpreter + backend agree) → iteration must be recursion;
-   recursion + `build --library` link/run correctly; List init/push/grow run.
-4. **`lib/compiler/needs_state.bv`**: rewritten as PURE string scanning (no
-   List reads — generic `T` element reads and String `+` are broken), recursion
-   for iteration, `:` slices + `==` + `.^Len` for scanning. Type-checks clean.
+ 3. **Verified language facts that shaped the pass**: `when` is an if-guard, not
+    a while loop (interpreter + backend agree) → iteration must be recursion;
+    recursion + `build --library` link/run correctly; List init/push/grow run.
+ 4. **`lib/compiler/needs_state.bv`**: rewritten as PURE string scanning (no
+    List reads — generic `T` element reads and String `+` are broken), recursion
+    for iteration, `char_at`/`brief_str_substr` frgns for scanning (the LLVM
+    backend's String slice returns the whole array — see BUGS.md). The dynamic
+    String slice was implemented as runtime `brief_str_substr` + a `char_at`
+    frgn (Int return, no allocation).
+ 5. **String codegen fixes en route**: `.^Len` on a boxed String param/frgn
+    result panicked — `is_semantic_string` + `string_ptr` (matches the `==`
+    fix); `let_binding_allocas` leaked across functions (manual clears missed
+    it; reg numbers rewind per function) — replaced with `clear_locals()`.
+ 6. **THE PASS WORKS**: `needs_state_compute` matches the Rust reference on all
+    five bridges — boundary=0, node_bridge=31, cancel=1, rank=2, bench=2 —
+    deterministically, asserted by `tests/c_driver_needs_state.rs` (the P4
+    transition test). A stateful export's C signature takes the state handle
+    first (`__brief_init_state()`), which the first C driver got wrong — the
+    "heap corruption" was that arity bug (see BUGS.md correction).
 
-**Blocked at P2 execution by the String-slicing codegen** (see BUGS.md): both
-constant-bounds (narrowed to `Vector`) and dynamic-bounds slices return the
-whole string — `s[a:b]` never creates a substring, and slicing a boxed String
-param passes the i64 handle to brief_char_len as a raw ptr. The pass therefore
-cannot build as a library yet. Next step: implement `brief_str_substr` in the
-runtime + a `frgn __str_substr(s, a, b) -> String` (verify the frgn String
-marshalling first — no stdlib frgn with String params is currently exercised),
-OR fix the dynamic-slice codegen to construct a length-prefixed substring; then
-test `needs_state_compute` against the Rust reference (`export_abi.rs`) on the
-boundary/node/bridge corpus and proceed to P3 (root build.rs linkage).
+**P2 complete.** Next: P3 (root `build.rs` links `libneeds_state.a` into
+`briefc` and calls `needs_state_compute` through the C ABI), then P4 integration
+(replace the two Rust call sites at `src/backend/llvm/mod.rs:1691` and
+`src/glue/export.rs:116` with serialize → Brief pass → read the bitmask;
+byte-identical shims; the transition test stays as the regression gate). Known
+gaps to fix before P4: the imported-module frgn String-param+String-return
+resolves to Int (the pass declares `brief_str_substr` locally — BUGS.md); the
+`soa_reorder` generalization (P5) will need the same frgn treatment.
+
 

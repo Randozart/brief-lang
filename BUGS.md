@@ -3498,3 +3498,19 @@ writing past the [len][bytes] buffer); (2) convert the remaining String-return
 frgns (brief_str_substr) to Int-return where the pass only needs a length /
 char, minimizing allocation; (3) verify every frgn String arg is inttoptr'd to
 the buffer (not the boxed i64 handle) at the call site.
+
+## RESOLVED — "frgn String-return heap corruption" was a test-harness arity bug
+
+**Date:** 2026-08-04
+**Status:** Resolved (false alarm). The "nondeterministic heap corruption"
+entry above was MY C-driver bug, not the compiler: `needs_state_compute` and
+the debug exports are STATEFUL (`define i64 @f(ptr %state, ptr %arg0)` — they
+call regular defns, so the needs_state analysis gives them `%state`), but the
+C main called them with ONE argument. The projection pointer landed in
+`%state` and `%arg0` was garbage, so the meld read a random length (60 / 5 / 3
+across runs — "corruption"). With the correct two-argument call
+(`needs_state_compute(st, proj)` where `st = __brief_init_state()`), the pass
+is DETERMINISTIC and matches the Rust reference on all five bridges
+(boundary=0, node_bridge=31, cancel=1, rank=2, bench=2) — asserted by
+`tests/c_driver_needs_state.rs`. Lesson: a stateful export's C signature takes
+the state handle first; the glue `bindings` header is the source of truth.
