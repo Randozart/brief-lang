@@ -301,7 +301,9 @@ performance-neutral as measured.
   the countdown loop, breaking `queue_drain` (`value doesn't match function
   result type 'i32'` at `queue_drain.ll:366`). The void path now checks
   `member_result.is_some()` first and emits no terminator (documented in BUGS.md).
-- Verified: `corrected_term_guard.bv` prints `"1"` (was `"12"`);
+- Verified: `corrected_term_guard.bv` prints `"1"` (was `"12"`) — now committed
+  as the clang-guarded parity test
+  `tests::guard_value_form_term_unwinds_body` (`tests/fixtures/term_guard_value_form.bv`);
   `term_valid_swan_song.bv` / all four `test-project-otto` CLI files pass with
   the expected checkpoint warnings; 1468 lib tests + 4 integration tests green;
   zero termination failures across all 352 tracked `.bv` files;
