@@ -241,3 +241,55 @@ $ python3 -c "import rank; print(rank.feature_hash(1000, 42))"
   declared by the meld, never per language. See
   `docs/architecture/casting-protocol.md` and the plan
   `docs/plans/2026-08-03-native-python-meld-composite.md`.
+
+## 11. Per-language glue folders (referenced as config)
+
+Each language's entire interop definition lives in `lib/glue/<lang>/` — a
+`glue.dbvl` config file (protocols, ABI, templates, **toolchain recipe**),
+`types.bv` (boundary declarations), and an optional `gen.bv` compile-time
+plugin escape hatch. `brief export|bindings|extension <bridge.bv> <lang>`
+resolves `lib/glue/<lang>/` BY NAME and loads its config; `load_glue_config`
+scans the folders for extension routing. The compiler carries zero language
+knowledge — the glue folder is data.
+
+The toolchain recipe lives in `glue.dbvl`: `native_include_cmd`,
+`native_suffix`/`native_suffix_cmd`, `native_link_cmd`, `native_cc`. The
+compiler only does "compile C, link a shared library"; python's
+`python3-config` and node's include discovery are config commands.
+
+## 12. Native Node addon + the Python ↔ Node bridge
+
+`brief extension <bridge.bv> node` generates a NAPI `.node` addon (no npm) —
+same generic renderer as the Python shim, node's `native.*` templates in
+`lib/glue/node/glue.dbvl`:
+
+```
+$ brief extension node_bridge.bv node --out build/
+  Extension: build/node_bridge.node
+$ node -e "const b = require('./node_bridge.node'); console.log(b.save('hi'))"
+```
+
+Python and Node have no native binding between them; Brief's composite is their
+only common interface. The cross-language test (`tests/c_driver_node.rs`)
+proves both directions: Node persists `"hello from node"` via the bridge's
+`persist` (runtime file I/O), Python loads it with `load`; then Python
+persists `"hello from python"` and Node loads it. Stateful exports (a String
+state field read/written across calls) work — several latent backend bugs were
+fixed along the way (see `BUGS.md`): the library `__brief_init_state` now
+returns a module-global state instead of a dangling stack pointer, state-field
+references from exports are no longer eliminated as dead, and stateful exports
+keep their `%state` param.
+
+Two shim-level correctness notes: every export is declared in the shim as
+`__brief_export_<name>` with an `asm("<name>")` label (a bridge export named
+like a libc function — `read`, `open` — would otherwise collide with the host's
+prototype at compile time and be PLT-interposed at runtime); and the link adds
+`-Wl,-Bsymbolic-functions` so the addon binds its own symbols.
+
+## 13. The gen.bv plugin escape hatch (designed)
+
+If `lib/glue/<lang>/gen.bv` exists, the command can invoke it instead of the
+renderer: the pipeline writes a `bridge.dbvl` contract next to the output, the
+plugin reads it via `FileRead$`/`ConfigGet$`, generates files via `FileWrite$`,
+and runs the toolchain via `ShellCmd$`. Turing-complete generation for anything
+the templates can't express. Staged after the config-driven path is proven.

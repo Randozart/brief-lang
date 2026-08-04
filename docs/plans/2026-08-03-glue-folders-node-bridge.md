@@ -101,6 +101,11 @@ Turing-complete generation for anything the templates can't express.
   (`tests/c_driver_node.rs`) — Node persists "hello from node", Python loads it,
   Python persists "hello from python", Node loads it. Stateful exports work
   (several latent bugs fixed, see BUGS.md). All 1459 lib + 7 glue tests green.
+- **P4 done:** c/rust/web per-language configs verified (migrated in P1) — the
+  C header resolves the boundary ABI, the rust crate renders, the web target
+  loads (its llc float issue is a pre-existing web-backend matter).
+- **P5 done:** `ffi-and-export.md` §11 (glue folders) + §12 (Node addon + the
+  Python ↔ Node bridge) + §13 (gen.bv escape hatch, designed). BUGS.md updated.
 
 ## 4. Node target — generated `.node` addon
 
