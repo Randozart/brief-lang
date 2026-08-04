@@ -161,11 +161,8 @@ fn collect_observable_names(items: &[TopLevel]) -> std::collections::HashSet<Str
             TopLevel::Transaction(t) if has_out(&t.modifiers) => {
                 names.insert(t.name.clone());
             }
-            TopLevel::StateDecl(s) => {
-                // vol-implied-out state fields are captured via their let sites
-                // below; StateDecl itself has no modifiers, so nothing here.
-                let _ = s;
-            }
+            // StateDecl has no modifiers; `out`/`vol` state fields are captured
+            // via their top-level `let` sites below.
             TopLevel::Statement(stmt) => {
                 collect_let_observable_names(stmt, &mut names);
             }
