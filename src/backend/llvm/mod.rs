@@ -2199,8 +2199,25 @@ impl LlvmBackend {
         // are REMOVED — the casting graph's ExtCall lanes call `int_to_str` /
         // `str_to_int` (no double-underscore) and emit their own declares via
         // emit_external_call. The old hardcoded cast arms were dead code.
+        //
+        // 2026-08-04 (Phase 4): the ExtCall lane emission (emit_cast_steps,
+        // LaneKind::ExtCall) writes the `call` inline WITHOUT a declare, so
+        // every lane symbol must be declared here or clang errors "use of
+        // undefined value". The C definitions live in brief_rt.c (the .bv
+        // path); the .ebv freestanding path provides the same symbols as
+        // Brief defns in lib/std/*.ebv. Signatures match the lane ABI:
+        //   String ABI = ptr to [len: i64][bytes]; Int/Bool = i64; Float = double.
         writeln!(out, "declare i8* @__chr_to_str(i32) #1").ok();
         writeln!(out, "declare ptr @int_to_str(i64) #1").ok();
+        writeln!(out, "declare ptr @uint_to_str(i64) #1").ok();
+        writeln!(out, "declare ptr @float_to_str(float) #1").ok();
+        writeln!(out, "declare ptr @bool_to_str(i64) #1").ok();
+        writeln!(out, "declare ptr @char_to_str(i64) #1").ok();
+        writeln!(out, "declare i64 @str_to_int(ptr) #1").ok();
+        writeln!(out, "declare i64 @str_to_uint(ptr) #1").ok();
+        writeln!(out, "declare float @str_to_float(ptr) #1").ok();
+        writeln!(out, "declare i64 @str_to_bool(ptr) #1").ok();
+        writeln!(out, "declare i64 @str_first_char(ptr) #1").ok();
         writeln!(out, "declare i64 @__str_bytes__(i64) #1").ok();
 
         // 2026-07-08: Phase 3 — brief_rt.c wrapper function declarations
