@@ -1268,6 +1268,27 @@ impl LlvmBackend {
         self.is_protocol_member(ty, "#String")
     }
 
+    /// 2026-08-04 (compiler-in-Brief): is the receiver of a String operation
+    /// semantically a #String, even if its emitted register was boxed to an
+    /// i64 handle (String param, frgn result) and is now typed Int/Custom?
+    /// The physical value is still the [len][bytes] pointer. Check the reg
+    /// first, then the binding's DECLARED type (a `let line: String = X`
+    /// binds line→reg with let_original_types[line] = String).
+    pub(super) fn is_semantic_string(&self, recv: &Expr, reg: &TypedRegister) -> bool {
+        if self.is_string_operand(&reg.ty) {
+            return true;
+        }
+        if let Expr::Identifier(name) = recv {
+            if let Some(orig) = self.fun.let_original_types.get(name) {
+                return self.is_string_operand(orig);
+            }
+            if let Some(orig) = self.fun.let_binding_types.get(name) {
+                return self.is_string_operand(orig);
+            }
+        }
+        false
+    }
+
     /// 2026-08-04 (compiler-in-Brief): the pointer form of a string operand
     /// for a content compare. A #String operand that survived unboxed (a
     /// literal's `@str.N` global) is already a `ptr`; a boxed one

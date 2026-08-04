@@ -125,6 +125,42 @@ char* __int_to_str__(int64_t n) {
     return int_to_str(n);
 }
 
+// 2026-08-04 (compiler-in-Brief): BYTE-wise substring of a Brief String.
+// Returns a fresh [len][bytes][\0] String with the bytes [a, b). The pass
+// scanner runs over the ASCII projection, so byte == char here; the UTF-8
+// char boundary is the caller's contract. Bounds clamp to [0, len].
+// This is the runtime half of the dynamic String slice, which the LLVM
+// backend currently emits as the whole array (see BUGS.md).
+char* brief_str_substr(const char* s, int64_t a, int64_t b) {
+    if (!s) return 0;
+    int64_t len = *(const int64_t*)s;
+    if (len < 0 || len > 1024 * 1024 * 1024) return 0;
+    int64_t lo = a < 0 ? 0 : a;
+    int64_t hi = b > len ? len : b;
+    if (hi < lo) hi = lo;
+    int64_t out_len = hi - lo;
+    char* buf = (char*)malloc((size_t)(out_len + 9));
+    if (!buf) return 0;
+    *(int64_t*)buf = out_len;
+    if (out_len > 0) memcpy(buf + 8, s + 8 + lo, (size_t)out_len);
+    buf[8 + out_len] = '\0';
+    return buf;
+}
+
+// 2026-08-04 (compiler-in-Brief): the i-th BYTE of a Brief String as an Int
+// (0 if out of range, 255 if the length header is invalid). Character scans in
+// the pass (newline/space/colon comparisons) use this INSTEAD of a per-char
+// brief_str_substr — a 1-byte allocation per scan step was corrupting the heap
+// under long recursion (the frgn String-return path, see BUGS.md). No
+// allocation.
+int64_t brief_str_char_at(const char* s, int64_t i) {
+    if (!s) return 0;
+    int64_t len = *(const int64_t*)s;
+    if (len < 0 || len > 1024 * 1024 * 1024) return 255;
+    if (i < 0 || i >= len) return 0;
+    return (unsigned char)s[8 + i];
+}
+
 // ── 2026-08-04: the remaining #String casting-graph lane symbols ────────
 // The casting graph (src/casting/graph.rs:195-257) declares ExtCall lanes
 // between #String and every other base protocol. Only `int_to_str` existed in

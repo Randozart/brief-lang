@@ -32,11 +32,25 @@
 
 import "glue/c.bv";
 
+// 2026-08-04: dynamic String slicing. The LLVM backend's dynamic-slice arm
+// returns the WHOLE array (see BUGS.md), so the scanner builds substrings via
+// this runtime frgn instead of `s[a:b]`. Declared LOCALLY: an imported frgn
+// with a String param + String return resolves to Int (see BUGS.md).
+
 // ── char / line primitives ──────────────────────────────────────────────
+
+frgn brief_str_substr(handle: String, a: Int, b: Int) -> String as brief_str_substr from "lib/runtime/brief_rt.c" fallback "";
+// char_at(s, i): the i-th byte as an Int (no allocation). Char comparisons
+// (newline/space/colon) use this — a per-char brief_str_substr (1-byte
+// allocation per step) corrupted the heap under long recursion (see BUGS.md).
+frgn brief_str_char_at(handle: String, i: Int) -> Int as brief_str_char_at from "lib/runtime/brief_rt.c" fallback 0;
+defn char_at(s: String, i: Int) -> Int {
+    term brief_str_char_at(s, i);
+};
 
 defn line_end(proj: String, i: Int, n: Int) -> Int {
     when i >= n { term i; };
-    when proj[i:i+1] == "\n" { term i; };
+    when char_at(proj, i) == 10 { term i; };
     term line_end(proj, i + 1, n);
 };
 
@@ -49,12 +63,12 @@ defn token_at(line: String, idx: Int) -> String {
 };
 defn token_at_scan(line: String, i: Int, n: Int, idx: Int, cur: Int, start: Int) -> String {
     when cur == idx {
-        when i >= n { term line[start:n]; };
-        when line[i:i+1] == " " { term line[start:i]; };
+        when i >= n { term brief_str_substr(line, start, n); };
+        when char_at(line, i) == 32 { term brief_str_substr(line, start, i); };
         term token_at_scan(line, i + 1, n, idx, cur, start);
     };
     when i >= n { term ""; };
-    when line[i:i+1] == " " { term token_at_scan(line, i + 1, n, idx, cur + 1, i + 1); };
+    when char_at(line, i) == 32 { term token_at_scan(line, i + 1, n, idx, cur + 1, i + 1); };
     term token_at_scan(line, i + 1, n, idx, cur, start);
 };
 
@@ -63,9 +77,9 @@ defn has_token(line: String, name: String) -> Bool {
     term has_token_scan(line, 0, line .^Len, name, 0);
 };
 defn has_token_scan(line: String, i: Int, n: Int, name: String, start: Int) -> Bool {
-    when i >= n { term line[start:n] == name; };
-    when line[i:i+1] == " " {
-        when line[start:i] == name { term true; };
+    when i >= n { term brief_str_substr(line, start, n) == name; };
+    when char_at(line, i) == 32 {
+        when brief_str_substr(line, start, i) == name { term true; };
         term has_token_scan(line, i + 1, n, name, i + 1);
     };
     term has_token_scan(line, i + 1, n, name, start);
@@ -79,21 +93,21 @@ defn in_section(proj: String, key: String, name: String) -> Bool {
 defn scan_sections(proj: String, i: Int, n: Int, key: String, name: String) -> Bool {
     when i >= n { term false; };
     when i == 0 && line_has_key(proj, 0, n, key) { term line_has_name(proj, 0, n, key, name); };
-    when proj[i:i+1] == "\n" && line_has_key(proj, i + 1, n, key) { term line_has_name(proj, i + 1, n, key, name); };
+    when char_at(proj, i) == 10 && line_has_key(proj, i + 1, n, key) { term line_has_name(proj, i + 1, n, key, name); };
     term scan_sections(proj, i + 1, n, key, name);
 };
 defn line_has_key(proj: String, ls: Int, n: Int, key: String) -> Bool {
     let le: Int = line_end(proj, ls, n);
-    let line: String = proj[ls:le];
+    let line: String = brief_str_substr(proj, ls, le);
     let klen: Int = key .^Len;
-    when line .^Len >= klen + 1 && line[0:klen] == key && line[klen:klen+1] == " " { term true; };
+    when line .^Len >= klen + 1 && brief_str_substr(line, 0, klen) == key && char_at(line, klen) == 32 { term true; };
     term false;
 };
 defn line_has_name(proj: String, ls: Int, n: Int, key: String, name: String) -> Bool {
     let le: Int = line_end(proj, ls, n);
-    let line: String = proj[ls:le];
+    let line: String = brief_str_substr(proj, ls, le);
     let klen: Int = key .^Len;
-    let rest: String = line[klen+1:line .^Len];
+    let rest: String = brief_str_substr(line, klen + 1, line .^Len);
     term has_token(rest, name);
 };
 
@@ -104,12 +118,12 @@ defn section_line(proj: String, key: String) -> String {
 defn find_section(proj: String, i: Int, n: Int, key: String) -> String {
     when i >= n { term ""; };
     when i == 0 && line_has_key(proj, 0, n, key) { term line_text(proj, 0, n); };
-    when proj[i:i+1] == "\n" && line_has_key(proj, i + 1, n, key) { term line_text(proj, i + 1, n); };
+    when char_at(proj, i) == 10 && line_has_key(proj, i + 1, n, key) { term line_text(proj, i + 1, n); };
     term find_section(proj, i + 1, n, key);
 };
 defn line_text(proj: String, ls: Int, n: Int) -> String {
     let le: Int = line_end(proj, ls, n);
-    term proj[ls:le];
+    term brief_str_substr(proj, ls, le);
 };
 
 // ── token name after ':' ────────────────────────────────────────────────
@@ -118,7 +132,7 @@ defn token_name(tok: String) -> String {
 };
 defn tok_after_colon(tok: String, i: Int, n: Int) -> String {
     when i >= n { term ""; };
-    when tok[i:i+1] == ":" { term tok[i+1:n]; };
+    when char_at(tok, i) == 58 { term brief_str_substr(tok, i + 1, n); };
     term tok_after_colon(tok, i + 1, n);
 };
 
@@ -133,27 +147,27 @@ defn export_needs(proj: String, name: String, depth: Int) -> Int {
 defn scan_bodies(proj: String, i: Int, n: Int, name: String, depth: Int) -> Int {
     when i >= n { term 0; };
     when i == 0 && body_matches(proj, 0, n, name) { term body_needs(proj, 0, n, name, depth); };
-    when proj[i:i+1] == "\n" && body_matches(proj, i + 1, n, name) { term body_needs(proj, i + 1, n, name, depth); };
+    when char_at(proj, i) == 10 && body_matches(proj, i + 1, n, name) { term body_needs(proj, i + 1, n, name, depth); };
     term scan_bodies(proj, i + 1, n, name, depth);
 };
 defn body_matches(proj: String, ls: Int, n: Int, name: String) -> Bool {
     let le: Int = line_end(proj, ls, n);
-    let line: String = proj[ls:le];
+    let line: String = brief_str_substr(proj, ls, le);
     let t0: String = token_at(line, 0);
     let t1: String = token_at(line, 1);
     when t0 == "body" && t1 == name { term true; };
     term false;
 };
-// Walk the body line's tokens (indices 2..) of `line`.
+// Walk the body line's tokens (indices 3.. = after "body", name, count).
 defn body_needs(proj: String, ls: Int, n: Int, name: String, depth: Int) -> Int {
     let le: Int = line_end(proj, ls, n);
-    let line: String = proj[ls:le];
-    term walk_body_tokens(line, 2, proj, depth);
+    let line: String = brief_str_substr(proj, ls, le);
+    term walk_body_tokens(line, 3, proj, depth);
 };
 defn walk_body_tokens(line: String, idx: Int, proj: String, depth: Int) -> Int {
     let tok: String = token_at(line, idx);
     when tok .^Len == 0 { term 0; };
-    let kind: String = tok[0:1];
+    let kind: String = brief_str_substr(tok, 0, 1);
     let nm: String = token_name(tok);
     let mine: Int = 0;
     when kind == "o" || kind == "D" { mine = 1; };

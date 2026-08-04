@@ -1592,6 +1592,18 @@ impl LlvmBackend {
                     writeln!(out, "{}{} = call i64 @brief_char_len(ptr {})", indent, r, recv_reg.name).ok();
                     TypedRegister { name: r, ty: Type::int() }
                 }
+                // 2026-08-04 (compiler-in-Brief): a String value boxed to an
+                // i64 HANDLE at a call/binding boundary (String param, frgn
+                // result) is typed Custom("Int")/Int here — the physical value
+                // is still the [len][bytes] pointer. Recover the semantic type
+                // from the binding (the let's declared type) and inttoptr the
+                // handle before brief_char_len. Mirrors the `==` operand fix.
+                other if self.is_semantic_string(recv, &recv_reg) => {
+                    let p = self.string_ptr(out, indent, &recv_reg);
+                    let r = self.fun.gen_reg();
+                    writeln!(out, "{}{} = call i64 @brief_char_len(ptr {})", indent, r, p).ok();
+                    TypedRegister { name: r, ty: Type::int() }
+                }
                 other => panic!(
                     "runtime reflection target 'Len' on '{:?}' (reg ty {:?}) has no codegen yet (Phase-1b boundary)",
                     recv, recv_reg.ty

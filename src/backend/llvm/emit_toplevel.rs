@@ -1198,7 +1198,7 @@ impl LlvmBackend {
 
     pub(super) fn emit_definition(&mut self, out: &mut String, d: &crate::ast::Definition, needs_state: bool) {
         self.fun.pending_cleanup.clear();
-        self.fun.let_bindings.clear(); self.fun.let_binding_types.clear(); self.fun.let_original_types.clear(); self.fun.reg_float_cache.clear(); self.fun.reg_type_cache.clear();
+        self.fun.clear_locals();
         self.fun.reassigned_lets.clear();
         self.fun.expr_dedup_cache.clear();
         self.fun.is_static_bound = false;
@@ -1800,7 +1800,7 @@ impl LlvmBackend {
             // existing @main() function. Resetting would produce duplicate
             // %t{N} registers across inlined transactions, violating SSA.
             // The counter keeps incrementing across all inlined transactions.
-            self.fun.let_bindings.clear(); self.fun.let_binding_types.clear(); self.fun.let_original_types.clear(); self.fun.reg_float_cache.clear(); self.fun.reg_type_cache.clear();
+            self.fun.clear_locals();
             self.fun.terminated = false;
             // 2026-06-26: Reset in_callable_txn — emit_definition may have left
             // it true from a prior TopLevel::Definition. Reactive transactions
@@ -1984,7 +1984,7 @@ impl LlvmBackend {
             writeln!(out, "  entry:").ok();
             self.fun.ssa_old_int_regs.clear();
             self.fun.ssa_old_float_regs.clear();
-            self.fun.let_bindings.clear(); self.fun.let_binding_types.clear(); self.fun.let_original_types.clear(); self.fun.reg_float_cache.clear(); self.fun.reg_type_cache.clear();
+            self.fun.clear_locals();
             self.fun.terminated = false;
             self.fun.in_callable_txn = false;
             self.fun.returns_i64 = false;
@@ -2617,7 +2617,7 @@ impl LlvmBackend {
         writeln!(out, "define internal i8 @pre_{}({}) #10 {{", name, self.ctx.state_ptr_param).ok();
         writeln!(out, "  entry:").ok();
         self.fun.txn_counter = 0;
-        self.fun.let_bindings.clear(); self.fun.let_binding_types.clear(); self.fun.let_original_types.clear(); self.fun.reg_float_cache.clear(); self.fun.reg_type_cache.clear();
+        self.fun.clear_locals();
         // 2026-06-27: Clear ssa_old int/float regs so identifier lookups fall
         // through to GEP+load from %state. Without this, stale entries from a
         // prior emit (main function) produce forward references to registers
@@ -2667,7 +2667,7 @@ impl LlvmBackend {
         writeln!(out, "define void @{}({}) local_unnamed_addr {} {{", async_name, self.ctx.state_ptr_param, async_attr).ok();
         writeln!(out, "  entry:").ok();
         self.fun.txn_counter = 0;
-        self.fun.let_bindings.clear(); self.fun.let_binding_types.clear(); self.fun.let_original_types.clear(); self.fun.reg_float_cache.clear(); self.fun.reg_type_cache.clear();
+        self.fun.clear_locals();
         // 2026-06-27: Clear ssa_old int/float regs so identifier lookups fall
         // through to GEP+load from %state (same rationale as emit_pre_function).
         self.fun.ssa_old_int_regs.clear();

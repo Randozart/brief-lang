@@ -3470,3 +3470,31 @@ brief_char_len as a raw ptr).
       inline. Either way, `.^Len`/`==`/concat on slices then need to see the
       substring, and the param-handle (boxed i64) must be inttoptr'd before
       slicing.
+
+## Imported-module frgn with String param + String return resolves to Int
+
+**Date:** 2026-08-04
+**Status:** Open — verified while wiring the substring frgn. `frgn brief_str_substr(handle: String, a: Int, b: Int) -> String` declared in `lib/glue/c.bv` and IMPORTED resolves its return type as `Int` (a `let x: String = ...` fails "found Int"). The SAME declaration placed in the importing file type-checks and runs correctly (1002/2003 via the boundary). `cstr_to_brief` (Int param + String return) and `str_to_c` (String param + Int return) — each alone — resolve fine when imported; only String-param AND String-return combined fails.
+**Impact:** the pass declares its substr frgn locally; a future cleanup should fix the imported-module frgn signature resolution (typechecker/mod.rs:1637 collects `success_output` per top-level item — the merge of imported ForeignBindings is likely missing the return type).
+
+## Frgn String-return heap corruption under many calls (blocks the pass)
+
+**Date:** 2026-08-04
+**Status:** Open — the compiler-in-Brief pass computes the CORRECT bitmask for
+the small boundary.bv projection (mask=0) but the linked library's memory is
+corrupted on longer projections (node_bridge: mask 0 instead of 31; a
+dbg_probe returns t .^Len = 60 / 5 / 3 across THREE runs of the SAME binary —
+nondeterministic heap corruption). The corruption is in the frgn String-return
+path: every `brief_str_substr` call allocates a fresh [len][bytes] String via
+the emit_direct_frgn_call String-return marshalling and it is never freed; the
+per-char substr scans (before the char_at frgn) made it far worse. The meld
+(`brief_cstr_to_brief`) result itself is sometimes read back with a corrupted
+length.
+**Impact:** `needs_state_compute` is only reliable on short inputs; the pass
+cannot yet replace the Rust reference.
+**Fix direction:** (1) run the linked library under ASan/valgrind to find the
+exact overrun (likely a runtime fn or the frgn String-arg/return marshalling
+writing past the [len][bytes] buffer); (2) convert the remaining String-return
+frgns (brief_str_substr) to Int-return where the pass only needs a length /
+char, minimizing allocation; (3) verify every frgn String arg is inttoptr'd to
+the buffer (not the boxed i64 handle) at the call site.
