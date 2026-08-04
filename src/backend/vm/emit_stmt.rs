@@ -8,13 +8,24 @@ use super::VmBackend;
 impl VmBackend {
     pub(crate) fn emit_stmt(&mut self, stmt: &Statement) {
         match stmt {
-            Statement::Let { name, names, expr, modifiers: _, .. } => {
+            Statement::Let { name, names, ty, expr, modifiers: _, .. } => {
                 // 2026-07-30: Handle tuple destructuring: let (a, b, c) = expr;
                 if names.is_empty() {
                     // Single variable
+                    // 2026-07-30: Allocate slots for struct types (let stack: VMStack;
+                    // allocates enough slots for all struct fields + len).
+                    let field_count = if let Some(Type::Custom(sname)) = ty {
+                        self.struct_fields.get(sname.as_str())
+                            .map(|f| f.len() as u8)
+                            .unwrap_or(1)
+                    } else { 1 };
                     let slot = self.next_local_slot;
-                    self.next_local_slot += 1;
+                    self.next_local_slot += field_count;
                     self.local_slots.insert(name.clone(), slot);
+                    // 2026-07-30: Track struct type name for field offset resolution.
+                    if let Some(Type::Custom(sname)) = ty {
+                        self.local_types.insert(name.clone(), sname.clone());
+                    }
                     if let Some(e) = expr {
                         self.emit_expr(e);
                         self.asm.emit_store_local(slot);
