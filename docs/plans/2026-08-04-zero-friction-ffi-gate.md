@@ -58,6 +58,39 @@ pointer-passing for composites. Fix any residual friction. Re-run Gate A.
 Wire Gate A + B into the test suite (toolchain-guarded) as the permanent
 zero-overhead regression gate. Record both tables in this plan + the roster doc.
 
+## Results (2026-08-04)
+
+**Gate A — real work (Brief feature_hash vs native feature_hash, median ns/call):**
+| host | Brief | native | ratio |
+|------|-------|--------|-------|
+| C | 1220 | 1185 | 1.03 |
+| C++ | 1243 | 1227 | 1.01 |
+| Java | 1216 | 1281 | 0.95 |
+| Go | 1398 | 1205 | 1.12 |
+| Lua | 1194 | 16768 | 0.07 |
+| Python | 1466 | 348588 | 0.004 |
+| Node | 1394 | 267169 | 0.005 |
+
+Parity for compiled hosts; **14–238× faster** for interpreted hosts (Brief's
+compute is native machine code).
+
+**Gate B — pure dispatch (Brief add vs native internal add):**
+C 1.23, C++ 1.44, Lua 1.19, **Python 0.63**, Node 2.15, Java 5.99, Go 143×.
+Python's METH_FASTCALL shim now dispatches faster than Python's own function
+call (76 vs 121 ns). Node/Java/Go sit at their structural FFI bounds
+(NAPI/JNI/cgo) — the Tier-3 floor.
+
+**P1:** Python shim `METH_VARARGS` → `METH_FASTCALL` (no arg tuple):
+trivial add ~174 → ~76 ns, below native Python's call.
+
+**P2 audit:** the export body is already frictionless — `add` emits one native
+`add i64`; the FNV loop is pure i64 arithmetic (no `adapt_to_i64` boxing,
+zero-copy composites). Nothing to fix.
+
+**Gate hygiene:** a fair gate keeps the native sink live (Go DCE'd the dead
+timed loop → bogus sub-1ns/iter numbers) and measures Go native in a pure-Go
+binary (a cgo-linked binary distorted it).
+
 ## Out of scope
 
 Per-language code-emission backends (Go/Java transpilation) — Brief is an FFI.
