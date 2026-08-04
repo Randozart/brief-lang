@@ -300,13 +300,10 @@ fn serialize_ctypes_dbvl(c_type_map: &HashMap<String, String>) -> String {
 fn export_template_vars(export: &ExportDecl, target: &GlueTarget, type_protocols: &HashMap<String, String>) -> HashMap<String, String> {
     let mut fn_vars: HashMap<String, String> = HashMap::new();
     fn_vars.insert("name".to_string(), export.name.clone());
-    // 2026-08-04 (ship common languages): capitalized form — Go wrappers must
-    // be exported (`Echo`, `Greet`), and the source names are lowercase.
-    let mut cap = export.name.clone();
-    if let Some(c) = cap.get_mut(0..1) {
-        c.make_ascii_uppercase();
-    }
-    fn_vars.insert("name_upper".to_string(), cap);
+    // 2026-08-04 (ship common languages): camelCase the export name — Go/Java
+    // wrappers must be exported and camelCase (`FeatureHash` from
+    // `feature_hash`); the source names are snake_case.
+    fn_vars.insert("name_upper".to_string(), to_camel_case(&export.name));
 
     let params: Vec<String> = export.params.iter()
         .map(|(name, ty)| {
@@ -671,13 +668,9 @@ fn render_native_shim(
         // the host's prototype at COMPILE time (conflicting types) and be
         // interposed at LINK time (read → libc read(2) → -1).
         let call_name = format!("__brief_export_{}", export.name);
-        let mut cap = export.name.clone();
-        if let Some(c) = cap.get_mut(0..1) {
-            c.make_ascii_uppercase();
-        }
         let mut vars: HashMap<String, String> = HashMap::new();
         vars.insert("name".to_string(), export.name.clone());
-        vars.insert("name_upper".to_string(), cap);
+        vars.insert("name_upper".to_string(), to_camel_case(&export.name));
         vars.insert("bridge_name".to_string(), bridge_name.to_string());
         vars.insert("parse_code".to_string(), parse_code);
         vars.insert("ret_c".to_string(), ret_c.clone());
@@ -743,6 +736,21 @@ fn native_key(ty: &str, type_protocols: &HashMap<String, String>) -> String {
 
 fn tpl_for(target: &GlueTarget, key: &str, default: &str) -> String {
     target.templates.get(key).cloned().unwrap_or_else(|| default.to_string())
+}
+
+/// camelCase a snake_case export name for host conventions: `feature_hash` →
+/// `FeatureHash` (Go exported funcs, Java/JNI methods).
+fn to_camel_case(name: &str) -> String {
+    name.split('_')
+        .filter(|s| !s.is_empty())
+        .map(|seg| {
+            let mut c = seg.to_string();
+            if let Some(f) = c.get_mut(0..1) {
+                f.make_ascii_uppercase();
+            }
+            c
+        })
+        .collect()
 }
 
 /// CLI entry point for `brief export <bridge.bv> <language> [--out <dir>]`.
