@@ -399,9 +399,7 @@ impl<'a> Parser<'a> {
                     Ok(Expr::Decimal(n))
                 }
             }
-            Some((Token::Float(f), span))
-            | Some((Token::Float32(f), span))
-            | Some((Token::Float64(f), span)) => {
+            Some((Token::Float(f), span)) => {
                 // 2026-07-27: Check for adjacent suffix identifier (e.g., 3.14f, 16.2bf)
                 if let Some(suf) = self.peek_suffix(span.end) {
                     Ok(Expr::TaggedLiteral(f as i64, suf))
@@ -588,8 +586,6 @@ impl<'a> Parser<'a> {
             Token::Identifier(_)
                 | Token::Integer(_)
                 | Token::Float(_)
-                | Token::Float32(_)
-                | Token::Float64(_)
                 | Token::String(_)
                 | Token::Char(_)
                 | Token::BoolTrue

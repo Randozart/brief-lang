@@ -11,51 +11,51 @@
 let bound: Int = get_env_int!("BOUND");
 let count: Int = 0;
 
-const pi: Float32 = 3.141592653589793f32;
-const solar_mass: Float32 = 4.0f32 * pi * pi;
-const dpy: Float32 = 365.24f32;
-const dt: Float32 = 0.01f32;
+const pi: Float32 = 3.141592653589793;
+const solar_mass: Float32 = 4.0 * pi * pi;
+const dpy: Float32 = 365.24;
+const dt: Float32 = 0.01;
 
 // Body 0 (Sun)
-let bx0: Float32 = 0.0f32;         let by0: Float32 = 0.0f32;         let bz0: Float32 = 0.0f32;
-let vx0: Float32 = 0.0f32;         let vy0: Float32 = 0.0f32;         let vz0: Float32 = 0.0f32;
-const m0: Float32 = 1.0f32 * solar_mass;
+let bx0: Float32 = 0.0;         let by0: Float32 = 0.0;         let bz0: Float32 = 0.0;
+let vx0: Float32 = 0.0;         let vy0: Float32 = 0.0;         let vz0: Float32 = 0.0;
+const m0: Float32 = 1.0 * solar_mass;
 
 // Body 1 (Jupiter)
-let bx1: Float32 = 4.84143144246472090f32;
-let by1: Float32 = -1.16032004402742839f32;
-let bz1: Float32 = -0.103622044471123109f32;
-let vx1: Float32 = 0.00166007664274403694f32 * dpy;
-let vy1: Float32 = 0.00769901118419740425f32 * dpy;
-let vz1: Float32 = -0.0000690460016972063023f32 * dpy;
-const m1: Float32 = 0.000954791938424326609f32 * solar_mass;
+let bx1: Float32 = 4.84143144246472090;
+let by1: Float32 = -1.16032004402742839;
+let bz1: Float32 = -0.103622044471123109;
+let vx1: Float32 = 0.00166007664274403694 * dpy;
+let vy1: Float32 = 0.00769901118419740425 * dpy;
+let vz1: Float32 = -0.0000690460016972063023 * dpy;
+const m1: Float32 = 0.000954791938424326609 * solar_mass;
 
 // Body 2 (Saturn)
-let bx2: Float32 = 8.34336671824457987f32;
-let by2: Float32 = 4.12479856412430479f32;
-let bz2: Float32 = -0.403523417114321381f32;
-let vx2: Float32 = -0.00276742510726862411f32 * dpy;
-let vy2: Float32 = 0.00499852801234917238f32 * dpy;
-let vz2: Float32 = 0.0000230417297573763929f32 * dpy;
-const m2: Float32 = 0.000285885980666130812f32 * solar_mass;
+let bx2: Float32 = 8.34336671824457987;
+let by2: Float32 = 4.12479856412430479;
+let bz2: Float32 = -0.403523417114321381;
+let vx2: Float32 = -0.00276742510726862411 * dpy;
+let vy2: Float32 = 0.00499852801234917238 * dpy;
+let vz2: Float32 = 0.0000230417297573763929 * dpy;
+const m2: Float32 = 0.000285885980666130812 * solar_mass;
 
 // Body 3 (Uranus)
-let bx3: Float32 = 12.8943695621309110f32;
-let by3: Float32 = -15.1111514016986312f32;
-let bz3: Float32 = -0.223307578892655734f32;
-let vx3: Float32 = 0.00296460137564761618f32 * dpy;
-let vy3: Float32 = 0.00237847173959480950f32 * dpy;
-let vz3: Float32 = -0.0000296589568540237556f32 * dpy;
-const m3: Float32 = 0.0000436624404335156298f32 * solar_mass;
+let bx3: Float32 = 12.8943695621309110;
+let by3: Float32 = -15.1111514016986312;
+let bz3: Float32 = -0.223307578892655734;
+let vx3: Float32 = 0.00296460137564761618 * dpy;
+let vy3: Float32 = 0.00237847173959480950 * dpy;
+let vz3: Float32 = -0.0000296589568540237556 * dpy;
+const m3: Float32 = 0.0000436624404335156298 * solar_mass;
 
 // Body 4 (Neptune)
-let bx4: Float32 = 15.3796971148509165f32;
-let by4: Float32 = -25.9193146099879641f32;
-let bz4: Float32 = 0.179258772950371181f32;
-let vx4: Float32 = 0.00268067772490389322f32 * dpy;
-let vy4: Float32 = 0.00162824170038242295f32 * dpy;
-let vz4: Float32 = -0.0000951592254519715870f32 * dpy;
-const m4: Float32 = 0.0000515138902046611451f32 * solar_mass;
+let bx4: Float32 = 15.3796971148509165;
+let by4: Float32 = -25.9193146099879641;
+let bz4: Float32 = 0.179258772950371181;
+let vx4: Float32 = 0.00268067772490389322 * dpy;
+let vy4: Float32 = 0.00162824170038242295 * dpy;
+let vz4: Float32 = -0.0000951592254519715870 * dpy;
+const m4: Float32 = 0.0000515138902046611451 * solar_mass;
 
 node simulate [
     count < bound
@@ -189,11 +189,11 @@ node simulate [
         let e24: Float32 = m2 * m4 / edist24;
         let e34: Float32 = m3 * m4 / edist34;
         let ep: Float32 = -(e01 + e02 + e03 + e04 + e12 + e13 + e14 + e23 + e24 + e34);
-        let ek0: Float32 = 0.5f32 * m0 * (vx0 * vx0 + vy0 * vy0 + vz0 * vz0);
-        let ek1: Float32 = 0.5f32 * m1 * (vx1 * vx1 + vy1 * vy1 + vz1 * vz1);
-        let ek2: Float32 = 0.5f32 * m2 * (vx2 * vx2 + vy2 * vy2 + vz2 * vz2);
-        let ek3: Float32 = 0.5f32 * m3 * (vx3 * vx3 + vy3 * vy3 + vz3 * vz3);
-        let ek4: Float32 = 0.5f32 * m4 * (vx4 * vx4 + vy4 * vy4 + vz4 * vz4);
+        let ek0: Float32 = 0.5 * m0 * (vx0 * vx0 + vy0 * vy0 + vz0 * vz0);
+        let ek1: Float32 = 0.5 * m1 * (vx1 * vx1 + vy1 * vy1 + vz1 * vz1);
+        let ek2: Float32 = 0.5 * m2 * (vx2 * vx2 + vy2 * vy2 + vz2 * vz2);
+        let ek3: Float32 = 0.5 * m3 * (vx3 * vx3 + vy3 * vy3 + vz3 * vz3);
+        let ek4: Float32 = 0.5 * m4 * (vx4 * vx4 + vy4 * vy4 + vz4 * vz4);
         let energy: Float32 = ep + ek0 + ek1 + ek2 + ek3 + ek4;
         term! -> println!(energy);
     };

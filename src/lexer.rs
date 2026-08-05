@@ -406,42 +406,15 @@ ExclaimArrow,
     Dot,
 
     // ── Literals ──────────────────────────────────────────────
+    // 2026-08-05 (Phase 3): width-suffix literal tokens (i8/i16/i32/i64,
+    // u8/u16/u32/u64, f32/f64) removed — physical width is expressed through
+    // type annotation or cast (SPEC §16.1), never a lexer suffix family.
     #[regex(r"0x[0-9a-fA-F]+", |lex| i64::from_str_radix(&lex.slice()[2..], 16).ok())]
     #[regex(r"[0-9]+", |lex| lex.slice().parse().ok())]
     Integer(i64),
 
-    #[regex(r"[0-9]+i8", |lex| lex.slice().trim_end_matches("i8").parse().ok())]
-    IntegerI8(i64),
-
-    #[regex(r"[0-9]+i16", |lex| lex.slice().trim_end_matches("i16").parse().ok())]
-    IntegerI16(i64),
-
-    #[regex(r"[0-9]+i32", |lex| lex.slice().trim_end_matches("i32").parse().ok())]
-    IntegerI32(i64),
-
-    #[regex(r"[0-9]+i64", |lex| lex.slice().trim_end_matches("i64").parse().ok())]
-    IntegerI64(i64),
-
-    #[regex(r"[0-9]+u8", |lex| lex.slice().trim_end_matches("u8").parse().ok())]
-    IntegerU8(i64),
-
-    #[regex(r"[0-9]+u16", |lex| lex.slice().trim_end_matches("u16").parse().ok())]
-    IntegerU16(i64),
-
-    #[regex(r"[0-9]+u32", |lex| lex.slice().trim_end_matches("u32").parse().ok())]
-    IntegerU32(i64),
-
-    #[regex(r"[0-9]+u64", |lex| lex.slice().trim_end_matches("u64").parse().ok())]
-    IntegerU64(i64),
-
     #[regex(r"[0-9]+\.[0-9]+", |lex| lex.slice().parse().ok())]
     Float(f64),
-
-    #[regex(r"[0-9]+\.[0-9]+f32", |lex| lex.slice().trim_end_matches("f32").parse().ok())]
-    Float32(f64),
-
-    #[regex(r"[0-9]+\.[0-9]+f64", |lex| lex.slice().trim_end_matches("f64").parse().ok())]
-    Float64(f64),
 
     #[regex(r#""([^"\\]|\\.)*""#, |lex| {
         let s = lex.slice();
@@ -639,17 +612,7 @@ impl std::fmt::Display for Token {
             Token::Ampersand => write!(f, "&"),
             Token::At => write!(f, "@"),
             Token::Integer(n) => write!(f, "{}", n),
-            Token::IntegerI8(n) => write!(f, "{}i8", n),
-            Token::IntegerI16(n) => write!(f, "{}i16", n),
-            Token::IntegerI32(n) => write!(f, "{}i32", n),
-            Token::IntegerI64(n) => write!(f, "{}i64", n),
-            Token::IntegerU8(n) => write!(f, "{}u8", n),
-            Token::IntegerU16(n) => write!(f, "{}u16", n),
-            Token::IntegerU32(n) => write!(f, "{}u32", n),
-            Token::IntegerU64(n) => write!(f, "{}u64", n),
             Token::Float(n) => write!(f, "{}", n),
-            Token::Float32(n) => write!(f, "{}f32", n),
-            Token::Float64(n) => write!(f, "{}f64", n),
             Token::String(s) => write!(f, "\"{}\"", s),
             Token::Char(c) => write!(f, "'{}'", c),
             Token::Identifier(s) => write!(f, "{}", s),
