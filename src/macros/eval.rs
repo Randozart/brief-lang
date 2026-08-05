@@ -705,7 +705,7 @@ fn evaluate_stage_stmt(
             Ok(Some(val))
         }
         // 2026-07-23: TermBang — evaluate for side effects, return Void.
-        Statement::TermBang(opt) => {
+        Statement::ExitProgram(opt) => {
             if let Some(expr) = opt {
                 eval_nav_chain(expr, program, universe, stage, scope, sandbox, pm)?;
             }
@@ -2089,7 +2089,7 @@ fn resolve_dollar_refs_in_stmt(stmt: &mut Statement, scope: &Scope) -> Result<()
             resolve_dollar_refs_in_expr(value, scope)
         }
         Statement::FreeHint(_) | Statement::KeepHint(_) => Ok(()),
-        Statement::Term(expr) | Statement::TermBang(expr)
+        Statement::Term(expr) | Statement::ExitProgram(expr)
         | Statement::Rollback(expr) => {
             if let Some(e) = expr {
                 resolve_dollar_refs_in_expr(e, scope)?;

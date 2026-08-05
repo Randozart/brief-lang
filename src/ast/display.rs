@@ -281,7 +281,7 @@ impl fmt::Display for Statement {
                     write!(f, "term;")
                 }
             }
-            Statement::TermBang(val) => {
+            Statement::ExitProgram(val) => {
                 if let Some(val) = val {
                     write!(f, "term! {};", val)
                 } else {

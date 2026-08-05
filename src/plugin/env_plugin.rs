@@ -92,7 +92,7 @@ fn walk_stmt(stmt: &mut crate::ast::Statement) {
         }
         crate::ast::Statement::Expression(expr)
         | crate::ast::Statement::Term(Some(expr))
-        | crate::ast::Statement::TermBang(Some(expr)) => {
+        | crate::ast::Statement::ExitProgram(Some(expr)) => {
             walk_expr(expr);
         }
         crate::ast::Statement::Guarded(_, body) => {

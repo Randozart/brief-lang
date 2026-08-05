@@ -713,8 +713,8 @@ fn rename_stmt(stmt: &Statement, from_names: &[String], to_names: &[String]) -> 
         Statement::Term(val) => {
             Statement::Term(val.as_ref().map(|e| rename_variables(e, from_names, to_names)))
         }
-        Statement::TermBang(val) => {
-            Statement::TermBang(val.as_ref().map(|e| rename_variables(e, from_names, to_names)))
+        Statement::ExitProgram(val) => {
+            Statement::ExitProgram(val.as_ref().map(|e| rename_variables(e, from_names, to_names)))
         }
         Statement::Guarded(cond, body) => {
             Statement::Guarded(

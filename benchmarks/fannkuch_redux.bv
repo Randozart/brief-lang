@@ -37,6 +37,6 @@ node fan [count < N][count == N] {
     p6 = p7;  p7 = p8;  p8 = p9;  p9 = p10;  p10 = p11;  p11 = saved;
     checksum = nchecksum;  max_flips = nmax;
     count = count + 1;
-    when count == N { term! -> println!(checksum); };
+    when count == N { exit program println!(checksum); };
     term;
 };

@@ -12,5 +12,5 @@ defn double(x: Int) -> Int { term x * 2; };
 
 txn main() -> Bool {
     let result: Int = 5 |> add_one() |> double() |> add_one();
-    term! -> Print#(result);   // prints 13
+    exit program Print#(result);   // prints 13
 };

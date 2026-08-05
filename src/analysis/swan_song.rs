@@ -34,11 +34,11 @@ use std::collections::{HashMap, HashSet};
 /// the fold must be blocked exactly when a hoist fires.
 pub fn has_swan_song(body: &[Statement]) -> bool {
     let stmts: Vec<&Statement> = body.iter()
-        .filter(|s| !matches!(s, Statement::Term(..) | Statement::TermBang(..)))
+        .filter(|s| !matches!(s, Statement::Term(..) | Statement::ExitProgram(..)))
         .collect();
     match stmts.last() {
         Some(Statement::Guarded(_, statements)) => {
-            statements.iter().any(|s| matches!(s, Statement::TermBang(..)))
+            statements.iter().any(|s| matches!(s, Statement::ExitProgram(..)))
         }
         _ => false,
     }
@@ -62,7 +62,7 @@ pub fn hoist_swan_song(
     state_fields: &HashSet<String>,
 ) -> (Vec<Statement>, Vec<Vec<Statement>>) {
     let mut stmts: Vec<&Statement> = body.iter()
-        .filter(|s| !matches!(s, Statement::Term(..) | Statement::TermBang(..)))
+        .filter(|s| !matches!(s, Statement::Term(..) | Statement::ExitProgram(..)))
         .collect();
     // 2026-07-05: Build let-to-state-field mapping from body assignments.
     // When the hoisted swan song references a let binding (like nesc in
@@ -82,7 +82,7 @@ pub fn hoist_swan_song(
     let mut hoist: Vec<Vec<Statement>> = Vec::new();
     while let Some(last_idx) = stmts.len().checked_sub(1) {
         if let Statement::Guarded(_, statements) = &stmts[last_idx] {
-            let is_terminating = statements.iter().any(|s| matches!(s, Statement::TermBang(..)));
+            let is_terminating = statements.iter().any(|s| matches!(s, Statement::ExitProgram(..)));
             if !is_terminating {
                 break;
             }
@@ -91,7 +91,7 @@ pub fn hoist_swan_song(
             // This handles both simple field-print patterns (original hoisting)
             // and let-binding-based patterns (nbody: energy computation + print).
             let mut body_stmts: Vec<Statement> = statements.iter()
-                .filter(|s| !matches!(s, Statement::TermBang(..)))
+                .filter(|s| !matches!(s, Statement::ExitProgram(..)))
                 .cloned()
                 .collect();
             // Remap let binding references to state field names in hoisted body.
@@ -99,7 +99,7 @@ pub fn hoist_swan_song(
                 remap_stmt_identifiers(s, &let_to_field);
             }
             let swan_song_stmt = statements.iter().find_map(|s| {
-                if let Statement::TermBang(Some(ss)) = s {
+                if let Statement::ExitProgram(Some(ss)) = s {
                     Some(ss.clone())
                 } else {
                     None
@@ -144,7 +144,7 @@ pub(crate) fn remap_stmt_identifiers(s: &mut Statement, map: &HashMap<String, St
         Statement::Expression(e) => {
             remap_expr_into(e, map);
         }
-        Statement::TermBang(Some(ss)) => {
+        Statement::ExitProgram(Some(ss)) => {
             remap_expr_into(ss, map);
         }
         Statement::Guarded(condition, statements) => {
@@ -237,7 +237,7 @@ mod tests {
                     Box::new(Expr::Identifier("count".into())),
                     Box::new(Expr::Identifier("N".into())),
                 ),
-                vec![Statement::TermBang(Some(Expr::Call(
+                vec![Statement::ExitProgram(Some(Expr::Call(
                     "PrintLn!".into(),
                     vec![Expr::Identifier("result".into())],
                     None,
@@ -265,7 +265,7 @@ mod tests {
             ),
             Statement::Guarded(
                 Expr::Bool(true),
-                vec![Statement::TermBang(Some(Expr::Call(
+                vec![Statement::ExitProgram(Some(Expr::Call(
                     "PrintLn!".into(),
                     vec![Expr::Identifier("nesc".into())],
                     None,
@@ -294,7 +294,7 @@ mod tests {
             ),
             Statement::Guarded(
                 Expr::Bool(true),
-                vec![Statement::TermBang(Some(Expr::Call(
+                vec![Statement::ExitProgram(Some(Expr::Call(
                     "PrintLn!".into(),
                     vec![Expr::Identifier("nesc".into())],
                     None,
@@ -316,7 +316,7 @@ mod tests {
         // term! -> print_int#(result) with no preceding statements in guard.
         let body = vec![Statement::Guarded(
             Expr::Bool(true),
-            vec![Statement::TermBang(Some(Expr::Call(
+            vec![Statement::ExitProgram(Some(Expr::Call(
                 "PrintInt#".into(),
                 vec![Expr::Decimal(7)],
                 None,
@@ -365,7 +365,7 @@ mod tests {
                 Box::new(Expr::Identifier("count".into())),
                 Box::new(Expr::Identifier("N".into())),
             ),
-            vec![Statement::TermBang(Some(Expr::Call(
+            vec![Statement::ExitProgram(Some(Expr::Call(
                 "PrintLn!".into(),
                 vec![Expr::Identifier("result".into())],
                 None,

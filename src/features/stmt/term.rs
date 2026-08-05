@@ -10,12 +10,6 @@ pub struct TermStmt {
     pub modifiers: Vec<Annotation>,
 }
 
-pub struct TermBangStmt {
-    pub values: Vec<Option<Expr>>,
-    pub swan_song: Option<Box<Statement>>,
-    pub modifiers: Vec<Annotation>,
-}
-
 impl StmtTypecheck for TermStmt {
     fn typecheck(&self, _ctx: &mut TypeChecker, _dispatch: &StmtDispatch) -> Result<(), TypeError> { Ok(()) }
 }
@@ -38,7 +32,7 @@ impl StmtCodegenLLVM for TermStmt {
     ) {}
 }
 impl StmtCodegenWebstack for TermStmt {
-    fn emit_js(&self, _ctx: &mut crate::backend::webstack::WebstackGenerator, _out: &mut String, _dispatch: &StmtDispatch) {}
+    fn emit_webstack(&self, _ctx: &mut crate::backend::webstack::WebstackBackend, _out: &mut String, _indent: &str) {}
 }
 
 impl StmtTypecheck for TermBangStmt {

@@ -1468,7 +1468,7 @@ pub fn infer_statement(stmt: &Statement, ctx: &mut TypecheckContext) -> Result<(
             }
             Ok(())
         }
-        Statement::Term(val) | Statement::TermBang(val) => {
+        Statement::Term(val) | Statement::ExitProgram(val) => {
             if let Some(val) = val {
                 let vty = infer_type_only(val, ctx)?;
                 // 2026-07-31 (Phase 2): a declared return type must match the

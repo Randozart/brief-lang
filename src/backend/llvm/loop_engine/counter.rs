@@ -1653,7 +1653,7 @@ impl LlvmBackend {
                         _ => {}
                     }
                 }
-                Statement::Term(Some(e)) | Statement::TermBang(Some(e)) => {
+                Statement::Term(Some(e)) | Statement::ExitProgram(Some(e)) => {
                     let val = self.emit_expr(out, e, "  ");
                     let name = format!("%t{}", self.fun.txn_counter);
                     self.fun.txn_counter += 1;
@@ -1741,7 +1741,7 @@ impl LlvmBackend {
                 writeln!(out, "{}br label %{}", indent, next_label).ok();
                 writeln!(out, "{}:", next_label).ok();
             }
-            Statement::Term(Some(e)) | Statement::Expression(e) | Statement::TermBang(Some(e)) => {
+            Statement::Term(Some(e)) | Statement::Expression(e) | Statement::ExitProgram(Some(e)) => {
                 self.emit_expr(out, e, indent);
             }
             Statement::ArrowAssign { .. } => {
@@ -1770,7 +1770,7 @@ impl LlvmBackend {
             Statement::Guarded(cond, body) => {
                 self.emit_guard_block(out, stmt, indent);
             }
-            Statement::Term(Some(e)) | Statement::TermBang(Some(e)) => {
+            Statement::Term(Some(e)) | Statement::ExitProgram(Some(e)) => {
                 self.emit_expr(out, e, indent);
             }
             Statement::Assign(lhs, expr) => {

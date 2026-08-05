@@ -182,7 +182,7 @@ fn rewrite_body(
     for stmt in body {
         match stmt {
             Statement::Term(opt)
-            | Statement::TermBang(opt)
+            | Statement::ExitProgram(opt)
             | Statement::Rollback(opt) => {
                 if let Some(expr) = opt.as_mut() {
                     rewrite_expr(ctx, env, expr);

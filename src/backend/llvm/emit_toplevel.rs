@@ -1489,7 +1489,7 @@ impl LlvmBackend {
                 )
             }
             Statement::Term(Some(e)) => Statement::Term(Some(Self::rewrite_expr_idents(e, field_names, param_names))),
-            Statement::TermBang(Some(e)) => Statement::TermBang(Some(Self::rewrite_expr_idents(e, field_names, param_names))),
+            Statement::ExitProgram(Some(e)) => Statement::ExitProgram(Some(Self::rewrite_expr_idents(e, field_names, param_names))),
             Statement::Guarded(cond, body) => {
                 Statement::Guarded(
                     Self::rewrite_expr_idents(cond, field_names, param_names),
@@ -1704,7 +1704,7 @@ impl LlvmBackend {
             match stmt {
                 Statement::Let { expr: Some(e), .. } => is_ffi_call(e, observable),
                 Statement::Expression(e) => is_ffi_call(e, observable),
-                Statement::Term(Some(e)) | Statement::TermBang(Some(e)) => is_ffi_call(e, observable),
+                Statement::Term(Some(e)) | Statement::ExitProgram(Some(e)) => is_ffi_call(e, observable),
                 Statement::Assign(_, e) => is_ffi_call(e, observable),
                 Statement::Guarded(_, body) => body.iter().any(|s| has_ffi_call(s, observable)),
                 Statement::Block(body) => body.iter().any(|s| has_ffi_call(s, observable)),
@@ -1737,7 +1737,7 @@ impl LlvmBackend {
             match stmt {
                 Statement::Let { expr: Some(e), .. } => collect_expr_idents(e, names),
                 Statement::Expression(e) => collect_expr_idents(e, names),
-                Statement::Term(Some(e)) | Statement::TermBang(Some(e)) => collect_expr_idents(e, names),
+                Statement::Term(Some(e)) | Statement::ExitProgram(Some(e)) => collect_expr_idents(e, names),
                 Statement::Assign(lhs, rhs) => { collect_expr_idents(lhs, names); collect_expr_idents(rhs, names); }
                 Statement::Guarded(_, body) => { for s in body { collect_idents(s, names); } }
                 Statement::Block(body) => { for s in body { collect_idents(s, names); } }
@@ -2731,7 +2731,7 @@ impl LlvmBackend {
     //   that A and B do not conflict on any state field.
     pub(super) fn emit_fused(&mut self, out: &mut String, a: &crate::ast::Transaction, b: &crate::ast::Transaction, name: &str) {
         let body_a: Vec<Statement> = a.body.iter()
-            .filter(|s| !matches!(s, Statement::Term(..) | Statement::TermBang(..) | Statement::Rollback(_)))
+            .filter(|s| !matches!(s, Statement::Term(..) | Statement::ExitProgram(..) | Statement::Rollback(_)))
             .cloned().collect();
         let combined: Vec<Statement> = body_a.into_iter().chain(b.body.iter().cloned()).collect();
         let fused_attr = "#0";

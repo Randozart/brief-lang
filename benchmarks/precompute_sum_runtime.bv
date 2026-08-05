@@ -18,7 +18,7 @@ node step_a [bound > 0 && count < bound && acc_a >= 0][count == bound] {
     acc_a = acc_a + count;
     count = count + 1;
     when count == bound {
-        term! -> println!(acc_a + acc_b);
+        exit program println!(acc_a + acc_b);
     };
     term;
 };
@@ -27,7 +27,7 @@ node step_b [bound > 0 && count < bound && acc_b >= 0][count == bound] {
     acc_b = acc_b + count;
     count = count + 1;
     when count == bound {
-        term! -> println!(acc_a + acc_b);
+        exit program println!(acc_a + acc_b);
     };
     term;
 };

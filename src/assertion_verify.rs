@@ -91,7 +91,7 @@ fn check_all_paths(
                 );
             }
 
-            Statement::Term(Some(expr)) | Statement::TermBang(Some(expr)) => {
+            Statement::Term(Some(expr)) | Statement::ExitProgram(Some(expr)) => {
                 found_term = true;
                 // Check if this term produces true
                 if is_provably_true(expr, &vars) {
@@ -103,7 +103,7 @@ fn check_all_paths(
                     ));
                 }
             }
-            Statement::Term(None) | Statement::TermBang(None) => {
+            Statement::Term(None) | Statement::ExitProgram(None) => {
                 return Err("Term has no output expression".to_string());
             }
 

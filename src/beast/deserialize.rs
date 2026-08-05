@@ -346,7 +346,7 @@ fn parse_statement(expr: &SExpr) -> Result<Statement, String> {
         }
         "term!" => {
             let e = if parts.len() > 1 { Some(parse_expr(&parts[1])?) } else { None };
-            Ok(Statement::TermBang(e))
+            Ok(Statement::ExitProgram(e))
         }
         "expr" => Ok(Statement::Expression(parse_expr(&parts[1])?)),
         "guarded" => {

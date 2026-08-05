@@ -83,7 +83,7 @@ fn statement_reads(stmt: &Statement, field: &str) -> bool {
             }
         }
         Statement::Let { expr, .. } => expr.as_ref().map_or(false, |e| expr_reads(e, field)),
-        Statement::Term(Some(e)) | Statement::TermBang(Some(e)) => expr_reads(e, field),
+        Statement::Term(Some(e)) | Statement::ExitProgram(Some(e)) => expr_reads(e, field),
         Statement::Expression(e) => expr_reads(e, field),
         Statement::Guarded(cond, body) => {
             expr_reads(cond, field) || body.iter().any(|s| statement_reads(s, field))

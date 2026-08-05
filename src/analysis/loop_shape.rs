@@ -476,7 +476,7 @@ mod tests {
              let result: Int = 42;\n\
              node work [count < bound][count == bound] {\n\
                count = count + 1;\n\
-               when count == bound { term! -> PrintLn!(result); };\n\
+               when count == bound { exit program PrintLn!(result); };\n\
                term;\n\
              };\n",
         );

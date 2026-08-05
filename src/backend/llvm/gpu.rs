@@ -66,7 +66,7 @@ pub fn check_eligibility(body: &[Statement]) -> GpuEligibility {
 
     for stmt in body {
         match stmt {
-            Statement::TermBang(_) => {
+            Statement::ExitProgram(_) => {
                 reasons.push("GPU kernel contains term! — unsupported".to_string());
             }
             Statement::Term(swan_song) => {
@@ -267,9 +267,9 @@ fn collect_unsafe_ffi_stmt(stmt: &Statement, reasons: &mut Vec<String>) {
             }
         }
         Statement::Term(Some(expr))
-        | Statement::TermBang(Some(expr))
+        | Statement::ExitProgram(Some(expr))
         | Statement::Rollback(Some(expr)) => collect_unsafe_ffi(expr, reasons),
-        Statement::Term(None) | Statement::TermBang(None) | Statement::Rollback(None) => {}
+        Statement::Term(None) | Statement::ExitProgram(None) | Statement::Rollback(None) => {}
         Statement::SyncBlock(stmts) => {
             for s in stmts {
                 collect_unsafe_ffi_stmt(s, reasons);
@@ -1115,7 +1115,7 @@ mod tests {
     #[test]
     fn test_check_eligibility_termbang_is_ineligible() {
         let body = vec![
-            Statement::TermBang(None),
+            Statement::ExitProgram(None),
         ];
         let result = check_eligibility(&body);
         assert!(!result.eligible, "term! statement should be ineligible");

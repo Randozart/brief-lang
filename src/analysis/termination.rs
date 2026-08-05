@@ -55,7 +55,7 @@ pub fn analyze(items: &[TopLevel]) -> (Vec<String>, Vec<String>) {
 /// matter what, so it makes every later sibling unreachable.
 fn statement_always_terminates(s: &Statement) -> bool {
     match s {
-        Statement::Term(Some(_)) | Statement::TermBang(Some(_)) => true,
+        Statement::Term(Some(_)) | Statement::ExitProgram(Some(_)) => true,
         Statement::If(_, then, else_) => {
             list_always_terminates(then) && list_always_terminates(else_)
         }
@@ -97,7 +97,7 @@ fn check_list(name: &str, stmts: &[Statement], errors: &mut Vec<String>, warning
         if let Statement::Guarded(_, body) = stmt {
             let ends_in_void_term = matches!(
                 body.last(),
-                Some(Statement::Term(None)) | Some(Statement::TermBang(None))
+                Some(Statement::Term(None)) | Some(Statement::ExitProgram(None))
             );
             if ends_in_void_term && i + 1 < stmts.len() {
                 warnings.push(format!(
@@ -166,19 +166,19 @@ mod tests {
     #[test]
     fn always_terminates_value_forms_only() {
         assert!(statement_always_terminates(&Statement::Term(Some(Expr::Decimal(1)))));
-        assert!(statement_always_terminates(&Statement::TermBang(Some(Expr::Decimal(1)))));
+        assert!(statement_always_terminates(&Statement::ExitProgram(Some(Expr::Decimal(1)))));
         assert!(!statement_always_terminates(&Statement::Term(None)));
-        assert!(!statement_always_terminates(&Statement::TermBang(None)));
+        assert!(!statement_always_terminates(&Statement::ExitProgram(None)));
         // A guard is conditional — NOT unconditional.
         assert!(!statement_always_terminates(&Statement::Guarded(
             Expr::Bool(true),
-            vec![Statement::TermBang(Some(Expr::Decimal(1)))]
+            vec![Statement::ExitProgram(Some(Expr::Decimal(1)))]
         )));
     }
 
     #[test]
     fn always_terminates_ifs_and_blocks() {
-        let term = Statement::TermBang(Some(Expr::Decimal(1)));
+        let term = Statement::ExitProgram(Some(Expr::Decimal(1)));
         let if_both = Statement::If(
             Expr::Bool(true),
             vec![term.clone()],
@@ -195,7 +195,7 @@ mod tests {
     fn unreachable_after_top_level_terminating_term() {
         let (errors, warnings) = analyze(&[txn("n", vec![
             Statement::Expression(expr_call("work")),
-            Statement::TermBang(Some(expr_call("Print#"))),
+            Statement::ExitProgram(Some(expr_call("Print#"))),
             Statement::Expression(expr_call("dead")),
         ])]);
         assert_eq!(errors.len(), 1, "dead statement must be flagged: {errors:?}");
@@ -211,7 +211,7 @@ mod tests {
                 Expr::Bool(true),
                 vec![
                     Statement::Expression(expr_call("print")),
-                    Statement::TermBang(Some(expr_call("Print#"))),
+                    Statement::ExitProgram(Some(expr_call("Print#"))),
                     Statement::Expression(expr_call("dead")),
                 ],
             ),
@@ -263,7 +263,7 @@ mod tests {
         let (errors, warnings) = analyze(&[txn("n", vec![
             Statement::Guarded(
                 Expr::Bool(true),
-                vec![Statement::TermBang(Some(expr_call("PrintLn#")))],
+                vec![Statement::ExitProgram(Some(expr_call("PrintLn#")))],
             ),
         ])]);
         assert!(errors.is_empty());

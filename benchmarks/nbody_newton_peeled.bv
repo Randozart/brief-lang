@@ -353,7 +353,7 @@ node simulate [
     // PEELED: Periodic print removed from the hot path.
     // Only the termination print fires once.
     when count == bound {
-        term! -> println!(last_energy);
+        exit program println!(last_energy);
     };
     term;
 };

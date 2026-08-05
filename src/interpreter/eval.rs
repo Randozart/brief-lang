@@ -698,7 +698,7 @@ pub fn eval_statement(
             }
             Ok(result)
         }
-        Statement::TermBang(val) => {
+        Statement::ExitProgram(val) => {
             match val {
                 Some(val) => {
                     let result = eval_expr(val, heap, bindings)?;

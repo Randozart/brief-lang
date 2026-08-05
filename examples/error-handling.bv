@@ -20,7 +20,7 @@ defn safe_divide(a: Int, b: Int) -> Int {
         term val;
     };
     uni res(Err(msg)) = {
-        term! -> Print#("Error: " + msg);
+        exit program Print#("Error: " + msg);
     };
 };
 

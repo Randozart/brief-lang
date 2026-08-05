@@ -197,10 +197,10 @@ impl<'a> DataflowAnalyzer<'a> {
             Statement::Term(Some(e)) => {
                 self.extract_ids_recursive(e, ids);
             }
-            Statement::TermBang(Some(e)) => {
+            Statement::ExitProgram(Some(e)) => {
                 self.extract_ids_recursive(e, ids);
             }
-            Statement::Term(None) | Statement::TermBang(None) => {}
+            Statement::Term(None) | Statement::ExitProgram(None) => {}
             Statement::Rollback(Some(e)) => {
                 self.extract_ids_recursive(e, ids);
             }

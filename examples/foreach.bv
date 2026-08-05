@@ -26,5 +26,5 @@ foreach x in [1, 2, 3, 4, 5] {
 
 // Terminate with observable output
 defn main() -> Int {
-    term! -> Print#(sum);
+    exit program Print#(sum);
 };

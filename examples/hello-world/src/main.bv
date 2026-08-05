@@ -1,8 +1,8 @@
 // Hello World - Your first Briv program
 //
-// Uses term! -> swan_song for observable output.
+// Uses exit program swan_song for observable output.
 // Without the swan song the program is dead code.
 
 txn greet [true][output_written == true] {
-    term! -> Print#("Hello, World!");
+    exit program Print#("Hello, World!");
 };

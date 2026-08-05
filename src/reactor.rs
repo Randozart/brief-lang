@@ -281,7 +281,7 @@ impl Reactor {
                 interp.eval_expr(expr)?;
                 Ok(StmtResult::Continue)
             }
-            Statement::Term(Some(expr)) | Statement::TermBang(Some(expr)) => {
+            Statement::Term(Some(expr)) | Statement::ExitProgram(Some(expr)) => {
                 let value = interp.eval_expr(expr)?;
                 if value .is_true() {
                     Ok(StmtResult::TermSuccess)
@@ -289,7 +289,7 @@ impl Reactor {
                     Ok(StmtResult::TermFailed)
                 }
             }
-            Statement::Term(None) | Statement::TermBang(None) => {
+            Statement::Term(None) | Statement::ExitProgram(None) => {
                 Ok(StmtResult::TermSuccess)
             }
             Statement::Rollback(_) => Ok(StmtResult::Escaped),

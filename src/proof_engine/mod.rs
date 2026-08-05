@@ -156,7 +156,7 @@ pub fn prove_linear(stmts: &[Statement]) -> bool {
         Statement::Assign(_, _) |
         Statement::Let { .. } |
         Statement::Term(_) |
-        Statement::TermBang(_)
+        Statement::ExitProgram(_)
     ))
 }
 
@@ -186,7 +186,7 @@ pub fn stmt_cost(stmt: &Statement) -> u64 {
         Statement::Expression(expr) => expr_cost(expr),
         Statement::Let { expr, .. } => expr.as_ref().map_or(0, |e| expr_cost(e)),
         Statement::Assign(_, rhs) => expr_cost(rhs),
-        Statement::Term(val) | Statement::TermBang(val) => val.as_ref().map_or(0, |e| expr_cost(e)),
+        Statement::Term(val) | Statement::ExitProgram(val) => val.as_ref().map_or(0, |e| expr_cost(e)),
         Statement::Guarded(cond, body) => {
             expr_cost(cond) + body.iter().map(stmt_cost).sum::<u64>()
         }

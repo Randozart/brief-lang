@@ -20,5 +20,5 @@ node boot [!boot_done]] {
     Print#(result);
     PutChar#(10);
     boot_done = true;
-    term!;
+    exit program;
 };

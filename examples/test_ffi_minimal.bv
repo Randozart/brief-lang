@@ -4,5 +4,5 @@
 frgn output_written: Bool = false;
 
 rct txn test_ffi [output_written == false][output_written == true] {
-    term! -> Print#("Hello from intrinsics!");
+    exit program Print#("Hello from intrinsics!");
 };

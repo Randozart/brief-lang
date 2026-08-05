@@ -339,7 +339,7 @@ fn validate_structural_toplevel(
     match new_item {
         TopLevel::Statement(stmt) => {
             let stmt = stmt.as_ref();
-            if matches!(stmt, Statement::Term(_) | Statement::TermBang(_)) {
+            if matches!(stmt, Statement::Term(_) | Statement::ExitProgram(_)) {
                 return Err(format!(
                     "cannot insert {:?} at top level — only valid inside a function body",
                     stmt

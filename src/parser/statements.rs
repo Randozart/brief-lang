@@ -48,8 +48,8 @@ impl<'a> Parser<'a> {
                 }
                 Ok(stmt)
             }
-            Some(Token::Term) => self.parse_term_statement(false),
-            Some(Token::TermBang) => self.parse_term_statement(true),
+            Some(Token::Term) => self.parse_term_statement(),
+            Some(Token::Exit) => self.parse_exit_program_statement(),
             Some(Token::Rollback) => self.parse_rollback_statement(),
             Some(Token::Foreach) => self.parse_foreach_statement(),
             Some(Token::Trg) => self.parse_trg_binding(),
@@ -144,11 +144,9 @@ impl<'a> Parser<'a> {
         })
     }
 
-    /// term expr; or term! expr;
-    fn parse_term_statement(&mut self, bang: bool) -> Result<Statement, SyntaxError> {
+    /// term expr;
+    fn parse_term_statement(&mut self) -> Result<Statement, SyntaxError> {
         self.pos += 1;
-        // 2026-07-15: Restore swan song: term! -> expr;
-        self.eat(&Token::Arrow);
         let val = if !self.check(&Token::Semicolon) && !self.check(&Token::RBrace) {
             Some(self.parse_expression()?)
         } else {
@@ -168,14 +166,26 @@ impl<'a> Parser<'a> {
             }
         }
         self.expect(Token::Semicolon)?;
-        if bang {
-            Ok(Statement::TermBang(val))
-        } else {
-            Ok(Statement::Term(val))
-        }
+        Ok(Statement::Term(val))
     }
 
-    /// escape expr;
+    /// exit program; or exit program code; — process boundary (SPEC §11.5).
+    /// 2026-08-05 (Phase 3): replaces `term!`.
+    fn parse_exit_program_statement(&mut self) -> Result<Statement, SyntaxError> {
+        self.pos += 1; // consume 'exit'
+        if !self.eat_identifier("program") {
+            return self.error_at_current("expected 'program' after 'exit' (use `exit program;` or `exit program code;`)");
+        }
+        let val = if !self.check(&Token::Semicolon) {
+            Some(self.parse_expression()?)
+        } else {
+            None
+        };
+        self.expect(Token::Semicolon)?;
+        Ok(Statement::ExitProgram(val))
+    }
+
+    /// rollback expr;
     fn parse_rollback_statement(&mut self) -> Result<Statement, SyntaxError> {
         self.pos += 1;
         let val = if !self.check(&Token::Semicolon) {

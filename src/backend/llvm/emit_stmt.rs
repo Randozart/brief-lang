@@ -463,7 +463,7 @@ pub fn emit_statement(backend: &mut LlvmBackend, out: &mut String, stmt: &Statem
             }
             TypedRegister { name: backend.fun.gen_reg(), ty: Type::void() }
         }
-        Statement::Term(val) | Statement::TermBang(val) => {
+        Statement::Term(val) | Statement::ExitProgram(val) => {
             // 2026-07-26: Phase 4 — webstack flush at term.
             // Emit __web_flush_state call before the return/branch so the
             // JS shim applies DOM updates before the transaction completes.            // Phase 6 will wire the actual flush buffer with modified fields.

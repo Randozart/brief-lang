@@ -136,7 +136,7 @@ fn emit_statement(s: &Statement) -> SExpr {
                 None => list(&[atom("term")]),
             }
         }
-        Statement::TermBang(e) => {
+        Statement::ExitProgram(e) => {
             match e {
                 Some(e) => list(&[atom("term!"), emit_expr(e)]),
                 None => list(&[atom("term!")]),

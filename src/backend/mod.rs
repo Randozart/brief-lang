@@ -494,7 +494,7 @@ pub fn collect_read_identifiers(body: &[Statement]) -> std::collections::HashSet
             // operands — a `term x;` node genuinely reads x. Without this the
             // concurrency gate's XOR-overlap check would miss read-write
             // dependencies through Term, wrongly requiring classification.
-            Statement::Term(Some(e)) | Statement::TermBang(Some(e)) => {
+            Statement::Term(Some(e)) | Statement::ExitProgram(Some(e)) => {
                 collect_expr_identifiers(e, &mut ids);
             }
             _ => {}
@@ -751,7 +751,7 @@ mod tests {
                 ),
                 Statement::Guarded(
                     Expr::Bool(true),
-                    vec![Statement::TermBang(Some(Expr::Call(
+                    vec![Statement::ExitProgram(Some(Expr::Call(
                         "PrintLn!".into(),
                         vec![Expr::Identifier("nesc".into())],
                         None,

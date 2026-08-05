@@ -984,7 +984,7 @@ impl RegionAnalyzer {
                     true
                 } else { false }
             }
-            Statement::Term(None) | Statement::TermBang(None) | Statement::InlineAsm { .. } => false,
+            Statement::Term(None) | Statement::ExitProgram(None) | Statement::InlineAsm { .. } => false,
             _ => true,
         }
     }
@@ -1342,7 +1342,7 @@ fn has_ffi_or_terminator_stmt(stmt: &Statement) -> bool {
     let mut work: Vec<&Statement> = vec![stmt];
     while let Some(s) = work.pop() {
         match s {
-            Statement::Term(_) | Statement::TermBang(_)
+            Statement::Term(_) | Statement::ExitProgram(_)
             | Statement::InlineAsm { .. } => return true,
             // 2026-07-19: Block precomputation for non-# calls (frgn, pure-Briv).
             // # intrinsics are handled by the interpreter's execute_intrinsic
@@ -1396,7 +1396,7 @@ fn has_ffi_or_trigger_stmt(stmt: &Statement, trigger_vars: &HashSet<String>) -> 
     let mut work: Vec<&Statement> = vec![stmt];
     while let Some(s) = work.pop() {
         match s {
-            Statement::Term(_) | Statement::TermBang(_)
+            Statement::Term(_) | Statement::ExitProgram(_)
             | Statement::InlineAsm { .. } => return true,
             Statement::Assign(lhs, expr) => {
                 if expr_has_call(expr) { return true; }
@@ -1458,7 +1458,7 @@ fn expr_has_call(expr: &Expr) -> bool {
 
 fn has_term_or_unify_escape(body: &[Statement]) -> bool {
     body.iter().any(|s| matches!(s,
-//         Statement::Term(None) | Statement::TermBang(None) | Statement::Unification { .. }
+//         Statement::Term(None) | Statement::ExitProgram(None) | Statement::Unification { .. }
         | Statement::Rollback(_) | Statement::InlineAsm { .. }
     ))
 }
@@ -1544,8 +1544,8 @@ fn substitute_stmt(stmt: &Statement, old_var: &str, new_expr: &Expr) -> Statemen
         Statement::Expression(e) => Statement::Expression(substitute_expr(e, old_var, new_expr)),
         Statement::Term(Some(e)) => Statement::Term(Some(substitute_expr(e, old_var, new_expr))),
         Statement::Term(None) => Statement::Term(None),
-        Statement::TermBang(Some(e)) => Statement::TermBang(Some(substitute_expr(e, old_var, new_expr))),
-        Statement::TermBang(None) => Statement::TermBang(None),
+        Statement::ExitProgram(Some(e)) => Statement::ExitProgram(Some(substitute_expr(e, old_var, new_expr))),
+        Statement::ExitProgram(None) => Statement::ExitProgram(None),
         Statement::Rollback(Some(e)) => Statement::Rollback(Some(substitute_expr(e, old_var, new_expr))),
         Statement::Rollback(None) => Statement::Rollback(None),
         Statement::SyncBlock(body) => Statement::SyncBlock(body.clone()),

@@ -103,7 +103,7 @@ impl VmBackend {
                 self.asm.emit_ret();
             }
 
-            Statement::TermBang(opt_expr) => {
+            Statement::ExitProgram(opt_expr) => {
                 if let Some(e) = opt_expr {
                     self.emit_expr(e);
                 }

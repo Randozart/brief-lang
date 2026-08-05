@@ -387,7 +387,7 @@ node simulate [
     };
     count = count + 1;
     when count == bound {
-        term! -> println!(energy);
+        exit program println!(energy);
     };
     term;
 };

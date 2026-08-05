@@ -196,7 +196,7 @@ fn walk_stmt(
         | crate::ast::Statement::Let { expr: Some(expr), .. }
         | crate::ast::Statement::Expression(expr)
         | crate::ast::Statement::Term(Some(expr))
-        | crate::ast::Statement::TermBang(Some(expr)) => {
+        | crate::ast::Statement::ExitProgram(Some(expr)) => {
             walk_expr(expr, known_types, universe)
         }
         crate::ast::Statement::Guarded(_, body) => walk_stmts(body, known_types, universe),
