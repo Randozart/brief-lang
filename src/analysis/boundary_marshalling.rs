@@ -482,7 +482,6 @@ mod tests {
                 bindings: vec![],
                 operators: vec![],
                 op_bindings: vec![],
-                props: vec![],
                 constraints: vec![],
                 members: vec![],
                 span: None,

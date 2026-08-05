@@ -77,14 +77,10 @@ type Char: #Char { !> bits: 32;
 //   #Bit → #String = CastFrom(#Bit) override if declared (interpretation door)
 // 2026-08-01 (B0): String is a bare #String protocol member with NO fields and
 // NO metadata. The value is a ptr to a length-prefixed [len][bytes] buffer;
-// everything else is derived from the protocol by the casting graph. The old
-// {data, len} fields and !> encoding metadata were never read by the compiler
-// (type_universe/mod.rs:89,285-287 — encoding unread; fields retained only for
-// the is_string_like structural check, which B4 removes). prop Size/Bytes
-// are wired to real dispatch in Phase B3.
+// everything else is derived from the protocol by the casting graph.
+// 2026-08-05 (Phase 3): `prop Size/Bytes` removed — computed observations are
+// ordinary functions, and the props were never wired to dispatch.
 type String: #String {
-    prop Size: chars(#L);
-    prop Bytes: byte_len(#L);
 };
 
 // 2026-08-01 (B4): the legacy String types (UTF8View, StaticString,
@@ -100,5 +96,4 @@ type Data: Int { !> bits: 64; };
 type Slice<T> {
     data: Ptr<T>;
     len: Int;
-    prop Size: len(#L);
 };

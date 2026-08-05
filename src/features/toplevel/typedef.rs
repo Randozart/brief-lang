@@ -143,7 +143,7 @@ mod tests {
                 make_binding("Alignment", Expr::Decimal(8)),
             ],
             operators: vec![],
-            props: vec![], constraints: vec![],
+            constraints: vec![],
             members: vec![],
             span: None,
         };
