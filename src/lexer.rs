@@ -97,15 +97,6 @@ pub enum Token {
     #[token("escape")]
     Escape,
 
-    #[token("uni")]
-    Uni,
-
-    #[token("is")]
-    Is,
-
-    #[token("like")]
-    Like,
-
     #[token("import")]
     Import,
 
@@ -170,12 +161,6 @@ pub enum Token {
     #[token("Ptr!")]
     PtrBang,
 
-    #[token("Ok")]
-    Ok,
-
-    #[token("Err")]
-    Err,
-
     #[token("match")]
     Match,
 
@@ -201,12 +186,6 @@ pub enum Token {
 
     #[token("sync")]
     Sync,
-
-    #[token("some")]
-    Some,
-
-    #[token("none")]
-    None,
 
     #[token("true")]
     BoolTrue,
@@ -289,9 +268,6 @@ pub enum Token {
 
     #[token(">>")]
     Shr,
-
-    #[token("|>")]
-    PipeGreater,
 
     #[token("|")]
     Pipe,
@@ -601,9 +577,6 @@ impl std::fmt::Display for Token {
             Token::Term => write!(f, "term"),
             Token::TermBang => write!(f, "term!"),
             Token::Escape => write!(f, "escape"),
-            Token::Uni => write!(f, "uni"),
-            Token::Is => write!(f, "is"),
-            Token::Like => write!(f, "like"),
             Token::Import => write!(f, "import"),
             Token::From => write!(f, "from"),
             Token::As => write!(f, "as"),
@@ -623,8 +596,6 @@ impl std::fmt::Display for Token {
             Token::Trg => write!(f, "trg"),
             Token::Within => write!(f, "within"),
             Token::PtrBang => write!(f, "Ptr!"),
-            Token::Ok => write!(f, "Ok"),
-            Token::Err => write!(f, "Err"),
             Token::Match => write!(f, "match"),
             // 2026-07-15: Template/Macro tokens removed
 
@@ -635,8 +606,6 @@ impl std::fmt::Display for Token {
             Token::Pvt => write!(f, "pvt"),
             Token::Sed => write!(f, "sed"),
             Token::Sync => write!(f, "sync"),
-            Token::Some => write!(f, "some"),
-            Token::None => write!(f, "none"),
             Token::BoolTrue => write!(f, "true"),
             Token::BoolFalse => write!(f, "false"),
             Token::Cycles => write!(f, "cycles"),
@@ -660,7 +629,6 @@ impl std::fmt::Display for Token {
             Token::Ge => write!(f, ">="),
             Token::Shl => write!(f, "<<"),
             Token::Shr => write!(f, ">>"),
-            Token::PipeGreater => write!(f, "|>"),
             Token::Pipe => write!(f, "|"),
             Token::OrOr => write!(f, "||"),
             Token::AndAnd => write!(f, "&&"),
